@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""Hindley-Milner style type inference/checking for Sprout v0.
+
+This module implements:
+- unification-based inference,
+- let-polymorphism via schemes (forall),
+- ADT constructor typing,
+- basic match exhaustiveness for ADTs.
+"""
+
 from dataclasses import dataclass
 from typing import Dict
 

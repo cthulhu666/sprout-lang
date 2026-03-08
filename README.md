@@ -11,12 +11,14 @@ Early bootstrap stage. The repository currently contains design docs and initial
 - [Specification v0 (Normative)](./docs/spec-v0.md)
 - [Language Design v0](./docs/language-design-v0.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
+- [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)
 
 ## Repository Layout
 
 - `docs/` design and process documents
 - `examples/` sample source files
-- `sprout/` implementation scaffold (lexer/parser/interpreter/CLI placeholders)
+- `sprout/` implementation (`tokenizer`, `parser`, `typechecker`, `cli`)
+- `tests/` parser and typechecker tests
 
 ## Near-Term Plan
 
