@@ -16,6 +16,7 @@ Primary design references:
 2. Do not mix unrelated refactors with language-semantics changes.
 3. Update docs and tests in the same change when behavior changes.
 4. Prefer explicit tradeoff notes over implicit assumptions.
+5. Use repository-managed tools via `mise` and `just` (avoid ad-hoc global tool versions).
 
 ## Design Change Process
 
@@ -35,12 +36,16 @@ For any non-trivial language change, include:
 2. Typechecker changes need both success and failure tests.
 3. Runtime/semantic changes need executable behavior tests.
 4. Keep diagnostics stable and understandable; avoid noisy cascades.
+5. Preferred execution path for local commands:
+   `mise exec -- just <task>`
 
 ## Directory Conventions
 
 - `docs/` normative and supporting design docs.
 - `examples/` user-facing language examples.
 - `sprout/` implementation source.
+- `mise.toml` toolchain definition.
+- `justfile` standard developer tasks.
 
 ## Commit Guidance
 

@@ -19,6 +19,24 @@ Early bootstrap stage. The repository currently contains design docs and initial
 - `examples/` sample source files
 - `sprout/` implementation (`tokenizer`, `parser`, `typechecker`, `cli`)
 - `tests/` parser and typechecker tests
+- `mise.toml` pinned local toolchain (`python`, `just`)
+- `justfile` common project commands
+
+## Tooling (mise + just)
+
+This repo uses [`mise`](https://mise.jdx.dev/) to pin tools and [`just`](https://github.com/casey/just) as task runner.
+
+1. Install tools from `mise.toml`:
+   `mise install`
+2. Run commands through mise:
+   `mise exec -- just test`
+
+Common tasks:
+
+- Parse file: `mise exec -- just parse examples/fizzbuzz.sprout`
+- Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
+- Run file: `mise exec -- just run examples/fizzbuzz.sprout`
+- Run tests: `mise exec -- just test`
 
 ## Near-Term Plan
 
