@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field, is_dataclass
+from typing import Any
+
+
+@dataclass
+class Program:
+    declarations: list[Any]
+
+
+@dataclass
+class TypeDecl:
+    name: str
+    type_params: list[str]
+    constructors: list["TypeConstructor"]
+
+
+@dataclass
+class TypeConstructor:
+    name: str
+    args: list["TypeExpr"]
+
+
+@dataclass
+class FnDecl:
+    name: str
+    params: list["Param"]
+    return_type: "TypeExpr | None"
+    body: "Expr"
+
+
+@dataclass
+class Param:
+    name: str
+    type_expr: "TypeExpr"
+
+
+@dataclass
+class LetDecl:
+    name: str
+    value: "Expr"
+
+
+class Expr:
+    pass
+
+
+@dataclass
+class IfExpr(Expr):
+    condition: Expr
+    then_branch: Expr
+    else_branch: Expr
+
+
+@dataclass
+class MatchExpr(Expr):
+    scrutinee: Expr
+    branches: list["MatchBranch"]
+
+
+@dataclass
+class MatchBranch:
+    pattern: "Pattern"
+    value: Expr
+
+
+@dataclass
+class BinaryExpr(Expr):
+    op: str
+    left: Expr
+    right: Expr
+
+
+@dataclass
+class UnaryExpr(Expr):
+    op: str
+    operand: Expr
+
+
+@dataclass
+class CallExpr(Expr):
+    callee: Expr
+    args: list[Expr]
+
+
+@dataclass
+class VarExpr(Expr):
+    name: str
+
+
+@dataclass
+class IntExpr(Expr):
+    value: int
+
+
+@dataclass
+class BoolExpr(Expr):
+    value: bool
+
+
+@dataclass
+class StringExpr(Expr):
+    value: str
+
+
+class Pattern:
+    pass
+
+
+@dataclass
+class WildcardPattern(Pattern):
+    pass
+
+
+@dataclass
+class VarPattern(Pattern):
+    name: str
+
+
+@dataclass
+class IntPattern(Pattern):
+    value: int
+
+
+@dataclass
+class BoolPattern(Pattern):
+    value: bool
+
+
+@dataclass
+class StringPattern(Pattern):
+    value: str
+
+
+@dataclass
+class ConstructorPattern(Pattern):
+    name: str
+    args: list[Pattern] = field(default_factory=list)
+
+
+class TypeExpr:
+    pass
+
+
+@dataclass
+class TypeName(TypeExpr):
+    name: str
+
+
+@dataclass
+class TypeApply(TypeExpr):
+    base: TypeExpr
+    arg: TypeExpr
+
+
+@dataclass
+class TypeArrow(TypeExpr):
+    left: TypeExpr
+    right: TypeExpr
+
+
+def to_dict(node: Any) -> Any:
+    if is_dataclass(node):
+        out = {"node": node.__class__.__name__}
+        for key in node.__dataclass_fields__.keys():
+            out[key] = to_dict(getattr(node, key))
+        return out
+    if isinstance(node, list):
+        return [to_dict(item) for item in node]
+    return node
