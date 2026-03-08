@@ -8,6 +8,7 @@ Early bootstrap stage. The repository currently contains design docs and initial
 
 ## Docs
 
+- [Specification v0 (Normative)](./docs/spec-v0.md)
 - [Language Design v0](./docs/language-design-v0.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 
