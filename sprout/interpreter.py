@@ -249,7 +249,11 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     for decl in program.declarations:
         if isinstance(decl, ast.TypeDecl):
             for ctor in decl.constructors:
-                env.set(ctor.name, ConstructorValue(name=ctor.name, arity=len(ctor.args)))
+                arity = len(ctor.args)
+                if arity == 0:
+                    env.set(ctor.name, ADTValue(constructor=ctor.name, args=()))
+                else:
+                    env.set(ctor.name, ConstructorValue(name=ctor.name, arity=arity))
 
     for decl in program.declarations:
         if isinstance(decl, ast.FnDecl):

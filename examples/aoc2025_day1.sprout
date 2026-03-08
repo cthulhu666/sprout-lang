@@ -1,0 +1,64 @@
+# Advent of Code 2025 Day 1: Secret Entrance
+# This solution computes both parts for a hardcoded input list.
+
+type List a =
+  | Cons a (List a)
+  | Nil
+
+type Rot =
+  | L Int
+  | R Int
+
+type Answers =
+  | Answers Int Int
+
+fn mod100(n: Int) -> Int =
+  n - (n / 100) * 100
+
+fn dial_after(dial: Int, rot: Rot) -> Int =
+  match rot with
+  | L clicks -> mod100(dial - clicks)
+  | R clicks -> mod100(dial + clicks)
+
+fn count_hits(rots: List Rot, dial: Int) -> Int =
+  match rots with
+  | Nil -> 0
+  | Cons rot rest ->
+      if dial_after(dial, rot) == 0 then 1 + count_hits(rest, dial_after(dial, rot))
+      else count_hits(rest, dial_after(dial, rot))
+
+fn clicks_to_zero(dial: Int, rot: Rot) -> Int =
+  match rot with
+  | L _ -> if dial == 0 then 100 else dial
+  | R _ -> if dial == 0 then 100 else 100 - dial
+
+fn rotation_clicks(rot: Rot) -> Int =
+  match rot with
+  | L clicks -> clicks
+  | R clicks -> clicks
+
+fn passes_in_rotation(dial: Int, rot: Rot) -> Int =
+  if rotation_clicks(rot) < clicks_to_zero(dial, rot) then 0
+  else 1 + ((rotation_clicks(rot) - clicks_to_zero(dial, rot)) / 100)
+
+fn count_passes(rots: List Rot, dial: Int) -> Int =
+  match rots with
+  | Nil -> 0
+  | Cons rot rest ->
+      passes_in_rotation(dial, rot) + count_passes(rest, dial_after(dial, rot))
+
+let r10 = Cons(L(82), Nil)
+let r9 = Cons(R(14), r10)
+let r8 = Cons(L(99), r9)
+let r7 = Cons(L(1), r8)
+let r6 = Cons(L(55), r7)
+let r5 = Cons(R(60), r6)
+let r4 = Cons(L(5), r5)
+let r3 = Cons(R(48), r4)
+let r2 = Cons(L(30), r3)
+let r1 = Cons(L(68), r2)
+
+fn sample_rotations() -> List Rot = r1
+
+fn main() -> IO Unit =
+  print(Answers(count_hits(sample_rotations(), 50), count_passes(sample_rotations(), 50)))
