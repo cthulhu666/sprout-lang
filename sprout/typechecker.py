@@ -441,44 +441,42 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars_ = tuple(sorted(ftv(ctor_type)))
             env[ctor_name] = Scheme(vars=vars_, type=ctor_type)
 
-    fn_decls: list[ast.FnDecl] = []
-    let_decls: list[ast.LetDecl] = []
-    for decl in program.declarations:
-        if isinstance(decl, ast.FnDecl):
-            fn_decls.append(decl)
-        elif isinstance(decl, ast.LetDecl):
-            let_decls.append(decl)
-
     fn_types: Dict[str, Type] = {}
-    for fn_decl in fn_decls:
+    for decl in program.declarations:
+        if not isinstance(decl, ast.FnDecl):
+            continue
+        fn_decl = decl
         if fn_decl.name in fn_types:
             raise TypeCheckError(f"Duplicate function {fn_decl.name}")
         fn_t = fn_type_from_decl(fn_decl, state)
         fn_types[fn_decl.name] = fn_t
         env[fn_decl.name] = Scheme(vars=(), type=fn_t)
 
-    for fn_decl in fn_decls:
-        fn_t = fn_types[fn_decl.name]
-        working_env = dict(env)
-        cursor = fn_t
-        for param in fn_decl.params:
-            cursor = apply(state.subst, cursor)
-            if not isinstance(cursor, TFunc):
-                raise TypeCheckError(f"Internal error for function params in {fn_decl.name}")
-            working_env[param.name] = Scheme(vars=(), type=cursor.arg)
-            cursor = cursor.ret
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            fn_decl = decl
+            fn_t = fn_types[fn_decl.name]
+            working_env = dict(env)
+            cursor = fn_t
+            for param in fn_decl.params:
+                cursor = apply(state.subst, cursor)
+                if not isinstance(cursor, TFunc):
+                    raise TypeCheckError(f"Internal error for function params in {fn_decl.name}")
+                working_env[param.name] = Scheme(vars=(), type=cursor.arg)
+                cursor = cursor.ret
 
-        body_t = infer_expr(fn_decl.body, working_env, state, type_decls)
-        expected_return = apply(state.subst, cursor)
-        unify(state, body_t, expected_return)
+            body_t = infer_expr(fn_decl.body, working_env, state, type_decls)
+            expected_return = apply(state.subst, cursor)
+            unify(state, body_t, expected_return)
 
-        solved_fn = apply(state.subst, fn_t)
-        generalized_env = dict(env)
-        generalized_env.pop(fn_decl.name, None)
-        env[fn_decl.name] = generalize(generalized_env, solved_fn, state)
+            solved_fn = apply(state.subst, fn_t)
+            generalized_env = dict(env)
+            generalized_env.pop(fn_decl.name, None)
+            env[fn_decl.name] = generalize(generalized_env, solved_fn, state)
 
-    for let_decl in let_decls:
-        value_t = infer_expr(let_decl.value, env, state, type_decls)
-        env[let_decl.name] = generalize(env, value_t, state)
+        elif isinstance(decl, ast.LetDecl):
+            let_decl = decl
+            value_t = infer_expr(let_decl.value, env, state, type_decls)
+            env[let_decl.name] = generalize(env, value_t, state)
 
     return {name: scheme_to_string(sch, state.subst) for name, sch in env.items()}

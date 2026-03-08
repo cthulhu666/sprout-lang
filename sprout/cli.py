@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .ast import to_dict
+from .interpreter import RuntimeError, run_program
 from .parser import ParseError, parse
 from .tokenizer import TokenizeError
 from .typechecker import TypeCheckError, typecheck_program
@@ -27,6 +28,14 @@ def cmd_check(path: Path) -> int:
     return 0
 
 
+def cmd_run(path: Path) -> int:
+    source = path.read_text(encoding="utf-8")
+    tree = parse(source)
+    typecheck_program(tree)
+    run_program(tree)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sprout")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -35,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_parse.add_argument("file", type=Path)
     p_check = sub.add_parser("check", help="typecheck a Sprout file")
     p_check.add_argument("file", type=Path)
+    p_run = sub.add_parser("run", help="typecheck and run a Sprout file")
+    p_run.add_argument("file", type=Path)
 
     return parser
 
@@ -48,7 +59,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_parse(args.file)
         if args.command == "check":
             return cmd_check(args.file)
-    except (ParseError, TokenizeError, TypeCheckError) as exc:
+        if args.command == "run":
+            return cmd_run(args.file)
+    except (ParseError, TokenizeError, TypeCheckError, RuntimeError) as exc:
         print(f"error: {exc}")
         return 1
 
