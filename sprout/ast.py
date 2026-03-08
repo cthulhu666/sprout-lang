@@ -160,11 +160,28 @@ class TypeArrow(TypeExpr):
     right: TypeExpr
 
 
+def attach_loc(node: Any, line: int, column: int) -> Any:
+    setattr(node, "line", line)
+    setattr(node, "column", column)
+    return node
+
+
+def loc_str(node: Any) -> str:
+    line = getattr(node, "line", None)
+    column = getattr(node, "column", None)
+    if line is None or column is None:
+        return ""
+    return f" at {line}:{column}"
+
+
 def to_dict(node: Any) -> Any:
     if is_dataclass(node):
         out = {"node": node.__class__.__name__}
         for key in node.__dataclass_fields__.keys():
             out[key] = to_dict(getattr(node, key))
+        if hasattr(node, "line") and hasattr(node, "column"):
+            out["line"] = getattr(node, "line")
+            out["column"] = getattr(node, "column")
         return out
     if isinstance(node, list):
         return [to_dict(item) for item in node]

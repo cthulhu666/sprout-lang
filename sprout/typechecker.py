@@ -19,6 +19,17 @@ class TypeCheckError(ValueError):
     pass
 
 
+def tc_error(message: str, node: object | None = None) -> TypeCheckError:
+    return TypeCheckError(f"{message}{ast.loc_str(node)}")
+
+
+def unify_at(state: "InferState", left: "Type", right: "Type", node: object | None = None) -> None:
+    try:
+        unify(state, left, right)
+    except TypeCheckError as exc:
+        raise tc_error(str(exc), node) from exc
+
+
 class Type:
     pass
 
@@ -112,7 +123,7 @@ def bind_var(state: InferState, name: str, typ: Type) -> None:
     if typ == TVar(name):
         return
     if name in ftv(typ):
-        raise TypeCheckError(f"Occurs check failed: {name} appears in {type_to_string(typ)}")
+        raise tc_error(f"Occurs check failed: {name} appears in {type_to_string(typ)}")
     state.subst[name] = typ
 
 
@@ -251,33 +262,33 @@ def infer_expr(
     if isinstance(expr, ast.VarExpr):
         scheme = env.get(expr.name)
         if scheme is None:
-            raise TypeCheckError(f"Unknown variable {expr.name}")
+            raise tc_error(f"Unknown variable {expr.name}", expr)
         return instantiate(state, scheme)
     if isinstance(expr, ast.UnaryExpr):
         operand_t = infer_expr(expr.operand, env, state, type_decls)
         if expr.op == "-":
-            unify(state, operand_t, INT)
+            unify_at(state, operand_t, INT, expr)
             return INT
-        raise TypeCheckError(f"Unsupported unary operator {expr.op}")
+        raise tc_error(f"Unsupported unary operator {expr.op}", expr)
     if isinstance(expr, ast.BinaryExpr):
         left = infer_expr(expr.left, env, state, type_decls)
         right = infer_expr(expr.right, env, state, type_decls)
         if expr.op in {"+", "-", "*", "/"}:
-            unify(state, left, INT)
-            unify(state, right, INT)
+            unify_at(state, left, INT, expr.left)
+            unify_at(state, right, INT, expr.right)
             return INT
         if expr.op in {"<", "<=", ">", ">="}:
-            unify(state, left, INT)
-            unify(state, right, INT)
+            unify_at(state, left, INT, expr.left)
+            unify_at(state, right, INT, expr.right)
             return BOOL
         if expr.op in {"==", "!="}:
-            unify(state, left, right)
+            unify_at(state, left, right, expr)
             return BOOL
         if expr.op in {"&&", "||"}:
-            unify(state, left, BOOL)
-            unify(state, right, BOOL)
+            unify_at(state, left, BOOL, expr.left)
+            unify_at(state, right, BOOL, expr.right)
             return BOOL
-        raise TypeCheckError(f"Unsupported binary operator {expr.op}")
+        raise tc_error(f"Unsupported binary operator {expr.op}", expr)
     if isinstance(expr, ast.CallExpr):
         callee = infer_expr(expr.callee, env, state, type_decls)
         result = state.fresh()
@@ -285,16 +296,16 @@ def infer_expr(
         for arg_expr in expr.args:
             arg_t = infer_expr(arg_expr, env, state, type_decls)
             next_t = state.fresh()
-            unify(state, typ, TFunc(arg_t, next_t))
+            unify_at(state, typ, TFunc(arg_t, next_t), arg_expr)
             typ = next_t
-        unify(state, typ, result)
+        unify_at(state, typ, result, expr)
         return result
     if isinstance(expr, ast.IfExpr):
         cond = infer_expr(expr.condition, env, state, type_decls)
-        unify(state, cond, BOOL)
+        unify_at(state, cond, BOOL, expr.condition)
         then_t = infer_expr(expr.then_branch, env, state, type_decls)
         else_t = infer_expr(expr.else_branch, env, state, type_decls)
-        unify(state, then_t, else_t)
+        unify_at(state, then_t, else_t, expr)
         return then_t
     if isinstance(expr, ast.MatchExpr):
         scrutinee_t = infer_expr(expr.scrutinee, env, state, type_decls)
@@ -316,12 +327,12 @@ def infer_expr(
             if isinstance(branch.pattern, (ast.WildcardPattern, ast.VarPattern)):
                 has_catchall = True
             value_t = infer_expr(branch.value, branch_env, state, type_decls)
-            unify(state, out_t, value_t)
+            unify_at(state, out_t, value_t, branch.value)
 
-        ensure_exhaustive_match(scrutinee_t, branch_ctors, has_catchall, state, type_decls)
+        ensure_exhaustive_match(scrutinee_t, branch_ctors, has_catchall, state, type_decls, expr)
         return out_t
 
-    raise TypeCheckError(f"Unsupported expression node: {expr}")
+    raise tc_error(f"Unsupported expression node: {expr}", expr)
 
 
 def infer_pattern(
@@ -337,18 +348,18 @@ def infer_pattern(
         env[pattern.name] = Scheme(vars=(), type=apply(state.subst, expected_type))
         return None
     if isinstance(pattern, ast.IntPattern):
-        unify(state, expected_type, INT)
+        unify_at(state, expected_type, INT, pattern)
         return None
     if isinstance(pattern, ast.BoolPattern):
-        unify(state, expected_type, BOOL)
+        unify_at(state, expected_type, BOOL, pattern)
         return None
     if isinstance(pattern, ast.StringPattern):
-        unify(state, expected_type, STRING)
+        unify_at(state, expected_type, STRING, pattern)
         return None
     if isinstance(pattern, ast.ConstructorPattern):
         ctor_scheme = env.get(pattern.name)
         if ctor_scheme is None:
-            raise TypeCheckError(f"Unknown constructor {pattern.name}")
+            raise tc_error(f"Unknown constructor {pattern.name}", pattern)
 
         ctor_t = instantiate(state, ctor_scheme)
         arg_types: list[Type] = []
@@ -359,16 +370,17 @@ def infer_pattern(
             arg_types.append(current.arg)
             current = current.ret
         if len(arg_types) != len(pattern.args):
-            raise TypeCheckError(
-                f"Constructor {pattern.name} expects {len(arg_types)} args, got {len(pattern.args)}"
+            raise tc_error(
+                f"Constructor {pattern.name} expects {len(arg_types)} args, got {len(pattern.args)}",
+                pattern,
             )
 
-        unify(state, current, expected_type)
+        unify_at(state, current, expected_type, pattern)
         for arg_pat, arg_t in zip(pattern.args, arg_types):
             infer_pattern(arg_pat, arg_t, env, state, type_decls)
         return pattern.name
 
-    raise TypeCheckError(f"Unsupported pattern node: {pattern}")
+    raise tc_error(f"Unsupported pattern node: {pattern}", pattern)
 
 
 def ensure_exhaustive_match(
@@ -377,6 +389,7 @@ def ensure_exhaustive_match(
     has_catchall: bool,
     state: InferState,
     type_decls: dict[str, TypeDeclInfo],
+    node: ast.MatchExpr | None = None,
 ) -> None:
     if has_catchall:
         return
@@ -399,7 +412,7 @@ def ensure_exhaustive_match(
     missing = sorted(all_ctors - set(seen_ctors))
     if missing:
         miss = ", ".join(missing)
-        raise TypeCheckError(f"Non-exhaustive match, missing constructor(s): {miss}")
+        raise tc_error(f"Non-exhaustive match, missing constructor(s): {miss}", node)
 
 
 def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
@@ -467,7 +480,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
 
             body_t = infer_expr(fn_decl.body, working_env, state, type_decls)
             expected_return = apply(state.subst, cursor)
-            unify(state, body_t, expected_return)
+            unify_at(state, body_t, expected_return, fn_decl.body)
 
             solved_fn = apply(state.subst, fn_t)
             generalized_env = dict(env)

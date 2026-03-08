@@ -19,6 +19,7 @@ Early bootstrap stage. The repository currently contains design docs and initial
 - `examples/` sample source files
 - `sprout/` implementation (`tokenizer`, `parser`, `typechecker`, `cli`)
 - `tests/` parser and typechecker tests
+- `tests/conformance/` executable language behavior fixtures (`run`, `parse_error`, `type_error`, `runtime_error`)
 - `mise.toml` pinned local toolchain (`python`, `just`)
 - `justfile` common project commands
 

@@ -44,11 +44,18 @@ class Parser:
         wanted = label or (f"{kind} {value}" if value is not None else kind)
         raise ParseError(f"Expected {wanted} at {t.line}:{t.column}, got {t.kind} {t.value!r}")
 
+    def mark(self, node, token: Token):
+        return ast.attach_loc(node, token.line, token.column)
+
     def parse_program(self) -> ast.Program:
         decls = []
         while not self.check("EOF"):
             decls.append(self.parse_declaration())
-        return ast.Program(decls)
+        if decls:
+            first = decls[0]
+            return self.mark(ast.Program(decls), Token("META", "", first.line, first.column))
+        eof = self.current()
+        return self.mark(ast.Program(decls), Token("META", "", eof.line, eof.column))
 
     def parse_declaration(self):
         if self.check("KEYWORD", "type"):
@@ -61,7 +68,7 @@ class Parser:
         raise ParseError(f"Expected top-level declaration at {t.line}:{t.column}, got {t.value!r}")
 
     def parse_type_decl(self) -> ast.TypeDecl:
-        self.expect("KEYWORD", "type")
+        start = self.expect("KEYWORD", "type")
         name = self.expect("IDENT", label="type name").value
         params = []
         while self.check("IDENT"):
@@ -74,17 +81,18 @@ class Parser:
         constructors.append(self.parse_type_constructor())
         while self.match("SYMBOL", "|"):
             constructors.append(self.parse_type_constructor())
-        return ast.TypeDecl(name=name, type_params=params, constructors=constructors)
+        return self.mark(ast.TypeDecl(name=name, type_params=params, constructors=constructors), start)
 
     def parse_type_constructor(self) -> ast.TypeConstructor:
-        name = self.expect("IDENT", label="constructor name").value
+        tok = self.expect("IDENT", label="constructor name")
+        name = tok.value
         args = []
         while self._starts_type_atom():
             args.append(self.parse_type_atom())
-        return ast.TypeConstructor(name=name, args=args)
+        return self.mark(ast.TypeConstructor(name=name, args=args), tok)
 
     def parse_fn_decl(self) -> ast.FnDecl:
-        self.expect("KEYWORD", "fn")
+        start = self.expect("KEYWORD", "fn")
         name = self.expect("IDENT", label="function name").value
         self.expect("SYMBOL", "(")
         params = []
@@ -100,31 +108,34 @@ class Parser:
 
         self.expect("SYMBOL", "=")
         body = self.parse_expr()
-        return ast.FnDecl(name=name, params=params, return_type=return_type, body=body)
+        return self.mark(ast.FnDecl(name=name, params=params, return_type=return_type, body=body), start)
 
     def parse_param(self) -> ast.Param:
-        name = self.expect("IDENT", label="parameter name").value
+        tok = self.expect("IDENT", label="parameter name")
+        name = tok.value
         self.expect("SYMBOL", ":")
         typ = self.parse_type_expr()
-        return ast.Param(name=name, type_expr=typ)
+        return self.mark(ast.Param(name=name, type_expr=typ), tok)
 
     def parse_let_decl(self) -> ast.LetDecl:
-        self.expect("KEYWORD", "let")
+        start = self.expect("KEYWORD", "let")
         name = self.expect("IDENT", label="binding name").value
         self.expect("SYMBOL", "=")
         value = self.parse_expr()
-        return ast.LetDecl(name=name, value=value)
+        return self.mark(ast.LetDecl(name=name, value=value), start)
 
     def parse_expr(self):
-        if self.match("KEYWORD", "if"):
+        if self.check("KEYWORD", "if"):
+            start = self.advance()
             cond = self.parse_expr()
             self.expect("KEYWORD", "then")
             then_b = self.parse_expr()
             self.expect("KEYWORD", "else")
             else_b = self.parse_expr()
-            return ast.IfExpr(cond, then_b, else_b)
+            return self.mark(ast.IfExpr(cond, then_b, else_b), start)
 
-        if self.match("KEYWORD", "match"):
+        if self.check("KEYWORD", "match"):
+            start = self.advance()
             scrutinee = self.parse_expr()
             self.expect("KEYWORD", "with")
             branches = []
@@ -132,57 +143,60 @@ class Parser:
                 pattern = self.parse_pattern()
                 self.expect("SYMBOL", "->")
                 value = self.parse_expr()
-                branches.append(ast.MatchBranch(pattern=pattern, value=value))
+                branches.append(self.mark(ast.MatchBranch(pattern=pattern, value=value), Token("META", "", pattern.line, pattern.column)))
             if not branches:
                 t = self.current()
                 raise ParseError(f"Expected at least one match branch at {t.line}:{t.column}")
-            return ast.MatchExpr(scrutinee=scrutinee, branches=branches)
+            return self.mark(ast.MatchExpr(scrutinee=scrutinee, branches=branches), start)
 
         return self.parse_logical_or()
 
     def parse_logical_or(self):
         expr = self.parse_logical_and()
         while self.match("SYMBOL", "||"):
-            expr = ast.BinaryExpr(op="||", left=expr, right=self.parse_logical_and())
+            op = self.tokens[self.i - 1]
+            expr = self.mark(ast.BinaryExpr(op="||", left=expr, right=self.parse_logical_and()), op)
         return expr
 
     def parse_logical_and(self):
         expr = self.parse_equality()
         while self.match("SYMBOL", "&&"):
-            expr = ast.BinaryExpr(op="&&", left=expr, right=self.parse_equality())
+            op = self.tokens[self.i - 1]
+            expr = self.mark(ast.BinaryExpr(op="&&", left=expr, right=self.parse_equality()), op)
         return expr
 
     def parse_equality(self):
         expr = self.parse_comparison()
         while self.check("SYMBOL") and self.current().value in {"==", "!="}:
-            op = self.advance().value
-            expr = ast.BinaryExpr(op=op, left=expr, right=self.parse_comparison())
+            tok = self.advance()
+            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_comparison()), tok)
         return expr
 
     def parse_comparison(self):
         expr = self.parse_term()
         while self.check("SYMBOL") and self.current().value in {"<", "<=", ">", ">="}:
-            op = self.advance().value
-            expr = ast.BinaryExpr(op=op, left=expr, right=self.parse_term())
+            tok = self.advance()
+            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_term()), tok)
         return expr
 
     def parse_term(self):
         expr = self.parse_factor()
         while self.check("SYMBOL") and self.current().value in {"+", "-"}:
-            op = self.advance().value
-            expr = ast.BinaryExpr(op=op, left=expr, right=self.parse_factor())
+            tok = self.advance()
+            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_factor()), tok)
         return expr
 
     def parse_factor(self):
         expr = self.parse_unary()
         while self.check("SYMBOL") and self.current().value in {"*", "/"}:
-            op = self.advance().value
-            expr = ast.BinaryExpr(op=op, left=expr, right=self.parse_unary())
+            tok = self.advance()
+            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_unary()), tok)
         return expr
 
     def parse_unary(self):
         if self.match("SYMBOL", "-"):
-            return ast.UnaryExpr(op="-", operand=self.parse_unary())
+            op = self.tokens[self.i - 1]
+            return self.mark(ast.UnaryExpr(op="-", operand=self.parse_unary()), op)
         return self.parse_call()
 
     def parse_call(self):
@@ -194,38 +208,50 @@ class Parser:
                 while self.match("SYMBOL", ","):
                     args.append(self.parse_expr())
             self.expect("SYMBOL", ")")
-            expr = ast.CallExpr(callee=expr, args=args)
+            open_tok = self.tokens[self.i - 1]
+            expr = self.mark(ast.CallExpr(callee=expr, args=args), open_tok)
         return expr
 
     def parse_primary(self):
         if self.check("INT"):
-            return ast.IntExpr(value=int(self.advance().value))
+            tok = self.advance()
+            return self.mark(ast.IntExpr(value=int(tok.value)), tok)
         if self.check("STRING"):
-            return ast.StringExpr(value=self.advance().value)
+            tok = self.advance()
+            return self.mark(ast.StringExpr(value=tok.value), tok)
         if self.match("KEYWORD", "true"):
-            return ast.BoolExpr(value=True)
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.BoolExpr(value=True), tok)
         if self.match("KEYWORD", "false"):
-            return ast.BoolExpr(value=False)
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.BoolExpr(value=False), tok)
         if self.check("IDENT"):
-            return ast.VarExpr(name=self.advance().value)
+            tok = self.advance()
+            return self.mark(ast.VarExpr(name=tok.value), tok)
         if self.match("SYMBOL", "("):
+            open_tok = self.tokens[self.i - 1]
             expr = self.parse_expr()
             self.expect("SYMBOL", ")")
-            return expr
+            return self.mark(expr, open_tok)
         t = self.current()
         raise ParseError(f"Expected expression at {t.line}:{t.column}, got {t.kind} {t.value!r}")
 
     def parse_pattern(self):
         if self.match("IDENT", "_"):
-            return ast.WildcardPattern()
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.WildcardPattern(), tok)
         if self.check("INT"):
-            return ast.IntPattern(value=int(self.advance().value))
+            tok = self.advance()
+            return self.mark(ast.IntPattern(value=int(tok.value)), tok)
         if self.match("KEYWORD", "true"):
-            return ast.BoolPattern(value=True)
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.BoolPattern(value=True), tok)
         if self.match("KEYWORD", "false"):
-            return ast.BoolPattern(value=False)
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.BoolPattern(value=False), tok)
         if self.check("STRING"):
-            return ast.StringPattern(value=self.advance().value)
+            tok = self.advance()
+            return self.mark(ast.StringPattern(value=tok.value), tok)
 
         name_token = self.expect("IDENT", label="pattern")
         name = name_token.value
@@ -233,29 +259,36 @@ class Parser:
             args = []
             while self._starts_pattern_atom():
                 args.append(self.parse_pattern_atom())
-            return ast.ConstructorPattern(name=name, args=args)
-        return ast.VarPattern(name=name)
+            return self.mark(ast.ConstructorPattern(name=name, args=args), name_token)
+        return self.mark(ast.VarPattern(name=name), name_token)
 
     def parse_pattern_atom(self):
         if self.match("IDENT", "_"):
-            return ast.WildcardPattern()
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.WildcardPattern(), tok)
         if self.check("INT"):
-            return ast.IntPattern(value=int(self.advance().value))
+            tok = self.advance()
+            return self.mark(ast.IntPattern(value=int(tok.value)), tok)
         if self.match("KEYWORD", "true"):
-            return ast.BoolPattern(value=True)
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.BoolPattern(value=True), tok)
         if self.match("KEYWORD", "false"):
-            return ast.BoolPattern(value=False)
+            tok = self.tokens[self.i - 1]
+            return self.mark(ast.BoolPattern(value=False), tok)
         if self.check("STRING"):
-            return ast.StringPattern(value=self.advance().value)
+            tok = self.advance()
+            return self.mark(ast.StringPattern(value=tok.value), tok)
         if self.check("IDENT"):
-            name = self.advance().value
+            tok = self.advance()
+            name = tok.value
             if name and name[0].isupper():
-                return ast.ConstructorPattern(name=name, args=[])
-            return ast.VarPattern(name=name)
+                return self.mark(ast.ConstructorPattern(name=name, args=[]), tok)
+            return self.mark(ast.VarPattern(name=name), tok)
         if self.match("SYMBOL", "("):
+            open_tok = self.tokens[self.i - 1]
             inner = self.parse_pattern()
             self.expect("SYMBOL", ")")
-            return inner
+            return self.mark(inner, open_tok)
         t = self.current()
         raise ParseError(f"Expected pattern atom at {t.line}:{t.column}")
 

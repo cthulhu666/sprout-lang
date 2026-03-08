@@ -10,6 +10,10 @@ class RuntimeError(ValueError):
     pass
 
 
+def rt_error(message: str, node: object | None = None) -> RuntimeError:
+    return RuntimeError(f"{message}{ast.loc_str(node)}")
+
+
 @dataclass(frozen=True)
 class ADTValue:
     constructor: str
@@ -35,6 +39,8 @@ class FunctionValue:
     params: list[str]
     body: ast.Expr
     closure: "Env"
+    line: int | None = None
+    column: int | None = None
 
 
 class Env:
@@ -71,44 +77,47 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
     if isinstance(expr, ast.StringExpr):
         return expr.value
     if isinstance(expr, ast.VarExpr):
-        return env.get(expr.name)
+        try:
+            return env.get(expr.name)
+        except RuntimeError as exc:
+            raise rt_error(str(exc), expr) from exc
 
     if isinstance(expr, ast.UnaryExpr):
         operand = eval_expr(expr.operand, env)
         if expr.op == "-":
             if not isinstance(operand, int):
-                raise RuntimeError("Unary '-' expects Int")
+                raise rt_error("Unary '-' expects Int", expr)
             return -operand
-        raise RuntimeError(f"Unsupported unary operator {expr.op}")
+        raise rt_error(f"Unsupported unary operator {expr.op}", expr)
 
     if isinstance(expr, ast.BinaryExpr):
         left = eval_expr(expr.left, env)
 
         if expr.op == "&&":
             if not isinstance(left, bool):
-                raise RuntimeError("'&&' expects Bool on the left")
+                raise rt_error("'&&' expects Bool on the left", expr.left)
             if not left:
                 return False
             right = eval_expr(expr.right, env)
             if not isinstance(right, bool):
-                raise RuntimeError("'&&' expects Bool on the right")
+                raise rt_error("'&&' expects Bool on the right", expr.right)
             return right
 
         if expr.op == "||":
             if not isinstance(left, bool):
-                raise RuntimeError("'||' expects Bool on the left")
+                raise rt_error("'||' expects Bool on the left", expr.left)
             if left:
                 return True
             right = eval_expr(expr.right, env)
             if not isinstance(right, bool):
-                raise RuntimeError("'||' expects Bool on the right")
+                raise rt_error("'||' expects Bool on the right", expr.right)
             return right
 
         right = eval_expr(expr.right, env)
 
         if expr.op in {"+", "-", "*", "/"}:
             if not isinstance(left, int) or not isinstance(right, int):
-                raise RuntimeError(f"Operator '{expr.op}' expects Int operands")
+                raise rt_error(f"Operator '{expr.op}' expects Int operands", expr)
             if expr.op == "+":
                 return left + right
             if expr.op == "-":
@@ -119,7 +128,7 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
 
         if expr.op in {"<", "<=", ">", ">="}:
             if not isinstance(left, int) or not isinstance(right, int):
-                raise RuntimeError(f"Operator '{expr.op}' expects Int operands")
+                raise rt_error(f"Operator '{expr.op}' expects Int operands", expr)
             if expr.op == "<":
                 return left < right
             if expr.op == "<=":
@@ -133,12 +142,12 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
         if expr.op == "!=":
             return left != right
 
-        raise RuntimeError(f"Unsupported binary operator {expr.op}")
+        raise rt_error(f"Unsupported binary operator {expr.op}", expr)
 
     if isinstance(expr, ast.IfExpr):
         condition = eval_expr(expr.condition, env)
         if not isinstance(condition, bool):
-            raise RuntimeError("if condition must be Bool")
+            raise rt_error("if condition must be Bool", expr.condition)
         if condition:
             return eval_expr(expr.then_branch, env)
         return eval_expr(expr.else_branch, env)
@@ -152,21 +161,25 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
                 for name, value in bindings.items():
                     branch_env.set(name, value)
                 return eval_expr(branch.value, branch_env)
-        raise RuntimeError("Non-exhaustive match at runtime")
+        raise rt_error("Non-exhaustive match at runtime", expr)
 
     if isinstance(expr, ast.CallExpr):
         callee = eval_expr(expr.callee, env)
         args = [eval_expr(arg, env) for arg in expr.args]
-        return apply_callable(callee, args)
+        try:
+            return apply_callable(callee, args)
+        except RuntimeError as exc:
+            raise rt_error(str(exc), expr) from exc
 
-    raise RuntimeError(f"Unsupported expression node: {expr}")
+    raise rt_error(f"Unsupported expression node: {expr}", expr)
 
 
 def apply_callable(callee: object, args: list[object]) -> object:
     if isinstance(callee, FunctionValue):
         if len(args) != len(callee.params):
-            raise RuntimeError(
-                f"Function {callee.name} expects {len(callee.params)} args, got {len(args)}"
+            raise rt_error(
+                f"Function {callee.name} expects {len(callee.params)} args, got {len(args)}",
+                callee,
             )
         call_env = Env(parent=callee.closure)
         for name, value in zip(callee.params, args):
@@ -247,6 +260,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
                     params=[param.name for param in decl.params],
                     body=decl.body,
                     closure=env,
+                    line=getattr(decl, "line", None),
+                    column=getattr(decl, "column", None),
                 ),
             )
         elif isinstance(decl, ast.LetDecl):

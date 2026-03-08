@@ -1,0 +1,11 @@
+fn rem(n: Int, m: Int) -> Int =
+  n - (n / m) * m
+
+fn fizzbuzz(n: Int) -> String =
+  if rem(n, 15) == 0 then "FizzBuzz"
+  else if rem(n, 3) == 0 then "Fizz"
+  else if rem(n, 5) == 0 then "Buzz"
+  else "Number"
+
+fn main() -> IO Unit =
+  print(fizzbuzz(15))

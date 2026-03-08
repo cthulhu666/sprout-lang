@@ -1,0 +1,2 @@
+fn main() -> IO Unit =
+  print("hello from sprout")
