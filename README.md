@@ -39,12 +39,15 @@ Common tasks:
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
 - Run tests: `mise exec -- just test`
+- Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
+- Build native binary (clang): `mise exec -- just compile-native /tmp/prog.spr /tmp/prog`
 
 ## Builtin Helpers (v0)
 
 Runtime builtins (host-implemented):
 
 - `print(x) -> IO Unit`
+- `print_int(x: Int) -> Int` (prints and returns `x`, useful for native backend subset)
 - `read_lines(path: String) -> List String`
 - `parse_int(s: String) -> Int`
 - `split_words(s: String) -> List String` (comma/whitespace separated)
@@ -60,6 +63,19 @@ Load stdlib prelude explicitly:
 
 - `python3 -m sprout.cli check --with-stdlib your_file.spr`
 - `python3 -m sprout.cli run --with-stdlib your_file.spr`
+
+## Native Backend (Early)
+
+`sprout compile` currently supports a small subset:
+
+- top-level `fn` declarations only (no top-level `let`/`type` yet),
+- `Int`/`Bool` typed params and returns,
+- expressions: literals, vars, arithmetic, comparisons, `if`, direct function calls, recursion.
+
+Commands:
+
+- LLVM IR output: `python3 -m sprout.cli compile input.spr -o out.ll`
+- Native binary (requires `clang`): `python3 -m sprout.cli compile input.spr --native -o out_bin`
 
 ## Near-Term Plan
 

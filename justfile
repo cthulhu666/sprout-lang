@@ -20,3 +20,9 @@ run file:
 
 run-stdlib file:
   python3 -m sprout.cli run --with-stdlib {{file}}
+
+compile file out:
+  python3 -m sprout.cli compile {{file}} -o {{out}}
+
+compile-native file out:
+  python3 -m sprout.cli compile {{file}} --native -o {{out}}

@@ -252,6 +252,16 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             print(text, file=out)
         return None
 
+    def builtin_print_int(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, int):
+            raise RuntimeError("print_int expects Int")
+        if out is None:
+            print(value)
+        else:
+            print(value, file=out)
+        return value
+
     def builtin_read_lines(args: list[object]) -> object:
         raw_path = args[0]
         if not isinstance(raw_path, str):
@@ -273,6 +283,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         return py_to_adt_list(tokens)
 
     env.set("print", BuiltinFunction(name="print", arity=1, fn=builtin_print))
+    env.set("print_int", BuiltinFunction(name="print_int", arity=1, fn=builtin_print_int))
     env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))

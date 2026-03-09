@@ -447,6 +447,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
     p_var = TVar("prelude.print.a")
     env: dict[str, Scheme] = {
         "print": Scheme(vars=(p_var.name,), type=TFunc(p_var, TApp(TConst("IO"), UNIT))),
+        "print_int": Scheme(vars=(), type=TFunc(INT, INT)),
         "read_lines": Scheme(
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
