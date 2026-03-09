@@ -72,6 +72,8 @@ Load stdlib prelude explicitly:
 - `Int`/`Bool`/`String` typed params and returns, plus `IO Unit` function return,
 - expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, `if`, direct function calls, recursion,
 - ADT constructor calls and `match` lowering (constructors with up to 2 fields),
+- generic type variables are currently erased to runtime `i64` handles,
+- first-order function values in params are supported (for patterns like `f: Int -> Int`),
 - `print(...)` lowering for `Int`/`Bool`/`String`,
 - `print_int(...)` external call.
 

@@ -48,12 +48,19 @@ EXTERN_SIGS: dict[str, FnSig] = {
 class Value:
     typ: LLType
     ir: str
+    callable_sig: "CallSig | None" = None
 
 
 @dataclass
 class GlobalConst:
     typ: LLType
     value_ir: str
+
+
+@dataclass(frozen=True)
+class CallSig:
+    params: list[LLType]
+    ret: LLType
 
 
 class Emitter:
@@ -105,6 +112,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
             return I8_PTR
         if node.name in adt_names:
             return I64
+        if node.name and node.name[0].islower():
+            return I64
     if isinstance(node, ast.TypeApply):
         if isinstance(node.base, ast.TypeName) and node.base.name == "IO":
             if isinstance(node.arg, ast.TypeName) and node.arg.name == "Unit":
@@ -124,7 +133,16 @@ def _type_base_name(node: ast.TypeExpr) -> str | None:
 
 
 def _check_param_type(node: ast.TypeExpr, adt_names: set[str]) -> LLType:
-    return _type_from_ast(node, adt_names)
+    typ, _ = _lower_value_type(node, adt_names)
+    return typ
+
+
+def _lower_value_type(node: ast.TypeExpr, adt_names: set[str]) -> tuple[LLType, CallSig | None]:
+    if isinstance(node, ast.TypeArrow):
+        param_ll = _type_from_ast(node.left, adt_names)
+        ret_ll = _type_from_ast(node.right, adt_names)
+        return I8_PTR, CallSig(params=[param_ll], ret=ret_ll)
+    return _type_from_ast(node, adt_names), None
 
 
 def compile_to_llvm(program: ast.Program) -> str:
@@ -179,7 +197,7 @@ def compile_to_llvm(program: ast.Program) -> str:
     emitter.emit("")
 
     for fn in fn_decls:
-        _emit_fn(fn, sigs, ctor_sigs, globals_, emitter)
+        _emit_fn(fn, sigs, ctor_sigs, globals_, adt_names, emitter)
         emitter.emit("")
 
     module_lines = [emitter.lines[0], emitter.lines[1], ""]
@@ -264,15 +282,17 @@ def _emit_fn(
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
     globals_: dict[str, GlobalConst],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> None:
     sig = sigs[fn.name]
     params = []
     locals_: dict[str, Value] = {}
     for p, typ in zip(fn.params, sig.params):
+        _, call_sig = _lower_value_type(p.type_expr, adt_names)
         pname = f"%{p.name}"
         params.append(f"{typ.text} {pname}")
-        locals_[p.name] = Value(typ=typ, ir=pname)
+        locals_[p.name] = Value(typ=typ, ir=pname, callable_sig=call_sig)
 
     emitter.emit(f"define {sig.ret.text} @{fn.name}({', '.join(params)}) {{")
     emitter.label("entry")
@@ -304,6 +324,13 @@ def _emit_expr(
         val = locals_.get(expr.name)
         if val is not None:
             return val
+        fn_ref = sigs.get(expr.name)
+        if fn_ref is not None:
+            return Value(
+                typ=I8_PTR,
+                ir=f"@{expr.name}",
+                callable_sig=CallSig(params=fn_ref.params, ret=fn_ref.ret),
+            )
         global_const = globals_.get(expr.name)
         if global_const is not None:
             tmp = emitter.tmp()
@@ -677,6 +704,23 @@ def _emit_call(
                 f"  {tmp} = call i64 @sprout_make2(i64 {ctor.tag}, i64 {packed_args[0]}, i64 {packed_args[1]})"
             )
         return Value(I64, tmp)
+
+    local_callee = locals_.get(fn_name)
+    if local_callee is not None and local_callee.callable_sig is not None:
+        call_sig = local_callee.callable_sig
+        if len(expr.args) != len(call_sig.params):
+            raise CodegenError(
+                f"Callable {fn_name} expects {len(call_sig.params)} args, got {len(expr.args)}"
+            )
+        args_ir: list[str] = []
+        for arg_expr, param_type in zip(expr.args, call_sig.params):
+            arg_val = _emit_expr(arg_expr, locals_, globals_, sigs, ctor_sigs, emitter)
+            if arg_val.typ != param_type:
+                raise CodegenError(f"Call type mismatch for callable {fn_name}")
+            args_ir.append(f"{param_type.text} {arg_val.ir}")
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = call {call_sig.ret.text} {local_callee.ir}({', '.join(args_ir)})")
+        return Value(call_sig.ret, tmp)
 
     sig = sigs.get(fn_name)
     if sig is None:
