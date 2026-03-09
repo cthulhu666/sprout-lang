@@ -36,6 +36,8 @@ class CtorSig:
 EXTERN_SIGS: dict[str, FnSig] = {
     "print_int": FnSig(name="print_int", params=[I64], ret=I64),
     "print_str": FnSig(name="print_str", params=[I8_PTR], ret=I64),
+    "print_value": FnSig(name="print_value", params=[I64], ret=I64),
+    "sprout_register_ctor": FnSig(name="sprout_register_ctor", params=[I64, I8_PTR, I64], ret=I64),
     "sprout_make0": FnSig(name="sprout_make0", params=[I64], ret=I64),
     "sprout_make1": FnSig(name="sprout_make1", params=[I64, I64], ret=I64),
     "sprout_make2": FnSig(name="sprout_make2", params=[I64, I64, I64], ret=I64),
@@ -55,6 +57,13 @@ class Value:
 class GlobalConst:
     typ: LLType
     value_ir: str
+
+
+@dataclass
+class GlobalInfo:
+    typ: LLType
+    is_const: bool
+    const_value_ir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,12 +146,68 @@ def _check_param_type(node: ast.TypeExpr, adt_names: set[str]) -> LLType:
     return typ
 
 
+def _is_io_unit(node: ast.TypeExpr | None) -> bool:
+    if not isinstance(node, ast.TypeApply):
+        return False
+    if not isinstance(node.base, ast.TypeName) or node.base.name != "IO":
+        return False
+    return isinstance(node.arg, ast.TypeName) and node.arg.name == "Unit"
+
+
 def _lower_value_type(node: ast.TypeExpr, adt_names: set[str]) -> tuple[LLType, CallSig | None]:
     if isinstance(node, ast.TypeArrow):
         param_ll = _type_from_ast(node.left, adt_names)
         ret_ll = _type_from_ast(node.right, adt_names)
         return I8_PTR, CallSig(params=[param_ll], ret=ret_ll)
     return _type_from_ast(node, adt_names), None
+
+
+def _infer_expr_type(
+    expr: ast.Expr,
+    globals_info: dict[str, GlobalInfo],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+) -> LLType:
+    if isinstance(expr, ast.IntExpr):
+        return I64
+    if isinstance(expr, ast.BoolExpr):
+        return I1
+    if isinstance(expr, ast.StringExpr):
+        return I8_PTR
+    if isinstance(expr, ast.VarExpr):
+        if expr.name in globals_info:
+            return globals_info[expr.name].typ
+        if expr.name in sigs:
+            return I8_PTR
+        if expr.name in ctor_sigs:
+            return I64
+        raise CodegenError(f"Cannot infer top-level let type for unknown variable {expr.name}")
+    if isinstance(expr, ast.UnaryExpr):
+        return I64
+    if isinstance(expr, ast.BinaryExpr):
+        if expr.op in {"+", "-", "*", "/"}:
+            return I64
+        return I1
+    if isinstance(expr, ast.IfExpr):
+        return _infer_expr_type(expr.then_branch, globals_info, sigs, ctor_sigs)
+    if isinstance(expr, ast.CallExpr):
+        if not isinstance(expr.callee, ast.VarExpr):
+            raise CodegenError("Cannot infer top-level let type for indirect call")
+        name = expr.callee.name
+        if name == "print":
+            return I64
+        if name in ctor_sigs:
+            return I64
+        if name in sigs:
+            return sigs[name].ret
+        if name in EXTERN_SIGS:
+            return EXTERN_SIGS[name].ret
+        raise CodegenError(f"Cannot infer top-level let call type for {name}")
+    if isinstance(expr, ast.MatchExpr):
+        if not expr.branches:
+            raise CodegenError("Cannot infer top-level let type for empty match")
+        return _infer_expr_type(expr.branches[0].value, globals_info, sigs, ctor_sigs)
+    raise CodegenError("Cannot infer top-level let type for expression")
 
 
 def compile_to_llvm(program: ast.Program) -> str:
@@ -162,8 +227,9 @@ def compile_to_llvm(program: ast.Program) -> str:
     adt_names = {t.name for t in type_decls}
 
     ctor_sigs: dict[str, CtorSig] = {}
+    next_tag = 0
     for tdecl in type_decls:
-        for tag, ctor in enumerate(tdecl.constructors):
+        for ctor in tdecl.constructors:
             if ctor.name in ctor_sigs:
                 raise CodegenError(f"Duplicate constructor name in backend: {ctor.name}")
             arg_types = [_type_from_ast(arg, adt_names) for arg in ctor.args]
@@ -171,7 +237,8 @@ def compile_to_llvm(program: ast.Program) -> str:
                 raise CodegenError(
                     f"Constructor {ctor.name} has {len(arg_types)} args; backend currently supports up to 2"
                 )
-            ctor_sigs[ctor.name] = CtorSig(name=ctor.name, tag=tag, arg_types=arg_types)
+            ctor_sigs[ctor.name] = CtorSig(name=ctor.name, tag=next_tag, arg_types=arg_types)
+            next_tag += 1
 
     sigs: dict[str, FnSig] = {}
     for fn in fn_decls:
@@ -181,11 +248,24 @@ def compile_to_llvm(program: ast.Program) -> str:
         ret = _type_from_ast(fn.return_type, adt_names)
         sigs[fn.name] = FnSig(fn.name, params, ret)
 
-    globals_: dict[str, GlobalConst] = {}
+    globals_info: dict[str, GlobalInfo] = {}
+    const_env: dict[str, GlobalConst] = {}
+    runtime_lets: list[ast.LetDecl] = []
     for let_decl in let_decls:
-        if let_decl.name in globals_:
+        if let_decl.name in globals_info:
             raise CodegenError(f"Duplicate global let {let_decl.name}")
-        globals_[let_decl.name] = _eval_const_expr(let_decl.value, globals_)
+        try:
+            const_val = _eval_const_expr(let_decl.value, const_env)
+            const_env[let_decl.name] = const_val
+            globals_info[let_decl.name] = GlobalInfo(
+                typ=const_val.typ,
+                is_const=True,
+                const_value_ir=const_val.value_ir,
+            )
+        except CodegenError:
+            inferred = _infer_expr_type(let_decl.value, globals_info, sigs, ctor_sigs)
+            globals_info[let_decl.name] = GlobalInfo(typ=inferred, is_const=False)
+            runtime_lets.append(let_decl)
 
     emitter = Emitter()
     emitter.emit("; Generated by sprout LLVM backend (v0)")
@@ -196,15 +276,29 @@ def compile_to_llvm(program: ast.Program) -> str:
         emitter.emit(f"declare {ext.ret.text} @{ext.name}({params})")
     emitter.emit("")
 
+    ctor_reg_meta: dict[str, tuple[str, int, int, int]] = {}
+    for ctor in ctor_sigs.values():
+        sname, slen = emitter.string_const(ctor.name)
+        ctor_reg_meta[ctor.name] = (sname, slen, len(ctor.arg_types), ctor.tag)
+
+    if runtime_lets:
+        _emit_init_globals(runtime_lets, globals_info, sigs, ctor_sigs, emitter)
+        emitter.emit("")
+
     for fn in fn_decls:
-        _emit_fn(fn, sigs, ctor_sigs, globals_, adt_names, emitter)
+        _emit_fn(fn, sigs, ctor_sigs, ctor_reg_meta, globals_info, adt_names, runtime_lets, emitter)
         emitter.emit("")
 
     module_lines = [emitter.lines[0], emitter.lines[1], ""]
-    for name, glob in globals_.items():
-        module_lines.append(f"@{name} = private constant {glob.typ.text} {glob.value_ir}")
+    for name, info in globals_info.items():
+        if info.is_const:
+            assert info.const_value_ir is not None
+            module_lines.append(f"@{name} = private constant {info.typ.text} {info.const_value_ir}")
+        else:
+            init = "null" if info.typ == I8_PTR else "0"
+            module_lines.append(f"@{name} = global {info.typ.text} {init}")
     module_lines.extend(emitter.string_globals)
-    if globals_ or emitter.string_globals:
+    if globals_info or emitter.string_globals:
         module_lines.append("")
     module_lines.extend(emitter.lines[3:])
 
@@ -281,8 +375,10 @@ def _emit_fn(
     fn: ast.FnDecl,
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
-    globals_: dict[str, GlobalConst],
+    ctor_reg_meta: dict[str, tuple[str, int, int, int]],
+    globals_info: dict[str, GlobalInfo],
     adt_names: set[str],
+    runtime_lets: list[ast.LetDecl],
     emitter: Emitter,
 ) -> None:
     sig = sigs[fn.name]
@@ -296,17 +392,52 @@ def _emit_fn(
 
     emitter.emit(f"define {sig.ret.text} @{fn.name}({', '.join(params)}) {{")
     emitter.label("entry")
-    ret = _emit_expr(fn.body, locals_, globals_, sigs, ctor_sigs, emitter)
+    if fn.name == "main":
+        if runtime_lets:
+            emitter.emit("  call void @__sprout_init_globals()")
+        for _, (sname, slen, arity, tag) in sorted(ctor_reg_meta.items(), key=lambda x: x[1][3]):
+            sptr = emitter.tmp()
+            emitter.emit(f"  {sptr} = getelementptr inbounds [{slen} x i8], ptr {sname}, i64 0, i64 0")
+            reg = emitter.tmp()
+            emitter.emit(
+                f"  {reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {sptr}, i64 {arity})"
+            )
+    ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, emitter)
     if ret.typ != sig.ret:
         raise CodegenError(f"Function {fn.name} body type mismatch in backend: {ret.typ.text} vs {sig.ret.text}")
-    emitter.emit(f"  ret {ret.typ.text} {ret.ir}")
+    if fn.name == "main" and _is_io_unit(fn.return_type):
+        emitter.emit("  ret i64 0")
+    else:
+        emitter.emit(f"  ret {ret.typ.text} {ret.ir}")
+    emitter.emit("}")
+
+
+def _emit_init_globals(
+    runtime_lets: list[ast.LetDecl],
+    globals_info: dict[str, GlobalInfo],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+    emitter: Emitter,
+) -> None:
+    emitter.emit("define void @__sprout_init_globals() {")
+    emitter.label("entry")
+    locals_: dict[str, Value] = {}
+    for let_decl in runtime_lets:
+        info = globals_info[let_decl.name]
+        value = _emit_expr(let_decl.value, locals_, globals_info, sigs, ctor_sigs, emitter)
+        if value.typ != info.typ:
+            raise CodegenError(
+                f"Global init type mismatch for {let_decl.name}: {value.typ.text} vs {info.typ.text}"
+            )
+        emitter.emit(f"  store {value.typ.text} {value.ir}, ptr @{let_decl.name}")
+    emitter.emit("  ret void")
     emitter.emit("}")
 
 
 def _emit_expr(
     expr: ast.Expr,
     locals_: dict[str, Value],
-    globals_: dict[str, GlobalConst],
+    globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
@@ -331,11 +462,11 @@ def _emit_expr(
                 ir=f"@{expr.name}",
                 callable_sig=CallSig(params=fn_ref.params, ret=fn_ref.ret),
             )
-        global_const = globals_.get(expr.name)
-        if global_const is not None:
+        global_info = globals_info.get(expr.name)
+        if global_info is not None:
             tmp = emitter.tmp()
-            emitter.emit(f"  {tmp} = load {global_const.typ.text}, ptr @{expr.name}")
-            return Value(global_const.typ, tmp)
+            emitter.emit(f"  {tmp} = load {global_info.typ.text}, ptr @{expr.name}")
+            return Value(global_info.typ, tmp)
         ctor = ctor_sigs.get(expr.name)
         if ctor is not None:
             if ctor.arg_types:
@@ -345,7 +476,7 @@ def _emit_expr(
             return Value(I64, tmp)
         raise CodegenError(f"Unknown variable in backend: {expr.name}")
     if isinstance(expr, ast.UnaryExpr):
-        operand = _emit_expr(expr.operand, locals_, globals_, sigs, ctor_sigs, emitter)
+        operand = _emit_expr(expr.operand, locals_, globals_info, sigs, ctor_sigs, emitter)
         if expr.op == "-":
             if operand.typ != I64:
                 raise CodegenError("Unary '-' backend supports Int only")
@@ -354,13 +485,13 @@ def _emit_expr(
             return Value(I64, tmp)
         raise CodegenError(f"Unsupported unary op in backend: {expr.op}")
     if isinstance(expr, ast.BinaryExpr):
-        return _emit_binary(expr, locals_, globals_, sigs, ctor_sigs, emitter)
+        return _emit_binary(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
     if isinstance(expr, ast.IfExpr):
-        return _emit_if(expr, locals_, globals_, sigs, ctor_sigs, emitter)
+        return _emit_if(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
     if isinstance(expr, ast.CallExpr):
-        return _emit_call(expr, locals_, globals_, sigs, ctor_sigs, emitter)
+        return _emit_call(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
     if isinstance(expr, ast.MatchExpr):
-        return _emit_match(expr, locals_, globals_, sigs, ctor_sigs, emitter)
+        return _emit_match(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
 
     raise CodegenError(f"Unsupported expression in LLVM backend: {expr.__class__.__name__}")
 
@@ -368,16 +499,16 @@ def _emit_expr(
 def _emit_binary(
     expr: ast.BinaryExpr,
     locals_: dict[str, Value],
-    globals_: dict[str, GlobalConst],
+    globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
 ) -> Value:
     if expr.op in {"&&", "||"}:
-        return _emit_short_circuit(expr, locals_, globals_, sigs, ctor_sigs, emitter)
+        return _emit_short_circuit(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
 
-    left = _emit_expr(expr.left, locals_, globals_, sigs, ctor_sigs, emitter)
-    right = _emit_expr(expr.right, locals_, globals_, sigs, ctor_sigs, emitter)
+    left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, emitter)
+    right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, emitter)
 
     if expr.op in {"+", "-", "*", "/"}:
         if left.typ != I64 or right.typ != I64:
@@ -410,12 +541,12 @@ def _emit_binary(
 def _emit_short_circuit(
     expr: ast.BinaryExpr,
     locals_: dict[str, Value],
-    globals_: dict[str, GlobalConst],
+    globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
 ) -> Value:
-    left = _emit_expr(expr.left, locals_, globals_, sigs, ctor_sigs, emitter)
+    left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, emitter)
     if left.typ != I1:
         raise CodegenError(f"Logical op {expr.op} expects Bool")
     left_block = emitter.current_block
@@ -432,7 +563,7 @@ def _emit_short_circuit(
         const_on_short = "1"
 
     emitter.label(rhs_label)
-    right = _emit_expr(expr.right, locals_, globals_, sigs, ctor_sigs, emitter)
+    right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, emitter)
     if right.typ != I1:
         raise CodegenError(f"Logical op {expr.op} expects Bool")
     rhs_end = emitter.current_block
@@ -451,12 +582,12 @@ def _emit_short_circuit(
 def _emit_if(
     expr: ast.IfExpr,
     locals_: dict[str, Value],
-    globals_: dict[str, GlobalConst],
+    globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
 ) -> Value:
-    cond = _emit_expr(expr.condition, locals_, globals_, sigs, ctor_sigs, emitter)
+    cond = _emit_expr(expr.condition, locals_, globals_info, sigs, ctor_sigs, emitter)
     if cond.typ != I1:
         raise CodegenError("if condition must be Bool")
 
@@ -466,14 +597,14 @@ def _emit_if(
     emitter.emit(f"  br i1 {cond.ir}, label %{then_label}, label %{else_label}")
 
     emitter.label(then_label)
-    then_val = _emit_expr(expr.then_branch, locals_, globals_, sigs, ctor_sigs, emitter)
+    then_val = _emit_expr(expr.then_branch, locals_, globals_info, sigs, ctor_sigs, emitter)
     then_end = emitter.current_block
     if then_end is None:
         raise CodegenError("Internal backend error: missing then block")
     emitter.emit(f"  br label %{done_label}")
 
     emitter.label(else_label)
-    else_val = _emit_expr(expr.else_branch, locals_, globals_, sigs, ctor_sigs, emitter)
+    else_val = _emit_expr(expr.else_branch, locals_, globals_info, sigs, ctor_sigs, emitter)
     else_end = emitter.current_block
     if else_end is None:
         raise CodegenError("Internal backend error: missing else block")
@@ -493,12 +624,12 @@ def _emit_if(
 def _emit_match(
     expr: ast.MatchExpr,
     locals_: dict[str, Value],
-    globals_: dict[str, GlobalConst],
+    globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
 ) -> Value:
-    scrut = _emit_expr(expr.scrutinee, locals_, globals_, sigs, ctor_sigs, emitter)
+    scrut = _emit_expr(expr.scrutinee, locals_, globals_info, sigs, ctor_sigs, emitter)
     done_label = emitter.block("match_done")
     next_label = emitter.block("match_next")
     branch_vals: list[tuple[Value, str]] = []
@@ -523,7 +654,7 @@ def _emit_match(
         emitter.label(branch_label)
         branch_locals = dict(locals_)
         _emit_pattern_bind(branch.pattern, scrut, branch_locals, ctor_sigs, emitter)
-        value = _emit_expr(branch.value, branch_locals, globals_, sigs, ctor_sigs, emitter)
+        value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, emitter)
         end_block = emitter.current_block
         if end_block is None:
             raise CodegenError("Internal backend error: missing match branch block")
@@ -652,7 +783,7 @@ def _pack_to_i64(value: Value, emitter: Emitter) -> str:
 def _emit_call(
     expr: ast.CallExpr,
     locals_: dict[str, Value],
-    globals_: dict[str, GlobalConst],
+    globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
@@ -663,16 +794,16 @@ def _emit_call(
     if fn_name == "print":
         if len(expr.args) != 1:
             raise CodegenError("print expects 1 argument")
-        arg = _emit_expr(expr.args[0], locals_, globals_, sigs, ctor_sigs, emitter)
+        arg = _emit_expr(expr.args[0], locals_, globals_info, sigs, ctor_sigs, emitter)
         if arg.typ == I64:
             tmp = emitter.tmp()
-            emitter.emit(f"  {tmp} = call i64 @print_int(i64 {arg.ir})")
+            emitter.emit(f"  {tmp} = call i64 @print_value(i64 {arg.ir})")
             return Value(I64, tmp)
         if arg.typ == I1:
             widened = emitter.tmp()
             emitter.emit(f"  {widened} = zext i1 {arg.ir} to i64")
             tmp = emitter.tmp()
-            emitter.emit(f"  {tmp} = call i64 @print_int(i64 {widened})")
+            emitter.emit(f"  {tmp} = call i64 @print_value(i64 {widened})")
             return Value(I64, tmp)
         if arg.typ == I8_PTR:
             tmp = emitter.tmp()
@@ -692,7 +823,7 @@ def _emit_call(
             return Value(I64, tmp)
         packed_args: list[str] = []
         for arg_expr, typ in zip(expr.args, ctor.arg_types):
-            arg_val = _emit_expr(arg_expr, locals_, globals_, sigs, ctor_sigs, emitter)
+            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, emitter)
             if arg_val.typ != typ:
                 raise CodegenError(f"Constructor call type mismatch for {fn_name}")
             packed_args.append(_pack_to_i64(arg_val, emitter))
@@ -714,7 +845,7 @@ def _emit_call(
             )
         args_ir: list[str] = []
         for arg_expr, param_type in zip(expr.args, call_sig.params):
-            arg_val = _emit_expr(arg_expr, locals_, globals_, sigs, ctor_sigs, emitter)
+            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, emitter)
             if arg_val.typ != param_type:
                 raise CodegenError(f"Call type mismatch for callable {fn_name}")
             args_ir.append(f"{param_type.text} {arg_val.ir}")
@@ -732,7 +863,7 @@ def _emit_call(
 
     args_ir: list[str] = []
     for arg_expr, param_type in zip(expr.args, sig.params):
-        arg_val = _emit_expr(arg_expr, locals_, globals_, sigs, ctor_sigs, emitter)
+        arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, emitter)
         if arg_val.typ != param_type:
             raise CodegenError(f"Call type mismatch for {fn_name}")
         args_ir.append(f"{param_type.text} {arg_val.ir}")

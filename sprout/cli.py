@@ -68,12 +68,76 @@ typedef struct {
   long long f1;
 } SproutObj;
 
+typedef struct ObjNode {
+  SproutObj* ptr;
+  struct ObjNode* next;
+} ObjNode;
+
+typedef struct {
+  long long tag;
+  const char* name;
+  long long arity;
+} CtorMeta;
+
+static ObjNode* g_objs = NULL;
+static CtorMeta g_ctor_meta[2048];
+static long long g_ctor_meta_len = 0;
+
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
 }
 
 static SproutObj* unbox_ptr(long long h) {
   return (SproutObj*)(uintptr_t)h;
+}
+
+static void register_obj(SproutObj* p) {
+  ObjNode* n = (ObjNode*)malloc(sizeof(ObjNode));
+  n->ptr = p;
+  n->next = g_objs;
+  g_objs = n;
+}
+
+static int is_obj_handle(long long h) {
+  uintptr_t u = (uintptr_t)h;
+  for (ObjNode* n = g_objs; n != NULL; n = n->next) {
+    if ((uintptr_t)n->ptr == u) return 1;
+  }
+  return 0;
+}
+
+static CtorMeta* find_ctor(long long tag) {
+  for (long long i = 0; i < g_ctor_meta_len; i++) {
+    if (g_ctor_meta[i].tag == tag) return &g_ctor_meta[i];
+  }
+  return NULL;
+}
+
+static void print_inline_value(long long v);
+
+static void print_inline_obj(SproutObj* o) {
+  CtorMeta* m = find_ctor(o->tag);
+  if (m == NULL) {
+    printf("Ctor%lld", o->tag);
+    return;
+  }
+  printf("%s", m->name);
+  if (m->arity <= 0) return;
+  printf("(");
+  print_inline_value(o->f0);
+  if (m->arity > 1) {
+    printf(", ");
+    print_inline_value(o->f1);
+  }
+  printf(")");
+}
+
+static void print_inline_value(long long v) {
+  if (is_obj_handle(v)) {
+    print_inline_obj(unbox_ptr(v));
+  } else {
+    printf("%lld", v);
+  }
 }
 
 long long print_int(long long x) {
@@ -84,11 +148,24 @@ long long print_str(const char* s) {
   printf("%s\\n", s);
   return 0;
 }
+long long print_value(long long x) {
+  print_inline_value(x);
+  printf("\\n");
+  return x;
+}
+long long sprout_register_ctor(long long tag, const char* name, long long arity) {
+  g_ctor_meta[g_ctor_meta_len].tag = tag;
+  g_ctor_meta[g_ctor_meta_len].name = name;
+  g_ctor_meta[g_ctor_meta_len].arity = arity;
+  g_ctor_meta_len++;
+  return 0;
+}
 long long sprout_make0(long long tag) {
   SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
   o->tag = tag;
   o->f0 = 0;
   o->f1 = 0;
+  register_obj(o);
   return box_ptr(o);
 }
 long long sprout_make1(long long tag, long long a0) {
@@ -96,6 +173,7 @@ long long sprout_make1(long long tag, long long a0) {
   o->tag = tag;
   o->f0 = a0;
   o->f1 = 0;
+  register_obj(o);
   return box_ptr(o);
 }
 long long sprout_make2(long long tag, long long a0, long long a1) {
@@ -103,6 +181,7 @@ long long sprout_make2(long long tag, long long a0, long long a1) {
   o->tag = tag;
   o->f0 = a0;
   o->f1 = a1;
+  register_obj(o);
   return box_ptr(o);
 }
 long long sprout_tag(long long h) {

@@ -42,16 +42,18 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("load i64, ptr @base", ir)
         self.assertIn("load i64, ptr @two", ir)
 
-    def test_compile_rejects_non_const_top_level_let(self) -> None:
+    def test_compile_supports_runtime_top_level_let(self) -> None:
         src = """
         fn value() -> Int = 1
         let x = value()
-        fn main() -> Int = x
+        fn main() -> Int = print_int(x)
         """
         program = parse(src)
         typecheck_program(program)
-        with self.assertRaises(CodegenError):
-            compile_to_llvm(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("@x = global i64 0", ir)
+        self.assertIn("define void @__sprout_init_globals()", ir)
+        self.assertIn("store i64", ir)
 
     def test_compile_with_print_int_external(self) -> None:
         src = """
@@ -96,6 +98,21 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call i64 @sprout_make1(i64 0, i64 42)", ir)
         self.assertIn("call i64 @sprout_tag", ir)
         self.assertIn("call i64 @sprout_field", ir)
+
+    def test_compile_print_adt_value(self) -> None:
+        src = """
+        type Pair =
+          | Pair Int Int
+
+        fn main() -> IO Unit =
+          print(Pair(3, 6))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare i64 @print_value(i64)", ir)
+        self.assertIn("call i64 @print_value(i64", ir)
+        self.assertIn("call i64 @sprout_register_ctor", ir)
 
     def test_compile_generic_identity_erased(self) -> None:
         src = """
@@ -244,6 +261,37 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
             self.assertEqual(run.returncode, 42)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_print_adt_value(self) -> None:
+        src = """
+        type Pair =
+          | Pair Int Int
+
+        fn main() -> IO Unit =
+          print(Pair(3, 6))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "Pair(3, 6)")
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_higher_order(self) -> None:
