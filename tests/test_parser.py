@@ -49,6 +49,21 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParseError):
             parse(src)
 
+    def test_parse_composition_precedence_and_associativity(self) -> None:
+        src = "fn main() -> Int = (f >> g >> h)(x) * y"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.BinaryExpr)
+        self.assertEqual(fn_decl.body.op, "*")
+
+        callee = fn_decl.body.left
+        self.assertIsInstance(callee, ast.CallExpr)
+        self.assertIsInstance(callee.callee, ast.BinaryExpr)
+        self.assertEqual(callee.callee.op, ">>")
+        self.assertIsInstance(callee.callee.right, ast.BinaryExpr)
+        self.assertEqual(callee.callee.right.op, ">>")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,12 @@ class FunctionValue:
     column: int | None = None
 
 
+@dataclass
+class ComposedFunction:
+    left: object
+    right: object
+
+
 class Env:
     def __init__(self, parent: "Env | None" = None) -> None:
         self.parent = parent
@@ -121,6 +127,14 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
                 raise rt_error("'||' expects Bool on the right", expr.right)
             return right
 
+        if expr.op == ">>":
+            right = eval_expr(expr.right, env)
+            if not _is_callable(left):
+                raise rt_error("Left side of '>>' must be a function", expr.left)
+            if not _is_callable(right):
+                raise rt_error("Right side of '>>' must be a function", expr.right)
+            return ComposedFunction(left=left, right=right)
+
         right = eval_expr(expr.right, env)
 
         if expr.op in {"+", "-", "*", "/"}:
@@ -183,6 +197,10 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
 
 
 def apply_callable(callee: object, args: list[object]) -> object:
+    if isinstance(callee, ComposedFunction):
+        intermediate = apply_callable(callee.right, args)
+        return apply_callable(callee.left, [intermediate])
+
     if isinstance(callee, FunctionValue):
         if len(args) != len(callee.params):
             raise rt_error(
@@ -207,6 +225,10 @@ def apply_callable(callee: object, args: list[object]) -> object:
         return ADTValue(constructor=callee.name, args=tuple(args))
 
     raise RuntimeError("Attempted to call a non-function value")
+
+
+def _is_callable(value: object) -> bool:
+    return isinstance(value, (FunctionValue, BuiltinFunction, ConstructorValue, ComposedFunction))
 
 
 def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | None:

@@ -66,6 +66,26 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
 
+    def test_typecheck_function_composition(self) -> None:
+        src = """
+        fn inc(x: Int) -> Int = x + 1
+        fn double(x: Int) -> Int = x * 2
+        fn apply(x: Int, f: Int -> Int) -> Int = f(x)
+        fn main() -> IO Unit =
+          print(apply(20, double >> inc))
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("main", types)
+
+    def test_type_error_invalid_function_composition(self) -> None:
+        src = """
+        fn inc(x: Int) -> Int = x + 1
+        fn is_even(x: Int) -> Bool = (x / 2) * 2 == x
+        fn bad(x: Int) -> Int = (inc >> is_even)(x)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
 
 if __name__ == "__main__":
     unittest.main()

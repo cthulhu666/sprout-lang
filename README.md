@@ -70,7 +70,7 @@ Load stdlib prelude explicitly:
 
 - top-level `fn`, `type`, and top-level `let` (constant and runtime-initialized),
 - `Int`/`Bool`/`String` typed params and returns, plus `IO Unit` function return,
-- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, `if`, direct function calls, recursion,
+- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, function composition (`f >> g` means `f(g(x))`), `if`, direct function calls, recursion,
 - ADT constructor calls and `match` lowering (constructors with up to 2 fields),
 - generic type variables are currently erased to runtime `i64` handles,
 - first-order function values in params are supported (for patterns like `f: Int -> Int`),

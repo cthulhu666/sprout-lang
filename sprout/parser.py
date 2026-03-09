@@ -187,10 +187,17 @@ class Parser:
         return expr
 
     def parse_factor(self):
-        expr = self.parse_unary()
+        expr = self.parse_composition()
         while self.check("SYMBOL") and self.current().value in {"*", "/"}:
             tok = self.advance()
-            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_unary()), tok)
+            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_composition()), tok)
+        return expr
+
+    def parse_composition(self):
+        expr = self.parse_unary()
+        if self.match("SYMBOL", ">>"):
+            op = self.tokens[self.i - 1]
+            return self.mark(ast.BinaryExpr(op=">>", left=expr, right=self.parse_composition()), op)
         return expr
 
     def parse_unary(self):

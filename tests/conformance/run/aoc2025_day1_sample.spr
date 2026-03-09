@@ -12,6 +12,12 @@ type Answers =
 fn mod100(n: Int) -> Int =
   n - (n / 100) * 100
 
+fn add100(n: Int) -> Int =
+  n + 100
+
+fn normalize_dial(n: Int) -> Int =
+  (mod100 >> add100)(n)
+
 fn dial_after(dial: Int, rot: Rot) -> Int =
   match rot with
   | L clicks -> mod100(dial - clicks)
@@ -58,4 +64,9 @@ let r1 = Cons(L(68), r2)
 fn sample_rotations() -> List Rot = r1
 
 fn main() -> IO Unit =
-  print(Answers(count_hits(sample_rotations(), 50), count_passes(sample_rotations(), 50)))
+  print(
+    Answers(
+      count_hits(sample_rotations(), normalize_dial(50)),
+      count_passes(sample_rotations(), normalize_dial(50))
+    )
+  )

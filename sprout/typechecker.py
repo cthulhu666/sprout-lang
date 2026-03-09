@@ -273,6 +273,13 @@ def infer_expr(
     if isinstance(expr, ast.BinaryExpr):
         left = infer_expr(expr.left, env, state, type_decls)
         right = infer_expr(expr.right, env, state, type_decls)
+        if expr.op == ">>":
+            input_t = state.fresh()
+            middle_t = state.fresh()
+            output_t = state.fresh()
+            unify_at(state, right, TFunc(input_t, middle_t), expr.right)
+            unify_at(state, left, TFunc(middle_t, output_t), expr.left)
+            return TFunc(input_t, output_t)
         if expr.op in {"+", "-", "*", "/"}:
             unify_at(state, left, INT, expr.left)
             unify_at(state, right, INT, expr.right)

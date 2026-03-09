@@ -97,6 +97,20 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "24")
 
+    def test_run_function_composition(self) -> None:
+        src = """
+        fn inc(x: Int) -> Int = x + 1
+        fn double(x: Int) -> Int = x * 2
+
+        fn main() -> IO Unit =
+          print((double >> inc)(20))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
 
 if __name__ == "__main__":
     unittest.main()
