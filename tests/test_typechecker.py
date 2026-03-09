@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from sprout import TypeCheckError, parse, typecheck_program
+from sprout.stdlib import with_prelude
 
 
 class TypecheckerTests(unittest.TestCase):
@@ -26,6 +27,23 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(prog)
         self.assertIn("map", types)
         self.assertIn("main", types)
+        self.assertIn("read_lines", types)
+
+    def test_typecheck_with_stdlib_loaded(self) -> None:
+        src = """
+        fn is_even(x: Int) -> Bool =
+          (x / 2) * 2 == x
+
+        fn add(acc: Int, x: Int) -> Int = acc + x
+
+        fn main() -> IO Unit =
+          print(fold(filter(split_ints("1 2 3 4"), is_even), 0, add))
+        """
+        prog = parse(with_prelude(src))
+        types = typecheck_program(prog)
+        self.assertIn("map", types)
+        self.assertIn("fold", types)
+        self.assertIn("filter", types)
 
     def test_type_error_if_branches_mismatch(self) -> None:
         src = """

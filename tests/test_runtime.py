@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import io
+import tempfile
+from pathlib import Path
 import unittest
 
 from sprout import parse, run_program, typecheck_program
+from sprout.stdlib import with_prelude
 
 
 class RuntimeTests(unittest.TestCase):
@@ -57,6 +60,42 @@ class RuntimeTests(unittest.TestCase):
         out = io.StringIO()
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "3")
+
+    def test_stdlib_split_ints_and_fold(self) -> None:
+        src = """
+        fn add(acc: Int, x: Int) -> Int = acc + x
+
+        fn main() -> IO Unit =
+          print(fold(split_ints("1, 2 3 4"), 0, add))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "10")
+
+    def test_stdlib_read_lines_and_parse_int(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            input_path = Path(tmp) / "numbers.txt"
+            input_path.write_text("7\n8\n9\n", encoding="utf-8")
+            src = f"""
+            type List a =
+              | Cons a (List a)
+              | Nil
+
+            fn sum_lines(lines: List String) -> Int =
+              match lines with
+              | Nil -> 0
+              | Cons s rest -> parse_int(s) + sum_lines(rest)
+
+            fn main() -> IO Unit =
+              print(sum_lines(read_lines("{input_path}")))
+            """
+            program = parse(src)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "24")
 
 
 if __name__ == "__main__":

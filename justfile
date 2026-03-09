@@ -12,5 +12,11 @@ parse file:
 check file:
   python3 -m sprout.cli check {{file}}
 
+check-stdlib file:
+  python3 -m sprout.cli check --with-stdlib {{file}}
+
 run file:
   python3 -m sprout.cli run {{file}}
+
+run-stdlib file:
+  python3 -m sprout.cli run --with-stdlib {{file}}

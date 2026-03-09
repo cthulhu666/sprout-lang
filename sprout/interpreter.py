@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, TextIO
 
 from . import ast
@@ -67,6 +68,13 @@ def format_value(value: object) -> str:
     if value is None:
         return "()"
     return str(value)
+
+
+def py_to_adt_list(items: list[object]) -> ADTValue:
+    cursor: ADTValue = ADTValue(constructor="Nil", args=())
+    for item in reversed(items):
+        cursor = ADTValue(constructor="Cons", args=(item, cursor))
+    return cursor
 
 
 def eval_expr(expr: ast.Expr, env: Env) -> object:
@@ -244,7 +252,30 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             print(text, file=out)
         return None
 
+    def builtin_read_lines(args: list[object]) -> object:
+        raw_path = args[0]
+        if not isinstance(raw_path, str):
+            raise RuntimeError("read_lines expects String path")
+        lines = Path(raw_path).read_text(encoding="utf-8").splitlines()
+        return py_to_adt_list(lines)
+
+    def builtin_parse_int(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("parse_int expects String")
+        return int(raw.strip())
+
+    def builtin_split_words(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("split_words expects String")
+        tokens = raw.replace(",", " ").split()
+        return py_to_adt_list(tokens)
+
     env.set("print", BuiltinFunction(name="print", arity=1, fn=builtin_print))
+    env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
+    env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
+    env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
 
     for decl in program.declarations:
         if isinstance(decl, ast.TypeDecl):

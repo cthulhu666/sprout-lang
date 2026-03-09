@@ -20,6 +20,7 @@ Early bootstrap stage. The repository currently contains design docs and initial
 - `sprout/` implementation (`tokenizer`, `parser`, `typechecker`, `cli`)
 - `tests/` parser and typechecker tests
 - `tests/conformance/` executable language behavior fixtures (`run`, `parse_error`, `type_error`, `runtime_error`)
+- `stdlib/` language-level standard library source (`prelude.sprout`)
 - `mise.toml` pinned local toolchain (`python`, `just`)
 - `justfile` common project commands
 
@@ -38,6 +39,27 @@ Common tasks:
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
 - Run tests: `mise exec -- just test`
+
+## Builtin Helpers (v0)
+
+Runtime builtins (host-implemented):
+
+- `print(x) -> IO Unit`
+- `read_lines(path: String) -> List String`
+- `parse_int(s: String) -> Int`
+- `split_words(s: String) -> List String` (comma/whitespace separated)
+
+Standard library (Sprout source in `stdlib/prelude.sprout`):
+
+- `map(list, fn) -> List`
+- `fold(list, init, fn) -> value`
+- `filter(list, predicate) -> List`
+- `split_ints(s: String) -> List Int`
+
+Load stdlib prelude explicitly:
+
+- `python3 -m sprout.cli check --with-stdlib your_file.spr`
+- `python3 -m sprout.cli run --with-stdlib your_file.spr`
 
 ## Near-Term Plan
 

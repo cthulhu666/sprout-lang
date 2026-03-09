@@ -44,8 +44,15 @@ For any non-trivial language change, include:
 - `docs/` normative and supporting design docs.
 - `examples/` user-facing language examples.
 - `sprout/` implementation source.
+- `stdlib/` language-level standard library source (`prelude.sprout`).
 - `mise.toml` toolchain definition.
 - `justfile` standard developer tasks.
+
+## Builtin vs Stdlib
+
+1. Keep host-side builtins minimal and effect-oriented.
+2. Prefer implementing pure helpers in `stdlib/prelude.sprout`.
+3. When moving functionality from builtin to stdlib, add/adjust conformance tests.
 
 ## Commit Guidance
 

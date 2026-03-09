@@ -447,6 +447,15 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
     p_var = TVar("prelude.print.a")
     env: dict[str, Scheme] = {
         "print": Scheme(vars=(p_var.name,), type=TFunc(p_var, TApp(TConst("IO"), UNIT))),
+        "read_lines": Scheme(
+            vars=(),
+            type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
+        ),
+        "parse_int": Scheme(vars=(), type=TFunc(TConst("String"), INT)),
+        "split_words": Scheme(
+            vars=(),
+            type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
+        ),
     }
 
     for info in type_decls.values():

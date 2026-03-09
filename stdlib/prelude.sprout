@@ -1,0 +1,26 @@
+# Sprout Prelude (v0)
+# Pure helpers implemented in Sprout itself.
+
+type List a =
+  | Cons a (List a)
+  | Nil
+
+fn map(xs: List a, f: a -> b) -> List b =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest -> Cons(f(x), map(rest, f))
+
+fn fold(xs: List a, init: b, f: b -> a -> b) -> b =
+  match xs with
+  | Nil -> init
+  | Cons x rest -> fold(rest, f(init, x), f)
+
+fn filter(xs: List a, pred: a -> Bool) -> List a =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest ->
+      if pred(x) then Cons(x, filter(rest, pred))
+      else filter(rest, pred)
+
+fn split_ints(s: String) -> List Int =
+  map(split_words(s), parse_int)

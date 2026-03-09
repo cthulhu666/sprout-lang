@@ -7,6 +7,7 @@ from pathlib import Path
 from .ast import to_dict
 from .interpreter import RuntimeError, run_program
 from .parser import ParseError, parse
+from .stdlib import with_prelude
 from .tokenizer import TokenizeError
 from .typechecker import TypeCheckError, typecheck_program
 
@@ -18,9 +19,9 @@ def cmd_parse(path: Path) -> int:
     return 0
 
 
-def cmd_check(path: Path) -> int:
+def cmd_check(path: Path, with_stdlib: bool = False) -> int:
     source = path.read_text(encoding="utf-8")
-    tree = parse(source)
+    tree = parse(with_prelude(source) if with_stdlib else source)
     typed = typecheck_program(tree)
     print("ok")
     for name in sorted(typed.keys()):
@@ -28,9 +29,9 @@ def cmd_check(path: Path) -> int:
     return 0
 
 
-def cmd_run(path: Path) -> int:
+def cmd_run(path: Path, with_stdlib: bool = False) -> int:
     source = path.read_text(encoding="utf-8")
-    tree = parse(source)
+    tree = parse(with_prelude(source) if with_stdlib else source)
     typecheck_program(tree)
     run_program(tree)
     return 0
@@ -44,8 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_parse.add_argument("file", type=Path)
     p_check = sub.add_parser("check", help="typecheck a Sprout file")
     p_check.add_argument("file", type=Path)
+    p_check.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
     p_run = sub.add_parser("run", help="typecheck and run a Sprout file")
     p_run.add_argument("file", type=Path)
+    p_run.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
 
     return parser
 
@@ -58,9 +61,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "parse":
             return cmd_parse(args.file)
         if args.command == "check":
-            return cmd_check(args.file)
+            return cmd_check(args.file, with_stdlib=args.with_stdlib)
         if args.command == "run":
-            return cmd_run(args.file)
+            return cmd_run(args.file, with_stdlib=args.with_stdlib)
     except (ParseError, TokenizeError, TypeCheckError, RuntimeError) as exc:
         print(f"error: {exc}")
         return 1

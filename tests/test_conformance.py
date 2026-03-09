@@ -6,6 +6,7 @@ import unittest
 
 from sprout.interpreter import RuntimeError, run_program
 from sprout.parser import ParseError, parse
+from sprout.stdlib import with_prelude
 from sprout.tokenizer import TokenizeError
 from sprout.typechecker import TypeCheckError, typecheck_program
 
@@ -17,12 +18,19 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _load_for_case(path: Path) -> str:
+    source = _read(path)
+    if path.stem.startswith("stdlib_"):
+        return with_prelude(source)
+    return source
+
+
 class ConformanceTests(unittest.TestCase):
     def test_run_cases(self) -> None:
         for spr_file in sorted((ROOT / "run").glob("*.spr")):
             with self.subTest(case=spr_file.name):
                 out_file = spr_file.with_suffix(".out")
-                program = parse(_read(spr_file))
+                program = parse(_load_for_case(spr_file))
                 typecheck_program(program)
                 out = io.StringIO()
                 run_program(program, stdout=out)
@@ -43,7 +51,7 @@ class ConformanceTests(unittest.TestCase):
                 err_file = spr_file.with_suffix(".err")
                 expected = _read(err_file).strip()
                 with self.assertRaises(TypeCheckError) as ctx:
-                    typecheck_program(parse(_read(spr_file)))
+                    typecheck_program(parse(_load_for_case(spr_file)))
                 self.assertIn(expected, str(ctx.exception))
 
     def test_runtime_error_cases(self) -> None:
@@ -51,7 +59,7 @@ class ConformanceTests(unittest.TestCase):
             with self.subTest(case=spr_file.name):
                 err_file = spr_file.with_suffix(".err")
                 expected = _read(err_file).strip()
-                program = parse(_read(spr_file))
+                program = parse(_load_for_case(spr_file))
                 typecheck_program(program)
                 with self.assertRaises(RuntimeError) as ctx:
                     run_program(program)
