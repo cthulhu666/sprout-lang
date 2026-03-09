@@ -59,6 +59,23 @@ def cmd_compile(path: Path, out: Path, with_stdlib: bool = False, native: bool =
         tmp.write(llvm_ir)
         ll_path = Path(tmp.name)
     runtime_c = """#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+typedef struct {
+  long long tag;
+  long long f0;
+  long long f1;
+} SproutObj;
+
+static long long box_ptr(SproutObj* p) {
+  return (long long)(uintptr_t)p;
+}
+
+static SproutObj* unbox_ptr(long long h) {
+  return (SproutObj*)(uintptr_t)h;
+}
+
 long long print_int(long long x) {
   printf("%lld\\n", x);
   return x;
@@ -66,6 +83,34 @@ long long print_int(long long x) {
 long long print_str(const char* s) {
   printf("%s\\n", s);
   return 0;
+}
+long long sprout_make0(long long tag) {
+  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  o->tag = tag;
+  o->f0 = 0;
+  o->f1 = 0;
+  return box_ptr(o);
+}
+long long sprout_make1(long long tag, long long a0) {
+  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  o->tag = tag;
+  o->f0 = a0;
+  o->f1 = 0;
+  return box_ptr(o);
+}
+long long sprout_make2(long long tag, long long a0, long long a1) {
+  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  o->tag = tag;
+  o->f0 = a0;
+  o->f1 = a1;
+  return box_ptr(o);
+}
+long long sprout_tag(long long h) {
+  return unbox_ptr(h)->tag;
+}
+long long sprout_field(long long h, long long idx) {
+  SproutObj* o = unbox_ptr(h);
+  return idx == 0 ? o->f0 : o->f1;
 }
 """
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
