@@ -68,9 +68,9 @@ Load stdlib prelude explicitly:
 
 `sprout compile` currently supports a small subset:
 
-- top-level `fn` declarations only (no top-level `let`/`type` yet),
+- top-level `fn` plus compile-time-constant top-level `let` (no `type` lowering yet),
 - `Int`/`Bool` typed params and returns,
-- expressions: literals, vars, arithmetic, comparisons, `if`, direct function calls, recursion.
+- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, `if`, direct function calls, recursion.
 
 Commands:
 

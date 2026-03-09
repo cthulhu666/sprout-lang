@@ -28,9 +28,24 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("icmp eq i64", ir)
         self.assertIn("call i64 @fact", ir)
 
-    def test_compile_rejects_top_level_let(self) -> None:
+    def test_compile_supports_top_level_const_let(self) -> None:
         src = """
-        let x = 1
+        let base = 40
+        let two = 2
+        fn main() -> Int = print_int(base + two)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("@base = private constant i64 40", ir)
+        self.assertIn("@two = private constant i64 2", ir)
+        self.assertIn("load i64, ptr @base", ir)
+        self.assertIn("load i64, ptr @two", ir)
+
+    def test_compile_rejects_non_const_top_level_let(self) -> None:
+        src = """
+        fn value() -> Int = 1
+        let x = value()
         fn main() -> Int = x
         """
         program = parse(src)
@@ -61,6 +76,37 @@ class CodegenTests(unittest.TestCase):
             bin_path = tmp_path / "prog"
             spr_path.write_text(src, encoding="utf-8")
 
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "42")
+            self.assertEqual(run.returncode, 42)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_short_circuit_and(self) -> None:
+        src = """
+        fn side() -> Bool =
+          print_int(1) == 1
+
+        fn main() -> Int =
+          if false && side() then print_int(0) else print_int(42)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
             subprocess.run(
                 [
                     sys.executable,
