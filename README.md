@@ -69,8 +69,10 @@ Load stdlib prelude explicitly:
 `sprout compile` currently supports a small subset:
 
 - top-level `fn` plus compile-time-constant top-level `let` (no `type` lowering yet),
-- `Int`/`Bool` typed params and returns,
-- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, `if`, direct function calls, recursion.
+- `Int`/`Bool`/`String` typed params and returns, plus `IO Unit` function return,
+- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, `if`, direct function calls, recursion,
+- `print(...)` lowering for `Int`/`Bool`/`String`,
+- `print_int(...)` external call.
 
 Commands:
 

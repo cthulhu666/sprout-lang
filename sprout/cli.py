@@ -63,6 +63,10 @@ long long print_int(long long x) {
   printf("%lld\\n", x);
   return x;
 }
+long long print_str(const char* s) {
+  printf("%s\\n", s);
+  return 0;
+}
 """
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
         tmp_c.write(runtime_c)
