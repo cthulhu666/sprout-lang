@@ -111,6 +111,20 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "42")
 
+    def test_tail_recursive_function_does_not_overflow_python_stack(self) -> None:
+        src = """
+        fn sum_down(n: Int, acc: Int) -> Int =
+          if n == 0 then acc else sum_down(n - 1, acc + n)
+
+        fn main() -> IO Unit =
+          print(sum_down(5000, 0))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "12502500")
+
 
 if __name__ == "__main__":
     unittest.main()

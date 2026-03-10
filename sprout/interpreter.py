@@ -50,6 +50,12 @@ class ComposedFunction:
     right: object
 
 
+@dataclass
+class TailCall:
+    callee: object
+    args: list[object]
+
+
 class Env:
     def __init__(self, parent: "Env | None" = None) -> None:
         self.parent = parent
@@ -83,7 +89,7 @@ def py_to_adt_list(items: list[object]) -> ADTValue:
     return cursor
 
 
-def eval_expr(expr: ast.Expr, env: Env) -> object:
+def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> object:
     if isinstance(expr, ast.IntExpr):
         return expr.value
     if isinstance(expr, ast.BoolExpr):
@@ -171,8 +177,8 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
         if not isinstance(condition, bool):
             raise rt_error("if condition must be Bool", expr.condition)
         if condition:
-            return eval_expr(expr.then_branch, env)
-        return eval_expr(expr.else_branch, env)
+            return eval_expr(expr.then_branch, env, in_tail_position=in_tail_position)
+        return eval_expr(expr.else_branch, env, in_tail_position=in_tail_position)
 
     if isinstance(expr, ast.MatchExpr):
         scrutinee = eval_expr(expr.scrutinee, env)
@@ -182,12 +188,14 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
                 branch_env = Env(parent=env)
                 for name, value in bindings.items():
                     branch_env.set(name, value)
-                return eval_expr(branch.value, branch_env)
+                return eval_expr(branch.value, branch_env, in_tail_position=in_tail_position)
         raise rt_error("Non-exhaustive match at runtime", expr)
 
     if isinstance(expr, ast.CallExpr):
         callee = eval_expr(expr.callee, env)
         args = [eval_expr(arg, env) for arg in expr.args]
+        if in_tail_position and isinstance(callee, FunctionValue):
+            return TailCall(callee=callee, args=args)
         try:
             return apply_callable(callee, args)
         except RuntimeError as exc:
@@ -197,34 +205,42 @@ def eval_expr(expr: ast.Expr, env: Env) -> object:
 
 
 def apply_callable(callee: object, args: list[object]) -> object:
-    if isinstance(callee, ComposedFunction):
-        intermediate = apply_callable(callee.right, args)
-        return apply_callable(callee.left, [intermediate])
+    while True:
+        if isinstance(callee, ComposedFunction):
+            intermediate = apply_callable(callee.right, args)
+            callee = callee.left
+            args = [intermediate]
+            continue
 
-    if isinstance(callee, FunctionValue):
-        if len(args) != len(callee.params):
-            raise rt_error(
-                f"Function {callee.name} expects {len(callee.params)} args, got {len(args)}",
-                callee,
-            )
-        call_env = Env(parent=callee.closure)
-        for name, value in zip(callee.params, args):
-            call_env.set(name, value)
-        return eval_expr(callee.body, call_env)
+        if isinstance(callee, FunctionValue):
+            if len(args) != len(callee.params):
+                raise rt_error(
+                    f"Function {callee.name} expects {len(callee.params)} args, got {len(args)}",
+                    callee,
+                )
+            call_env = Env(parent=callee.closure)
+            for name, value in zip(callee.params, args):
+                call_env.set(name, value)
+            result = eval_expr(callee.body, call_env, in_tail_position=True)
+            if isinstance(result, TailCall):
+                callee = result.callee
+                args = result.args
+                continue
+            return result
 
-    if isinstance(callee, BuiltinFunction):
-        if len(args) != callee.arity:
-            raise RuntimeError(f"Builtin {callee.name} expects {callee.arity} args, got {len(args)}")
-        return callee.fn(args)
+        if isinstance(callee, BuiltinFunction):
+            if len(args) != callee.arity:
+                raise RuntimeError(f"Builtin {callee.name} expects {callee.arity} args, got {len(args)}")
+            return callee.fn(args)
 
-    if isinstance(callee, ConstructorValue):
-        if len(args) != callee.arity:
-            raise RuntimeError(
-                f"Constructor {callee.name} expects {callee.arity} args, got {len(args)}"
-            )
-        return ADTValue(constructor=callee.name, args=tuple(args))
+        if isinstance(callee, ConstructorValue):
+            if len(args) != callee.arity:
+                raise RuntimeError(
+                    f"Constructor {callee.name} expects {callee.arity} args, got {len(args)}"
+                )
+            return ADTValue(constructor=callee.name, args=tuple(args))
 
-    raise RuntimeError("Attempted to call a non-function value")
+        raise RuntimeError("Attempted to call a non-function value")
 
 
 def _is_callable(value: object) -> bool:
