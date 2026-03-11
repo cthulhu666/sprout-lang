@@ -300,6 +300,21 @@ long long tcp_close_listener(long long listener) {
   g_listener_fd[listener] = -1;
   return 0;
 }
+
+long long tcp_echo_serve(long long port, long long max_connections) {
+  if (max_connections < 1) tcp_fail("tcp_echo_serve: max_connections must be >= 1");
+  long long listener = tcp_listen(port);
+  long long served = 0;
+  while (served < max_connections) {
+    long long conn = tcp_accept(listener);
+    const char* payload = tcp_read(conn);
+    tcp_write(conn, payload);
+    tcp_close(conn);
+    served++;
+  }
+  tcp_close_listener(listener);
+  return 0;
+}
 """
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
         tmp_c.write(runtime_c)

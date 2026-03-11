@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import selectors
 import socket
 from typing import Callable, TextIO
 
@@ -55,6 +57,82 @@ class ComposedFunction:
 class TailCall:
     callee: object
     args: list[object]
+
+
+class EchoServerBackend:
+    def serve_echo(self, port: int, max_connections: int) -> None:
+        raise NotImplementedError
+
+
+class BlockingEchoServerBackend(EchoServerBackend):
+    def serve_echo(self, port: int, max_connections: int) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", port))
+            listener.listen(128)
+            served = 0
+            while served < max_connections:
+                conn, _ = listener.accept()
+                with conn:
+                    payload = conn.recv(65536)
+                    if payload:
+                        conn.sendall(payload)
+                served += 1
+
+
+class ReactorEchoServerBackend(EchoServerBackend):
+    def serve_echo(self, port: int, max_connections: int) -> None:
+        selector = selectors.DefaultSelector()
+        pending: dict[socket.socket, bytes] = {}
+        served = 0
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", port))
+        listener.listen(1024)
+        listener.setblocking(False)
+        selector.register(listener, selectors.EVENT_READ, data="listener")
+
+        try:
+            while served < max_connections:
+                events = selector.select(timeout=1.0)
+                for key, mask in events:
+                    if key.data == "listener":
+                        conn, _ = listener.accept()
+                        conn.setblocking(False)
+                        selector.register(conn, selectors.EVENT_READ, data="conn")
+                        continue
+
+                    conn = key.fileobj
+                    assert isinstance(conn, socket.socket)
+                    if mask & selectors.EVENT_READ:
+                        payload = conn.recv(65536)
+                        pending[conn] = payload
+                        selector.modify(conn, selectors.EVENT_WRITE, data="conn")
+                        continue
+
+                    if mask & selectors.EVENT_WRITE:
+                        payload = pending.pop(conn, b"")
+                        if payload:
+                            conn.sendall(payload)
+                        selector.unregister(conn)
+                        conn.close()
+                        served += 1
+        finally:
+            for key in list(selector.get_map().values()):
+                obj = key.fileobj
+                if isinstance(obj, socket.socket):
+                    selector.unregister(obj)
+                    obj.close()
+            selector.close()
+
+
+def _build_echo_backend() -> EchoServerBackend:
+    backend_name = os.environ.get("SPROUT_NET_MODEL", "reactor").strip().lower()
+    if backend_name == "reactor":
+        return ReactorEchoServerBackend()
+    if backend_name == "blocking":
+        return BlockingEchoServerBackend()
+    raise RuntimeError(f"Unknown SPROUT_NET_MODEL {backend_name!r}, expected 'reactor' or 'blocking'")
 
 
 class Env:
@@ -282,6 +360,7 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
 def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     out = stdout
     env = Env()
+    echo_backend = _build_echo_backend()
     listeners: dict[int, socket.socket] = {}
     connections: dict[int, socket.socket] = {}
     next_handle = 1
@@ -399,6 +478,20 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         listener.close()
         return None
 
+    def builtin_tcp_echo_serve(args: list[object]) -> object:
+        port = args[0]
+        max_connections = args[1]
+        if not isinstance(port, int):
+            raise RuntimeError("tcp_echo_serve expects Int port")
+        if not isinstance(max_connections, int):
+            raise RuntimeError("tcp_echo_serve expects Int max_connections")
+        if port < 1 or port > 65535:
+            raise RuntimeError("tcp_echo_serve port must be in 1..65535")
+        if max_connections < 1:
+            raise RuntimeError("tcp_echo_serve max_connections must be >= 1")
+        echo_backend.serve_echo(port, max_connections)
+        return None
+
     env.set("print", BuiltinFunction(name="print", arity=1, fn=builtin_print))
     env.set("print_int", BuiltinFunction(name="print_int", arity=1, fn=builtin_print_int))
     env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
@@ -413,6 +506,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         "tcp_close_listener",
         BuiltinFunction(name="tcp_close_listener", arity=1, fn=builtin_tcp_close_listener),
     )
+    env.set("tcp_echo_serve", BuiltinFunction(name="tcp_echo_serve", arity=2, fn=builtin_tcp_echo_serve))
 
     for decl in program.declarations:
         if isinstance(decl, ast.TypeDecl):

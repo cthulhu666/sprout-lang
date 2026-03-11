@@ -43,6 +43,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "tcp_write": FnSig(name="tcp_write", params=[I64, I8_PTR], ret=I64),
     "tcp_close": FnSig(name="tcp_close", params=[I64], ret=I64),
     "tcp_close_listener": FnSig(name="tcp_close_listener", params=[I64], ret=I64),
+    "tcp_echo_serve": FnSig(name="tcp_echo_serve", params=[I64, I64], ret=I64),
     "sprout_register_ctor": FnSig(name="sprout_register_ctor", params=[I64, I8_PTR, I64], ret=I64),
     "sprout_make0": FnSig(name="sprout_make0", params=[I64], ret=I64),
     "sprout_make1": FnSig(name="sprout_make1", params=[I64, I64], ret=I64),

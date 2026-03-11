@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import io
+import os
 import socket
 import tempfile
 import threading
 import time
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from sprout import parse, run_program, typecheck_program
 from sprout.stdlib import with_prelude
@@ -185,6 +187,78 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(server_thread.is_alive(), "echo server did not exit after one connection")
         self.assertFalse(errors, f"server thread raised: {errors!r}")
         self.assertEqual(response, request)
+
+    def test_tcp_echo_serve_builtin_reactor(self) -> None:
+        try:
+            port = self._find_free_port()
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        src = f"fn main() -> IO Unit = tcp_echo_serve({port}, 1)"
+        program = parse(src)
+        typecheck_program(program)
+        errors: list[BaseException] = []
+
+        def server() -> None:
+            try:
+                run_program(program)
+            except BaseException as exc:  # pragma: no cover
+                errors.append(exc)
+
+        with patch.dict(os.environ, {"SPROUT_NET_MODEL": "reactor"}, clear=False):
+            server_thread = threading.Thread(target=server, daemon=True)
+            server_thread.start()
+            response = ""
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.5) as client:
+                        client.sendall(b"reactor")
+                        client.shutdown(socket.SHUT_WR)
+                        response = client.recv(4096).decode("utf-8", errors="replace")
+                        break
+                except OSError:
+                    time.sleep(0.02)
+            server_thread.join(timeout=2.0)
+
+        self.assertFalse(server_thread.is_alive(), "reactor server did not exit after one connection")
+        self.assertFalse(errors, f"reactor server thread raised: {errors!r}")
+        self.assertEqual(response, "reactor")
+
+    def test_tcp_echo_serve_builtin_blocking_backend(self) -> None:
+        try:
+            port = self._find_free_port()
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        src = f"fn main() -> IO Unit = tcp_echo_serve({port}, 1)"
+        program = parse(src)
+        typecheck_program(program)
+        errors: list[BaseException] = []
+
+        def server() -> None:
+            try:
+                run_program(program)
+            except BaseException as exc:  # pragma: no cover
+                errors.append(exc)
+
+        with patch.dict(os.environ, {"SPROUT_NET_MODEL": "blocking"}, clear=False):
+            server_thread = threading.Thread(target=server, daemon=True)
+            server_thread.start()
+            response = ""
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.5) as client:
+                        client.sendall(b"blocking")
+                        client.shutdown(socket.SHUT_WR)
+                        response = client.recv(4096).decode("utf-8", errors="replace")
+                        break
+                except OSError:
+                    time.sleep(0.02)
+            server_thread.join(timeout=2.0)
+
+        self.assertFalse(server_thread.is_alive(), "blocking server did not exit after one connection")
+        self.assertFalse(errors, f"blocking server thread raised: {errors!r}")
+        self.assertEqual(response, "blocking")
 
 
 if __name__ == "__main__":

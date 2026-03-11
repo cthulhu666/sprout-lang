@@ -163,6 +163,7 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("declare i64 @tcp_write(i64, ptr)", ir)
         self.assertIn("declare i64 @tcp_close(i64)", ir)
         self.assertIn("declare i64 @tcp_close_listener(i64)", ir)
+        self.assertIn("declare i64 @tcp_echo_serve(i64, i64)", ir)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_and_execute(self) -> None:

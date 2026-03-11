@@ -57,6 +57,7 @@ Runtime builtins (host-implemented):
 - `tcp_write(conn: Int, payload: String) -> IO Unit`
 - `tcp_close(conn: Int) -> IO Unit`
 - `tcp_close_listener(listener: Int) -> IO Unit`
+- `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
@@ -84,6 +85,11 @@ Load stdlib prelude explicitly:
 - `print_int(...)` external call.
 
 Networking builtins are available in interpreter and native (`sprout compile --native`) modes.
+
+Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
+
+- `reactor` (default): event loop / readiness-based echo server
+- `blocking`: simple blocking accept/read/write loop
 
 Commands:
 
