@@ -464,6 +464,15 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
         ),
+        "tcp_listen": Scheme(vars=(), type=TFunc(INT, INT)),
+        "tcp_accept": Scheme(vars=(), type=TFunc(INT, INT)),
+        "tcp_read": Scheme(vars=(), type=TFunc(INT, STRING)),
+        "tcp_write": Scheme(
+            vars=(),
+            type=TFunc(INT, TFunc(STRING, TApp(TConst("IO"), UNIT))),
+        ),
+        "tcp_close": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
+        "tcp_close_listener": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
     }
 
     for info in type_decls.values():

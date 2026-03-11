@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import socket
 from typing import Callable, TextIO
 
 from . import ast
@@ -281,6 +282,15 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
 def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     out = stdout
     env = Env()
+    listeners: dict[int, socket.socket] = {}
+    connections: dict[int, socket.socket] = {}
+    next_handle = 1
+
+    def alloc_handle() -> int:
+        nonlocal next_handle
+        handle = next_handle
+        next_handle += 1
+        return handle
 
     def builtin_print(args: list[object]) -> object:
         text = format_value(args[0])
@@ -320,11 +330,89 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         tokens = raw.replace(",", " ").split()
         return py_to_adt_list(tokens)
 
+    def builtin_tcp_listen(args: list[object]) -> object:
+        port = args[0]
+        if not isinstance(port, int):
+            raise RuntimeError("tcp_listen expects Int port")
+        if port < 1 or port > 65535:
+            raise RuntimeError("tcp_listen port must be in 1..65535")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", port))
+        sock.listen(16)
+        handle = alloc_handle()
+        listeners[handle] = sock
+        return handle
+
+    def builtin_tcp_accept(args: list[object]) -> object:
+        listener_handle = args[0]
+        if not isinstance(listener_handle, int):
+            raise RuntimeError("tcp_accept expects Int listener handle")
+        listener = listeners.get(listener_handle)
+        if listener is None:
+            raise RuntimeError("tcp_accept got unknown listener handle")
+        conn, _ = listener.accept()
+        handle = alloc_handle()
+        connections[handle] = conn
+        return handle
+
+    def builtin_tcp_read(args: list[object]) -> object:
+        conn_handle = args[0]
+        if not isinstance(conn_handle, int):
+            raise RuntimeError("tcp_read expects Int connection handle")
+        conn = connections.get(conn_handle)
+        if conn is None:
+            raise RuntimeError("tcp_read got unknown connection handle")
+        data = conn.recv(65536)
+        return data.decode("utf-8", errors="replace")
+
+    def builtin_tcp_write(args: list[object]) -> object:
+        conn_handle = args[0]
+        payload = args[1]
+        if not isinstance(conn_handle, int):
+            raise RuntimeError("tcp_write expects Int connection handle")
+        if not isinstance(payload, str):
+            raise RuntimeError("tcp_write expects String payload")
+        conn = connections.get(conn_handle)
+        if conn is None:
+            raise RuntimeError("tcp_write got unknown connection handle")
+        conn.sendall(payload.encode("utf-8"))
+        return None
+
+    def builtin_tcp_close(args: list[object]) -> object:
+        conn_handle = args[0]
+        if not isinstance(conn_handle, int):
+            raise RuntimeError("tcp_close expects Int connection handle")
+        conn = connections.pop(conn_handle, None)
+        if conn is None:
+            raise RuntimeError("tcp_close got unknown connection handle")
+        conn.close()
+        return None
+
+    def builtin_tcp_close_listener(args: list[object]) -> object:
+        listener_handle = args[0]
+        if not isinstance(listener_handle, int):
+            raise RuntimeError("tcp_close_listener expects Int listener handle")
+        listener = listeners.pop(listener_handle, None)
+        if listener is None:
+            raise RuntimeError("tcp_close_listener got unknown listener handle")
+        listener.close()
+        return None
+
     env.set("print", BuiltinFunction(name="print", arity=1, fn=builtin_print))
     env.set("print_int", BuiltinFunction(name="print_int", arity=1, fn=builtin_print_int))
     env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
+    env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))
+    env.set("tcp_accept", BuiltinFunction(name="tcp_accept", arity=1, fn=builtin_tcp_accept))
+    env.set("tcp_read", BuiltinFunction(name="tcp_read", arity=1, fn=builtin_tcp_read))
+    env.set("tcp_write", BuiltinFunction(name="tcp_write", arity=2, fn=builtin_tcp_write))
+    env.set("tcp_close", BuiltinFunction(name="tcp_close", arity=1, fn=builtin_tcp_close))
+    env.set(
+        "tcp_close_listener",
+        BuiltinFunction(name="tcp_close_listener", arity=1, fn=builtin_tcp_close_listener),
+    )
 
     for decl in program.declarations:
         if isinstance(decl, ast.TypeDecl):
@@ -351,7 +439,13 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         elif isinstance(decl, ast.LetDecl):
             env.set(decl.name, eval_expr(decl.value, env))
 
-    if "main" in env.values:
-        main = env.get("main")
-        if isinstance(main, FunctionValue):
-            apply_callable(main, [])
+    try:
+        if "main" in env.values:
+            main = env.get("main")
+            if isinstance(main, FunctionValue):
+                apply_callable(main, [])
+    finally:
+        for conn in connections.values():
+            conn.close()
+        for listener in listeners.values():
+            listener.close()

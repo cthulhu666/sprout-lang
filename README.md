@@ -51,6 +51,12 @@ Runtime builtins (host-implemented):
 - `read_lines(path: String) -> List String`
 - `parse_int(s: String) -> Int`
 - `split_words(s: String) -> List String` (comma/whitespace separated)
+- `tcp_listen(port: Int) -> Int`
+- `tcp_accept(listener: Int) -> Int`
+- `tcp_read(conn: Int) -> String`
+- `tcp_write(conn: Int, payload: String) -> IO Unit`
+- `tcp_close(conn: Int) -> IO Unit`
+- `tcp_close_listener(listener: Int) -> IO Unit`
 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
@@ -76,6 +82,8 @@ Load stdlib prelude explicitly:
 - first-order function values in params are supported (for patterns like `f: Int -> Int`),
 - `print(...)` lowering for `Int`/`Bool`/`String`/ADT values,
 - `print_int(...)` external call.
+
+Networking builtins are currently interpreter-only (not available in native LLVM backend yet).
 
 Commands:
 
