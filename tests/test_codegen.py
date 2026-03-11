@@ -5,12 +5,20 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+import socket
 import sys
+import time
 
 from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
 
 
 class CodegenTests(unittest.TestCase):
+    @staticmethod
+    def _find_free_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            return probe.getsockname()[1]
+
     def test_compile_recursive_if_program_to_llvm(self) -> None:
         src = """
         fn fact(n: Int) -> Int =
@@ -137,6 +145,25 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("define i64 @apply(i64 %x, ptr %f)", ir)
         self.assertIn("call i64 %f(i64 %x)", ir)
 
+    def test_compile_tcp_builtins_to_llvm(self) -> None:
+        src = """
+        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn main() -> IO Unit =
+          seq(
+            tcp_write(1, tcp_read(1)),
+            seq(tcp_close(1), tcp_close_listener(tcp_listen(8081)))
+          )
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare i64 @tcp_listen(i64)", ir)
+        self.assertIn("declare i64 @tcp_accept(i64)", ir)
+        self.assertIn("declare ptr @tcp_read(i64)", ir)
+        self.assertIn("declare i64 @tcp_write(i64, ptr)", ir)
+        self.assertIn("declare i64 @tcp_close(i64)", ir)
+        self.assertIn("declare i64 @tcp_close_listener(i64)", ir)
+
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_and_execute(self) -> None:
         src = """
@@ -224,6 +251,69 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "hello")
             self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_tcp_echo_once(self) -> None:
+        try:
+            port = self._find_free_port()
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+
+        src = f"""
+        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+        fn handle_conn(conn: Int) -> IO Unit =
+          seq(tcp_write(conn, tcp_read(conn)), tcp_close(conn))
+
+        fn serve_once(listener: Int) -> IO Unit =
+          handle_conn(tcp_accept(listener))
+
+        fn close_after_serve(listener: Int) -> IO Unit =
+          seq(serve_once(listener), tcp_close_listener(listener))
+
+        fn main() -> IO Unit =
+          close_after_serve(tcp_listen({port}))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+
+            proc = subprocess.Popen(
+                [str(bin_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            echoed = ""
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.2) as client:
+                        client.sendall(b"native-echo")
+                        client.shutdown(socket.SHUT_WR)
+                        echoed = client.recv(4096).decode("utf-8", errors="replace")
+                        break
+                except OSError:
+                    time.sleep(0.02)
+
+            run = proc.communicate(timeout=2.0)
+            self.assertEqual(proc.returncode, 0, msg=run[1])
+            self.assertEqual(echoed, "native-echo")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_adt_match(self) -> None:

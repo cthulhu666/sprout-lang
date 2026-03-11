@@ -83,7 +83,7 @@ Load stdlib prelude explicitly:
 - `print(...)` lowering for `Int`/`Bool`/`String`/ADT values,
 - `print_int(...)` external call.
 
-Networking builtins are currently interpreter-only (not available in native LLVM backend yet).
+Networking builtins are available in interpreter and native (`sprout compile --native`) modes.
 
 Commands:
 

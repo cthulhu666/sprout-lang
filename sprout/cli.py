@@ -61,6 +61,11 @@ def cmd_compile(path: Path, out: Path, with_stdlib: bool = False, native: bool =
     runtime_c = """#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 typedef struct {
   long long tag;
@@ -82,6 +87,12 @@ typedef struct {
 static ObjNode* g_objs = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
+static int g_listener_fd[2048];
+static int g_listener_used[2048];
+static int g_conn_fd[2048];
+static int g_conn_used[2048];
+static long long g_next_listener_handle = 1;
+static long long g_next_conn_handle = 1;
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -190,6 +201,104 @@ long long sprout_tag(long long h) {
 long long sprout_field(long long h, long long idx) {
   SproutObj* o = unbox_ptr(h);
   return idx == 0 ? o->f0 : o->f1;
+}
+
+static void tcp_fail(const char* msg) {
+  fprintf(stderr, "%s\\n", msg);
+  exit(1);
+}
+
+long long tcp_listen(long long port) {
+  if (port < 1 || port > 65535) tcp_fail("tcp_listen: port out of range");
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) tcp_fail("tcp_listen: socket failed");
+  int one = 1;
+  if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
+    close(fd);
+    tcp_fail("tcp_listen: setsockopt failed");
+  }
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((unsigned short)port);
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    close(fd);
+    tcp_fail("tcp_listen: bind failed");
+  }
+  if (listen(fd, 16) < 0) {
+    close(fd);
+    tcp_fail("tcp_listen: listen failed");
+  }
+  long long h = g_next_listener_handle++;
+  if (h >= 2048) {
+    close(fd);
+    tcp_fail("tcp_listen: handle table full");
+  }
+  g_listener_fd[h] = fd;
+  g_listener_used[h] = 1;
+  return h;
+}
+
+long long tcp_accept(long long listener) {
+  if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
+    tcp_fail("tcp_accept: unknown listener handle");
+  }
+  int fd = accept(g_listener_fd[listener], NULL, NULL);
+  if (fd < 0) tcp_fail("tcp_accept: accept failed");
+  long long h = g_next_conn_handle++;
+  if (h >= 2048) {
+    close(fd);
+    tcp_fail("tcp_accept: connection table full");
+  }
+  g_conn_fd[h] = fd;
+  g_conn_used[h] = 1;
+  return h;
+}
+
+const char* tcp_read(long long conn) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_read: unknown connection handle");
+  char* buf = (char*)malloc(65537);
+  if (buf == NULL) tcp_fail("tcp_read: out of memory");
+  ssize_t n = recv(g_conn_fd[conn], buf, 65536, 0);
+  if (n < 0) {
+    free(buf);
+    tcp_fail("tcp_read: recv failed");
+  }
+  buf[n] = '\\0';
+  return buf;
+}
+
+long long tcp_write(long long conn, const char* payload) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_write: unknown connection handle");
+  if (payload == NULL) tcp_fail("tcp_write: null payload");
+  size_t len = strlen(payload);
+  const char* p = payload;
+  while (len > 0) {
+    ssize_t n = send(g_conn_fd[conn], p, len, 0);
+    if (n <= 0) tcp_fail("tcp_write: send failed");
+    p += n;
+    len -= (size_t)n;
+  }
+  return 0;
+}
+
+long long tcp_close(long long conn) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_close: unknown connection handle");
+  close(g_conn_fd[conn]);
+  g_conn_used[conn] = 0;
+  g_conn_fd[conn] = -1;
+  return 0;
+}
+
+long long tcp_close_listener(long long listener) {
+  if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
+    tcp_fail("tcp_close_listener: unknown listener handle");
+  }
+  close(g_listener_fd[listener]);
+  g_listener_used[listener] = 0;
+  g_listener_fd[listener] = -1;
+  return 0;
 }
 """
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
