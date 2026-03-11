@@ -1,0 +1,76 @@
+# Sprout HTTP helpers (v0)
+# Minimal helpers for request-line parsing and response formatting.
+
+type Maybe a =
+  | Just a
+  | Nothing
+
+type RequestPathVersion =
+  | RequestPathVersion String String
+
+type RequestLine =
+  | RequestLine String RequestPathVersion
+
+fn str_drop(s: String, n: Int) -> String =
+  if n >= str_len(s) then ""
+  else str_slice(s, n, str_len(s) - n)
+
+fn first_line(raw: String) -> String =
+  if str_find(raw, "\r\n") < 0 then raw
+  else str_slice(raw, 0, str_find(raw, "\r\n"))
+
+fn parse_request_line_after_rest(method: String, rest: String) -> Maybe RequestLine =
+  if str_find(rest, " ") < 0 then Nothing
+  else
+    Just(
+      RequestLine(
+        method,
+        RequestPathVersion(str_slice(rest, 0, str_find(rest, " ")), str_drop(rest, str_find(rest, " ") + 1))
+      )
+    )
+
+fn parse_request_line_from_line(line: String) -> Maybe RequestLine =
+  if str_find(line, " ") < 0 then Nothing
+  else parse_request_line_after_rest(str_slice(line, 0, str_find(line, " ")), str_drop(line, str_find(line, " ") + 1))
+
+fn parse_request_line(raw: String) -> Maybe RequestLine =
+  parse_request_line_from_line(first_line(raw))
+
+fn http_status_code_text(status: Int) -> String =
+  if status == 200 then "200"
+  else if status == 400 then "400"
+  else if status == 404 then "404"
+  else "500"
+
+fn http_reason(status: Int) -> String =
+  if status == 200 then "OK"
+  else if status == 400 then "Bad Request"
+  else if status == 404 then "Not Found"
+  else "Internal Server Error"
+
+fn http_status_line(status: Int) -> String =
+  str_concat("HTTP/1.1 ", str_concat(http_status_code_text(status), str_concat(" ", http_reason(status))))
+
+fn http_response(status: Int, body: String) -> String =
+  str_concat(
+    http_status_line(status),
+    str_concat("\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n", body)
+  )
+
+fn http_ok(body: String) -> String =
+  http_response(200, body)
+
+fn http_bad_request() -> String =
+  http_response(400, "bad request")
+
+fn request_line_to_string(req: RequestLine) -> String =
+  match req with
+  | RequestLine method pv ->
+      match pv with
+      | RequestPathVersion path version ->
+          str_concat(str_concat(method, " "), str_concat(path, str_concat(" ", version)))
+
+fn http_echo_response(raw_request: String) -> String =
+  match parse_request_line(raw_request) with
+  | Nothing -> http_bad_request()
+  | Just req -> http_ok(request_line_to_string(req))

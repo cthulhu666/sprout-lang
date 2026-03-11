@@ -11,7 +11,7 @@ from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .interpreter import RuntimeError, run_program
 from .parser import ParseError, parse
-from .stdlib import with_prelude
+from .stdlib import with_http_prelude, with_prelude
 from .tokenizer import TokenizeError
 from .typechecker import TypeCheckError, typecheck_program
 
@@ -23,9 +23,13 @@ def cmd_parse(path: Path) -> int:
     return 0
 
 
-def cmd_check(path: Path, with_stdlib: bool = False) -> int:
+def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
     source = path.read_text(encoding="utf-8")
-    tree = parse(with_prelude(source) if with_stdlib else source)
+    if with_http_stdlib:
+        source = with_http_prelude(source)
+    elif with_stdlib:
+        source = with_prelude(source)
+    tree = parse(source)
     typed = typecheck_program(tree)
     print("ok")
     for name in sorted(typed.keys()):
@@ -33,17 +37,31 @@ def cmd_check(path: Path, with_stdlib: bool = False) -> int:
     return 0
 
 
-def cmd_run(path: Path, with_stdlib: bool = False) -> int:
+def cmd_run(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
     source = path.read_text(encoding="utf-8")
-    tree = parse(with_prelude(source) if with_stdlib else source)
+    if with_http_stdlib:
+        source = with_http_prelude(source)
+    elif with_stdlib:
+        source = with_prelude(source)
+    tree = parse(source)
     typecheck_program(tree)
     run_program(tree)
     return 0
 
 
-def cmd_compile(path: Path, out: Path, with_stdlib: bool = False, native: bool = False) -> int:
+def cmd_compile(
+    path: Path,
+    out: Path,
+    with_stdlib: bool = False,
+    with_http_stdlib: bool = False,
+    native: bool = False,
+) -> int:
     source = path.read_text(encoding="utf-8")
-    tree = parse(with_prelude(source) if with_stdlib else source)
+    if with_http_stdlib:
+        source = with_http_prelude(source)
+    elif with_stdlib:
+        source = with_prelude(source)
+    tree = parse(source)
     typecheck_program(tree)
     llvm_ir = compile_to_llvm(tree)
 
@@ -208,6 +226,56 @@ static void tcp_fail(const char* msg) {
   exit(1);
 }
 
+const char* str_concat(const char* left, const char* right) {
+  if (left == NULL || right == NULL) tcp_fail("str_concat: null input");
+  size_t left_len = strlen(left);
+  size_t right_len = strlen(right);
+  char* out = (char*)malloc(left_len + right_len + 1);
+  if (out == NULL) tcp_fail("str_concat: out of memory");
+  memcpy(out, left, left_len);
+  memcpy(out + left_len, right, right_len);
+  out[left_len + right_len] = '\\0';
+  return out;
+}
+
+long long str_len(const char* s) {
+  if (s == NULL) tcp_fail("str_len: null input");
+  return (long long)strlen(s);
+}
+
+const char* str_slice(const char* s, long long start, long long length) {
+  if (s == NULL) tcp_fail("str_slice: null input");
+  if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
+  size_t slen = strlen(s);
+  if ((size_t)start >= slen) {
+    char* out = (char*)malloc(1);
+    if (out == NULL) tcp_fail("str_slice: out of memory");
+    out[0] = '\\0';
+    return out;
+  }
+  size_t avail = slen - (size_t)start;
+  size_t want = (size_t)length;
+  size_t take = want < avail ? want : avail;
+  char* out = (char*)malloc(take + 1);
+  if (out == NULL) tcp_fail("str_slice: out of memory");
+  memcpy(out, s + start, take);
+  out[take] = '\\0';
+  return out;
+}
+
+long long str_find(const char* haystack, const char* needle) {
+  if (haystack == NULL || needle == NULL) tcp_fail("str_find: null input");
+  const char* pos = strstr(haystack, needle);
+  if (pos == NULL) return -1;
+  return (long long)(pos - haystack);
+}
+
+_Bool str_starts_with(const char* s, const char* prefix) {
+  if (s == NULL || prefix == NULL) tcp_fail("str_starts_with: null input");
+  size_t prefix_len = strlen(prefix);
+  return strncmp(s, prefix, prefix_len) == 0;
+}
+
 long long tcp_listen(long long port) {
   if (port < 1 || port > 65535) tcp_fail("tcp_listen: port out of range");
   int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -336,13 +404,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_check = sub.add_parser("check", help="typecheck a Sprout file")
     p_check.add_argument("file", type=Path)
     p_check.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
+    p_check.add_argument(
+        "--with-http-stdlib",
+        action="store_true",
+        help="load stdlib http helpers",
+    )
     p_run = sub.add_parser("run", help="typecheck and run a Sprout file")
     p_run.add_argument("file", type=Path)
     p_run.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
+    p_run.add_argument(
+        "--with-http-stdlib",
+        action="store_true",
+        help="load stdlib http helpers",
+    )
     p_compile = sub.add_parser("compile", help="typecheck and compile a Sprout file")
     p_compile.add_argument("file", type=Path)
     p_compile.add_argument("-o", "--output", type=Path, required=True, help="output file")
     p_compile.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
+    p_compile.add_argument(
+        "--with-http-stdlib",
+        action="store_true",
+        help="load stdlib http helpers",
+    )
     p_compile.add_argument(
         "--native",
         action="store_true",
@@ -360,14 +443,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "parse":
             return cmd_parse(args.file)
         if args.command == "check":
-            return cmd_check(args.file, with_stdlib=args.with_stdlib)
+            return cmd_check(
+                args.file,
+                with_stdlib=args.with_stdlib,
+                with_http_stdlib=args.with_http_stdlib,
+            )
         if args.command == "run":
-            return cmd_run(args.file, with_stdlib=args.with_stdlib)
+            return cmd_run(
+                args.file,
+                with_stdlib=args.with_stdlib,
+                with_http_stdlib=args.with_http_stdlib,
+            )
         if args.command == "compile":
             return cmd_compile(
                 args.file,
                 out=args.output,
                 with_stdlib=args.with_stdlib,
+                with_http_stdlib=args.with_http_stdlib,
                 native=args.native,
             )
     except (ParseError, TokenizeError, TypeCheckError, RuntimeError, CodegenError, subprocess.CalledProcessError) as exc:

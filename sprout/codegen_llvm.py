@@ -37,6 +37,11 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "print_int": FnSig(name="print_int", params=[I64], ret=I64),
     "print_str": FnSig(name="print_str", params=[I8_PTR], ret=I64),
     "print_value": FnSig(name="print_value", params=[I64], ret=I64),
+    "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
+    "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
+    "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
+    "str_find": FnSig(name="str_find", params=[I8_PTR, I8_PTR], ret=I64),
+    "str_starts_with": FnSig(name="str_starts_with", params=[I8_PTR, I8_PTR], ret=I1),
     "tcp_listen": FnSig(name="tcp_listen", params=[I64], ret=I64),
     "tcp_accept": FnSig(name="tcp_accept", params=[I64], ret=I64),
     "tcp_read": FnSig(name="tcp_read", params=[I64], ret=I8_PTR),
@@ -163,9 +168,14 @@ def _is_io_unit(node: ast.TypeExpr | None) -> bool:
 
 def _lower_value_type(node: ast.TypeExpr, adt_names: set[str]) -> tuple[LLType, CallSig | None]:
     if isinstance(node, ast.TypeArrow):
-        param_ll = _type_from_ast(node.left, adt_names)
-        ret_ll = _type_from_ast(node.right, adt_names)
-        return I8_PTR, CallSig(params=[param_ll], ret=ret_ll)
+        params_ast: list[ast.TypeExpr] = []
+        cursor: ast.TypeExpr = node
+        while isinstance(cursor, ast.TypeArrow):
+            params_ast.append(cursor.left)
+            cursor = cursor.right
+        params_ll = [_type_from_ast(param, adt_names) for param in params_ast]
+        ret_ll = _type_from_ast(cursor, adt_names)
+        return I8_PTR, CallSig(params=params_ll, ret=ret_ll)
     return _type_from_ast(node, adt_names), None
 
 

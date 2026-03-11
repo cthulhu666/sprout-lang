@@ -21,6 +21,7 @@ Early bootstrap stage. The repository currently contains design docs and initial
 - `tests/` parser and typechecker tests
 - `tests/conformance/` executable language behavior fixtures (`run`, `parse_error`, `type_error`, `runtime_error`)
 - `stdlib/` language-level standard library source (`prelude.sprout`)
+  plus protocol helpers such as `http.sprout`
 - `mise.toml` pinned local toolchain (`python`, `just`)
 - `justfile` common project commands
 
@@ -51,6 +52,11 @@ Runtime builtins (host-implemented):
 - `read_lines(path: String) -> List String`
 - `parse_int(s: String) -> Int`
 - `split_words(s: String) -> List String` (comma/whitespace separated)
+- `str_concat(a: String, b: String) -> String`
+- `str_len(s: String) -> Int`
+- `str_slice(s: String, start: Int, len: Int) -> String`
+- `str_find(s: String, needle: String) -> Int` (`-1` when not found)
+- `str_starts_with(s: String, prefix: String) -> Bool`
 - `tcp_listen(port: Int) -> Int`
 - `tcp_accept(listener: Int) -> Int`
 - `tcp_read(conn: Int) -> String`
@@ -59,6 +65,8 @@ Runtime builtins (host-implemented):
 - `tcp_close_listener(listener: Int) -> IO Unit`
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
 
+String helpers currently use `str_*` global names; they are intended to move to a future module/namespace surface.
+
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
 - `map(list, fn) -> List`
@@ -66,10 +74,25 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `filter(list, predicate) -> List`
 - `split_ints(s: String) -> List Int`
 
+HTTP stdlib helpers (in `stdlib/http.sprout`):
+
+- `parse_request_line(raw) -> Maybe RequestLine`
+- `http_response(status, body) -> String`
+- `http_ok(body) -> String`
+- `http_bad_request() -> String`
+- `http_echo_response(raw_request) -> String`
+
 Load stdlib prelude explicitly:
 
 - `python3 -m sprout.cli check --with-stdlib your_file.spr`
 - `python3 -m sprout.cli run --with-stdlib your_file.spr`
+
+Load HTTP helpers:
+
+- `python3 -m sprout.cli check --with-http-stdlib your_file.spr`
+- `python3 -m sprout.cli run --with-http-stdlib your_file.spr`
+- Example HTTP echo server:
+  `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run --with-http-stdlib examples/http_echo_server.sprout`
 
 ## Native Backend (Early)
 

@@ -409,6 +409,47 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         tokens = raw.replace(",", " ").split()
         return py_to_adt_list(tokens)
 
+    def builtin_str_concat(args: list[object]) -> object:
+        left = args[0]
+        right = args[1]
+        if not isinstance(left, str) or not isinstance(right, str):
+            raise RuntimeError("str_concat expects String, String")
+        return left + right
+
+    def builtin_str_len(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("str_len expects String")
+        return len(raw)
+
+    def builtin_str_slice(args: list[object]) -> object:
+        raw = args[0]
+        start = args[1]
+        length = args[2]
+        if not isinstance(raw, str):
+            raise RuntimeError("str_slice expects String as first argument")
+        if not isinstance(start, int) or not isinstance(length, int):
+            raise RuntimeError("str_slice expects Int start and Int length")
+        if start < 0 or length < 0:
+            raise RuntimeError("str_slice start/length must be >= 0")
+        if start >= len(raw):
+            return ""
+        return raw[start : start + length]
+
+    def builtin_str_find(args: list[object]) -> object:
+        haystack = args[0]
+        needle = args[1]
+        if not isinstance(haystack, str) or not isinstance(needle, str):
+            raise RuntimeError("str_find expects String, String")
+        return haystack.find(needle)
+
+    def builtin_str_starts_with(args: list[object]) -> object:
+        raw = args[0]
+        prefix = args[1]
+        if not isinstance(raw, str) or not isinstance(prefix, str):
+            raise RuntimeError("str_starts_with expects String, String")
+        return raw.startswith(prefix)
+
     def builtin_tcp_listen(args: list[object]) -> object:
         port = args[0]
         if not isinstance(port, int):
@@ -497,6 +538,14 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
+    env.set("str_concat", BuiltinFunction(name="str_concat", arity=2, fn=builtin_str_concat))
+    env.set("str_len", BuiltinFunction(name="str_len", arity=1, fn=builtin_str_len))
+    env.set("str_slice", BuiltinFunction(name="str_slice", arity=3, fn=builtin_str_slice))
+    env.set("str_find", BuiltinFunction(name="str_find", arity=2, fn=builtin_str_find))
+    env.set(
+        "str_starts_with",
+        BuiltinFunction(name="str_starts_with", arity=2, fn=builtin_str_starts_with),
+    )
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))
     env.set("tcp_accept", BuiltinFunction(name="tcp_accept", arity=1, fn=builtin_tcp_accept))
     env.set("tcp_read", BuiltinFunction(name="tcp_read", arity=1, fn=builtin_tcp_read))

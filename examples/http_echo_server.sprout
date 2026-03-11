@@ -1,0 +1,23 @@
+# Multi-connection HTTP echo server (minimal v0).
+# Requires --with-http-stdlib to load stdlib/http.sprout helpers.
+#
+# Run:
+#   SPROUT_NET_MODEL=reactor python3 -m sprout.cli run --with-http-stdlib examples/http_echo_server.sprout
+#
+# Then:
+#   curl -i http://127.0.0.1:8081/hello
+
+fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+fn handle_conn(conn: Int) -> IO Unit =
+  seq(
+    tcp_write(conn, http_echo_response(tcp_read(conn))),
+    tcp_close(conn)
+  )
+
+fn serve_n(listener: Int, remaining: Int) -> IO Unit =
+  if remaining == 0 then tcp_close_listener(listener)
+  else seq(handle_conn(tcp_accept(listener)), serve_n(listener, remaining - 1))
+
+fn main() -> IO Unit =
+  serve_n(tcp_listen(8081), 1000000)

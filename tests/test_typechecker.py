@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from sprout import TypeCheckError, parse, typecheck_program
-from sprout.stdlib import with_prelude
+from sprout.stdlib import with_http_prelude, with_prelude
 
 
 class TypecheckerTests(unittest.TestCase):
@@ -85,6 +85,26 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
+
+    def test_typecheck_string_builtins(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(
+            if str_starts_with(str_concat("sprout", "-lang"), "sprout")
+            then str_slice("abcdef", 1, str_len("abc"))
+            else "nope"
+          )
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("main", types)
+
+    def test_typecheck_with_http_stdlib_loaded(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(http_echo_response("GET /ping HTTP/1.1\\r\\n\\r\\n"))
+        """
+        types = typecheck_program(parse(with_http_prelude(src)))
+        self.assertIn("http_echo_response", types)
 
 
 if __name__ == "__main__":

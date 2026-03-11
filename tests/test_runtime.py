@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from sprout import parse, run_program, typecheck_program
-from sprout.stdlib import with_prelude
+from sprout.stdlib import with_http_prelude, with_prelude
 
 
 class RuntimeTests(unittest.TestCase):
@@ -259,6 +259,42 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(server_thread.is_alive(), "blocking server did not exit after one connection")
         self.assertFalse(errors, f"blocking server thread raised: {errors!r}")
         self.assertEqual(response, "blocking")
+
+    def test_string_builtins(self) -> None:
+        src = """
+        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+        fn main() -> IO Unit =
+          seq(
+            print(str_concat(str_slice("sprout-lang", 0, 6), "-ok")),
+            seq(
+              print(str_len("sprout-lang") == 11),
+              seq(
+                print(str_find("sprout-lang", "lang") == 7),
+                print(str_starts_with("sprout-lang", "sprout"))
+              )
+            )
+          )
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "sprout-ok\nTrue\nTrue\nTrue")
+
+    def test_http_stdlib_echo_response(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(http_echo_response("GET /hello HTTP/1.1\\r\\nHost: local\\r\\n\\r\\n"))
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        result = out.getvalue()
+        self.assertIn("HTTP/1.1 200 OK", result)
+        self.assertIn("Connection: close", result)
+        self.assertIn("GET /hello HTTP/1.1", result)
 
 
 if __name__ == "__main__":

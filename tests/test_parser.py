@@ -64,6 +64,14 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(callee.callee.right, ast.BinaryExpr)
         self.assertEqual(callee.callee.right.op, ">>")
 
+    def test_parse_string_escape_carriage_return(self) -> None:
+        src = 'fn main() -> String = "a\\r\\nb"'
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.StringExpr)
+        self.assertEqual(fn_decl.body.value, "a\r\nb")
+
 
 if __name__ == "__main__":
     unittest.main()

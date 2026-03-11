@@ -165,6 +165,20 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("declare i64 @tcp_close_listener(i64)", ir)
         self.assertIn("declare i64 @tcp_echo_serve(i64, i64)", ir)
 
+    def test_compile_string_builtins_to_llvm(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(str_concat(str_slice("sprout", 0, 3), " ok"))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare ptr @str_concat(ptr, ptr)", ir)
+        self.assertIn("declare i64 @str_len(ptr)", ir)
+        self.assertIn("declare ptr @str_slice(ptr, i64, i64)", ir)
+        self.assertIn("declare i64 @str_find(ptr, ptr)", ir)
+        self.assertIn("declare i1 @str_starts_with(ptr, ptr)", ir)
+
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_and_execute(self) -> None:
         src = """
@@ -315,6 +329,44 @@ class CodegenTests(unittest.TestCase):
             run = proc.communicate(timeout=2.0)
             self.assertEqual(proc.returncode, 0, msg=run[1])
             self.assertEqual(echoed, "native-echo")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_string_builtins(self) -> None:
+        src = """
+        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn main() -> IO Unit =
+          seq(
+            print(str_concat(str_slice("sprout-lang", 0, 6), "-ok")),
+            seq(
+              print(str_len("sprout-lang") == 11),
+              seq(
+                print(str_find("sprout-lang", "lang") == 7),
+                print(str_starts_with("sprout-lang", "sprout"))
+              )
+            )
+          )
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "sprout-ok\n1\n1\n1")
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_adt_match(self) -> None:
