@@ -10,6 +10,7 @@ import tempfile
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .interpreter import RuntimeError, run_program
+from .module_loader import ModuleLoadError, load_module_source
 from .parser import ParseError, parse
 from .stdlib import with_http_prelude, with_prelude
 from .tokenizer import TokenizeError
@@ -17,14 +18,14 @@ from .typechecker import TypeCheckError, typecheck_program
 
 
 def cmd_parse(path: Path) -> int:
-    source = path.read_text(encoding="utf-8")
+    source = load_module_source(path)
     tree = parse(source)
     print(json.dumps(to_dict(tree), indent=2))
     return 0
 
 
 def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
-    source = path.read_text(encoding="utf-8")
+    source = load_module_source(path)
     if with_http_stdlib:
         source = with_http_prelude(source)
     elif with_stdlib:
@@ -38,7 +39,7 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
 
 
 def cmd_run(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
-    source = path.read_text(encoding="utf-8")
+    source = load_module_source(path)
     if with_http_stdlib:
         source = with_http_prelude(source)
     elif with_stdlib:
@@ -56,7 +57,7 @@ def cmd_compile(
     with_http_stdlib: bool = False,
     native: bool = False,
 ) -> int:
-    source = path.read_text(encoding="utf-8")
+    source = load_module_source(path)
     if with_http_stdlib:
         source = with_http_prelude(source)
     elif with_stdlib:
@@ -462,7 +463,15 @@ def main(argv: list[str] | None = None) -> int:
                 with_http_stdlib=args.with_http_stdlib,
                 native=args.native,
             )
-    except (ParseError, TokenizeError, TypeCheckError, RuntimeError, CodegenError, subprocess.CalledProcessError) as exc:
+    except (
+        ParseError,
+        TokenizeError,
+        TypeCheckError,
+        RuntimeError,
+        CodegenError,
+        ModuleLoadError,
+        subprocess.CalledProcessError,
+    ) as exc:
         print(f"error: {exc}")
         return 1
 

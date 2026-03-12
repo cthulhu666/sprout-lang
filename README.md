@@ -114,6 +114,26 @@ Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
 - `reactor` (default): event loop / readiness-based echo server
 - `blocking`: simple blocking accept/read/write loop
 
+## Modules (v0)
+
+Sprout now supports file-based modules with top-of-file headers:
+
+- `module a.b.c`
+- `import x.y.z`
+- `import x.y.z as alias`
+- `import x.y.z exposing (name1, name2)` (parsed for future compatibility)
+
+Resolution:
+
+- `import stdlib.http` resolves to `stdlib/http.sprout`
+- loader checks importing file directory first, then current working directory
+- import cycles are rejected
+
+Current limitation:
+
+- imported declarations are loaded into a shared global scope (no namespace qualification yet)
+  except alias access via generated qualified names (`alias.symbol`)
+
 Commands:
 
 - LLVM IR output: `python3 -m sprout.cli compile input.spr -o out.ll`

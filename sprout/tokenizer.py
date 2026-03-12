@@ -108,7 +108,7 @@ def tokenize(source: str) -> list[Token]:
 
         if ch.isalpha() or ch == "_":
             start_i, start_line, start_col = i, line, col
-            while i < len(source) and (source[i].isalnum() or source[i] == "_"):
+            while i < len(source) and (source[i].isalnum() or source[i] == "_" or source[i] == "."):
                 advance()
             ident = source[start_i:i]
             if ident in KEYWORDS:
