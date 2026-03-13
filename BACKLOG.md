@@ -62,18 +62,18 @@ Definition of done:
 - [ ] `P1` Add better diagnostics for module/import/export errors with source context.
 - [ ] `P2` Add formatter/linter baseline.
 
-### 8) Sentry Integration Layer
+### 8) External Integration Example Layer
 
-- [ ] `P0` Add `stdlib/sentry.sprout` with typed wrappers for key endpoints:
+- [ ] `P0` Add `examples/sentry_api.sprout` with typed wrappers for key endpoints:
   - list issues
   - issue details
   - pagination cursor extraction
 - [ ] `P1` Add auth/token helpers and secure configuration loading.
 - [ ] `P1` Add integration tests with mocked HTTP responses.
 
-### 9) Sentry TUI App
+### 9) Issue Browser TUI App
 
-- [ ] `P0` Build `examples/sentry_tui.sprout`:
+- [ ] `P0` Build `examples/sentry_issue_browser_tui.sprout`:
   - load token/org/project config
   - fetch first page
   - render list
@@ -94,6 +94,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add `stdlib/sentry.sprout` typed wrappers for listing issues.
-2. Add `stdlib/http_client.sprout` convenience wrappers on top of `http_request`.
-3. Expand JSON helper surface (`json_get_int`, `json_get_array`, object iteration helpers).
+1. Add `stdlib/http_client.sprout` convenience wrappers on top of `http_request`.
+2. Expand JSON helper surface (`json_get_int`, `json_get_array`, object iteration helpers).
+3. Add `examples/sentry_api.sprout` and `examples/sentry_issue_browser_tui.sprout` as app-level integrations.
