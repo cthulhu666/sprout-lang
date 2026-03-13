@@ -27,7 +27,7 @@ Definition of done:
 
 - [x] `P0` Add builtin: `http_request(method, url, headers, body, timeout_ms) -> Result HttpError HttpResponse`.
 - [x] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
-- [ ] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
+- [x] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
 - [ ] `P1` Ensure interpreter/native parity for HTTP client builtins.
 
 ### 3) JSON Support
@@ -94,6 +94,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add `stdlib/http_client.sprout` convenience wrappers on top of `http_request`.
-2. Expand JSON helper surface (`json_get_int`, `json_get_array`, object iteration helpers).
-3. Add `examples/sentry_api.sprout` and `examples/sentry_issue_browser_tui.sprout` as app-level integrations.
+1. Expand JSON helper surface (`json_get_int`, `json_get_array`, object iteration helpers).
+2. Add `examples/sentry_api.sprout` and `examples/sentry_issue_browser_tui.sprout` as app-level integrations.
+3. Define terminal input/output primitives required by interactive TUI apps.

@@ -97,6 +97,12 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `json_get_field(value, key) -> Maybe Json`
 - `json_get_string(value) -> Maybe String`
 
+HTTP client convenience module (in `stdlib/http_client.sprout`):
+
+- `http_get(url, headers, timeout_ms) -> Result HttpError HttpResponse`
+- `http_post(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
+- `http_put(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
+
 Load stdlib prelude explicitly:
 
 - `python3 -m sprout.cli check --with-stdlib your_file.sprout`

@@ -297,6 +297,31 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "7")
 
+    def test_import_stdlib_http_client_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.http (Result, HttpError, HttpResponse)
+                import stdlib.http_client (http_get)
+
+                fn use_get(url: String) -> Result HttpError HttpResponse =
+                  http_get(url, "", 1000)
+
+                fn main() -> IO Unit = print("ok")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ok")
+
 
 if __name__ == "__main__":
     unittest.main()
