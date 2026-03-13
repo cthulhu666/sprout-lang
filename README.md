@@ -122,6 +122,24 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_render_line(row, text) -> IO Unit`
 - `term_read_key_once() -> String`
 
+Collections module (in `stdlib/collections.sprout`):
+
+- `Maybe a` (`Just`, `Nothing`)
+- `Vec a` (`VecNil`, `VecCons`) with helpers:
+  - `vec_empty()`
+  - `vec_prepend(value, vec)`
+  - `vec_append(vec, value)`
+  - `vec_length(vec)`
+  - `vec_get(vec, index) -> Maybe a`
+  - `vec_set(vec, index, value)`
+  - `vec_map(vec, f)`
+  - `vec_fold(vec, init, f)`
+- `Dict v` (`DictNil`, `DictCons`) with helpers:
+  - `dict_empty()`
+  - `dict_get(dict, key) -> Maybe v`
+  - `dict_set(dict, key, value)`
+  - `dict_remove(dict, key)`
+
 Application-level example wrapper:
 
 - `examples/sentry_api.sprout` demonstrates how to layer Sentry-specific API helpers on top of generic `stdlib.http` + `stdlib.http_client`.

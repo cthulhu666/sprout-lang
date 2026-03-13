@@ -1,0 +1,81 @@
+module stdlib.collections
+
+export type Maybe a =
+  | Just a
+  | Nothing
+
+export type Vec a =
+  | VecNil
+  | VecCons a (Vec a)
+
+export type Dict v =
+  | DictNil
+  | DictCons String v (Dict v)
+
+export fn vec_empty() -> Vec a =
+  VecNil
+
+export fn vec_prepend(value: a, vec: Vec a) -> Vec a =
+  VecCons(value, vec)
+
+export fn vec_append(vec: Vec a, value: a) -> Vec a =
+  match vec with
+  | VecNil -> VecCons(value, VecNil)
+  | VecCons head tail -> VecCons(head, vec_append(tail, value))
+
+export fn vec_length(vec: Vec a) -> Int =
+  match vec with
+  | VecNil -> 0
+  | VecCons _ tail -> 1 + vec_length(tail)
+
+export fn vec_get(vec: Vec a, index: Int) -> Maybe a =
+  if index < 0 then Nothing
+  else
+    match vec with
+    | VecNil -> Nothing
+    | VecCons head tail ->
+        if index == 0 then Just(head)
+        else vec_get(tail, index - 1)
+
+export fn vec_set(vec: Vec a, index: Int, value: a) -> Vec a =
+  if index < 0 then vec
+  else
+    match vec with
+    | VecNil -> VecNil
+    | VecCons head tail ->
+        if index == 0 then VecCons(value, tail)
+        else VecCons(head, vec_set(tail, index - 1, value))
+
+export fn vec_map(vec: Vec a, f: a -> b) -> Vec b =
+  match vec with
+  | VecNil -> VecNil
+  | VecCons head tail -> VecCons(f(head), vec_map(tail, f))
+
+export fn vec_fold(vec: Vec a, init: b, f: b -> a -> b) -> b =
+  match vec with
+  | VecNil -> init
+  | VecCons head tail -> vec_fold(tail, f(init, head), f)
+
+export fn dict_empty() -> Dict v =
+  DictNil
+
+export fn dict_get(dict: Dict v, key: String) -> Maybe v =
+  match dict with
+  | DictNil -> Nothing
+  | DictCons entry_key entry_value rest ->
+      if entry_key == key then Just(entry_value)
+      else dict_get(rest, key)
+
+export fn dict_set(dict: Dict v, key: String, value: v) -> Dict v =
+  match dict with
+  | DictNil -> DictCons(key, value, DictNil)
+  | DictCons entry_key entry_value rest ->
+      if entry_key == key then DictCons(key, value, rest)
+      else DictCons(entry_key, entry_value, dict_set(rest, key, value))
+
+export fn dict_remove(dict: Dict v, key: String) -> Dict v =
+  match dict with
+  | DictNil -> DictNil
+  | DictCons entry_key entry_value rest ->
+      if entry_key == key then rest
+      else DictCons(entry_key, entry_value, dict_remove(rest, key))

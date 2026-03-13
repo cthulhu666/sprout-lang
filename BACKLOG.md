@@ -46,8 +46,8 @@ Definition of done:
 
 ### 5) Data Structures and Collections
 
-- [ ] `P1` Add practical indexed sequence type (`Array`/`Vector`) for UI lists.
-- [ ] `P1` Add dictionary/map type for API payload handling.
+- [~] `P1` Add practical indexed sequence type (`Array`/`Vector`) for UI lists.
+- [~] `P1` Add dictionary/map type for API payload handling.
 - [ ] `P2` Add set type and common ops.
 
 ### 6) Modules and Packaging
@@ -90,10 +90,11 @@ Definition of done:
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
 - [x] `http_request` builtin and typed HTTP result ADTs are implemented (interpreter).
 - [x] `json_parse` builtin and basic JSON accessors are implemented.
-- [ ] terminal interaction primitives are not yet implemented.
+- [x] initial `stdlib.collections` module exists with `Vec` and `Dict` ADTs plus core helpers.
+- [ ] terminal interaction primitives are not yet fully implemented.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Extend `examples/sentry_api.sprout` with issue-details and pagination helpers.
-2. Add `examples/sentry_issue_browser_tui.sprout` using current runtime primitives.
-3. Improve terminal key input beyond env-var stub to real non-blocking interactive reads.
+1. Extend `stdlib.collections` with richer operations (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`) and edge-case tests.
+2. Add `json_stringify(Json) -> String` with malformed/edge-case tests.
+3. Implement consistent runtime error conventions for effectful builtins.
