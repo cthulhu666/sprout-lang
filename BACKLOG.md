@@ -64,7 +64,7 @@ Definition of done:
 
 ### 8) External Integration Example Layer
 
-- [ ] `P0` Add `examples/sentry_api.sprout` with typed wrappers for key endpoints:
+- [~] `P0` Add `examples/sentry_api.sprout` with typed wrappers for key endpoints:
   - list issues
   - issue details
   - pagination cursor extraction
@@ -73,7 +73,7 @@ Definition of done:
 
 ### 9) Issue Browser TUI App
 
-- [ ] `P0` Build `examples/sentry_issue_browser_tui.sprout`:
+- [~] `P0` Build `examples/sentry_issue_browser_tui.sprout`:
   - load token/org/project config
   - fetch first page
   - render list
@@ -94,6 +94,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add `examples/sentry_api.sprout` as a thin app-level API wrapper over generic HTTP/JSON helpers.
+1. Extend `examples/sentry_api.sprout` with issue-details and pagination helpers.
 2. Add `examples/sentry_issue_browser_tui.sprout` using current runtime primitives.
 3. Define terminal input/output primitives required by interactive TUI apps.

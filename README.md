@@ -109,6 +109,11 @@ HTTP client convenience module (in `stdlib/http_client.sprout`):
 - `http_post(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
 - `http_put(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
 
+Application-level example wrapper:
+
+- `examples/sentry_api.sprout` demonstrates how to layer Sentry-specific API helpers on top of generic `stdlib.http` + `stdlib.http_client`.
+- `examples/sentry_issue_browser_tui.sprout` is a minimal TUI-oriented scaffold module using the app-level Sentry API layer.
+
 Load stdlib prelude explicitly:
 
 - `python3 -m sprout.cli check --with-stdlib your_file.sprout`

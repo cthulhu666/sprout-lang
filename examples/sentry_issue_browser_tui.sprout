@@ -1,0 +1,17 @@
+module examples.sentry_issue_browser_tui
+import examples.sentry_api (sentry_list_issues)
+import stdlib.http (Json)
+
+fn issue_count_text(issues: Json) -> String =
+  "issues payload loaded"
+
+export fn run_once(org: String, project: String, token: String) -> String =
+  match sentry_list_issues(org, project, token, 3000) with
+  | Ok issues -> issue_count_text(issues)
+  | Err _ -> "request failed"
+
+fn boot_message() -> String =
+  "sentry tui scaffold: run_once(org, project, token)"
+
+export fn sentry_tui_demo_main() -> IO Unit =
+  print(boot_message())
