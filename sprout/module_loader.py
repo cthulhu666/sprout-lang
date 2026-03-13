@@ -143,9 +143,7 @@ def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], str]:
     sanitized = "\n".join(out_lines)
     if body.endswith("\n"):
         sanitized += "\n"
-    if explicit_exports:
-        return declared, explicit_exports, sanitized
-    return declared, set(declared), sanitized
+    return declared, explicit_exports, sanitized
 
 
 def _module_path(module_name: str) -> Path:

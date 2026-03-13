@@ -139,8 +139,8 @@ Current limitation:
 
 Export behavior:
 
-- if a module uses at least one `export` declaration, only explicitly exported names are importable
-- if a module uses no `export`, all top-level declarations are importable (compatibility mode)
+- only explicitly exported top-level declarations are importable
+- declarations without `export` are module-private
 
 Commands:
 

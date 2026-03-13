@@ -1,5 +1,5 @@
 module app.main
-import stdlib.http
+import stdlib.http (http_ok)
 
 fn main() -> IO Unit =
   print(http_ok("modules work"))
