@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 
 from sprout import parse, run_program, typecheck_program
-from sprout.module_loader import ModuleLoadError, load_module_source
+from sprout.module_loader import ModuleLoadError, load_module_bundle, load_module_source, resolve_program_names
 
 
 class ModuleLoaderTests(unittest.TestCase):
@@ -33,8 +33,9 @@ class ModuleLoaderTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            source = load_module_source(main)
-            program = parse(source)
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
             typecheck_program(program)
             out = io.StringIO()
             run_program(program, stdout=out)
@@ -156,8 +157,9 @@ class ModuleLoaderTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            source = load_module_source(main)
-            program = parse(source)
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
             typecheck_program(program)
             out = io.StringIO()
             run_program(program, stdout=out)
@@ -191,6 +193,31 @@ class ModuleLoaderTests(unittest.TestCase):
             )
             with self.assertRaises(ModuleLoadError):
                 load_module_source(root / "main.sprout")
+
+    def test_resolver_requires_unqualified_import_or_exposing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                fn answer() -> Int = 42
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib as l
+                fn main() -> IO Unit =
+                  print(answer())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError):
+                resolve_program_names(program, bundle)
 
 
 if __name__ == "__main__":

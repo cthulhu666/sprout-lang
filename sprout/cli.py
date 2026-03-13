@@ -10,7 +10,7 @@ import tempfile
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .interpreter import RuntimeError, run_program
-from .module_loader import ModuleLoadError, load_module_source
+from .module_loader import ModuleLoadError, load_module_bundle, resolve_program_names
 from .parser import ParseError, parse
 from .stdlib import with_http_prelude, with_prelude
 from .tokenizer import TokenizeError
@@ -18,19 +18,26 @@ from .typechecker import TypeCheckError, typecheck_program
 
 
 def cmd_parse(path: Path) -> int:
-    source = load_module_source(path)
+    bundle = load_module_bundle(path)
+    source = bundle.source
     tree = parse(source)
+    resolve_program_names(tree, bundle)
     print(json.dumps(to_dict(tree), indent=2))
     return 0
 
 
 def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
-    source = load_module_source(path)
+    bundle = load_module_bundle(path)
+    source = bundle.source
     if with_http_stdlib:
         source = with_http_prelude(source)
+        bundle = None
     elif with_stdlib:
         source = with_prelude(source)
+        bundle = None
     tree = parse(source)
+    if bundle is not None:
+        resolve_program_names(tree, bundle)
     typed = typecheck_program(tree)
     print("ok")
     for name in sorted(typed.keys()):
@@ -39,12 +46,17 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
 
 
 def cmd_run(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
-    source = load_module_source(path)
+    bundle = load_module_bundle(path)
+    source = bundle.source
     if with_http_stdlib:
         source = with_http_prelude(source)
+        bundle = None
     elif with_stdlib:
         source = with_prelude(source)
+        bundle = None
     tree = parse(source)
+    if bundle is not None:
+        resolve_program_names(tree, bundle)
     typecheck_program(tree)
     run_program(tree)
     return 0
@@ -57,12 +69,17 @@ def cmd_compile(
     with_http_stdlib: bool = False,
     native: bool = False,
 ) -> int:
-    source = load_module_source(path)
+    bundle = load_module_bundle(path)
+    source = bundle.source
     if with_http_stdlib:
         source = with_http_prelude(source)
+        bundle = None
     elif with_stdlib:
         source = with_prelude(source)
+        bundle = None
     tree = parse(source)
+    if bundle is not None:
+        resolve_program_names(tree, bundle)
     typecheck_program(tree)
     llvm_ir = compile_to_llvm(tree)
 
