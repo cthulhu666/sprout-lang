@@ -4,7 +4,8 @@ Sprout is an experimental, statically typed, functional-first programming langua
 
 ## Status
 
-Early bootstrap stage. The repository currently contains design docs and initial scaffolding.
+Prototype implementation stage. The repository includes a working tokenizer/parser/typechecker,
+interpreter runtime, early native backend, module loader, and stdlib examples.
 
 ## Docs
 
@@ -41,7 +42,7 @@ Common tasks:
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
 - Run tests: `mise exec -- just test`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
-- Build native binary (clang): `mise exec -- just compile-native /tmp/prog.spr /tmp/prog`
+- Build native binary (clang): `mise exec -- just compile-native /tmp/prog.sprout /tmp/prog`
 
 ## Builtin Helpers (v0)
 
@@ -84,13 +85,13 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 
 Load stdlib prelude explicitly:
 
-- `python3 -m sprout.cli check --with-stdlib your_file.spr`
-- `python3 -m sprout.cli run --with-stdlib your_file.spr`
+- `python3 -m sprout.cli check --with-stdlib your_file.sprout`
+- `python3 -m sprout.cli run --with-stdlib your_file.sprout`
 
 Load HTTP helpers:
 
-- `python3 -m sprout.cli check --with-http-stdlib your_file.spr`
-- `python3 -m sprout.cli run --with-http-stdlib your_file.spr`
+- `python3 -m sprout.cli check --with-http-stdlib your_file.sprout`
+- `python3 -m sprout.cli run --with-http-stdlib your_file.sprout`
 - Example HTTP echo server:
   `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run --with-http-stdlib examples/http_echo_server.sprout`
 
@@ -122,6 +123,7 @@ Sprout now supports file-based modules with top-of-file headers:
 - `import x.y.z`
 - `import x.y.z as alias`
 - `import x.y.z (name1, name2)`
+- `import x.y.z as alias (name1, name2)`
 - `export fn ...`, `export type ...`, `export let ...` (top-level only)
 
 Resolution:
@@ -132,8 +134,8 @@ Resolution:
 
 Current limitation:
 
-- imported declarations are loaded into a shared global scope (no namespace qualification yet)
-  except alias access via generated qualified names (`alias.symbol`)
+- imported declarations still flatten into a shared program scope;
+  alias qualification (`alias.symbol`) is a resolver-level feature, not a full namespace runtime model yet
 
 Export behavior:
 
@@ -142,14 +144,16 @@ Export behavior:
 
 Commands:
 
-- LLVM IR output: `python3 -m sprout.cli compile input.spr -o out.ll`
-- Native binary (requires `clang`): `python3 -m sprout.cli compile input.spr --native -o out_bin`
+- LLVM IR output: `python3 -m sprout.cli compile input.sprout -o out.ll`
+- Native binary (requires `clang`): `python3 -m sprout.cli compile input.sprout --native -o out_bin`
 
-## Near-Term Plan
+## Roadmap / TODO
 
-1. Lock v0 syntax and type-system scope.
-2. Build parser and typechecker around the v0 spec.
-3. Add golden tests for parsing, typing, and evaluation behavior.
+1. Introduce real module namespaces (avoid flattening all imported declarations into one global scope).
+2. Move string/runtime helpers into namespaced stdlib modules.
+3. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
+4. Add stronger server-side runtime models (multi-reactor as next target).
+5. Add a REPL for iterative development.
 
 ## Contributing
 
