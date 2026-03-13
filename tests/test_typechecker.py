@@ -44,6 +44,8 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("map", types)
         self.assertIn("fold", types)
         self.assertIn("filter", types)
+        self.assertIn("result_map", types)
+        self.assertIn("result_and_then", types)
 
     def test_type_error_if_branches_mismatch(self) -> None:
         src = """

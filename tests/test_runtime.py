@@ -85,6 +85,32 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "10")
 
+    def test_stdlib_result_helpers(self) -> None:
+        src = """
+        fn plus1(x: Int) -> Int = x + 1
+        fn twice(x: Int) -> Result String Int = Ok(x * 2)
+        fn tag(e: String) -> String = str_concat("err:", e)
+
+        fn main() -> IO Unit =
+          print(
+            result_with_default(
+              result_map_error(
+                result_and_then(
+                  result_map(Ok(20), plus1),
+                  twice
+                ),
+                tag
+              ),
+              0
+            )
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
     def test_stdlib_read_lines_and_parse_int(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_path = Path(tmp) / "numbers.txt"

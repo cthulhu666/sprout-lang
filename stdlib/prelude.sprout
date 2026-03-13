@@ -5,6 +5,10 @@ type List a =
   | Cons a (List a)
   | Nil
 
+type Result e a =
+  | Ok a
+  | Err e
+
 fn map(xs: List a, f: a -> b) -> List b =
   match xs with
   | Nil -> Nil
@@ -24,3 +28,23 @@ fn filter(xs: List a, pred: a -> Bool) -> List a =
 
 fn split_ints(s: String) -> List Int =
   map(split_words(s), parse_int)
+
+fn result_map(r: Result e a, f: a -> b) -> Result e b =
+  match r with
+  | Ok x -> Ok(f(x))
+  | Err e -> Err(e)
+
+fn result_map_error(r: Result e a, f: e -> f_err) -> Result f_err a =
+  match r with
+  | Ok x -> Ok(x)
+  | Err e -> Err(f(e))
+
+fn result_and_then(r: Result e a, f: a -> Result e b) -> Result e b =
+  match r with
+  | Ok x -> f(x)
+  | Err e -> Err(e)
+
+fn result_with_default(r: Result e a, fallback: a) -> a =
+  match r with
+  | Ok x -> x
+  | Err _ -> fallback

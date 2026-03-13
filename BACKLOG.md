@@ -19,7 +19,7 @@ Definition of done:
 
 ### 1) Language Core and Safety
 
-- [ ] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
+- [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [ ] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [ ] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 
@@ -92,6 +92,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Implement `Result` in stdlib and wire basic tests.
-2. Implement `http_request` builtin + `HttpResponse/HttpError` types.
-3. Implement `json_parse` + minimal JSON accessors needed for Sentry issue listing.
+1. Implement `http_request` builtin + `HttpResponse/HttpError` types.
+2. Implement `json_parse` + minimal JSON accessors needed for Sentry issue listing.
+3. Add `stdlib/sentry.sprout` typed wrappers for listing issues.
