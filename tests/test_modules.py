@@ -76,7 +76,7 @@ class ModuleLoaderTests(unittest.TestCase):
             (root / "main.sprout").write_text(
                 """
                 module main
-                import lib exposing (missing)
+                import lib (missing)
                 fn main() -> IO Unit = print(0)
                 """,
                 encoding="utf-8",
@@ -194,7 +194,7 @@ class ModuleLoaderTests(unittest.TestCase):
             with self.assertRaises(ModuleLoadError):
                 load_module_source(root / "main.sprout")
 
-    def test_resolver_requires_unqualified_import_or_exposing(self) -> None:
+    def test_resolver_requires_unqualified_import_or_parenthesized_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "lib.sprout").write_text(

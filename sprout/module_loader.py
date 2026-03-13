@@ -19,7 +19,7 @@ class ModuleLoadError(ValueError):
 class ImportSpec:
     module: str
     alias: str | None = None
-    exposing: tuple[str, ...] | None = None
+    imported_names: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -53,25 +53,25 @@ class ModuleBundle:
 def _parse_import_line(trimmed: str, path: Path, line_no: int) -> ImportSpec:
     rest = trimmed[len("import ") :].strip()
     alias: str | None = None
-    exposing: tuple[str, ...] | None = None
+    imported_names: tuple[str, ...] | None = None
     clause_part = rest
-    exposing_key = " exposing "
-    if exposing_key in rest:
-        clause_part, exposing_part = rest.split(exposing_key, 1)
-        exposing_part = exposing_part.strip()
-        if not (exposing_part.startswith("(") and exposing_part.endswith(")")):
+
+    if "(" in rest:
+        if not rest.endswith(")"):
             raise ModuleLoadError(
-                f"Invalid import exposing clause in {path}:{line_no}; expected import x.y exposing (a, b)"
+                f"Invalid import clause in {path}:{line_no}; expected import x.y (a, b)"
             )
-        names_txt = exposing_part[1:-1].strip()
+        open_idx = rest.rfind("(")
+        clause_part = rest[:open_idx].strip()
+        names_txt = rest[open_idx + 1 : -1].strip()
         if names_txt:
             names = [name.strip() for name in names_txt.split(",")]
             for name in names:
                 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
                     raise ModuleLoadError(f"Invalid exposed symbol {name!r} in {path}:{line_no}")
-            exposing = tuple(names)
+            imported_names = tuple(names)
         else:
-            exposing = tuple()
+            imported_names = tuple()
 
     module_part = clause_part.strip()
     as_key = " as "
@@ -85,7 +85,7 @@ def _parse_import_line(trimmed: str, path: Path, line_no: int) -> ImportSpec:
     if not MODULE_RE.fullmatch(module_name):
         raise ModuleLoadError(f"Invalid module name {module_name!r} in import at {path}:{line_no}")
 
-    return ImportSpec(module=module_name, alias=alias, exposing=exposing)
+    return ImportSpec(module=module_name, alias=alias, imported_names=imported_names)
 
 
 def parse_header(source: str, path: Path) -> HeaderInfo:
@@ -180,8 +180,8 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
         for imp in info.header.imports:
             imp_path = _resolve_module(imp.module, path)
             imp_info = modules[imp_path]
-            exposed_names = list(imp.exposing or ())
-            for name in exposed_names:
+            imported_names = list(imp.imported_names or ())
+            for name in imported_names:
                 if name not in imp_info.exported:
                     raise ModuleLoadError(
                         f"Module {imp.module!r} does not export {name!r} "
@@ -197,8 +197,8 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
                     )
                 aliases[imp.alias] = imp.module
 
-            if imp.exposing is not None:
-                names = exposed_names
+            if imp.imported_names is not None:
+                names = imported_names
             elif imp.alias is None:
                 names = sorted(imp_info.exported)
             else:
@@ -263,8 +263,8 @@ def _imports_for_module(module_info: ModuleInfo, bundle: ModuleBundle) -> tuple[
         imp_info = bundle.modules[imp_path]
         if imp.alias is not None:
             aliases[imp.alias] = imp.module
-        if imp.exposing is not None:
-            names = list(imp.exposing)
+        if imp.imported_names is not None:
+            names = list(imp.imported_names)
         elif imp.alias is None:
             names = sorted(imp_info.exported)
         else:

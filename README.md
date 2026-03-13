@@ -121,7 +121,7 @@ Sprout now supports file-based modules with top-of-file headers:
 - `module a.b.c`
 - `import x.y.z`
 - `import x.y.z as alias`
-- `import x.y.z exposing (name1, name2)` (parsed for future compatibility)
+- `import x.y.z (name1, name2)`
 
 Resolution:
 
