@@ -25,8 +25,8 @@ Definition of done:
 
 ### 2) Networking and HTTP Client
 
-- [ ] `P0` Add builtin: `http_request(method, url, headers, body, timeout_ms) -> Result HttpError HttpResponse`.
-- [ ] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
+- [~] `P0` Add builtin: `http_request(method, url, headers, body, timeout_ms) -> Result HttpError HttpResponse`.
+- [x] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
 - [ ] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
 - [ ] `P1` Ensure interpreter/native parity for HTTP client builtins.
 

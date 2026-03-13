@@ -74,11 +74,19 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `fold(list, init, fn) -> value`
 - `filter(list, predicate) -> List`
 - `split_ints(s: String) -> List Int`
+- `Result e a` with helpers:
+  - `result_map(r, f)`
+  - `result_map_error(r, f)`
+  - `result_and_then(r, f)`
+  - `result_with_default(r, fallback)`
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 
+- `HttpResponse(status, headers, body)`
+- `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
 - `parse_request_line(raw) -> Maybe RequestLine`
 - `http_response(status, body) -> String`
+- `http_response_body(resp: HttpResponse) -> String`
 - `http_ok(body) -> String`
 - `http_bad_request() -> String`
 - `http_echo_response(raw_request) -> String`

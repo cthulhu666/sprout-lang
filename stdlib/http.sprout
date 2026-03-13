@@ -5,6 +5,15 @@ export type Maybe a =
   | Just a
   | Nothing
 
+export type HttpResponse =
+  | HttpResponse Int String String
+
+export type HttpError =
+  | HttpTimeout
+  | HttpNetwork String
+  | HttpBadStatus Int
+  | HttpDecode String
+
 export type RequestPathVersion =
   | RequestPathVersion String String
 
@@ -74,3 +83,7 @@ export fn http_echo_response(raw_request: String) -> String =
   match parse_request_line(raw_request) with
   | Nothing -> http_bad_request()
   | Just req -> http_ok(request_line_to_string(req))
+
+export fn http_response_body(resp: HttpResponse) -> String =
+  match resp with
+  | HttpResponse _ _ body -> body

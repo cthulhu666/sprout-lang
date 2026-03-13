@@ -322,6 +322,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("Connection: close", result)
         self.assertIn("GET /hello HTTP/1.1", result)
 
+    def test_http_stdlib_response_body_helper(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(http_response_body(HttpResponse(200, "h: v", "payload")))
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "payload")
+
 
 if __name__ == "__main__":
     unittest.main()
