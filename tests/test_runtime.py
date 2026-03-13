@@ -393,13 +393,13 @@ class RuntimeTests(unittest.TestCase):
             src = f"""
             fn main() -> IO Unit =
               match http_request("GET", "http://127.0.0.1:{port}/missing", "", "", 500) with
-              | Ok _ -> print_int(0)
+              | Ok _ -> print(0)
               | Err e ->
                   match e with
-                  | HttpBadStatus code -> print_int(code)
-                  | HttpTimeout -> print_int(-1)
-                  | HttpNetwork _ -> print_int(-2)
-                  | HttpDecode _ -> print_int(-3)
+                  | HttpBadStatus code -> print(code)
+                  | HttpTimeout -> print(-1)
+                  | HttpNetwork _ -> print(-2)
+                  | HttpDecode _ -> print(-3)
             """
             program = parse(with_http_prelude(src))
             typecheck_program(program)
