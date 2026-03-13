@@ -511,6 +511,12 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 ),
             ),
         ),
+        "term_clear": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),
+        "term_move": Scheme(vars=(), type=TFunc(INT, TFunc(INT, TApp(TConst("IO"), UNIT)))),
+        "term_hide_cursor": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),
+        "term_show_cursor": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),
+        "term_read_key": Scheme(vars=(), type=STRING),
+        "term_write": Scheme(vars=(), type=TFunc(STRING, TApp(TConst("IO"), UNIT))),
     }
 
     for info in type_decls.values():

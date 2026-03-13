@@ -1,6 +1,7 @@
 module examples.sentry_issue_browser_tui
 import examples.sentry_api (sentry_list_issues)
 import stdlib.http (Json)
+import stdlib.terminal (term_reset_screen, term_render_line)
 
 fn issue_count_text(issues: Json) -> String =
   "issues payload loaded"
@@ -14,4 +15,4 @@ fn boot_message() -> String =
   "sentry tui scaffold: run_once(org, project, token)"
 
 export fn sentry_tui_demo_main() -> IO Unit =
-  print(boot_message())
+  term_render_line(1, boot_message())

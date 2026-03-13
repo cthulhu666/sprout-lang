@@ -1,0 +1,15 @@
+module stdlib.terminal
+
+fn term_then(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+export fn term_home() -> IO Unit =
+  term_move(1, 1)
+
+export fn term_reset_screen() -> IO Unit =
+  term_then(term_clear(), term_home())
+
+export fn term_render_line(row: Int, text: String) -> IO Unit =
+  term_then(term_move(row, 1), term_write(text))
+
+export fn term_read_key_once() -> String =
+  term_read_key()

@@ -486,6 +486,33 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "1")
 
+    def test_terminal_builtins_emit_ansi(self) -> None:
+        src = """
+        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn main() -> IO Unit =
+          seq(term_clear(), seq(term_move(2, 3), term_write("x")))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        text = out.getvalue()
+        self.assertIn("\x1b[2J\x1b[H", text)
+        self.assertIn("\x1b[2;3H", text)
+        self.assertTrue(text.endswith("x"))
+
+    def test_terminal_read_key_builtin(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(term_read_key())
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        with patch.dict(os.environ, {"SPROUT_TERM_KEY": "j"}, clear=False):
+            run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "j")
+
 
 if __name__ == "__main__":
     unittest.main()

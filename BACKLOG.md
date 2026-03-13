@@ -39,8 +39,8 @@ Definition of done:
 
 ### 4) Terminal UI Runtime
 
-- [ ] `P0` Add terminal builtins: alternate screen, clear, cursor move, hide/show cursor, style/color.
-- [ ] `P0` Add key input primitive (single-key read with non-blocking/poll mode).
+- [~] `P0` Add terminal builtins: alternate screen, clear, cursor move, hide/show cursor, style/color.
+- [~] `P0` Add key input primitive (single-key read with non-blocking/poll mode).
 - [ ] `P1` Add line wrapping / viewport helpers in stdlib.
 - [ ] `P1` Add basic event loop utility for TUI apps.
 
@@ -96,4 +96,4 @@ Definition of done:
 
 1. Extend `examples/sentry_api.sprout` with issue-details and pagination helpers.
 2. Add `examples/sentry_issue_browser_tui.sprout` using current runtime primitives.
-3. Define terminal input/output primitives required by interactive TUI apps.
+3. Improve terminal key input beyond env-var stub to real non-blocking interactive reads.

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import selectors
 import socket
+import sys
 from typing import Callable, TextIO
 import urllib.error
 import urllib.request
@@ -560,6 +561,45 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             err = ADTValue(constructor="JsonDecode", args=(str(exc),))
             return ADTValue(constructor="Err", args=(err,))
 
+    def _term_emit(text: str) -> None:
+        if out is None:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        else:
+            out.write(text)
+
+    def builtin_term_clear(args: list[object]) -> object:
+        _term_emit("\x1b[2J\x1b[H")
+        return None
+
+    def builtin_term_move(args: list[object]) -> object:
+        row = args[0]
+        col = args[1]
+        if not isinstance(row, int) or not isinstance(col, int):
+            raise RuntimeError("term_move expects Int row and Int col")
+        if row < 1 or col < 1:
+            raise RuntimeError("term_move row and col must be >= 1")
+        _term_emit(f"\x1b[{row};{col}H")
+        return None
+
+    def builtin_term_hide_cursor(args: list[object]) -> object:
+        _term_emit("\x1b[?25l")
+        return None
+
+    def builtin_term_show_cursor(args: list[object]) -> object:
+        _term_emit("\x1b[?25h")
+        return None
+
+    def builtin_term_read_key(args: list[object]) -> object:
+        return os.environ.get("SPROUT_TERM_KEY", "q")
+
+    def builtin_term_write(args: list[object]) -> object:
+        text = args[0]
+        if not isinstance(text, str):
+            raise RuntimeError("term_write expects String")
+        _term_emit(text)
+        return None
+
     def builtin_tcp_listen(args: list[object]) -> object:
         port = args[0]
         if not isinstance(port, int):
@@ -658,6 +698,12 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     )
     env.set("http_request", BuiltinFunction(name="http_request", arity=5, fn=builtin_http_request))
     env.set("json_parse", BuiltinFunction(name="json_parse", arity=1, fn=builtin_json_parse))
+    env.set("term_clear", BuiltinFunction(name="term_clear", arity=0, fn=builtin_term_clear))
+    env.set("term_move", BuiltinFunction(name="term_move", arity=2, fn=builtin_term_move))
+    env.set("term_hide_cursor", BuiltinFunction(name="term_hide_cursor", arity=0, fn=builtin_term_hide_cursor))
+    env.set("term_show_cursor", BuiltinFunction(name="term_show_cursor", arity=0, fn=builtin_term_show_cursor))
+    env.set("term_read_key", BuiltinFunction(name="term_read_key", arity=0, fn=builtin_term_read_key))
+    env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))
     env.set("tcp_accept", BuiltinFunction(name="tcp_accept", arity=1, fn=builtin_tcp_accept))
     env.set("tcp_read", BuiltinFunction(name="tcp_read", arity=1, fn=builtin_tcp_read))

@@ -316,6 +316,12 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "tcp_echo_serve",
         "http_request",
         "json_parse",
+        "term_clear",
+        "term_move",
+        "term_hide_cursor",
+        "term_show_cursor",
+        "term_read_key",
+        "term_write",
     }
     all_exported: set[str] = set()
     all_declared: set[str] = set()

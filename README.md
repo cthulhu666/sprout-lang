@@ -67,6 +67,12 @@ Runtime builtins (host-implemented):
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
 - `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse`
 - `json_parse(raw: String) -> Result JsonError Json`
+- `term_clear() -> IO Unit`
+- `term_move(row: Int, col: Int) -> IO Unit`
+- `term_hide_cursor() -> IO Unit`
+- `term_show_cursor() -> IO Unit`
+- `term_read_key() -> String` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
+- `term_write(text: String) -> IO Unit`
 
 String helpers currently use `str_*` global names; they are intended to move to a future module/namespace surface.
 
@@ -108,6 +114,13 @@ HTTP client convenience module (in `stdlib/http_client.sprout`):
 - `http_get(url, headers, timeout_ms) -> Result HttpError HttpResponse`
 - `http_post(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
 - `http_put(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
+
+Terminal convenience module (in `stdlib/terminal.sprout`):
+
+- `term_home() -> IO Unit`
+- `term_reset_screen() -> IO Unit`
+- `term_render_line(row, text) -> IO Unit`
+- `term_read_key_once() -> String`
 
 Application-level example wrapper:
 

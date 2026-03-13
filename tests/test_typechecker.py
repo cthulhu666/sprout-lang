@@ -116,6 +116,18 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("json_array_next", types)
         self.assertIn("json_object_next", types)
 
+    def test_typecheck_terminal_builtins(self) -> None:
+        src = """
+        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+        fn main() -> IO Unit =
+          seq(term_hide_cursor(), seq(term_move(1, 1), term_show_cursor()))
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("term_clear", types)
+        self.assertIn("term_move", types)
+        self.assertIn("term_read_key", types)
+
 
 if __name__ == "__main__":
     unittest.main()
