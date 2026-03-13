@@ -108,6 +108,9 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(with_http_prelude(src)))
         self.assertIn("http_echo_response", types)
         self.assertIn("http_response_body", types)
+        self.assertIn("http_request", types)
+        self.assertIn("json_parse", types)
+        self.assertIn("json_get_field", types)
 
 
 if __name__ == "__main__":

@@ -479,6 +479,38 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "tcp_close": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
         "tcp_close_listener": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
         "tcp_echo_serve": Scheme(vars=(), type=TFunc(INT, TFunc(INT, TApp(TConst("IO"), UNIT)))),
+        "http_request": Scheme(
+            vars=(),
+            type=TFunc(
+                STRING,
+                TFunc(
+                    STRING,
+                    TFunc(
+                        STRING,
+                        TFunc(
+                            STRING,
+                            TFunc(
+                                INT,
+                                TApp(
+                                    TApp(TConst("Result"), TConst("HttpError")),
+                                    TConst("HttpResponse"),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "json_parse": Scheme(
+            vars=(),
+            type=TFunc(
+                STRING,
+                TApp(
+                    TApp(TConst("Result"), TConst("JsonError")),
+                    TConst("Json"),
+                ),
+            ),
+        ),
     }
 
     for info in type_decls.values():

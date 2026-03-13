@@ -65,6 +65,8 @@ Runtime builtins (host-implemented):
 - `tcp_close(conn: Int) -> IO Unit`
 - `tcp_close_listener(listener: Int) -> IO Unit`
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
+- `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse`
+- `json_parse(raw: String) -> Result JsonError Json`
 
 String helpers currently use `str_*` global names; they are intended to move to a future module/namespace surface.
 
@@ -82,14 +84,18 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 
+- `Result e a` (`Ok`, `Err`)
 - `HttpResponse(status, headers, body)`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
+- `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
 - `parse_request_line(raw) -> Maybe RequestLine`
 - `http_response(status, body) -> String`
 - `http_response_body(resp: HttpResponse) -> String`
 - `http_ok(body) -> String`
 - `http_bad_request() -> String`
 - `http_echo_response(raw_request) -> String`
+- `json_get_field(value, key) -> Maybe Json`
+- `json_get_string(value) -> Maybe String`
 
 Load stdlib prelude explicitly:
 
@@ -116,7 +122,8 @@ Load HTTP helpers:
 - `print(...)` lowering for `Int`/`Bool`/`String`/ADT values,
 - `print_int(...)` external call.
 
-Networking builtins are available in interpreter and native (`sprout compile --native`) modes.
+TCP server builtins are available in interpreter and native (`sprout compile --native`) modes.
+`http_request` is currently interpreter-only.
 
 Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
 

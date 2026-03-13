@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import io
 import os
 import socket
@@ -332,6 +333,121 @@ class RuntimeTests(unittest.TestCase):
         out = io.StringIO()
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "payload")
+
+    def test_http_request_builtin_success(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802
+                size = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(size).decode("utf-8", errors="replace")
+                payload = f"ok:{body}".encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        try:
+            server = HTTPServer(("127.0.0.1", 0), Handler)
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            src = f"""
+            fn main() -> IO Unit =
+              match http_request("POST", "http://127.0.0.1:{port}/echo", "X-Test: yes", "hello", 500) with
+              | Ok resp -> print(http_response_body(resp))
+              | Err _ -> print("err")
+            """
+            program = parse(with_http_prelude(src))
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ok:hello")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1.0)
+
+    def test_http_request_builtin_http_error(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        try:
+            server = HTTPServer(("127.0.0.1", 0), Handler)
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            src = f"""
+            fn main() -> IO Unit =
+              match http_request("GET", "http://127.0.0.1:{port}/missing", "", "", 500) with
+              | Ok _ -> print_int(0)
+              | Err e ->
+                  match e with
+                  | HttpBadStatus code -> print_int(code)
+                  | HttpTimeout -> print_int(-1)
+                  | HttpNetwork _ -> print_int(-2)
+                  | HttpDecode _ -> print_int(-3)
+            """
+            program = parse(with_http_prelude(src))
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "404")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1.0)
+
+    def test_json_parse_and_lookup(self) -> None:
+        src = """
+        fn json_string_or_default(value: Json) -> String =
+          match json_get_string(value) with
+          | Just s -> s
+          | Nothing -> "not-string"
+
+        fn title_or_missing(value: Json) -> String =
+          match json_get_field(value, "title") with
+          | Just field -> json_string_or_default(field)
+          | Nothing -> "missing"
+
+        fn main() -> IO Unit =
+          match json_parse("{\\"title\\":\\"hello\\",\\"count\\":2}") with
+          | Ok value -> print(title_or_missing(value))
+          | Err _ -> print("decode-error")
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "hello")
+
+    def test_json_parse_invalid(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          match json_parse("{bad json}") with
+          | Ok _ -> print("ok")
+          | Err e ->
+              match e with
+              | JsonDecode _ -> print("decode-error")
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "decode-error")
 
 
 if __name__ == "__main__":

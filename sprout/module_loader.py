@@ -314,6 +314,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "tcp_close",
         "tcp_close_listener",
         "tcp_echo_serve",
+        "http_request",
+        "json_parse",
     }
     all_exported: set[str] = set()
     all_declared: set[str] = set()

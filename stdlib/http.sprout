@@ -5,6 +5,10 @@ export type Maybe a =
   | Just a
   | Nothing
 
+export type Result e a =
+  | Ok a
+  | Err e
+
 export type HttpResponse =
   | HttpResponse Int String String
 
@@ -13,6 +17,25 @@ export type HttpError =
   | HttpNetwork String
   | HttpBadStatus Int
   | HttpDecode String
+
+export type JsonError =
+  | JsonDecode String
+
+export type Json =
+  | JsonNull
+  | JsonBool Bool
+  | JsonInt Int
+  | JsonString String
+  | JsonArray JsonArray
+  | JsonObject JsonObject
+
+export type JsonArray =
+  | JsonArrayCons Json JsonArray
+  | JsonArrayNil
+
+export type JsonObject =
+  | JsonObjectCons String Json JsonObject
+  | JsonObjectNil
 
 export type RequestPathVersion =
   | RequestPathVersion String String
@@ -87,3 +110,19 @@ export fn http_echo_response(raw_request: String) -> String =
 export fn http_response_body(resp: HttpResponse) -> String =
   match resp with
   | HttpResponse _ _ body -> body
+
+fn json_object_find(obj: JsonObject, key: String) -> Maybe Json =
+  match obj with
+  | JsonObjectNil -> Nothing
+  | JsonObjectCons k v rest ->
+      if k == key then Just(v) else json_object_find(rest, key)
+
+export fn json_get_field(value: Json, key: String) -> Maybe Json =
+  match value with
+  | JsonObject obj -> json_object_find(obj, key)
+  | _ -> Nothing
+
+export fn json_get_string(value: Json) -> Maybe String =
+  match value with
+  | JsonString s -> Just(s)
+  | _ -> Nothing

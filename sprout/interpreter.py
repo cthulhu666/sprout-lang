@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import selectors
 import socket
 from typing import Callable, TextIO
+import urllib.error
+import urllib.request
 
 from . import ast
 
@@ -450,6 +453,113 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             raise RuntimeError("str_starts_with expects String, String")
         return raw.startswith(prefix)
 
+    def _parse_header_block(raw: str) -> list[tuple[str, str]]:
+        headers: list[tuple[str, str]] = []
+        lines = raw.replace("\r\n", "\n").split("\n")
+        for line in lines:
+            txt = line.strip()
+            if txt == "":
+                continue
+            if ":" not in txt:
+                raise RuntimeError("http_request headers must be 'Name: Value' lines")
+            key, value = txt.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            if key == "":
+                raise RuntimeError("http_request header name cannot be empty")
+            headers.append((key, value))
+        return headers
+
+    def _http_err(constructor: str, payload: object | None = None) -> ADTValue:
+        err = ADTValue(constructor=constructor, args=() if payload is None else (payload,))
+        return ADTValue(constructor="Err", args=(err,))
+
+    def builtin_http_request(args: list[object]) -> object:
+        method = args[0]
+        url = args[1]
+        headers_raw = args[2]
+        body = args[3]
+        timeout_ms = args[4]
+        if not isinstance(method, str):
+            raise RuntimeError("http_request expects String method")
+        if not isinstance(url, str):
+            raise RuntimeError("http_request expects String url")
+        if not isinstance(headers_raw, str):
+            raise RuntimeError("http_request expects String headers")
+        if not isinstance(body, str):
+            raise RuntimeError("http_request expects String body")
+        if not isinstance(timeout_ms, int):
+            raise RuntimeError("http_request expects Int timeout_ms")
+        if timeout_ms < 1:
+            raise RuntimeError("http_request timeout_ms must be >= 1")
+
+        method_name = method.upper()
+        payload: bytes | None = body.encode("utf-8")
+        if method_name in {"GET", "HEAD"} and body == "":
+            payload = None
+
+        try:
+            request = urllib.request.Request(url=url, data=payload, method=method_name)
+            for key, value in _parse_header_block(headers_raw):
+                request.add_header(key, value)
+            with urllib.request.urlopen(request, timeout=timeout_ms / 1000.0) as response:
+                status = int(response.getcode() or 0)
+                response_headers = "".join(f"{k}: {v}\r\n" for k, v in response.headers.items())
+                response_body = response.read().decode("utf-8", errors="replace")
+                resp = ADTValue(
+                    constructor="HttpResponse",
+                    args=(status, response_headers, response_body),
+                )
+                return ADTValue(constructor="Ok", args=(resp,))
+        except TimeoutError:
+            return _http_err("HttpTimeout")
+        except urllib.error.HTTPError as exc:
+            return _http_err("HttpBadStatus", int(exc.code))
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                return _http_err("HttpTimeout")
+            return _http_err("HttpNetwork", str(exc.reason))
+        except ValueError as exc:
+            return _http_err("HttpDecode", str(exc))
+
+    def _json_to_adt(value: object) -> ADTValue:
+        if value is None:
+            return ADTValue(constructor="JsonNull", args=())
+        if isinstance(value, bool):
+            return ADTValue(constructor="JsonBool", args=(value,))
+        if isinstance(value, int):
+            return ADTValue(constructor="JsonInt", args=(value,))
+        if isinstance(value, str):
+            return ADTValue(constructor="JsonString", args=(value,))
+        if isinstance(value, list):
+            cursor = ADTValue(constructor="JsonArrayNil", args=())
+            for item in reversed(value):
+                cursor = ADTValue(
+                    constructor="JsonArrayCons",
+                    args=(_json_to_adt(item), cursor),
+                )
+            return ADTValue(constructor="JsonArray", args=(cursor,))
+        if isinstance(value, dict):
+            cursor = ADTValue(constructor="JsonObjectNil", args=())
+            for key, item in reversed(list(value.items())):
+                cursor = ADTValue(
+                    constructor="JsonObjectCons",
+                    args=(str(key), _json_to_adt(item), cursor),
+                )
+            return ADTValue(constructor="JsonObject", args=(cursor,))
+        raise RuntimeError(f"json_parse unsupported value kind: {type(value).__name__}")
+
+    def builtin_json_parse(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("json_parse expects String")
+        try:
+            parsed = json.loads(raw)
+            return ADTValue(constructor="Ok", args=(_json_to_adt(parsed),))
+        except json.JSONDecodeError as exc:
+            err = ADTValue(constructor="JsonDecode", args=(str(exc),))
+            return ADTValue(constructor="Err", args=(err,))
+
     def builtin_tcp_listen(args: list[object]) -> object:
         port = args[0]
         if not isinstance(port, int):
@@ -546,6 +656,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         "str_starts_with",
         BuiltinFunction(name="str_starts_with", arity=2, fn=builtin_str_starts_with),
     )
+    env.set("http_request", BuiltinFunction(name="http_request", arity=5, fn=builtin_http_request))
+    env.set("json_parse", BuiltinFunction(name="json_parse", arity=1, fn=builtin_json_parse))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))
     env.set("tcp_accept", BuiltinFunction(name="tcp_accept", arity=1, fn=builtin_tcp_accept))
     env.set("tcp_read", BuiltinFunction(name="tcp_read", arity=1, fn=builtin_tcp_read))

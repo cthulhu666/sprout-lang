@@ -25,15 +25,15 @@ Definition of done:
 
 ### 2) Networking and HTTP Client
 
-- [~] `P0` Add builtin: `http_request(method, url, headers, body, timeout_ms) -> Result HttpError HttpResponse`.
+- [x] `P0` Add builtin: `http_request(method, url, headers, body, timeout_ms) -> Result HttpError HttpResponse`.
 - [x] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
 - [ ] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
 - [ ] `P1` Ensure interpreter/native parity for HTTP client builtins.
 
 ### 3) JSON Support
 
-- [ ] `P0` Add `json_parse(String) -> Result JsonError Json`.
-- [ ] `P0` Add JSON query helpers (`json_get`, `json_get_string`, `json_get_int`, `json_get_array`, etc.).
+- [x] `P0` Add `json_parse(String) -> Result JsonError Json`.
+- [~] `P0` Add JSON query helpers (`json_get`, `json_get_string`, `json_get_int`, `json_get_array`, etc.).
 - [ ] `P1` Add `json_stringify(Json) -> String` for debug and payload building.
 - [ ] `P1` Add tests for malformed input and edge cases.
 
@@ -88,10 +88,12 @@ Definition of done:
 - [x] Modules with explicit exports (`export`) are implemented.
 - [x] HTTP response helpers exist in `stdlib/http.sprout`.
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
-- [ ] HTTP client, JSON, and terminal interaction primitives are not yet implemented.
+- [x] `http_request` builtin and typed HTTP result ADTs are implemented (interpreter).
+- [x] `json_parse` builtin and basic JSON accessors are implemented.
+- [ ] terminal interaction primitives are not yet implemented.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Implement `http_request` builtin + `HttpResponse/HttpError` types.
-2. Implement `json_parse` + minimal JSON accessors needed for Sentry issue listing.
-3. Add `stdlib/sentry.sprout` typed wrappers for listing issues.
+1. Add `stdlib/sentry.sprout` typed wrappers for listing issues.
+2. Add `stdlib/http_client.sprout` convenience wrappers on top of `http_request`.
+3. Expand JSON helper surface (`json_get_int`, `json_get_array`, object iteration helpers).
