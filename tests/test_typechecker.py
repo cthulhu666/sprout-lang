@@ -128,6 +128,44 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("term_move", types)
         self.assertIn("term_read_key", types)
 
+    def test_typecheck_vector_builtins(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn third_or_zero(v: Vector Int) -> Int =
+          match vector_get(v, 2) with
+          | Just x -> x
+          | Nothing -> 0
+
+        fn main() -> IO Unit =
+          print(third_or_zero(vector_append(vector_append(vector_append(vector_empty(), 1), 2), 3)))
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("vector_empty", types)
+        self.assertIn("vector_get", types)
+        self.assertIn("third_or_zero", types)
+
+    def test_typecheck_map_builtins(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn find_or(m: Map Int, key: String, fallback: Int) -> Int =
+          match map_get(m, key) with
+          | Just x -> x
+          | Nothing -> fallback
+
+        fn main() -> IO Unit =
+          print(find_or(map_set(map_empty(), "a", 7), "a", -1))
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("map_empty", types)
+        self.assertIn("map_get", types)
+        self.assertIn("find_or", types)
+
 
 if __name__ == "__main__":
     unittest.main()

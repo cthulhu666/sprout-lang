@@ -452,6 +452,12 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
     type_decls = build_type_decls(program)
 
     p_var = TVar("prelude.print.a")
+    vector_var = TVar("prelude.vector.a")
+    maybe_vector_var = TApp(TConst("Maybe"), vector_var)
+    vector_t = TApp(TConst("Vector"), vector_var)
+    map_var = TVar("prelude.map.a")
+    maybe_map_var = TApp(TConst("Maybe"), map_var)
+    map_t = TApp(TConst("Map"), map_var)
     env: dict[str, Scheme] = {
         "print": Scheme(vars=(p_var.name,), type=TFunc(p_var, TApp(TConst("IO"), UNIT))),
         "print_int": Scheme(vars=(), type=TFunc(INT, INT)),
@@ -469,6 +475,16 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "str_slice": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(INT, STRING)))),
         "str_find": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),
         "str_starts_with": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, BOOL))),
+        "vector_empty": Scheme(vars=(vector_var.name,), type=vector_t),
+        "vector_length": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, INT)),
+        "vector_get": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(INT, maybe_vector_var))),
+        "vector_set": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(INT, TFunc(vector_var, vector_t)))),
+        "vector_append": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(vector_var, vector_t))),
+        "map_empty": Scheme(vars=(map_var.name,), type=map_t),
+        "map_get": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, maybe_map_var))),
+        "map_set": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, TFunc(map_var, map_t)))),
+        "map_remove": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, map_t))),
+        "map_size": Scheme(vars=(map_var.name,), type=TFunc(map_t, INT)),
         "tcp_listen": Scheme(vars=(), type=TFunc(INT, INT)),
         "tcp_accept": Scheme(vars=(), type=TFunc(INT, INT)),
         "tcp_read": Scheme(vars=(), type=TFunc(INT, STRING)),

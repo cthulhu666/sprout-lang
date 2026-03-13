@@ -513,6 +513,69 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "j")
 
+    def test_vector_builtins(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn value_or(v: Maybe Int, fallback: Int) -> Int =
+          match v with
+          | Just x -> x
+          | Nothing -> fallback
+
+        fn main() -> IO Unit =
+          print(
+            value_or(
+              vector_get(
+                vector_set(
+                  vector_append(vector_append(vector_empty(), 10), 20),
+                  1,
+                  25
+                ),
+                1
+              ),
+              -1
+            )
+          )
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "25")
+
+    def test_map_builtins(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn value_or(v: Maybe Int, fallback: Int) -> Int =
+          match v with
+          | Just x -> x
+          | Nothing -> fallback
+
+        fn main() -> IO Unit =
+          print(
+            value_or(
+              map_get(
+                map_remove(
+                  map_set(map_set(map_empty(), "a", 1), "b", 2),
+                  "a"
+                ),
+                "b"
+              ),
+              -1
+            )
+          )
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "2")
+
 
 if __name__ == "__main__":
     unittest.main()

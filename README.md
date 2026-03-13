@@ -58,6 +58,16 @@ Runtime builtins (host-implemented):
 - `str_slice(s: String, start: Int, len: Int) -> String`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`
+- `vector_empty() -> Vector a`
+- `vector_length(v: Vector a) -> Int`
+- `vector_get(v: Vector a, index: Int) -> Maybe a`
+- `vector_set(v: Vector a, index: Int, value: a) -> Vector a`
+- `vector_append(v: Vector a, value: a) -> Vector a`
+- `map_empty() -> Map a`
+- `map_get(m: Map a, key: String) -> Maybe a`
+- `map_set(m: Map a, key: String, value: a) -> Map a`
+- `map_remove(m: Map a, key: String) -> Map a`
+- `map_size(m: Map a) -> Int`
 - `tcp_listen(port: Int) -> Int`
 - `tcp_accept(listener: Int) -> Int`
 - `tcp_read(conn: Int) -> String`
@@ -125,7 +135,7 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 Collections module (in `stdlib/collections.sprout`):
 
 - `Maybe a` (`Just`, `Nothing`)
-- `Vec a` (`VecNil`, `VecCons`) with helpers:
+- `Vec a` (`Vec (Vector a)`) with helpers:
   - `vec_empty()`
   - `vec_prepend(value, vec)`
   - `vec_append(vec, value)`
@@ -134,7 +144,7 @@ Collections module (in `stdlib/collections.sprout`):
   - `vec_set(vec, index, value)`
   - `vec_map(vec, f)`
   - `vec_fold(vec, init, f)`
-- `Dict v` (`DictNil`, `DictCons`) with helpers:
+- `Dict v` (`Dict (Map v)`) with helpers:
   - `dict_empty()`
   - `dict_get(dict, key) -> Maybe v`
   - `dict_set(dict, key, value)`

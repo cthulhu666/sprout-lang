@@ -28,6 +28,16 @@ class ADTValue:
     args: tuple[object, ...]
 
 
+@dataclass(frozen=True)
+class VectorValue:
+    items: tuple[object, ...]
+
+
+@dataclass(frozen=True)
+class MapValue:
+    items: dict[str, object]
+
+
 @dataclass
 class ConstructorValue:
     name: str
@@ -160,6 +170,11 @@ def format_value(value: object) -> str:
         if not value.args:
             return value.constructor
         return f"{value.constructor}({', '.join(format_value(arg) for arg in value.args)})"
+    if isinstance(value, VectorValue):
+        return "[" + ", ".join(format_value(item) for item in value.items) + "]"
+    if isinstance(value, MapValue):
+        rendered = ", ".join(f"{k}: {format_value(v)}" for k, v in value.items.items())
+        return "{" + rendered + "}"
     if value is None:
         return "()"
     return str(value)
@@ -454,6 +469,92 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             raise RuntimeError("str_starts_with expects String, String")
         return raw.startswith(prefix)
 
+    def builtin_vector_empty(args: list[object]) -> object:
+        return VectorValue(items=())
+
+    def builtin_vector_length(args: list[object]) -> object:
+        vec = args[0]
+        if not isinstance(vec, VectorValue):
+            raise RuntimeError("vector_length expects Vector")
+        return len(vec.items)
+
+    def builtin_vector_get(args: list[object]) -> object:
+        vec = args[0]
+        index = args[1]
+        if not isinstance(vec, VectorValue):
+            raise RuntimeError("vector_get expects Vector")
+        if not isinstance(index, int):
+            raise RuntimeError("vector_get expects Int index")
+        if index < 0 or index >= len(vec.items):
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(vec.items[index],))
+
+    def builtin_vector_set(args: list[object]) -> object:
+        vec = args[0]
+        index = args[1]
+        value = args[2]
+        if not isinstance(vec, VectorValue):
+            raise RuntimeError("vector_set expects Vector")
+        if not isinstance(index, int):
+            raise RuntimeError("vector_set expects Int index")
+        if index < 0 or index >= len(vec.items):
+            return vec
+        updated = list(vec.items)
+        updated[index] = value
+        return VectorValue(items=tuple(updated))
+
+    def builtin_vector_append(args: list[object]) -> object:
+        vec = args[0]
+        value = args[1]
+        if not isinstance(vec, VectorValue):
+            raise RuntimeError("vector_append expects Vector")
+        return VectorValue(items=vec.items + (value,))
+
+    def builtin_map_empty(args: list[object]) -> object:
+        return MapValue(items={})
+
+    def builtin_map_get(args: list[object]) -> object:
+        map_value = args[0]
+        key = args[1]
+        if not isinstance(map_value, MapValue):
+            raise RuntimeError("map_get expects Map")
+        if not isinstance(key, str):
+            raise RuntimeError("map_get expects String key")
+        if key not in map_value.items:
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(map_value.items[key],))
+
+    def builtin_map_set(args: list[object]) -> object:
+        map_value = args[0]
+        key = args[1]
+        value = args[2]
+        if not isinstance(map_value, MapValue):
+            raise RuntimeError("map_set expects Map")
+        if not isinstance(key, str):
+            raise RuntimeError("map_set expects String key")
+        updated = dict(map_value.items)
+        updated[key] = value
+        return MapValue(items=updated)
+
+    def builtin_map_remove(args: list[object]) -> object:
+        map_value = args[0]
+        key = args[1]
+        if not isinstance(map_value, MapValue):
+            raise RuntimeError("map_remove expects Map")
+        if not isinstance(key, str):
+            raise RuntimeError("map_remove expects String key")
+        if key not in map_value.items:
+            return map_value
+        updated = dict(map_value.items)
+        del updated[key]
+        return MapValue(items=updated)
+
+    def builtin_map_size(args: list[object]) -> object:
+        map_value = args[0]
+        if not isinstance(map_value, MapValue):
+            raise RuntimeError("map_size expects Map")
+        return len(map_value.items)
+
     def _parse_header_block(raw: str) -> list[tuple[str, str]]:
         headers: list[tuple[str, str]] = []
         lines = raw.replace("\r\n", "\n").split("\n")
@@ -696,6 +797,16 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         "str_starts_with",
         BuiltinFunction(name="str_starts_with", arity=2, fn=builtin_str_starts_with),
     )
+    env.set("vector_empty", BuiltinFunction(name="vector_empty", arity=0, fn=builtin_vector_empty))
+    env.set("vector_length", BuiltinFunction(name="vector_length", arity=1, fn=builtin_vector_length))
+    env.set("vector_get", BuiltinFunction(name="vector_get", arity=2, fn=builtin_vector_get))
+    env.set("vector_set", BuiltinFunction(name="vector_set", arity=3, fn=builtin_vector_set))
+    env.set("vector_append", BuiltinFunction(name="vector_append", arity=2, fn=builtin_vector_append))
+    env.set("map_empty", BuiltinFunction(name="map_empty", arity=0, fn=builtin_map_empty))
+    env.set("map_get", BuiltinFunction(name="map_get", arity=2, fn=builtin_map_get))
+    env.set("map_set", BuiltinFunction(name="map_set", arity=3, fn=builtin_map_set))
+    env.set("map_remove", BuiltinFunction(name="map_remove", arity=2, fn=builtin_map_remove))
+    env.set("map_size", BuiltinFunction(name="map_size", arity=1, fn=builtin_map_size))
     env.set("http_request", BuiltinFunction(name="http_request", arity=5, fn=builtin_http_request))
     env.set("json_parse", BuiltinFunction(name="json_parse", arity=1, fn=builtin_json_parse))
     env.set("term_clear", BuiltinFunction(name="term_clear", arity=0, fn=builtin_term_clear))

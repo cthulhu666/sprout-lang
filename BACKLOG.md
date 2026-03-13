@@ -46,8 +46,8 @@ Definition of done:
 
 ### 5) Data Structures and Collections
 
-- [~] `P1` Add practical indexed sequence type (`Array`/`Vector`) for UI lists.
-- [~] `P1` Add dictionary/map type for API payload handling.
+- [x] `P1` Add practical indexed sequence type (`Array`/`Vector`) for UI lists.
+- [x] `P1` Add dictionary/map type for API payload handling.
 - [ ] `P2` Add set type and common ops.
 
 ### 6) Modules and Packaging
@@ -90,7 +90,8 @@ Definition of done:
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
 - [x] `http_request` builtin and typed HTTP result ADTs are implemented (interpreter).
 - [x] `json_parse` builtin and basic JSON accessors are implemented.
-- [x] initial `stdlib.collections` module exists with `Vec` and `Dict` ADTs plus core helpers.
+- [x] `stdlib.collections` now uses runtime-backed `Vector` for `Vec` indexing helpers.
+- [x] `stdlib.collections` now uses runtime-backed `Map` for `Dict` helpers.
 - [ ] terminal interaction primitives are not yet fully implemented.
 
 ## Next 3 Tasks (Execution Order)
