@@ -111,6 +111,10 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("http_request", types)
         self.assertIn("json_parse", types)
         self.assertIn("json_get_field", types)
+        self.assertIn("json_get_int", types)
+        self.assertIn("json_get_array", types)
+        self.assertIn("json_array_next", types)
+        self.assertIn("json_object_next", types)
 
 
 if __name__ == "__main__":

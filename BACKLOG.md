@@ -33,7 +33,7 @@ Definition of done:
 ### 3) JSON Support
 
 - [x] `P0` Add `json_parse(String) -> Result JsonError Json`.
-- [~] `P0` Add JSON query helpers (`json_get`, `json_get_string`, `json_get_int`, `json_get_array`, etc.).
+- [x] `P0` Add JSON query helpers (`json_get`, `json_get_string`, `json_get_int`, `json_get_array`, etc.).
 - [ ] `P1` Add `json_stringify(Json) -> String` for debug and payload building.
 - [ ] `P1` Add tests for malformed input and edge cases.
 
@@ -94,6 +94,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Expand JSON helper surface (`json_get_int`, `json_get_array`, object iteration helpers).
-2. Add `examples/sentry_api.sprout` and `examples/sentry_issue_browser_tui.sprout` as app-level integrations.
+1. Add `examples/sentry_api.sprout` as a thin app-level API wrapper over generic HTTP/JSON helpers.
+2. Add `examples/sentry_issue_browser_tui.sprout` using current runtime primitives.
 3. Define terminal input/output primitives required by interactive TUI apps.

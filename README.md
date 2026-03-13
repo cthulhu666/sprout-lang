@@ -88,6 +88,7 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `HttpResponse(status, headers, body)`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
+- `JsonArrayStep` / `JsonObjectStep` traversal ADTs
 - `parse_request_line(raw) -> Maybe RequestLine`
 - `http_response(status, body) -> String`
 - `http_response_body(resp: HttpResponse) -> String`
@@ -96,6 +97,11 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `http_echo_response(raw_request) -> String`
 - `json_get_field(value, key) -> Maybe Json`
 - `json_get_string(value) -> Maybe String`
+- `json_get_int(value) -> Maybe Int`
+- `json_get_array(value) -> Maybe JsonArray`
+- `json_get_object(value) -> Maybe JsonObject`
+- `json_array_next(array) -> Maybe JsonArrayStep`
+- `json_object_next(object) -> Maybe JsonObjectStep`
 
 HTTP client convenience module (in `stdlib/http_client.sprout`):
 

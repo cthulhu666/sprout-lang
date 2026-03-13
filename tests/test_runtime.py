@@ -449,6 +449,43 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "decode-error")
 
+    def test_json_array_and_object_iteration_helpers(self) -> None:
+        src = """
+        fn int_from_json(value: Json) -> Int =
+          match json_get_int(value) with
+          | Just n -> n
+          | Nothing -> -2
+
+        fn first_int_from_step(step: JsonArrayStep) -> Int =
+          match step with
+          | JsonArrayStep first _ -> int_from_json(first)
+
+        fn first_int_from_array(arr: JsonArray) -> Int =
+          match json_array_next(arr) with
+          | Just step -> first_int_from_step(step)
+          | Nothing -> -3
+
+        fn first_int_from_items(items: Json) -> Int =
+          match json_get_array(items) with
+          | Just arr -> first_int_from_array(arr)
+          | Nothing -> -4
+
+        fn first_int_from_value(value: Json) -> Int =
+          match json_get_field(value, "items") with
+          | Just items -> first_int_from_items(items)
+          | Nothing -> -5
+
+        fn main() -> IO Unit =
+          match json_parse("{\\"items\\":[1,2]}") with
+          | Ok value -> print(first_int_from_value(value))
+          | Err _ -> print(-6)
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "1")
+
 
 if __name__ == "__main__":
     unittest.main()

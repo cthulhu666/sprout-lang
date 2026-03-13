@@ -37,6 +37,12 @@ export type JsonObject =
   | JsonObjectCons String Json JsonObject
   | JsonObjectNil
 
+export type JsonArrayStep =
+  | JsonArrayStep Json JsonArray
+
+export type JsonObjectStep =
+  | JsonObjectStep String Json JsonObject
+
 export type RequestPathVersion =
   | RequestPathVersion String String
 
@@ -126,3 +132,28 @@ export fn json_get_string(value: Json) -> Maybe String =
   match value with
   | JsonString s -> Just(s)
   | _ -> Nothing
+
+export fn json_get_int(value: Json) -> Maybe Int =
+  match value with
+  | JsonInt n -> Just(n)
+  | _ -> Nothing
+
+export fn json_get_array(value: Json) -> Maybe JsonArray =
+  match value with
+  | JsonArray arr -> Just(arr)
+  | _ -> Nothing
+
+export fn json_array_next(arr: JsonArray) -> Maybe JsonArrayStep =
+  match arr with
+  | JsonArrayNil -> Nothing
+  | JsonArrayCons head tail -> Just(JsonArrayStep(head, tail))
+
+export fn json_get_object(value: Json) -> Maybe JsonObject =
+  match value with
+  | JsonObject obj -> Just(obj)
+  | _ -> Nothing
+
+export fn json_object_next(obj: JsonObject) -> Maybe JsonObjectStep =
+  match obj with
+  | JsonObjectNil -> Nothing
+  | JsonObjectCons key value rest -> Just(JsonObjectStep(key, value, rest))
