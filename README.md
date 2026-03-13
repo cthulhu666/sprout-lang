@@ -122,6 +122,7 @@ Sprout now supports file-based modules with top-of-file headers:
 - `import x.y.z`
 - `import x.y.z as alias`
 - `import x.y.z (name1, name2)`
+- `export fn ...`, `export type ...`, `export let ...` (top-level only)
 
 Resolution:
 
@@ -133,6 +134,11 @@ Current limitation:
 
 - imported declarations are loaded into a shared global scope (no namespace qualification yet)
   except alias access via generated qualified names (`alias.symbol`)
+
+Export behavior:
+
+- if a module uses at least one `export` declaration, only explicitly exported names are importable
+- if a module uses no `export`, all top-level declarations are importable (compatibility mode)
 
 Commands:
 

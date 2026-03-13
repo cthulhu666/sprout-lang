@@ -9,6 +9,7 @@ from . import ast
 
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 DECL_RE = re.compile(r"^\s*(fn|type|let)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+EXPORT_DECL_RE = re.compile(r"^\s*export\s+(fn|type|let)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 
 
 class ModuleLoadError(ValueError):
@@ -33,6 +34,7 @@ class HeaderInfo:
 class ModuleInfo:
     path: Path
     header: HeaderInfo
+    declared: set[str]
     exported: set[str]
 
 
@@ -122,13 +124,28 @@ def parse_header(source: str, path: Path) -> HeaderInfo:
     return HeaderInfo(module=module_name, imports=imports, body=body)
 
 
-def _extract_decl_names(body: str) -> set[str]:
-    out: set[str] = set()
+def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], str]:
+    declared: set[str] = set()
+    explicit_exports: set[str] = set()
+    out_lines: list[str] = []
     for line in body.splitlines():
+        m_export = EXPORT_DECL_RE.match(line)
+        if m_export is not None:
+            name = m_export.group(2)
+            declared.add(name)
+            explicit_exports.add(name)
+            out_lines.append(line.replace("export ", "", 1))
+            continue
         m = DECL_RE.match(line)
         if m is not None:
-            out.add(m.group(2))
-    return out
+            declared.add(m.group(2))
+        out_lines.append(line)
+    sanitized = "\n".join(out_lines)
+    if body.endswith("\n"):
+        sanitized += "\n"
+    if explicit_exports:
+        return declared, explicit_exports, sanitized
+    return declared, set(declared), sanitized
 
 
 def _module_path(module_name: str) -> Path:
@@ -170,11 +187,17 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
 
         seen.add(path)
         ordered.append(path)
-        modules[path] = ModuleInfo(path=path, header=header, exported=_extract_decl_names(header.body))
+        declared, exported, sanitized_body = _extract_decl_and_export_names(header.body)
+        modules[path] = ModuleInfo(
+            path=path,
+            header=HeaderInfo(module=header.module, imports=header.imports, body=sanitized_body),
+            declared=declared,
+            exported=exported,
+        )
 
     def validate_module(path: Path) -> None:
         info = modules[path]
-        local_names = info.exported
+        local_names = info.declared
         introduced: dict[str, str] = {}
         aliases: dict[str, str] = {}
         for imp in info.header.imports:
@@ -295,8 +318,13 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "tcp_echo_serve",
     }
     all_exported: set[str] = set()
-    for info in bundle.modules.values():
+    all_declared: set[str] = set()
+    declared_by_name: dict[str, set[Path]] = {}
+    for path, info in bundle.modules.items():
         all_exported |= info.exported
+        all_declared |= info.declared
+        for name in info.declared:
+            declared_by_name.setdefault(name, set()).add(path)
 
     def resolve_name(name: str, node: object | None = None) -> str:
         line = getattr(node, "line", None)
@@ -306,7 +334,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if module_info is None:
             return name
         aliases, unqualified_imports = _imports_for_module(module_info, bundle)
-        local = module_info.exported
+        local = module_info.declared
 
         if "." in name:
             alias, symbol = name.split(".", 1)
@@ -325,6 +353,11 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if name in all_exported:
             raise ModuleLoadError(
                 f"Symbol {name!r} at {module_info.path}:{line} requires explicit import or qualification"
+            )
+        providers = declared_by_name.get(name, set())
+        if providers and module_info.path not in providers and name in all_declared:
+            raise ModuleLoadError(
+                f"Symbol {name!r} at {module_info.path}:{line} is not exported by any imported module"
             )
         return name
 
@@ -346,32 +379,46 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             for arg in p.args:
                 walk_pattern(arg, node)
 
-    def walk_expr(e: ast.Expr, node: object | None = None) -> None:
+    def _pattern_bindings(p: ast.Pattern) -> set[str]:
+        if isinstance(p, ast.VarPattern):
+            return {p.name}
+        if isinstance(p, ast.ConstructorPattern):
+            out: set[str] = set()
+            for arg in p.args:
+                out |= _pattern_bindings(arg)
+            return out
+        return set()
+
+    def walk_expr(e: ast.Expr, node: object | None = None, scope: set[str] | None = None) -> None:
+        current_scope = scope or set()
         if isinstance(e, ast.VarExpr):
-            e.name = resolve_name(e.name, e)
+            if e.name not in current_scope:
+                e.name = resolve_name(e.name, e)
             return
         if isinstance(e, ast.UnaryExpr):
-            walk_expr(e.operand, e)
+            walk_expr(e.operand, e, current_scope)
             return
         if isinstance(e, ast.BinaryExpr):
-            walk_expr(e.left, e)
-            walk_expr(e.right, e)
+            walk_expr(e.left, e, current_scope)
+            walk_expr(e.right, e, current_scope)
             return
         if isinstance(e, ast.CallExpr):
-            walk_expr(e.callee, e)
+            walk_expr(e.callee, e, current_scope)
             for arg in e.args:
-                walk_expr(arg, e)
+                walk_expr(arg, e, current_scope)
             return
         if isinstance(e, ast.IfExpr):
-            walk_expr(e.condition, e)
-            walk_expr(e.then_branch, e)
-            walk_expr(e.else_branch, e)
+            walk_expr(e.condition, e, current_scope)
+            walk_expr(e.then_branch, e, current_scope)
+            walk_expr(e.else_branch, e, current_scope)
             return
         if isinstance(e, ast.MatchExpr):
-            walk_expr(e.scrutinee, e)
+            walk_expr(e.scrutinee, e, current_scope)
             for branch in e.branches:
                 walk_pattern(branch.pattern, e)
-                walk_expr(branch.value, e)
+                branch_scope = set(current_scope)
+                branch_scope |= _pattern_bindings(branch.pattern)
+                walk_expr(branch.value, e, branch_scope)
 
     for decl in program.declarations:
         if isinstance(decl, ast.TypeDecl):
@@ -383,6 +430,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                 walk_type(param.type_expr, decl)
             if decl.return_type is not None:
                 walk_type(decl.return_type, decl)
-            walk_expr(decl.body, decl)
+            scope = {p.name for p in decl.params}
+            walk_expr(decl.body, decl, scope)
         elif isinstance(decl, ast.LetDecl):
             walk_expr(decl.value, decl)

@@ -219,6 +219,58 @@ class ModuleLoaderTests(unittest.TestCase):
             with self.assertRaises(ModuleLoadError):
                 resolve_program_names(program, bundle)
 
+    def test_import_sees_only_explicit_exports_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                export fn public() -> Int = 1
+                fn hidden() -> Int = 2
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib
+                fn main() -> IO Unit = print(hidden())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError):
+                resolve_program_names(program, bundle)
+
+    def test_import_sees_all_names_without_explicit_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                fn value() -> Int = 7
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib
+                fn main() -> IO Unit = print(value())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "7")
+
 
 if __name__ == "__main__":
     unittest.main()
