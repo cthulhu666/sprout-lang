@@ -18,6 +18,14 @@ Primary design references:
 4. Prefer explicit tradeoff notes over implicit assumptions.
 5. Use repository-managed tools via `mise` and `just` (avoid ad-hoc global tool versions).
 
+## Docs and TODO Hygiene
+
+1. Keep `README.md` and relevant `docs/*.md` aligned with current behavior after every feature or semantics change.
+2. If a task listed in roadmap/TODO sections is completed, update or remove it in the same change.
+3. If new follow-up work is discovered during implementation, add it to the appropriate roadmap/TODO section with concise scope.
+4. Do not leave stale examples or commands in docs (`.spr` vs `.sprout`, old flags, outdated syntax).
+5. Treat documentation drift as a bug: fix it before marking work complete.
+
 ## Design Change Process
 
 For any non-trivial language change, include:
