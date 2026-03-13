@@ -58,6 +58,8 @@ class Parser:
         return self.mark(ast.Program(decls), Token("META", "", eof.line, eof.column))
 
     def parse_declaration(self):
+        # `export` is a declaration modifier. Visibility is handled by module loading.
+        self.match("KEYWORD", "export")
         if self.check("KEYWORD", "type"):
             return self.parse_type_decl()
         if self.check("KEYWORD", "fn"):

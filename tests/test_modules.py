@@ -271,6 +271,35 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "7")
 
+    def test_resolver_allows_local_shadowing_of_hidden_top_level_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                export fn public(x: Int) -> Int = x + hidden()
+                fn hidden() -> Int = 1
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib (public)
+                fn use(hidden: Int) -> Int = hidden + public(1)
+                fn main() -> IO Unit = print(use(5))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "7")
+
 
 if __name__ == "__main__":
     unittest.main()

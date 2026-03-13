@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 
 KEYWORDS = {
+    "export",
     "fn",
     "let",
     "type",

@@ -72,6 +72,19 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body, ast.StringExpr)
         self.assertEqual(fn_decl.body.value, "a\r\nb")
 
+    def test_parse_export_prefix_on_declarations(self) -> None:
+        src = """
+        export type Box a =
+          | Box a
+        export fn id(x: Int) -> Int = x
+        export let answer = id(42)
+        """
+        program = parse(src)
+        self.assertEqual(len(program.declarations), 3)
+        self.assertIsInstance(program.declarations[0], ast.TypeDecl)
+        self.assertIsInstance(program.declarations[1], ast.FnDecl)
+        self.assertIsInstance(program.declarations[2], ast.LetDecl)
+
 
 if __name__ == "__main__":
     unittest.main()
