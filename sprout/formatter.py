@@ -7,7 +7,6 @@ from .tokenizer import Token, tokenize
 
 INLINE_OPS = {
     "=",
-    ":",
     "->",
     "+",
     "-",
@@ -112,11 +111,15 @@ def _split_comment(line: str) -> tuple[str, str]:
 def _format_code(code: str) -> str:
     tokens = [token for token in tokenize(code) if token.kind != "EOF"]
     parts: list[str] = []
+    prev_prev: Token | None = None
     prev: Token | None = None
-    for token in tokens:
-        if parts and _needs_space(prev, token):
+    for i, token in enumerate(tokens):
+        next_token = tokens[i + 1] if i + 1 < len(tokens) else None
+        has_equals_ahead = any(later.value == "=" for later in tokens[i + 1 :])
+        if parts and _needs_space(prev_prev, prev, token, next_token, has_equals_ahead):
             parts.append(" ")
         parts.append(_render_token(token))
+        prev_prev = prev
         prev = token
     return "".join(parts)
 
@@ -134,8 +137,20 @@ def _render_token(token: Token) -> str:
     return token.value
 
 
-def _needs_space(prev: Token | None, curr: Token) -> bool:
+def _needs_space(
+    prev_prev: Token | None,
+    prev: Token | None,
+    curr: Token,
+    next_token: Token | None,
+    has_equals_ahead: bool,
+) -> bool:
     if prev is None:
+        return False
+    if curr.value == ":":
+        return False
+    if prev.value == ":":
+        return True
+    if prev.value == "-" and _is_unary_minus(prev_prev):
         return False
     if prev.value == ",":
         return True
@@ -143,10 +158,18 @@ def _needs_space(prev: Token | None, curr: Token) -> bool:
         return False
     if curr.value in {")", "]", "}"}:
         return False
+    if prev.value in {")", "]", "}"} and curr.kind in {"IDENT", "KEYWORD", "INT", "STRING"}:
+        return True
     if prev.value in {"(", "[", "{"}:
         return False
+    if curr.kind == "KEYWORD" and prev.value not in {"(", "[", "{", "|"}:
+        return True
+    if curr.value == "{":
+        return True
     if curr.value == "(":
-        return False
+        if _is_call_like(prev_prev, prev, next_token, has_equals_ahead):
+            return False
+        return True
     if prev.value in INLINE_OPS or curr.value in INLINE_OPS:
         return True
     if prev.value == "|" or curr.value == "|":
@@ -158,3 +181,60 @@ def _needs_space(prev: Token | None, curr: Token) -> bool:
 
 def _is_word_like(token: Token) -> bool:
     return token.kind in {"IDENT", "KEYWORD", "INT", "STRING"}
+
+
+def _is_call_like(
+    prev_prev: Token | None,
+    prev: Token,
+    next_token: Token | None,
+    has_equals_ahead: bool,
+) -> bool:
+    if prev.value in {")", "]", "}"}:
+        return True
+    if prev.kind != "IDENT":
+        return False
+    if prev_prev is None:
+        return True
+    if prev_prev.value == "=":
+        return True
+    if prev_prev.kind == "KEYWORD" and prev_prev.value in {"then", "else"}:
+        return True
+    if prev_prev.kind == "KEYWORD" and prev_prev.value == "where":
+        return False
+    if prev_prev.value == "|":
+        return False
+    if prev_prev.value == "->":
+        if not has_equals_ahead:
+            return True
+        return not _looks_like_type_group(prev, next_token)
+    if prev_prev.kind == "KEYWORD":
+        return prev_prev.value not in {"import", "class", "instance", "type"}
+    if prev_prev.kind in {"IDENT", "INT", "STRING"}:
+        return False
+    if prev_prev.value in {")", "]", "}"}:
+        return True
+    if _looks_like_type_group(prev, next_token):
+        return False
+    if prev_prev.value in {"|", "="} | INLINE_OPS | {",", "(", "[", "{"}:
+        return True
+    return False
+
+
+def _is_unary_minus(prev_prev: Token | None) -> bool:
+    if prev_prev is None:
+        return True
+    if prev_prev.value in {"(", "[", "{", ",", "|"}:
+        return True
+    if prev_prev.value in INLINE_OPS:
+        return True
+    if prev_prev.kind == "KEYWORD":
+        return True
+    return False
+
+
+def _looks_like_type_group(prev: Token, next_token: Token | None) -> bool:
+    if not prev.value[:1].isupper():
+        return False
+    if next_token is None:
+        return False
+    return next_token.kind == "IDENT" and next_token.value[:1].isupper()
