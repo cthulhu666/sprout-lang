@@ -68,6 +68,11 @@ class TypeDeclInfo:
     constructors: dict[str, Type]
 
 
+@dataclass
+class ClassDeclInfo:
+    arity: int
+
+
 INT = TConst("Int")
 BOOL = TConst("Bool")
 STRING = TConst("String")
@@ -245,6 +250,64 @@ def fn_type_from_decl(decl: ast.FnDecl, state: InferState) -> Type:
     for p in reversed(param_types):
         typ = TFunc(p, typ)
     return typ
+
+
+def _type_expr_key(node: ast.TypeExpr) -> tuple:
+    if isinstance(node, ast.TypeName):
+        return ("name", node.name)
+    if isinstance(node, ast.TypeApply):
+        return ("apply", _type_expr_key(node.base), _type_expr_key(node.arg))
+    if isinstance(node, ast.TypeArrow):
+        return ("arrow", _type_expr_key(node.left), _type_expr_key(node.right))
+    raise TypeCheckError(f"Unsupported type expression {node}")
+
+
+def build_class_decls(program: ast.Program) -> dict[str, ClassDeclInfo]:
+    out: dict[str, ClassDeclInfo] = {}
+    for decl in program.declarations:
+        if not isinstance(decl, ast.ClassDecl):
+            continue
+        if decl.name in out:
+            raise tc_error(f"Duplicate class declaration: {decl.name}", decl)
+        if len(set(decl.type_params)) != len(decl.type_params):
+            raise tc_error(f"Duplicate class type parameter in {decl.name}", decl)
+        out[decl.name] = ClassDeclInfo(arity=len(decl.type_params))
+    return out
+
+
+def _validate_constraint(
+    constraint: ast.TypeConstraint,
+    class_decls: dict[str, ClassDeclInfo],
+    node: object | None = None,
+) -> None:
+    class_info = class_decls.get(constraint.class_name)
+    if class_info is None:
+        raise tc_error(f"Unknown class {constraint.class_name}", node or constraint)
+    if len(constraint.args) != class_info.arity:
+        raise tc_error(
+            f"Class {constraint.class_name} expects {class_info.arity} type arg(s), got {len(constraint.args)}",
+            node or constraint,
+        )
+
+
+def validate_class_constraints(program: ast.Program, class_decls: dict[str, ClassDeclInfo]) -> None:
+    seen_instances: set[tuple[str, tuple[tuple, ...]]] = set()
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            for constraint in decl.constraints:
+                _validate_constraint(constraint, class_decls, decl)
+        elif isinstance(decl, ast.InstanceDecl):
+            _validate_constraint(decl.constraint, class_decls, decl)
+            key = (
+                decl.constraint.class_name,
+                tuple(_type_expr_key(arg) for arg in decl.constraint.args),
+            )
+            if key in seen_instances:
+                raise tc_error(
+                    f"Duplicate instance declaration for {decl.constraint.class_name}",
+                    decl,
+                )
+            seen_instances.add(key)
 
 
 def infer_expr(
@@ -450,6 +513,8 @@ def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
 def typecheck_program(program: ast.Program) -> dict[str, str]:
     state = InferState()
     type_decls = build_type_decls(program)
+    class_decls = build_class_decls(program)
+    validate_class_constraints(program, class_decls)
 
     p_var = TVar("prelude.print.a")
     vector_var = TVar("prelude.vector.a")

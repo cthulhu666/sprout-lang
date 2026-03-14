@@ -68,7 +68,7 @@ Definition of done:
 ### 7.5) Type Classes (Collections First)
 
 - [x] `P0` Add class declarations and constrained function signatures (`class`, `where` constraints).
-- [ ] `P0` Add instance declarations and resolution (`instance` lookup, coherence checks).
+- [~] `P0` Add instance declarations and resolution (`instance` lookup, coherence checks).
 - [ ] `P0` Implement dictionary-passing lowering in typechecker/backend.
 - [ ] `P0` Add `Functor` class and instances for `List` and `Vec`.
 - [ ] `P0` Add `Foldable` class and instances for `List` and `Vec`.

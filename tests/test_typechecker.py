@@ -177,6 +177,33 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
 
+    def test_type_error_unknown_class_in_constraint(self) -> None:
+        src = """
+        fn main() -> IO Unit where Missing List =
+          print(1)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
+    def test_type_error_class_arity_mismatch(self) -> None:
+        src = """
+        class Foldable f
+        instance Foldable List Int
+        fn main() -> IO Unit = print(1)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
+    def test_type_error_duplicate_instance_head(self) -> None:
+        src = """
+        class Foldable f
+        instance Foldable List
+        instance Foldable List
+        fn main() -> IO Unit = print(1)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
 
 if __name__ == "__main__":
     unittest.main()
