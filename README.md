@@ -146,8 +146,9 @@ Collections module (in `stdlib/collections.sprout`):
   - `dict_get(dict, key) -> Maybe v`
   - `dict_set(dict, key, value)`
   - `dict_remove(dict, key)`
+  - `dict_keys(dict) -> Vec String`
+  - `dict_values(dict) -> Vec v`
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
-  - note: key/value enumeration helpers are not available yet
 - `Foldable f` class:
   - `fold_values(xs, init, step)`
 - `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`

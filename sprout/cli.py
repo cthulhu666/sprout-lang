@@ -568,6 +568,26 @@ long long map_size(long long map_h) {
   return m->len;
 }
 
+long long map_nth_key(long long map_h, long long index) {
+  MapVal* m = (MapVal*)(uintptr_t)map_h;
+  if (m == NULL) tcp_fail("map_nth_key: null map");
+  if (index < 0 || index >= m->len) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  char* key = strdup(m->entries[index].key);
+  if (key == NULL) tcp_fail("map_nth_key: out of memory");
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)key);
+}
+
+long long map_nth_value(long long map_h, long long index) {
+  MapVal* m = (MapVal*)(uintptr_t)map_h;
+  if (m == NULL) tcp_fail("map_nth_value: null map");
+  if (index < 0 || index >= m->len) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
+}
+
 long long tcp_listen(long long port) {
   if (port < 1 || port > 65535) tcp_fail("tcp_listen: port out of range");
   int fd = socket(AF_INET, SOCK_STREAM, 0);

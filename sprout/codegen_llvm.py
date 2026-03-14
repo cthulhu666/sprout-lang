@@ -55,6 +55,8 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "map_set": FnSig(name="map_set", params=[I64, I8_PTR, I64], ret=I64),
     "map_remove": FnSig(name="map_remove", params=[I64, I8_PTR], ret=I64),
     "map_size": FnSig(name="map_size", params=[I64], ret=I64),
+    "map_nth_key": FnSig(name="map_nth_key", params=[I64, I64], ret=I64),
+    "map_nth_value": FnSig(name="map_nth_value", params=[I64, I64], ret=I64),
     "tcp_listen": FnSig(name="tcp_listen", params=[I64], ret=I64),
     "tcp_accept": FnSig(name="tcp_accept", params=[I64], ret=I64),
     "tcp_read": FnSig(name="tcp_read", params=[I64], ret=I8_PTR),

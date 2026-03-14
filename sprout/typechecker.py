@@ -675,6 +675,8 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "map_set": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, TFunc(map_var, map_t)))),
         "map_remove": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, map_t))),
         "map_size": Scheme(vars=(map_var.name,), type=TFunc(map_t, INT)),
+        "map_nth_key": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, TApp(maybe_collections, STRING)))),
+        "map_nth_value": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, maybe_map_var))),
         "tcp_listen": Scheme(vars=(), type=TFunc(INT, INT)),
         "tcp_accept": Scheme(vars=(), type=TFunc(INT, INT)),
         "tcp_read": Scheme(vars=(), type=TFunc(INT, STRING)),

@@ -24,6 +24,8 @@ RAW_MAP_BUILTINS = {
     "map_set",
     "map_remove",
     "map_size",
+    "map_nth_key",
+    "map_nth_value",
 }
 
 

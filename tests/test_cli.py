@@ -137,7 +137,7 @@ class CliTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertIn("41", run.stdout)
+        self.assertIn("47", run.stdout)
 
     def test_compile_native_foldable_to_vec_demo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

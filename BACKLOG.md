@@ -50,8 +50,7 @@ Definition of done:
 - [x] `P1` Add dictionary/map type for API payload handling.
 - [x] `P1` Add stdlib text parsing helpers: `string_lines(String) -> Vec String`.
 - [x] `P1` Add stdlib digit helpers: `string_digits(String) -> Vec Int`.
-- [~] `P2` Extend collections helpers (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`).
-- [ ] `P1` Add map/dict iteration primitive so `dict_keys`/`dict_values` can be implemented in stdlib.
+- [x] `P2` Extend collections helpers (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`).
 - [ ] `P2` Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).
 - [ ] `P2` Add set type and common ops.
 
@@ -115,5 +114,5 @@ Definition of done:
 ## Next 3 Tasks (Execution Order)
 
 1. Add `Functor`/`Foldable` for `List` and `Vec` via dictionary passing, with conformance tests.
-2. Finish dict enumeration support (`dict_keys`, `dict_values`) once map iteration exists in the runtime.
-3. Add better diagnostics for module/import/export errors with source context.
+2. Add better diagnostics for module/import/export errors with source context.
+3. Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).

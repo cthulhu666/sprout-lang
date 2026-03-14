@@ -401,6 +401,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "map_set",
         "map_remove",
         "map_size",
+        "map_nth_key",
+        "map_nth_value",
         "tcp_listen",
         "tcp_accept",
         "tcp_read",

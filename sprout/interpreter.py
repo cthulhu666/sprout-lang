@@ -577,6 +577,30 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             raise RuntimeError("map_size expects Map")
         return len(map_value.items)
 
+    def builtin_map_nth_key(args: list[object]) -> object:
+        map_value = args[0]
+        index = args[1]
+        if not isinstance(map_value, MapValue):
+            raise RuntimeError("map_nth_key expects Map")
+        if not isinstance(index, int):
+            raise RuntimeError("map_nth_key expects Int index")
+        keys = list(map_value.items.keys())
+        if index < 0 or index >= len(keys):
+            return ADTValue(constructor="stdlib.collections.Nothing", args=())
+        return ADTValue(constructor="stdlib.collections.Just", args=(keys[index],))
+
+    def builtin_map_nth_value(args: list[object]) -> object:
+        map_value = args[0]
+        index = args[1]
+        if not isinstance(map_value, MapValue):
+            raise RuntimeError("map_nth_value expects Map")
+        if not isinstance(index, int):
+            raise RuntimeError("map_nth_value expects Int index")
+        values = list(map_value.items.values())
+        if index < 0 or index >= len(values):
+            return ADTValue(constructor="stdlib.collections.Nothing", args=())
+        return ADTValue(constructor="stdlib.collections.Just", args=(values[index],))
+
     def _parse_header_block(raw: str) -> list[tuple[str, str]]:
         headers: list[tuple[str, str]] = []
         lines = raw.replace("\r\n", "\n").split("\n")
@@ -831,6 +855,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     env.set("map_set", BuiltinFunction(name="map_set", arity=3, fn=builtin_map_set))
     env.set("map_remove", BuiltinFunction(name="map_remove", arity=2, fn=builtin_map_remove))
     env.set("map_size", BuiltinFunction(name="map_size", arity=1, fn=builtin_map_size))
+    env.set("map_nth_key", BuiltinFunction(name="map_nth_key", arity=2, fn=builtin_map_nth_key))
+    env.set("map_nth_value", BuiltinFunction(name="map_nth_value", arity=2, fn=builtin_map_nth_value))
     env.set("http_request", BuiltinFunction(name="http_request", arity=5, fn=builtin_http_request))
     env.set("json_parse", BuiltinFunction(name="json_parse", arity=1, fn=builtin_json_parse))
     env.set("term_clear", BuiltinFunction(name="term_clear", arity=0, fn=builtin_term_clear))

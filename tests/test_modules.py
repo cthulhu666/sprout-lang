@@ -521,6 +521,34 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "30")
 
+    def test_import_stdlib_collections_dict_keys_and_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Dict, dict_empty, dict_keys, dict_set, dict_values, vec_get_or)
+
+                fn sample() -> Dict Int =
+                  dict_set(dict_set(dict_empty(), "alpha", 7), "beta", 11)
+
+                fn main() -> IO Unit =
+                  print(
+                    vec_get_or(dict_values(sample()), 1, -100)
+                    + str_len(vec_get_or(dict_keys(sample()), 0, ""))
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "16")
+
     def test_import_stdlib_string_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
