@@ -107,6 +107,45 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run_proc.returncode, 0, msg=run_proc.stderr)
             self.assertIn("27", run_proc.stdout)
 
+    def test_run_foldable_to_vec_demo(self) -> None:
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sprout.cli",
+                "run",
+                "examples/foldable_to_vec_demo.sprout",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertIn("5", run.stdout)
+
+    def test_compile_native_foldable_to_vec_demo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "foldable_demo_bin"
+            compile_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    "examples/foldable_to_vec_demo.sprout",
+                    "--native",
+                    "-o",
+                    str(out),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
+            run_proc = subprocess.run([str(out)], check=False, capture_output=True, text=True)
+            self.assertEqual(run_proc.returncode, 0, msg=run_proc.stderr)
+            self.assertIn("5", run_proc.stdout)
+
     def test_run_rejects_raw_vector_builtins_in_non_stdlib_module(self) -> None:
         src = """
         module app.main

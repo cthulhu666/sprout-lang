@@ -144,6 +144,9 @@ Collections module (in `stdlib/collections.sprout`):
   - `dict_get(dict, key) -> Maybe v`
   - `dict_set(dict, key, value)`
   - `dict_remove(dict, key)`
+- `Foldable f` class:
+  - `fold_values(xs, init, step)`
+- `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`
 
 Low-level runtime notes:
 

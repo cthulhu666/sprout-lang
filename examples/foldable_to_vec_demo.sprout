@@ -1,0 +1,34 @@
+module app.main
+import stdlib.collections (Foldable, Vec, vec_append, vec_empty, vec_length, foldable_to_vec)
+
+type List a =
+  | Cons a (List a)
+  | Nil
+
+instance Foldable List {
+  fn fold_values(xs: List a, init: b, step: b -> a -> b) -> b =
+    list_fold_values(xs, init, step)
+}
+
+fn list_fold_values(xs: List a, init: b, step: b -> a -> b) -> b =
+  match xs with
+  | Nil -> init
+  | Cons x rest -> list_fold_values(rest, step(init, x), step)
+
+fn list_sample() -> List Int =
+  [1, 2, 3]
+
+fn vec_sample() -> Vec Int =
+  vec_append(vec_append(vec_empty(), 4), 5)
+
+fn list_to_vec(xs: List Int) -> Vec Int where Foldable List =
+  foldable_to_vec(xs)
+
+fn vec_to_vec(xs: Vec Int) -> Vec Int where Foldable Vec =
+  foldable_to_vec(xs)
+
+fn main() -> IO Unit =
+  print(
+    vec_length(list_to_vec(list_sample()))
+    + vec_length(vec_to_vec(vec_sample()))
+  )

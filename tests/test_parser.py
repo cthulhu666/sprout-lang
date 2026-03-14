@@ -85,6 +85,15 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(program.declarations[1], ast.FnDecl)
         self.assertIsInstance(program.declarations[2], ast.LetDecl)
 
+    def test_parse_list_literal_desugars_to_cons_chain(self) -> None:
+        src = "fn xs() -> List Int = [1, 2, 3]"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
+        self.assertEqual(fn_decl.body.callee.name, "Cons")
+
     def test_parse_class_instance_and_where_constraints(self) -> None:
         src = """
         class Functor f {

@@ -69,9 +69,9 @@ Definition of done:
 
 - [x] `P0` Add class declarations and constrained function signatures (`class`, `where` constraints).
 - [~] `P0` Add instance declarations and resolution (`instance` lookup, coherence checks).
-- [~] `P0` Implement dictionary-passing lowering in typechecker/backend (hidden-method-parameter lowering now supports constrained polymorphic helpers via forwarding; full first-class dictionary representation still pending).
+- [~] `P0` Implement dictionary-passing lowering in typechecker/backend (hidden-method-parameter lowering supports constrained polymorphic helpers via forwarding and now monomorphizes concrete call sites to specialized wrappers; true first-class dictionaries for polymorphic class methods are blocked on higher-rank method-field representation).
 - [ ] `P0` Add `Functor` class and instances for `List` and `Vec`.
-- [ ] `P0` Add `Foldable` class and instances for `List` and `Vec`.
+- [~] `P0` Add `Foldable` class and instances for `List` and `Vec` (`Vec` in `stdlib.collections`; `List` instance demonstrated in example pending canonical home).
 - [ ] `P1` Add `Semigroup` and `Monoid` classes with laws documented.
 - [ ] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `Show`) for collection-focused workflows.
 - [ ] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity).

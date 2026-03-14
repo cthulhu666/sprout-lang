@@ -68,6 +68,21 @@ fn vec_fold_indexed(vec: Vec a, acc: b, f: b -> a -> b, index: Int, total: Int) 
     | Nothing -> acc
     | Just value -> vec_fold_indexed(vec, f(acc, value), f, index + 1, total)
 
+export class Foldable f {
+  fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
+}
+
+instance Foldable Vec {
+  fn fold_values(xs: Vec a, init: b, step: b -> a -> b) -> b =
+    vec_fold(xs, init, step)
+}
+
+fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
+  vec_append(acc, item)
+
+export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
+  fold_values(xs, vec_empty(), vec_append_flip)
+
 export fn dict_empty() -> Dict v =
   Dict(map_empty())
 

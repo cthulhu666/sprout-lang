@@ -125,6 +125,198 @@ def _pattern_bindings(pat: ast.Pattern) -> set[str]:
     return set()
 
 
+def _rewrite_expr_with_specialization(
+    expr: ast.Expr,
+    scope: set[str],
+    hidden_count_by_fn: dict[str, int],
+    fn_decls_by_name: dict[str, ast.FnDecl],
+    specializations: dict[tuple[str, tuple[str, ...]], str],
+    generated_wrappers: list[ast.FnDecl],
+    taken_names: set[str],
+) -> ast.Expr:
+    if isinstance(expr, (ast.IntExpr, ast.BoolExpr, ast.StringExpr, ast.VarExpr)):
+        return expr
+    if isinstance(expr, ast.UnaryExpr):
+        return _clone_with_loc(
+            ast.UnaryExpr(
+                op=expr.op,
+                operand=_rewrite_expr_with_specialization(
+                    expr.operand,
+                    scope,
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+            ),
+            expr,
+        )
+    if isinstance(expr, ast.BinaryExpr):
+        return _clone_with_loc(
+            ast.BinaryExpr(
+                op=expr.op,
+                left=_rewrite_expr_with_specialization(
+                    expr.left,
+                    scope,
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+                right=_rewrite_expr_with_specialization(
+                    expr.right,
+                    scope,
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+            ),
+            expr,
+        )
+    if isinstance(expr, ast.CallExpr):
+        callee = _rewrite_expr_with_specialization(
+            expr.callee,
+            scope,
+            hidden_count_by_fn,
+            fn_decls_by_name,
+            specializations,
+            generated_wrappers,
+            taken_names,
+        )
+        args = [
+            _rewrite_expr_with_specialization(
+                arg,
+                scope,
+                hidden_count_by_fn,
+                fn_decls_by_name,
+                specializations,
+                generated_wrappers,
+                taken_names,
+            )
+            for arg in expr.args
+        ]
+
+        if isinstance(expr.callee, ast.VarExpr) and expr.callee.name not in scope:
+            callee_name = expr.callee.name
+            hidden_count = hidden_count_by_fn.get(callee_name, 0)
+            if hidden_count > 0 and len(args) >= hidden_count:
+                extra = args[-hidden_count:]
+                if all(
+                    isinstance(x, ast.VarExpr)
+                    and x.name in fn_decls_by_name
+                    and hidden_count_by_fn.get(x.name, 0) == 0
+                    for x in extra
+                ):
+                    extra_names = tuple(x.name for x in extra if isinstance(x, ast.VarExpr))
+                    key = (callee_name, extra_names)
+                    spec_name = specializations.get(key)
+                    if spec_name is None:
+                        target = fn_decls_by_name.get(callee_name)
+                        if target is None:
+                            raise TypeclassLoweringError(f"Cannot specialize unknown function {callee_name}")
+                        user_param_count = len(target.params) - hidden_count
+                        if user_param_count < 0:
+                            raise TypeclassLoweringError(f"Internal specialization error for {callee_name}")
+                        wrapper_name = f"__spec_{callee_name}_{len(specializations)}"
+                        while wrapper_name in taken_names:
+                            wrapper_name += "_"
+                        taken_names.add(wrapper_name)
+                        specializations[key] = wrapper_name
+
+                        user_params = target.params[:user_param_count]
+                        wrapper_call_args = [ast.VarExpr(p.name) for p in user_params] + [
+                            ast.VarExpr(name) for name in extra_names
+                        ]
+                        generated_wrappers.append(
+                            _clone_with_loc(
+                                ast.FnDecl(
+                                    name=wrapper_name,
+                                    params=user_params,
+                                    return_type=target.return_type,
+                                    constraints=[],
+                                    body=ast.CallExpr(callee=ast.VarExpr(callee_name), args=wrapper_call_args),
+                                ),
+                                expr,
+                            )
+                        )
+                        spec_name = wrapper_name
+
+                    return _clone_with_loc(
+                        ast.CallExpr(callee=ast.VarExpr(spec_name), args=args[:-hidden_count]),
+                        expr,
+                    )
+
+        return _clone_with_loc(ast.CallExpr(callee=callee, args=args), expr)
+    if isinstance(expr, ast.IfExpr):
+        return _clone_with_loc(
+            ast.IfExpr(
+                condition=_rewrite_expr_with_specialization(
+                    expr.condition,
+                    scope,
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+                then_branch=_rewrite_expr_with_specialization(
+                    expr.then_branch,
+                    scope,
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+                else_branch=_rewrite_expr_with_specialization(
+                    expr.else_branch,
+                    scope,
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+            ),
+            expr,
+        )
+    if isinstance(expr, ast.MatchExpr):
+        return _clone_with_loc(
+            ast.MatchExpr(
+                scrutinee=_rewrite_expr_with_specialization(
+                    expr.scrutinee,
+                    scope,
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+                branches=[
+                    ast.MatchBranch(
+                        pattern=b.pattern,
+                        value=_rewrite_expr_with_specialization(
+                            b.value,
+                            scope | _pattern_bindings(b.pattern),
+                            hidden_count_by_fn,
+                            fn_decls_by_name,
+                            specializations,
+                            generated_wrappers,
+                            taken_names,
+                        ),
+                    )
+                    for b in expr.branches
+                ],
+            ),
+            expr,
+        )
+    return expr
+
+
 def _rewrite_expr(
     expr: ast.Expr,
     scope: set[str],
@@ -493,4 +685,49 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
         )
 
     out = ast.Program(declarations=decls_for_output)
-    return _clone_with_loc(out, program)
+
+    # Monomorphize concrete typeclass call sites into lightweight wrappers.
+    hidden_count_by_fn: dict[str, int] = {}
+    for fn_name, constraints in fn_constraints.items():
+        hidden_count_by_fn[fn_name] = sum(
+            len(class_method_order.get(c.class_name, [])) for c in constraints
+        )
+
+    fn_decls_by_name = {
+        d.name: d for d in out.declarations if isinstance(d, ast.FnDecl)
+    }
+    taken_names = {
+        d.name for d in out.declarations if isinstance(d, ast.FnDecl) or isinstance(d, ast.LetDecl) or isinstance(d, ast.TypeDecl)
+    }
+    specializations: dict[tuple[str, tuple[str, ...]], str] = {}
+    generated_wrappers: list[ast.FnDecl] = []
+
+    rewritten_decls: list[object] = []
+    for decl in out.declarations:
+        if isinstance(decl, ast.FnDecl):
+            rewritten_decls.append(
+                _clone_with_loc(
+                    ast.FnDecl(
+                        name=decl.name,
+                        params=decl.params,
+                        return_type=decl.return_type,
+                        constraints=[],
+                        body=_rewrite_expr_with_specialization(
+                            decl.body,
+                            scope={p.name for p in decl.params},
+                            hidden_count_by_fn=hidden_count_by_fn,
+                            fn_decls_by_name=fn_decls_by_name,
+                            specializations=specializations,
+                            generated_wrappers=generated_wrappers,
+                            taken_names=taken_names,
+                        ),
+                    ),
+                    decl,
+                )
+            )
+        else:
+            rewritten_decls.append(decl)
+
+    rewritten_decls.extend(generated_wrappers)
+    out2 = ast.Program(declarations=rewritten_decls)
+    return _clone_with_loc(out2, program)

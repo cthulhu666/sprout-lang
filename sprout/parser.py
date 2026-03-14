@@ -315,6 +315,22 @@ class Parser:
         return expr
 
     def parse_primary(self):
+        if self.match("SYMBOL", "["):
+            open_tok = self.tokens[self.i - 1]
+            items = []
+            if not self.check("SYMBOL", "]"):
+                items.append(self.parse_expr())
+                while self.match("SYMBOL", ","):
+                    items.append(self.parse_expr())
+            self.expect("SYMBOL", "]")
+            # Desugar list literal [a, b, c] into Cons(a, Cons(b, Cons(c, Nil))).
+            out = self.mark(ast.VarExpr(name="Nil"), open_tok)
+            for item in reversed(items):
+                out = self.mark(
+                    ast.CallExpr(callee=ast.VarExpr(name="Cons"), args=[item, out]),
+                    open_tok,
+                )
+            return out
         if self.check("INT"):
             tok = self.advance()
             return self.mark(ast.IntExpr(value=int(tok.value)), tok)

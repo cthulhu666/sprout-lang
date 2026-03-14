@@ -1,5 +1,5 @@
 module app.main
-import stdlib.collections (Vec, vec_append, vec_empty, vec_fold, vec_map)
+import stdlib.collections (Foldable, Vec, vec_append, vec_empty, vec_map)
 
 type List a =
   | Cons a (List a)
@@ -7,10 +7,6 @@ type List a =
 
 class Functor f {
   fn fmap(f: a -> b, xs: f a) -> f b
-}
-
-class Foldable f {
-  fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
 }
 
 instance Functor List {
@@ -36,11 +32,6 @@ fn list_fold(xs: List a, init: b, step: b -> a -> b) -> b =
 instance Functor Vec {
   fn fmap(f: a -> b, xs: Vec a) -> Vec b =
     vec_map(xs, f)
-}
-
-instance Foldable Vec {
-  fn fold_values(xs: Vec a, init: b, step: b -> a -> b) -> b =
-    vec_fold(xs, init, step)
 }
 
 fn add_one(x: Int) -> Int = x + 1
