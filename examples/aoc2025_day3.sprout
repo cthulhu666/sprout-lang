@@ -1,5 +1,6 @@
 module examples.aoc2025_day3
 import stdlib.collections (Vec, vec_empty, vec_append, vec_length, vec_get_or, vec_set)
+import stdlib.string as string
 
 # Advent of Code 2025 Day 3: Battery Boost
 # For each bank line, pick digits in-order to maximize resulting number.
@@ -73,27 +74,27 @@ fn sum_for_count(banks: Vec (Vec Int), count: Int) -> Int =
 fn digits_from_string(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
   if index >= total then acc
   else
-    digits_from_string(raw, index + 1, total, vec_append(acc, parse_int(str_slice(raw, index, 1))))
+    digits_from_string(raw, index + 1, total, vec_append(acc, parse_int(string.slice(raw, index, 1))))
 
 fn bank_from_string(raw: String) -> Vec Int =
-  digits_from_string(raw, 0, str_len(raw), vec_empty())
+  digits_from_string(raw, 0, string.length(raw), vec_empty())
 
 fn append_if_non_empty(banks: Vec (Vec Int), current: Vec Int) -> Vec (Vec Int) =
   if vec_length(current) == 0 then banks
   else vec_append(banks, current)
 
 fn char_at(raw: String, index: Int) -> String =
-  str_slice(raw, index, 1)
+  string.slice(raw, index, 1)
 
 fn digit_value(ch: String) -> Int =
-  str_find("0123456789", ch)
+  string.find("0123456789", ch)
 
 fn parse_banks_from_text(raw: String, index: Int, total: Int, banks: Vec (Vec Int), current: Vec Int) -> Vec (Vec Int) =
   if index >= total then append_if_non_empty(banks, current)
   else
-    if str_find("\n", char_at(raw, index)) == 0 then
+    if string.find("\n", char_at(raw, index)) == 0 then
       parse_banks_from_text(raw, index + 1, total, append_if_non_empty(banks, current), vec_empty())
-    else if str_find("\r", char_at(raw, index)) == 0 then
+    else if string.find("\r", char_at(raw, index)) == 0 then
       parse_banks_from_text(raw, index + 1, total, banks, current)
     else if digit_value(char_at(raw, index)) >= 0 then
       parse_banks_from_text(raw, index + 1, total, banks, vec_append(current, digit_value(char_at(raw, index))))
@@ -101,7 +102,7 @@ fn parse_banks_from_text(raw: String, index: Int, total: Int, banks: Vec (Vec In
       parse_banks_from_text(raw, index + 1, total, banks, current)
 
 fn parse_all_banks(raw: String) -> Vec (Vec Int) =
-  parse_banks_from_text(raw, 0, str_len(raw), vec_empty(), vec_empty())
+  parse_banks_from_text(raw, 0, string.length(raw), vec_empty(), vec_empty())
 
 fn stdin_banks() -> Vec (Vec Int) =
   parse_all_banks(read_file("-"))

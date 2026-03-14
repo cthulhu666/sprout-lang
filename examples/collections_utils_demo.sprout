@@ -1,5 +1,6 @@
 module app.main
 import stdlib.collections (Dict, Vec, dict_keys, dict_set, dict_remove, dict_empty, dict_values, vec_append, vec_empty, vec_get_or, vec_reverse, vec_slice, vec_sum_by)
+import stdlib.string as string
 
 fn sample_vec() -> Vec Int =
   vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40)
@@ -15,7 +16,7 @@ fn main() -> IO Unit =
       -1
     )
     + vec_get_or(dict_values(dict_remove(sample_dict(), "first")), 0, -100)
-    + str_len(vec_get_or(dict_keys(sample_dict()), 1, ""))
+    + string.length(vec_get_or(dict_keys(sample_dict()), 1, ""))
     + vec_sum_by(sample_vec(), half)
   )
 

@@ -736,6 +736,7 @@ class RuntimeTests(unittest.TestCase):
                 """
                 module main
                 import stdlib.collections (Dict, dict_empty, dict_keys, dict_set, dict_values, vec_get_or)
+                import stdlib.string as string
 
                 fn sample() -> Dict Int =
                   dict_set(dict_set(dict_empty(), "alpha", 7), "beta", 11)
@@ -743,7 +744,7 @@ class RuntimeTests(unittest.TestCase):
                 fn main() -> IO Unit =
                   print(
                     vec_get_or(dict_values(sample()), 0, -100)
-                    + str_len(vec_get_or(dict_keys(sample()), 1, ""))
+                    + string.length(vec_get_or(dict_keys(sample()), 1, ""))
                   )
                 """,
                 encoding="utf-8",

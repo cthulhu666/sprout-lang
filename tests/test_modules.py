@@ -596,6 +596,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import stdlib.collections (Dict, dict_empty, dict_keys, dict_set, dict_values, vec_get_or)
+                import stdlib.string as string
 
                 fn sample() -> Dict Int =
                   dict_set(dict_set(dict_empty(), "alpha", 7), "beta", 11)
@@ -603,7 +604,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn main() -> IO Unit =
                   print(
                     vec_get_or(dict_values(sample()), 1, -100)
-                    + str_len(vec_get_or(dict_keys(sample()), 0, ""))
+                    + string.length(vec_get_or(dict_keys(sample()), 0, ""))
                   )
                 """,
                 encoding="utf-8",
@@ -734,6 +735,32 @@ class ModuleLoaderTests(unittest.TestCase):
             out = io.StringIO()
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "3")
+
+    def test_import_stdlib_string_runtime_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.string as string
+
+                fn main() -> IO Unit =
+                  print(
+                    if string.starts_with(string.concat("sprout", "-lang"), "sprout")
+                    then string.slice("abcdef", 1, string.length("abc"))
+                    else "nope"
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "bcd")
 
 
 if __name__ == "__main__":

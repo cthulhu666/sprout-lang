@@ -59,7 +59,6 @@ Runtime builtins (host-implemented):
 - `print_int(x: Int) -> Int` (prints and returns `x`, useful for native backend subset)
 - `read_lines(path: String) -> List String`
 - `parse_int(s: String) -> Int`
-- `split_words(s: String) -> List String` (comma/whitespace separated)
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
 - `str_slice(s: String, start: Int, len: Int) -> String`
@@ -86,7 +85,7 @@ Runtime builtins (host-implemented):
 - `term_read_key() -> String` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
 - `term_write(text: String) -> IO Unit`
 
-String helpers currently use `str_*` global names; they are intended to move to a future module/namespace surface.
+String/runtime helpers are host-implemented primitives. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
@@ -222,8 +221,18 @@ Low-level runtime notes:
 
 String module (in `stdlib/string.sprout`):
 
+- `words(raw: String) -> List String`
+- `concat(left: String, right: String) -> String`
+- `length(raw: String) -> Int`
+- `slice(raw: String, start: Int, count: Int) -> String`
+- `find(raw: String, needle: String) -> Int`
+- `starts_with(raw: String, prefix: String) -> Bool`
 - `string_lines(raw: String) -> Vec String`
 - `string_digits(raw: String) -> Vec Int`
+
+For module code, prefer:
+`import stdlib.string as string`
+then call helpers like `string.concat(...)` and `string.length(...)`.
 
 Application-level example wrapper:
 
@@ -311,11 +320,10 @@ Commands:
 
 ## Roadmap / TODO
 
-1. Move string/runtime helpers into namespaced stdlib modules.
-2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
-3. Add stronger server-side runtime models (multi-reactor as next target).
-4. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
-5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
+1. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
+2. Add stronger server-side runtime models (multi-reactor as next target).
+3. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
+4. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
 
 ## Contributing
 

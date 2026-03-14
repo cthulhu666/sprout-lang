@@ -28,6 +28,15 @@ RAW_MAP_BUILTINS = {
     "map_nth_value",
 }
 
+RAW_STRING_BUILTINS = {
+    "split_words",
+    "str_concat",
+    "str_len",
+    "str_slice",
+    "str_find",
+    "str_starts_with",
+}
+
 
 def _module_path_for_line(bundle: ModuleBundle, line: int) -> Path | None:
     for segment in bundle.segments:
@@ -103,6 +112,30 @@ def _walk_expr_has_raw_map_builtin(expr: ast.Expr) -> bool:
     return False
 
 
+def _walk_expr_has_raw_string_builtin(expr: ast.Expr) -> bool:
+    if isinstance(expr, ast.VarExpr):
+        return expr.name in RAW_STRING_BUILTINS
+    if isinstance(expr, ast.UnaryExpr):
+        return _walk_expr_has_raw_string_builtin(expr.operand)
+    if isinstance(expr, ast.BinaryExpr):
+        return _walk_expr_has_raw_string_builtin(expr.left) or _walk_expr_has_raw_string_builtin(expr.right)
+    if isinstance(expr, ast.CallExpr):
+        if _walk_expr_has_raw_string_builtin(expr.callee):
+            return True
+        return any(_walk_expr_has_raw_string_builtin(arg) for arg in expr.args)
+    if isinstance(expr, ast.IfExpr):
+        return (
+            _walk_expr_has_raw_string_builtin(expr.condition)
+            or _walk_expr_has_raw_string_builtin(expr.then_branch)
+            or _walk_expr_has_raw_string_builtin(expr.else_branch)
+        )
+    if isinstance(expr, ast.MatchExpr):
+        if _walk_expr_has_raw_string_builtin(expr.scrutinee):
+            return True
+        return any(_walk_expr_has_raw_string_builtin(branch.value) for branch in expr.branches)
+    return False
+
+
 def _ensure_allowed(bundle: ModuleBundle, node: object, reason: str) -> None:
     line = getattr(node, "line", None)
     if line is None:
@@ -141,11 +174,15 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
                 _ensure_allowed(bundle, decl.body, "vector_* builtin")
             if _walk_expr_has_raw_map_builtin(decl.body):
                 _ensure_allowed(bundle, decl.body, "map_* builtin")
+            if _walk_expr_has_raw_string_builtin(decl.body):
+                _ensure_allowed(bundle, decl.body, "string builtin")
         elif isinstance(decl, ast.LetDecl):
             if _walk_expr_has_raw_vector_builtin(decl.value):
                 _ensure_allowed(bundle, decl.value, "vector_* builtin")
             if _walk_expr_has_raw_map_builtin(decl.value):
                 _ensure_allowed(bundle, decl.value, "map_* builtin")
+            if _walk_expr_has_raw_string_builtin(decl.value):
+                _ensure_allowed(bundle, decl.value, "string builtin")
         elif isinstance(decl, ast.ClassDecl):
             for method in decl.methods:
                 for param in method.params:
@@ -167,3 +204,5 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
                     _ensure_allowed(bundle, method.body, "vector_* builtin")
                 if _walk_expr_has_raw_map_builtin(method.body):
                     _ensure_allowed(bundle, method.body, "map_* builtin")
+                if _walk_expr_has_raw_string_builtin(method.body):
+                    _ensure_allowed(bundle, method.body, "string builtin")

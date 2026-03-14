@@ -58,7 +58,7 @@ Definition of done:
 ### 6) Modules and Packaging
 
 - [x] `P0` Implement real module namespaces (remove flattened global import model).
-- [ ] `P1` Move global string helpers into namespaced stdlib module(s).
+- [x] `P1` Move global string helpers into namespaced stdlib module(s).
 - [ ] `P1` Define package/dependency conventions for third-party modules.
 
 ### 7) Tooling and Developer UX
@@ -120,6 +120,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Move global string helpers into namespaced stdlib module(s).
-2. Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
-3. Add `json_stringify(Json) -> String` for debug and payload building.
+1. Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
+2. Add `json_stringify(Json) -> String` for debug and payload building.
+3. Add tests for malformed input and edge cases.
