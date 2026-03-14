@@ -29,7 +29,7 @@ Definition of done:
 - [x] `P0` Add builtin: `http_request(method, url, headers, body, timeout_ms) -> Result HttpError HttpResponse`.
 - [x] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
 - [x] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
-- [ ] `P1` Ensure interpreter/native parity for HTTP client builtins.
+- [x] `P1` Ensure interpreter/native parity for HTTP client builtins.
 
 ### 3) JSON Support
 
@@ -107,7 +107,7 @@ Definition of done:
 - [x] Modules with explicit exports (`export`) are implemented.
 - [x] HTTP response helpers exist in `stdlib/http.sprout`.
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
-- [x] `http_request` builtin and typed HTTP result ADTs are implemented (interpreter).
+- [x] `http_request` builtin and typed HTTP result ADTs are implemented in interpreter and native modes.
 - [x] `json_parse` builtin and basic JSON accessors are implemented.
 - [x] `stdlib.collections` now uses runtime-backed `Vector` for `Vec` indexing helpers.
 - [x] `stdlib.collections` now uses runtime-backed `Map` for `Dict` helpers.
@@ -120,6 +120,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Ensure interpreter/native parity for HTTP client builtins.
-2. Move global string helpers into namespaced stdlib module(s).
-3. Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
+1. Move global string helpers into namespaced stdlib module(s).
+2. Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
+3. Add `json_stringify(Json) -> String` for debug and payload building.

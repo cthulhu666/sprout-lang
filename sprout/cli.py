@@ -138,14 +138,19 @@ def cmd_compile(
 #include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <errno.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 typedef struct {
   long long tag;
   long long f0;
   long long f1;
+  long long f2;
 } SproutObj;
 
 typedef struct ObjNode {
@@ -175,6 +180,18 @@ typedef struct {
   long long cap;
   MapEntry* entries;
 } MapVal;
+
+typedef struct {
+  char* data;
+  size_t len;
+  size_t cap;
+} ByteBuf;
+
+typedef struct {
+  char* host;
+  char* port;
+  char* path;
+} HttpUrl;
 
 static ObjNode* g_objs = NULL;
 static CtorMeta g_ctor_meta[2048];
@@ -241,6 +258,10 @@ static void print_inline_obj(SproutObj* o) {
   if (m->arity > 1) {
     printf(", ");
     print_inline_value(o->f1);
+  }
+  if (m->arity > 2) {
+    printf(", ");
+    print_inline_value(o->f2);
   }
   printf(")");
 }
@@ -369,6 +390,7 @@ long long sprout_make0(long long tag) {
   o->tag = tag;
   o->f0 = 0;
   o->f1 = 0;
+  o->f2 = 0;
   register_obj(o);
   return box_ptr(o);
 }
@@ -377,6 +399,7 @@ long long sprout_make1(long long tag, long long a0) {
   o->tag = tag;
   o->f0 = a0;
   o->f1 = 0;
+  o->f2 = 0;
   register_obj(o);
   return box_ptr(o);
 }
@@ -385,6 +408,16 @@ long long sprout_make2(long long tag, long long a0, long long a1) {
   o->tag = tag;
   o->f0 = a0;
   o->f1 = a1;
+  o->f2 = 0;
+  register_obj(o);
+  return box_ptr(o);
+}
+long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
+  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  o->tag = tag;
+  o->f0 = a0;
+  o->f1 = a1;
+  o->f2 = a2;
   register_obj(o);
   return box_ptr(o);
 }
@@ -393,7 +426,9 @@ long long sprout_tag(long long h) {
 }
 long long sprout_field(long long h, long long idx) {
   SproutObj* o = unbox_ptr(h);
-  return idx == 0 ? o->f0 : o->f1;
+  if (idx == 0) return o->f0;
+  if (idx == 1) return o->f1;
+  return o->f2;
 }
 
 static void tcp_fail(const char* msg) {
@@ -457,6 +492,298 @@ _Bool str_starts_with(const char* s, const char* prefix) {
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with: null input");
   size_t prefix_len = strlen(prefix);
   return strncmp(s, prefix, prefix_len) == 0;
+}
+
+static void buf_init(ByteBuf* buf) {
+  buf->data = NULL;
+  buf->len = 0;
+  buf->cap = 0;
+}
+
+static void buf_reserve(ByteBuf* buf, size_t want) {
+  if (want <= buf->cap) return;
+  size_t next = buf->cap == 0 ? 256 : buf->cap;
+  while (next < want) next *= 2;
+  char* grown = (char*)realloc(buf->data, next);
+  if (grown == NULL) tcp_fail("http_request: out of memory");
+  buf->data = grown;
+  buf->cap = next;
+}
+
+static void buf_append_bytes(ByteBuf* buf, const char* data, size_t len) {
+  buf_reserve(buf, buf->len + len + 1);
+  memcpy(buf->data + buf->len, data, len);
+  buf->len += len;
+  buf->data[buf->len] = '\\0';
+}
+
+static void buf_append_cstr(ByteBuf* buf, const char* text) {
+  buf_append_bytes(buf, text, strlen(text));
+}
+
+static char* dup_slice(const char* start, size_t len) {
+  char* out = (char*)malloc(len + 1);
+  if (out == NULL) tcp_fail("http_request: out of memory");
+  memcpy(out, start, len);
+  out[len] = '\\0';
+  return out;
+}
+
+static char* dup_cstr(const char* text) {
+  return dup_slice(text, strlen(text));
+}
+
+static char* upper_copy(const char* text) {
+  size_t len = strlen(text);
+  char* out = dup_slice(text, len);
+  for (size_t i = 0; i < len; i++) {
+    if (out[i] >= 'a' && out[i] <= 'z') out[i] = (char)(out[i] - 'a' + 'A');
+  }
+  return out;
+}
+
+static long long http_err0(const char* ctor_name) {
+  long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+}
+
+static long long http_err1(const char* ctor_name, long long payload) {
+  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+}
+
+static long long http_ok_response(long long status, const char* headers, const char* body) {
+  long long resp = sprout_make3(
+    find_ctor_tag_by_name("HttpResponse"),
+    status,
+    (long long)(uintptr_t)headers,
+    (long long)(uintptr_t)body
+  );
+  return sprout_make1(find_ctor_tag_by_name("Ok"), resp);
+}
+
+static int parse_http_url(const char* url, HttpUrl* out, char** err) {
+  const char* prefix = "http://";
+  size_t prefix_len = strlen(prefix);
+  if (strncmp(url, prefix, prefix_len) != 0) {
+    *err = dup_cstr("unsupported url scheme");
+    return 0;
+  }
+  const char* rest = url + prefix_len;
+  const char* slash = strchr(rest, '/');
+  const char* host_end = slash != NULL ? slash : rest + strlen(rest);
+  if (host_end == rest) {
+    *err = dup_cstr("missing host");
+    return 0;
+  }
+  const char* colon = NULL;
+  for (const char* p = rest; p < host_end; p++) {
+    if (*p == ':') colon = p;
+  }
+  if (colon != NULL) {
+    if (colon == rest || colon + 1 >= host_end) {
+      *err = dup_cstr("invalid host or port");
+      return 0;
+    }
+    out->host = dup_slice(rest, (size_t)(colon - rest));
+    out->port = dup_slice(colon + 1, (size_t)(host_end - colon - 1));
+  } else {
+    out->host = dup_slice(rest, (size_t)(host_end - rest));
+    out->port = dup_cstr("80");
+  }
+  out->path = slash != NULL ? dup_cstr(slash) : dup_cstr("/");
+  return 1;
+}
+
+static void free_http_url(HttpUrl* url) {
+  free(url->host);
+  free(url->port);
+  free(url->path);
+}
+
+static void append_header_block(ByteBuf* out, const char* raw) {
+  const char* line = raw;
+  while (*line != '\\0') {
+    const char* end = line;
+    while (*end != '\\0' && *end != '\\n' && *end != '\\r') end++;
+    const char* content_end = end;
+    while (content_end > line && (content_end[-1] == ' ' || content_end[-1] == '\\t')) content_end--;
+    const char* content_start = line;
+    while (content_start < content_end && (*content_start == ' ' || *content_start == '\\t')) content_start++;
+    if (content_start < content_end) {
+      const char* colon = NULL;
+      for (const char* p = content_start; p < content_end; p++) {
+        if (*p == ':') {
+          colon = p;
+          break;
+        }
+      }
+      if (colon == NULL) tcp_fail("http_request: headers must be 'Name: Value' lines");
+      if (colon == content_start) tcp_fail("http_request: header name cannot be empty");
+      buf_append_bytes(out, content_start, (size_t)(content_end - content_start));
+      buf_append_cstr(out, "\\r\\n");
+    }
+    while (*end == '\\r' || *end == '\\n') end++;
+    line = end;
+  }
+}
+
+static int send_all(int fd, const char* data, size_t len) {
+  while (len > 0) {
+    ssize_t wrote = send(fd, data, len, 0);
+    if (wrote <= 0) return 0;
+    data += wrote;
+    len -= (size_t)wrote;
+  }
+  return 1;
+}
+
+long long http_request(const char* method, const char* url, const char* headers_raw, const char* body, long long timeout_ms) {
+  if (method == NULL) tcp_fail("http_request: null method");
+  if (url == NULL) tcp_fail("http_request: null url");
+  if (headers_raw == NULL) tcp_fail("http_request: null headers");
+  if (body == NULL) tcp_fail("http_request: null body");
+  if (timeout_ms < 1) tcp_fail("http_request: timeout_ms must be >= 1");
+
+  HttpUrl parsed = {0};
+  char* url_err = NULL;
+  if (!parse_http_url(url, &parsed, &url_err)) {
+    long long out = http_err1("HttpDecode", (long long)(uintptr_t)url_err);
+    return out;
+  }
+
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  struct addrinfo* infos = NULL;
+  int gai = getaddrinfo(parsed.host, parsed.port, &hints, &infos);
+  if (gai != 0) {
+    free_http_url(&parsed);
+    return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
+  }
+
+  int fd = -1;
+  int last_errno = 0;
+  for (struct addrinfo* it = infos; it != NULL; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd < 0) {
+      last_errno = errno;
+      continue;
+    }
+    struct timeval tv;
+    tv.tv_sec = (time_t)(timeout_ms / 1000);
+    tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
+    last_errno = errno;
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(infos);
+  if (fd < 0) {
+    free_http_url(&parsed);
+    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("HttpTimeout");
+    return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
+  }
+
+  ByteBuf header_block;
+  buf_init(&header_block);
+  append_header_block(&header_block, headers_raw);
+
+  ByteBuf request;
+  buf_init(&request);
+  char* method_upper = upper_copy(method);
+  buf_append_cstr(&request, method_upper);
+  buf_append_cstr(&request, " ");
+  buf_append_cstr(&request, parsed.path);
+  buf_append_cstr(&request, " HTTP/1.1\\r\\nHost: ");
+  buf_append_cstr(&request, parsed.host);
+  buf_append_cstr(&request, "\\r\\nConnection: close\\r\\n");
+  buf_append_bytes(&request, header_block.data == NULL ? "" : header_block.data, header_block.len);
+  char content_len[64];
+  snprintf(content_len, sizeof(content_len), "Content-Length: %zu\\r\\n", strlen(body));
+  buf_append_cstr(&request, content_len);
+  buf_append_cstr(&request, "\\r\\n");
+  buf_append_cstr(&request, body);
+
+  free(method_upper);
+  free(header_block.data);
+
+  if (!send_all(fd, request.data, request.len)) {
+    int send_errno = errno;
+    free(request.data);
+    close(fd);
+    free_http_url(&parsed);
+    if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) return http_err0("HttpTimeout");
+    return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(send_errno)));
+  }
+  free(request.data);
+
+  ByteBuf response;
+  buf_init(&response);
+  while (1) {
+    char chunk[4096];
+    ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
+    if (n == 0) break;
+    if (n < 0) {
+      int recv_errno = errno;
+      free(response.data);
+      close(fd);
+      free_http_url(&parsed);
+      if (recv_errno == EAGAIN || recv_errno == EWOULDBLOCK) return http_err0("HttpTimeout");
+      return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(recv_errno)));
+    }
+    buf_append_bytes(&response, chunk, (size_t)n);
+  }
+  close(fd);
+  free_http_url(&parsed);
+
+  const char* sep = strstr(response.data, "\\r\\n\\r\\n");
+  size_t sep_len = 4;
+  if (sep == NULL) {
+    sep = strstr(response.data, "\\n\\n");
+    sep_len = 2;
+  }
+  if (sep == NULL) {
+    free(response.data);
+    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid http response"));
+  }
+
+  const char* line_end = strstr(response.data, "\\r\\n");
+  size_t line_sep_len = 2;
+  if (line_end == NULL || line_end > sep) {
+    line_end = strstr(response.data, "\\n");
+    line_sep_len = 1;
+  }
+  if (line_end == NULL || line_end > sep) {
+    free(response.data);
+    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+  }
+
+  const char* code_start = strchr(response.data, ' ');
+  if (code_start == NULL || code_start >= line_end) {
+    free(response.data);
+    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+  }
+  code_start++;
+  char* code_end = NULL;
+  long long status = strtoll(code_start, &code_end, 10);
+  if (code_end == code_start || code_end > line_end) {
+    free(response.data);
+    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status code"));
+  }
+  if (status >= 400) {
+    free(response.data);
+    return http_err1("HttpBadStatus", status);
+  }
+
+  const char* headers_start = line_end + line_sep_len;
+  char* headers = dup_slice(headers_start, (size_t)(sep - headers_start));
+  char* body_out = dup_cstr(sep + sep_len);
+  free(response.data);
+  return http_ok_response(status, headers, body_out);
 }
 
 long long vector_empty() {

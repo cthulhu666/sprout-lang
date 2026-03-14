@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import unittest
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 import socket
 import sys
 import time
 
 from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
+from sprout.stdlib import with_http_prelude
 
 
 class CodegenTests(unittest.TestCase):
@@ -178,6 +181,52 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("declare ptr @str_slice(ptr, i64, i64)", ir)
         self.assertIn("declare i64 @str_find(ptr, ptr)", ir)
         self.assertIn("declare i1 @str_starts_with(ptr, ptr)", ir)
+
+    def test_compile_http_request_to_llvm(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
+          | Ok resp -> print(http_response_body(resp))
+          | Err _ -> print("err")
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare i64 @http_request(ptr, ptr, ptr, ptr, i64)", ir)
+        self.assertIn("declare i64 @sprout_make3(i64, i64, i64, i64)", ir)
+        self.assertIn("call i64 @sprout_field(i64 %resp, i64 2)", ir)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_compile_http_request_program(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
+          | Ok resp -> print(http_response_body(resp))
+          | Err _ -> print("err")
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            compile_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    "--with-http-stdlib",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
+            self.assertTrue(bin_path.exists())
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_and_execute(self) -> None:
@@ -492,6 +541,119 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
             self.assertEqual(run.returncode, 42)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_http_request_success(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802
+                size = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(size).decode("utf-8", errors="replace")
+                payload = f"ok:{body}".encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        try:
+            server = HTTPServer(("127.0.0.1", 0), Handler)
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            src = f"""
+            fn main() -> IO Unit =
+              match http_request("POST", "http://127.0.0.1:{port}/echo", "X-Test: yes", "hello", 500) with
+              | Ok resp -> print(http_response_body(resp))
+              | Err _ -> print("err")
+            """
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                spr_path = tmp_path / "prog.sprout"
+                bin_path = tmp_path / "prog"
+                spr_path.write_text(src, encoding="utf-8")
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sprout.cli",
+                        "compile",
+                        "--with-http-stdlib",
+                        str(spr_path),
+                        "--native",
+                        "-o",
+                        str(bin_path),
+                    ],
+                    check=True,
+                )
+                run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, msg=run.stderr)
+                self.assertEqual(run.stdout.strip(), "ok:hello")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1.0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_http_request_http_error(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        try:
+            server = HTTPServer(("127.0.0.1", 0), Handler)
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            src = f"""
+            fn main() -> IO Unit =
+              match http_request("GET", "http://127.0.0.1:{port}/missing", "", "", 500) with
+              | Ok _ -> print(0)
+              | Err e ->
+                  match e with
+                  | HttpBadStatus code -> print(code)
+                  | HttpTimeout -> print(-1)
+                  | HttpNetwork _ -> print(-2)
+                  | HttpDecode _ -> print(-3)
+            """
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                spr_path = tmp_path / "prog.sprout"
+                bin_path = tmp_path / "prog"
+                spr_path.write_text(src, encoding="utf-8")
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sprout.cli",
+                        "compile",
+                        "--with-http-stdlib",
+                        str(spr_path),
+                        "--native",
+                        "-o",
+                        str(bin_path),
+                    ],
+                    check=True,
+                )
+                run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, msg=run.stderr)
+                self.assertEqual(run.stdout.strip(), "404")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1.0)
 
 
 if __name__ == "__main__":
