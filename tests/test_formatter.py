@@ -31,6 +31,13 @@ class FormatterTests(unittest.TestCase):
             "fn mod100(n: Int) -> Int =\n  n - (n / 100) * 100\n",
         )
 
+    def test_format_source_keeps_spaces_around_semigroup_append_operator(self) -> None:
+        src = 'fn prefix_error(e: String) -> String =\n  "error:"++e\n'
+        self.assertEqual(
+            format_source(src),
+            'fn prefix_error(e: String) -> String =\n  "error:" ++ e\n',
+        )
+
     def test_format_source_preserves_spacing_for_imports_and_type_constructors(self) -> None:
         src = (
             "import stdlib.collections (Vec, vec_empty)\n"
