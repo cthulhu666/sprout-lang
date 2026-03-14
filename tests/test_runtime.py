@@ -11,7 +11,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from sprout import parse, run_program, typecheck_program
+from sprout import RuntimeError, parse, run_program, typecheck_program
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude, with_prelude
 from sprout.typeclass_lowering import lower_typeclasses
@@ -164,6 +164,29 @@ class RuntimeTests(unittest.TestCase):
         out = io.StringIO()
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "12502500")
+
+    def test_read_file_builtin_missing_path_reports_runtime_error_convention(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(read_file("/definitely/missing/sprout-runtime-test.txt"))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        with self.assertRaises(RuntimeError) as ctx:
+            run_program(program)
+        self.assertIn("runtime error: builtin `read_file`:", str(ctx.exception))
+        self.assertIn("No such file", str(ctx.exception))
+
+    def test_tcp_close_unknown_handle_reports_runtime_error_convention(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          tcp_close(1)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        with self.assertRaises(RuntimeError) as ctx:
+            run_program(program)
+        self.assertIn("runtime error: builtin `tcp_close`: got unknown connection handle", str(ctx.exception))
 
     def test_tcp_echo_single_connection(self) -> None:
         try:

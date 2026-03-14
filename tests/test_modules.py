@@ -87,6 +87,9 @@ class ModuleLoaderTests(unittest.TestCase):
                 load_module_source(root / "main.sprout")
             self.assertIn("exported names", str(ctx.exception))
             self.assertIn("'ok'", str(ctx.exception))
+            self.assertIn("main.sprout:3:17", str(ctx.exception))
+            self.assertIn("3 |                 import lib (missing)", str(ctx.exception))
+            self.assertIn("^", str(ctx.exception))
 
     def test_load_module_source_rejects_duplicate_implicit_namespace_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -257,6 +260,37 @@ class ModuleLoaderTests(unittest.TestCase):
                 resolve_program_names(program, bundle)
             self.assertIn("requires explicit import or qualification", str(ctx.exception))
             self.assertIn("Use `import module (answer)`", str(ctx.exception))
+            self.assertIn("main.sprout:5:25", str(ctx.exception))
+            self.assertIn("5 |                   print(answer())", str(ctx.exception))
+            self.assertIn("^", str(ctx.exception))
+
+    def test_resolver_reports_source_context_for_unknown_qualified_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                export fn answer() -> Int = 42
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib
+                fn main() -> IO Unit =
+                  print(lib.missing())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError) as ctx:
+                resolve_program_names(program, bundle)
+            self.assertIn("does not export value 'missing'", str(ctx.exception))
+            self.assertIn("main.sprout:5:25", str(ctx.exception))
+            self.assertIn("5 |                   print(lib.missing())", str(ctx.exception))
 
     def test_resolver_unknown_alias_lists_available_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

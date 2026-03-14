@@ -20,7 +20,7 @@ Definition of done:
 ### 1) Language Core and Safety
 
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
-- [ ] `P0` Define runtime error conventions for effectful builtins (no silent exits).
+- [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [ ] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 
 ### 2) Networking and HTTP Client
@@ -63,7 +63,7 @@ Definition of done:
 ### 7) Tooling and Developer UX
 
 - [ ] `P1` Add REPL (parse/typecheck/eval loop).
-- [ ] `P1` Add better diagnostics for module/import/export errors with source context.
+- [x] `P1` Add better diagnostics for module/import/export errors with source context.
 - [ ] `P2` Add formatter/linter baseline.
 
 ### 7.5) Type Classes (Collections First)
@@ -109,10 +109,11 @@ Definition of done:
 - [x] `json_parse` builtin and basic JSON accessors are implemented.
 - [x] `stdlib.collections` now uses runtime-backed `Vector` for `Vec` indexing helpers.
 - [x] `stdlib.collections` now uses runtime-backed `Map` for `Dict` helpers.
+- [x] Runtime builtin failures now use a shared `runtime error: builtin ...` convention in interpreter and native paths.
 - [ ] terminal interaction primitives are not yet fully implemented.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add better diagnostics for module/import/export errors with source context.
-2. Add more vector utility combinators (next likely: `vec_max_subsequence_by_count`).
-3. Define runtime error conventions for effectful builtins (no silent exits).
+1. Add more vector utility combinators (next likely: `vec_max_subsequence_by_count`).
+2. Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
+3. Add REPL (parse/typecheck/eval loop).

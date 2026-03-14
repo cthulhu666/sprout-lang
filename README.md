@@ -165,6 +165,10 @@ Low-level runtime notes:
 - `Vector` and `vector_*` builtins exist as backend/runtime primitives.
 - For application code, prefer `stdlib.collections` (`Vec`/`Dict`) as the stable public API.
 - CLI/module checks reject raw `Vector`/`Map` and `vector_*`/`map_*` usage outside `stdlib.*` modules.
+- Builtin failures now follow one convention:
+  `runtime error: builtin \`name\`: detail`
+- `sprout run` surfaces that as `error: runtime error: builtin ...`.
+- Native binaries print the same runtime-error message to stderr and exit with status `1`.
 
 String module (in `stdlib/string.sprout`):
 

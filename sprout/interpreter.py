@@ -22,6 +22,21 @@ def rt_error(message: str, node: object | None = None) -> RuntimeError:
     return RuntimeError(f"{message}{ast.loc_str(node)}")
 
 
+def _builtin_runtime_message(name: str, detail: str) -> str:
+    return f"runtime error: builtin `{name}`: {detail}"
+
+
+def _normalize_builtin_runtime_error(name: str, message: str) -> str:
+    if message.startswith("runtime error:"):
+        return message
+    detail = message
+    if message.startswith(f"{name}:"):
+        detail = message[len(name) + 1 :].strip()
+    elif message.startswith(f"{name} "):
+        detail = message[len(name) + 1 :].strip()
+    return _builtin_runtime_message(name, detail)
+
+
 @dataclass(frozen=True)
 class ADTValue:
     constructor: str
@@ -330,7 +345,17 @@ def apply_callable(callee: object, args: list[object]) -> object:
         if isinstance(callee, BuiltinFunction):
             if len(args) != callee.arity:
                 raise RuntimeError(f"Builtin {callee.name} expects {callee.arity} args, got {len(args)}")
-            return callee.fn(args)
+            try:
+                return callee.fn(args)
+            except RuntimeError as exc:
+                raise RuntimeError(_normalize_builtin_runtime_error(callee.name, str(exc))) from exc
+            except OSError as exc:
+                detail = exc.strerror or str(exc)
+                if exc.filename is not None:
+                    detail = f"{detail}: {exc.filename}"
+                raise RuntimeError(_builtin_runtime_message(callee.name, detail)) from exc
+            except ValueError as exc:
+                raise RuntimeError(_builtin_runtime_message(callee.name, str(exc))) from exc
 
         if isinstance(callee, ConstructorValue):
             if len(args) != callee.arity:
@@ -434,14 +459,21 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             txt = line.strip()
             if txt == "":
                 continue
-            items.append(int(txt))
+            try:
+                items.append(int(txt))
+            except ValueError as exc:
+                raise RuntimeError(f"read_int_lines invalid integer line {txt!r}") from exc
         return VectorValue(items=tuple(items))
 
     def builtin_parse_int(args: list[object]) -> object:
         raw = args[0]
         if not isinstance(raw, str):
             raise RuntimeError("parse_int expects String")
-        return int(raw.strip())
+        txt = raw.strip()
+        try:
+            return int(txt)
+        except ValueError as exc:
+            raise RuntimeError(f"parse_int invalid integer {txt!r}") from exc
 
     def builtin_split_words(args: list[object]) -> object:
         raw = args[0]

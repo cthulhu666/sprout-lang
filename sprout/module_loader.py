@@ -31,6 +31,8 @@ class ImportSpec:
     module: str
     alias: str | None = None
     imported_names: tuple[str, ...] | None = None
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class HeaderInfo:
     module: str | None
     imports: list[ImportSpec]
     body: str
+    body_line_numbers: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ class ModuleSegment:
     path: Path
     start_line: int
     end_line: int
+    source_lines: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -73,7 +77,31 @@ class ModuleSymbols:
     exported_type_constructors: dict[str, dict[str, str]]
 
 
-def _parse_import_line(trimmed: str, path: Path, line_no: int) -> ImportSpec:
+def _source_line(path: Path, line_no: int) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if 1 <= line_no <= len(lines):
+        return lines[line_no - 1]
+    return ""
+
+
+def _format_source_context(path: Path, line_no: int, column: int = 1) -> str:
+    source = _source_line(path, line_no)
+    gutter = f"{line_no}"
+    caret_pad = max(column - 1, 0)
+    return (
+        f"--> {path}:{line_no}:{column}\n"
+        f"{gutter} | {source}\n"
+        f"{' ' * len(gutter)} | {' ' * caret_pad}^"
+    )
+
+
+def _module_error(message: str, path: Path, line_no: int, column: int = 1) -> ModuleLoadError:
+    return ModuleLoadError(f"{message}\n{_format_source_context(path, line_no, column)}")
+
+
+def _parse_import_line(line: str, path: Path, line_no: int) -> ImportSpec:
+    column = line.index("import ") + 1
+    trimmed = line.strip()
     rest = trimmed[len("import ") :].strip()
     alias: str | None = None
     imported_names: tuple[str, ...] | None = None
@@ -81,8 +109,11 @@ def _parse_import_line(trimmed: str, path: Path, line_no: int) -> ImportSpec:
 
     if "(" in rest:
         if not rest.endswith(")"):
-            raise ModuleLoadError(
-                f"Invalid import clause in {path}:{line_no}; expected import x.y (a, b)"
+            raise _module_error(
+                "Invalid import clause; expected `import x.y (a, b)`",
+                path,
+                line_no,
+                column,
             )
         open_idx = rest.rfind("(")
         clause_part = rest[:open_idx].strip()
@@ -91,7 +122,12 @@ def _parse_import_line(trimmed: str, path: Path, line_no: int) -> ImportSpec:
             names = [name.strip() for name in names_txt.split(",")]
             for name in names:
                 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-                    raise ModuleLoadError(f"Invalid exposed symbol {name!r} in {path}:{line_no}")
+                    raise _module_error(
+                        f"Invalid exposed symbol {name!r}",
+                        path,
+                        line_no,
+                        column,
+                    )
             imported_names = tuple(names)
         else:
             imported_names = tuple()
@@ -102,19 +138,26 @@ def _parse_import_line(trimmed: str, path: Path, line_no: int) -> ImportSpec:
         module_part, alias_part = module_part.split(as_key, 1)
         alias = alias_part.strip()
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", alias):
-            raise ModuleLoadError(f"Invalid import alias {alias!r} in {path}:{line_no}")
+            raise _module_error(f"Invalid import alias {alias!r}", path, line_no, column)
 
     module_name = module_part.strip()
     if not MODULE_RE.fullmatch(module_name):
-        raise ModuleLoadError(f"Invalid module name {module_name!r} in import at {path}:{line_no}")
+        raise _module_error(f"Invalid module name {module_name!r} in import", path, line_no, column)
 
-    return ImportSpec(module=module_name, alias=alias, imported_names=imported_names)
+    return ImportSpec(
+        module=module_name,
+        alias=alias,
+        imported_names=imported_names,
+        line=line_no,
+        column=column,
+    )
 
 
 def parse_header(source: str, path: Path) -> HeaderInfo:
     module_name: str | None = None
     imports: list[ImportSpec] = []
     body_lines: list[str] = []
+    body_line_numbers: list[int] = []
 
     in_header = True
     lines = source.splitlines()
@@ -123,26 +166,33 @@ def parse_header(source: str, path: Path) -> HeaderInfo:
         if in_header:
             if trimmed == "" or trimmed.startswith("#"):
                 body_lines.append(line)
+                body_line_numbers.append(idx)
                 continue
             if trimmed.startswith("module "):
                 candidate = trimmed[len("module ") :].strip()
                 if module_name is not None:
-                    raise ModuleLoadError(f"Duplicate module declaration in {path}:{idx}")
+                    raise _module_error("Duplicate module declaration", path, idx, line.index("module ") + 1)
                 if not MODULE_RE.fullmatch(candidate):
-                    raise ModuleLoadError(f"Invalid module name {candidate!r} at {path}:{idx}")
+                    raise _module_error(f"Invalid module name {candidate!r}", path, idx, line.index("module ") + 1)
                 module_name = candidate
                 continue
             if trimmed.startswith("import "):
-                imports.append(_parse_import_line(trimmed, path, idx))
+                imports.append(_parse_import_line(line, path, idx))
                 continue
             in_header = False
 
         body_lines.append(line)
+        body_line_numbers.append(idx)
 
     body = "\n".join(body_lines)
     if source.endswith("\n"):
         body += "\n"
-    return HeaderInfo(module=module_name, imports=imports, body=body)
+    return HeaderInfo(
+        module=module_name,
+        imports=imports,
+        body=body,
+        body_line_numbers=tuple(body_line_numbers),
+    )
 
 
 def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], str]:
@@ -165,6 +215,17 @@ def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], str]:
     if body.endswith("\n"):
         sanitized += "\n"
     return declared, explicit_exports, sanitized
+
+
+def _find_decl_line(body: str, body_line_numbers: tuple[int, ...], name: str) -> int:
+    for source_line_no, line in zip(body_line_numbers, body.splitlines()):
+        m_export = EXPORT_DECL_RE.match(line)
+        if m_export is not None and m_export.group(2) == name:
+            return source_line_no
+        m = DECL_RE.match(line)
+        if m is not None and m.group(2) == name:
+            return source_line_no
+    return body_line_numbers[0] if body_line_numbers else 1
 
 
 def _module_path(module_name: str) -> Path:
@@ -210,7 +271,12 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
         declared, exported, sanitized_body = _extract_decl_and_export_names(header.body)
         modules[path] = ModuleInfo(
             path=path,
-            header=HeaderInfo(module=header.module, imports=header.imports, body=sanitized_body),
+            header=HeaderInfo(
+                module=header.module,
+                imports=header.imports,
+                body=sanitized_body,
+                body_line_numbers=header.body_line_numbers,
+            ),
             declared=declared,
             exported=exported,
         )
@@ -226,19 +292,25 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             imported_names = list(imp.imported_names or ())
             for name in imported_names:
                 if name not in imp_info.exported:
-                    raise ModuleLoadError(
-                        f"Module {imp.module!r} does not export {name!r} "
-                        f"(imported from {path}); exported names: {_fmt_names(imp_info.exported)}"
+                    raise _module_error(
+                        f"Module {imp.module!r} does not export {name!r}; "
+                        f"exported names: {_fmt_names(imp_info.exported)}",
+                        path,
+                        imp.line,
+                        imp.column,
                     )
 
             namespace_alias = _namespace_alias_for_import(imp)
             if namespace_alias is not None:
                 prev_alias = aliases.get(namespace_alias)
                 if prev_alias is not None and prev_alias != imp.module:
-                    raise ModuleLoadError(
-                        f"Duplicate import alias {namespace_alias!r} in {path}: "
+                    raise _module_error(
+                        f"Duplicate import alias {namespace_alias!r}: "
                         f"used for both {prev_alias!r} and {imp.module!r}. "
-                        f"Use an explicit `as ...` alias on one import."
+                        f"Use an explicit `as ...` alias on one import.",
+                        path,
+                        imp.line,
+                        imp.column,
                     )
                 aliases[namespace_alias] = imp.module
 
@@ -247,16 +319,23 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             for name in names:
                 prev = introduced.get(name)
                 if prev is not None and prev != imp.module:
-                    raise ModuleLoadError(
-                        f"Ambiguous import {name!r} in {path}: provided by both {prev!r} and {imp.module!r}"
+                    raise _module_error(
+                        f"Ambiguous import {name!r}: provided by both {prev!r} and {imp.module!r}",
+                        path,
+                        imp.line,
+                        imp.column,
                     )
                 introduced[name] = imp.module
 
         for name, provider in introduced.items():
             if name in local_names:
-                raise ModuleLoadError(
+                local_line = _find_decl_line(info.header.body, info.header.body_line_numbers, name)
+                raise _module_error(
                     f"Module {path} declares {name!r} which conflicts with selected import from {provider!r}. "
-                    f"Rename the local declaration or qualify the imported module instead."
+                    f"Rename the local declaration or qualify the imported module instead.",
+                    path,
+                    local_line,
+                    1,
                 )
 
     visit(entry)
@@ -269,16 +348,22 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
     for path in ordered:
         header = f"# module: {path}\n"
         chunks.append(header)
-        line_cursor += 1
+        line_cursor += len(header.splitlines())
         body = modules[path].header.body
-        body_lines = body.count("\n") + (0 if body.endswith("\n") else 1 if body else 0)
+        body_lines = len(body.splitlines())
         if body_lines > 0:
-            segments.append(ModuleSegment(path=path, start_line=line_cursor, end_line=line_cursor + body_lines - 1))
+            segments.append(
+                ModuleSegment(
+                    path=path,
+                    start_line=line_cursor,
+                    end_line=line_cursor + body_lines - 1,
+                    source_lines=modules[path].header.body_line_numbers,
+                )
+            )
         chunks.append(body)
         line_cursor += body_lines
         if not body.endswith("\n"):
             chunks.append("\n")
-            line_cursor += 1
         chunks.append("\n")
         line_cursor += 1
 
@@ -294,6 +379,28 @@ def _module_for_line(bundle: ModuleBundle, line: int) -> ModuleInfo | None:
         if segment.start_line <= line <= segment.end_line:
             return bundle.modules[segment.path]
     return None
+
+
+def _source_location_for_bundle_line(bundle: ModuleBundle, line: int, column: int = 1) -> tuple[Path, int, int] | None:
+    for segment in bundle.segments:
+        if segment.start_line <= line <= segment.end_line:
+            offset = line - segment.start_line
+            if 0 <= offset < len(segment.source_lines):
+                return segment.path, segment.source_lines[offset], column
+            return segment.path, line, column
+    return None
+
+
+def _node_module_error(bundle: ModuleBundle, node: object, message: str) -> ModuleLoadError:
+    line = getattr(node, "line", None)
+    column = getattr(node, "column", 1)
+    if line is None:
+        return ModuleLoadError(message)
+    location = _source_location_for_bundle_line(bundle, line, column)
+    if location is None:
+        return ModuleLoadError(message)
+    path, source_line_no, source_column = location
+    return _module_error(message, path, source_line_no, source_column)
 
 
 def _namespace_alias_for_import(imp: ImportSpec) -> str | None:
@@ -483,9 +590,10 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             alias, symbol = name.split(".", 1)
             target_path = aliases.get(alias)
             if target_path is None:
-                raise ModuleLoadError(
-                    f"Unknown import alias {alias!r} at {module_info.path}:{line}; "
-                    f"available aliases: {_fmt_names(set(aliases))}"
+                raise _node_module_error(
+                    bundle,
+                    node,
+                    f"Unknown import alias {alias!r}; available aliases: {_fmt_names(set(aliases))}",
                 )
             target_symbols = module_symbols[target_path]
             target = target_symbols.exported_values.get(symbol)
@@ -495,10 +603,12 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                 target = ctors.get(symbol)
                 if target is not None:
                     return target
-            raise ModuleLoadError(
+            raise _node_module_error(
+                bundle,
+                node,
                 f"Module {bundle.modules[target_path].header.module or str(target_path)!r} "
-                f"does not export value {symbol!r} (referenced at {module_info.path}:{line}); "
-                f"exported values: {_fmt_names(set(target_symbols.exported_values))}"
+                f"does not export value {symbol!r}; "
+                f"exported values: {_fmt_names(set(target_symbols.exported_values))}",
             )
 
         if name in builtin_values:
@@ -509,16 +619,20 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             return unqualified_values[name]
         if name in all_exported_values:
             providers = sorted(bundle.modules[path].header.module or str(path) for path in declared_value_by_name.get(name, set()))
-            raise ModuleLoadError(
-                f"Value {name!r} at {module_info.path}:{line} requires explicit import or qualification; "
+            raise _node_module_error(
+                bundle,
+                node,
+                f"Value {name!r} requires explicit import or qualification; "
                 f"available from: {_fmt_names(providers)}. "
-                f"Use `import module ({name})` or `import module` and qualify it."
+                f"Use `import module ({name})` or `import module` and qualify it.",
             )
         providers = declared_value_by_name.get(name, set())
         if providers and module_info.path not in providers:
-            raise ModuleLoadError(
-                f"Value {name!r} at {module_info.path}:{line} is not exported by any imported module; "
-                f"it exists in: {_fmt_names(bundle.modules[path].header.module or str(path) for path in providers)}"
+            raise _node_module_error(
+                bundle,
+                node,
+                f"Value {name!r} is not exported by any imported module; "
+                f"it exists in: {_fmt_names(bundle.modules[path].header.module or str(path) for path in providers)}",
             )
         return name
 
@@ -536,18 +650,21 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             alias, symbol = name.split(".", 1)
             target_path = aliases.get(alias)
             if target_path is None:
-                raise ModuleLoadError(
-                    f"Unknown import alias {alias!r} at {module_info.path}:{line}; "
-                    f"available aliases: {_fmt_names(set(aliases))}"
+                raise _node_module_error(
+                    bundle,
+                    node,
+                    f"Unknown import alias {alias!r}; available aliases: {_fmt_names(set(aliases))}",
                 )
             target_symbols = module_symbols[target_path]
             target = target_symbols.exported_types.get(symbol) or target_symbols.exported_classes.get(symbol)
             if target is not None:
                 return target
-            raise ModuleLoadError(
+            raise _node_module_error(
+                bundle,
+                node,
                 f"Module {bundle.modules[target_path].header.module or str(target_path)!r} "
-                f"does not export type/class {symbol!r} (referenced at {module_info.path}:{line}); "
-                f"exported types/classes: {_fmt_names(set(target_symbols.exported_types) | set(target_symbols.exported_classes))}"
+                f"does not export type/class {symbol!r}; "
+                f"exported types/classes: {_fmt_names(set(target_symbols.exported_types) | set(target_symbols.exported_classes))}",
             )
 
         if name in builtin_types:
@@ -565,15 +682,19 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                 bundle.modules[path].header.module or str(path)
                 for path in (declared_type_by_name.get(name, set()) | declared_class_by_name.get(name, set()))
             )
-            raise ModuleLoadError(
-                f"Type/class {name!r} at {module_info.path}:{line} requires explicit import or qualification; "
-                f"available from: {_fmt_names(providers)}"
+            raise _node_module_error(
+                bundle,
+                node,
+                f"Type/class {name!r} requires explicit import or qualification; "
+                f"available from: {_fmt_names(providers)}",
             )
         providers = declared_type_by_name.get(name, set()) | declared_class_by_name.get(name, set())
         if providers and module_info.path not in providers:
-            raise ModuleLoadError(
-                f"Type/class {name!r} at {module_info.path}:{line} is not exported by any imported module; "
-                f"it exists in: {_fmt_names(bundle.modules[path].header.module or str(path) for path in providers)}"
+            raise _node_module_error(
+                bundle,
+                node,
+                f"Type/class {name!r} is not exported by any imported module; "
+                f"it exists in: {_fmt_names(bundle.modules[path].header.module or str(path) for path in providers)}",
             )
         return name
 

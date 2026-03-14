@@ -367,7 +367,15 @@ long long sprout_field(long long h, long long idx) {
 }
 
 static void tcp_fail(const char* msg) {
-  fprintf(stderr, "%s\\n", msg);
+  const char* colon = strchr(msg, ':');
+  if (colon != NULL) {
+    size_t name_len = (size_t)(colon - msg);
+    const char* detail = colon + 1;
+    while (*detail == ' ') detail++;
+    fprintf(stderr, "runtime error: builtin `%.*s`: %s\\n", (int)name_len, msg, detail);
+  } else {
+    fprintf(stderr, "runtime error: %s\\n", msg);
+  }
   exit(1);
 }
 
