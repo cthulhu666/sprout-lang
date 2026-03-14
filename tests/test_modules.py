@@ -424,6 +424,56 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "30")
 
+    def test_import_stdlib_string_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (vec_get_or)
+                import stdlib.string (string_lines, string_digits)
+
+                fn main() -> IO Unit =
+                  print(
+                    vec_get_or(string_lines("a\\nb\\n"), 1, "missing")
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "b")
+
+    def test_import_stdlib_string_digits_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (vec_get_or)
+                import stdlib.string (string_digits)
+
+                fn main() -> IO Unit =
+                  print(
+                    vec_get_or(string_digits("x7y3z"), 1, -1)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "3")
+
 
 if __name__ == "__main__":
     unittest.main()

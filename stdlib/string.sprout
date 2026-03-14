@@ -1,0 +1,49 @@
+module stdlib.string
+import stdlib.collections (Vec, vec_empty, vec_append)
+
+fn char_at(raw: String, index: Int) -> String =
+  str_slice(raw, index, 1)
+
+fn is_newline(ch: String) -> Bool =
+  str_find("\n", ch) == 0
+
+fn is_carriage_return(ch: String) -> Bool =
+  str_find("\r", ch) == 0
+
+fn append_line(acc: Vec String, current: String) -> Vec String =
+  vec_append(acc, current)
+
+fn lines_loop(raw: String, index: Int, total: Int, acc: Vec String, current: String) -> Vec String =
+  if index >= total then
+    if str_len(current) == 0 then acc
+    else append_line(acc, current)
+  else
+    if is_newline(char_at(raw, index)) then
+      lines_loop(raw, index + 1, total, append_line(acc, current), "")
+    else if is_carriage_return(char_at(raw, index)) then
+      lines_loop(raw, index + 1, total, acc, current)
+    else
+      lines_loop(
+        raw,
+        index + 1,
+        total,
+        acc,
+        str_concat(current, char_at(raw, index))
+      )
+
+export fn string_lines(raw: String) -> Vec String =
+  lines_loop(raw, 0, str_len(raw), vec_empty(), "")
+
+fn digit_value(ch: String) -> Int =
+  str_find("0123456789", ch)
+
+fn digits_loop(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
+  if index >= total then acc
+  else
+    if digit_value(char_at(raw, index)) >= 0 then
+      digits_loop(raw, index + 1, total, vec_append(acc, digit_value(char_at(raw, index))))
+    else
+      digits_loop(raw, index + 1, total, acc)
+
+export fn string_digits(raw: String) -> Vec Int =
+  digits_loop(raw, 0, str_len(raw), vec_empty())

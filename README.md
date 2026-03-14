@@ -150,6 +150,11 @@ Collections module (in `stdlib/collections.sprout`):
   - `dict_set(dict, key, value)`
   - `dict_remove(dict, key)`
 
+String module (in `stdlib/string.sprout`):
+
+- `string_lines(raw: String) -> Vec String`
+- `string_digits(raw: String) -> Vec Int`
+
 Application-level example wrapper:
 
 - `examples/sentry_api.sprout` demonstrates how to layer Sentry-specific API helpers on top of generic `stdlib.http` + `stdlib.http_client`.
