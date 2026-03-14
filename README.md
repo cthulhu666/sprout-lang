@@ -93,6 +93,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `result_map_error(r, f)`
   - `result_and_then(r, f)`
   - `result_with_default(r, fallback)`
+  - `when_ok(r, f)` runs `f` for `Ok` and preserves `r`
+  - `when_error(r, f)` runs `f` for `Err` and preserves `r`
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 

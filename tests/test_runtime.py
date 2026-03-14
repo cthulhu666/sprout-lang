@@ -114,6 +114,46 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "42")
 
+    def test_stdlib_when_ok_and_when_error_helpers(self) -> None:
+        src = """
+        fn show_ok(x: Int) -> IO Unit = print(x)
+        fn show_err(e: String) -> IO Unit = print(e)
+
+        fn main() -> IO Unit =
+          print(
+            result_with_default(
+              when_error(
+                when_ok(Ok(42), show_ok),
+                show_err
+              ),
+              0
+            )
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42\n42")
+
+    def test_stdlib_when_error_runs_effect_and_preserves_result(self) -> None:
+        src = """
+        fn show_err(e: String) -> IO Unit = print(e)
+
+        fn main() -> IO Unit =
+          print(
+            result_with_default(
+              when_error(Err("boom"), show_err),
+              7
+            )
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "boom\n7")
+
     def test_stdlib_read_lines_and_parse_int(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             input_path = Path(tmp) / "numbers.txt"

@@ -48,3 +48,16 @@ fn result_with_default(r: Result e a, fallback: a) -> a =
   match r with
   | Ok x -> x
   | Err _ -> fallback
+
+fn keep_after(effect: IO Unit, value: a) -> a =
+  value
+
+fn when_ok(r: Result e a, f: a -> IO Unit) -> Result e a =
+  match r with
+  | Ok x -> keep_after(f(x), r)
+  | Err e -> Err(e)
+
+fn when_error(r: Result e a, f: e -> IO Unit) -> Result e a =
+  match r with
+  | Ok x -> Ok(x)
+  | Err e -> keep_after(f(e), r)

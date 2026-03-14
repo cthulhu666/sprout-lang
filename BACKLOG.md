@@ -21,7 +21,7 @@ Definition of done:
 
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
-- [ ] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
+- [~] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 
 ### 2) Networking and HTTP Client
 
@@ -111,10 +111,11 @@ Definition of done:
 - [x] `stdlib.collections` now uses runtime-backed `Map` for `Dict` helpers.
 - [x] Runtime builtin failures now use a shared `runtime error: builtin ...` convention in interpreter and native paths.
 - [x] CLI REPL exists with declarations, expression evaluation, and `:type`.
+- [x] Prelude now includes `when_ok` / `when_error` effect taps for `Result`.
 - [ ] terminal interaction primitives are not yet fully implemented.
 
 ## Next 3 Tasks (Execution Order)
 
 1. Add more vector utility combinators (next likely: `vec_max_subsequence_by_count`).
-2. Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
+2. Add optional pipeline helpers for `Result`/effectful control flow.
 3. Add formatter/linter baseline.
