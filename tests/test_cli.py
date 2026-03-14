@@ -139,6 +139,35 @@ class CliTests(unittest.TestCase):
             self.assertIn("HTTP/1.1 200 OK", run.stdout)
             self.assertIn("ready", run.stdout)
 
+    def test_run_passes_program_args_to_argv_get(self) -> None:
+        src = """
+        module main
+        import stdlib.collections (Maybe)
+
+        fn main() -> IO Unit =
+          match argv_get(0) with
+          | Just value -> print(value)
+          | Nothing -> print("missing")
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "argv_test.spr"
+            path.write_text(src, encoding="utf-8")
+            run = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "run",
+                    str(path),
+                    "http://example.test",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(run.stdout.strip(), "http://example.test")
+
     def test_run_with_typeclass_lowering(self) -> None:
         src = """
         class Renderable t {

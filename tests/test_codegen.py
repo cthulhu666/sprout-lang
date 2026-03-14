@@ -36,7 +36,7 @@ class CodegenTests(unittest.TestCase):
         ir = compile_to_llvm(program)
 
         self.assertIn("define i64 @fact(i64 %n)", ir)
-        self.assertIn("define i64 @main()", ir)
+        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
         self.assertIn("icmp eq i64", ir)
         self.assertIn("call i64 @fact", ir)
 
@@ -87,7 +87,7 @@ class CodegenTests(unittest.TestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertIn("define i64 @main()", ir)
+        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
         self.assertIn("call i64 @print_str(ptr", ir)
 
     def test_compile_adt_match(self) -> None:
@@ -290,6 +290,9 @@ class CodegenTests(unittest.TestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("declare i64 @http_request(ptr, ptr, ptr, ptr, i64)", ir)
+        self.assertIn("declare i64 @argv_get(i64)", ir)
+        self.assertIn("declare i64 @sprout_set_argv(i32, ptr)", ir)
+        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
         self.assertIn("declare i64 @sprout_make3(i64, i64, i64, i64)", ir)
         self.assertIn("call i64 @sprout_field(i64 %resp, i64 2)", ir)
 
@@ -353,6 +356,40 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
             self.assertEqual(run.returncode, 42)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_program_receives_program_args(self) -> None:
+        src = """
+        module main
+        import stdlib.collections (Maybe)
+
+        fn main() -> IO Unit =
+          match argv_get(0) with
+          | Just value -> print(value)
+          | Nothing -> print("missing")
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path), "http://example.test"], check=False, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(run.stdout.strip(), "http://example.test")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_short_circuit_and(self) -> None:
@@ -976,6 +1013,143 @@ class CodegenTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+            thread.join(timeout=1.0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_module_http_client_with_argv_and_collections_maybe(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                payload = b"module-http-ok"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        try:
+            server = HTTPServer(("127.0.0.1", 0), Handler)
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            src = """
+            module app.main
+            import stdlib.collections (Maybe)
+            import stdlib.http (Result, HttpError, http_response_body)
+            import stdlib.http_client (http_get)
+
+            fn http_error_message(err: HttpError) -> String =
+              match err with
+              | HttpTimeout -> "request timed out"
+              | HttpNetwork msg -> "network error: " ++ msg
+              | HttpBadStatus _ -> "http error status"
+              | HttpDecode msg -> "decode error: " ++ msg
+
+            fn main() -> IO Unit =
+              match argv_get(0) with
+              | Nothing -> print("missing")
+              | Just url ->
+                  match http_get(url, "", 5000) with
+                  | Ok resp -> print(http_response_body(resp))
+                  | Err err -> print(http_error_message(err))
+            """
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                spr_path = tmp_path / "prog.sprout"
+                bin_path = tmp_path / "prog"
+                spr_path.write_text(src, encoding="utf-8")
+                compile_proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sprout.cli",
+                        "compile",
+                        str(spr_path),
+                        "--native",
+                        "-o",
+                        str(bin_path),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
+                run = subprocess.run(
+                    [str(bin_path), f"http://127.0.0.1:{port}/ok"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(run.returncode, 0, msg=run.stderr)
+                self.assertEqual(run.stdout.strip(), "module-http-ok")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1.0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_http_request_remote_close_without_response(self) -> None:
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            listener.bind(("127.0.0.1", 0))
+        except PermissionError:
+            listener.close()
+            self.skipTest("network socket bind not permitted in this environment")
+        listener.listen(1)
+        port = listener.getsockname()[1]
+
+        def close_immediately() -> None:
+            try:
+                conn, _ = listener.accept()
+                conn.close()
+            finally:
+                listener.close()
+
+        thread = threading.Thread(target=close_immediately, daemon=True)
+        thread.start()
+        try:
+            src = f"""
+            fn main() -> IO Unit =
+              match http_request("GET", "http://127.0.0.1:{port}/", "", "", 500) with
+              | Ok _ -> print("ok")
+              | Err err ->
+                  match err with
+                  | HttpNetwork msg -> print(msg)
+                  | HttpTimeout -> print("timeout")
+                  | HttpBadStatus _ -> print("bad-status")
+                  | HttpDecode _ -> print("decode")
+            """
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                spr_path = tmp_path / "prog.sprout"
+                bin_path = tmp_path / "prog"
+                spr_path.write_text(src, encoding="utf-8")
+                compile_proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sprout.cli",
+                        "compile",
+                        "--with-http-stdlib",
+                        str(spr_path),
+                        "--native",
+                        "-o",
+                        str(bin_path),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
+                run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, msg=run.stderr)
+                self.assertIn("remote closed connection without response", run.stdout)
+        finally:
             thread.join(timeout=1.0)
 
 

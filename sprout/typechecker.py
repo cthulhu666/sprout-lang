@@ -768,6 +768,10 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(TConst("String"), TApp(maybe_collections, STRING)),
         ),
+        "argv_get": Scheme(
+            vars=(),
+            type=TFunc(INT, TApp(maybe_collections, STRING)),
+        ),
         "parse_int": Scheme(vars=(), type=TFunc(TConst("String"), INT)),
         "split_words": Scheme(
             vars=(),

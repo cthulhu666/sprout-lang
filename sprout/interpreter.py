@@ -409,8 +409,9 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
     return None
 
 
-def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
+def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[str] | None = None) -> None:
     out = stdout
+    program_argv = [] if argv is None else argv
     env = Env()
     echo_backend = _build_echo_backend()
     listeners: dict[int, socket.socket] = {}
@@ -480,6 +481,14 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         if value is None:
             return ADTValue(constructor="stdlib.collections.Nothing", args=())
         return ADTValue(constructor="stdlib.collections.Just", args=(value,))
+
+    def builtin_argv_get(args: list[object]) -> object:
+        index = args[0]
+        if not isinstance(index, int):
+            raise RuntimeError("argv_get expects Int index")
+        if index < 0 or index >= len(program_argv):
+            return ADTValue(constructor="stdlib.collections.Nothing", args=())
+        return ADTValue(constructor="stdlib.collections.Just", args=(program_argv[index],))
 
     def builtin_parse_int(args: list[object]) -> object:
         raw = args[0]
@@ -1020,6 +1029,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     env.set("read_file", BuiltinFunction(name="read_file", arity=1, fn=builtin_read_file))
     env.set("read_int_lines", BuiltinFunction(name="read_int_lines", arity=1, fn=builtin_read_int_lines))
     env.set("env_get", BuiltinFunction(name="env_get", arity=1, fn=builtin_env_get))
+    env.set("argv_get", BuiltinFunction(name="argv_get", arity=1, fn=builtin_argv_get))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
     env.set("str_concat", BuiltinFunction(name="str_concat", arity=2, fn=builtin_str_concat))

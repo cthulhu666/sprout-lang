@@ -16,6 +16,7 @@ class LLType:
 
 I64 = LLType("i64")
 I1 = LLType("i1")
+I32 = LLType("i32")
 I8_PTR = LLType("ptr")
 
 
@@ -39,6 +40,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "print_value": FnSig(name="print_value", params=[I64], ret=I64),
     "read_file": FnSig(name="read_file", params=[I8_PTR], ret=I8_PTR),
     "env_get": FnSig(name="env_get", params=[I8_PTR], ret=I64),
+    "argv_get": FnSig(name="argv_get", params=[I64], ret=I64),
     "read_int_lines": FnSig(name="read_int_lines", params=[I8_PTR], ret=I64),
     "parse_int": FnSig(name="parse_int", params=[I8_PTR], ret=I64),
     "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
@@ -77,6 +79,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "tcp_close_listener": FnSig(name="tcp_close_listener", params=[I64], ret=I64),
     "tcp_echo_serve": FnSig(name="tcp_echo_serve", params=[I64, I64], ret=I64),
     "http_request": FnSig(name="http_request", params=[I8_PTR, I8_PTR, I8_PTR, I8_PTR, I64], ret=I64),
+    "sprout_set_argv": FnSig(name="sprout_set_argv", params=[I32, I8_PTR], ret=I64),
     "sprout_register_ctor": FnSig(name="sprout_register_ctor", params=[I64, I8_PTR, I64], ret=I64),
     "sprout_make0": FnSig(name="sprout_make0", params=[I64], ret=I64),
     "sprout_make1": FnSig(name="sprout_make1", params=[I64, I64], ret=I64),
@@ -509,9 +512,15 @@ def _emit_fn(
 
     is_entry_main = fn.name == "main" or fn.name.endswith(".main")
     emitted_name = "main" if is_entry_main else fn.name
-    emitter.emit(f"define {sig.ret.text} @{emitted_name}({', '.join(params)}) {{")
+    if is_entry_main:
+        emitted_params = ["i32 %argc", "ptr %argv"]
+    else:
+        emitted_params = params
+    emitter.emit(f"define {sig.ret.text} @{emitted_name}({', '.join(emitted_params)}) {{")
     emitter.label("entry")
     if is_entry_main:
+        init_argv = emitter.tmp()
+        emitter.emit(f"  {init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)")
         if runtime_lets:
             emitter.emit("  call void @__sprout_init_globals()")
         for _, (primary, leaf, arity, tag) in sorted(ctor_reg_meta.items(), key=lambda x: x[1][3]):

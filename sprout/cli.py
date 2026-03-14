@@ -78,7 +78,12 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
     return 0
 
 
-def cmd_run(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
+def cmd_run(
+    path: Path,
+    with_stdlib: bool = False,
+    with_http_stdlib: bool = False,
+    program_args: list[str] | None = None,
+) -> int:
     bundle = load_module_bundle(path)
     source = bundle.source
     if with_http_stdlib:
@@ -94,7 +99,7 @@ def cmd_run(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fals
     typecheck_program(tree)
     lowered = lower_typeclasses(tree)
     typecheck_program(lowered)
-    run_program(lowered)
+    run_program(lowered, argv=program_args)
     return 0
 
 
@@ -207,6 +212,8 @@ static int g_conn_fd[2048];
 static int g_conn_used[2048];
 static long long g_next_listener_handle = 1;
 static long long g_next_conn_handle = 1;
+static int g_sprout_argc = 0;
+static char** g_sprout_argv = NULL;
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -305,8 +312,19 @@ long long parse_int(const char* s) {
 long long env_get(const char* name) {
   if (name == NULL) tcp_fail("env_get: null name");
   const char* value = getenv(name);
-  if (value == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)value);
+  if (value == NULL) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)(uintptr_t)value);
+}
+long long sprout_set_argv(int argc, char** argv) {
+  g_sprout_argc = argc;
+  g_sprout_argv = argv;
+  return 0;
+}
+long long argv_get(long long index) {
+  if (index < 0) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+  if (g_sprout_argv == NULL) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+  if (index >= (long long)(g_sprout_argc - 1)) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)(uintptr_t)g_sprout_argv[index + 1]);
 }
 const char* read_file(const char* path) {
   if (path == NULL) tcp_fail("read_file: null path");
@@ -558,22 +576,22 @@ static char* upper_copy(const char* text) {
 
 static long long http_err0(const char* ctor_name) {
   long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.http.Err"), err);
 }
 
 static long long http_err1(const char* ctor_name, long long payload) {
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.http.Err"), err);
 }
 
 static long long http_ok_response(long long status, const char* headers, const char* body) {
   long long resp = sprout_make3(
-    find_ctor_tag_by_name("HttpResponse"),
+    find_ctor_tag_by_name("stdlib.http.HttpResponse"),
     status,
     (long long)(uintptr_t)headers,
     (long long)(uintptr_t)body
   );
-  return sprout_make1(find_ctor_tag_by_name("Ok"), resp);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.http.Ok"), resp);
 }
 
 static int parse_http_url(const char* url, HttpUrl* out, char** err) {
@@ -662,7 +680,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   HttpUrl parsed = {0};
   char* url_err = NULL;
   if (!parse_http_url(url, &parsed, &url_err)) {
-    long long out = http_err1("HttpDecode", (long long)(uintptr_t)url_err);
+    long long out = http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)url_err);
     return out;
   }
 
@@ -674,7 +692,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   int gai = getaddrinfo(parsed.host, parsed.port, &hints, &infos);
   if (gai != 0) {
     free_http_url(&parsed);
-    return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
   }
 
   int fd = -1;
@@ -698,8 +716,8 @@ long long http_request(const char* method, const char* url, const char* headers_
   freeaddrinfo(infos);
   if (fd < 0) {
     free_http_url(&parsed);
-    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("HttpTimeout");
-    return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
+    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
   }
 
   ByteBuf header_block;
@@ -730,8 +748,8 @@ long long http_request(const char* method, const char* url, const char* headers_
     free(request.data);
     close(fd);
     free_http_url(&parsed);
-    if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) return http_err0("HttpTimeout");
-    return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(send_errno)));
+    if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(send_errno)));
   }
   free(request.data);
 
@@ -746,13 +764,21 @@ long long http_request(const char* method, const char* url, const char* headers_
       free(response.data);
       close(fd);
       free_http_url(&parsed);
-      if (recv_errno == EAGAIN || recv_errno == EWOULDBLOCK) return http_err0("HttpTimeout");
-      return http_err1("HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(recv_errno)));
+      if (recv_errno == EAGAIN || recv_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+      return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(recv_errno)));
     }
     buf_append_bytes(&response, chunk, (size_t)n);
   }
   close(fd);
   free_http_url(&parsed);
+
+  if (response.data == NULL || response.len == 0) {
+    free(response.data);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("remote closed connection without response")
+    );
+  }
 
   const char* sep = strstr(response.data, "\\r\\n\\r\\n");
   size_t sep_len = 4;
@@ -762,7 +788,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   }
   if (sep == NULL) {
     free(response.data);
-    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid http response"));
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid http response"));
   }
 
   const char* line_end = strstr(response.data, "\\r\\n");
@@ -773,24 +799,24 @@ long long http_request(const char* method, const char* url, const char* headers_
   }
   if (line_end == NULL || line_end > sep) {
     free(response.data);
-    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
   }
 
   const char* code_start = strchr(response.data, ' ');
   if (code_start == NULL || code_start >= line_end) {
     free(response.data);
-    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
   }
   code_start++;
   char* code_end = NULL;
   long long status = strtoll(code_start, &code_end, 10);
   if (code_end == code_start || code_end > line_end) {
     free(response.data);
-    return http_err1("HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status code"));
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status code"));
   }
   if (status >= 400) {
     free(response.data);
-    return http_err1("HttpBadStatus", status);
+    return http_err1("stdlib.http.HttpBadStatus", status);
   }
 
   const char* headers_start = line_end + line_sep_len;
@@ -819,9 +845,9 @@ long long vector_get(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_get: null vector");
   if (index < 0 || index >= v->len) {
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), v->data[index]);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), v->data[index]);
 }
 
 long long vector_set(long long vec, long long index, long long value) {
@@ -882,9 +908,9 @@ long long map_get(long long map_h, const char* key) {
   if (key == NULL) tcp_fail("map_get: null key");
   long long idx = map_find_index(m, key);
   if (idx < 0) {
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[idx].value);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), m->entries[idx].value);
 }
 
 long long map_set(long long map_h, const char* key, long long value) {
@@ -951,20 +977,20 @@ long long map_nth_key(long long map_h, long long index) {
   MapVal* m = (MapVal*)(uintptr_t)map_h;
   if (m == NULL) tcp_fail("map_nth_key: null map");
   if (index < 0 || index >= m->len) {
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
   }
   char* key = strdup(m->entries[index].key);
   if (key == NULL) tcp_fail("map_nth_key: out of memory");
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)key);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)(uintptr_t)key);
 }
 
 long long map_nth_value(long long map_h, long long index) {
   MapVal* m = (MapVal*)(uintptr_t)map_h;
   if (m == NULL) tcp_fail("map_nth_value: null map");
   if (index < 0 || index >= m->len) {
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), m->entries[index].value);
 }
 
 long long bytes_empty() {
@@ -985,9 +1011,9 @@ long long bytes_get(long long bytes_h, long long index) {
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) tcp_fail("bytes_get: null bytes");
   if (index < 0 || (size_t)index >= value->len) {
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)value->data[index]);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)value->data[index]);
 }
 
 long long bytes_slice(long long bytes_h, long long start, long long count) {
@@ -1515,6 +1541,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="load stdlib http helpers",
     )
+    p_run.add_argument("program_args", nargs="*", help="arguments exposed to the program via argv_get")
     p_compile = sub.add_parser("compile", help="typecheck and compile a Sprout file")
     p_compile.add_argument("file", type=Path)
     p_compile.add_argument("-o", "--output", type=Path, required=True, help="output file")
@@ -1562,6 +1589,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.file,
                 with_stdlib=args.with_stdlib,
                 with_http_stdlib=args.with_http_stdlib,
+                program_args=args.program_args,
             )
         if args.command == "compile":
             return cmd_compile(

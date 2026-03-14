@@ -1,0 +1,28 @@
+module app.main
+import stdlib.collections (Maybe)
+import stdlib.http (Result, HttpError, http_response_body)
+import stdlib.http_client (http_get)
+
+# Simple HTTP GET CLI client.
+#
+# Run:
+#   python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/
+#
+# Or compile natively and pass the URL directly to the binary:
+#   python3 -m sprout.cli compile examples/http_get_cli.sprout --native -o /tmp/http_get_cli
+#   /tmp/http_get_cli http://127.0.0.1:8080/
+
+fn http_error_message(err: HttpError) -> String =
+  match err with
+  | HttpTimeout -> "request timed out"
+  | HttpNetwork msg -> "network error: " ++ msg
+  | HttpBadStatus _ -> "http error status"
+  | HttpDecode msg -> "decode error: " ++ msg
+
+fn main() -> IO Unit =
+  match argv_get(0) with
+  | Nothing -> print("usage: sprout run examples/http_get_cli.sprout <url>")
+  | Just url ->
+      match http_get(url, "", 5000) with
+      | Ok resp -> print(http_response_body(resp))
+      | Err err -> print(http_error_message(err))

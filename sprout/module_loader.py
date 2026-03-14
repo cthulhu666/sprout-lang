@@ -505,6 +505,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "read_file",
         "read_int_lines",
         "env_get",
+        "argv_get",
         "parse_int",
         "split_words",
         "str_concat",

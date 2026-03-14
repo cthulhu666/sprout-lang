@@ -898,6 +898,38 @@ class RuntimeTests(unittest.TestCase):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "missing")
 
+    def test_argv_get_builtin_returns_program_argument(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+
+                fn arg_or_missing(index: Int) -> String =
+                  match argv_get(index) with
+                  | Just value -> value
+                  | Nothing -> "missing"
+
+                fn main() -> IO Unit =
+                  print(arg_or_missing(0))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+
+            out = io.StringIO()
+            run_program(program, stdout=out, argv=["http://example.test"])
+            self.assertEqual(out.getvalue().strip(), "http://example.test")
+
+            out = io.StringIO()
+            run_program(program, stdout=out, argv=[])
+            self.assertEqual(out.getvalue().strip(), "missing")
+
     def test_stdlib_bytes_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

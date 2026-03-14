@@ -59,6 +59,7 @@ Runtime builtins (host-implemented):
 - `print_int(x: Int) -> Int` (prints and returns `x`, useful for native backend subset)
 - `read_lines(path: String) -> List String`
 - `env_get(name: String) -> Maybe String`
+- `argv_get(index: Int) -> Maybe String` (`0` is the first user-supplied program argument)
 - `parse_int(s: String) -> Int`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
@@ -293,6 +294,7 @@ Application-level example wrapper:
 
 - `examples/sentry_api.sprout` demonstrates how to layer Sentry-specific API helpers on top of generic `stdlib.http` + `stdlib.http_client`.
 - `examples/sentry_issue_browser_tui.sprout` is a minimal TUI-oriented scaffold module using the app-level Sentry API layer.
+- `examples/http_get_cli.sprout` is a simple CLI HTTP client that reads its URL from `argv_get(0)` and prints the response body.
 
 Load stdlib prelude explicitly:
 
@@ -303,8 +305,11 @@ Load HTTP helpers:
 
 - `python3 -m sprout.cli check --with-http-stdlib your_file.sprout`
 - `python3 -m sprout.cli run --with-http-stdlib your_file.sprout`
+- Pass program arguments to `sprout run` after the source path; inside Sprout, read them with `argv_get(index)`.
 - Example HTTP echo server:
   `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/http_echo_server.sprout`
+- Example HTTP GET CLI:
+  `python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/`
 - Collections helper demo:
   `python3 -m sprout.cli run examples/collections_utils_demo.sprout`
 - Typeclass collections demo:
