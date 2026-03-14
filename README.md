@@ -65,6 +65,14 @@ Runtime builtins (host-implemented):
 - `str_slice(s: String, start: Int, len: Int) -> String`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`
+- `bytes_empty() -> Bytes`
+- `bytes_length(value: Bytes) -> Int`
+- `bytes_get(value: Bytes, index: Int) -> Maybe Int`
+- `bytes_slice(value: Bytes, start: Int, count: Int) -> Bytes`
+- `bytes_append(left: Bytes, right: Bytes) -> Bytes`
+- `bytes_singleton(value: Int) -> Bytes`
+- `bytes_from_utf8(raw: String) -> Bytes`
+- `bytes_to_utf8(value: Bytes) -> stdlib.bytes.Result stdlib.bytes.Utf8Error String`
 - `map_empty() -> Map a`
 - `map_get(m: Map a, key: String) -> Maybe a`
 - `map_set(m: Map a, key: String, value: a) -> Map a`
@@ -193,6 +201,23 @@ TCP client helper types (in `stdlib/net.sprout`):
 Current limitation:
 - `TcpConnection(...)` and `TcpListener(...)` constructors are still public because Sprout does not yet support hidden/export-private constructors, so this is safer than bare `Int` but not fully opaque yet.
 
+Bytes helpers (in `stdlib/bytes.sprout`):
+
+- `empty() -> Bytes`
+- `singleton(value) -> Bytes`
+- `length(value) -> Int`
+- `get(value, index) -> Maybe Int`
+- `slice(value, start, count) -> Bytes`
+- `append(left, right) -> Bytes`
+- `u16_be(value) -> Bytes`
+- `u32_be(value) -> Bytes`
+- `read_u16_be(value) -> Maybe Int`
+- `read_u32_be(value) -> Maybe Int`
+- `from_string(raw) -> Bytes`
+- `to_string(value) -> Result Utf8Error String`
+- `c_string(raw) -> Bytes`
+- `read_c_string(value) -> Result Utf8Error String`
+
 Terminal convenience module (in `stdlib/terminal.sprout`):
 
 - `term_home() -> IO Unit`
@@ -301,6 +326,8 @@ Load HTTP helpers:
 TCP server builtins are available in interpreter and native (`sprout compile --native`) modes.
 Typed TCP client builtins are also available; they still use `String` payloads for now, with `Bytes` planned next for raw protocol data.
 Application code should prefer the typed `stdlib.net` wrapper API over bare `Int` socket handles.
+Raw `bytes_*` primitives are internal to `stdlib.*`; application code should use `stdlib.bytes`.
+`to_string` rejects invalid UTF-8 and decoded NUL bytes; `read_c_string` is the intended helper for null-terminated protocol strings.
 `http_request` is available in interpreter and native modes for plain `http://` requests.
 
 Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:

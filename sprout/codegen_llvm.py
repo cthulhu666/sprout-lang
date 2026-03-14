@@ -46,6 +46,14 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
     "str_find": FnSig(name="str_find", params=[I8_PTR, I8_PTR], ret=I64),
     "str_starts_with": FnSig(name="str_starts_with", params=[I8_PTR, I8_PTR], ret=I1),
+    "bytes_empty": FnSig(name="bytes_empty", params=[], ret=I64),
+    "bytes_length": FnSig(name="bytes_length", params=[I64], ret=I64),
+    "bytes_get": FnSig(name="bytes_get", params=[I64, I64], ret=I64),
+    "bytes_slice": FnSig(name="bytes_slice", params=[I64, I64, I64], ret=I64),
+    "bytes_append": FnSig(name="bytes_append", params=[I64, I64], ret=I64),
+    "bytes_singleton": FnSig(name="bytes_singleton", params=[I64], ret=I64),
+    "bytes_from_utf8": FnSig(name="bytes_from_utf8", params=[I8_PTR], ret=I64),
+    "bytes_to_utf8": FnSig(name="bytes_to_utf8", params=[I64], ret=I64),
     "vector_empty": FnSig(name="vector_empty", params=[], ret=I64),
     "vector_length": FnSig(name="vector_length", params=[I64], ret=I64),
     "vector_get": FnSig(name="vector_get", params=[I64, I64], ret=I64),
@@ -154,6 +162,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
             return I1
         if node.name == "String":
             return I8_PTR
+        if node.name == "Bytes":
+            return I64
         if node.name in adt_names or leaf in adt_leaf_names:
             return I64
         if leaf and leaf[0].islower():
@@ -166,7 +176,7 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
         base_leaf = base_name.rsplit(".", 1)[-1] if base_name is not None else None
         if base_name in adt_names or (base_leaf is not None and base_leaf in adt_leaf_names):
             return I64
-        if base_name in {"Vector", "Map"}:
+        if base_name in {"Vector", "Map", "Bytes"}:
             return I64
         if base_leaf and base_leaf[0].islower():
             return I64

@@ -36,10 +36,10 @@ Definition of done:
 
 ### 2.5) Binary Data and Protocol Primitives
 
-- [ ] `P0` Add a stable `Bytes` type for raw binary data handling.
-- [ ] `P0` Add byte primitives: length, indexing, slicing, append, and construction.
-- [ ] `P0` Add big-endian integer encode/decode helpers for framed protocols.
-- [ ] `P1` Add UTF-8 string/bytes conversion helpers and null-terminated string helpers.
+- [x] `P0` Add a stable `Bytes` type for raw binary data handling.
+- [x] `P0` Add byte primitives: length, indexing, slicing, append, and construction.
+- [x] `P0` Add big-endian integer encode/decode helpers for framed protocols.
+- [x] `P1` Add UTF-8 string/bytes conversion helpers and null-terminated string helpers.
 - [ ] `P1` Add efficient byte-buffer/builder utilities so protocol parsers do not depend on repeated full-copy concatenation.
 
 ### 3) JSON Support
@@ -126,6 +126,8 @@ Definition of done:
 - [x] HTTP response helpers exist in `stdlib/http.sprout`.
 - [x] `stdlib.net` defines typed TCP client result/error helpers.
 - [x] `stdlib.net` wraps TCP connections/listeners in distinct handle types for user-facing APIs.
+- [x] `stdlib.bytes` provides raw byte slicing plus big-endian integer helpers.
+- [x] `stdlib.bytes` now includes UTF-8 encode/decode plus null-terminated string helpers.
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
 - [x] `http_request` builtin and typed HTTP result ADTs are implemented in interpreter and native modes.
 - [x] `json_parse` builtin and basic JSON accessors are implemented.
@@ -137,11 +139,11 @@ Definition of done:
 - [x] Prelude now includes `pipe` plus `result_pipe*` helpers for lighter `Result` pipelines.
 - [x] CLI formatter/linter baseline exists (`fmt`, `fmt --check`, `lint`).
 - [ ] terminal interaction primitives are not yet fully implemented.
-- [ ] binary protocol primitives and fully opaque external-resource handles are not yet implemented.
+- [ ] byte builders and fully opaque external-resource handles are not yet implemented.
 - [x] `env_get(name) -> Maybe String` is available in interpreter and native modes.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add a stable `Bytes` type with byte slicing and big-endian integer decode helpers.
+1. Add byte-buffer/builder utilities so protocol parsers do not depend on repeated full-copy concatenation.
 2. Add fully opaque constructor/private-export support so runtime resource handles cannot be forged.
 3. Define test support for integration-style IO programs that depend on external services.

@@ -402,6 +402,24 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run.returncode, 1)
             self.assertIn("string builtin is internal", run.stdout)
 
+    def test_run_rejects_raw_bytes_builtins_in_non_stdlib_module(self) -> None:
+        src = """
+        module app.main
+        fn main() -> IO Unit =
+          print(bytes_length(bytes_singleton(7)))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.sprout"
+            path.write_text(src, encoding="utf-8")
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "run", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("bytes_* builtin is internal", run.stdout)
+
     def test_run_allows_raw_string_builtins_in_stdlib_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -431,6 +449,36 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(run.returncode, 0, msg=run.stderr)
             self.assertIn("6", run.stdout)
+
+    def test_run_allows_raw_bytes_builtins_in_stdlib_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "stdlib").mkdir(parents=True)
+            (root / "stdlib" / "internal_bytes.sprout").write_text(
+                """
+                module stdlib.internal_bytes
+                export fn raw_count() -> Int =
+                  bytes_length(bytes_append(bytes_singleton(1), bytes_singleton(2)))
+                """,
+                encoding="utf-8",
+            )
+            (root / "main.sprout").write_text(
+                """
+                module app.main
+                import stdlib.internal_bytes (raw_count)
+                fn main() -> IO Unit =
+                  print(raw_count())
+                """,
+                encoding="utf-8",
+            )
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "run", str(root / "main.sprout")],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertIn("2", run.stdout)
 
     def test_run_allows_raw_map_builtins_in_stdlib_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -188,6 +188,11 @@ typedef struct {
 } ByteBuf;
 
 typedef struct {
+  size_t len;
+  unsigned char* data;
+} BytesVal;
+
+typedef struct {
   char* host;
   char* port;
   char* path;
@@ -206,6 +211,7 @@ static long long g_next_conn_handle = 1;
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
+static char* dup_cstr(const char* s);
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -959,6 +965,151 @@ long long map_nth_value(long long map_h, long long index) {
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
   return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
+}
+
+long long bytes_empty() {
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("bytes_empty: out of memory");
+  out->len = 0;
+  out->data = NULL;
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_length(long long bytes_h) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_length: null bytes");
+  return (long long)value->len;
+}
+
+long long bytes_get(long long bytes_h, long long index) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_get: null bytes");
+  if (index < 0 || (size_t)index >= value->len) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)value->data[index]);
+}
+
+long long bytes_slice(long long bytes_h, long long start, long long count) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_slice: null bytes");
+  if (start < 0 || count < 0) tcp_fail("bytes_slice: start/count must be >= 0");
+  size_t s = (size_t)start;
+  size_t c = (size_t)count;
+  if (s > value->len) s = value->len;
+  if (s + c > value->len) c = value->len - s;
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("bytes_slice: out of memory");
+  out->len = c;
+  out->data = c == 0 ? NULL : (unsigned char*)malloc(c);
+  if (c > 0 && out->data == NULL) tcp_fail("bytes_slice: out of memory");
+  if (c > 0) memcpy(out->data, value->data + s, c);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_append(long long left_h, long long right_h) {
+  BytesVal* left = (BytesVal*)(uintptr_t)left_h;
+  BytesVal* right = (BytesVal*)(uintptr_t)right_h;
+  if (left == NULL || right == NULL) tcp_fail("bytes_append: null bytes");
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("bytes_append: out of memory");
+  out->len = left->len + right->len;
+  out->data = out->len == 0 ? NULL : (unsigned char*)malloc(out->len);
+  if (out->len > 0 && out->data == NULL) tcp_fail("bytes_append: out of memory");
+  if (left->len > 0) memcpy(out->data, left->data, left->len);
+  if (right->len > 0) memcpy(out->data + left->len, right->data, right->len);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_singleton(long long value) {
+  if (value < 0 || value > 255) tcp_fail("bytes_singleton: byte out of range");
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("bytes_singleton: out of memory");
+  out->len = 1;
+  out->data = (unsigned char*)malloc(1);
+  if (out->data == NULL) tcp_fail("bytes_singleton: out of memory");
+  out->data[0] = (unsigned char)value;
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_from_utf8(const char* raw) {
+  if (raw == NULL) tcp_fail("bytes_from_utf8: null input");
+  size_t len = strlen(raw);
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("bytes_from_utf8: out of memory");
+  out->len = len;
+  out->data = len == 0 ? NULL : (unsigned char*)malloc(len);
+  if (len > 0 && out->data == NULL) tcp_fail("bytes_from_utf8: out of memory");
+  if (len > 0) memcpy(out->data, raw, len);
+  return (long long)(uintptr_t)out;
+}
+
+static int utf8_validate(const unsigned char* data, size_t len, const char** reason) {
+  size_t i = 0;
+  while (i < len) {
+    unsigned char b0 = data[i];
+    if (b0 == 0) {
+      *reason = "decoded string contains NUL byte";
+      return 0;
+    }
+    if (b0 <= 0x7F) {
+      i += 1;
+      continue;
+    }
+    if ((b0 & 0xE0) == 0xC0) {
+      if (i + 1 >= len) { *reason = "truncated UTF-8 sequence"; return 0; }
+      unsigned char b1 = data[i + 1];
+      if ((b1 & 0xC0) != 0x80 || b0 < 0xC2) { *reason = "invalid UTF-8 sequence"; return 0; }
+      i += 2;
+      continue;
+    }
+    if ((b0 & 0xF0) == 0xE0) {
+      if (i + 2 >= len) { *reason = "truncated UTF-8 sequence"; return 0; }
+      unsigned char b1 = data[i + 1];
+      unsigned char b2 = data[i + 2];
+      if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) { *reason = "invalid UTF-8 sequence"; return 0; }
+      if ((b0 == 0xE0 && b1 < 0xA0) || (b0 == 0xED && b1 >= 0xA0)) { *reason = "invalid UTF-8 sequence"; return 0; }
+      i += 3;
+      continue;
+    }
+    if ((b0 & 0xF8) == 0xF0) {
+      if (i + 3 >= len) { *reason = "truncated UTF-8 sequence"; return 0; }
+      unsigned char b1 = data[i + 1];
+      unsigned char b2 = data[i + 2];
+      unsigned char b3 = data[i + 3];
+      if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80) {
+        *reason = "invalid UTF-8 sequence";
+        return 0;
+      }
+      if ((b0 == 0xF0 && b1 < 0x90) || (b0 == 0xF4 && b1 >= 0x90) || b0 > 0xF4) {
+        *reason = "invalid UTF-8 sequence";
+        return 0;
+      }
+      i += 4;
+      continue;
+    }
+    *reason = "invalid UTF-8 sequence";
+    return 0;
+  }
+  return 1;
+}
+
+long long bytes_to_utf8(long long bytes_h) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_to_utf8: null bytes");
+  const char* reason = NULL;
+  if (!utf8_validate(value->data, value->len, &reason)) {
+    long long err = sprout_make1(
+      find_ctor_tag_by_name("stdlib.bytes.Utf8DecodeError"),
+      (long long)(uintptr_t)dup_cstr(reason)
+    );
+    return sprout_make1(find_ctor_tag_by_name("stdlib.bytes.Err"), err);
+  }
+  char* out = (char*)malloc(value->len + 1);
+  if (out == NULL) tcp_fail("bytes_to_utf8: out of memory");
+  if (value->len > 0) memcpy(out, value->data, value->len);
+  out[value->len] = '\\0';
+  return sprout_make1(find_ctor_tag_by_name("stdlib.bytes.Ok"), (long long)(uintptr_t)out);
 }
 
 long long tcp_listen(long long port) {

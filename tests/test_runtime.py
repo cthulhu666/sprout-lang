@@ -898,6 +898,70 @@ class RuntimeTests(unittest.TestCase):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "missing")
 
+    def test_stdlib_bytes_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+                import stdlib.bytes (Result, Utf8Error, append, c_string, from_string, get, length, read_c_string, read_u16_be, read_u32_be, slice, to_string, u16_be, u32_be)
+
+                fn int_or(value: Maybe Int, fallback: Int) -> Int =
+                  match value with
+                  | Just n -> n
+                  | Nothing -> fallback
+
+                fn string_score(value: Result Utf8Error String, expected: String, score: Int, fallback: Int) -> Int =
+                  match value with
+                  | Ok text -> if text == expected then score else fallback
+                  | Err _ -> fallback
+
+                fn main() -> IO Unit =
+                  print(
+                    int_or(get(slice(append(u16_be(258), u32_be(16909060)), 1, 4), 0), -1)
+                    + int_or(read_u16_be(u16_be(258)), -10)
+                    + int_or(read_u32_be(u32_be(16909060)), -100)
+                    + length(append(u16_be(258), u32_be(16909060)))
+                    + string_score(to_string(from_string("zaż")), "zaż", 3, -1000)
+                    + string_score(read_c_string(c_string("ok")), "ok", 2, -1000)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "16909331")
+
+    def test_stdlib_bytes_utf8_decode_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.bytes (Result, append, singleton, to_string)
+
+                fn main() -> IO Unit =
+                  match to_string(append(singleton(255), singleton(97))) with
+                  | Ok _ -> print("ok")
+                  | Err _ -> print("bad")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "bad")
+
     def test_stdlib_vec_sum_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

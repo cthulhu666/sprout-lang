@@ -223,6 +223,48 @@ class CodegenTests(unittest.TestCase):
             ir = compile_to_llvm(program)
             self.assertIn("declare i64 @env_get(ptr)", ir)
 
+    def test_compile_bytes_builtins_to_llvm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "main.sprout"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+                import stdlib.bytes (Result, Utf8Error, append, from_string, length, read_u16_be, to_string, u16_be)
+
+                fn value_or_zero(value: Maybe Int) -> Int =
+                  match value with
+                  | Just n -> n
+                  | Nothing -> 0
+
+                fn string_score_or_zero(value: Result Utf8Error String, expected: String, score: Int) -> Int =
+                  match value with
+                  | Ok text -> if text == expected then score else 0
+                  | Err _ -> 0
+
+                fn main() -> IO Unit =
+                  print(
+                    value_or_zero(read_u16_be(append(u16_be(1), u16_be(length(u16_be(2))))))
+                    + string_score_or_zero(to_string(from_string("zaż")), "zaż", 3)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(spr_path)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            ir = compile_to_llvm(program)
+            self.assertIn("declare i64 @bytes_empty()", ir)
+            self.assertIn("declare i64 @bytes_length(i64)", ir)
+            self.assertIn("declare i64 @bytes_get(i64, i64)", ir)
+            self.assertIn("declare i64 @bytes_slice(i64, i64, i64)", ir)
+            self.assertIn("declare i64 @bytes_append(i64, i64)", ir)
+            self.assertIn("declare i64 @bytes_singleton(i64)", ir)
+            self.assertIn("declare i64 @bytes_from_utf8(ptr)", ir)
+            self.assertIn("declare i64 @bytes_to_utf8(i64)", ir)
+
     def test_compile_string_builtins_to_llvm(self) -> None:
         src = """
         fn main() -> IO Unit =
@@ -640,6 +682,62 @@ class CodegenTests(unittest.TestCase):
 
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env={})
             self.assertEqual(run.stdout.strip(), "missing")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_bytes_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+                import stdlib.bytes (Result, Utf8Error, append, c_string, from_string, get, length, read_c_string, read_u16_be, read_u32_be, slice, to_string, u16_be, u32_be)
+
+                fn int_or(value: Maybe Int, fallback: Int) -> Int =
+                  match value with
+                  | Just n -> n
+                  | Nothing -> fallback
+
+                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+                fn main() -> IO Unit =
+                  seq(
+                    print(
+                      int_or(get(slice(append(u16_be(258), u32_be(16909060)), 1, 4), 0), -1)
+                      + int_or(read_u16_be(u16_be(258)), -10)
+                      + int_or(read_u32_be(u32_be(16909060)), -100)
+                      + length(append(u16_be(258), u32_be(16909060)))
+                    ),
+                    seq(
+                      match to_string(from_string("zaż")) with
+                      | Ok text -> print(text)
+                      | Err _ -> print("bad"),
+                      match read_c_string(c_string("ok")) with
+                      | Ok text -> print(text)
+                      | Err _ -> print("bad")
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "16909326\nzaż\nok")
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")

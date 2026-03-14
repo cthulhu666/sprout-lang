@@ -53,6 +53,11 @@ class MapValue:
     items: dict[str, object]
 
 
+@dataclass(frozen=True)
+class BytesValue:
+    items: bytes
+
+
 @dataclass
 class ConstructorValue:
     name: str
@@ -191,6 +196,8 @@ def format_value(value: object) -> str:
     if isinstance(value, MapValue):
         rendered = ", ".join(f"{k}: {format_value(v)}" for k, v in value.items.items())
         return "{" + rendered + "}"
+    if isinstance(value, BytesValue):
+        return "Bytes[" + ", ".join(str(item) for item in value.items) + "]"
     if value is None:
         return "()"
     return str(value)
@@ -531,6 +538,76 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         if not isinstance(raw, str) or not isinstance(prefix, str):
             raise RuntimeError("str_starts_with expects String, String")
         return raw.startswith(prefix)
+
+    def builtin_bytes_empty(args: list[object]) -> object:
+        return BytesValue(items=b"")
+
+    def builtin_bytes_length(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, BytesValue):
+            raise RuntimeError("bytes_length expects Bytes")
+        return len(value.items)
+
+    def builtin_bytes_get(args: list[object]) -> object:
+        value = args[0]
+        index = args[1]
+        if not isinstance(value, BytesValue):
+            raise RuntimeError("bytes_get expects Bytes")
+        if not isinstance(index, int):
+            raise RuntimeError("bytes_get expects Int index")
+        if index < 0 or index >= len(value.items):
+            return ADTValue(constructor="stdlib.collections.Nothing", args=())
+        return ADTValue(constructor="stdlib.collections.Just", args=(value.items[index],))
+
+    def builtin_bytes_slice(args: list[object]) -> object:
+        value = args[0]
+        start = args[1]
+        count = args[2]
+        if not isinstance(value, BytesValue):
+            raise RuntimeError("bytes_slice expects Bytes")
+        if not isinstance(start, int) or not isinstance(count, int):
+            raise RuntimeError("bytes_slice expects Int start and Int count")
+        if start < 0 or count < 0:
+            raise RuntimeError("bytes_slice start/count must be >= 0")
+        return BytesValue(items=value.items[start : start + count])
+
+    def builtin_bytes_append(args: list[object]) -> object:
+        left = args[0]
+        right = args[1]
+        if not isinstance(left, BytesValue) or not isinstance(right, BytesValue):
+            raise RuntimeError("bytes_append expects Bytes")
+        return BytesValue(items=left.items + right.items)
+
+    def builtin_bytes_singleton(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, int):
+            raise RuntimeError("bytes_singleton expects Int")
+        if value < 0 or value > 255:
+            raise RuntimeError("bytes_singleton expects byte in 0..255")
+        return BytesValue(items=bytes([value]))
+
+    def builtin_bytes_from_utf8(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("bytes_from_utf8 expects String")
+        return BytesValue(items=raw.encode("utf-8"))
+
+    def builtin_bytes_to_utf8(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, BytesValue):
+            raise RuntimeError("bytes_to_utf8 expects Bytes")
+        try:
+            decoded = value.items.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            err = ADTValue(constructor="stdlib.bytes.Utf8DecodeError", args=(str(exc),))
+            return ADTValue(constructor="stdlib.bytes.Err", args=(err,))
+        if "\x00" in decoded:
+            err = ADTValue(
+                constructor="stdlib.bytes.Utf8DecodeError",
+                args=("decoded string contains NUL byte",),
+            )
+            return ADTValue(constructor="stdlib.bytes.Err", args=(err,))
+        return ADTValue(constructor="stdlib.bytes.Ok", args=(decoded,))
 
     def builtin_vector_empty(args: list[object]) -> object:
         return VectorValue(items=())
@@ -953,6 +1030,14 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         "str_starts_with",
         BuiltinFunction(name="str_starts_with", arity=2, fn=builtin_str_starts_with),
     )
+    env.set("bytes_empty", BuiltinFunction(name="bytes_empty", arity=0, fn=builtin_bytes_empty))
+    env.set("bytes_length", BuiltinFunction(name="bytes_length", arity=1, fn=builtin_bytes_length))
+    env.set("bytes_get", BuiltinFunction(name="bytes_get", arity=2, fn=builtin_bytes_get))
+    env.set("bytes_slice", BuiltinFunction(name="bytes_slice", arity=3, fn=builtin_bytes_slice))
+    env.set("bytes_append", BuiltinFunction(name="bytes_append", arity=2, fn=builtin_bytes_append))
+    env.set("bytes_singleton", BuiltinFunction(name="bytes_singleton", arity=1, fn=builtin_bytes_singleton))
+    env.set("bytes_from_utf8", BuiltinFunction(name="bytes_from_utf8", arity=1, fn=builtin_bytes_from_utf8))
+    env.set("bytes_to_utf8", BuiltinFunction(name="bytes_to_utf8", arity=1, fn=builtin_bytes_to_utf8))
     env.set("vector_empty", BuiltinFunction(name="vector_empty", arity=0, fn=builtin_vector_empty))
     env.set("vector_length", BuiltinFunction(name="vector_length", arity=1, fn=builtin_vector_length))
     env.set("vector_get", BuiltinFunction(name="vector_get", arity=2, fn=builtin_vector_get))

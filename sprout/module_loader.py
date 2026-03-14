@@ -512,6 +512,14 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "str_slice",
         "str_find",
         "str_starts_with",
+        "bytes_empty",
+        "bytes_length",
+        "bytes_get",
+        "bytes_slice",
+        "bytes_append",
+        "bytes_singleton",
+        "bytes_from_utf8",
+        "bytes_to_utf8",
         "vector_empty",
         "vector_length",
         "vector_get",
@@ -543,7 +551,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "term_read_key",
         "term_write",
     }
-    builtin_types = {"Int", "Bool", "String", "IO", "Unit", "List", "Vector", "Map"}
+    builtin_types = {"Int", "Bool", "String", "Bytes", "IO", "Unit", "List", "Vector", "Map"}
     module_symbols = _build_module_symbols(program, bundle)
 
     all_exported_values: set[str] = set()

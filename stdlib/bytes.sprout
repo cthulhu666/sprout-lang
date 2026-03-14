@@ -1,0 +1,85 @@
+module stdlib.bytes
+import stdlib.collections (Maybe)
+
+export type Result e a =
+  | Ok a
+  | Err e
+
+export type Utf8Error =
+  | Utf8DecodeError String
+
+export fn empty() -> Bytes =
+  bytes_empty()
+
+export fn singleton(value: Int) -> Bytes =
+  bytes_singleton(value)
+
+export fn length(value: Bytes) -> Int =
+  bytes_length(value)
+
+export fn get(value: Bytes, index: Int) -> Maybe Int =
+  bytes_get(value, index)
+
+export fn slice(value: Bytes, start: Int, count: Int) -> Bytes =
+  bytes_slice(value, start, count)
+
+export fn append(left: Bytes, right: Bytes) -> Bytes =
+  bytes_append(left, right)
+
+export fn from_string(raw: String) -> Bytes =
+  bytes_from_utf8(raw)
+
+export fn to_string(value: Bytes) -> Result Utf8Error String =
+  bytes_to_utf8(value)
+
+fn mod_256(value: Int) -> Int =
+  value - (value / 256) * 256
+
+export fn u16_be(value: Int) -> Bytes =
+  append(singleton(mod_256(value / 256)), singleton(mod_256(value)))
+
+export fn u32_be(value: Int) -> Bytes =
+  append(
+    singleton(mod_256(value / 16777216)),
+    append(
+      singleton(mod_256(value / 65536)),
+      append(singleton(mod_256(value / 256)), singleton(mod_256(value)))
+    )
+  )
+
+export fn read_u16_be(value: Bytes) -> Maybe Int =
+  match get(value, 0) with
+  | Nothing -> Nothing
+  | Just b0 ->
+      match get(value, 1) with
+      | Nothing -> Nothing
+      | Just b1 -> Just(b0 * 256 + b1)
+
+export fn read_u32_be(value: Bytes) -> Maybe Int =
+  match get(value, 0) with
+  | Nothing -> Nothing
+  | Just b0 ->
+      match get(value, 1) with
+      | Nothing -> Nothing
+      | Just b1 ->
+          match get(value, 2) with
+          | Nothing -> Nothing
+          | Just b2 ->
+              match get(value, 3) with
+              | Nothing -> Nothing
+              | Just b3 -> Just(b0 * 16777216 + b1 * 65536 + b2 * 256 + b3)
+
+fn c_string_len_from(value: Bytes, index: Int, total: Int) -> Int =
+  if index >= total then total
+  else
+    match get(value, index) with
+    | Nothing -> total
+    | Just b ->
+        if b == 0 then index
+        else c_string_len_from(value, index + 1, total)
+
+export fn c_string(raw: String) -> Bytes =
+  append(from_string(raw), singleton(0))
+
+export fn read_c_string(value: Bytes) -> Result Utf8Error String =
+  to_string(slice(value, 0, c_string_len_from(value, 0, length(value))))

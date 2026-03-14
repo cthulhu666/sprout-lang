@@ -444,6 +444,43 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "refused")
 
+    def test_import_stdlib_bytes_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+                import stdlib.bytes (Result, Utf8Error, c_string, from_string, length, read_c_string, read_u16_be, slice, to_string, u16_be)
+
+                fn unwrap_or_zero(value: Maybe Int) -> Int =
+                  match value with
+                  | Just n -> n
+                  | Nothing -> 0
+
+                fn utf8_score(value: Result Utf8Error String, expected: String, score: Int) -> Int =
+                  match value with
+                  | Ok text -> if text == expected then score else 0
+                  | Err _ -> 0
+
+                fn main() -> IO Unit =
+                  print(
+                    unwrap_or_zero(read_u16_be(slice(u16_be(513), 0, length(u16_be(513)))))
+                    + utf8_score(to_string(from_string("zaż")), "zaż", 3)
+                    + utf8_score(read_c_string(c_string("ok")), "ok", 2)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "518")
+
     def test_import_examples_sentry_api_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
