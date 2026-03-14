@@ -300,6 +300,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "print",
         "print_int",
         "read_lines",
+        "read_int_lines",
+        "read_digit_lines",
         "parse_int",
         "split_words",
         "str_concat",

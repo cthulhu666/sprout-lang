@@ -39,6 +39,11 @@ export fn vec_get(vec: Vec a, index: Int) -> Maybe a =
   match vec with
   | Vec raw -> vector_get(raw, index)
 
+export fn vec_get_or(vec: Vec a, index: Int, fallback: a) -> a =
+  match vec_get(vec, index) with
+  | Just value -> value
+  | Nothing -> fallback
+
 export fn vec_set(vec: Vec a, index: Int, value: a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_set(raw, index, value))

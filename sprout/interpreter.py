@@ -415,6 +415,37 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         lines = Path(raw_path).read_text(encoding="utf-8").splitlines()
         return py_to_adt_list(lines)
 
+    def builtin_read_int_lines(args: list[object]) -> object:
+        raw_path = args[0]
+        if not isinstance(raw_path, str):
+            raise RuntimeError("read_int_lines expects String path")
+        lines = Path(raw_path).read_text(encoding="utf-8").splitlines()
+        items: list[object] = []
+        for line in lines:
+            txt = line.strip()
+            if txt == "":
+                continue
+            items.append(int(txt))
+        return VectorValue(items=tuple(items))
+
+    def builtin_read_digit_lines(args: list[object]) -> object:
+        raw_path = args[0]
+        if not isinstance(raw_path, str):
+            raise RuntimeError("read_digit_lines expects String path")
+        lines = Path(raw_path).read_text(encoding="utf-8").splitlines()
+        banks: list[object] = []
+        for line in lines:
+            txt = line.strip()
+            if txt == "":
+                continue
+            digits: list[object] = []
+            for ch in txt:
+                if ch < "0" or ch > "9":
+                    raise RuntimeError("read_digit_lines expects only decimal digits per non-empty line")
+                digits.append(ord(ch) - ord("0"))
+            banks.append(VectorValue(items=tuple(digits)))
+        return VectorValue(items=tuple(banks))
+
     def builtin_parse_int(args: list[object]) -> object:
         raw = args[0]
         if not isinstance(raw, str):
@@ -787,6 +818,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     env.set("print", BuiltinFunction(name="print", arity=1, fn=builtin_print))
     env.set("print_int", BuiltinFunction(name="print_int", arity=1, fn=builtin_print_int))
     env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
+    env.set("read_int_lines", BuiltinFunction(name="read_int_lines", arity=1, fn=builtin_read_int_lines))
+    env.set("read_digit_lines", BuiltinFunction(name="read_digit_lines", arity=1, fn=builtin_read_digit_lines))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
     env.set("str_concat", BuiltinFunction(name="str_concat", arity=2, fn=builtin_str_concat))

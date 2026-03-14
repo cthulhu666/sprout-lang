@@ -1,10 +1,9 @@
 module examples.aoc2025_day3
-import stdlib.collections (Vec, vec_empty, vec_append, vec_length, vec_get, vec_set)
+import stdlib.collections (Vec, vec_empty, vec_append, vec_length, vec_get_or, vec_set)
 
 # Advent of Code 2025 Day 3: Battery Boost
-# Sample expected answers:
-# part1 (pick 2 batteries): 357
-# part2 (pick 12 batteries): 3121910778619
+# For each bank line, pick digits in-order to maximize resulting number.
+# part1 uses 2 picks; part2 uses 12 picks.
 
 export type Answers =
   | Answers Int Int
@@ -18,29 +17,12 @@ type SizeDrops =
 type PickState =
   | PickState (Vec Int) SizeDrops
 
-fn modn(n: Int, m: Int) -> Int =
-  n - (n / m) * m
-
-fn pow10(k: Int) -> Int =
-  if k == 0 then 1
-  else 10 * pow10(k - 1)
-
-fn num_digits(n: Int) -> Int =
-  if n < 10 then 1
-  else 1 + num_digits(n / 10)
-
-fn digit_at(n: Int, len: Int, index: Int) -> Int =
-  modn(n / pow10(len - index - 1), 10)
-
 fn shrink_for_digit(digits: Vec Int, size: Int, drops: Int, digit: Int) -> Shrink =
   if size <= 0 then Shrink(size, drops)
   else if drops <= 0 then Shrink(size, drops)
   else
-    match vec_get(digits, size - 1) with
-    | Nothing -> Shrink(size, drops)
-    | Just last ->
-        if last < digit then shrink_for_digit(digits, size - 1, drops - 1, digit)
-        else Shrink(size, drops)
+    if vec_get_or(digits, size - 1, 0) < digit then shrink_for_digit(digits, size - 1, drops - 1, digit)
+    else Shrink(size, drops)
 
 fn write_at_or_append(digits: Vec Int, index: Int, digit: Int) -> Vec Int =
   if index < vec_length(digits) then vec_set(digits, index, digit)
@@ -51,56 +33,82 @@ fn push_digit(digits: Vec Int, size: Int, drops: Int, digit: Int) -> PickState =
   | Shrink shrunk_size shrunk_drops ->
       PickState(write_at_or_append(digits, shrunk_size, digit), SizeDrops(shrunk_size + 1, shrunk_drops))
 
-fn pick_digits(n: Int, len: Int, index: Int, total: Int, digits: Vec Int, size: Int, drops: Int) -> PickState =
+fn pick_digits(bank: Vec Int, index: Int, total: Int, digits: Vec Int, size: Int, drops: Int) -> PickState =
   if index >= total then PickState(digits, SizeDrops(size, drops))
   else
-    match push_digit(digits, size, drops, digit_at(n, len, index)) with
+    match push_digit(digits, size, drops, vec_get_or(bank, index, 0)) with
     | PickState next_digits sd ->
         match sd with
         | SizeDrops next_size next_drops ->
-            pick_digits(n, len, index + 1, total, next_digits, next_size, next_drops)
+            pick_digits(bank, index + 1, total, next_digits, next_size, next_drops)
 
 fn fold_prefix_int(digits: Vec Int, index: Int, count: Int, acc: Int) -> Int =
   if index >= count then acc
-  else
-    match vec_get(digits, index) with
-    | Nothing -> acc
-    | Just digit -> fold_prefix_int(digits, index + 1, count, acc * 10 + digit)
+  else fold_prefix_int(digits, index + 1, count, acc * 10 + vec_get_or(digits, index, 0))
 
-fn best_value_with_len(n: Int, len: Int, count: Int) -> Int =
+fn best_value_vec(bank: Vec Int, count: Int) -> Int =
+  let_best_value_with_len(bank, vec_length(bank), count)
+
+fn let_best_value_with_len(bank: Vec Int, len: Int, count: Int) -> Int =
   if count <= 0 then 0
   else if count > len then 0
   else
-    match pick_digits(n, len, 0, len, vec_empty(), 0, len - count) with
+    match pick_digits(bank, 0, len, vec_empty(), 0, len - count) with
     | PickState digits _ -> fold_prefix_int(digits, 0, count, 0)
 
-fn best_value(n: Int, count: Int) -> Int =
-  best_value_with_len(n, num_digits(n), count)
+fn best_value(bank: Vector Int, count: Int) -> Int =
+  best_value_vec(Vec(bank), count)
 
-fn sum_best_values(banks: Vec Int, index: Int, total: Int, count: Int, acc: Int) -> Int =
+fn sum_best_values(banks: Vec (Vector Int), index: Int, total: Int, count: Int, acc: Int) -> Int =
   if index >= total then acc
   else
-    match vec_get(banks, index) with
-    | Nothing -> acc
-    | Just bank -> sum_best_values(banks, index + 1, total, count, acc + best_value(bank, count))
+    sum_best_values(
+      banks,
+      index + 1,
+      total,
+      count,
+      acc + best_value(vec_get_or(banks, index, vector_empty()), count)
+    )
 
-fn sum_for_count(banks: Vec Int, count: Int) -> Int =
+fn sum_for_count(banks: Vec (Vector Int), count: Int) -> Int =
   sum_best_values(banks, 0, vec_length(banks), count, 0)
 
-fn sample_banks() -> Vec Int =
+fn digits_from_string(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
+  if index >= total then acc
+  else
+    digits_from_string(raw, index + 1, total, vec_append(acc, parse_int(str_slice(raw, index, 1))))
+
+fn bank_from_string(raw: String) -> Vector Int =
+  match digits_from_string(raw, 0, str_len(raw), vec_empty()) with
+  | Vec bank -> bank
+
+fn stdin_banks() -> Vec (Vector Int) =
+  Vec(read_digit_lines("/dev/stdin"))
+
+fn sample_banks() -> Vec (Vector Int) =
   vec_append(
     vec_append(
       vec_append(
-        vec_append(vec_empty(), 987654321111111),
-        811111111111119
+        vec_append(vec_empty(), bank_from_string("987654321111111")),
+        bank_from_string("811111111111119")
       ),
-      234234234234278
+      bank_from_string("234234234234278")
     ),
-    818181911112111
+    bank_from_string("818181911112111")
   )
 
+fn solve_for_banks(banks: Vec (Vector Int)) -> Answers =
+  Answers(sum_for_count(banks, 2), sum_for_count(banks, 12))
+
 export fn solve_sample() -> Answers =
-  Answers(sum_for_count(sample_banks(), 2), sum_for_count(sample_banks(), 12))
+  solve_for_banks(sample_banks())
+
+fn solve_or_sample(banks: Vec (Vector Int)) -> Answers =
+  if vec_length(banks) == 0 then solve_sample()
+  else solve_for_banks(banks)
+
+export fn solve_stdin() -> Answers =
+  solve_or_sample(stdin_banks())
 
 fn main() -> IO Unit =
-  print(solve_sample())
+  print(solve_stdin())

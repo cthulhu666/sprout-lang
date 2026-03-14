@@ -234,6 +234,88 @@ long long parse_int(const char* s) {
   if (end == s || *end != '\\0') tcp_fail("parse_int: invalid integer");
   return out;
 }
+long long read_int_lines(const char* path) {
+  if (path == NULL) tcp_fail("read_int_lines: null path");
+  FILE* f = fopen(path, "r");
+  if (f == NULL) tcp_fail("read_int_lines: cannot open file");
+  VectorVal* v = (VectorVal*)malloc(sizeof(VectorVal));
+  if (v == NULL) tcp_fail("read_int_lines: out of memory");
+  v->len = 0;
+  v->cap = 0;
+  v->data = NULL;
+
+  char buf[4096];
+  while (fgets(buf, sizeof(buf), f) != NULL) {
+    size_t n = strlen(buf);
+    while (n > 0 && (buf[n - 1] == '\\n' || buf[n - 1] == '\\r')) {
+      buf[n - 1] = '\\0';
+      n--;
+    }
+    if (n == 0) continue;
+    char* end = NULL;
+    long long value = strtoll(buf, &end, 10);
+    if (end == buf || *end != '\\0') tcp_fail("read_int_lines: invalid integer line");
+    if (v->len == v->cap) {
+      long long new_cap = v->cap == 0 ? 8 : (v->cap * 2);
+      long long* new_data = (long long*)realloc(v->data, (size_t)new_cap * sizeof(long long));
+      if (new_data == NULL) tcp_fail("read_int_lines: out of memory");
+      v->data = new_data;
+      v->cap = new_cap;
+    }
+    v->data[v->len] = value;
+    v->len++;
+  }
+  fclose(f);
+  return (long long)(uintptr_t)v;
+}
+long long read_digit_lines(const char* path) {
+  if (path == NULL) tcp_fail("read_digit_lines: null path");
+  FILE* f = fopen(path, "r");
+  if (f == NULL) tcp_fail("read_digit_lines: cannot open file");
+
+  VectorVal* outer = (VectorVal*)malloc(sizeof(VectorVal));
+  if (outer == NULL) tcp_fail("read_digit_lines: out of memory");
+  outer->len = 0;
+  outer->cap = 0;
+  outer->data = NULL;
+
+  char buf[8192];
+  while (fgets(buf, sizeof(buf), f) != NULL) {
+    size_t n = strlen(buf);
+    while (n > 0 && (buf[n - 1] == '\\n' || buf[n - 1] == '\\r')) {
+      buf[n - 1] = '\\0';
+      n--;
+    }
+    if (n == 0) continue;
+
+    VectorVal* inner = (VectorVal*)malloc(sizeof(VectorVal));
+    if (inner == NULL) tcp_fail("read_digit_lines: out of memory");
+    inner->len = 0;
+    inner->cap = (long long)n;
+    inner->data = inner->cap == 0 ? NULL : (long long*)malloc((size_t)inner->cap * sizeof(long long));
+    if (inner->cap > 0 && inner->data == NULL) tcp_fail("read_digit_lines: out of memory");
+
+    for (size_t i = 0; i < n; i++) {
+      char c = buf[i];
+      if (c < '0' || c > '9') tcp_fail("read_digit_lines: invalid digit line");
+      inner->data[inner->len] = (long long)(c - '0');
+      inner->len++;
+    }
+
+    if (outer->len == outer->cap) {
+      long long new_cap = outer->cap == 0 ? 8 : (outer->cap * 2);
+      long long* new_data = (long long*)realloc(outer->data, (size_t)new_cap * sizeof(long long));
+      if (new_data == NULL) tcp_fail("read_digit_lines: out of memory");
+      outer->data = new_data;
+      outer->cap = new_cap;
+    }
+    outer->data[outer->len] = (long long)(uintptr_t)inner;
+    outer->len++;
+  }
+
+  fclose(f);
+  return (long long)(uintptr_t)outer;
+}
 long long sprout_register_ctor(long long tag, const char* name, long long arity) {
   g_ctor_meta[g_ctor_meta_len].tag = tag;
   g_ctor_meta[g_ctor_meta_len].name = name;
