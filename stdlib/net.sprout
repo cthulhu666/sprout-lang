@@ -1,0 +1,59 @@
+module stdlib.net
+
+export type Result e a =
+  | Ok a
+  | Err e
+
+export type TcpError =
+  | TcpInvalidArgument String
+  | TcpInvalidHandle
+  | TcpConnectFailed String
+  | TcpReadFailed String
+  | TcpWriteFailed String
+  | TcpEndOfStream
+
+export type TcpConnection =
+  | TcpConnection Int
+
+export type TcpListener =
+  | TcpListener Int
+
+export fn tcp_error_message(err: TcpError) -> String =
+  match err with
+  | TcpInvalidArgument msg -> msg
+  | TcpInvalidHandle -> "invalid handle"
+  | TcpConnectFailed msg -> msg
+  | TcpReadFailed msg -> msg
+  | TcpWriteFailed msg -> msg
+  | TcpEndOfStream -> "end of stream"
+
+fn tcp_connection_handle(conn: TcpConnection) -> Int =
+  match conn with
+  | TcpConnection handle -> handle
+
+fn tcp_listener_handle(listener: TcpListener) -> Int =
+  match listener with
+  | TcpListener handle -> handle
+
+export fn connect(host: String, port: Int) -> Result TcpError TcpConnection =
+  match tcp_connect(host, port) with
+  | Err err -> Err(err)
+  | Ok handle -> Ok(TcpConnection(handle))
+
+export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError String =
+  tcp_read_exact(tcp_connection_handle(conn), count)
+
+export fn write_all(conn: TcpConnection, payload: String) -> Result TcpError Int =
+  tcp_write_all(tcp_connection_handle(conn), payload)
+
+export fn close(conn: TcpConnection) -> IO Unit =
+  tcp_close(tcp_connection_handle(conn))
+
+export fn listen_local(port: Int) -> TcpListener =
+  TcpListener(tcp_listen(port))
+
+export fn accept(listener: TcpListener) -> TcpConnection =
+  TcpConnection(tcp_accept(tcp_listener_handle(listener)))
+
+export fn close_listener(listener: TcpListener) -> IO Unit =
+  tcp_close_listener(tcp_listener_handle(listener))

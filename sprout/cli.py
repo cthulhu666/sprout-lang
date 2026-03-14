@@ -993,6 +993,69 @@ long long tcp_listen(long long port) {
   return h;
 }
 
+static long long tcp_net_ok(long long payload) {
+  return sprout_make1(find_ctor_tag_by_name("stdlib.net.Ok"), payload);
+}
+
+static long long tcp_net_err0(const char* ctor_name) {
+  long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
+  return sprout_make1(find_ctor_tag_by_name("stdlib.net.Err"), err);
+}
+
+static long long tcp_net_err1(const char* ctor_name, long long payload) {
+  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
+  return sprout_make1(find_ctor_tag_by_name("stdlib.net.Err"), err);
+}
+
+long long tcp_connect(const char* host, long long port) {
+  if (host == NULL) tcp_fail("tcp_connect: null host");
+  if (port < 1 || port > 65535) {
+    return tcp_net_err1(
+      "stdlib.net.TcpInvalidArgument",
+      (long long)(uintptr_t)"port must be in 1..65535"
+    );
+  }
+  char port_buf[16];
+  snprintf(port_buf, sizeof(port_buf), "%lld", port);
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo* resolved = NULL;
+  int gai = getaddrinfo(host, port_buf, &hints, &resolved);
+  if (gai != 0) {
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)gai_strerror(gai));
+  }
+
+  int fd = -1;
+  const char* error_msg = "connect failed";
+  for (struct addrinfo* it = resolved; it != NULL; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd < 0) continue;
+    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
+      error_msg = NULL;
+      break;
+    }
+    error_msg = strerror(errno);
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(resolved);
+
+  if (fd < 0) {
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)error_msg);
+  }
+
+  long long h = g_next_conn_handle++;
+  if (h >= 2048) {
+    close(fd);
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)"connection table full");
+  }
+  g_conn_fd[h] = fd;
+  g_conn_used[h] = 1;
+  return tcp_net_ok(h);
+}
+
 long long tcp_accept(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
     tcp_fail("tcp_accept: unknown listener handle");
@@ -1022,6 +1085,33 @@ const char* tcp_read(long long conn) {
   return buf;
 }
 
+long long tcp_read_exact(long long conn, long long count) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  if (count < 0) {
+    return tcp_net_err1(
+      "stdlib.net.TcpInvalidArgument",
+      (long long)(uintptr_t)"count must be >= 0"
+    );
+  }
+  char* buf = (char*)malloc((size_t)count + 1);
+  if (buf == NULL) tcp_fail("tcp_read_exact: out of memory");
+  size_t received = 0;
+  while (received < (size_t)count) {
+    ssize_t n = recv(g_conn_fd[conn], buf + received, (size_t)count - received, 0);
+    if (n == 0) {
+      free(buf);
+      return tcp_net_err0("stdlib.net.TcpEndOfStream");
+    }
+    if (n < 0) {
+      free(buf);
+      return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
+    }
+    received += (size_t)n;
+  }
+  buf[count] = '\\0';
+  return tcp_net_ok((long long)(uintptr_t)buf);
+}
+
 long long tcp_write(long long conn, const char* payload) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_write: unknown connection handle");
   if (payload == NULL) tcp_fail("tcp_write: null payload");
@@ -1034,6 +1124,22 @@ long long tcp_write(long long conn, const char* payload) {
     len -= (size_t)n;
   }
   return 0;
+}
+
+long long tcp_write_all(long long conn, const char* payload) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  if (payload == NULL) tcp_fail("tcp_write_all: null payload");
+  size_t len = strlen(payload);
+  const char* p = payload;
+  while (len > 0) {
+    ssize_t n = send(g_conn_fd[conn], p, len, 0);
+    if (n <= 0) {
+      return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
+    }
+    p += n;
+    len -= (size_t)n;
+  }
+  return tcp_net_ok((long long)strlen(payload));
 }
 
 long long tcp_close(long long conn) {

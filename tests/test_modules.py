@@ -422,6 +422,28 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
+    def test_import_stdlib_net_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.net (TcpConnection, TcpError, TcpListener, tcp_error_message)
+
+                fn main() -> IO Unit =
+                  print(tcp_error_message(TcpConnectFailed("refused")))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "refused")
+
     def test_import_examples_sentry_api_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

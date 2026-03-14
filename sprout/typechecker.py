@@ -797,6 +797,45 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(INT, TFunc(STRING, TApp(TConst("IO"), UNIT))),
         ),
+        "tcp_connect": Scheme(
+            vars=(),
+            type=TFunc(
+                STRING,
+                TFunc(
+                    INT,
+                    TApp(
+                        TApp(TConst("stdlib.net.Result"), TConst("stdlib.net.TcpError")),
+                        INT,
+                    ),
+                ),
+            ),
+        ),
+        "tcp_read_exact": Scheme(
+            vars=(),
+            type=TFunc(
+                INT,
+                TFunc(
+                    INT,
+                    TApp(
+                        TApp(TConst("stdlib.net.Result"), TConst("stdlib.net.TcpError")),
+                        STRING,
+                    ),
+                ),
+            ),
+        ),
+        "tcp_write_all": Scheme(
+            vars=(),
+            type=TFunc(
+                INT,
+                TFunc(
+                    STRING,
+                    TApp(
+                        TApp(TConst("stdlib.net.Result"), TConst("stdlib.net.TcpError")),
+                        INT,
+                    ),
+                ),
+            ),
+        ),
         "tcp_close": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
         "tcp_close_listener": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
         "tcp_echo_serve": Scheme(vars=(), type=TFunc(INT, TFunc(INT, TApp(TConst("IO"), UNIT)))),

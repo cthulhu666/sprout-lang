@@ -74,6 +74,9 @@ Runtime builtins (host-implemented):
 - `tcp_accept(listener: Int) -> Int`
 - `tcp_read(conn: Int) -> String`
 - `tcp_write(conn: Int, payload: String) -> IO Unit`
+- `tcp_connect(host: String, port: Int) -> stdlib.net.Result stdlib.net.TcpError Int`
+- `tcp_read_exact(conn: Int, count: Int) -> stdlib.net.Result stdlib.net.TcpError String`
+- `tcp_write_all(conn: Int, payload: String) -> stdlib.net.Result stdlib.net.TcpError Int`
 - `tcp_close(conn: Int) -> IO Unit`
 - `tcp_close_listener(listener: Int) -> IO Unit`
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
@@ -171,6 +174,24 @@ HTTP client convenience module (in `stdlib/http_client.sprout`):
 - `http_get(url, headers, timeout_ms) -> Result HttpError HttpResponse`
 - `http_post(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
 - `http_put(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
+
+TCP client helper types (in `stdlib/net.sprout`):
+
+- `Result e a`
+- `TcpError` variants (`TcpInvalidArgument`, `TcpInvalidHandle`, `TcpConnectFailed`, `TcpReadFailed`, `TcpWriteFailed`, `TcpEndOfStream`)
+- `TcpConnection`
+- `TcpListener`
+- `connect(host, port) -> Result TcpError TcpConnection`
+- `read_exact(conn, count) -> Result TcpError String`
+- `write_all(conn, payload) -> Result TcpError Int`
+- `close(conn) -> IO Unit`
+- `listen_local(port) -> TcpListener`
+- `accept(listener) -> TcpConnection`
+- `close_listener(listener) -> IO Unit`
+- `tcp_error_message(err) -> String`
+
+Current limitation:
+- `TcpConnection(...)` and `TcpListener(...)` constructors are still public because Sprout does not yet support hidden/export-private constructors, so this is safer than bare `Int` but not fully opaque yet.
 
 Terminal convenience module (in `stdlib/terminal.sprout`):
 
@@ -278,6 +299,8 @@ Load HTTP helpers:
 - `print_int(...)` external call.
 
 TCP server builtins are available in interpreter and native (`sprout compile --native`) modes.
+Typed TCP client builtins are also available; they still use `String` payloads for now, with `Bytes` planned next for raw protocol data.
+Application code should prefer the typed `stdlib.net` wrapper API over bare `Int` socket handles.
 `http_request` is available in interpreter and native modes for plain `http://` requests.
 
 Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:

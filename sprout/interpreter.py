@@ -837,6 +837,72 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         conn.sendall(payload.encode("utf-8"))
         return None
 
+    def _tcp_ok(value: object) -> ADTValue:
+        return ADTValue(constructor="stdlib.net.Ok", args=(value,))
+
+    def _tcp_err(constructor: str, payload: object | None = None) -> ADTValue:
+        err = ADTValue(constructor=f"stdlib.net.{constructor}", args=() if payload is None else (payload,))
+        return ADTValue(constructor="stdlib.net.Err", args=(err,))
+
+    def builtin_tcp_connect(args: list[object]) -> object:
+        host = args[0]
+        port = args[1]
+        if not isinstance(host, str):
+            raise RuntimeError("tcp_connect expects String host")
+        if not isinstance(port, int):
+            raise RuntimeError("tcp_connect expects Int port")
+        if port < 1 or port > 65535:
+            return _tcp_err("TcpInvalidArgument", "port must be in 1..65535")
+        try:
+            conn = socket.create_connection((host, port), timeout=1.0)
+        except OSError as exc:
+            return _tcp_err("TcpConnectFailed", str(exc))
+        handle = alloc_handle()
+        connections[handle] = conn
+        return _tcp_ok(handle)
+
+    def builtin_tcp_read_exact(args: list[object]) -> object:
+        conn_handle = args[0]
+        count = args[1]
+        if not isinstance(conn_handle, int):
+            raise RuntimeError("tcp_read_exact expects Int connection handle")
+        if not isinstance(count, int):
+            raise RuntimeError("tcp_read_exact expects Int count")
+        if count < 0:
+            return _tcp_err("TcpInvalidArgument", "count must be >= 0")
+        conn = connections.get(conn_handle)
+        if conn is None:
+            return _tcp_err("TcpInvalidHandle")
+        chunks: list[bytes] = []
+        remaining = count
+        try:
+            while remaining > 0:
+                chunk = conn.recv(remaining)
+                if chunk == b"":
+                    return _tcp_err("TcpEndOfStream")
+                chunks.append(chunk)
+                remaining -= len(chunk)
+        except OSError as exc:
+            return _tcp_err("TcpReadFailed", str(exc))
+        return _tcp_ok(b"".join(chunks).decode("utf-8", errors="replace"))
+
+    def builtin_tcp_write_all(args: list[object]) -> object:
+        conn_handle = args[0]
+        payload = args[1]
+        if not isinstance(conn_handle, int):
+            raise RuntimeError("tcp_write_all expects Int connection handle")
+        if not isinstance(payload, str):
+            raise RuntimeError("tcp_write_all expects String payload")
+        conn = connections.get(conn_handle)
+        if conn is None:
+            return _tcp_err("TcpInvalidHandle")
+        raw = payload.encode("utf-8")
+        try:
+            conn.sendall(raw)
+        except OSError as exc:
+            return _tcp_err("TcpWriteFailed", str(exc))
+        return _tcp_ok(len(raw))
+
     def builtin_tcp_close(args: list[object]) -> object:
         conn_handle = args[0]
         if not isinstance(conn_handle, int):
@@ -911,6 +977,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
     env.set("tcp_accept", BuiltinFunction(name="tcp_accept", arity=1, fn=builtin_tcp_accept))
     env.set("tcp_read", BuiltinFunction(name="tcp_read", arity=1, fn=builtin_tcp_read))
     env.set("tcp_write", BuiltinFunction(name="tcp_write", arity=2, fn=builtin_tcp_write))
+    env.set("tcp_connect", BuiltinFunction(name="tcp_connect", arity=2, fn=builtin_tcp_connect))
+    env.set("tcp_read_exact", BuiltinFunction(name="tcp_read_exact", arity=2, fn=builtin_tcp_read_exact))
+    env.set("tcp_write_all", BuiltinFunction(name="tcp_write_all", arity=2, fn=builtin_tcp_write_all))
     env.set("tcp_close", BuiltinFunction(name="tcp_close", arity=1, fn=builtin_tcp_close))
     env.set(
         "tcp_close_listener",

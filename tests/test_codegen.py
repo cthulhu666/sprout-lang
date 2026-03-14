@@ -169,6 +169,37 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("declare i64 @tcp_close_listener(i64)", ir)
         self.assertIn("declare i64 @tcp_echo_serve(i64, i64)", ir)
 
+    def test_compile_typed_tcp_client_builtins_to_llvm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "main.sprout"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.net (Result, TcpConnection, TcpError, connect, read_exact, write_all)
+
+                fn main() -> IO Unit =
+                  match connect("127.0.0.1", 5432) with
+                  | Err _ -> print("err")
+                  | Ok conn ->
+                      match write_all(conn, "ping") with
+                      | Err _ -> print("write")
+                      | Ok _ ->
+                          match read_exact(conn, 4) with
+                          | Err _ -> print("read")
+                          | Ok body -> print(body)
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(spr_path)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            ir = compile_to_llvm(program)
+            self.assertIn("declare i64 @tcp_connect(ptr, i64)", ir)
+            self.assertIn("declare i64 @tcp_read_exact(i64, i64)", ir)
+            self.assertIn("declare i64 @tcp_write_all(i64, ptr)", ir)
+
     def test_compile_env_get_builtin_to_llvm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -402,6 +433,76 @@ class CodegenTests(unittest.TestCase):
             run = proc.communicate(timeout=2.0)
             self.assertEqual(proc.returncode, 0, msg=run[1])
             self.assertEqual(echoed, "native-echo")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_typed_tcp_client_builtins(self) -> None:
+        try:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind(("127.0.0.1", 0))
+        except PermissionError:
+            self.skipTest("network socket bind not permitted in this environment")
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        received: list[bytes] = []
+
+        def server() -> None:
+            with listener:
+                conn, _ = listener.accept()
+                with conn:
+                    received.append(conn.recv(4))
+                    conn.sendall(b"pong")
+
+        server_thread = threading.Thread(target=server, daemon=True)
+        server_thread.start()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                f"""
+                module main
+                import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact, tcp_error_message, write_all)
+
+                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+                fn finish(conn: TcpConnection, message: String) -> IO Unit =
+                  seq(close(conn), print(message))
+
+                fn with_conn(conn: TcpConnection) -> IO Unit =
+                  match write_all(conn, "ping") with
+                  | Err err -> finish(conn, tcp_error_message(err))
+                  | Ok _ ->
+                      match read_exact(conn, 4) with
+                      | Err err -> finish(conn, tcp_error_message(err))
+                      | Ok body -> finish(conn, body)
+
+                fn main() -> IO Unit =
+                  match connect("127.0.0.1", {port}) with
+                  | Err err -> print(tcp_error_message(err))
+                  | Ok conn -> with_conn(conn)
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(run.stdout.strip(), "pong")
+
+        server_thread.join(timeout=2.0)
+        self.assertEqual(received, [b"ping"])
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_string_builtins(self) -> None:

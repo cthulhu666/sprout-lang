@@ -30,9 +30,9 @@ Definition of done:
 - [x] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
 - [x] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
 - [x] `P1` Ensure interpreter/native parity for HTTP client builtins.
-- [ ] `P0` Add outbound TCP client connect primitive (`tcp_connect(host, port)`) for external services such as databases.
-- [ ] `P0` Add exact-read and write-all socket operations suitable for framed protocols.
-- [ ] `P1` Define transport failures for socket operations as typed `Result` values instead of only runtime-fatal builtin errors.
+- [x] `P0` Add outbound TCP client connect primitive (`tcp_connect(host, port)`) for external services such as databases.
+- [x] `P0` Add exact-read and write-all socket operations suitable for framed protocols.
+- [x] `P1` Define transport failures for socket operations as typed `Result` values instead of only runtime-fatal builtin errors.
 
 ### 2.5) Binary Data and Protocol Primitives
 
@@ -104,7 +104,7 @@ Definition of done:
 
 ### 8.5) Runtime and FFI Foundations for Database Clients
 
-- [ ] `P0` Define a safer representation for external resource handles (for example opaque connection values instead of bare `Int`).
+- [x] `P0` Define a safer representation for external resource handles (currently `stdlib.net` wrapper ADTs; true opacity still depends on hidden constructors).
 - [x] `P1` Add environment/config helpers such as `env_get(name) -> Maybe String`.
 - [ ] `P1` Define test support for integration-style IO programs that depend on external services.
 
@@ -124,6 +124,8 @@ Definition of done:
 
 - [x] Modules with explicit exports (`export`) are implemented.
 - [x] HTTP response helpers exist in `stdlib/http.sprout`.
+- [x] `stdlib.net` defines typed TCP client result/error helpers.
+- [x] `stdlib.net` wraps TCP connections/listeners in distinct handle types for user-facing APIs.
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
 - [x] `http_request` builtin and typed HTTP result ADTs are implemented in interpreter and native modes.
 - [x] `json_parse` builtin and basic JSON accessors are implemented.
@@ -135,11 +137,11 @@ Definition of done:
 - [x] Prelude now includes `pipe` plus `result_pipe*` helpers for lighter `Result` pipelines.
 - [x] CLI formatter/linter baseline exists (`fmt`, `fmt --check`, `lint`).
 - [ ] terminal interaction primitives are not yet fully implemented.
-- [ ] outbound TCP client sockets and binary protocol primitives are not yet implemented.
+- [ ] binary protocol primitives and fully opaque external-resource handles are not yet implemented.
 - [x] `env_get(name) -> Maybe String` is available in interpreter and native modes.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add outbound TCP client connect plus exact-read/write-all operations for framed external protocols.
-2. Add a stable `Bytes` type with byte slicing and big-endian integer decode helpers.
-3. Define safer external-resource handle conventions and integration-style IO test support.
+1. Add a stable `Bytes` type with byte slicing and big-endian integer decode helpers.
+2. Add fully opaque constructor/private-export support so runtime resource handles cannot be forged.
+3. Define test support for integration-style IO programs that depend on external services.
