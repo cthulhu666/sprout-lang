@@ -30,6 +30,17 @@ Definition of done:
 - [x] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
 - [x] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
 - [x] `P1` Ensure interpreter/native parity for HTTP client builtins.
+- [ ] `P0` Add outbound TCP client connect primitive (`tcp_connect(host, port)`) for external services such as databases.
+- [ ] `P0` Add exact-read and write-all socket operations suitable for framed protocols.
+- [ ] `P1` Define transport failures for socket operations as typed `Result` values instead of only runtime-fatal builtin errors.
+
+### 2.5) Binary Data and Protocol Primitives
+
+- [ ] `P0` Add a stable `Bytes` type for raw binary data handling.
+- [ ] `P0` Add byte primitives: length, indexing, slicing, append, and construction.
+- [ ] `P0` Add big-endian integer encode/decode helpers for framed protocols.
+- [ ] `P1` Add UTF-8 string/bytes conversion helpers and null-terminated string helpers.
+- [ ] `P1` Add efficient byte-buffer/builder utilities so protocol parsers do not depend on repeated full-copy concatenation.
 
 ### 3) JSON Support
 
@@ -91,6 +102,12 @@ Definition of done:
 - [ ] `P1` Add auth/token helpers and secure configuration loading.
 - [ ] `P1` Add integration tests with mocked HTTP responses.
 
+### 8.5) Runtime and FFI Foundations for Database Clients
+
+- [ ] `P0` Define a safer representation for external resource handles (for example opaque connection values instead of bare `Int`).
+- [ ] `P1` Add environment/config helpers such as `env_get(name) -> Maybe String`.
+- [ ] `P1` Define test support for integration-style IO programs that depend on external services.
+
 ### 9) Issue Browser TUI App
 
 - [~] `P0` Build `examples/sentry_issue_browser_tui.sprout`:
@@ -118,9 +135,10 @@ Definition of done:
 - [x] Prelude now includes `pipe` plus `result_pipe*` helpers for lighter `Result` pipelines.
 - [x] CLI formatter/linter baseline exists (`fmt`, `fmt --check`, `lint`).
 - [ ] terminal interaction primitives are not yet fully implemented.
+- [ ] outbound TCP client sockets and binary protocol primitives are not yet implemented.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
-2. Add `json_stringify(Json) -> String` for debug and payload building.
-3. Add tests for malformed input and edge cases.
+1. Add outbound TCP client connect plus exact-read/write-all operations for framed external protocols.
+2. Add a stable `Bytes` type with byte slicing and big-endian integer decode helpers.
+3. Add `env_get(name) -> Maybe String` and define safer external-resource handle conventions.
