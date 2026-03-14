@@ -8,6 +8,49 @@ import unittest
 
 
 class CliTests(unittest.TestCase):
+    def test_fmt_rewrites_file_in_place(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fmt_test.sprout"
+            path.write_text("fn main()->Int=1", encoding="utf-8")
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "fmt", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(path.read_text(encoding="utf-8"), "fn main() -> Int = 1\n")
+            self.assertIn("formatted", run.stdout)
+
+    def test_fmt_check_fails_when_file_needs_formatting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fmt_check_test.sprout"
+            path.write_text("fn main()->Int=1", encoding="utf-8")
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "fmt", "--check", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("needs formatting", run.stdout)
+
+    def test_lint_reports_style_issues(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "lint_test.sprout"
+            path.write_text("fn main()->Int=1\t  ", encoding="utf-8")
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "lint", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("tab indentation is not allowed", run.stdout)
+            self.assertIn("trailing whitespace", run.stdout)
+            self.assertIn("missing trailing newline", run.stdout)
+            self.assertIn("file is not formatted", run.stdout)
+
     def test_repl_supports_declarations_expressions_and_type_queries(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],

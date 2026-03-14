@@ -38,6 +38,9 @@ This repo uses [`mise`](https://mise.jdx.dev/) to pin tools and [`just`](https:/
 Common tasks:
 
 - Parse file: `mise exec -- just parse examples/fizzbuzz.sprout`
+- Format file: `mise exec -- just fmt examples/fizzbuzz.sprout`
+- Check formatting: `mise exec -- just fmt-check examples/fizzbuzz.sprout`
+- Lint file: `mise exec -- just lint examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
 - Start REPL: `mise exec -- python -m sprout.cli repl` (loads stdlib by default)
@@ -297,6 +300,11 @@ Commands:
   - stdlib prelude is loaded by default
   - `--with-http-stdlib` switches to the HTTP helper preload
   - `--with-stdlib --with-http-stdlib` requests both preloads, but overlapping helper/type names are not reconciled yet
+- Formatter/linter baseline:
+  - format in place: `python3 -m sprout.cli fmt your_file.sprout`
+  - check formatting only: `python3 -m sprout.cli fmt --check your_file.sprout`
+  - lint baseline style issues: `python3 -m sprout.cli lint your_file.sprout`
+  - current scope: whitespace-aware formatting, comment preservation, trailing-whitespace/tab/final-newline checks
 
 ## Roadmap / TODO
 
@@ -304,7 +312,7 @@ Commands:
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
 3. Add stronger server-side runtime models (multi-reactor as next target).
 4. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
-5. Add formatter/linter baseline.
+5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
 
 ## Contributing
 

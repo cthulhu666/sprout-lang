@@ -22,6 +22,7 @@ Definition of done:
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
+- [ ] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
 
 ### 2) Networking and HTTP Client
 
@@ -64,7 +65,8 @@ Definition of done:
 
 - [x] `P1` Add REPL (parse/typecheck/eval loop).
 - [x] `P1` Add better diagnostics for module/import/export errors with source context.
-- [ ] `P2` Add formatter/linter baseline.
+- [x] `P2` Add formatter/linter baseline.
+- [ ] `P2` Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
 
 ### 7.5) Type Classes (Collections First)
 
@@ -113,10 +115,11 @@ Definition of done:
 - [x] CLI REPL exists with declarations, expression evaluation, and `:type`.
 - [x] Prelude now includes `when_ok` / `when_error` effect taps for `Result`.
 - [x] Prelude now includes `pipe` plus `result_pipe*` helpers for lighter `Result` pipelines.
+- [x] CLI formatter/linter baseline exists (`fmt`, `fmt --check`, `lint`).
 - [ ] terminal interaction primitives are not yet fully implemented.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add formatter/linter baseline.
-2. Ensure interpreter/native parity for HTTP client builtins.
-3. Move global string helpers into namespaced stdlib module(s).
+1. Ensure interpreter/native parity for HTTP client builtins.
+2. Move global string helpers into namespaced stdlib module(s).
+3. Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).

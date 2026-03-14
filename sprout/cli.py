@@ -10,6 +10,7 @@ import tempfile
 
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
+from .formatter import format_source, lint_source
 from .interpreter import RuntimeError, run_program
 from .module_loader import ModuleLoadError, load_module_bundle, resolve_program_names
 from .parser import ParseError, parse
@@ -27,6 +28,34 @@ def cmd_parse(path: Path) -> int:
     resolve_program_names(tree, bundle)
     print(json.dumps(to_dict(tree), indent=2))
     return 0
+
+
+def cmd_fmt(path: Path, check: bool = False) -> int:
+    source = path.read_text(encoding="utf-8")
+    formatted = format_source(source)
+    current = source if source.endswith("\n") else source + "\n"
+    if check:
+        if formatted != current:
+            print(f"needs formatting: {path}")
+            return 1
+        print("ok")
+        return 0
+    if formatted != current:
+        path.write_text(formatted, encoding="utf-8")
+        print(f"formatted {path}")
+        return 0
+    print(f"already formatted {path}")
+    return 0
+
+
+def cmd_lint(path: Path) -> int:
+    issues = lint_source(path.read_text(encoding="utf-8"))
+    if not issues:
+        print("ok")
+        return 0
+    for issue in issues:
+        print(f"{path}:{issue.line}:{issue.column}: {issue.message}")
+    return 1
 
 
 def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
@@ -873,6 +902,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_parse = sub.add_parser("parse", help="parse a Sprout file and print AST as JSON")
     p_parse.add_argument("file", type=Path)
+    p_fmt = sub.add_parser("fmt", help="format a Sprout file")
+    p_fmt.add_argument("file", type=Path)
+    p_fmt.add_argument("--check", action="store_true", help="report whether formatting changes are needed")
+    p_lint = sub.add_parser("lint", help="lint a Sprout file for baseline style issues")
+    p_lint.add_argument("file", type=Path)
     p_check = sub.add_parser("check", help="typecheck a Sprout file")
     p_check.add_argument("file", type=Path)
     p_check.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
@@ -921,6 +955,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "parse":
             return cmd_parse(args.file)
+        if args.command == "fmt":
+            return cmd_fmt(args.file, check=args.check)
+        if args.command == "lint":
+            return cmd_lint(args.file)
         if args.command == "check":
             return cmd_check(
                 args.file,

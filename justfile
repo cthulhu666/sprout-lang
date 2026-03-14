@@ -9,6 +9,15 @@ test:
 parse file:
   python3 -m sprout.cli parse {{file}}
 
+fmt file:
+  python3 -m sprout.cli fmt {{file}}
+
+fmt-check file:
+  python3 -m sprout.cli fmt --check {{file}}
+
+lint file:
+  python3 -m sprout.cli lint {{file}}
+
 check file:
   python3 -m sprout.cli check {{file}}
 
