@@ -227,6 +227,7 @@ Commands:
 3. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
 4. Add stronger server-side runtime models (multi-reactor as next target).
 5. Add a REPL for iterative development.
+6. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
 
 ## Contributing
 

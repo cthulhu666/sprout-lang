@@ -48,6 +48,9 @@ Definition of done:
 
 - [x] `P1` Add practical indexed sequence type (`Array`/`Vector`) for UI lists.
 - [x] `P1` Add dictionary/map type for API payload handling.
+- [ ] `P1` Add stdlib text parsing helpers: `string_lines(String) -> Vec String`.
+- [ ] `P1` Add stdlib digit helpers: `string_digits(String) -> Vec Int`.
+- [ ] `P2` Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).
 - [ ] `P2` Add set type and common ops.
 
 ### 6) Modules and Packaging
@@ -96,6 +99,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Extend `stdlib.collections` with richer operations (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`) and edge-case tests.
-2. Add `json_stringify(Json) -> String` with malformed/edge-case tests.
-3. Implement consistent runtime error conventions for effectful builtins.
+1. Add `string_lines(String) -> Vec String` and `string_digits(String) -> Vec Int` to stdlib.
+2. Extend `stdlib.collections` with richer operations (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`) and edge-case tests.
+3. Add `json_stringify(Json) -> String` with malformed/edge-case tests.
