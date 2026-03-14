@@ -120,6 +120,23 @@ typedef struct {
   long long arity;
 } CtorMeta;
 
+typedef struct {
+  long long len;
+  long long cap;
+  long long* data;
+} VectorVal;
+
+typedef struct {
+  char* key;
+  long long value;
+} MapEntry;
+
+typedef struct {
+  long long len;
+  long long cap;
+  MapEntry* entries;
+} MapVal;
+
 static ObjNode* g_objs = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
@@ -129,6 +146,8 @@ static int g_conn_fd[2048];
 static int g_conn_used[2048];
 static long long g_next_listener_handle = 1;
 static long long g_next_conn_handle = 1;
+
+static void tcp_fail(const char* msg);
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -158,6 +177,14 @@ static CtorMeta* find_ctor(long long tag) {
     if (g_ctor_meta[i].tag == tag) return &g_ctor_meta[i];
   }
   return NULL;
+}
+
+static long long find_ctor_tag_by_name(const char* name) {
+  for (long long i = 0; i < g_ctor_meta_len; i++) {
+    if (strcmp(g_ctor_meta[i].name, name) == 0) return g_ctor_meta[i].tag;
+  }
+  tcp_fail("constructor metadata not registered");
+  return -1;
 }
 
 static void print_inline_value(long long v);
@@ -199,6 +226,13 @@ long long print_value(long long x) {
   print_inline_value(x);
   printf("\\n");
   return x;
+}
+long long parse_int(const char* s) {
+  if (s == NULL) tcp_fail("parse_int: null input");
+  char* end = NULL;
+  long long out = strtoll(s, &end, 10);
+  if (end == s || *end != '\\0') tcp_fail("parse_int: invalid integer");
+  return out;
 }
 long long sprout_register_ctor(long long tag, const char* name, long long arity) {
   g_ctor_meta[g_ctor_meta_len].tag = tag;
@@ -292,6 +326,153 @@ _Bool str_starts_with(const char* s, const char* prefix) {
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with: null input");
   size_t prefix_len = strlen(prefix);
   return strncmp(s, prefix, prefix_len) == 0;
+}
+
+long long vector_empty() {
+  VectorVal* v = (VectorVal*)malloc(sizeof(VectorVal));
+  if (v == NULL) tcp_fail("vector_empty: out of memory");
+  v->len = 0;
+  v->cap = 0;
+  v->data = NULL;
+  return (long long)(uintptr_t)v;
+}
+
+long long vector_length(long long vec) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_length: null vector");
+  return v->len;
+}
+
+long long vector_get(long long vec, long long index) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_get: null vector");
+  if (index < 0 || index >= v->len) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), v->data[index]);
+}
+
+long long vector_set(long long vec, long long index, long long value) {
+  VectorVal* src = (VectorVal*)(uintptr_t)vec;
+  if (src == NULL) tcp_fail("vector_set: null vector");
+  VectorVal* out = (VectorVal*)malloc(sizeof(VectorVal));
+  if (out == NULL) tcp_fail("vector_set: out of memory");
+  out->len = src->len;
+  out->cap = src->len;
+  if (out->cap == 0) {
+    out->data = NULL;
+    return (long long)(uintptr_t)out;
+  }
+  out->data = (long long*)malloc((size_t)out->cap * sizeof(long long));
+  if (out->data == NULL) tcp_fail("vector_set: out of memory");
+  memcpy(out->data, src->data, (size_t)out->len * sizeof(long long));
+  if (index >= 0 && index < out->len) {
+    out->data[index] = value;
+  }
+  return (long long)(uintptr_t)out;
+}
+
+long long vector_append(long long vec, long long value) {
+  VectorVal* src = (VectorVal*)(uintptr_t)vec;
+  if (src == NULL) tcp_fail("vector_append: null vector");
+  VectorVal* out = (VectorVal*)malloc(sizeof(VectorVal));
+  if (out == NULL) tcp_fail("vector_append: out of memory");
+  out->len = src->len + 1;
+  out->cap = out->len;
+  out->data = (long long*)malloc((size_t)out->cap * sizeof(long long));
+  if (out->data == NULL) tcp_fail("vector_append: out of memory");
+  if (src->len > 0) {
+    memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
+  }
+  out->data[src->len] = value;
+  return (long long)(uintptr_t)out;
+}
+
+long long map_empty() {
+  MapVal* m = (MapVal*)malloc(sizeof(MapVal));
+  if (m == NULL) tcp_fail("map_empty: out of memory");
+  m->len = 0;
+  m->cap = 0;
+  m->entries = NULL;
+  return (long long)(uintptr_t)m;
+}
+
+static long long map_find_index(MapVal* m, const char* key) {
+  for (long long i = 0; i < m->len; i++) {
+    if (strcmp(m->entries[i].key, key) == 0) return i;
+  }
+  return -1;
+}
+
+long long map_get(long long map_h, const char* key) {
+  MapVal* m = (MapVal*)(uintptr_t)map_h;
+  if (m == NULL) tcp_fail("map_get: null map");
+  if (key == NULL) tcp_fail("map_get: null key");
+  long long idx = map_find_index(m, key);
+  if (idx < 0) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[idx].value);
+}
+
+long long map_set(long long map_h, const char* key, long long value) {
+  MapVal* src = (MapVal*)(uintptr_t)map_h;
+  if (src == NULL) tcp_fail("map_set: null map");
+  if (key == NULL) tcp_fail("map_set: null key");
+  long long existing = map_find_index(src, key);
+  long long out_len = existing >= 0 ? src->len : (src->len + 1);
+
+  MapVal* out = (MapVal*)malloc(sizeof(MapVal));
+  if (out == NULL) tcp_fail("map_set: out of memory");
+  out->len = out_len;
+  out->cap = out_len;
+  out->entries = out_len == 0 ? NULL : (MapEntry*)malloc((size_t)out_len * sizeof(MapEntry));
+  if (out_len > 0 && out->entries == NULL) tcp_fail("map_set: out of memory");
+
+  for (long long i = 0; i < src->len; i++) {
+    out->entries[i].key = strdup(src->entries[i].key);
+    if (out->entries[i].key == NULL) tcp_fail("map_set: out of memory");
+    out->entries[i].value = src->entries[i].value;
+  }
+  if (existing >= 0) {
+    out->entries[existing].value = value;
+  } else {
+    out->entries[src->len].key = strdup(key);
+    if (out->entries[src->len].key == NULL) tcp_fail("map_set: out of memory");
+    out->entries[src->len].value = value;
+  }
+  return (long long)(uintptr_t)out;
+}
+
+long long map_remove(long long map_h, const char* key) {
+  MapVal* src = (MapVal*)(uintptr_t)map_h;
+  if (src == NULL) tcp_fail("map_remove: null map");
+  if (key == NULL) tcp_fail("map_remove: null key");
+  long long remove_idx = map_find_index(src, key);
+  if (remove_idx < 0) return map_h;
+
+  MapVal* out = (MapVal*)malloc(sizeof(MapVal));
+  if (out == NULL) tcp_fail("map_remove: out of memory");
+  out->len = src->len - 1;
+  out->cap = out->len;
+  out->entries = out->len == 0 ? NULL : (MapEntry*)malloc((size_t)out->len * sizeof(MapEntry));
+  if (out->len > 0 && out->entries == NULL) tcp_fail("map_remove: out of memory");
+
+  long long j = 0;
+  for (long long i = 0; i < src->len; i++) {
+    if (i == remove_idx) continue;
+    out->entries[j].key = strdup(src->entries[i].key);
+    if (out->entries[j].key == NULL) tcp_fail("map_remove: out of memory");
+    out->entries[j].value = src->entries[i].value;
+    j++;
+  }
+  return (long long)(uintptr_t)out;
+}
+
+long long map_size(long long map_h) {
+  MapVal* m = (MapVal*)(uintptr_t)map_h;
+  if (m == NULL) tcp_fail("map_size: null map");
+  return m->len;
 }
 
 long long tcp_listen(long long port) {

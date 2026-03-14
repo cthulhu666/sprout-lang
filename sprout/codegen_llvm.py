@@ -37,11 +37,22 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "print_int": FnSig(name="print_int", params=[I64], ret=I64),
     "print_str": FnSig(name="print_str", params=[I8_PTR], ret=I64),
     "print_value": FnSig(name="print_value", params=[I64], ret=I64),
+    "parse_int": FnSig(name="parse_int", params=[I8_PTR], ret=I64),
     "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
     "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
     "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
     "str_find": FnSig(name="str_find", params=[I8_PTR, I8_PTR], ret=I64),
     "str_starts_with": FnSig(name="str_starts_with", params=[I8_PTR, I8_PTR], ret=I1),
+    "vector_empty": FnSig(name="vector_empty", params=[], ret=I64),
+    "vector_length": FnSig(name="vector_length", params=[I64], ret=I64),
+    "vector_get": FnSig(name="vector_get", params=[I64, I64], ret=I64),
+    "vector_set": FnSig(name="vector_set", params=[I64, I64, I64], ret=I64),
+    "vector_append": FnSig(name="vector_append", params=[I64, I64], ret=I64),
+    "map_empty": FnSig(name="map_empty", params=[], ret=I64),
+    "map_get": FnSig(name="map_get", params=[I64, I8_PTR], ret=I64),
+    "map_set": FnSig(name="map_set", params=[I64, I8_PTR, I64], ret=I64),
+    "map_remove": FnSig(name="map_remove", params=[I64, I8_PTR], ret=I64),
+    "map_size": FnSig(name="map_size", params=[I64], ret=I64),
     "tcp_listen": FnSig(name="tcp_listen", params=[I64], ret=I64),
     "tcp_accept": FnSig(name="tcp_accept", params=[I64], ret=I64),
     "tcp_read": FnSig(name="tcp_read", params=[I64], ret=I8_PTR),
@@ -141,6 +152,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
                 return I64
         base_name = _type_base_name(node)
         if base_name in adt_names:
+            return I64
+        if base_name in {"Vector", "Map"}:
             return I64
     raise CodegenError(f"Unsupported type for LLVM backend: {node}")
 
