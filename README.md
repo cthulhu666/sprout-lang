@@ -130,6 +130,9 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 Collections module (in `stdlib/collections.sprout`):
 
 - `Maybe a` (`Just`, `Nothing`)
+- `List a` (`Cons`, `Nil`) with helpers:
+  - `list_map(xs, f)`
+  - `list_fold(xs, init, step)`
 - `Vec a` with helpers:
   - `vec_empty()`
   - `vec_prepend(value, vec)`
@@ -151,6 +154,8 @@ Collections module (in `stdlib/collections.sprout`):
   - `dict_keys(dict) -> Vec String`
   - `dict_values(dict) -> Vec v`
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
+- `Functor f` class:
+  - `fmap(f, xs)`
 - `Foldable f` class:
   - `fold_values(xs, init, step)`
 - `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`
@@ -184,6 +189,8 @@ Load HTTP helpers:
   `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run --with-http-stdlib examples/http_echo_server.sprout`
 - Collections helper demo:
   `python3 -m sprout.cli run examples/collections_utils_demo.sprout`
+- Typeclass collections demo:
+  `python3 -m sprout.cli run examples/typeclass_functor_foldable_demo.sprout`
 
 ## Native Backend (Early)
 

@@ -4,6 +4,10 @@ export type Maybe a =
   | Just a
   | Nothing
 
+export type List a =
+  | Cons a (List a)
+  | Nil
+
 export type Vec a =
   | Vec (Vector a)
 
@@ -101,8 +105,37 @@ export fn vec_sum(vec: Vec Int) -> Int =
 export fn vec_sum_by(vec: Vec a, f: a -> Int) -> Int =
   vec_sum(vec_map(vec, f))
 
+export fn list_map(xs: List a, f: a -> b) -> List b =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest -> Cons(f(x), list_map(rest, f))
+
+export fn list_fold(xs: List a, init: b, step: b -> a -> b) -> b =
+  match xs with
+  | Nil -> init
+  | Cons x rest -> list_fold(rest, step(init, x), step)
+
+export class Functor f {
+  fn fmap(f: a -> b, xs: f a) -> f b
+}
+
 export class Foldable f {
   fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
+}
+
+instance Functor List {
+  fn fmap(f: a -> b, xs: List a) -> List b =
+    list_map(xs, f)
+}
+
+instance Functor Vec {
+  fn fmap(f: a -> b, xs: Vec a) -> Vec b =
+    vec_map(xs, f)
+}
+
+instance Foldable List {
+  fn fold_values(xs: List a, init: b, step: b -> a -> b) -> b =
+    list_fold(xs, init, step)
 }
 
 instance Foldable Vec {

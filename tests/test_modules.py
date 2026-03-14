@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from sprout import parse, run_program, typecheck_program
 from sprout.module_loader import ModuleLoadError, load_module_bundle, load_module_source, resolve_program_names
+from sprout.typeclass_lowering import lower_typeclasses
 
 
 class ModuleLoaderTests(unittest.TestCase):
@@ -607,6 +608,48 @@ class ModuleLoaderTests(unittest.TestCase):
             out = io.StringIO()
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "66")
+
+    def test_import_stdlib_collections_functor_and_foldable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Functor, Foldable, List, Vec, vec_append, vec_empty)
+
+                fn add_one(x: Int) -> Int = x + 1
+                fn add(acc: Int, x: Int) -> Int = acc + x
+
+                fn sum_after_map(xs: c) -> Int where Functor c, Foldable c =
+                  fold_values(fmap(add_one, xs), 0, add)
+
+                fn sample_list() -> List Int =
+                  Cons(1, Cons(2, Cons(3, Nil)))
+
+                fn sample_vec() -> Vec Int =
+                  vec_append(vec_append(vec_append(vec_empty(), 4), 5), 6)
+
+                fn sum_list(xs: List Int) -> Int where Functor List, Foldable List =
+                  sum_after_map(xs)
+
+                fn sum_vec(xs: Vec Int) -> Int where Functor Vec, Foldable Vec =
+                  sum_after_map(xs)
+
+                fn main() -> IO Unit =
+                  print(sum_list(sample_list()) + sum_vec(sample_vec()))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "27")
 
     def test_import_stdlib_string_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

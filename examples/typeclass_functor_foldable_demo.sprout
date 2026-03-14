@@ -1,38 +1,5 @@
 module app.main
-import stdlib.collections (Foldable, Vec, vec_append, vec_empty, vec_map)
-
-type List a =
-  | Cons a (List a)
-  | Nil
-
-class Functor f {
-  fn fmap(f: a -> b, xs: f a) -> f b
-}
-
-instance Functor List {
-  fn fmap(f: a -> b, xs: List a) -> List b =
-    list_fmap(f, xs)
-}
-
-instance Foldable List {
-  fn fold_values(xs: List a, init: b, step: b -> a -> b) -> b =
-    list_fold(xs, init, step)
-}
-
-fn list_fmap(f: a -> b, xs: List a) -> List b =
-  match xs with
-  | Nil -> Nil
-  | Cons x rest -> Cons(f(x), list_fmap(f, rest))
-
-fn list_fold(xs: List a, init: b, step: b -> a -> b) -> b =
-  match xs with
-  | Nil -> init
-  | Cons x rest -> list_fold(rest, step(init, x), step)
-
-instance Functor Vec {
-  fn fmap(f: a -> b, xs: Vec a) -> Vec b =
-    vec_map(xs, f)
-}
+import stdlib.collections (Functor, Foldable, List, Vec, vec_append, vec_empty)
 
 fn add_one(x: Int) -> Int = x + 1
 fn add(acc: Int, x: Int) -> Int = acc + x
