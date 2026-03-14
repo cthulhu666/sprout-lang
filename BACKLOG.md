@@ -65,6 +65,19 @@ Definition of done:
 - [ ] `P1` Add better diagnostics for module/import/export errors with source context.
 - [ ] `P2` Add formatter/linter baseline.
 
+### 7.5) Type Classes (Collections First)
+
+- [ ] `P0` Add class declarations and constrained function signatures (`class`, `where` constraints).
+- [ ] `P0` Add instance declarations and resolution (`instance` lookup, coherence checks).
+- [ ] `P0` Implement dictionary-passing lowering in typechecker/backend.
+- [ ] `P0` Add `Functor` class and instances for `List` and `Vec`.
+- [ ] `P0` Add `Foldable` class and instances for `List` and `Vec`.
+- [ ] `P1` Add `Semigroup` and `Monoid` classes with laws documented.
+- [ ] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `Show`) for collection-focused workflows.
+- [ ] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity).
+- [ ] `P1` Add diagnostics for ambiguous/overlapping instance errors.
+- [ ] `P2` Add deriving/specialization follow-ups once core class system is stable.
+
 ### 8) External Integration Example Layer
 
 - [~] `P0` Add `examples/sentry_api.sprout` with typed wrappers for key endpoints:
@@ -100,5 +113,5 @@ Definition of done:
 ## Next 3 Tasks (Execution Order)
 
 1. Add `string_lines(String) -> Vec String` and `string_digits(String) -> Vec Int` to stdlib.
-2. Extend `stdlib.collections` with richer operations (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`) and edge-case tests.
-3. Add `json_stringify(Json) -> String` with malformed/edge-case tests.
+2. Start typeclass foundation: class/instance syntax + constrained signatures (collections-first).
+3. Add `Functor`/`Foldable` for `List` and `Vec` via dictionary passing, with conformance tests.
