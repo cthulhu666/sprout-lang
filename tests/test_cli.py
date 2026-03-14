@@ -8,6 +8,45 @@ import unittest
 
 
 class CliTests(unittest.TestCase):
+    def test_repl_supports_declarations_expressions_and_type_queries(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="let x = 41\nx + 1\n[1,2,3]\n:type x\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("42", run.stdout)
+        self.assertIn("Cons(1, Cons(2, Cons(3, Nil)))", run.stdout)
+        self.assertIn("Int", run.stdout)
+
+    def test_repl_with_stdlib_flag_loads_prelude(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":type split_ints(\"1 2 3\")\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("List Int", run.stdout)
+
+    def test_repl_with_http_stdlib_loads_http_helpers(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--with-http-stdlib"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":type http_ok(\"x\")\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("String", run.stdout)
+
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
         fn main() -> IO Unit =

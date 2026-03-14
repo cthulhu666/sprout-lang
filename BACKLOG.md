@@ -62,7 +62,7 @@ Definition of done:
 
 ### 7) Tooling and Developer UX
 
-- [ ] `P1` Add REPL (parse/typecheck/eval loop).
+- [x] `P1` Add REPL (parse/typecheck/eval loop).
 - [x] `P1` Add better diagnostics for module/import/export errors with source context.
 - [ ] `P2` Add formatter/linter baseline.
 
@@ -110,10 +110,11 @@ Definition of done:
 - [x] `stdlib.collections` now uses runtime-backed `Vector` for `Vec` indexing helpers.
 - [x] `stdlib.collections` now uses runtime-backed `Map` for `Dict` helpers.
 - [x] Runtime builtin failures now use a shared `runtime error: builtin ...` convention in interpreter and native paths.
+- [x] CLI REPL exists with declarations, expression evaluation, and `:type`.
 - [ ] terminal interaction primitives are not yet fully implemented.
 
 ## Next 3 Tasks (Execution Order)
 
 1. Add more vector utility combinators (next likely: `vec_max_subsequence_by_count`).
 2. Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
-3. Add REPL (parse/typecheck/eval loop).
+3. Add formatter/linter baseline.

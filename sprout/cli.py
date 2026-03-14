@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from .ast import to_dict
@@ -715,6 +716,152 @@ long long tcp_echo_serve(long long port, long long max_connections) {
     return 0
 
 
+def _repl_compose_source(
+    declarations: list[str],
+    tail: list[str] | None = None,
+    *,
+    with_stdlib: bool,
+    with_http_stdlib: bool,
+) -> str:
+    chunks = declarations + (tail or [])
+    user_source = "\n\n".join(chunk for chunk in chunks if chunk.strip())
+    if with_http_stdlib:
+        return with_http_prelude(user_source)
+    if with_stdlib:
+        return with_prelude(user_source)
+    return user_source
+
+
+def _repl_parse_and_check(
+    declarations: list[str],
+    tail: list[str] | None = None,
+    *,
+    with_stdlib: bool,
+    with_http_stdlib: bool,
+) -> tuple[object, dict[str, str]]:
+    source = _repl_compose_source(
+        declarations,
+        tail,
+        with_stdlib=with_stdlib,
+        with_http_stdlib=with_http_stdlib,
+    )
+    tree = parse(source)
+    validate_public_surface(tree, None)
+    types = typecheck_program(tree)
+    return tree, types
+
+
+def _repl_is_declaration(source: str) -> bool:
+    stripped = source.strip()
+    return stripped.startswith(("fn ", "let ", "type ", "class ", "instance ", "export "))
+
+
+def cmd_repl(with_stdlib: bool = True, with_http_stdlib: bool = False) -> int:
+    declarations: list[str] = []
+    repl_counter = 0
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+
+    def emit(text: str) -> None:
+        print(text)
+
+    def process_submission(source: str) -> None:
+        nonlocal repl_counter
+        stripped = source.strip()
+        if stripped == "":
+            return
+        if stripped in {":quit", ":q", ":exit"}:
+            raise EOFError
+        if stripped == ":help":
+            emit("Commands: :type EXPR, :quit, :help")
+            return
+        if stripped.startswith("module ") or stripped.startswith("import "):
+            emit("error: repl does not support module/import headers")
+            return
+        if stripped.startswith(":type "):
+            expr = stripped[len(":type ") :].strip()
+            if expr == "":
+                emit("error: :type expects an expression")
+                return
+            repl_counter += 1
+            name = f"__repl_value_{repl_counter}"
+            _, types = _repl_parse_and_check(
+                declarations,
+                [f"let {name} = {expr}"],
+                with_stdlib=with_stdlib,
+                with_http_stdlib=with_http_stdlib,
+            )
+            emit(types[name])
+            return
+        if _repl_is_declaration(stripped):
+            _repl_parse_and_check(
+                declarations + [source],
+                with_stdlib=with_stdlib,
+                with_http_stdlib=with_http_stdlib,
+            )
+            declarations.append(source)
+            emit("ok")
+            return
+
+        repl_counter += 1
+        name = f"__repl_value_{repl_counter}"
+        _, types = _repl_parse_and_check(
+            declarations,
+            [f"let {name} = {source}"],
+            with_stdlib=with_stdlib,
+            with_http_stdlib=with_http_stdlib,
+        )
+        inferred_type = types[name]
+        main_body = name if inferred_type == "IO Unit" else f"print({name})"
+        tree, _ = _repl_parse_and_check(
+            declarations,
+            [f"let {name} = {source}", f"fn main() -> IO Unit = {main_body}"],
+            with_stdlib=with_stdlib,
+            with_http_stdlib=with_http_stdlib,
+        )
+        lowered = lower_typeclasses(tree)
+        typecheck_program(lowered)
+        run_program(lowered)
+
+    if interactive:
+        emit("Sprout REPL. Use :help for commands.")
+        while True:
+            try:
+                line = input("sprout> ")
+            except EOFError:
+                emit("")
+                break
+            try:
+                process_submission(line)
+            except EOFError:
+                break
+            except (
+                ParseError,
+                TokenizeError,
+                TypeCheckError,
+                RuntimeError,
+                SurfaceCheckError,
+                TypeclassLoweringError,
+            ) as exc:
+                emit(f"error: {exc}")
+        return 0
+
+    for raw in sys.stdin:
+        try:
+            process_submission(raw.rstrip("\n"))
+        except EOFError:
+            break
+        except (
+            ParseError,
+            TokenizeError,
+            TypeCheckError,
+            RuntimeError,
+            SurfaceCheckError,
+            TypeclassLoweringError,
+        ) as exc:
+            emit(f"error: {exc}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sprout")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -751,6 +898,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit native binary with clang (default writes LLVM .ll text)",
     )
+    p_repl = sub.add_parser("repl", help="start a simple interactive Sprout REPL")
+    p_repl.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude (already enabled by default)")
+    p_repl.add_argument(
+        "--with-http-stdlib",
+        action="store_true",
+        help="load stdlib http helpers",
+    )
 
     return parser
 
@@ -781,6 +935,11 @@ def main(argv: list[str] | None = None) -> int:
                 with_stdlib=args.with_stdlib,
                 with_http_stdlib=args.with_http_stdlib,
                 native=args.native,
+            )
+        if args.command == "repl":
+            return cmd_repl(
+                with_stdlib=(not args.with_http_stdlib) or args.with_stdlib,
+                with_http_stdlib=args.with_http_stdlib,
             )
     except (
         ParseError,

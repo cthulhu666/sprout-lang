@@ -40,6 +40,7 @@ Common tasks:
 - Parse file: `mise exec -- just parse examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
+- Start REPL: `mise exec -- python -m sprout.cli repl` (loads stdlib by default)
 - Run tests: `mise exec -- just test`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
 - Build native binary (clang): `mise exec -- just compile-native /tmp/prog.sprout /tmp/prog`
@@ -248,14 +249,19 @@ Commands:
 
 - LLVM IR output: `python3 -m sprout.cli compile input.sprout -o out.ll`
 - Native binary (requires `clang`): `python3 -m sprout.cli compile input.sprout --native -o out_bin`
+- REPL: `python3 -m sprout.cli repl`
+  - commands: `:type EXPR`, `:help`, `:quit`
+  - stdlib prelude is loaded by default
+  - `--with-http-stdlib` switches to the HTTP helper preload
+  - `--with-stdlib --with-http-stdlib` requests both preloads, but overlapping helper/type names are not reconciled yet
 
 ## Roadmap / TODO
 
 1. Move string/runtime helpers into namespaced stdlib modules.
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
 3. Add stronger server-side runtime models (multi-reactor as next target).
-4. Add a REPL for iterative development.
-5. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
+4. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
+5. Add formatter/linter baseline.
 
 ## Contributing
 
