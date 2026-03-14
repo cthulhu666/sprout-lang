@@ -166,6 +166,17 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("map_get", types)
         self.assertIn("find_or", types)
 
+    def test_typecheck_program_with_class_and_instance_decls(self) -> None:
+        src = """
+        class Functor f
+        instance Functor List
+
+        fn main() -> IO Unit where Functor List =
+          print(1)
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("main", types)
+
 
 if __name__ == "__main__":
     unittest.main()

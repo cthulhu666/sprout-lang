@@ -23,10 +23,17 @@ class TypeConstructor:
 
 
 @dataclass
+class TypeConstraint:
+    class_name: str
+    args: list["TypeExpr"]
+
+
+@dataclass
 class FnDecl:
     name: str
     params: list["Param"]
     return_type: "TypeExpr | None"
+    constraints: list["TypeConstraint"]
     body: "Expr"
 
 
@@ -40,6 +47,17 @@ class Param:
 class LetDecl:
     name: str
     value: "Expr"
+
+
+@dataclass
+class ClassDecl:
+    name: str
+    type_params: list[str]
+
+
+@dataclass
+class InstanceDecl:
+    constraint: TypeConstraint
 
 
 class Expr:

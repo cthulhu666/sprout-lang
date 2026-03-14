@@ -8,8 +8,8 @@ from . import ast
 
 
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
-DECL_RE = re.compile(r"^\s*(fn|type|let)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
-EXPORT_DECL_RE = re.compile(r"^\s*export\s+(fn|type|let)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+DECL_RE = re.compile(r"^\s*(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+EXPORT_DECL_RE = re.compile(r"^\s*export\s+(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 
 
 class ModuleLoadError(ValueError):
@@ -448,7 +448,13 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                 walk_type(param.type_expr, decl)
             if decl.return_type is not None:
                 walk_type(decl.return_type, decl)
+            for constraint in decl.constraints:
+                for arg in constraint.args:
+                    walk_type(arg, decl)
             scope = {p.name for p in decl.params}
             walk_expr(decl.body, decl, scope)
         elif isinstance(decl, ast.LetDecl):
             walk_expr(decl.value, decl)
+        elif isinstance(decl, ast.InstanceDecl):
+            for arg in decl.constraint.args:
+                walk_type(arg, decl)

@@ -62,6 +62,10 @@ class Parser:
         self.match("KEYWORD", "export")
         if self.check("KEYWORD", "type"):
             return self.parse_type_decl()
+        if self.check("KEYWORD", "class"):
+            return self.parse_class_decl()
+        if self.check("KEYWORD", "instance"):
+            return self.parse_instance_decl()
         if self.check("KEYWORD", "fn"):
             return self.parse_fn_decl()
         if self.check("KEYWORD", "let"):
@@ -108,9 +112,51 @@ class Parser:
         if self.match("SYMBOL", "->"):
             return_type = self.parse_type_expr()
 
+        constraints: list[ast.TypeConstraint] = []
+        if self.match("KEYWORD", "where"):
+            constraints.append(self.parse_type_constraint())
+            while self.match("SYMBOL", ","):
+                constraints.append(self.parse_type_constraint())
+
         self.expect("SYMBOL", "=")
         body = self.parse_expr()
-        return self.mark(ast.FnDecl(name=name, params=params, return_type=return_type, body=body), start)
+        return self.mark(
+            ast.FnDecl(
+                name=name,
+                params=params,
+                return_type=return_type,
+                constraints=constraints,
+                body=body,
+            ),
+            start,
+        )
+
+    def parse_class_decl(self) -> ast.ClassDecl:
+        start = self.expect("KEYWORD", "class")
+        name = self.expect("IDENT", label="class name").value
+        type_params: list[str] = []
+        while self.check("IDENT"):
+            type_params.append(self.advance().value)
+        if not type_params:
+            t = self.current()
+            raise ParseError(f"Expected at least one class type parameter at {t.line}:{t.column}")
+        return self.mark(ast.ClassDecl(name=name, type_params=type_params), start)
+
+    def parse_instance_decl(self) -> ast.InstanceDecl:
+        start = self.expect("KEYWORD", "instance")
+        constraint = self.parse_type_constraint()
+        return self.mark(ast.InstanceDecl(constraint=constraint), start)
+
+    def parse_type_constraint(self) -> ast.TypeConstraint:
+        start = self.expect("IDENT", label="class name")
+        class_name = start.value
+        args: list[ast.TypeExpr] = []
+        while self._starts_type_atom():
+            args.append(self.parse_type_atom())
+        if not args:
+            t = self.current()
+            raise ParseError(f"Expected at least one constraint argument at {t.line}:{t.column}")
+        return self.mark(ast.TypeConstraint(class_name=class_name, args=args), start)
 
     def parse_param(self) -> ast.Param:
         tok = self.expect("IDENT", label="parameter name")

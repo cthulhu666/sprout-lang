@@ -85,6 +85,32 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(program.declarations[1], ast.FnDecl)
         self.assertIsInstance(program.declarations[2], ast.LetDecl)
 
+    def test_parse_class_instance_and_where_constraints(self) -> None:
+        src = """
+        class Functor f
+        instance Functor List
+        fn map_id(xs: List Int) -> List Int where Functor List = xs
+        """
+        program = parse(src)
+        self.assertEqual(len(program.declarations), 3)
+        self.assertIsInstance(program.declarations[0], ast.ClassDecl)
+        self.assertIsInstance(program.declarations[1], ast.InstanceDecl)
+        self.assertIsInstance(program.declarations[2], ast.FnDecl)
+
+        class_decl = program.declarations[0]
+        self.assertEqual(class_decl.name, "Functor")
+        self.assertEqual(class_decl.type_params, ["f"])
+
+        inst_decl = program.declarations[1]
+        self.assertEqual(inst_decl.constraint.class_name, "Functor")
+        self.assertEqual(len(inst_decl.constraint.args), 1)
+        self.assertIsInstance(inst_decl.constraint.args[0], ast.TypeName)
+        self.assertEqual(inst_decl.constraint.args[0].name, "List")
+
+        fn_decl = program.declarations[2]
+        self.assertEqual(len(fn_decl.constraints), 1)
+        self.assertEqual(fn_decl.constraints[0].class_name, "Functor")
+
 
 if __name__ == "__main__":
     unittest.main()
