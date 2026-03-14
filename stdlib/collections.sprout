@@ -93,6 +93,14 @@ fn vec_reverse_from(vec: Vec a, index: Int, acc: Vec a) -> Vec a =
     | Nothing -> acc
     | Just value -> vec_reverse_from(vec, index - 1, vec_append(acc, value))
 
+fn add_ints(left: Int, right: Int) -> Int = left + right
+
+export fn vec_sum(vec: Vec Int) -> Int =
+  vec_fold(vec, 0, add_ints)
+
+export fn vec_sum_by(vec: Vec a, f: a -> Int) -> Int =
+  vec_sum(vec_map(vec, f))
+
 export class Foldable f {
   fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
 }

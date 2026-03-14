@@ -51,7 +51,7 @@ Definition of done:
 - [x] `P1` Add stdlib text parsing helpers: `string_lines(String) -> Vec String`.
 - [x] `P1` Add stdlib digit helpers: `string_digits(String) -> Vec Int`.
 - [x] `P2` Extend collections helpers (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`).
-- [ ] `P2` Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).
+- [~] `P2` Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).
 - [ ] `P2` Add set type and common ops.
 
 ### 6) Modules and Packaging
@@ -115,4 +115,4 @@ Definition of done:
 
 1. Add `Functor`/`Foldable` for `List` and `Vec` via dictionary passing, with conformance tests.
 2. Add better diagnostics for module/import/export errors with source context.
-3. Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).
+3. Add more vector utility combinators (next likely: `vec_max_subsequence_by_count`).

@@ -141,6 +141,8 @@ Collections module (in `stdlib/collections.sprout`):
   - `vec_reverse(vec)`
   - `vec_map(vec, f)`
   - `vec_fold(vec, init, f)`
+  - `vec_sum(vec)`
+  - `vec_sum_by(vec, f)`
 - `Dict v` (`Dict (Map v)`) with helpers:
   - `dict_empty()`
   - `dict_get(dict, key) -> Maybe v`

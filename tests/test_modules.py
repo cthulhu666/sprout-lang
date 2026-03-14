@@ -70,7 +70,7 @@ class ModuleLoaderTests(unittest.TestCase):
             (root / "lib.sprout").write_text(
                 """
                 module lib
-                fn ok() -> Int = 1
+                export fn ok() -> Int = 1
                 """,
                 encoding="utf-8",
             )
@@ -82,8 +82,10 @@ class ModuleLoaderTests(unittest.TestCase):
                 """,
                 encoding="utf-8",
             )
-            with self.assertRaises(ModuleLoadError):
+            with self.assertRaises(ModuleLoadError) as ctx:
                 load_module_source(root / "main.sprout")
+            self.assertIn("exported names", str(ctx.exception))
+            self.assertIn("'ok'", str(ctx.exception))
 
     def test_load_module_source_rejects_duplicate_implicit_namespace_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -224,8 +226,9 @@ class ModuleLoaderTests(unittest.TestCase):
                 """,
                 encoding="utf-8",
             )
-            with self.assertRaises(ModuleLoadError):
+            with self.assertRaises(ModuleLoadError) as ctx:
                 load_module_source(root / "main.sprout")
+            self.assertIn("Use an explicit `as ...` alias", str(ctx.exception))
 
     def test_resolver_requires_unqualified_import_or_parenthesized_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -233,7 +236,7 @@ class ModuleLoaderTests(unittest.TestCase):
             (root / "lib.sprout").write_text(
                 """
                 module lib
-                fn answer() -> Int = 42
+                export fn answer() -> Int = 42
                 """,
                 encoding="utf-8",
             )
@@ -249,8 +252,37 @@ class ModuleLoaderTests(unittest.TestCase):
             )
             bundle = load_module_bundle(main)
             program = parse(bundle.source)
-            with self.assertRaises(ModuleLoadError):
+            with self.assertRaises(ModuleLoadError) as ctx:
                 resolve_program_names(program, bundle)
+            self.assertIn("requires explicit import or qualification", str(ctx.exception))
+            self.assertIn("Use `import module (answer)`", str(ctx.exception))
+
+    def test_resolver_unknown_alias_lists_available_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                export fn answer() -> Int = 42
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib as good
+                fn main() -> IO Unit =
+                  print(bad.answer())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError) as ctx:
+                resolve_program_names(program, bundle)
+            self.assertIn("available aliases", str(ctx.exception))
+            self.assertIn("'good'", str(ctx.exception))
 
     def test_import_sees_only_explicit_exports_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -548,6 +580,33 @@ class ModuleLoaderTests(unittest.TestCase):
             out = io.StringIO()
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "16")
+
+    def test_import_stdlib_collections_vec_sum_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sum, vec_sum_by)
+
+                fn sample() -> Vec Int =
+                  vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30)
+
+                fn tens(value: Int) -> Int = value / 10
+
+                fn main() -> IO Unit =
+                  print(vec_sum(sample()) + vec_sum_by(sample(), tens))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "66")
 
     def test_import_stdlib_string_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -16,6 +16,16 @@ class ModuleLoadError(ValueError):
     pass
 
 
+def _fmt_names(names: set[str] | list[str] | tuple[str, ...], limit: int = 8) -> str:
+    ordered = sorted(set(names))
+    if not ordered:
+        return "<none>"
+    if len(ordered) <= limit:
+        return ", ".join(repr(name) for name in ordered)
+    shown = ", ".join(repr(name) for name in ordered[:limit])
+    return f"{shown}, ... ({len(ordered)} total)"
+
+
 @dataclass(frozen=True)
 class ImportSpec:
     module: str
@@ -168,7 +178,8 @@ def _resolve_module(module_name: str, importer: Path) -> Path:
         if candidate.exists():
             return candidate.resolve()
     raise ModuleLoadError(
-        f"Cannot resolve module {module_name!r} imported from {importer}; checked {[str(c) for c in candidates]}"
+        f"Cannot resolve module {module_name!r} imported from {importer}; "
+        f"checked {', '.join(str(c) for c in candidates)}"
     )
 
 
@@ -217,7 +228,7 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
                 if name not in imp_info.exported:
                     raise ModuleLoadError(
                         f"Module {imp.module!r} does not export {name!r} "
-                        f"(imported from {path})"
+                        f"(imported from {path}); exported names: {_fmt_names(imp_info.exported)}"
                     )
 
             namespace_alias = _namespace_alias_for_import(imp)
@@ -226,7 +237,8 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
                 if prev_alias is not None and prev_alias != imp.module:
                     raise ModuleLoadError(
                         f"Duplicate import alias {namespace_alias!r} in {path}: "
-                        f"used for both {prev_alias!r} and {imp.module!r}"
+                        f"used for both {prev_alias!r} and {imp.module!r}. "
+                        f"Use an explicit `as ...` alias on one import."
                     )
                 aliases[namespace_alias] = imp.module
 
@@ -243,7 +255,8 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
         for name, provider in introduced.items():
             if name in local_names:
                 raise ModuleLoadError(
-                    f"Module {path} declares {name!r} which conflicts with imported symbol from {provider!r}"
+                    f"Module {path} declares {name!r} which conflicts with selected import from {provider!r}. "
+                    f"Rename the local declaration or qualify the imported module instead."
                 )
 
     visit(entry)
@@ -470,7 +483,10 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             alias, symbol = name.split(".", 1)
             target_path = aliases.get(alias)
             if target_path is None:
-                raise ModuleLoadError(f"Unknown import alias {alias!r} at {module_info.path}:{line}")
+                raise ModuleLoadError(
+                    f"Unknown import alias {alias!r} at {module_info.path}:{line}; "
+                    f"available aliases: {_fmt_names(set(aliases))}"
+                )
             target_symbols = module_symbols[target_path]
             target = target_symbols.exported_values.get(symbol)
             if target is not None:
@@ -481,7 +497,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                     return target
             raise ModuleLoadError(
                 f"Module {bundle.modules[target_path].header.module or str(target_path)!r} "
-                f"does not export value {symbol!r} (referenced at {module_info.path}:{line})"
+                f"does not export value {symbol!r} (referenced at {module_info.path}:{line}); "
+                f"exported values: {_fmt_names(set(target_symbols.exported_values))}"
             )
 
         if name in builtin_values:
@@ -491,13 +508,17 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if name in unqualified_values:
             return unqualified_values[name]
         if name in all_exported_values:
+            providers = sorted(bundle.modules[path].header.module or str(path) for path in declared_value_by_name.get(name, set()))
             raise ModuleLoadError(
-                f"Value {name!r} at {module_info.path}:{line} requires explicit import or qualification"
+                f"Value {name!r} at {module_info.path}:{line} requires explicit import or qualification; "
+                f"available from: {_fmt_names(providers)}. "
+                f"Use `import module ({name})` or `import module` and qualify it."
             )
         providers = declared_value_by_name.get(name, set())
         if providers and module_info.path not in providers:
             raise ModuleLoadError(
-                f"Value {name!r} at {module_info.path}:{line} is not exported by any imported module"
+                f"Value {name!r} at {module_info.path}:{line} is not exported by any imported module; "
+                f"it exists in: {_fmt_names(bundle.modules[path].header.module or str(path) for path in providers)}"
             )
         return name
 
@@ -515,14 +536,18 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             alias, symbol = name.split(".", 1)
             target_path = aliases.get(alias)
             if target_path is None:
-                raise ModuleLoadError(f"Unknown import alias {alias!r} at {module_info.path}:{line}")
+                raise ModuleLoadError(
+                    f"Unknown import alias {alias!r} at {module_info.path}:{line}; "
+                    f"available aliases: {_fmt_names(set(aliases))}"
+                )
             target_symbols = module_symbols[target_path]
             target = target_symbols.exported_types.get(symbol) or target_symbols.exported_classes.get(symbol)
             if target is not None:
                 return target
             raise ModuleLoadError(
                 f"Module {bundle.modules[target_path].header.module or str(target_path)!r} "
-                f"does not export type/class {symbol!r} (referenced at {module_info.path}:{line})"
+                f"does not export type/class {symbol!r} (referenced at {module_info.path}:{line}); "
+                f"exported types/classes: {_fmt_names(set(target_symbols.exported_types) | set(target_symbols.exported_classes))}"
             )
 
         if name in builtin_types:
@@ -536,13 +561,19 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if name in unqualified_classes:
             return unqualified_classes[name]
         if name in all_exported_types or name in all_exported_classes:
+            providers = sorted(
+                bundle.modules[path].header.module or str(path)
+                for path in (declared_type_by_name.get(name, set()) | declared_class_by_name.get(name, set()))
+            )
             raise ModuleLoadError(
-                f"Type/class {name!r} at {module_info.path}:{line} requires explicit import or qualification"
+                f"Type/class {name!r} at {module_info.path}:{line} requires explicit import or qualification; "
+                f"available from: {_fmt_names(providers)}"
             )
         providers = declared_type_by_name.get(name, set()) | declared_class_by_name.get(name, set())
         if providers and module_info.path not in providers:
             raise ModuleLoadError(
-                f"Type/class {name!r} at {module_info.path}:{line} is not exported by any imported module"
+                f"Type/class {name!r} at {module_info.path}:{line} is not exported by any imported module; "
+                f"it exists in: {_fmt_names(bundle.modules[path].header.module or str(path) for path in providers)}"
             )
         return name
 
