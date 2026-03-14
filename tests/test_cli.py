@@ -14,7 +14,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input="let x = 41\nx + 1\n[1,2,3]\n:type x\n:quit\n",
+            input="let x = 41\nx + 1\n[1,2,3]\n:t x\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -22,6 +22,18 @@ class CliTests(unittest.TestCase):
         self.assertIn("42", run.stdout)
         self.assertIn("Cons(1, Cons(2, Cons(3, Nil)))", run.stdout)
         self.assertIn("Int", run.stdout)
+
+    def test_repl_help_mentions_type_shorthand(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":help\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertIn(":type EXPR", run.stdout)
+        self.assertIn(":t EXPR", run.stdout)
 
     def test_repl_with_stdlib_flag_loads_prelude(self) -> None:
         run = subprocess.run(

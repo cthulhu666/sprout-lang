@@ -250,7 +250,7 @@ Commands:
 - LLVM IR output: `python3 -m sprout.cli compile input.sprout -o out.ll`
 - Native binary (requires `clang`): `python3 -m sprout.cli compile input.sprout --native -o out_bin`
 - REPL: `python3 -m sprout.cli repl`
-  - commands: `:type EXPR`, `:help`, `:quit`
+  - commands: `:type EXPR`, `:t EXPR`, `:help`, `:quit`
   - stdlib prelude is loaded by default
   - `--with-http-stdlib` switches to the HTTP helper preload
   - `--with-stdlib --with-http-stdlib` requests both preloads, but overlapping helper/type names are not reconciled yet

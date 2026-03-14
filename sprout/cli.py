@@ -772,13 +772,18 @@ def cmd_repl(with_stdlib: bool = True, with_http_stdlib: bool = False) -> int:
         if stripped in {":quit", ":q", ":exit"}:
             raise EOFError
         if stripped == ":help":
-            emit("Commands: :type EXPR, :quit, :help")
+            emit("Commands: :type EXPR, :t EXPR, :quit, :help")
             return
         if stripped.startswith("module ") or stripped.startswith("import "):
             emit("error: repl does not support module/import headers")
             return
+        type_expr: str | None = None
         if stripped.startswith(":type "):
-            expr = stripped[len(":type ") :].strip()
+            type_expr = stripped[len(":type ") :].strip()
+        elif stripped.startswith(":t "):
+            type_expr = stripped[len(":t ") :].strip()
+        if type_expr is not None:
+            expr = type_expr
             if expr == "":
                 emit("error: :type expects an expression")
                 return
