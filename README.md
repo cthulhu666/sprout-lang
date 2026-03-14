@@ -38,9 +38,12 @@ This repo uses [`mise`](https://mise.jdx.dev/) to pin tools and [`just`](https:/
 Common tasks:
 
 - Parse file: `mise exec -- just parse examples/fizzbuzz.sprout`
-- Format file: `mise exec -- just fmt examples/fizzbuzz.sprout`
-- Check formatting: `mise exec -- just fmt-check examples/fizzbuzz.sprout`
-- Lint file: `mise exec -- just lint examples/fizzbuzz.sprout`
+- Format repo: `mise exec -- just fmt`
+- Check repo formatting: `mise exec -- just fmt-check`
+- Lint repo: `mise exec -- just lint`
+- Format file: `mise exec -- just fmt-file examples/fizzbuzz.sprout`
+- Check file formatting: `mise exec -- just fmt-check-file examples/fizzbuzz.sprout`
+- Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
 - Start REPL: `mise exec -- python -m sprout.cli repl` (loads stdlib by default)
