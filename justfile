@@ -44,3 +44,12 @@ compile file out:
 
 compile-native file out:
   python3 -m sprout.cli compile {{file}} --native -o {{out}}
+
+compile-examples:
+  for file in examples/*.sprout; do \
+    flags=""; \
+    if [ "$file" = "examples/result_control_flow_demo.sprout" ]; then flags="--with-stdlib"; fi; \
+    out="/tmp/$(basename "$file" .sprout).ll"; \
+    python3 -m sprout.cli compile $flags "$file" -o "$out"; \
+    echo "OK $file"; \
+  done

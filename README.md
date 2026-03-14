@@ -257,7 +257,7 @@ Load HTTP helpers:
 - `python3 -m sprout.cli check --with-http-stdlib your_file.sprout`
 - `python3 -m sprout.cli run --with-http-stdlib your_file.sprout`
 - Example HTTP echo server:
-  `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run --with-http-stdlib examples/http_echo_server.sprout`
+  `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/http_echo_server.sprout`
 - Collections helper demo:
   `python3 -m sprout.cli run examples/collections_utils_demo.sprout`
 - Typeclass collections demo:

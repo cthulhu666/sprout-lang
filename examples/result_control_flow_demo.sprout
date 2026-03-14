@@ -1,3 +1,5 @@
+module app.main
+
 fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
 
 fn inc(x: Int) -> Int = x + 1
@@ -6,7 +8,7 @@ fn double_if_large(x: Int) -> Result String Int =
   if x > 10 then Ok(x * 2) else Err("too-small")
 
 fn prefix_error(e: String) -> String =
-  str_concat("error:", e)
+  "error:" ++ e
 
 fn show_ok(x: Int) -> IO Unit =
   print(x)

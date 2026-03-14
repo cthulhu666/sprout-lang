@@ -1,8 +1,10 @@
+module app.main
+import stdlib.http (http_echo_response)
+
 # Multi-connection HTTP echo server (minimal v0).
-# Requires --with-http-stdlib to load stdlib/http.sprout helpers.
 #
 # Run:
-#   SPROUT_NET_MODEL=reactor python3 -m sprout.cli run --with-http-stdlib examples/http_echo_server.sprout
+#   SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/http_echo_server.sprout
 #
 # Then:
 #   curl -i http://127.0.0.1:8081/hello

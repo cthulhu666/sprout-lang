@@ -262,6 +262,39 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stdout.strip(), "43\n43\n43\n43\nerror:too-small\n7")
 
+    def test_compile_all_examples(self) -> None:
+        example_flags = {
+            "examples/result_control_flow_demo.sprout": ["--with-stdlib"],
+        }
+        failures: list[tuple[Path, str, str]] = []
+        for path in sorted(Path("examples").glob("*.sprout")):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / f"{path.stem}.ll"
+                extra = example_flags.get(str(path), [])
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sprout.cli",
+                        "compile",
+                        *extra,
+                        str(path),
+                        "-o",
+                        str(out),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if proc.returncode != 0:
+                    failures.append((path, proc.stdout, proc.stderr))
+        if failures:
+            details = "\n".join(
+                f"{path}:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                for path, stdout, stderr in failures
+            )
+            self.fail(f"example compile failures:\n{details}")
+
     def test_compile_native_foldable_to_vec_demo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "foldable_demo_bin"

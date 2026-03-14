@@ -348,7 +348,7 @@ def compile_to_llvm(program: ast.Program) -> str:
         ctor_reg_meta[ctor.name] = (primary, leaf, len(ctor.arg_types), ctor.tag)
 
     if runtime_lets:
-        _emit_init_globals(runtime_lets, globals_info, sigs, ctor_sigs, emitter)
+        _emit_init_globals(runtime_lets, globals_info, sigs, ctor_sigs, adt_names, emitter)
         emitter.emit("")
 
     for fn in fn_decls:
@@ -533,6 +533,7 @@ def _emit_init_globals(
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> None:
     emitter.emit("define void @__sprout_init_globals() {")
@@ -540,7 +541,7 @@ def _emit_init_globals(
     locals_: dict[str, Value] = {}
     for let_decl in runtime_lets:
         info = globals_info[let_decl.name]
-        value = _emit_expr(let_decl.value, locals_, globals_info, sigs, ctor_sigs, set(), emitter)
+        value = _emit_expr(let_decl.value, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
         if value.typ != info.typ:
             raise CodegenError(
                 f"Global init type mismatch for {let_decl.name}: {value.typ.text} vs {info.typ.text}"
@@ -571,6 +572,9 @@ def _emit_expr(
     if isinstance(expr, ast.VarExpr):
         val = locals_.get(expr.name)
         if val is not None:
+            inferred_type = getattr(expr, "inferred_type", None)
+            if inferred_type is not None:
+                return _coerce_value(val, _type_from_ast(inferred_type, adt_names), emitter)
             return val
         fn_ref = sigs.get(expr.name)
         if fn_ref is not None:
@@ -583,7 +587,11 @@ def _emit_expr(
         if global_info is not None:
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = load {global_info.typ.text}, ptr @{expr.name}")
-            return Value(global_info.typ, tmp)
+            out = Value(global_info.typ, tmp)
+            inferred_type = getattr(expr, "inferred_type", None)
+            if inferred_type is not None:
+                out = _coerce_value(out, _type_from_ast(inferred_type, adt_names), emitter)
+            return out
         ctor = ctor_sigs.get(expr.name)
         if ctor is not None:
             if ctor.arg_types:
@@ -962,9 +970,8 @@ def _emit_call(
         packed_args: list[str] = []
         for arg_expr, typ in zip(expr.args, ctor.arg_types):
             arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
-            if arg_val.typ != typ:
-                raise CodegenError(f"Constructor call type mismatch for {fn_name}")
-            packed_args.append(_pack_to_i64(arg_val, emitter))
+            coerced = _coerce_value(arg_val, typ, emitter)
+            packed_args.append(_pack_to_i64(coerced, emitter))
         tmp = emitter.tmp()
         if len(packed_args) == 1:
             emitter.emit(f"  {tmp} = call i64 @sprout_make1(i64 {ctor.tag}, i64 {packed_args[0]})")
