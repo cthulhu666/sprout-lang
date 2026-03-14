@@ -234,6 +234,56 @@ long long parse_int(const char* s) {
   if (end == s || *end != '\\0') tcp_fail("parse_int: invalid integer");
   return out;
 }
+const char* read_file(const char* path) {
+  if (path == NULL) tcp_fail("read_file: null path");
+  FILE* f = NULL;
+  int close_after = 0;
+  if (strcmp(path, "-") == 0) {
+    f = stdin;
+  } else {
+    f = fopen(path, "rb");
+    if (f == NULL) tcp_fail("read_file: cannot open file");
+    close_after = 1;
+  }
+
+  size_t cap = 4096;
+  size_t len = 0;
+  char* out = (char*)malloc(cap);
+  if (out == NULL) {
+    if (close_after) fclose(f);
+    tcp_fail("read_file: out of memory");
+  }
+
+  char buf[4096];
+  while (1) {
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    if (n > 0) {
+      while (len + n + 1 > cap) {
+        size_t new_cap = cap * 2;
+        char* grown = (char*)realloc(out, new_cap);
+        if (grown == NULL) {
+          if (close_after) fclose(f);
+          tcp_fail("read_file: out of memory");
+        }
+        out = grown;
+        cap = new_cap;
+      }
+      memcpy(out + len, buf, n);
+      len += n;
+    }
+    if (n < sizeof(buf)) {
+      if (feof(f)) break;
+      if (ferror(f)) {
+        if (close_after) fclose(f);
+        tcp_fail("read_file: read error");
+      }
+    }
+  }
+
+  if (close_after) fclose(f);
+  out[len] = '\\0';
+  return out;
+}
 long long read_int_lines(const char* path) {
   if (path == NULL) tcp_fail("read_int_lines: null path");
   FILE* f = fopen(path, "r");
@@ -267,54 +317,6 @@ long long read_int_lines(const char* path) {
   }
   fclose(f);
   return (long long)(uintptr_t)v;
-}
-long long read_digit_lines(const char* path) {
-  if (path == NULL) tcp_fail("read_digit_lines: null path");
-  FILE* f = fopen(path, "r");
-  if (f == NULL) tcp_fail("read_digit_lines: cannot open file");
-
-  VectorVal* outer = (VectorVal*)malloc(sizeof(VectorVal));
-  if (outer == NULL) tcp_fail("read_digit_lines: out of memory");
-  outer->len = 0;
-  outer->cap = 0;
-  outer->data = NULL;
-
-  char buf[8192];
-  while (fgets(buf, sizeof(buf), f) != NULL) {
-    size_t n = strlen(buf);
-    while (n > 0 && (buf[n - 1] == '\\n' || buf[n - 1] == '\\r')) {
-      buf[n - 1] = '\\0';
-      n--;
-    }
-    if (n == 0) continue;
-
-    VectorVal* inner = (VectorVal*)malloc(sizeof(VectorVal));
-    if (inner == NULL) tcp_fail("read_digit_lines: out of memory");
-    inner->len = 0;
-    inner->cap = (long long)n;
-    inner->data = inner->cap == 0 ? NULL : (long long*)malloc((size_t)inner->cap * sizeof(long long));
-    if (inner->cap > 0 && inner->data == NULL) tcp_fail("read_digit_lines: out of memory");
-
-    for (size_t i = 0; i < n; i++) {
-      char c = buf[i];
-      if (c < '0' || c > '9') tcp_fail("read_digit_lines: invalid digit line");
-      inner->data[inner->len] = (long long)(c - '0');
-      inner->len++;
-    }
-
-    if (outer->len == outer->cap) {
-      long long new_cap = outer->cap == 0 ? 8 : (outer->cap * 2);
-      long long* new_data = (long long*)realloc(outer->data, (size_t)new_cap * sizeof(long long));
-      if (new_data == NULL) tcp_fail("read_digit_lines: out of memory");
-      outer->data = new_data;
-      outer->cap = new_cap;
-    }
-    outer->data[outer->len] = (long long)(uintptr_t)inner;
-    outer->len++;
-  }
-
-  fclose(f);
-  return (long long)(uintptr_t)outer;
 }
 long long sprout_register_ctor(long long tag, const char* name, long long arity) {
   g_ctor_meta[g_ctor_meta_len].tag = tag;

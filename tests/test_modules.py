@@ -4,6 +4,7 @@ import io
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from sprout import parse, run_program, typecheck_program
 from sprout.module_loader import ModuleLoadError, load_module_bundle, load_module_source, resolve_program_names
@@ -382,7 +383,8 @@ class ModuleLoaderTests(unittest.TestCase):
             resolve_program_names(program, bundle)
             typecheck_program(program)
             out = io.StringIO()
-            run_program(program, stdout=out)
+            with patch("sys.stdin", io.StringIO("")):
+                run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Answers(357, 3121910778619)")
 
     def test_import_stdlib_collections_vec_and_dict(self) -> None:

@@ -465,16 +465,13 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
         ),
+        "read_file": Scheme(
+            vars=(),
+            type=TFunc(TConst("String"), TConst("String")),
+        ),
         "read_int_lines": Scheme(
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("Vector"), INT)),
-        ),
-        "read_digit_lines": Scheme(
-            vars=(),
-            type=TFunc(
-                TConst("String"),
-                TApp(TConst("Vector"), TApp(TConst("Vector"), INT)),
-            ),
         ),
         "parse_int": Scheme(vars=(), type=TFunc(TConst("String"), INT)),
         "split_words": Scheme(

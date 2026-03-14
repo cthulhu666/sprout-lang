@@ -82,8 +82,35 @@ fn bank_from_string(raw: String) -> Vector Int =
   match digits_from_string(raw, 0, str_len(raw), vec_empty()) with
   | Vec bank -> bank
 
+fn append_if_non_empty(banks: Vec (Vector Int), current: Vec Int) -> Vec (Vector Int) =
+  if vec_length(current) == 0 then banks
+  else
+    match current with
+    | Vec raw -> vec_append(banks, raw)
+
+fn char_at(raw: String, index: Int) -> String =
+  str_slice(raw, index, 1)
+
+fn digit_value(ch: String) -> Int =
+  str_find("0123456789", ch)
+
+fn parse_banks_from_text(raw: String, index: Int, total: Int, banks: Vec (Vector Int), current: Vec Int) -> Vec (Vector Int) =
+  if index >= total then append_if_non_empty(banks, current)
+  else
+    if str_find("\n", char_at(raw, index)) == 0 then
+      parse_banks_from_text(raw, index + 1, total, append_if_non_empty(banks, current), vec_empty())
+    else if str_find("\r", char_at(raw, index)) == 0 then
+      parse_banks_from_text(raw, index + 1, total, banks, current)
+    else if digit_value(char_at(raw, index)) >= 0 then
+      parse_banks_from_text(raw, index + 1, total, banks, vec_append(current, digit_value(char_at(raw, index))))
+    else
+      parse_banks_from_text(raw, index + 1, total, banks, current)
+
+fn parse_all_banks(raw: String) -> Vec (Vector Int) =
+  parse_banks_from_text(raw, 0, str_len(raw), vec_empty(), vec_empty())
+
 fn stdin_banks() -> Vec (Vector Int) =
-  Vec(read_digit_lines("/dev/stdin"))
+  parse_all_banks(read_file("-"))
 
 fn sample_banks() -> Vec (Vector Int) =
   vec_append(
