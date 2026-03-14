@@ -168,14 +168,43 @@ class TypecheckerTests(unittest.TestCase):
 
     def test_typecheck_program_with_class_and_instance_decls(self) -> None:
         src = """
-        class Functor f
-        instance Functor List
+        class Functor f {
+          fn fmap(f: a -> b, xs: f a) -> f b
+        }
+        instance Functor List {
+          fn fmap(f: a -> b, xs: List a) -> List b = xs
+        }
 
         fn main() -> IO Unit where Functor List =
           print(1)
         """
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
+
+    def test_type_error_instance_missing_method(self) -> None:
+        src = """
+        class Foldable f {
+          fn fold_count(xs: f a) -> Int
+        }
+        instance Foldable List {
+        }
+        fn main() -> IO Unit = print(1)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
+    def test_type_error_instance_method_signature_mismatch(self) -> None:
+        src = """
+        class Foldable f {
+          fn fold_count(xs: f a) -> Int
+        }
+        instance Foldable List {
+          fn fold_count(xs: List Int) -> Bool = true
+        }
+        fn main() -> IO Unit = print(1)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
 
     def test_type_error_unknown_class_in_constraint(self) -> None:
         src = """

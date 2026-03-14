@@ -157,6 +157,11 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
             return I64
         if base_name in {"Vector", "Map"}:
             return I64
+        if base_name and base_name[0].islower():
+            return I64
+    if isinstance(node, ast.TypeArrow):
+        # Function-typed values are lowered as opaque callable pointers.
+        return I8_PTR
     raise CodegenError(f"Unsupported type for LLVM backend: {node}")
 
 

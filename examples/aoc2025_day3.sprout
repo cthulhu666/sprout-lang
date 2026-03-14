@@ -56,10 +56,7 @@ fn let_best_value_with_len(bank: Vec Int, len: Int, count: Int) -> Int =
     match pick_digits(bank, 0, len, vec_empty(), 0, len - count) with
     | PickState digits _ -> fold_prefix_int(digits, 0, count, 0)
 
-fn best_value(bank: Vector Int, count: Int) -> Int =
-  best_value_vec(Vec(bank), count)
-
-fn sum_best_values(banks: Vec (Vector Int), index: Int, total: Int, count: Int, acc: Int) -> Int =
+fn sum_best_values(banks: Vec (Vec Int), index: Int, total: Int, count: Int, acc: Int) -> Int =
   if index >= total then acc
   else
     sum_best_values(
@@ -67,10 +64,10 @@ fn sum_best_values(banks: Vec (Vector Int), index: Int, total: Int, count: Int, 
       index + 1,
       total,
       count,
-      acc + best_value(vec_get_or(banks, index, vector_empty()), count)
+      acc + best_value_vec(vec_get_or(banks, index, vec_empty()), count)
     )
 
-fn sum_for_count(banks: Vec (Vector Int), count: Int) -> Int =
+fn sum_for_count(banks: Vec (Vec Int), count: Int) -> Int =
   sum_best_values(banks, 0, vec_length(banks), count, 0)
 
 fn digits_from_string(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
@@ -78,15 +75,12 @@ fn digits_from_string(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec 
   else
     digits_from_string(raw, index + 1, total, vec_append(acc, parse_int(str_slice(raw, index, 1))))
 
-fn bank_from_string(raw: String) -> Vector Int =
-  match digits_from_string(raw, 0, str_len(raw), vec_empty()) with
-  | Vec bank -> bank
+fn bank_from_string(raw: String) -> Vec Int =
+  digits_from_string(raw, 0, str_len(raw), vec_empty())
 
-fn append_if_non_empty(banks: Vec (Vector Int), current: Vec Int) -> Vec (Vector Int) =
+fn append_if_non_empty(banks: Vec (Vec Int), current: Vec Int) -> Vec (Vec Int) =
   if vec_length(current) == 0 then banks
-  else
-    match current with
-    | Vec raw -> vec_append(banks, raw)
+  else vec_append(banks, current)
 
 fn char_at(raw: String, index: Int) -> String =
   str_slice(raw, index, 1)
@@ -94,7 +88,7 @@ fn char_at(raw: String, index: Int) -> String =
 fn digit_value(ch: String) -> Int =
   str_find("0123456789", ch)
 
-fn parse_banks_from_text(raw: String, index: Int, total: Int, banks: Vec (Vector Int), current: Vec Int) -> Vec (Vector Int) =
+fn parse_banks_from_text(raw: String, index: Int, total: Int, banks: Vec (Vec Int), current: Vec Int) -> Vec (Vec Int) =
   if index >= total then append_if_non_empty(banks, current)
   else
     if str_find("\n", char_at(raw, index)) == 0 then
@@ -106,13 +100,13 @@ fn parse_banks_from_text(raw: String, index: Int, total: Int, banks: Vec (Vector
     else
       parse_banks_from_text(raw, index + 1, total, banks, current)
 
-fn parse_all_banks(raw: String) -> Vec (Vector Int) =
+fn parse_all_banks(raw: String) -> Vec (Vec Int) =
   parse_banks_from_text(raw, 0, str_len(raw), vec_empty(), vec_empty())
 
-fn stdin_banks() -> Vec (Vector Int) =
+fn stdin_banks() -> Vec (Vec Int) =
   parse_all_banks(read_file("-"))
 
-fn sample_banks() -> Vec (Vector Int) =
+fn sample_banks() -> Vec (Vec Int) =
   vec_append(
     vec_append(
       vec_append(
@@ -124,13 +118,13 @@ fn sample_banks() -> Vec (Vector Int) =
     bank_from_string("818181911112111")
   )
 
-fn solve_for_banks(banks: Vec (Vector Int)) -> Answers =
+fn solve_for_banks(banks: Vec (Vec Int)) -> Answers =
   Answers(sum_for_count(banks, 2), sum_for_count(banks, 12))
 
 export fn solve_sample() -> Answers =
   solve_for_banks(sample_banks())
 
-fn solve_or_sample(banks: Vec (Vector Int)) -> Answers =
+fn solve_or_sample(banks: Vec (Vec Int)) -> Answers =
   if vec_length(banks) == 0 then solve_sample()
   else solve_for_banks(banks)
 

@@ -87,8 +87,12 @@ class ParserTests(unittest.TestCase):
 
     def test_parse_class_instance_and_where_constraints(self) -> None:
         src = """
-        class Functor f
-        instance Functor List
+        class Functor f {
+          fn fmap(f: a -> b, xs: f a) -> f b
+        }
+        instance Functor List {
+          fn fmap(f: a -> b, xs: List a) -> List b = xs
+        }
         fn map_id(xs: List Int) -> List Int where Functor List = xs
         """
         program = parse(src)
@@ -100,12 +104,16 @@ class ParserTests(unittest.TestCase):
         class_decl = program.declarations[0]
         self.assertEqual(class_decl.name, "Functor")
         self.assertEqual(class_decl.type_params, ["f"])
+        self.assertEqual(len(class_decl.methods), 1)
+        self.assertEqual(class_decl.methods[0].name, "fmap")
 
         inst_decl = program.declarations[1]
         self.assertEqual(inst_decl.constraint.class_name, "Functor")
         self.assertEqual(len(inst_decl.constraint.args), 1)
         self.assertIsInstance(inst_decl.constraint.args[0], ast.TypeName)
         self.assertEqual(inst_decl.constraint.args[0].name, "List")
+        self.assertEqual(len(inst_decl.methods), 1)
+        self.assertEqual(inst_decl.methods[0].name, "fmap")
 
         fn_decl = program.declarations[2]
         self.assertEqual(len(fn_decl.constraints), 1)

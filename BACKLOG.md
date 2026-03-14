@@ -69,7 +69,7 @@ Definition of done:
 
 - [x] `P0` Add class declarations and constrained function signatures (`class`, `where` constraints).
 - [~] `P0` Add instance declarations and resolution (`instance` lookup, coherence checks).
-- [ ] `P0` Implement dictionary-passing lowering in typechecker/backend.
+- [~] `P0` Implement dictionary-passing lowering in typechecker/backend (hidden-method-parameter lowering now supports constrained polymorphic helpers via forwarding; full first-class dictionary representation still pending).
 - [ ] `P0` Add `Functor` class and instances for `List` and `Vec`.
 - [ ] `P0` Add `Foldable` class and instances for `List` and `Vec`.
 - [ ] `P1` Add `Semigroup` and `Monoid` classes with laws documented.

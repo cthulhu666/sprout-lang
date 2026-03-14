@@ -22,7 +22,7 @@ KEYWORDS = {
 
 
 MULTI_CHAR = ["->", "==", "!=", "<=", ">=", "&&", "||", ">>"]
-SINGLE_CHAR = set("()|=,:+-*/<>")
+SINGLE_CHAR = set("(){}|=,:+-*/<>")
 
 
 @dataclass

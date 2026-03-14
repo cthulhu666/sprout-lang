@@ -71,6 +71,8 @@ class TypeDeclInfo:
 @dataclass
 class ClassDeclInfo:
     arity: int
+    type_param_vars: tuple[str, ...]
+    methods: dict[str, Type]
 
 
 INT = TConst("Int")
@@ -252,6 +254,22 @@ def fn_type_from_decl(decl: ast.FnDecl, state: InferState) -> Type:
     return typ
 
 
+def method_type_from_parts(
+    params: list[ast.Param],
+    return_type: ast.TypeExpr | None,
+    local_vars: dict[str, TVar],
+) -> Type:
+    param_types = [
+        parse_type_expr(param.type_expr, local_vars, allow_implicit_type_vars=True)
+        for param in params
+    ]
+    ret = parse_type_expr(return_type, local_vars, allow_implicit_type_vars=True) if return_type else UNIT
+    typ = ret
+    for p in reversed(param_types):
+        typ = TFunc(p, typ)
+    return typ
+
+
 def _type_expr_key(node: ast.TypeExpr) -> tuple:
     if isinstance(node, ast.TypeName):
         return ("name", node.name)
@@ -271,7 +289,23 @@ def build_class_decls(program: ast.Program) -> dict[str, ClassDeclInfo]:
             raise tc_error(f"Duplicate class declaration: {decl.name}", decl)
         if len(set(decl.type_params)) != len(decl.type_params):
             raise tc_error(f"Duplicate class type parameter in {decl.name}", decl)
-        out[decl.name] = ClassDeclInfo(arity=len(decl.type_params))
+        method_types: dict[str, Type] = {}
+        class_local_vars: dict[str, TVar] = {
+            p: TVar(f"class.{decl.name}.{p}") for p in decl.type_params
+        }
+        for method in decl.methods:
+            if method.name in method_types:
+                raise tc_error(f"Duplicate method {method.name} in class {decl.name}", method)
+            method_types[method.name] = method_type_from_parts(
+                method.params,
+                method.return_type,
+                dict(class_local_vars),
+            )
+        out[decl.name] = ClassDeclInfo(
+            arity=len(decl.type_params),
+            type_param_vars=tuple(f"class.{decl.name}.{p}" for p in decl.type_params),
+            methods=method_types,
+        )
     return out
 
 
@@ -308,6 +342,87 @@ def validate_class_constraints(program: ast.Program, class_decls: dict[str, Clas
                     decl,
                 )
             seen_instances.add(key)
+
+
+def substitute_type_vars(typ: Type, subst: dict[str, Type]) -> Type:
+    if isinstance(typ, TVar):
+        return subst.get(typ.name, typ)
+    if isinstance(typ, TFunc):
+        return TFunc(substitute_type_vars(typ.arg, subst), substitute_type_vars(typ.ret, subst))
+    if isinstance(typ, TApp):
+        return TApp(substitute_type_vars(typ.base, subst), substitute_type_vars(typ.arg, subst))
+    return typ
+
+
+def validate_instance_methods(
+    program: ast.Program,
+    class_decls: dict[str, ClassDeclInfo],
+    env: dict[str, Scheme],
+    state: InferState,
+    type_decls: dict[str, TypeDeclInfo],
+) -> None:
+    for decl in program.declarations:
+        if not isinstance(decl, ast.InstanceDecl):
+            continue
+        class_info = class_decls.get(decl.constraint.class_name)
+        if class_info is None:
+            continue
+        expected_names = set(class_info.methods.keys())
+        provided_names = {m.name for m in decl.methods}
+        if expected_names != provided_names:
+            missing = sorted(expected_names - provided_names)
+            extra = sorted(provided_names - expected_names)
+            parts: list[str] = []
+            if missing:
+                parts.append(f"missing: {', '.join(missing)}")
+            if extra:
+                parts.append(f"extra: {', '.join(extra)}")
+            detail = "; ".join(parts) if parts else "method set mismatch"
+            raise tc_error(
+                f"Instance for {decl.constraint.class_name} has incorrect methods ({detail})",
+                decl,
+            )
+
+        method_impls: dict[str, ast.InstanceMethodImpl] = {}
+        for method in decl.methods:
+            if method.name in method_impls:
+                raise tc_error(f"Duplicate method {method.name} in instance", method)
+            method_impls[method.name] = method
+
+        instance_args = [parse_type_expr(arg) for arg in decl.constraint.args]
+        class_subst = {
+            class_var_name: arg_type
+            for class_var_name, arg_type in zip(class_info.type_param_vars, instance_args)
+        }
+
+        for method_name, expected_template in class_info.methods.items():
+            impl = method_impls[method_name]
+            expected_type = substitute_type_vars(expected_template, class_subst)
+            actual_type = fn_type_from_decl(
+                ast.FnDecl(
+                    name=impl.name,
+                    params=impl.params,
+                    return_type=impl.return_type,
+                    constraints=[],
+                    body=impl.body,
+                ),
+                state,
+            )
+
+            local_state = InferState()
+            unify_at(local_state, expected_type, actual_type, impl)
+
+            working_env = dict(env)
+            cursor = apply(state.subst, actual_type)
+            for param in impl.params:
+                cursor = apply(state.subst, cursor)
+                if not isinstance(cursor, TFunc):
+                    raise tc_error("Internal error for instance method params", impl)
+                working_env[param.name] = Scheme(vars=(), type=cursor.arg)
+                cursor = cursor.ret
+            body_t = infer_expr(impl.body, working_env, state, type_decls)
+            expected_return = apply(state.subst, cursor)
+            unify_at(state, body_t, expected_return, impl.body)
 
 
 def infer_expr(
@@ -637,6 +752,34 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 working_env[param.name] = Scheme(vars=(), type=cursor.arg)
                 cursor = cursor.ret
 
+            for constraint in fn_decl.constraints:
+                class_info = class_decls.get(constraint.class_name)
+                if class_info is None:
+                    continue
+                instance_args = [
+                    parse_type_expr(arg, allow_implicit_type_vars=True, state=state)
+                    for arg in constraint.args
+                ]
+                class_subst = {
+                    class_var_name: arg_type
+                    for class_var_name, arg_type in zip(class_info.type_param_vars, instance_args)
+                }
+                for method_name, method_template in class_info.methods.items():
+                    resolved_method_type = substitute_type_vars(method_template, class_subst)
+                    method_scheme = Scheme(
+                        vars=tuple(sorted(ftv(resolved_method_type))),
+                        type=resolved_method_type,
+                    )
+                    existing = working_env.get(method_name)
+                    if existing is not None and scheme_to_string(existing, state.subst) != scheme_to_string(
+                        method_scheme, state.subst
+                    ):
+                        raise tc_error(
+                            f"Ambiguous method {method_name} from constraints in function {fn_decl.name}",
+                            fn_decl,
+                        )
+                    working_env[method_name] = method_scheme
+
             body_t = infer_expr(fn_decl.body, working_env, state, type_decls)
             expected_return = apply(state.subst, cursor)
             unify_at(state, body_t, expected_return, fn_decl.body)
@@ -650,5 +793,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             let_decl = decl
             value_t = infer_expr(let_decl.value, env, state, type_decls)
             env[let_decl.name] = generalize(env, value_t, state)
+
+    validate_instance_methods(program, class_decls, env, state, type_decls)
 
     return {name: scheme_to_string(sch, state.subst) for name, sch in env.items()}

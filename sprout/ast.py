@@ -53,11 +53,28 @@ class LetDecl:
 class ClassDecl:
     name: str
     type_params: list[str]
+    methods: list["ClassMethodSig"] = field(default_factory=list)
 
 
 @dataclass
 class InstanceDecl:
     constraint: TypeConstraint
+    methods: list["InstanceMethodImpl"] = field(default_factory=list)
+
+
+@dataclass
+class ClassMethodSig:
+    name: str
+    params: list["Param"]
+    return_type: "TypeExpr"
+
+
+@dataclass
+class InstanceMethodImpl:
+    name: str
+    params: list["Param"]
+    return_type: "TypeExpr | None"
+    body: "Expr"
 
 
 class Expr:

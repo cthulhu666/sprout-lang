@@ -1,0 +1,65 @@
+module app.main
+import stdlib.collections (Vec, vec_append, vec_empty, vec_fold, vec_map)
+
+type List a =
+  | Cons a (List a)
+  | Nil
+
+class Functor f {
+  fn fmap(f: a -> b, xs: f a) -> f b
+}
+
+class Foldable f {
+  fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
+}
+
+instance Functor List {
+  fn fmap(f: a -> b, xs: List a) -> List b =
+    list_fmap(f, xs)
+}
+
+instance Foldable List {
+  fn fold_values(xs: List a, init: b, step: b -> a -> b) -> b =
+    list_fold(xs, init, step)
+}
+
+fn list_fmap(f: a -> b, xs: List a) -> List b =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest -> Cons(f(x), list_fmap(f, rest))
+
+fn list_fold(xs: List a, init: b, step: b -> a -> b) -> b =
+  match xs with
+  | Nil -> init
+  | Cons x rest -> list_fold(rest, step(init, x), step)
+
+instance Functor Vec {
+  fn fmap(f: a -> b, xs: Vec a) -> Vec b =
+    vec_map(xs, f)
+}
+
+instance Foldable Vec {
+  fn fold_values(xs: Vec a, init: b, step: b -> a -> b) -> b =
+    vec_fold(xs, init, step)
+}
+
+fn add_one(x: Int) -> Int = x + 1
+fn add(acc: Int, x: Int) -> Int = acc + x
+
+fn map_and_sum(xs: c) -> Int where Functor c, Foldable c =
+  fold_values(fmap(add_one, xs), 0, add)
+
+fn map_and_sum_list(xs: List Int) -> Int where Functor List, Foldable List =
+  map_and_sum(xs)
+
+fn map_and_sum_vec(xs: Vec Int) -> Int where Functor Vec, Foldable Vec =
+  map_and_sum(xs)
+
+fn sample_list() -> List Int =
+  Cons(1, Cons(2, Cons(3, Nil)))
+
+fn sample_vec() -> Vec Int =
+  vec_append(vec_append(vec_append(vec_empty(), 4), 5), 6)
+
+fn main() -> IO Unit =
+  print(map_and_sum_list(sample_list()) + map_and_sum_vec(sample_vec()))

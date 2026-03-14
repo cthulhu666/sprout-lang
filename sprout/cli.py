@@ -12,8 +12,10 @@ from .codegen_llvm import CodegenError, compile_to_llvm
 from .interpreter import RuntimeError, run_program
 from .module_loader import ModuleLoadError, load_module_bundle, resolve_program_names
 from .parser import ParseError, parse
+from .surface_checks import SurfaceCheckError, validate_public_surface
 from .stdlib import with_http_prelude, with_prelude
 from .tokenizer import TokenizeError
+from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 from .typechecker import TypeCheckError, typecheck_program
 
 
@@ -38,6 +40,7 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
     tree = parse(source)
     if bundle is not None:
         resolve_program_names(tree, bundle)
+    validate_public_surface(tree, bundle)
     typed = typecheck_program(tree)
     print("ok")
     for name in sorted(typed.keys()):
@@ -57,8 +60,11 @@ def cmd_run(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fals
     tree = parse(source)
     if bundle is not None:
         resolve_program_names(tree, bundle)
+    validate_public_surface(tree, bundle)
     typecheck_program(tree)
-    run_program(tree)
+    lowered = lower_typeclasses(tree)
+    typecheck_program(lowered)
+    run_program(lowered)
     return 0
 
 
@@ -80,8 +86,11 @@ def cmd_compile(
     tree = parse(source)
     if bundle is not None:
         resolve_program_names(tree, bundle)
+    validate_public_surface(tree, bundle)
     typecheck_program(tree)
-    llvm_ir = compile_to_llvm(tree)
+    lowered = lower_typeclasses(tree)
+    typecheck_program(lowered)
+    llvm_ir = compile_to_llvm(lowered)
 
     if not native:
         out.write_text(llvm_ir, encoding="utf-8")
@@ -752,6 +761,8 @@ def main(argv: list[str] | None = None) -> int:
         RuntimeError,
         CodegenError,
         ModuleLoadError,
+        SurfaceCheckError,
+        TypeclassLoweringError,
         subprocess.CalledProcessError,
     ) as exc:
         print(f"error: {exc}")

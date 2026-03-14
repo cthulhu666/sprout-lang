@@ -140,12 +140,59 @@ class Parser:
         if not type_params:
             t = self.current()
             raise ParseError(f"Expected at least one class type parameter at {t.line}:{t.column}")
-        return self.mark(ast.ClassDecl(name=name, type_params=type_params), start)
+        methods: list[ast.ClassMethodSig] = []
+        if self.match("SYMBOL", "{"):
+            while not self.check("SYMBOL", "}"):
+                methods.append(self.parse_class_method_sig())
+            self.expect("SYMBOL", "}")
+        return self.mark(ast.ClassDecl(name=name, type_params=type_params, methods=methods), start)
 
     def parse_instance_decl(self) -> ast.InstanceDecl:
         start = self.expect("KEYWORD", "instance")
         constraint = self.parse_type_constraint()
-        return self.mark(ast.InstanceDecl(constraint=constraint), start)
+        methods: list[ast.InstanceMethodImpl] = []
+        if self.match("SYMBOL", "{"):
+            while not self.check("SYMBOL", "}"):
+                methods.append(self.parse_instance_method_impl())
+            self.expect("SYMBOL", "}")
+        return self.mark(ast.InstanceDecl(constraint=constraint, methods=methods), start)
+
+    def parse_class_method_sig(self) -> ast.ClassMethodSig:
+        start = self.expect("KEYWORD", "fn")
+        name = self.expect("IDENT", label="method name").value
+        self.expect("SYMBOL", "(")
+        params: list[ast.Param] = []
+        if not self.check("SYMBOL", ")"):
+            params.append(self.parse_param())
+            while self.match("SYMBOL", ","):
+                params.append(self.parse_param())
+        self.expect("SYMBOL", ")")
+        self.expect("SYMBOL", "->")
+        return_type = self.parse_type_expr()
+        return self.mark(
+            ast.ClassMethodSig(name=name, params=params, return_type=return_type),
+            start,
+        )
+
+    def parse_instance_method_impl(self) -> ast.InstanceMethodImpl:
+        start = self.expect("KEYWORD", "fn")
+        name = self.expect("IDENT", label="method name").value
+        self.expect("SYMBOL", "(")
+        params: list[ast.Param] = []
+        if not self.check("SYMBOL", ")"):
+            params.append(self.parse_param())
+            while self.match("SYMBOL", ","):
+                params.append(self.parse_param())
+        self.expect("SYMBOL", ")")
+        return_type = None
+        if self.match("SYMBOL", "->"):
+            return_type = self.parse_type_expr()
+        self.expect("SYMBOL", "=")
+        body = self.parse_expr()
+        return self.mark(
+            ast.InstanceMethodImpl(name=name, params=params, return_type=return_type, body=body),
+            start,
+        )
 
     def parse_type_constraint(self) -> ast.TypeConstraint:
         start = self.expect("IDENT", label="class name")

@@ -58,11 +58,6 @@ Runtime builtins (host-implemented):
 - `str_slice(s: String, start: Int, len: Int) -> String`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`
-- `vector_empty() -> Vector a`
-- `vector_length(v: Vector a) -> Int`
-- `vector_get(v: Vector a, index: Int) -> Maybe a`
-- `vector_set(v: Vector a, index: Int, value: a) -> Vector a`
-- `vector_append(v: Vector a, value: a) -> Vector a`
 - `map_empty() -> Map a`
 - `map_get(m: Map a, key: String) -> Maybe a`
 - `map_set(m: Map a, key: String, value: a) -> Map a`
@@ -135,7 +130,7 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 Collections module (in `stdlib/collections.sprout`):
 
 - `Maybe a` (`Just`, `Nothing`)
-- `Vec a` (`Vec (Vector a)`) with helpers:
+- `Vec a` with helpers:
   - `vec_empty()`
   - `vec_prepend(value, vec)`
   - `vec_append(vec, value)`
@@ -149,6 +144,12 @@ Collections module (in `stdlib/collections.sprout`):
   - `dict_get(dict, key) -> Maybe v`
   - `dict_set(dict, key, value)`
   - `dict_remove(dict, key)`
+
+Low-level runtime notes:
+
+- `Vector` and `vector_*` builtins exist as backend/runtime primitives.
+- For application code, prefer `stdlib.collections` (`Vec`/`Dict`) as the stable public API.
+- CLI/module checks reject raw `Vector`/`Map` and `vector_*`/`map_*` usage outside `stdlib.*` modules.
 
 String module (in `stdlib/string.sprout`):
 
