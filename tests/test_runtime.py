@@ -114,6 +114,59 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "42")
 
+    def test_stdlib_pipeline_helpers(self) -> None:
+        src = """
+        fn plus1(x: Int) -> Int = x + 1
+        fn twice(x: Int) -> Result String Int = Ok(x * 2)
+        fn tag(e: String) -> String = str_concat("err:", e)
+
+        fn main() -> IO Unit =
+          print(
+            result_with_default(
+              result_pipe_error(
+                result_pipe_ok(
+                  result_pipe(
+                    Ok(pipe(20, plus1)),
+                    twice
+                  ),
+                  plus1
+                ),
+                tag
+              ),
+              0
+            )
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "43")
+
+    def test_forward_pipe_operator_with_result_helpers(self) -> None:
+        src = """
+        fn plus1(x: Int) -> Int = x + 1
+        fn twice(x: Int) -> Result String Int = Ok(x * 2)
+        fn tag(e: String) -> String = str_concat("err:", e)
+
+        fn main() -> IO Unit =
+          print(
+            result_with_default(
+              Ok(20)
+              |> result_pipe_ok(plus1)
+              |> result_pipe(twice)
+              |> result_pipe_ok(plus1)
+              |> result_pipe_error(tag),
+              0
+            )
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "43")
+
     def test_stdlib_when_ok_and_when_error_helpers(self) -> None:
         src = """
         fn show_ok(x: Int) -> IO Unit = print(x)

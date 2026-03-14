@@ -89,12 +89,53 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `filter(list, predicate) -> List`
 - `split_ints(s: String) -> List Int`
 - `Result e a` with helpers:
+  - forward pipe operator: `value |> f` rewrites to `f(value)`
+  - `pipe(value, f)`
   - `result_map(r, f)`
   - `result_map_error(r, f)`
   - `result_and_then(r, f)`
   - `result_with_default(r, fallback)`
+  - `result_pipe(r, f)` aliases `result_and_then` in pipeline style
+  - `result_pipe_ok(r, f)` aliases `result_map` in pipeline style
+  - `result_pipe_error(r, f)` aliases `result_map_error` in pipeline style
   - `when_ok(r, f)` runs `f` for `Ok` and preserves `r`
   - `when_error(r, f)` runs `f` for `Err` and preserves `r`
+
+Example usage:
+
+```sprout
+fn inc(x: Int) -> Int = x + 1
+fn double_if_large(x: Int) -> Result String Int =
+  if x > 10 then Ok(x * 2) else Err("too-small")
+fn show_ok(x: Int) -> IO Unit = print(x)
+fn show_error(e: String) -> IO Unit = print(e)
+
+# Nested style
+when_error(
+  when_ok(
+    result_pipe_ok(
+      result_pipe(
+        Ok(pipe(20, inc)),
+        double_if_large
+      ),
+      inc
+    ),
+    show_ok
+  ),
+  show_error
+)
+
+# Piped style
+Ok(20)
+|> result_pipe_ok(inc)
+|> result_pipe(double_if_large)
+|> result_pipe_ok(inc)
+|> when_ok(show_ok)
+|> when_error(show_error)
+```
+
+Runnable demo:
+- `python3 -m sprout.cli run --with-stdlib examples/result_control_flow_demo.sprout`
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 

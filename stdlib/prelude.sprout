@@ -29,6 +29,9 @@ fn filter(xs: List a, pred: a -> Bool) -> List a =
 fn split_ints(s: String) -> List Int =
   map(split_words(s), parse_int)
 
+fn pipe(value: a, f: a -> b) -> b =
+  f(value)
+
 fn result_map(r: Result e a, f: a -> b) -> Result e b =
   match r with
   | Ok x -> Ok(f(x))
@@ -48,6 +51,15 @@ fn result_with_default(r: Result e a, fallback: a) -> a =
   match r with
   | Ok x -> x
   | Err _ -> fallback
+
+fn result_pipe(r: Result e a, f: a -> Result e b) -> Result e b =
+  result_and_then(r, f)
+
+fn result_pipe_ok(r: Result e a, f: a -> b) -> Result e b =
+  result_map(r, f)
+
+fn result_pipe_error(r: Result e a, f: e -> f_err) -> Result f_err a =
+  result_map_error(r, f)
 
 fn keep_after(effect: IO Unit, value: a) -> a =
   value

@@ -244,7 +244,20 @@ class Parser:
                 raise ParseError(f"Expected at least one match branch at {t.line}:{t.column}")
             return self.mark(ast.MatchExpr(scrutinee=scrutinee, branches=branches), start)
 
-        return self.parse_logical_or()
+        return self.parse_pipe()
+
+    def parse_pipe(self):
+        expr = self.parse_logical_or()
+        while self.match("SYMBOL", "|>"):
+            op = self.tokens[self.i - 1]
+            rhs = self.parse_logical_or()
+            expr = self.mark(self._pipe_into_call(expr, rhs), op)
+        return expr
+
+    def _pipe_into_call(self, left: ast.Expr, rhs: ast.Expr) -> ast.Expr:
+        if isinstance(rhs, ast.CallExpr):
+            return ast.CallExpr(callee=rhs.callee, args=[left] + rhs.args)
+        return ast.CallExpr(callee=rhs, args=[left])
 
     def parse_logical_or(self):
         expr = self.parse_logical_and()

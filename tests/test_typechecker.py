@@ -46,6 +46,10 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("filter", types)
         self.assertIn("result_map", types)
         self.assertIn("result_and_then", types)
+        self.assertIn("pipe", types)
+        self.assertIn("result_pipe", types)
+        self.assertIn("result_pipe_ok", types)
+        self.assertIn("result_pipe_error", types)
         self.assertIn("when_ok", types)
         self.assertIn("when_error", types)
 

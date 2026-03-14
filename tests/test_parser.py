@@ -64,6 +64,31 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(callee.callee.right, ast.BinaryExpr)
         self.assertEqual(callee.callee.right.op, ">>")
 
+    def test_parse_forward_pipe_desugars_to_call(self) -> None:
+        src = "fn main() -> Int = 20 |> inc"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
+        self.assertEqual(fn_decl.body.callee.name, "inc")
+        self.assertEqual(len(fn_decl.body.args), 1)
+        self.assertIsInstance(fn_decl.body.args[0], ast.IntExpr)
+        self.assertEqual(fn_decl.body.args[0].value, 20)
+
+    def test_parse_forward_pipe_into_existing_call(self) -> None:
+        src = "fn main() -> Int = Ok(20) |> result_pipe_ok(inc)"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
+        self.assertEqual(fn_decl.body.callee.name, "result_pipe_ok")
+        self.assertEqual(len(fn_decl.body.args), 2)
+        self.assertIsInstance(fn_decl.body.args[0], ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.args[1], ast.VarExpr)
+        self.assertEqual(fn_decl.body.args[1].name, "inc")
+
     def test_parse_string_escape_carriage_return(self) -> None:
         src = 'fn main() -> String = "a\\r\\nb"'
         program = parse(src)

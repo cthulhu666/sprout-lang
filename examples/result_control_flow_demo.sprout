@@ -1,0 +1,67 @@
+fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+fn inc(x: Int) -> Int = x + 1
+
+fn double_if_large(x: Int) -> Result String Int =
+  if x > 10 then Ok(x * 2) else Err("too-small")
+
+fn prefix_error(e: String) -> String =
+  str_concat("error:", e)
+
+fn show_ok(x: Int) -> IO Unit =
+  print(x)
+
+fn show_error(e: String) -> IO Unit =
+  print(e)
+
+fn nested_ok_demo() -> IO Unit =
+  print(
+    result_with_default(
+      when_error(
+        when_ok(
+          result_pipe_error(
+            result_pipe_ok(
+              result_pipe(
+                Ok(pipe(20, inc)),
+                double_if_large
+              ),
+              inc
+            ),
+            prefix_error
+          ),
+          show_ok
+        ),
+        show_error
+      ),
+      0
+    )
+  )
+
+fn piped_ok_demo() -> IO Unit =
+  print(
+    result_with_default(
+      Ok(20)
+      |> result_pipe_ok(inc)
+      |> result_pipe(double_if_large)
+      |> result_pipe_ok(inc)
+      |> result_pipe_error(prefix_error)
+      |> when_ok(show_ok)
+      |> when_error(show_error),
+      0
+    )
+  )
+
+fn piped_err_demo() -> IO Unit =
+  print(
+    result_with_default(
+      Ok(3)
+      |> result_pipe(double_if_large)
+      |> result_pipe_error(prefix_error)
+      |> when_ok(show_ok)
+      |> when_error(show_error),
+      7
+    )
+  )
+
+fn main() -> IO Unit =
+  seq(nested_ok_demo(), seq(piped_ok_demo(), piped_err_demo()))

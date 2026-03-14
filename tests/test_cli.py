@@ -190,6 +190,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertIn("57", run.stdout)
 
+    def test_run_result_control_flow_demo(self) -> None:
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sprout.cli",
+                "run",
+                "--with-stdlib",
+                "examples/result_control_flow_demo.sprout",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stdout.strip(), "43\n43\n43\n43\nerror:too-small\n7")
+
     def test_compile_native_foldable_to_vec_demo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "foldable_demo_bin"

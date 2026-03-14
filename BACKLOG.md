@@ -21,7 +21,7 @@ Definition of done:
 
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
-- [~] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
+- [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 
 ### 2) Networking and HTTP Client
 
@@ -51,7 +51,7 @@ Definition of done:
 - [x] `P1` Add stdlib text parsing helpers: `string_lines(String) -> Vec String`.
 - [x] `P1` Add stdlib digit helpers: `string_digits(String) -> Vec Int`.
 - [x] `P2` Extend collections helpers (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`).
-- [~] `P2` Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).
+- [~] `P2` Add vector utility combinators (for example `vec_sum_by`; `vec_max_subsequence_by_count` is now a maybe/later item).
 - [ ] `P2` Add set type and common ops.
 
 ### 6) Modules and Packaging
@@ -112,10 +112,11 @@ Definition of done:
 - [x] Runtime builtin failures now use a shared `runtime error: builtin ...` convention in interpreter and native paths.
 - [x] CLI REPL exists with declarations, expression evaluation, and `:type`.
 - [x] Prelude now includes `when_ok` / `when_error` effect taps for `Result`.
+- [x] Prelude now includes `pipe` plus `result_pipe*` helpers for lighter `Result` pipelines.
 - [ ] terminal interaction primitives are not yet fully implemented.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add more vector utility combinators (next likely: `vec_max_subsequence_by_count`).
-2. Add optional pipeline helpers for `Result`/effectful control flow.
-3. Add formatter/linter baseline.
+1. Add formatter/linter baseline.
+2. Ensure interpreter/native parity for HTTP client builtins.
+3. Move global string helpers into namespaced stdlib module(s).
