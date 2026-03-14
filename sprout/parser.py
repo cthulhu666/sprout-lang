@@ -327,7 +327,31 @@ class Parser:
             out = self.mark(ast.VarExpr(name="Nil"), open_tok)
             for item in reversed(items):
                 out = self.mark(
-                    ast.CallExpr(callee=ast.VarExpr(name="Cons"), args=[item, out]),
+                    ast.CallExpr(callee=self.mark(ast.VarExpr(name="Cons"), open_tok), args=[item, out]),
+                    open_tok,
+                )
+            return out
+        if self.match("SYMBOL", "{"):
+            open_tok = self.tokens[self.i - 1]
+            entries: list[tuple[str, ast.Expr]] = []
+            if not self.check("SYMBOL", "}"):
+                entries.append(self.parse_dict_entry())
+                while self.match("SYMBOL", ","):
+                    if self.check("SYMBOL", "}"):
+                        break
+                    entries.append(self.parse_dict_entry())
+            self.expect("SYMBOL", "}")
+            # Desugar dict literal {foo: 1, bar: 2} into nested dict_set calls.
+            out: ast.Expr = self.mark(
+                ast.CallExpr(callee=self.mark(ast.VarExpr(name="dict_empty"), open_tok), args=[]),
+                open_tok,
+            )
+            for key, value in entries:
+                out = self.mark(
+                    ast.CallExpr(
+                        callee=self.mark(ast.VarExpr(name="dict_set"), open_tok),
+                        args=[out, self.mark(ast.StringExpr(value=key), open_tok), value],
+                    ),
                     open_tok,
                 )
             return out
@@ -373,7 +397,7 @@ class Parser:
 
         name_token = self.expect("IDENT", label="pattern")
         name = name_token.value
-        if name and name[0].isupper():
+        if self._is_constructor_name(name):
             args = []
             while self._starts_pattern_atom():
                 args.append(self.parse_pattern_atom())
@@ -399,7 +423,7 @@ class Parser:
         if self.check("IDENT"):
             tok = self.advance()
             name = tok.value
-            if name and name[0].isupper():
+            if self._is_constructor_name(name):
                 return self.mark(ast.ConstructorPattern(name=name, args=[]), tok)
             return self.mark(ast.VarPattern(name=name), tok)
         if self.match("SYMBOL", "("):
@@ -409,6 +433,17 @@ class Parser:
             return self.mark(inner, open_tok)
         t = self.current()
         raise ParseError(f"Expected pattern atom at {t.line}:{t.column}")
+
+    def parse_dict_entry(self) -> tuple[str, ast.Expr]:
+        if self.check("IDENT"):
+            key = self.advance().value
+        elif self.check("STRING"):
+            key = self.advance().value
+        else:
+            t = self.current()
+            raise ParseError(f"Expected dict key at {t.line}:{t.column}, got {t.kind} {t.value!r}")
+        self.expect("SYMBOL", ":")
+        return key, self.parse_expr()
 
     def parse_type_expr(self):
         left = self.parse_type_apply()
@@ -446,6 +481,10 @@ class Parser:
         if self.check("KEYWORD") and self.current().value in {"true", "false"}:
             return True
         return False
+
+    def _is_constructor_name(self, name: str) -> bool:
+        leaf = name.rsplit(".", 1)[-1]
+        return bool(leaf) and leaf[0].isupper()
 
 
 def parse(source: str) -> ast.Program:

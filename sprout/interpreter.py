@@ -167,9 +167,10 @@ class Env:
 
 def format_value(value: object) -> str:
     if isinstance(value, ADTValue):
+        ctor_name = value.constructor.rsplit(".", 1)[-1]
         if not value.args:
-            return value.constructor
-        return f"{value.constructor}({', '.join(format_value(arg) for arg in value.args)})"
+            return ctor_name
+        return f"{ctor_name}({', '.join(format_value(arg) for arg in value.args)})"
     if isinstance(value, VectorValue):
         return "[" + ", ".join(format_value(item) for item in value.items) + "]"
     if isinstance(value, MapValue):
@@ -360,7 +361,7 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
     if isinstance(pattern, ast.ConstructorPattern):
         if not isinstance(value, ADTValue):
             return None
-        if value.constructor != pattern.name:
+        if value.constructor != pattern.name and value.constructor.rsplit(".", 1)[-1] != pattern.name.rsplit(".", 1)[-1]:
             return None
         if len(value.args) != len(pattern.args):
             return None
@@ -507,8 +508,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         if not isinstance(index, int):
             raise RuntimeError("vector_get expects Int index")
         if index < 0 or index >= len(vec.items):
-            return ADTValue(constructor="Nothing", args=())
-        return ADTValue(constructor="Just", args=(vec.items[index],))
+            return ADTValue(constructor="stdlib.collections.Nothing", args=())
+        return ADTValue(constructor="stdlib.collections.Just", args=(vec.items[index],))
 
     def builtin_vector_set(args: list[object]) -> object:
         vec = args[0]
@@ -542,8 +543,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         if not isinstance(key, str):
             raise RuntimeError("map_get expects String key")
         if key not in map_value.items:
-            return ADTValue(constructor="Nothing", args=())
-        return ADTValue(constructor="Just", args=(map_value.items[key],))
+            return ADTValue(constructor="stdlib.collections.Nothing", args=())
+        return ADTValue(constructor="stdlib.collections.Just", args=(map_value.items[key],))
 
     def builtin_map_set(args: list[object]) -> object:
         map_value = args[0]
@@ -594,8 +595,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
         return headers
 
     def _http_err(constructor: str, payload: object | None = None) -> ADTValue:
-        err = ADTValue(constructor=constructor, args=() if payload is None else (payload,))
-        return ADTValue(constructor="Err", args=(err,))
+        err = ADTValue(constructor=f"stdlib.http.{constructor}", args=() if payload is None else (payload,))
+        return ADTValue(constructor="stdlib.http.Err", args=(err,))
 
     def builtin_http_request(args: list[object]) -> object:
         method = args[0]
@@ -630,10 +631,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
                 response_headers = "".join(f"{k}: {v}\r\n" for k, v in response.headers.items())
                 response_body = response.read().decode("utf-8", errors="replace")
                 resp = ADTValue(
-                    constructor="HttpResponse",
+                    constructor="stdlib.http.HttpResponse",
                     args=(status, response_headers, response_body),
                 )
-                return ADTValue(constructor="Ok", args=(resp,))
+                return ADTValue(constructor="stdlib.http.Ok", args=(resp,))
         except TimeoutError:
             return _http_err("HttpTimeout")
         except urllib.error.HTTPError as exc:
@@ -647,29 +648,29 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
 
     def _json_to_adt(value: object) -> ADTValue:
         if value is None:
-            return ADTValue(constructor="JsonNull", args=())
+            return ADTValue(constructor="stdlib.http.JsonNull", args=())
         if isinstance(value, bool):
-            return ADTValue(constructor="JsonBool", args=(value,))
+            return ADTValue(constructor="stdlib.http.JsonBool", args=(value,))
         if isinstance(value, int):
-            return ADTValue(constructor="JsonInt", args=(value,))
+            return ADTValue(constructor="stdlib.http.JsonInt", args=(value,))
         if isinstance(value, str):
-            return ADTValue(constructor="JsonString", args=(value,))
+            return ADTValue(constructor="stdlib.http.JsonString", args=(value,))
         if isinstance(value, list):
-            cursor = ADTValue(constructor="JsonArrayNil", args=())
+            cursor = ADTValue(constructor="stdlib.http.JsonArrayNil", args=())
             for item in reversed(value):
                 cursor = ADTValue(
-                    constructor="JsonArrayCons",
+                    constructor="stdlib.http.JsonArrayCons",
                     args=(_json_to_adt(item), cursor),
                 )
-            return ADTValue(constructor="JsonArray", args=(cursor,))
+            return ADTValue(constructor="stdlib.http.JsonArray", args=(cursor,))
         if isinstance(value, dict):
-            cursor = ADTValue(constructor="JsonObjectNil", args=())
+            cursor = ADTValue(constructor="stdlib.http.JsonObjectNil", args=())
             for key, item in reversed(list(value.items())):
                 cursor = ADTValue(
-                    constructor="JsonObjectCons",
+                    constructor="stdlib.http.JsonObjectCons",
                     args=(str(key), _json_to_adt(item), cursor),
                 )
-            return ADTValue(constructor="JsonObject", args=(cursor,))
+            return ADTValue(constructor="stdlib.http.JsonObject", args=(cursor,))
         raise RuntimeError(f"json_parse unsupported value kind: {type(value).__name__}")
 
     def builtin_json_parse(args: list[object]) -> object:
@@ -678,10 +679,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             raise RuntimeError("json_parse expects String")
         try:
             parsed = json.loads(raw)
-            return ADTValue(constructor="Ok", args=(_json_to_adt(parsed),))
+            return ADTValue(constructor="stdlib.http.Ok", args=(_json_to_adt(parsed),))
         except json.JSONDecodeError as exc:
-            err = ADTValue(constructor="JsonDecode", args=(str(exc),))
-            return ADTValue(constructor="Err", args=(err,))
+            err = ADTValue(constructor="stdlib.http.JsonDecode", args=(str(exc),))
+            return ADTValue(constructor="stdlib.http.Err", args=(err,))
 
     def _term_emit(text: str) -> None:
         if out is None:
@@ -875,8 +876,12 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
             env.set(decl.name, eval_expr(decl.value, env))
 
     try:
-        if "main" in env.values:
-            main = env.get("main")
+        entry_name = "main" if "main" in env.values else next(
+            (name for name in env.values if name.endswith(".main")),
+            None,
+        )
+        if entry_name is not None:
+            main = env.get(entry_name)
             if isinstance(main, FunctionValue):
                 apply_callable(main, [])
     finally:

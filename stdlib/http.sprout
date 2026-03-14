@@ -1,3 +1,5 @@
+module stdlib.http
+
 # Sprout HTTP helpers (v0)
 # Minimal helpers for request-line parsing and response formatting.
 

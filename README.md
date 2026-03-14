@@ -137,6 +137,8 @@ Collections module (in `stdlib/collections.sprout`):
   - `vec_length(vec)`
   - `vec_get(vec, index) -> Maybe a`
   - `vec_set(vec, index, value)`
+  - `vec_slice(vec, start, count)`
+  - `vec_reverse(vec)`
   - `vec_map(vec, f)`
   - `vec_fold(vec, init, f)`
 - `Dict v` (`Dict (Map v)`) with helpers:
@@ -144,6 +146,8 @@ Collections module (in `stdlib/collections.sprout`):
   - `dict_get(dict, key) -> Maybe v`
   - `dict_set(dict, key, value)`
   - `dict_remove(dict, key)`
+  - dict literals: `{foo: 1, "bar": 2}`, `{}`
+  - note: key/value enumeration helpers are not available yet
 - `Foldable f` class:
   - `fold_values(xs, init, step)`
 - `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`
@@ -175,6 +179,8 @@ Load HTTP helpers:
 - `python3 -m sprout.cli run --with-http-stdlib your_file.sprout`
 - Example HTTP echo server:
   `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run --with-http-stdlib examples/http_echo_server.sprout`
+- Collections helper demo:
+  `python3 -m sprout.cli run examples/collections_utils_demo.sprout`
 
 ## Native Backend (Early)
 
@@ -213,11 +219,11 @@ Resolution:
 - `import stdlib.http` resolves to `stdlib/http.sprout`
 - loader checks importing file directory first, then current working directory
 - import cycles are rejected
-
-Current limitation:
-
-- imported declarations still flatten into a shared program scope;
-  alias qualification (`alias.symbol`) is a resolver-level feature, not a full namespace runtime model yet
+- bare `import x.y.z` introduces a namespace qualifier using the last path segment (`z.symbol`)
+- `import x.y.z as alias` introduces `alias.symbol`
+- `import x.y.z (name1, name2)` imports only those names unqualified
+- importing an exported type also makes its constructors available to pattern matches and calls
+- top-level declarations are internally namespaced by module, so imported modules no longer flatten into one global scope
 
 Export behavior:
 
@@ -231,12 +237,11 @@ Commands:
 
 ## Roadmap / TODO
 
-1. Introduce real module namespaces (avoid flattening all imported declarations into one global scope).
-2. Move string/runtime helpers into namespaced stdlib modules.
-3. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
-4. Add stronger server-side runtime models (multi-reactor as next target).
-5. Add a REPL for iterative development.
-6. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
+1. Move string/runtime helpers into namespaced stdlib modules.
+2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
+3. Add stronger server-side runtime models (multi-reactor as next target).
+4. Add a REPL for iterative development.
+5. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
 
 ## Contributing
 

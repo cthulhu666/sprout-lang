@@ -68,6 +68,31 @@ fn vec_fold_indexed(vec: Vec a, acc: b, f: b -> a -> b, index: Int, total: Int) 
     | Nothing -> acc
     | Just value -> vec_fold_indexed(vec, f(acc, value), f, index + 1, total)
 
+export fn vec_slice(vec: Vec a, start: Int, count: Int) -> Vec a =
+  if count <= 0 then vec_empty()
+  else
+    vec_slice_from(vec, if start < 0 then 0 else start, count, 0, vec_length(vec), vec_empty())
+
+fn vec_slice_from(vec: Vec a, start: Int, count: Int, index: Int, total: Int, acc: Vec a) -> Vec a =
+  if index >= total then acc
+  else if index < start then
+    vec_slice_from(vec, start, count, index + 1, total, acc)
+  else if index >= start + count then acc
+  else
+    match vec_get(vec, index) with
+    | Nothing -> acc
+    | Just value -> vec_slice_from(vec, start, count, index + 1, total, vec_append(acc, value))
+
+export fn vec_reverse(vec: Vec a) -> Vec a =
+  vec_reverse_from(vec, vec_length(vec) - 1, vec_empty())
+
+fn vec_reverse_from(vec: Vec a, index: Int, acc: Vec a) -> Vec a =
+  if index < 0 then acc
+  else
+    match vec_get(vec, index) with
+    | Nothing -> acc
+    | Just value -> vec_reverse_from(vec, index - 1, vec_append(acc, value))
+
 export class Foldable f {
   fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
 }

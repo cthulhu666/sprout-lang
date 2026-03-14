@@ -94,6 +94,34 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
         self.assertEqual(fn_decl.body.callee.name, "Cons")
 
+    def test_parse_dict_literal_desugars_to_dict_set_chain(self) -> None:
+        src = 'fn xs() -> Dict Int = {foo: 1, "bar": 2}'
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
+        self.assertEqual(fn_decl.body.callee.name, "dict_set")
+
+        first_arg = fn_decl.body.args[0]
+        self.assertIsInstance(first_arg, ast.CallExpr)
+        self.assertIsInstance(first_arg.callee, ast.VarExpr)
+        self.assertEqual(first_arg.callee.name, "dict_set")
+
+        empty_call = first_arg.args[0]
+        self.assertIsInstance(empty_call, ast.CallExpr)
+        self.assertIsInstance(empty_call.callee, ast.VarExpr)
+        self.assertEqual(empty_call.callee.name, "dict_empty")
+
+    def test_parse_empty_dict_literal_desugars_to_dict_empty(self) -> None:
+        src = "fn xs() -> Dict Int = {}"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
+        self.assertEqual(fn_decl.body.callee.name, "dict_empty")
+
     def test_parse_class_instance_and_where_constraints(self) -> None:
         src = """
         class Functor f {

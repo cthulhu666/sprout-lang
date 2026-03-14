@@ -135,29 +135,32 @@ class Emitter:
 
 
 def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
+    adt_leaf_names = {name.rsplit(".", 1)[-1] for name in adt_names}
     if node is None:
         raise CodegenError("Function return type annotation is required for native codegen")
     if isinstance(node, ast.TypeName):
+        leaf = node.name.rsplit(".", 1)[-1]
         if node.name == "Int":
             return I64
         if node.name == "Bool":
             return I1
         if node.name == "String":
             return I8_PTR
-        if node.name in adt_names:
+        if node.name in adt_names or leaf in adt_leaf_names:
             return I64
-        if node.name and node.name[0].islower():
+        if leaf and leaf[0].islower():
             return I64
     if isinstance(node, ast.TypeApply):
         if isinstance(node.base, ast.TypeName) and node.base.name == "IO":
             if isinstance(node.arg, ast.TypeName) and node.arg.name == "Unit":
                 return I64
         base_name = _type_base_name(node)
-        if base_name in adt_names:
+        base_leaf = base_name.rsplit(".", 1)[-1] if base_name is not None else None
+        if base_name in adt_names or (base_leaf is not None and base_leaf in adt_leaf_names):
             return I64
         if base_name in {"Vector", "Map"}:
             return I64
-        if base_name and base_name[0].islower():
+        if base_leaf and base_leaf[0].islower():
             return I64
     if isinstance(node, ast.TypeArrow):
         # Function-typed values are lowered as opaque callable pointers.
@@ -315,10 +318,12 @@ def compile_to_llvm(program: ast.Program) -> str:
         emitter.emit(f"declare {ext.ret.text} @{ext.name}({params})")
     emitter.emit("")
 
-    ctor_reg_meta: dict[str, tuple[str, int, int, int]] = {}
+    ctor_reg_meta: dict[str, tuple[tuple[str, int], tuple[str, int] | None, int, int]] = {}
     for ctor in ctor_sigs.values():
-        sname, slen = emitter.string_const(ctor.name)
-        ctor_reg_meta[ctor.name] = (sname, slen, len(ctor.arg_types), ctor.tag)
+        primary = emitter.string_const(ctor.name)
+        leaf_name = ctor.name.rsplit(".", 1)[-1]
+        leaf = emitter.string_const(leaf_name) if leaf_name != ctor.name else None
+        ctor_reg_meta[ctor.name] = (primary, leaf, len(ctor.arg_types), ctor.tag)
 
     if runtime_lets:
         _emit_init_globals(runtime_lets, globals_info, sigs, ctor_sigs, emitter)
@@ -414,7 +419,7 @@ def _emit_fn(
     fn: ast.FnDecl,
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
-    ctor_reg_meta: dict[str, tuple[str, int, int, int]],
+    ctor_reg_meta: dict[str, tuple[tuple[str, int], tuple[str, int] | None, int, int]],
     globals_info: dict[str, GlobalInfo],
     adt_names: set[str],
     runtime_lets: list[ast.LetDecl],
@@ -429,22 +434,35 @@ def _emit_fn(
         params.append(f"{typ.text} {pname}")
         locals_[p.name] = Value(typ=typ, ir=pname, callable_sig=call_sig)
 
-    emitter.emit(f"define {sig.ret.text} @{fn.name}({', '.join(params)}) {{")
+    is_entry_main = fn.name == "main" or fn.name.endswith(".main")
+    emitted_name = "main" if is_entry_main else fn.name
+    emitter.emit(f"define {sig.ret.text} @{emitted_name}({', '.join(params)}) {{")
     emitter.label("entry")
-    if fn.name == "main":
+    if is_entry_main:
         if runtime_lets:
             emitter.emit("  call void @__sprout_init_globals()")
-        for _, (sname, slen, arity, tag) in sorted(ctor_reg_meta.items(), key=lambda x: x[1][3]):
+        for _, (primary, leaf, arity, tag) in sorted(ctor_reg_meta.items(), key=lambda x: x[1][3]):
+            sname, slen = primary
             sptr = emitter.tmp()
             emitter.emit(f"  {sptr} = getelementptr inbounds [{slen} x i8], ptr {sname}, i64 0, i64 0")
             reg = emitter.tmp()
             emitter.emit(
                 f"  {reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {sptr}, i64 {arity})"
             )
+            if leaf is not None:
+                leaf_name, leaf_len = leaf
+                leaf_ptr = emitter.tmp()
+                emitter.emit(
+                    f"  {leaf_ptr} = getelementptr inbounds [{leaf_len} x i8], ptr {leaf_name}, i64 0, i64 0"
+                )
+                leaf_reg = emitter.tmp()
+                emitter.emit(
+                    f"  {leaf_reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {leaf_ptr}, i64 {arity})"
+                )
     ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, emitter)
     if ret.typ != sig.ret:
         raise CodegenError(f"Function {fn.name} body type mismatch in backend: {ret.typ.text} vs {sig.ret.text}")
-    if fn.name == "main" and _is_io_unit(fn.return_type):
+    if is_entry_main and _is_io_unit(fn.return_type):
         emitter.emit("  ret i64 0")
     else:
         emitter.emit(f"  ret {ret.typ.text} {ret.ir}")

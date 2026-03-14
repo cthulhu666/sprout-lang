@@ -1,6 +1,6 @@
 module examples.sentry_issue_browser_tui
 import examples.sentry_api (sentry_list_issues)
-import stdlib.http (Json)
+import stdlib.http (Json, Result)
 import stdlib.terminal (term_reset_screen, term_render_line)
 
 fn issue_count_text(issues: Json) -> String =

@@ -50,12 +50,14 @@ Definition of done:
 - [x] `P1` Add dictionary/map type for API payload handling.
 - [x] `P1` Add stdlib text parsing helpers: `string_lines(String) -> Vec String`.
 - [x] `P1` Add stdlib digit helpers: `string_digits(String) -> Vec Int`.
+- [~] `P2` Extend collections helpers (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`).
+- [ ] `P1` Add map/dict iteration primitive so `dict_keys`/`dict_values` can be implemented in stdlib.
 - [ ] `P2` Add vector utility combinators (for example `vec_sum_by`, `vec_max_subsequence_by_count`).
 - [ ] `P2` Add set type and common ops.
 
 ### 6) Modules and Packaging
 
-- [ ] `P0` Implement real module namespaces (remove flattened global import model).
+- [x] `P0` Implement real module namespaces (remove flattened global import model).
 - [ ] `P1` Move global string helpers into namespaced stdlib module(s).
 - [ ] `P1` Define package/dependency conventions for third-party modules.
 
@@ -112,6 +114,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Start typeclass foundation: class/instance syntax + constrained signatures (collections-first).
-2. Add `Functor`/`Foldable` for `List` and `Vec` via dictionary passing, with conformance tests.
-3. Extend `stdlib.collections` with richer operations (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`) and edge-case tests.
+1. Add `Functor`/`Foldable` for `List` and `Vec` via dictionary passing, with conformance tests.
+2. Finish dict enumeration support (`dict_keys`, `dict_values`) once map iteration exists in the runtime.
+3. Add better diagnostics for module/import/export errors with source context.

@@ -29,7 +29,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 import math.util
 
                 fn main() -> IO Unit =
-                  print(double(21))
+                  print(util.double(21))
                 """,
                 encoding="utf-8",
             )
@@ -85,19 +85,21 @@ class ModuleLoaderTests(unittest.TestCase):
             with self.assertRaises(ModuleLoadError):
                 load_module_source(root / "main.sprout")
 
-    def test_load_module_source_rejects_ambiguous_imports(self) -> None:
+    def test_load_module_source_rejects_duplicate_implicit_namespace_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "a.sprout").write_text(
+            (root / "foo").mkdir(parents=True)
+            (root / "bar").mkdir(parents=True)
+            (root / "foo" / "common.sprout").write_text(
                 """
-                module a
+                module foo.common
                 export fn value() -> Int = 1
                 """,
                 encoding="utf-8",
             )
-            (root / "b.sprout").write_text(
+            (root / "bar" / "common.sprout").write_text(
                 """
-                module b
+                module bar.common
                 export fn value() -> Int = 2
                 """,
                 encoding="utf-8",
@@ -105,16 +107,16 @@ class ModuleLoaderTests(unittest.TestCase):
             (root / "main.sprout").write_text(
                 """
                 module main
-                import a
-                import b
-                fn main() -> IO Unit = print(value())
+                import foo.common
+                import bar.common
+                fn main() -> IO Unit = print(0)
                 """,
                 encoding="utf-8",
             )
             with self.assertRaises(ModuleLoadError):
                 load_module_source(root / "main.sprout")
 
-    def test_load_module_source_rejects_local_import_conflict(self) -> None:
+    def test_load_module_source_rejects_local_selected_import_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "lib.sprout").write_text(
@@ -127,7 +129,7 @@ class ModuleLoaderTests(unittest.TestCase):
             (root / "main.sprout").write_text(
                 """
                 module main
-                import lib
+                import lib (value)
                 fn value() -> Int = 2
                 fn main() -> IO Unit = print(value())
                 """,
@@ -154,6 +156,36 @@ class ModuleLoaderTests(unittest.TestCase):
 
                 fn main() -> IO Unit =
                   print(h.ok())
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ok")
+
+    def test_load_module_source_supports_implicit_namespace_qualified_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "http.sprout").write_text(
+                """
+                module http
+                export fn ok() -> String = "ok"
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import http
+
+                fn main() -> IO Unit =
+                  print(http.ok())
                 """,
                 encoding="utf-8",
             )
@@ -411,6 +443,71 @@ class ModuleLoaderTests(unittest.TestCase):
                     read_or_missing(
                       dict_set(dict_set(dict_empty(), "a", 1), "b", third_or_zero(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30))),
                       "b"
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "30")
+
+    def test_import_stdlib_collections_dict_literal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Dict, Maybe, dict_empty, dict_get, dict_set)
+
+                fn read_or_missing(d: Dict Int, key: String) -> Int =
+                  match dict_get(d, key) with
+                  | Just x -> x
+                  | Nothing -> -1
+
+                fn main() -> IO Unit =
+                  print(read_or_missing({foo: 10, "bar": 20}, "bar"))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "20")
+
+    def test_import_stdlib_collections_vec_slice_and_reverse(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Vec, Maybe, vec_append, vec_empty, vec_get, vec_reverse, vec_slice)
+
+                fn value_or(v: Maybe Int, fallback: Int) -> Int =
+                  match v with
+                  | Just x -> x
+                  | Nothing -> fallback
+
+                fn sample() -> Vec Int =
+                  vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40)
+
+                fn main() -> IO Unit =
+                  print(
+                    value_or(
+                      vec_get(
+                        vec_reverse(vec_slice(sample(), 1, 2)),
+                        0
+                      ),
+                      -1
                     )
                   )
                 """,

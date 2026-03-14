@@ -146,7 +146,7 @@ def unify(state: InferState, left: Type, right: Type) -> None:
         return
 
     if isinstance(left, TConst) and isinstance(right, TConst):
-        if left.name != right.name:
+        if left.name != right.name and left.name.rsplit(".", 1)[-1] != right.name.rsplit(".", 1)[-1]:
             raise TypeCheckError(f"Type mismatch: {left.name} vs {right.name}")
         return
 
@@ -220,7 +220,8 @@ def parse_type_expr(
     if isinstance(node, ast.TypeName):
         if node.name in local_vars:
             return local_vars[node.name]
-        if allow_implicit_type_vars and node.name and node.name[0].islower():
+        leaf = node.name.rsplit(".", 1)[-1]
+        if allow_implicit_type_vars and leaf and leaf[0].islower():
             local_vars[node.name] = state.fresh() if state is not None else TVar(f"v_{node.name}")
             return local_vars[node.name]
         return TConst(node.name)
@@ -633,10 +634,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
 
     p_var = TVar("prelude.print.a")
     vector_var = TVar("prelude.vector.a")
-    maybe_vector_var = TApp(TConst("Maybe"), vector_var)
+    maybe_collections = TConst("stdlib.collections.Maybe")
+    maybe_vector_var = TApp(maybe_collections, vector_var)
     vector_t = TApp(TConst("Vector"), vector_var)
     map_var = TVar("prelude.map.a")
-    maybe_map_var = TApp(TConst("Maybe"), map_var)
+    maybe_map_var = TApp(maybe_collections, map_var)
     map_t = TApp(TConst("Map"), map_var)
     env: dict[str, Scheme] = {
         "print": Scheme(vars=(p_var.name,), type=TFunc(p_var, TApp(TConst("IO"), UNIT))),
@@ -696,8 +698,8 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                             TFunc(
                                 INT,
                                 TApp(
-                                    TApp(TConst("Result"), TConst("HttpError")),
-                                    TConst("HttpResponse"),
+                                    TApp(TConst("stdlib.http.Result"), TConst("stdlib.http.HttpError")),
+                                    TConst("stdlib.http.HttpResponse"),
                                 ),
                             ),
                         ),
@@ -710,8 +712,8 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             type=TFunc(
                 STRING,
                 TApp(
-                    TApp(TConst("Result"), TConst("JsonError")),
-                    TConst("Json"),
+                    TApp(TConst("stdlib.http.Result"), TConst("stdlib.http.JsonError")),
+                    TConst("stdlib.http.Json"),
                 ),
             ),
         ),

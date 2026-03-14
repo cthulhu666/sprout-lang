@@ -1,0 +1,23 @@
+module app.main
+import stdlib.collections (Dict, Maybe, Vec, dict_get, dict_set, dict_remove, dict_empty, vec_append, vec_empty, vec_get_or, vec_reverse, vec_slice)
+
+fn value_or(v: Maybe Int, fallback: Int) -> Int =
+  match v with
+  | Just x -> x
+  | Nothing -> fallback
+
+fn sample_vec() -> Vec Int =
+  vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40)
+
+fn sample_dict() -> Dict Int =
+  dict_set(dict_set(dict_empty(), "first", 7), "second", 11)
+
+fn main() -> IO Unit =
+  print(
+    vec_get_or(
+      vec_reverse(vec_slice(sample_vec(), 1, 2)),
+      0,
+      -1
+    )
+    + value_or(dict_get(dict_remove(sample_dict(), "first"), "second"), -100)
+  )

@@ -52,6 +52,17 @@ class ModuleBundle:
     segments: list[ModuleSegment]
 
 
+@dataclass
+class ModuleSymbols:
+    value_locals: dict[str, str]
+    type_locals: dict[str, str]
+    class_locals: dict[str, str]
+    exported_values: dict[str, str]
+    exported_types: dict[str, str]
+    exported_classes: dict[str, str]
+    exported_type_constructors: dict[str, dict[str, str]]
+
+
 def _parse_import_line(trimmed: str, path: Path, line_no: int) -> ImportSpec:
     rest = trimmed[len("import ") :].strip()
     alias: str | None = None
@@ -209,21 +220,17 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
                         f"(imported from {path})"
                     )
 
-            if imp.alias is not None:
-                prev_alias = aliases.get(imp.alias)
+            namespace_alias = _namespace_alias_for_import(imp)
+            if namespace_alias is not None:
+                prev_alias = aliases.get(namespace_alias)
                 if prev_alias is not None and prev_alias != imp.module:
                     raise ModuleLoadError(
-                        f"Duplicate import alias {imp.alias!r} in {path}: "
+                        f"Duplicate import alias {namespace_alias!r} in {path}: "
                         f"used for both {prev_alias!r} and {imp.module!r}"
                     )
-                aliases[imp.alias] = imp.module
+                aliases[namespace_alias] = imp.module
 
-            if imp.imported_names is not None:
-                names = imported_names
-            elif imp.alias is None:
-                names = sorted(imp_info.exported)
-            else:
-                names = []
+            names = imported_names if imp.imported_names is not None else []
 
             for name in names:
                 prev = introduced.get(name)
@@ -276,23 +283,98 @@ def _module_for_line(bundle: ModuleBundle, line: int) -> ModuleInfo | None:
     return None
 
 
-def _imports_for_module(module_info: ModuleInfo, bundle: ModuleBundle) -> tuple[dict[str, str], dict[str, str]]:
-    aliases: dict[str, str] = {}
-    unqualified: dict[str, str] = {}
+def _namespace_alias_for_import(imp: ImportSpec) -> str | None:
+    if imp.alias is not None:
+        return imp.alias
+    if imp.imported_names is None:
+        return imp.module.rsplit(".", 1)[-1]
+    return None
+
+
+def _qualify_name(module_name: str | None, name: str) -> str:
+    if module_name is None:
+        return name
+    return f"{module_name}.{name}"
+
+
+def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Path, ModuleSymbols]:
+    out: dict[Path, ModuleSymbols] = {
+        path: ModuleSymbols(
+            value_locals={},
+            type_locals={},
+            class_locals={},
+            exported_values={},
+            exported_types={},
+            exported_classes={},
+            exported_type_constructors={},
+        )
+        for path in bundle.modules
+    }
+
+    for decl in program.declarations:
+        line = getattr(decl, "line", None)
+        if line is None:
+            continue
+        module_info = _module_for_line(bundle, line)
+        if module_info is None:
+            continue
+        symbols = out[module_info.path]
+        exported = getattr(decl, "name", None) in module_info.exported
+        module_name = module_info.header.module
+        if isinstance(decl, ast.FnDecl) or isinstance(decl, ast.LetDecl):
+            canonical = _qualify_name(module_name, decl.name)
+            symbols.value_locals[decl.name] = canonical
+            if exported:
+                symbols.exported_values[decl.name] = canonical
+        elif isinstance(decl, ast.TypeDecl):
+            canonical = _qualify_name(module_name, decl.name)
+            symbols.type_locals[decl.name] = canonical
+            if exported:
+                symbols.exported_types[decl.name] = canonical
+            ctor_exports: dict[str, str] = {}
+            for ctor in decl.constructors:
+                ctor_canonical = _qualify_name(module_name, ctor.name)
+                symbols.value_locals[ctor.name] = ctor_canonical
+                if exported:
+                    ctor_exports[ctor.name] = ctor_canonical
+                    symbols.exported_values[ctor.name] = ctor_canonical
+            if exported:
+                symbols.exported_type_constructors[decl.name] = ctor_exports
+        elif isinstance(decl, ast.ClassDecl):
+            canonical = _qualify_name(module_name, decl.name)
+            symbols.class_locals[decl.name] = canonical
+            if exported:
+                symbols.exported_classes[decl.name] = canonical
+    return out
+
+
+def _imports_for_module(
+    module_info: ModuleInfo,
+    bundle: ModuleBundle,
+    module_symbols: dict[Path, ModuleSymbols],
+) -> tuple[dict[str, Path], dict[str, str], dict[str, str], dict[str, str]]:
+    aliases: dict[str, Path] = {}
+    unqualified_values: dict[str, str] = {}
+    unqualified_types: dict[str, str] = {}
+    unqualified_classes: dict[str, str] = {}
     for imp in module_info.header.imports:
         imp_path = _resolve_module(imp.module, module_info.path)
-        imp_info = bundle.modules[imp_path]
-        if imp.alias is not None:
-            aliases[imp.alias] = imp.module
-        if imp.imported_names is not None:
-            names = list(imp.imported_names)
-        elif imp.alias is None:
-            names = sorted(imp_info.exported)
-        else:
-            names = []
-        for name in names:
-            unqualified[name] = imp.module
-    return aliases, unqualified
+        imp_symbols = module_symbols[imp_path]
+        namespace_alias = _namespace_alias_for_import(imp)
+        if namespace_alias is not None:
+            aliases[namespace_alias] = imp_path
+        if imp.imported_names is None:
+            continue
+        for name in imp.imported_names:
+            if name in imp_symbols.exported_values:
+                unqualified_values[name] = imp_symbols.exported_values[name]
+            if name in imp_symbols.exported_types:
+                unqualified_types[name] = imp_symbols.exported_types[name]
+                for ctor_name, ctor_target in imp_symbols.exported_type_constructors.get(name, {}).items():
+                    unqualified_values[ctor_name] = ctor_target
+            if name in imp_symbols.exported_classes:
+                unqualified_classes[name] = imp_symbols.exported_classes[name]
+    return aliases, unqualified_values, unqualified_types, unqualified_classes
 
 
 def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
@@ -335,53 +417,136 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "term_read_key",
         "term_write",
     }
-    all_exported: set[str] = set()
-    all_declared: set[str] = set()
-    declared_by_name: dict[str, set[Path]] = {}
-    for path, info in bundle.modules.items():
-        all_exported |= info.exported
-        all_declared |= info.declared
-        for name in info.declared:
-            declared_by_name.setdefault(name, set()).add(path)
+    builtin_types = {"Int", "Bool", "String", "IO", "Unit", "List", "Vector", "Map"}
+    module_symbols = _build_module_symbols(program, bundle)
 
-    def resolve_name(name: str, node: object | None = None) -> str:
+    all_exported_values: set[str] = set()
+    all_exported_types: set[str] = set()
+    all_exported_classes: set[str] = set()
+    declared_value_by_name: dict[str, set[Path]] = {}
+    declared_type_by_name: dict[str, set[Path]] = {}
+    declared_class_by_name: dict[str, set[Path]] = {}
+    for path, symbols in module_symbols.items():
+        all_exported_values |= set(symbols.exported_values)
+        all_exported_types |= set(symbols.exported_types)
+        all_exported_classes |= set(symbols.exported_classes)
+        for name in symbols.value_locals:
+            declared_value_by_name.setdefault(name, set()).add(path)
+        for name in symbols.type_locals:
+            declared_type_by_name.setdefault(name, set()).add(path)
+        for name in symbols.class_locals:
+            declared_class_by_name.setdefault(name, set()).add(path)
+
+    for decl in program.declarations:
+        line = getattr(decl, "line", None)
+        if line is None:
+            continue
+        module_info = _module_for_line(bundle, line)
+        if module_info is None:
+            continue
+        symbols = module_symbols[module_info.path]
+        if isinstance(decl, ast.FnDecl) or isinstance(decl, ast.LetDecl):
+            decl.name = symbols.value_locals[decl.name]
+        elif isinstance(decl, ast.TypeDecl):
+            decl.name = symbols.type_locals[decl.name]
+            for ctor in decl.constructors:
+                ctor.name = symbols.value_locals[ctor.name]
+        elif isinstance(decl, ast.ClassDecl):
+            decl.name = symbols.class_locals[decl.name]
+
+    def resolve_value_name(name: str, node: object | None = None) -> str:
         line = getattr(node, "line", None)
         if line is None:
             return name
         module_info = _module_for_line(bundle, line)
         if module_info is None:
             return name
-        aliases, unqualified_imports = _imports_for_module(module_info, bundle)
-        local = module_info.declared
+        symbols = module_symbols[module_info.path]
+        aliases, unqualified_values, _, _ = _imports_for_module(module_info, bundle, module_symbols)
 
         if "." in name:
             alias, symbol = name.split(".", 1)
-            target = aliases.get(alias)
-            if target is None:
+            target_path = aliases.get(alias)
+            if target_path is None:
                 raise ModuleLoadError(f"Unknown import alias {alias!r} at {module_info.path}:{line}")
-            target_path = _resolve_module(target, module_info.path)
-            if symbol not in bundle.modules[target_path].exported:
-                raise ModuleLoadError(
-                    f"Module {target!r} does not export {symbol!r} (referenced at {module_info.path}:{line})"
-                )
-            return symbol
-
-        if name in builtin_values or name in local or name in unqualified_imports:
-            return name
-        if name in all_exported:
+            target_symbols = module_symbols[target_path]
+            target = target_symbols.exported_values.get(symbol)
+            if target is not None:
+                return target
+            for ctors in target_symbols.exported_type_constructors.values():
+                target = ctors.get(symbol)
+                if target is not None:
+                    return target
             raise ModuleLoadError(
-                f"Symbol {name!r} at {module_info.path}:{line} requires explicit import or qualification"
+                f"Module {bundle.modules[target_path].header.module or str(target_path)!r} "
+                f"does not export value {symbol!r} (referenced at {module_info.path}:{line})"
             )
-        providers = declared_by_name.get(name, set())
-        if providers and module_info.path not in providers and name in all_declared:
+
+        if name in builtin_values:
+            return name
+        if name in symbols.value_locals:
+            return symbols.value_locals[name]
+        if name in unqualified_values:
+            return unqualified_values[name]
+        if name in all_exported_values:
             raise ModuleLoadError(
-                f"Symbol {name!r} at {module_info.path}:{line} is not exported by any imported module"
+                f"Value {name!r} at {module_info.path}:{line} requires explicit import or qualification"
+            )
+        providers = declared_value_by_name.get(name, set())
+        if providers and module_info.path not in providers:
+            raise ModuleLoadError(
+                f"Value {name!r} at {module_info.path}:{line} is not exported by any imported module"
+            )
+        return name
+
+    def resolve_type_name(name: str, node: object | None = None) -> str:
+        line = getattr(node, "line", None)
+        if line is None:
+            return name
+        module_info = _module_for_line(bundle, line)
+        if module_info is None:
+            return name
+        symbols = module_symbols[module_info.path]
+        aliases, _, unqualified_types, unqualified_classes = _imports_for_module(module_info, bundle, module_symbols)
+
+        if "." in name:
+            alias, symbol = name.split(".", 1)
+            target_path = aliases.get(alias)
+            if target_path is None:
+                raise ModuleLoadError(f"Unknown import alias {alias!r} at {module_info.path}:{line}")
+            target_symbols = module_symbols[target_path]
+            target = target_symbols.exported_types.get(symbol) or target_symbols.exported_classes.get(symbol)
+            if target is not None:
+                return target
+            raise ModuleLoadError(
+                f"Module {bundle.modules[target_path].header.module or str(target_path)!r} "
+                f"does not export type/class {symbol!r} (referenced at {module_info.path}:{line})"
+            )
+
+        if name in builtin_types:
+            return name
+        if name in symbols.type_locals:
+            return symbols.type_locals[name]
+        if name in symbols.class_locals:
+            return symbols.class_locals[name]
+        if name in unqualified_types:
+            return unqualified_types[name]
+        if name in unqualified_classes:
+            return unqualified_classes[name]
+        if name in all_exported_types or name in all_exported_classes:
+            raise ModuleLoadError(
+                f"Type/class {name!r} at {module_info.path}:{line} requires explicit import or qualification"
+            )
+        providers = declared_type_by_name.get(name, set()) | declared_class_by_name.get(name, set())
+        if providers and module_info.path not in providers:
+            raise ModuleLoadError(
+                f"Type/class {name!r} at {module_info.path}:{line} is not exported by any imported module"
             )
         return name
 
     def walk_type(t: ast.TypeExpr, node: object | None = None) -> None:
         if isinstance(t, ast.TypeName):
-            t.name = resolve_name(t.name, node)
+            t.name = resolve_type_name(t.name, node)
             return
         if isinstance(t, ast.TypeApply):
             walk_type(t.base, node)
@@ -393,7 +558,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
 
     def walk_pattern(p: ast.Pattern, node: object | None = None) -> None:
         if isinstance(p, ast.ConstructorPattern):
-            p.name = resolve_name(p.name, node)
+            p.name = resolve_value_name(p.name, node or p)
             for arg in p.args:
                 walk_pattern(arg, node)
 
@@ -411,7 +576,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         current_scope = scope or set()
         if isinstance(e, ast.VarExpr):
             if e.name not in current_scope:
-                e.name = resolve_name(e.name, e)
+                e.name = resolve_value_name(e.name, e)
             return
         if isinstance(e, ast.UnaryExpr):
             walk_expr(e.operand, e, current_scope)
@@ -454,6 +619,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             if decl.return_type is not None:
                 walk_type(decl.return_type, decl)
             for constraint in decl.constraints:
+                constraint.class_name = resolve_type_name(constraint.class_name, decl)
                 for arg in constraint.args:
                     walk_type(arg, decl)
             scope = {p.name for p in decl.params}
@@ -461,6 +627,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         elif isinstance(decl, ast.LetDecl):
             walk_expr(decl.value, decl)
         elif isinstance(decl, ast.InstanceDecl):
+            decl.constraint.class_name = resolve_type_name(decl.constraint.class_name, decl)
             for arg in decl.constraint.args:
                 walk_type(arg, decl)
             for method in decl.methods:

@@ -23,7 +23,8 @@ def _copy_type_expr(node: ast.TypeExpr) -> ast.TypeExpr:
 
 def _type_expr_is_concrete(node: ast.TypeExpr) -> bool:
     if isinstance(node, ast.TypeName):
-        return not (node.name and node.name[0].islower())
+        leaf = node.name.rsplit(".", 1)[-1]
+        return not (leaf and leaf[0].islower())
     if isinstance(node, ast.TypeApply):
         return _type_expr_is_concrete(node.base) and _type_expr_is_concrete(node.arg)
     if isinstance(node, ast.TypeArrow):
@@ -82,7 +83,7 @@ def _match_type_expr_pattern(
     candidate: ast.TypeExpr,
     env: dict[str, ast.TypeExpr],
 ) -> bool:
-    if isinstance(pattern, ast.TypeName) and pattern.name and pattern.name[0].islower():
+    if isinstance(pattern, ast.TypeName) and pattern.name and pattern.name.rsplit(".", 1)[-1][0].islower():
         existing = env.get(pattern.name)
         if existing is None:
             env[pattern.name] = candidate

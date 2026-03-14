@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from sprout import parse, run_program, typecheck_program
+from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude, with_prelude
 
 
@@ -575,6 +576,40 @@ class RuntimeTests(unittest.TestCase):
         out = io.StringIO()
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "2")
+
+    def test_stdlib_vec_slice_and_reverse(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (vec_append, vec_empty, vec_get_or, vec_reverse, vec_slice)
+
+                fn main() -> IO Unit =
+                  print(
+                    vec_get_or(
+                      vec_reverse(
+                        vec_slice(
+                          vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40),
+                          1,
+                          2
+                        )
+                      ),
+                      0,
+                      -1
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "30")
 
 
 if __name__ == "__main__":
