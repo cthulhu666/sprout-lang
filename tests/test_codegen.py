@@ -439,6 +439,40 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_string_lines_compiles_generic_vec_string_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module app.main
+                import stdlib.collections (vec_get_or)
+                import stdlib.string (string_lines)
+
+                fn main() -> IO Unit =
+                  print(vec_get_or(string_lines("alpha\\nbeta\\n"), 1, "missing"))
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "beta")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_runtime_builtin_failure_uses_runtime_error_convention(self) -> None:
         src = """
         fn main() -> IO Unit =

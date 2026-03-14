@@ -1,6 +1,6 @@
 module examples.aoc2025_day3
 import stdlib.collections (Vec, vec_empty, vec_append, vec_length, vec_get_or, vec_set)
-import stdlib.string as string
+import stdlib.string (string_digits, string_lines)
 
 # Advent of Code 2025 Day 3: Battery Boost
 # For each bank line, pick digits in-order to maximize resulting number.
@@ -71,66 +71,34 @@ fn sum_best_values(banks: Vec (Vec Int), index: Int, total: Int, count: Int, acc
 fn sum_for_count(banks: Vec (Vec Int), count: Int) -> Int =
   sum_best_values(banks, 0, vec_length(banks), count, 0)
 
-fn digits_from_string(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
+fn append_if_non_empty_bank(banks: Vec (Vec Int), bank: Vec Int) -> Vec (Vec Int) =
+  if vec_length(bank) == 0 then banks
+  else vec_append(banks, bank)
+
+fn lines_to_banks(lines: Vec String, index: Int, total: Int, acc: Vec (Vec Int)) -> Vec (Vec Int) =
   if index >= total then acc
   else
-    digits_from_string(raw, index + 1, total, vec_append(acc, parse_int(string.slice(raw, index, 1))))
-
-fn bank_from_string(raw: String) -> Vec Int =
-  digits_from_string(raw, 0, string.length(raw), vec_empty())
-
-fn append_if_non_empty(banks: Vec (Vec Int), current: Vec Int) -> Vec (Vec Int) =
-  if vec_length(current) == 0 then banks
-  else vec_append(banks, current)
-
-fn char_at(raw: String, index: Int) -> String =
-  string.slice(raw, index, 1)
-
-fn digit_value(ch: String) -> Int =
-  string.find("0123456789", ch)
-
-fn parse_banks_from_text(raw: String, index: Int, total: Int, banks: Vec (Vec Int), current: Vec Int) -> Vec (Vec Int) =
-  if index >= total then append_if_non_empty(banks, current)
-  else
-    if string.find("\n", char_at(raw, index)) == 0 then
-      parse_banks_from_text(raw, index + 1, total, append_if_non_empty(banks, current), vec_empty())
-    else if string.find("\r", char_at(raw, index)) == 0 then
-      parse_banks_from_text(raw, index + 1, total, banks, current)
-    else if digit_value(char_at(raw, index)) >= 0 then
-      parse_banks_from_text(raw, index + 1, total, banks, vec_append(current, digit_value(char_at(raw, index))))
-    else
-      parse_banks_from_text(raw, index + 1, total, banks, current)
+    lines_to_banks(
+      lines,
+      index + 1,
+      total,
+      append_if_non_empty_bank(acc, string_digits(vec_get_or(lines, index, "")))
+    )
 
 fn parse_all_banks(raw: String) -> Vec (Vec Int) =
-  parse_banks_from_text(raw, 0, string.length(raw), vec_empty(), vec_empty())
+  let_lines_to_banks(string_lines(raw))
+
+fn let_lines_to_banks(lines: Vec String) -> Vec (Vec Int) =
+  lines_to_banks(lines, 0, vec_length(lines), vec_empty())
 
 fn stdin_banks() -> Vec (Vec Int) =
   parse_all_banks(read_file("-"))
 
-fn sample_banks() -> Vec (Vec Int) =
-  vec_append(
-    vec_append(
-      vec_append(
-        vec_append(vec_empty(), bank_from_string("987654321111111")),
-        bank_from_string("811111111111119")
-      ),
-      bank_from_string("234234234234278")
-    ),
-    bank_from_string("818181911112111")
-  )
-
 fn solve_for_banks(banks: Vec (Vec Int)) -> Answers =
   Answers(sum_for_count(banks, 2), sum_for_count(banks, 12))
 
-export fn solve_sample() -> Answers =
-  solve_for_banks(sample_banks())
-
-fn solve_or_sample(banks: Vec (Vec Int)) -> Answers =
-  if vec_length(banks) == 0 then solve_sample()
-  else solve_for_banks(banks)
-
 export fn solve_stdin() -> Answers =
-  solve_or_sample(stdin_banks())
+  solve_for_banks(stdin_banks())
 
 fn main() -> IO Unit =
   print(solve_stdin())

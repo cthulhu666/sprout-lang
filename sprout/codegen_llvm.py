@@ -518,7 +518,7 @@ def _emit_fn(
                 emitter.emit(
                     f"  {leaf_reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {leaf_ptr}, i64 {arity})"
                 )
-    ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, emitter)
+    ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if ret.typ != sig.ret:
         raise CodegenError(f"Function {fn.name} body type mismatch in backend: {ret.typ.text} vs {sig.ret.text}")
     if is_entry_main and _is_io_unit(fn.return_type):
@@ -540,7 +540,7 @@ def _emit_init_globals(
     locals_: dict[str, Value] = {}
     for let_decl in runtime_lets:
         info = globals_info[let_decl.name]
-        value = _emit_expr(let_decl.value, locals_, globals_info, sigs, ctor_sigs, emitter)
+        value = _emit_expr(let_decl.value, locals_, globals_info, sigs, ctor_sigs, set(), emitter)
         if value.typ != info.typ:
             raise CodegenError(
                 f"Global init type mismatch for {let_decl.name}: {value.typ.text} vs {info.typ.text}"
@@ -556,6 +556,7 @@ def _emit_expr(
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
     if isinstance(expr, ast.IntExpr):
@@ -592,7 +593,7 @@ def _emit_expr(
             return Value(I64, tmp)
         raise CodegenError(f"Unknown variable in backend: {expr.name}")
     if isinstance(expr, ast.UnaryExpr):
-        operand = _emit_expr(expr.operand, locals_, globals_info, sigs, ctor_sigs, emitter)
+        operand = _emit_expr(expr.operand, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
         if expr.op == "-":
             if operand.typ != I64:
                 raise CodegenError("Unary '-' backend supports Int only")
@@ -601,13 +602,13 @@ def _emit_expr(
             return Value(I64, tmp)
         raise CodegenError(f"Unsupported unary op in backend: {expr.op}")
     if isinstance(expr, ast.BinaryExpr):
-        return _emit_binary(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
+        return _emit_binary(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if isinstance(expr, ast.IfExpr):
-        return _emit_if(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
+        return _emit_if(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if isinstance(expr, ast.CallExpr):
-        return _emit_call(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
+        return _emit_call(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if isinstance(expr, ast.MatchExpr):
-        return _emit_match(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
+        return _emit_match(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
 
     raise CodegenError(f"Unsupported expression in LLVM backend: {expr.__class__.__name__}")
 
@@ -618,13 +619,14 @@ def _emit_binary(
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
     if expr.op in {"&&", "||"}:
-        return _emit_short_circuit(expr, locals_, globals_info, sigs, ctor_sigs, emitter)
+        return _emit_short_circuit(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
 
-    left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, emitter)
-    right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, emitter)
+    left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+    right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
 
     if expr.op in {"+", "-", "*", "/"}:
         if left.typ != I64 or right.typ != I64:
@@ -660,9 +662,10 @@ def _emit_short_circuit(
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
-    left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, emitter)
+    left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if left.typ != I1:
         raise CodegenError(f"Logical op {expr.op} expects Bool")
     left_block = emitter.current_block
@@ -679,7 +682,7 @@ def _emit_short_circuit(
         const_on_short = "1"
 
     emitter.label(rhs_label)
-    right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, emitter)
+    right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if right.typ != I1:
         raise CodegenError(f"Logical op {expr.op} expects Bool")
     rhs_end = emitter.current_block
@@ -701,9 +704,10 @@ def _emit_if(
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
-    cond = _emit_expr(expr.condition, locals_, globals_info, sigs, ctor_sigs, emitter)
+    cond = _emit_expr(expr.condition, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if cond.typ != I1:
         raise CodegenError("if condition must be Bool")
 
@@ -713,14 +717,14 @@ def _emit_if(
     emitter.emit(f"  br i1 {cond.ir}, label %{then_label}, label %{else_label}")
 
     emitter.label(then_label)
-    then_val = _emit_expr(expr.then_branch, locals_, globals_info, sigs, ctor_sigs, emitter)
+    then_val = _emit_expr(expr.then_branch, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     then_end = emitter.current_block
     if then_end is None:
         raise CodegenError("Internal backend error: missing then block")
     emitter.emit(f"  br label %{done_label}")
 
     emitter.label(else_label)
-    else_val = _emit_expr(expr.else_branch, locals_, globals_info, sigs, ctor_sigs, emitter)
+    else_val = _emit_expr(expr.else_branch, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     else_end = emitter.current_block
     if else_end is None:
         raise CodegenError("Internal backend error: missing else block")
@@ -743,9 +747,10 @@ def _emit_match(
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
-    scrut = _emit_expr(expr.scrutinee, locals_, globals_info, sigs, ctor_sigs, emitter)
+    scrut = _emit_expr(expr.scrutinee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     done_label = emitter.block("match_done")
     next_label = emitter.block("match_next")
     branch_vals: list[tuple[Value, str]] = []
@@ -770,7 +775,7 @@ def _emit_match(
         emitter.label(branch_label)
         branch_locals = dict(locals_)
         _emit_pattern_bind(branch.pattern, scrut, branch_locals, ctor_sigs, emitter)
-        value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, emitter)
+        value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, adt_names, emitter)
         end_block = emitter.current_block
         if end_block is None:
             raise CodegenError("Internal backend error: missing match branch block")
@@ -896,12 +901,29 @@ def _pack_to_i64(value: Value, emitter: Emitter) -> str:
     raise CodegenError("Cannot pack value to i64")
 
 
+def _coerce_value(value: Value, target: LLType, emitter: Emitter) -> Value:
+    if value.typ == target:
+        return value
+    if target == I64:
+        return Value(I64, _pack_to_i64(value, emitter))
+    if value.typ == I64 and target == I1:
+        out = emitter.tmp()
+        emitter.emit(f"  {out} = trunc i64 {value.ir} to i1")
+        return Value(I1, out)
+    if value.typ == I64 and target == I8_PTR:
+        out = emitter.tmp()
+        emitter.emit(f"  {out} = inttoptr i64 {value.ir} to ptr")
+        return Value(I8_PTR, out)
+    raise CodegenError(f"Cannot coerce {value.typ.text} to {target.text} in backend")
+
+
 def _emit_call(
     expr: ast.CallExpr,
     locals_: dict[str, Value],
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
     if not isinstance(expr.callee, ast.VarExpr):
@@ -910,7 +932,7 @@ def _emit_call(
     if fn_name == "print":
         if len(expr.args) != 1:
             raise CodegenError("print expects 1 argument")
-        arg = _emit_expr(expr.args[0], locals_, globals_info, sigs, ctor_sigs, emitter)
+        arg = _emit_expr(expr.args[0], locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
         if arg.typ == I64:
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = call i64 @print_value(i64 {arg.ir})")
@@ -939,7 +961,7 @@ def _emit_call(
             return Value(I64, tmp)
         packed_args: list[str] = []
         for arg_expr, typ in zip(expr.args, ctor.arg_types):
-            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, emitter)
+            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
             if arg_val.typ != typ:
                 raise CodegenError(f"Constructor call type mismatch for {fn_name}")
             packed_args.append(_pack_to_i64(arg_val, emitter))
@@ -966,7 +988,7 @@ def _emit_call(
             )
         args_ir: list[str] = []
         for arg_expr, param_type in zip(expr.args, call_sig.params):
-            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, emitter)
+            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
             if arg_val.typ != param_type:
                 raise CodegenError(f"Call type mismatch for callable {fn_name}")
             args_ir.append(f"{param_type.text} {arg_val.ir}")
@@ -984,11 +1006,14 @@ def _emit_call(
 
     args_ir: list[str] = []
     for arg_expr, param_type in zip(expr.args, sig.params):
-        arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, emitter)
-        if arg_val.typ != param_type:
-            raise CodegenError(f"Call type mismatch for {fn_name}")
-        args_ir.append(f"{param_type.text} {arg_val.ir}")
+        arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        coerced = _coerce_value(arg_val, param_type, emitter)
+        args_ir.append(f"{param_type.text} {coerced.ir}")
 
     tmp = emitter.tmp()
     emitter.emit(f"  {tmp} = call {sig.ret.text} @{fn_name}({', '.join(args_ir)})")
-    return Value(sig.ret, tmp)
+    out = Value(sig.ret, tmp)
+    inferred_type = getattr(expr, "inferred_type", None)
+    if inferred_type is not None:
+        out = _coerce_value(out, _type_from_ast(inferred_type, adt_names), emitter)
+    return out

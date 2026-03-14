@@ -375,6 +375,49 @@ def type_to_ast_expr(typ: Type) -> ast.TypeExpr:
     raise TypeCheckError(f"Unsupported type for AST conversion: {typ}")
 
 
+def _mark_expr_type(expr: ast.Expr, typ: Type) -> Type:
+    setattr(expr, "_inferred_type_raw", typ)
+    return typ
+
+
+def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> None:
+    def visit_expr(expr: ast.Expr) -> None:
+        raw = getattr(expr, "_inferred_type_raw", None)
+        if raw is not None:
+            setattr(expr, "inferred_type", type_to_ast_expr(apply(state.subst, raw)))
+        if isinstance(expr, ast.IfExpr):
+            visit_expr(expr.condition)
+            visit_expr(expr.then_branch)
+            visit_expr(expr.else_branch)
+            return
+        if isinstance(expr, ast.MatchExpr):
+            visit_expr(expr.scrutinee)
+            for branch in expr.branches:
+                visit_expr(branch.value)
+            return
+        if isinstance(expr, ast.BinaryExpr):
+            visit_expr(expr.left)
+            visit_expr(expr.right)
+            return
+        if isinstance(expr, ast.UnaryExpr):
+            visit_expr(expr.operand)
+            return
+        if isinstance(expr, ast.CallExpr):
+            visit_expr(expr.callee)
+            for arg in expr.args:
+                visit_expr(arg)
+            return
+
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            visit_expr(decl.body)
+        elif isinstance(decl, ast.LetDecl):
+            visit_expr(decl.value)
+        elif isinstance(decl, ast.InstanceDecl):
+            for method in decl.methods:
+                visit_expr(method.body)
+
+
 def build_global_method_info(class_decls: dict[str, ClassDeclInfo]) -> dict[str, GlobalMethodInfo]:
     methods: dict[str, GlobalMethodInfo | None] = {}
     for class_name, class_info in class_decls.items():
@@ -469,21 +512,21 @@ def infer_expr(
     global_methods: dict[str, GlobalMethodInfo],
 ) -> Type:
     if isinstance(expr, ast.IntExpr):
-        return INT
+        return _mark_expr_type(expr, INT)
     if isinstance(expr, ast.BoolExpr):
-        return BOOL
+        return _mark_expr_type(expr, BOOL)
     if isinstance(expr, ast.StringExpr):
-        return STRING
+        return _mark_expr_type(expr, STRING)
     if isinstance(expr, ast.VarExpr):
         scheme = env.get(expr.name)
         if scheme is None:
             raise tc_error(f"Unknown variable {expr.name}", expr)
-        return instantiate(state, scheme)
+        return _mark_expr_type(expr, instantiate(state, scheme))
     if isinstance(expr, ast.UnaryExpr):
         operand_t = infer_expr(expr.operand, env, state, type_decls, global_methods)
         if expr.op == "-":
             unify_at(state, operand_t, INT, expr)
-            return INT
+            return _mark_expr_type(expr, INT)
         raise tc_error(f"Unsupported unary operator {expr.op}", expr)
     if isinstance(expr, ast.BinaryExpr):
         left = infer_expr(expr.left, env, state, type_decls, global_methods)
@@ -494,22 +537,22 @@ def infer_expr(
             output_t = state.fresh()
             unify_at(state, right, TFunc(input_t, middle_t), expr.right)
             unify_at(state, left, TFunc(middle_t, output_t), expr.left)
-            return TFunc(input_t, output_t)
+            return _mark_expr_type(expr, TFunc(input_t, output_t))
         if expr.op in {"+", "-", "*", "/"}:
             unify_at(state, left, INT, expr.left)
             unify_at(state, right, INT, expr.right)
-            return INT
+            return _mark_expr_type(expr, INT)
         if expr.op in {"<", "<=", ">", ">="}:
             unify_at(state, left, INT, expr.left)
             unify_at(state, right, INT, expr.right)
-            return BOOL
+            return _mark_expr_type(expr, BOOL)
         if expr.op in {"==", "!="}:
             unify_at(state, left, right, expr)
-            return BOOL
+            return _mark_expr_type(expr, BOOL)
         if expr.op in {"&&", "||"}:
             unify_at(state, left, BOOL, expr.left)
             unify_at(state, right, BOOL, expr.right)
-            return BOOL
+            return _mark_expr_type(expr, BOOL)
         raise tc_error(f"Unsupported binary operator {expr.op}", expr)
     if isinstance(expr, ast.CallExpr):
         direct_method_info: GlobalMethodInfo | None = None
@@ -550,14 +593,14 @@ def infer_expr(
                     args=[type_to_ast_expr(arg) for arg in resolved_args],
                 ),
             )
-        return result
+        return _mark_expr_type(expr, result)
     if isinstance(expr, ast.IfExpr):
         cond = infer_expr(expr.condition, env, state, type_decls, global_methods)
         unify_at(state, cond, BOOL, expr.condition)
         then_t = infer_expr(expr.then_branch, env, state, type_decls, global_methods)
         else_t = infer_expr(expr.else_branch, env, state, type_decls, global_methods)
         unify_at(state, then_t, else_t, expr)
-        return then_t
+        return _mark_expr_type(expr, then_t)
     if isinstance(expr, ast.MatchExpr):
         scrutinee_t = infer_expr(expr.scrutinee, env, state, type_decls, global_methods)
         out_t = state.fresh()
@@ -581,7 +624,7 @@ def infer_expr(
             unify_at(state, out_t, value_t, branch.value)
 
         ensure_exhaustive_match(scrutinee_t, branch_ctors, has_catchall, state, type_decls, expr)
-        return out_t
+        return _mark_expr_type(expr, out_t)
 
     raise tc_error(f"Unsupported expression node: {expr}", expr)
 
@@ -865,5 +908,6 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             env[let_decl.name] = generalize(env, value_t, state)
 
     validate_instance_methods(program, class_decls, env, state, type_decls)
+    _finalize_inferred_expr_types(program, state)
 
     return {name: scheme_to_string(sch, state.subst) for name, sch in env.items()}

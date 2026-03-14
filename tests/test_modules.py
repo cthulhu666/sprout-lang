@@ -473,7 +473,10 @@ class ModuleLoaderTests(unittest.TestCase):
             main.write_text(
                 """
                 module main
-                import examples.aoc2025_day3 (solve_sample)
+                import examples.aoc2025_day3 (solve_stdin)
+
+                fn main() -> IO Unit =
+                  print(solve_stdin())
                 """,
                 encoding="utf-8",
             )
@@ -482,7 +485,7 @@ class ModuleLoaderTests(unittest.TestCase):
             resolve_program_names(program, bundle)
             typecheck_program(program)
             out = io.StringIO()
-            with patch("sys.stdin", io.StringIO("")):
+            with patch("sys.stdin", io.StringIO("987654321111111\n811111111111119\n234234234234278\n818181911112111\n")):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Answers(357, 3121910778619)")
 
