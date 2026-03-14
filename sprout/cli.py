@@ -204,6 +204,8 @@ static long long g_next_listener_handle = 1;
 static long long g_next_conn_handle = 1;
 
 static void tcp_fail(const char* msg);
+long long sprout_make0(long long tag);
+long long sprout_make1(long long tag, long long a0);
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -293,6 +295,12 @@ long long parse_int(const char* s) {
   long long out = strtoll(s, &end, 10);
   if (end == s || *end != '\\0') tcp_fail("parse_int: invalid integer");
   return out;
+}
+long long env_get(const char* name) {
+  if (name == NULL) tcp_fail("env_get: null name");
+  const char* value = getenv(name);
+  if (value == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)value);
 }
 const char* read_file(const char* path) {
   if (path == NULL) tcp_fail("read_file: null path");

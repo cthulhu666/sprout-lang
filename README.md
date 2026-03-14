@@ -58,6 +58,7 @@ Runtime builtins (host-implemented):
 - `print(x) -> IO Unit`
 - `print_int(x: Int) -> Int` (prints and returns `x`, useful for native backend subset)
 - `read_lines(path: String) -> List String`
+- `env_get(name: String) -> Maybe String`
 - `parse_int(s: String) -> Int`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`

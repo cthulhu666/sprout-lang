@@ -38,6 +38,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "print_str": FnSig(name="print_str", params=[I8_PTR], ret=I64),
     "print_value": FnSig(name="print_value", params=[I64], ret=I64),
     "read_file": FnSig(name="read_file", params=[I8_PTR], ret=I8_PTR),
+    "env_get": FnSig(name="env_get", params=[I8_PTR], ret=I64),
     "read_int_lines": FnSig(name="read_int_lines", params=[I8_PTR], ret=I64),
     "parse_int": FnSig(name="parse_int", params=[I8_PTR], ret=I64),
     "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),

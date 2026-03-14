@@ -105,7 +105,7 @@ Definition of done:
 ### 8.5) Runtime and FFI Foundations for Database Clients
 
 - [ ] `P0` Define a safer representation for external resource handles (for example opaque connection values instead of bare `Int`).
-- [ ] `P1` Add environment/config helpers such as `env_get(name) -> Maybe String`.
+- [x] `P1` Add environment/config helpers such as `env_get(name) -> Maybe String`.
 - [ ] `P1` Define test support for integration-style IO programs that depend on external services.
 
 ### 9) Issue Browser TUI App
@@ -136,9 +136,10 @@ Definition of done:
 - [x] CLI formatter/linter baseline exists (`fmt`, `fmt --check`, `lint`).
 - [ ] terminal interaction primitives are not yet fully implemented.
 - [ ] outbound TCP client sockets and binary protocol primitives are not yet implemented.
+- [x] `env_get(name) -> Maybe String` is available in interpreter and native modes.
 
 ## Next 3 Tasks (Execution Order)
 
 1. Add outbound TCP client connect plus exact-read/write-all operations for framed external protocols.
 2. Add a stable `Bytes` type with byte slicing and big-endian integer decode helpers.
-3. Add `env_get(name) -> Maybe String` and define safer external-resource handle conventions.
+3. Define safer external-resource handle conventions and integration-style IO test support.

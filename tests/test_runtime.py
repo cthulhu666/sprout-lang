@@ -757,6 +757,39 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "11")
 
+    def test_env_get_builtin_returns_maybe_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+
+                fn value_or_missing(name: String) -> String =
+                  match env_get(name) with
+                  | Just value -> value
+                  | Nothing -> "missing"
+
+                fn main() -> IO Unit =
+                  print(value_or_missing("SPROUT_TEST_ENV_GET"))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            with patch.dict(os.environ, {"SPROUT_TEST_ENV_GET": "sprout-env"}, clear=False):
+                run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "sprout-env")
+
+            out = io.StringIO()
+            with patch.dict(os.environ, {}, clear=True):
+                run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "missing")
+
     def test_stdlib_vec_sum_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

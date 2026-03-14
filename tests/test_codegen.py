@@ -12,6 +12,7 @@ import sys
 import time
 
 from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
+from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude
 
 
@@ -167,6 +168,29 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("declare i64 @tcp_close(i64)", ir)
         self.assertIn("declare i64 @tcp_close_listener(i64)", ir)
         self.assertIn("declare i64 @tcp_echo_serve(i64, i64)", ir)
+
+    def test_compile_env_get_builtin_to_llvm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "main.sprout"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+
+                fn main() -> IO Unit =
+                  match env_get("SPROUT_TEST_ENV_GET") with
+                  | Just value -> print(value)
+                  | Nothing -> print("missing")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(spr_path)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            ir = compile_to_llvm(program)
+            self.assertIn("declare i64 @env_get(ptr)", ir)
 
     def test_compile_string_builtins_to_llvm(self) -> None:
         src = """
@@ -470,6 +494,51 @@ class CodegenTests(unittest.TestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "beta")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_env_get_builtin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+
+                fn main() -> IO Unit =
+                  match env_get("SPROUT_TEST_ENV_GET") with
+                  | Just value -> print(value)
+                  | Nothing -> print("missing")
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={"SPROUT_TEST_ENV_GET": "native-env"},
+            )
+            self.assertEqual(run.stdout.strip(), "native-env")
+            self.assertEqual(run.returncode, 0)
+
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env={})
+            self.assertEqual(run.stdout.strip(), "missing")
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
