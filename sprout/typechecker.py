@@ -75,6 +75,13 @@ class ClassDeclInfo:
     methods: dict[str, Type]
 
 
+@dataclass(frozen=True)
+class GlobalMethodInfo:
+    class_name: str
+    class_info: ClassDeclInfo
+    method_type: Type
+
+
 INT = TConst("Int")
 BOOL = TConst("Bool")
 STRING = TConst("String")
@@ -355,6 +362,34 @@ def substitute_type_vars(typ: Type, subst: dict[str, Type]) -> Type:
     return typ
 
 
+def type_to_ast_expr(typ: Type) -> ast.TypeExpr:
+    typ = apply({}, typ)
+    if isinstance(typ, TVar):
+        return ast.TypeName(typ.name)
+    if isinstance(typ, TConst):
+        return ast.TypeName(typ.name)
+    if isinstance(typ, TApp):
+        return ast.TypeApply(base=type_to_ast_expr(typ.base), arg=type_to_ast_expr(typ.arg))
+    if isinstance(typ, TFunc):
+        return ast.TypeArrow(left=type_to_ast_expr(typ.arg), right=type_to_ast_expr(typ.ret))
+    raise TypeCheckError(f"Unsupported type for AST conversion: {typ}")
+
+
+def build_global_method_info(class_decls: dict[str, ClassDeclInfo]) -> dict[str, GlobalMethodInfo]:
+    methods: dict[str, GlobalMethodInfo | None] = {}
+    for class_name, class_info in class_decls.items():
+        for method_name, method_type in class_info.methods.items():
+            if method_name in methods:
+                methods[method_name] = None
+                continue
+            methods[method_name] = GlobalMethodInfo(
+                class_name=class_name,
+                class_info=class_info,
+                method_type=method_type,
+            )
+    return {name: info for name, info in methods.items() if info is not None}
+
+
 def validate_instance_methods(
     program: ast.Program,
     class_decls: dict[str, ClassDeclInfo],
@@ -421,7 +456,7 @@ def validate_instance_methods(
                     raise tc_error("Internal error for instance method params", impl)
                 working_env[param.name] = Scheme(vars=(), type=cursor.arg)
                 cursor = cursor.ret
-            body_t = infer_expr(impl.body, working_env, state, type_decls)
+            body_t = infer_expr(impl.body, working_env, state, type_decls, {})
             expected_return = apply(state.subst, cursor)
             unify_at(state, body_t, expected_return, impl.body)
 
@@ -431,6 +466,7 @@ def infer_expr(
     env: dict[str, Scheme],
     state: InferState,
     type_decls: dict[str, TypeDeclInfo],
+    global_methods: dict[str, GlobalMethodInfo],
 ) -> Type:
     if isinstance(expr, ast.IntExpr):
         return INT
@@ -444,14 +480,14 @@ def infer_expr(
             raise tc_error(f"Unknown variable {expr.name}", expr)
         return instantiate(state, scheme)
     if isinstance(expr, ast.UnaryExpr):
-        operand_t = infer_expr(expr.operand, env, state, type_decls)
+        operand_t = infer_expr(expr.operand, env, state, type_decls, global_methods)
         if expr.op == "-":
             unify_at(state, operand_t, INT, expr)
             return INT
         raise tc_error(f"Unsupported unary operator {expr.op}", expr)
     if isinstance(expr, ast.BinaryExpr):
-        left = infer_expr(expr.left, env, state, type_decls)
-        right = infer_expr(expr.right, env, state, type_decls)
+        left = infer_expr(expr.left, env, state, type_decls, global_methods)
+        right = infer_expr(expr.right, env, state, type_decls, global_methods)
         if expr.op == ">>":
             input_t = state.fresh()
             middle_t = state.fresh()
@@ -476,25 +512,54 @@ def infer_expr(
             return BOOL
         raise tc_error(f"Unsupported binary operator {expr.op}", expr)
     if isinstance(expr, ast.CallExpr):
-        callee = infer_expr(expr.callee, env, state, type_decls)
+        direct_method_info: GlobalMethodInfo | None = None
+        direct_method_args: list[Type] = []
+        if isinstance(expr.callee, ast.VarExpr) and expr.callee.name not in env:
+            direct_method_info = global_methods.get(expr.callee.name)
+        if direct_method_info is not None:
+            replacements = {name: state.fresh() for name in ftv(direct_method_info.method_type)}
+            direct_method_args = [replacements[name] for name in direct_method_info.class_info.type_param_vars]
+
+            def go(typ: Type) -> Type:
+                if isinstance(typ, TVar) and typ.name in replacements:
+                    return replacements[typ.name]
+                if isinstance(typ, TFunc):
+                    return TFunc(go(typ.arg), go(typ.ret))
+                if isinstance(typ, TApp):
+                    return TApp(go(typ.base), go(typ.arg))
+                return typ
+
+            callee = go(direct_method_info.method_type)
+        else:
+            callee = infer_expr(expr.callee, env, state, type_decls, global_methods)
         result = state.fresh()
         typ = callee
         for arg_expr in expr.args:
-            arg_t = infer_expr(arg_expr, env, state, type_decls)
+            arg_t = infer_expr(arg_expr, env, state, type_decls, global_methods)
             next_t = state.fresh()
             unify_at(state, typ, TFunc(arg_t, next_t), arg_expr)
             typ = next_t
         unify_at(state, typ, result, expr)
+        if direct_method_info is not None:
+            resolved_args = [apply(state.subst, arg) for arg in direct_method_args]
+            setattr(
+                expr,
+                "resolved_constraint",
+                ast.TypeConstraint(
+                    class_name=direct_method_info.class_name,
+                    args=[type_to_ast_expr(arg) for arg in resolved_args],
+                ),
+            )
         return result
     if isinstance(expr, ast.IfExpr):
-        cond = infer_expr(expr.condition, env, state, type_decls)
+        cond = infer_expr(expr.condition, env, state, type_decls, global_methods)
         unify_at(state, cond, BOOL, expr.condition)
-        then_t = infer_expr(expr.then_branch, env, state, type_decls)
-        else_t = infer_expr(expr.else_branch, env, state, type_decls)
+        then_t = infer_expr(expr.then_branch, env, state, type_decls, global_methods)
+        else_t = infer_expr(expr.else_branch, env, state, type_decls, global_methods)
         unify_at(state, then_t, else_t, expr)
         return then_t
     if isinstance(expr, ast.MatchExpr):
-        scrutinee_t = infer_expr(expr.scrutinee, env, state, type_decls)
+        scrutinee_t = infer_expr(expr.scrutinee, env, state, type_decls, global_methods)
         out_t = state.fresh()
         branch_ctors: list[str] = []
         has_catchall = False
@@ -512,7 +577,7 @@ def infer_expr(
                 branch_ctors.append(ctor_name)
             if isinstance(branch.pattern, (ast.WildcardPattern, ast.VarPattern)):
                 has_catchall = True
-            value_t = infer_expr(branch.value, branch_env, state, type_decls)
+            value_t = infer_expr(branch.value, branch_env, state, type_decls, global_methods)
             unify_at(state, out_t, value_t, branch.value)
 
         ensure_exhaustive_match(scrutinee_t, branch_ctors, has_catchall, state, type_decls, expr)
@@ -630,6 +695,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
     state = InferState()
     type_decls = build_type_decls(program)
     class_decls = build_class_decls(program)
+    global_methods = build_global_method_info(class_decls)
     validate_class_constraints(program, class_decls)
 
     p_var = TVar("prelude.print.a")
@@ -784,7 +850,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                         )
                     working_env[method_name] = method_scheme
 
-            body_t = infer_expr(fn_decl.body, working_env, state, type_decls)
+            body_t = infer_expr(fn_decl.body, working_env, state, type_decls, global_methods)
             expected_return = apply(state.subst, cursor)
             unify_at(state, body_t, expected_return, fn_decl.body)
 
@@ -795,7 +861,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
 
         elif isinstance(decl, ast.LetDecl):
             let_decl = decl
-            value_t = infer_expr(let_decl.value, env, state, type_decls)
+            value_t = infer_expr(let_decl.value, env, state, type_decls, global_methods)
             env[let_decl.name] = generalize(env, value_t, state)
 
     validate_instance_methods(program, class_decls, env, state, type_decls)

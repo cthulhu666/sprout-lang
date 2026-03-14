@@ -29,6 +29,25 @@ fn filter(xs: List a, pred: a -> Bool) -> List a =
 fn split_ints(s: String) -> List Int =
   map(split_words(s), parse_int)
 
+fn list_append(left: List a, right: List a) -> List a =
+  match left with
+  | Nil -> right
+  | Cons x rest -> Cons(x, list_append(rest, right))
+
+class Semigroup t {
+  fn append(x: t, y: t) -> t
+}
+
+instance Semigroup String {
+  fn append(x: String, y: String) -> String =
+    str_concat(x, y)
+}
+
+instance Semigroup (List a) {
+  fn append(x: List a, y: List a) -> List a =
+    list_append(x, y)
+}
+
 fn pipe(value: a, f: a -> b) -> b =
   f(value)
 

@@ -89,6 +89,16 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.args[1], ast.VarExpr)
         self.assertEqual(fn_decl.body.args[1].name, "inc")
 
+    def test_parse_semigroup_append_operator_desugars_to_append_call(self) -> None:
+        src = "fn main() -> List Int = [1, 2] ++ [3, 4]"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
+        self.assertEqual(fn_decl.body.callee.name, "append")
+        self.assertEqual(len(fn_decl.body.args), 2)
+
     def test_parse_string_escape_carriage_return(self) -> None:
         src = 'fn main() -> String = "a\\r\\nb"'
         program = parse(src)

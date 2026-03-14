@@ -289,9 +289,19 @@ class Parser:
 
     def parse_term(self):
         expr = self.parse_factor()
-        while self.check("SYMBOL") and self.current().value in {"+", "-"}:
+        while self.check("SYMBOL") and self.current().value in {"+", "-", "++"}:
             tok = self.advance()
-            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_factor()), tok)
+            right = self.parse_factor()
+            if tok.value == "++":
+                expr = self.mark(
+                    ast.CallExpr(
+                        callee=self.mark(ast.VarExpr(name="append"), tok),
+                        args=[expr, right],
+                    ),
+                    tok,
+                )
+            else:
+                expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=right), tok)
         return expr
 
     def parse_factor(self):

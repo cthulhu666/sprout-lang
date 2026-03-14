@@ -34,7 +34,7 @@ def _type_expr_is_concrete(node: ast.TypeExpr) -> bool:
 
 def _type_expr_equal(left: ast.TypeExpr, right: ast.TypeExpr) -> bool:
     if isinstance(left, ast.TypeName) and isinstance(right, ast.TypeName):
-        return left.name == right.name
+        return left.name == right.name or left.name.rsplit(".", 1)[-1] == right.name.rsplit(".", 1)[-1]
     if isinstance(left, ast.TypeApply) and isinstance(right, ast.TypeApply):
         return _type_expr_equal(left.base, right.base) and _type_expr_equal(left.arg, right.arg)
     if isinstance(left, ast.TypeArrow) and isinstance(right, ast.TypeArrow):
@@ -91,7 +91,7 @@ def _match_type_expr_pattern(
         return _type_expr_equal(existing, candidate)
 
     if isinstance(pattern, ast.TypeName) and isinstance(candidate, ast.TypeName):
-        return pattern.name == candidate.name
+        return pattern.name == candidate.name or pattern.name.rsplit(".", 1)[-1] == candidate.name.rsplit(".", 1)[-1]
     if isinstance(pattern, ast.TypeApply) and isinstance(candidate, ast.TypeApply):
         return _match_type_expr_pattern(pattern.base, candidate.base, env) and _match_type_expr_pattern(
             pattern.arg, candidate.arg, env
@@ -405,6 +405,47 @@ def _rewrite_expr(
         ]
 
         if isinstance(expr.callee, ast.VarExpr) and expr.callee.name not in scope:
+            resolved_constraint = getattr(expr, "resolved_constraint", None)
+            if isinstance(resolved_constraint, ast.TypeConstraint):
+                method_source: dict[str, str] | None = None
+
+                matches = [
+                    binding
+                    for have in current_constraints
+                    for key, binding in current_binding_by_constraint.items()
+                    if _constraint_matches_pattern(have, resolved_constraint) and key == _constraint_key(have)
+                ]
+                if len(matches) > 1:
+                    raise TypeclassLoweringError(
+                        f"Ambiguous constraint forwarding for {resolved_constraint.class_name} in direct method call"
+                    )
+                if len(matches) == 1:
+                    method_source = matches[0]
+
+                if method_source is None:
+                    inst_matches = [
+                        methods
+                        for inst_constraint, methods in instance_constraints
+                        if _constraint_matches_pattern(inst_constraint, resolved_constraint)
+                    ]
+                    if len(inst_matches) > 1:
+                        raise TypeclassLoweringError(
+                            f"Ambiguous instance resolution for {resolved_constraint.class_name} in direct method call"
+                        )
+                    if len(inst_matches) == 1:
+                        method_source = inst_matches[0]
+
+                if method_source is None:
+                    raise TypeclassLoweringError(
+                        f"Cannot resolve direct method call for constraint {resolved_constraint.class_name}"
+                    )
+                target = method_source.get(expr.callee.name)
+                if target is None:
+                    raise TypeclassLoweringError(
+                        f"Resolved direct method call missing method {expr.callee.name}"
+                    )
+                return _clone_with_loc(ast.CallExpr(callee=ast.VarExpr(target), args=rewritten_args), expr)
+
             callee_constraints = fn_constraints.get(expr.callee.name, [])
             if callee_constraints:
                 extra_args: list[ast.Expr] = []
@@ -430,7 +471,7 @@ def _rewrite_expr(
                         inst_matches = [
                             methods
                             for inst_constraint, methods in instance_constraints
-                            if _constraint_matches_pattern(needed, inst_constraint)
+                            if _constraint_matches_pattern(inst_constraint, needed)
                         ]
                         if len(inst_matches) > 1:
                             raise TypeclassLoweringError(
@@ -552,10 +593,6 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
     for decl in program.declarations:
         if not isinstance(decl, ast.InstanceDecl):
             continue
-        if not all(_type_expr_is_concrete(arg) for arg in decl.constraint.args):
-            raise TypeclassLoweringError(
-                f"Instance for {decl.constraint.class_name} must use concrete types for lowering"
-            )
         key = _constraint_key(decl.constraint)
         method_map: dict[str, str] = {}
         for method in decl.methods:
@@ -658,6 +695,27 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
             )
             continue
 
+        if isinstance(decl, ast.LetDecl):
+            decls_for_output.append(
+                _clone_with_loc(
+                    ast.LetDecl(
+                        name=decl.name,
+                        value=_rewrite_expr(
+                            decl.value,
+                            scope=set(),
+                            method_aliases={},
+                            current_constraints=[],
+                            current_binding_by_constraint={},
+                            fn_constraints=fn_constraints,
+                            class_method_order=class_method_order,
+                            instance_constraints=instance_constraints,
+                        ),
+                    ),
+                    decl,
+                )
+            )
+            continue
+
         decls_for_output.append(decl)
 
     # Rewrite generated instance fns too (they can call constrained functions).
@@ -716,6 +774,24 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                         body=_rewrite_expr_with_specialization(
                             decl.body,
                             scope={p.name for p in decl.params},
+                            hidden_count_by_fn=hidden_count_by_fn,
+                            fn_decls_by_name=fn_decls_by_name,
+                            specializations=specializations,
+                            generated_wrappers=generated_wrappers,
+                            taken_names=taken_names,
+                        ),
+                    ),
+                    decl,
+                )
+            )
+        elif isinstance(decl, ast.LetDecl):
+            rewritten_decls.append(
+                _clone_with_loc(
+                    ast.LetDecl(
+                        name=decl.name,
+                        value=_rewrite_expr_with_specialization(
+                            decl.value,
+                            scope=set(),
                             hidden_count_by_fn=hidden_count_by_fn,
                             fn_decls_by_name=fn_decls_by_name,
                             specializations=specializations,

@@ -71,6 +71,35 @@ class TypeclassLoweringTests(unittest.TestCase):
         with self.assertRaises(TypeclassLoweringError):
             lower_typeclasses(program)
 
+    def test_lowering_supports_parametric_instance_head(self) -> None:
+        src = """
+        type List a =
+          | Cons a (List a)
+          | Nil
+        class Semigroup t {
+          fn append(x: t, y: t) -> t
+        }
+        fn list_append(left: List a, right: List a) -> List a =
+          match left with
+          | Nil -> right
+          | Cons x rest -> Cons(x, list_append(rest, right))
+        instance Semigroup (List a) {
+          fn append(x: List a, y: List a) -> List a =
+            list_append(x, y)
+        }
+        fn combine(xs: List Int, ys: List Int) -> List Int where Semigroup (List Int) =
+          append(xs, ys)
+        fn main() -> IO Unit =
+          print(combine(Cons(1, Nil), Cons(2, Nil)))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Cons(1, Cons(2, Nil))")
+
 
 if __name__ == "__main__":
     unittest.main()

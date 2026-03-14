@@ -93,6 +93,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `fold(list, init, fn) -> value`
 - `filter(list, predicate) -> List`
 - `split_ints(s: String) -> List Int`
+- `Semigroup t` with prelude instances for `String` and `List a`
+- `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
   - forward pipe operator: `value |> f` rewrites to `f(value)`
   - `pipe(value, f)`
@@ -203,6 +205,12 @@ Collections module (in `stdlib/collections.sprout`):
   - `dict_keys(dict) -> Vec String`
   - `dict_values(dict) -> Vec v`
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
+- `Semigroup t` class:
+  - `append(x, y) -> t`
+  - instances currently provided for `String`, `List a`, `Vec a`, and `Dict v`
+  - law: instance `append` should be associative
+  - `Dict` append is right-biased on duplicate keys
+  - infix sugar: `left ++ right` desugars to semigroup append
 - `Functor f` class:
   - `fmap(f, xs)`
 - `Foldable f` class:

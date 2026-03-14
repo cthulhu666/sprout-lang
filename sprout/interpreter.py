@@ -930,7 +930,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None) -> None:
                     column=getattr(decl, "column", None),
                 ),
             )
-        elif isinstance(decl, ast.LetDecl):
+
+    for decl in program.declarations:
+        if isinstance(decl, ast.LetDecl):
             env.set(decl.name, eval_expr(decl.value, env))
 
     try:

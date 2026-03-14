@@ -381,25 +381,46 @@ class CodegenTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_string_builtins(self) -> None:
-        src = """
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
-        fn main() -> IO Unit =
-          seq(
-            print(str_concat(str_slice("sprout-lang", 0, 6), "-ok")),
-            seq(
-              print(str_len("sprout-lang") == 11),
-              seq(
-                print(str_find("sprout-lang", "lang") == 7),
-                print(str_starts_with("sprout-lang", "sprout"))
-              )
-            )
-          )
-        """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            spr_path = tmp_path / "prog.spr"
+            (tmp_path / "stdlib").mkdir(parents=True)
+            (tmp_path / "stdlib" / "internal_string.sprout").write_text(
+                """
+                module stdlib.internal_string
+                export fn demo() -> String =
+                  str_concat(str_slice("sprout-lang", 0, 6), "-ok")
+                export fn demo_len_ok() -> Bool =
+                  str_len("sprout-lang") == 11
+                export fn demo_find_ok() -> Bool =
+                  str_find("sprout-lang", "lang") == 7
+                export fn demo_prefix_ok() -> Bool =
+                  str_starts_with("sprout-lang", "sprout")
+                """,
+                encoding="utf-8",
+            )
+            spr_path = tmp_path / "prog.sprout"
             bin_path = tmp_path / "prog"
-            spr_path.write_text(src, encoding="utf-8")
+            spr_path.write_text(
+                """
+                module app.main
+                import stdlib.internal_string (demo, demo_find_ok, demo_len_ok, demo_prefix_ok)
+
+                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+                fn main() -> IO Unit =
+                  seq(
+                    print(demo()),
+                    seq(
+                      print(demo_len_ok()),
+                      seq(
+                        print(demo_find_ok()),
+                        print(demo_prefix_ok())
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
             subprocess.run(
                 [
                     sys.executable,

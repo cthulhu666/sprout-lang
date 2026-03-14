@@ -75,7 +75,8 @@ Definition of done:
 - [~] `P0` Implement dictionary-passing lowering in typechecker/backend (hidden-method-parameter lowering supports constrained polymorphic helpers via forwarding and now monomorphizes concrete call sites to specialized wrappers; true first-class dictionaries for polymorphic class methods are blocked on higher-rank method-field representation).
 - [x] `P0` Add `Functor` class and instances for `List` and `Vec`.
 - [x] `P0` Add `Foldable` class and instances for `List` and `Vec`.
-- [ ] `P1` Add `Semigroup` and `Monoid` classes with laws documented.
+- [x] `P1` Add `Semigroup` class with associativity law documented.
+- [ ] `P1` Add `Monoid` class with identity law documented.
 - [ ] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `Show`) for collection-focused workflows.
 - [ ] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity).
 - [ ] `P1` Add diagnostics for ambiguous/overlapping instance errors.

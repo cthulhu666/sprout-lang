@@ -762,6 +762,135 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "bcd")
 
+    def test_import_stdlib_semigroup_instances(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (List, Semigroup)
+
+                fn list_count(xs: List Int) -> Int =
+                  match xs with
+                  | Nil -> 0
+                  | Cons _ rest -> 1 + list_count(rest)
+
+                fn append_string(x: String, y: String) -> String where Semigroup String =
+                  append(x, y)
+
+                fn append_list(xs: List Int, ys: List Int) -> List Int where Semigroup (List Int) =
+                  append(xs, ys)
+
+                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+                fn main() -> IO Unit =
+                  seq(
+                    print(append_string("sprout", "-lang")),
+                    print(list_count(append_list(Cons(1, Nil), Cons(2, Cons(3, Nil)))))
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "sprout-lang\n3")
+
+    def test_import_stdlib_semigroup_vec_and_dict_append(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Dict, Maybe, Semigroup, Vec, dict_empty, dict_get, dict_set, vec_append, vec_empty, vec_get_or)
+
+                fn left_vec() -> Vec Int =
+                  vec_append(vec_append(vec_empty(), 1), 2)
+
+                fn right_vec() -> Vec Int =
+                  vec_append(vec_empty(), 3)
+
+                fn left_dict() -> Dict Int =
+                  dict_set(dict_set(dict_empty(), "a", 1), "shared", 7)
+
+                fn right_dict() -> Dict Int =
+                  dict_set(dict_set(dict_empty(), "b", 2), "shared", 9)
+
+                fn value_or(d: Dict Int, key: String, fallback: Int) -> Int =
+                  match dict_get(d, key) with
+                  | Just value -> value
+                  | Nothing -> fallback
+
+                fn append_vec(left: Vec Int, right: Vec Int) -> Vec Int where Semigroup (Vec Int) =
+                  append(left, right)
+
+                fn append_dict(left: Dict Int, right: Dict Int) -> Dict Int where Semigroup (Dict Int) =
+                  append(left, right)
+
+                fn main() -> IO Unit =
+                  print(
+                    vec_get_or(append_vec(left_vec(), right_vec()), 2, -1)
+                    + value_or(append_dict(left_dict(), right_dict()), "shared", -1)
+                    + value_or(append_dict(left_dict(), right_dict()), "b", -1)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "14")
+
+    def test_import_stdlib_semigroup_append_operator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Dict, List, Maybe, Vec, dict_empty, dict_get, dict_set, vec_append, vec_empty, vec_get_or)
+
+                fn left_vec() -> Vec Int =
+                  vec_append(vec_append(vec_empty(), 1), 2)
+
+                fn right_vec() -> Vec Int =
+                  vec_append(vec_empty(), 3)
+
+                fn value_or(d: Dict Int, key: String, fallback: Int) -> Int =
+                  match dict_get(d, key) with
+                  | Just value -> value
+                  | Nothing -> fallback
+
+                fn main() -> IO Unit =
+                  print(
+                    vec_get_or(left_vec() ++ right_vec(), 2, -1)
+                    + value_or(dict_set(dict_empty(), "a", 1) ++ dict_set(dict_empty(), "a", 7), "a", -1)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "10")
+
 
 if __name__ == "__main__":
     unittest.main()

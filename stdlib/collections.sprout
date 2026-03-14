@@ -115,12 +115,21 @@ export fn list_fold(xs: List a, init: b, step: b -> a -> b) -> b =
   | Nil -> init
   | Cons x rest -> list_fold(rest, step(init, x), step)
 
+export fn list_append(left: List a, right: List a) -> List a =
+  match left with
+  | Nil -> right
+  | Cons x rest -> Cons(x, list_append(rest, right))
+
 export class Functor f {
   fn fmap(f: a -> b, xs: f a) -> f b
 }
 
 export class Foldable f {
   fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
+}
+
+export class Semigroup t {
+  fn append(x: t, y: t) -> t
 }
 
 instance Functor List {
@@ -141,6 +150,37 @@ instance Foldable List {
 instance Foldable Vec {
   fn fold_values(xs: Vec a, init: b, step: b -> a -> b) -> b =
     vec_fold(xs, init, step)
+}
+
+instance Semigroup String {
+  fn append(x: String, y: String) -> String =
+    str_concat(x, y)
+}
+
+instance Semigroup (List a) {
+  fn append(x: List a, y: List a) -> List a =
+    list_append(x, y)
+}
+
+instance Semigroup (Vec a) {
+  fn append(x: Vec a, y: Vec a) -> Vec a =
+    vec_fold(y, x, vec_append_flip)
+}
+
+fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict v =
+  if index >= total then acc
+  else
+    match map_nth_key(raw, index) with
+    | Nothing -> acc
+    | Just key ->
+        match map_nth_value(raw, index) with
+        | Nothing -> acc
+        | Just value -> dict_append_entries(dict_set(acc, key, value), raw, index + 1, total)
+
+instance Semigroup (Dict v) {
+  fn append(x: Dict v, y: Dict v) -> Dict v =
+    match y with
+    | Dict raw -> dict_append_entries(x, raw, 0, map_size(raw))
 }
 
 fn vec_append_flip(acc: Vec a, item: a) -> Vec a =

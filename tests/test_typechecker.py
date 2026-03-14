@@ -187,6 +187,56 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
 
+    def test_typecheck_parametric_semigroup_instance(self) -> None:
+        src = """
+        type List a =
+          | Cons a (List a)
+          | Nil
+        class Semigroup t {
+          fn append(x: t, y: t) -> t
+        }
+        fn list_append(left: List a, right: List a) -> List a =
+          match left with
+          | Nil -> right
+          | Cons x rest -> Cons(x, list_append(rest, right))
+        instance Semigroup (List a) {
+          fn append(x: List a, y: List a) -> List a =
+            list_append(x, y)
+        }
+        fn combine(xs: List Int, ys: List Int) -> List Int where Semigroup (List Int) =
+          append(xs, ys)
+        fn main() -> IO Unit =
+          print(combine(Cons(1, Nil), Cons(2, Nil)))
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("combine", types)
+
+    def test_typecheck_semigroup_append_operator(self) -> None:
+        src = """
+        type List a =
+          | Cons a (List a)
+          | Nil
+        class Semigroup t {
+          fn append(x: t, y: t) -> t
+        }
+        instance Semigroup String {
+          fn append(x: String, y: String) -> String = str_concat(x, y)
+        }
+        fn list_append(left: List a, right: List a) -> List a =
+          match left with
+          | Nil -> right
+          | Cons x rest -> Cons(x, list_append(rest, right))
+        instance Semigroup (List a) {
+          fn append(x: List a, y: List a) -> List a = list_append(x, y)
+        }
+        let s = "a" ++ "b"
+        let xs = [1, 2] ++ [3, 4]
+        fn main() -> IO Unit = print(xs)
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("s", types)
+        self.assertIn("xs", types)
+
     def test_type_error_instance_missing_method(self) -> None:
         src = """
         class Foldable f {

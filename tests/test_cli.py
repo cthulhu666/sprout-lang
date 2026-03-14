@@ -90,6 +90,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("List Int", run.stdout)
 
+    def test_repl_default_supports_list_append_operator(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="[1,2] ++ [3,4]\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("Cons(1, Cons(2, Cons(3, Cons(4, Nil))))", run.stdout)
+
     def test_repl_with_http_stdlib_loads_http_helpers(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl", "--with-http-stdlib"],
