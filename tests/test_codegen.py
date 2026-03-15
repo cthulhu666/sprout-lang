@@ -123,6 +123,48 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call i64 @sprout_tag", ir)
         self.assertIn("call i64 @sprout_field", ir)
 
+    def test_compile_direct_constructor_match_avoids_materializing_maybe(self) -> None:
+        src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn main() -> Int =
+          match if true then Just(42) else Nothing with
+          | Just value -> print_int(value)
+          | Nothing -> print_int(0)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertNotIn("call i64 @sprout_make0", ir)
+        self.assertNotIn("call i64 @sprout_make1", ir)
+        self.assertNotIn("call i64 @sprout_tag", ir)
+        self.assertNotIn("call i64 @sprout_field", ir)
+        self.assertIn("phi i64", ir)
+
+    def test_compile_direct_constructor_match_falls_back_for_top_level_var_pattern(self) -> None:
+        src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn unwrap(m: MaybeInt) -> Int =
+          match m with
+          | Just value -> value
+          | Nothing -> 0
+
+        fn main() -> Int =
+          match if true then Just(42) else Nothing with
+          | value -> print_int(unwrap(value))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("call i64 @sprout_make1(i64 0, i64 42)", ir)
+        self.assertIn("call i64 @sprout_make0(i64 1)", ir)
+        self.assertIn("call i64 @sprout_tag", ir)
+
     def test_compile_print_adt_value(self) -> None:
         src = """
         type Pair =
@@ -460,6 +502,41 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.returncode, 42)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_direct_constructor_match_executes_without_maybe_regression(self) -> None:
+        src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn main() -> Int =
+          match if false then Just(7) else Nothing with
+          | Just value -> print_int(value)
+          | Nothing -> print_int(0)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "0")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_program_receives_program_args(self) -> None:
         src = """
         module main
@@ -492,6 +569,40 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path), "http://example.test"], check=False, capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, msg=run.stderr)
             self.assertEqual(run.stdout.strip(), "http://example.test")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_program_uses_nothing_path_for_missing_arg(self) -> None:
+        src = """
+        module main
+        import stdlib.collections (Maybe)
+
+        fn main() -> IO Unit =
+          match argv_get(0) with
+          | Just value -> print(value)
+          | Nothing -> print("missing")
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(run.stdout.strip(), "missing")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_short_circuit_and(self) -> None:

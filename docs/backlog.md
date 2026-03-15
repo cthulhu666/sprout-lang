@@ -21,3 +21,7 @@ This file tracks open design, implementation, and tooling follow-up work.
 2. Add inclusive integer ranges in v1.
    Initial scope: a dedicated `IntRange` type, `a..b` inclusive syntax, ascending and descending unit-step semantics, and a small helper surface such as `range_contains`, `range_count`, and `range_fold`.
    First milestone constraints: integer-only, inclusive-only, no custom step syntax, no open-ended ranges, no range patterns, and no immediate redesign of existing slice APIs.
+3. Expand native ADT lowering in v1.
+   Design doc: [native-adt-lowering-v1.md](./native-adt-lowering-v1.md).
+   Initial completed slice: native `Nothing` singleton plus immediate-match optimization for direct constructor-producing scrutinees.
+   Planned follow-up: broader constructor forwarding, whole-scrutinee binding support, and specialized representations for tiny ADTs.

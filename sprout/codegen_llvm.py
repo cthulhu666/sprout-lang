@@ -1200,6 +1200,9 @@ def _emit_match(
     adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
+    direct = _try_emit_direct_ctor_match(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+    if direct is not None:
+        return direct
     scrut = _emit_expr(expr.scrutinee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     done_label = emitter.block("match_done")
     next_label = emitter.block("match_next")
@@ -1255,6 +1258,254 @@ def _emit_match(
     return Value(out_type, phi, callable_sig=callable_sig)
 
 
+def _try_emit_direct_ctor_match(
+    expr: ast.MatchExpr,
+    locals_: dict[str, Value],
+    globals_info: dict[str, GlobalInfo],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
+    emitter: Emitter,
+) -> Value | None:
+    if not _supports_direct_ctor_match(expr.scrutinee, expr.branches, ctor_sigs):
+        return None
+
+    done_label = emitter.block("match_done")
+    branch_vals: list[tuple[Value, str]] = []
+    _emit_direct_ctor_match_scrutinee(
+        expr.scrutinee,
+        expr.branches,
+        locals_,
+        globals_info,
+        sigs,
+        ctor_sigs,
+        adt_names,
+        emitter,
+        done_label,
+        branch_vals,
+    )
+    return _finalize_match_result(branch_vals, done_label, emitter)
+
+
+def _supports_direct_ctor_match(
+    scrutinee: ast.Expr, branches: list[ast.MatchBranch], ctor_sigs: dict[str, CtorSig]
+) -> bool:
+    if any(isinstance(branch.pattern, ast.VarPattern) for branch in branches):
+        return False
+    return _is_direct_ctor_scrutinee(scrutinee, ctor_sigs)
+
+
+def _is_direct_ctor_scrutinee(expr: ast.Expr, ctor_sigs: dict[str, CtorSig]) -> bool:
+    if _direct_ctor_expr(expr, ctor_sigs) is not None:
+        return True
+    return (
+        isinstance(expr, ast.IfExpr)
+        and _is_direct_ctor_scrutinee(expr.then_branch, ctor_sigs)
+        and _is_direct_ctor_scrutinee(expr.else_branch, ctor_sigs)
+    )
+
+
+def _direct_ctor_expr(expr: ast.Expr, ctor_sigs: dict[str, CtorSig]) -> tuple[CtorSig, list[ast.Expr]] | None:
+    if isinstance(expr, ast.VarExpr):
+        ctor = ctor_sigs.get(expr.name)
+        if ctor is not None and not ctor.arg_types:
+            return ctor, []
+        return None
+    if isinstance(expr, ast.CallExpr) and isinstance(expr.callee, ast.VarExpr):
+        ctor = ctor_sigs.get(expr.callee.name)
+        if ctor is not None and len(expr.args) == len(ctor.arg_types):
+            return ctor, expr.args
+    return None
+
+
+def _emit_direct_ctor_match_scrutinee(
+    scrutinee: ast.Expr,
+    branches: list[ast.MatchBranch],
+    locals_: dict[str, Value],
+    globals_info: dict[str, GlobalInfo],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
+    emitter: Emitter,
+    done_label: str,
+    branch_vals: list[tuple[Value, str]],
+) -> None:
+    direct_ctor = _direct_ctor_expr(scrutinee, ctor_sigs)
+    if direct_ctor is not None:
+        ctor, arg_exprs = direct_ctor
+        payloads: list[Value] = []
+        for arg_expr, typ in zip(arg_exprs, ctor.arg_types):
+            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+            payloads.append(_coerce_value(arg_val, typ, emitter))
+        _emit_direct_ctor_match_case(
+            ctor,
+            payloads,
+            branches,
+            locals_,
+            globals_info,
+            sigs,
+            ctor_sigs,
+            adt_names,
+            emitter,
+            done_label,
+            branch_vals,
+        )
+        return
+
+    if not isinstance(scrutinee, ast.IfExpr):
+        raise CodegenError("Internal backend error: unsupported direct constructor scrutinee")
+
+    cond = _emit_expr(scrutinee.condition, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+    if cond.typ != I1:
+        raise CodegenError("if condition in direct constructor match must be Bool")
+    then_label = emitter.block("match_ctor_then")
+    else_label = emitter.block("match_ctor_else")
+    emitter.emit(f"  br i1 {cond.ir}, label %{then_label}, label %{else_label}")
+
+    emitter.label(then_label)
+    _emit_direct_ctor_match_scrutinee(
+        scrutinee.then_branch,
+        branches,
+        locals_,
+        globals_info,
+        sigs,
+        ctor_sigs,
+        adt_names,
+        emitter,
+        done_label,
+        branch_vals,
+    )
+
+    emitter.label(else_label)
+    _emit_direct_ctor_match_scrutinee(
+        scrutinee.else_branch,
+        branches,
+        locals_,
+        globals_info,
+        sigs,
+        ctor_sigs,
+        adt_names,
+        emitter,
+        done_label,
+        branch_vals,
+    )
+
+
+def _emit_direct_ctor_match_case(
+    ctor: CtorSig,
+    payloads: list[Value],
+    branches: list[ast.MatchBranch],
+    locals_: dict[str, Value],
+    globals_info: dict[str, GlobalInfo],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
+    emitter: Emitter,
+    done_label: str,
+    branch_vals: list[tuple[Value, str]],
+) -> None:
+    current_fail = emitter.block("match_ctor_next")
+    first = True
+    for branch in branches:
+        branch_label = emitter.block("match_ctor_branch")
+        fail_label = emitter.block("match_ctor_next")
+
+        if first:
+            first = False
+        else:
+            emitter.label(current_fail)
+
+        test = _emit_direct_ctor_pattern_test(branch.pattern, ctor, payloads, ctor_sigs, emitter)
+        if test is None:
+            emitter.emit(f"  br label %{fail_label}")
+            current_fail = fail_label
+            continue
+        if test.ir == "1":
+            emitter.emit(f"  br label %{branch_label}")
+        else:
+            emitter.emit(f"  br i1 {test.ir}, label %{branch_label}, label %{fail_label}")
+
+        emitter.label(branch_label)
+        branch_locals = dict(locals_)
+        _emit_direct_ctor_pattern_bind(branch.pattern, ctor, payloads, branch_locals, ctor_sigs, emitter)
+        value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        end_block = emitter.current_block
+        if end_block is None:
+            raise CodegenError("Internal backend error: missing direct constructor branch block")
+        branch_vals.append((value, end_block))
+        emitter.emit(f"  br label %{done_label}")
+        current_fail = fail_label
+
+    emitter.label(current_fail)
+    emitter.emit("  unreachable")
+
+
+def _emit_direct_ctor_pattern_test(
+    pattern: ast.Pattern, ctor: CtorSig, payloads: list[Value], ctor_sigs: dict[str, CtorSig], emitter: Emitter
+) -> Value | None:
+    if isinstance(pattern, ast.WildcardPattern):
+        return Value(I1, "1")
+    if isinstance(pattern, ast.VarPattern):
+        return None
+    if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
+        return None
+    if isinstance(pattern, ast.ConstructorPattern):
+        if pattern.name != ctor.name:
+            return None
+        if len(pattern.args) != len(ctor.arg_types):
+            raise CodegenError(
+                f"Constructor pattern {pattern.name} expects {len(ctor.arg_types)} args, got {len(pattern.args)}"
+            )
+        acc = Value(I1, "1")
+        for arg_pat, arg_val in zip(pattern.args, payloads):
+            test = _emit_pattern_test(arg_pat, arg_val, ctor_sigs, emitter)
+            and_tmp = emitter.tmp()
+            emitter.emit(f"  {and_tmp} = and i1 {acc.ir}, {test.ir}")
+            acc = Value(I1, and_tmp)
+        return acc
+    raise CodegenError("Unsupported pattern form in direct constructor match")
+
+
+def _emit_direct_ctor_pattern_bind(
+    pattern: ast.Pattern,
+    ctor: CtorSig,
+    payloads: list[Value],
+    locals_: dict[str, Value],
+    ctor_sigs: dict[str, CtorSig],
+    emitter: Emitter,
+) -> None:
+    if isinstance(pattern, (ast.WildcardPattern, ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
+        return
+    if isinstance(pattern, ast.VarPattern):
+        raise CodegenError("Direct constructor match does not support top-level variable patterns")
+    if isinstance(pattern, ast.ConstructorPattern):
+        if pattern.name != ctor.name:
+            return
+        for sub, value in zip(pattern.args, payloads):
+            _emit_pattern_bind(sub, value, locals_, ctor_sigs, emitter)
+        return
+    raise CodegenError("Unsupported pattern form in direct constructor bind")
+
+
+def _finalize_match_result(branch_vals: list[tuple[Value, str]], done_label: str, emitter: Emitter) -> Value:
+    if not branch_vals:
+        raise CodegenError("Match expression has no branches")
+
+    out_type = branch_vals[0][0].typ
+    for val, _ in branch_vals[1:]:
+        if val.typ != out_type:
+            raise CodegenError("match branches must have same type in backend")
+
+    emitter.label(done_label)
+    phi = emitter.tmp()
+    parts = ", ".join(f"[ {val.ir}, %{block} ]" for val, block in branch_vals)
+    emitter.emit(f"  {phi} = phi {out_type.text} {parts}")
+    callable_sig = branch_vals[0][0].callable_sig
+    if any(val.callable_sig != callable_sig for val, _ in branch_vals[1:]):
+        callable_sig = None
+    return Value(out_type, phi, callable_sig=callable_sig)
+
+
 def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, CtorSig], emitter: Emitter) -> Value:
     if isinstance(pattern, (ast.WildcardPattern, ast.VarPattern)):
         return Value(I1, "1")
@@ -1270,6 +1521,13 @@ def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, 
         lit = "1" if pattern.value else "0"
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = icmp eq i1 {value.ir}, {lit}")
+        return Value(I1, tmp)
+    if isinstance(pattern, ast.StringPattern):
+        if value.typ != I8_PTR:
+            raise CodegenError("String pattern expects String scrutinee")
+        literal_ptr, _ = emitter.string_const(pattern.value)
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value.ir}, ptr {literal_ptr})")
         return Value(I1, tmp)
     if isinstance(pattern, ast.ConstructorPattern):
         if value.typ != I64:

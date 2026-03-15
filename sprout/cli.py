@@ -217,6 +217,7 @@ typedef struct {
 } HttpUrl;
 
 static ObjNode* g_objs = NULL;
+static SproutObj* g_nothing_singleton = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
 static int g_listener_fd[2048];
@@ -431,6 +432,18 @@ long long sprout_register_ctor(long long tag, const char* name, long long arity)
   return 0;
 }
 long long sprout_make0(long long tag) {
+  CtorMeta* meta = find_ctor(tag);
+  if (meta != NULL && strcmp(meta->name, "Nothing") == 0) {
+    if (g_nothing_singleton == NULL) {
+      g_nothing_singleton = (SproutObj*)malloc(sizeof(SproutObj));
+      g_nothing_singleton->tag = tag;
+      g_nothing_singleton->f0 = 0;
+      g_nothing_singleton->f1 = 0;
+      g_nothing_singleton->f2 = 0;
+      register_obj(g_nothing_singleton);
+    }
+    return box_ptr(g_nothing_singleton);
+  }
   SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
   o->tag = tag;
   o->f0 = 0;
