@@ -178,6 +178,23 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call ptr @malloc(i64 %t", ir)
         self.assertIn("getelementptr i64, ptr %env, i64 1", ir)
 
+    def test_compile_runtime_top_level_function_value_let_to_llvm(self) -> None:
+        src = r"""
+        fn inc(x: Int) -> Int = x + 1
+        let f = inc
+        let g = \(x: Int) -> x + 2
+
+        fn main() -> Int =
+          print_int(f(20) + g(20))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define void @__sprout_init_globals()", ir)
+        self.assertIn("store ptr", ir)
+        self.assertIn("@f = global ptr null", ir)
+        self.assertIn("@g = global ptr null", ir)
+
     def test_compile_tcp_builtins_to_llvm(self) -> None:
         src = """
         fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b

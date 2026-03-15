@@ -657,10 +657,6 @@ def compile_to_llvm(program: ast.Program) -> str:
             aliases.append(emitter.string_const(reg_name))
         ctor_reg_meta[ctor.name] = (aliases, len(ctor.arg_types), ctor.tag)
 
-    if runtime_lets:
-        _emit_init_globals(runtime_lets, globals_info, sigs, ctor_sigs, adt_names, emitter)
-        emitter.emit("")
-
     for fn in fn_decls:
         if fn.name == "main" or fn.name.endswith(".main"):
             continue
@@ -672,6 +668,10 @@ def compile_to_llvm(program: ast.Program) -> str:
         setattr(info.expr, "_lambda_info", info)
         _emit_lambda_helper(info, globals_info, sigs, ctor_sigs, adt_names, emitter)
         emitter.lifted_defs.append("")
+
+    if runtime_lets:
+        _emit_init_globals(runtime_lets, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        emitter.emit("")
 
     for fn in fn_decls:
         _emit_fn(fn, sigs, ctor_sigs, ctor_reg_meta, globals_info, adt_names, runtime_lets, emitter)
