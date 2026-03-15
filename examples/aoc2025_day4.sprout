@@ -123,7 +123,9 @@ fn collect_non_empty_lines(lines: Vec String, index: Int, total: Int, acc: Vec S
     )
 
 fn parse_grid(raw: String) -> Vec String =
-  let_collect_non_empty_lines(string_lines(raw))
+  raw
+  |> string_lines
+  |> let_collect_non_empty_lines
 
 fn let_collect_non_empty_lines(lines: Vec String) -> Vec String =
   collect_non_empty_lines(lines, 0, vec_length(lines), vec_empty())
@@ -132,7 +134,9 @@ fn solve_grid(grid: Vec String) -> Answers =
   Answers(count_accessible_now(grid), remove_accessible_layers(grid, 0))
 
 export fn solve_stdin() -> Answers =
-  solve_grid(parse_grid(read_file("-")))
+  read_file("-")
+  |> parse_grid
+  |> solve_grid
 
 fn main() -> IO Unit =
   print(solve_stdin())
