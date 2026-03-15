@@ -267,6 +267,55 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call ptr @malloc(i64 %t", ir)
         self.assertIn("@__sprout_fn_closure_", ir)
 
+    def test_compile_tuple_match_to_llvm(self) -> None:
+        src = """
+        fn sum_pair(pair: (Int, Int)) -> Int =
+          match pair with
+          | (x, y) -> x + y
+
+        fn main() -> Int =
+          print_int(sum_pair((20, 22)))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define i64 @sum_pair({ i64, i64 } %pair)", ir)
+        self.assertIn("extractvalue { i64, i64 } %pair, 0", ir)
+        self.assertIn("extractvalue { i64, i64 } %pair, 1", ir)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_compile_tuple_match(self) -> None:
+        src = """
+        fn sum_pair(pair: (Int, Int)) -> Int =
+          match pair with
+          | (x, y) -> x + y
+
+        fn main() -> Int =
+          print_int(sum_pair((20, 22)))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "42")
+            self.assertEqual(run.returncode, 42)
+
     def test_compile_tcp_builtins_to_llvm(self) -> None:
         src = """
         fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b

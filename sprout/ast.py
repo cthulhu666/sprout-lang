@@ -145,6 +145,11 @@ class StringExpr(Expr):
     value: str
 
 
+@dataclass
+class TupleExpr(Expr):
+    items: list[Expr]
+
+
 class Pattern:
     pass
 
@@ -175,6 +180,11 @@ class StringPattern(Pattern):
 
 
 @dataclass
+class TuplePattern(Pattern):
+    items: list[Pattern]
+
+
+@dataclass
 class ConstructorPattern(Pattern):
     name: str
     args: list[Pattern] = field(default_factory=list)
@@ -199,6 +209,11 @@ class TypeApply(TypeExpr):
 class TypeArrow(TypeExpr):
     left: TypeExpr
     right: TypeExpr
+
+
+@dataclass
+class TupleType(TypeExpr):
+    items: list[TypeExpr]
 
 
 def attach_loc(node: Any, line: int, column: int) -> Any:

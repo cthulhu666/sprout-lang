@@ -296,6 +296,33 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "42")
 
+    def test_run_tuple_match(self) -> None:
+        src = """
+        fn sum_pair(pair: (Int, Int)) -> Int =
+          match pair with
+          | (x, y) -> x + y
+
+        fn main() -> IO Unit =
+          print(sum_pair((20, 22)))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_run_nested_tuple_match(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          match (1, (20, 22)) with
+          | (_, (x, y)) -> print(x + y)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
     def test_tail_recursive_function_does_not_overflow_python_stack(self) -> None:
         src = """
         fn sum_down(n: Int, acc: Int) -> Int =

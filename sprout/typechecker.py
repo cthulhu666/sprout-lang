@@ -57,6 +57,11 @@ class TApp(Type):
 
 
 @dataclass(frozen=True)
+class TTuple(Type):
+    items: tuple[Type, ...]
+
+
+@dataclass(frozen=True)
 class Scheme:
     vars: tuple[str, ...]
     type: Type
@@ -113,6 +118,8 @@ def apply(subst: dict[str, Type], typ: Type) -> Type:
         return TFunc(apply(subst, typ.arg), apply(subst, typ.ret))
     if isinstance(typ, TApp):
         return TApp(apply(subst, typ.base), apply(subst, typ.arg))
+    if isinstance(typ, TTuple):
+        return TTuple(tuple(apply(subst, item) for item in typ.items))
     return typ
 
 
@@ -123,6 +130,11 @@ def ftv(typ: Type) -> set[str]:
         return ftv(typ.arg) | ftv(typ.ret)
     if isinstance(typ, TApp):
         return ftv(typ.base) | ftv(typ.arg)
+    if isinstance(typ, TTuple):
+        out: set[str] = set()
+        for item in typ.items:
+            out |= ftv(item)
+        return out
     return set()
 
 
@@ -171,6 +183,14 @@ def unify(state: InferState, left: Type, right: Type) -> None:
         unify(state, left.base, right.base)
         unify(state, left.arg, right.arg)
         return
+    if isinstance(left, TTuple) and isinstance(right, TTuple):
+        if len(left.items) != len(right.items):
+            raise TypeCheckError(
+                f"Tuple arity mismatch: {len(left.items)} vs {len(right.items)}"
+            )
+        for left_item, right_item in zip(left.items, right.items):
+            unify(state, left_item, right_item)
+        return
 
     raise TypeCheckError(f"Type mismatch: {type_to_string(left)} vs {type_to_string(right)}")
 
@@ -185,6 +205,8 @@ def instantiate(state: InferState, scheme: Scheme) -> Type:
             return TFunc(go(typ.arg), go(typ.ret))
         if isinstance(typ, TApp):
             return TApp(go(typ.base), go(typ.arg))
+        if isinstance(typ, TTuple):
+            return TTuple(tuple(go(item) for item in typ.items))
         return typ
 
     return go(scheme.type)
@@ -204,6 +226,8 @@ def type_to_string(typ: Type) -> str:
         return typ.name
     if isinstance(typ, TApp):
         return f"{type_to_string(typ.base)} {type_to_string(typ.arg)}"
+    if isinstance(typ, TTuple):
+        return "(" + ", ".join(type_to_string(item) for item in typ.items) + ")"
     if isinstance(typ, TFunc):
         left = type_to_string(typ.arg)
         right = type_to_string(typ.ret)
@@ -246,6 +270,10 @@ def parse_type_expr(
         return TFunc(
             parse_type_expr(node.left, local_vars, allow_implicit_type_vars, state),
             parse_type_expr(node.right, local_vars, allow_implicit_type_vars, state),
+        )
+    if isinstance(node, ast.TupleType):
+        return TTuple(
+            tuple(parse_type_expr(item, local_vars, allow_implicit_type_vars, state) for item in node.items)
         )
     raise TypeCheckError(f"Unsupported type expression {node}")
 
@@ -325,6 +353,8 @@ def _type_expr_key(node: ast.TypeExpr) -> tuple:
         return ("apply", _type_expr_key(node.base), _type_expr_key(node.arg))
     if isinstance(node, ast.TypeArrow):
         return ("arrow", _type_expr_key(node.left), _type_expr_key(node.right))
+    if isinstance(node, ast.TupleType):
+        return ("tuple", tuple(_type_expr_key(item) for item in node.items))
     raise TypeCheckError(f"Unsupported type expression {node}")
 
 
@@ -399,6 +429,8 @@ def substitute_type_vars(typ: Type, subst: dict[str, Type]) -> Type:
         return TFunc(substitute_type_vars(typ.arg, subst), substitute_type_vars(typ.ret, subst))
     if isinstance(typ, TApp):
         return TApp(substitute_type_vars(typ.base, subst), substitute_type_vars(typ.arg, subst))
+    if isinstance(typ, TTuple):
+        return TTuple(tuple(substitute_type_vars(item, subst) for item in typ.items))
     return typ
 
 
@@ -412,6 +444,8 @@ def type_to_ast_expr(typ: Type) -> ast.TypeExpr:
         return ast.TypeApply(base=type_to_ast_expr(typ.base), arg=type_to_ast_expr(typ.arg))
     if isinstance(typ, TFunc):
         return ast.TypeArrow(left=type_to_ast_expr(typ.arg), right=type_to_ast_expr(typ.ret))
+    if isinstance(typ, TTuple):
+        return ast.TupleType(items=[type_to_ast_expr(item) for item in typ.items])
     raise TypeCheckError(f"Unsupported type for AST conversion: {typ}")
 
 
@@ -433,6 +467,10 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
             visit_expr(expr.condition)
             visit_expr(expr.then_branch)
             visit_expr(expr.else_branch)
+            return
+        if isinstance(expr, ast.TupleExpr):
+            for item in expr.items:
+                visit_expr(item)
             return
         if isinstance(expr, ast.MatchExpr):
             visit_expr(expr.scrutinee)
@@ -568,6 +606,9 @@ def infer_expr(
         return _mark_expr_type(expr, BOOL)
     if isinstance(expr, ast.StringExpr):
         return _mark_expr_type(expr, STRING)
+    if isinstance(expr, ast.TupleExpr):
+        item_types = [infer_expr(item, env, state, type_decls, global_methods) for item in expr.items]
+        return _mark_expr_type(expr, TTuple(tuple(item_types)))
     if isinstance(expr, ast.VarExpr):
         scheme = env.get(expr.name)
         if scheme is None:
@@ -724,6 +765,23 @@ def infer_pattern(
         return None
     if isinstance(pattern, ast.StringPattern):
         unify_at(state, expected_type, STRING, pattern)
+        return None
+    if isinstance(pattern, ast.TuplePattern):
+        expected = apply(state.subst, expected_type)
+        if isinstance(expected, TVar):
+            fresh_items = tuple(state.fresh() for _ in pattern.items)
+            tuple_type = TTuple(fresh_items)
+            unify_at(state, expected, tuple_type, pattern)
+            expected = apply(state.subst, tuple_type)
+        if not isinstance(expected, TTuple):
+            raise tc_error(f"Tuple pattern expects tuple type, got {type_to_string(expected)}", pattern)
+        if len(expected.items) != len(pattern.items):
+            raise tc_error(
+                f"Tuple pattern expects {len(expected.items)} items, got {len(pattern.items)}",
+                pattern,
+            )
+        for sub_pattern, item_type in zip(pattern.items, expected.items):
+            infer_pattern(sub_pattern, item_type, env, state, type_decls)
         return None
     if isinstance(pattern, ast.ConstructorPattern):
         ctor_scheme = env.get(pattern.name)

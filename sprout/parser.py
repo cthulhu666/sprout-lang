@@ -416,6 +416,12 @@ class Parser:
         if self.match("SYMBOL", "("):
             open_tok = self.tokens[self.i - 1]
             expr = self.parse_expr()
+            if self.match("SYMBOL", ","):
+                items = [expr, self.parse_expr()]
+                while self.match("SYMBOL", ","):
+                    items.append(self.parse_expr())
+                self.expect("SYMBOL", ")")
+                return self.mark(ast.TupleExpr(items=items), open_tok)
             self.expect("SYMBOL", ")")
             return self.mark(expr, open_tok)
         t = self.current()
@@ -437,6 +443,17 @@ class Parser:
         if self.check("STRING"):
             tok = self.advance()
             return self.mark(ast.StringPattern(value=tok.value), tok)
+        if self.match("SYMBOL", "("):
+            open_tok = self.tokens[self.i - 1]
+            inner = self.parse_pattern()
+            if self.match("SYMBOL", ","):
+                items = [inner, self.parse_pattern()]
+                while self.match("SYMBOL", ","):
+                    items.append(self.parse_pattern())
+                self.expect("SYMBOL", ")")
+                return self.mark(ast.TuplePattern(items=items), open_tok)
+            self.expect("SYMBOL", ")")
+            return self.mark(inner, open_tok)
 
         name_token = self.expect("IDENT", label="pattern")
         name = name_token.value
@@ -472,6 +489,12 @@ class Parser:
         if self.match("SYMBOL", "("):
             open_tok = self.tokens[self.i - 1]
             inner = self.parse_pattern()
+            if self.match("SYMBOL", ","):
+                items = [inner, self.parse_pattern()]
+                while self.match("SYMBOL", ","):
+                    items.append(self.parse_pattern())
+                self.expect("SYMBOL", ")")
+                return self.mark(ast.TuplePattern(items=items), open_tok)
             self.expect("SYMBOL", ")")
             return self.mark(inner, open_tok)
         t = self.current()
@@ -512,7 +535,14 @@ class Parser:
         if self.check("IDENT"):
             return ast.TypeName(name=self.advance().value)
         if self.match("SYMBOL", "("):
+            open_tok = self.tokens[self.i - 1]
             inner = self.parse_type_expr()
+            if self.match("SYMBOL", ","):
+                items = [inner, self.parse_type_expr()]
+                while self.match("SYMBOL", ","):
+                    items.append(self.parse_type_expr())
+                self.expect("SYMBOL", ")")
+                return self.mark(ast.TupleType(items=items), open_tok)
             self.expect("SYMBOL", ")")
             return inner
         t = self.current()

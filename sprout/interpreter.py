@@ -58,6 +58,11 @@ class BytesValue:
     items: bytes
 
 
+@dataclass(frozen=True)
+class TupleValue:
+    items: tuple[object, ...]
+
+
 @dataclass
 class ConstructorValue:
     name: str
@@ -198,6 +203,8 @@ def format_value(value: object) -> str:
         return "{" + rendered + "}"
     if isinstance(value, BytesValue):
         return "Bytes[" + ", ".join(str(item) for item in value.items) + "]"
+    if isinstance(value, TupleValue):
+        return "(" + ", ".join(format_value(item) for item in value.items) + ")"
     if value is None:
         return "()"
     return str(value)
@@ -217,6 +224,8 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
         return expr.value
     if isinstance(expr, ast.StringExpr):
         return expr.value
+    if isinstance(expr, ast.TupleExpr):
+        return TupleValue(items=tuple(eval_expr(item, env) for item in expr.items))
     if isinstance(expr, ast.VarExpr):
         try:
             return env.get(expr.name)
@@ -399,6 +408,18 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
         return {} if value == pattern.value else None
     if isinstance(pattern, ast.StringPattern):
         return {} if value == pattern.value else None
+    if isinstance(pattern, ast.TuplePattern):
+        if not isinstance(value, TupleValue):
+            return None
+        if len(value.items) != len(pattern.items):
+            return None
+        merged: dict[str, object] = {}
+        for sub_pattern, sub_value in zip(pattern.items, value.items):
+            sub = match_pattern(sub_pattern, sub_value)
+            if sub is None:
+                return None
+            merged.update(sub)
+        return merged
 
     if isinstance(pattern, ast.ConstructorPattern):
         if not isinstance(value, ADTValue):

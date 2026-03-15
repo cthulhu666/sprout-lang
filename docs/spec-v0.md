@@ -64,7 +64,7 @@ Type forms:
 - Type variable: `a`, `b`, `t`
 - Function type: `a -> b`
 - Parameterized type: `Maybe a`, `Result e a`
-- Tuple type (optional v0.1): `(a, b)`
+- Tuple type: `(a, b, c)`
 
 Type inference:
 
@@ -127,6 +127,21 @@ match m with
 
 Patterns are checked top-to-bottom; first match wins.
 
+Tuple expressions use comma-separated elements inside parentheses:
+
+```sprout
+(x, y, z)
+```
+
+`(x)` remains ordinary grouping, not a 1-tuple.
+
+Tuple patterns are positional and arity-sensitive:
+
+```sprout
+match pair with
+| (x, y) -> x
+```
+
 ### 5.6 ADT declaration
 
 ```sprout
@@ -146,8 +161,7 @@ type Maybe a =
 - `a || b`: evaluate `b` only if `a` is `false`.
 6. `if`: evaluate condition, then exactly one branch.
 7. `match`: evaluate scrutinee once, then patterns in order, evaluate first matching branch.
-8. Constructors (and tuples, if present in a v0.1 extension) evaluate fields
-   left-to-right before construction.
+8. Constructors and tuples evaluate fields left-to-right before construction.
 9. Top-level declarations evaluate in source order.
 
 Effect note for v0:
@@ -170,6 +184,7 @@ Effect note for v0:
 7. ADT constructors produce values of their declared type.
 8. `IO a` is treated as an ordinary type constructor in v0, with no special
    typing rules beyond normal type checking.
+9. Tuple expressions and tuple patterns use structural, exact-arity typing.
 
 ## 8. Standard Library Math Module
 
@@ -259,6 +274,14 @@ fn with_default(m: Maybe Int, d: Int) -> Int =
   match m with
   | Just x -> x
   | Nothing -> d
+```
+
+### 10.6 Tuple match
+
+```sprout
+fn swap(pair: (Int, Bool)) -> (Bool, Int) =
+  match pair with
+  | (x, y) -> (y, x)
 ```
 
 ### 10.6 Generic map over Maybe

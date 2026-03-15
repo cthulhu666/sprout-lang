@@ -165,6 +165,25 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
 
+    def test_typecheck_tuples(self) -> None:
+        src = """
+        fn swap(pair: (Int, Bool)) -> (Bool, Int) =
+          match pair with
+          | (x, y) -> (y, x)
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["swap"], "(Int, Bool) -> (Bool, Int)")
+
+    def test_type_error_tuple_pattern_arity_mismatch(self) -> None:
+        src = """
+        fn bad(pair: (Int, Bool)) -> Int =
+          match pair with
+          | (x, y, z) -> x
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Tuple pattern expects 2 items, got 3", str(ctx.exception))
+
     def test_typecheck_string_builtins(self) -> None:
         src = """
         fn main() -> IO Unit =

@@ -20,6 +20,10 @@ I32 = LLType("i32")
 I8_PTR = LLType("ptr")
 
 
+def _tuple_lltype(items: list[LLType]) -> LLType:
+    return LLType("{ " + ", ".join(item.text for item in items) + " }")
+
+
 @dataclass
 class FnSig:
     name: str
@@ -120,6 +124,7 @@ class Value:
     typ: LLType
     ir: str
     callable_sig: "CallSig | None" = None
+    tuple_items: list[LLType] | None = None
 
 
 @dataclass
@@ -236,7 +241,45 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
     if isinstance(node, ast.TypeArrow):
         # Function-typed values are lowered as opaque callable pointers.
         return I8_PTR
+    if isinstance(node, ast.TupleType):
+        return _tuple_lltype([_type_from_ast(item, adt_names) for item in node.items])
     raise CodegenError(f"Unsupported type for LLVM backend: {node}")
+
+
+def _tuple_item_types_from_type_expr(node: ast.TypeExpr | None, adt_names: set[str]) -> list[LLType] | None:
+    if not isinstance(node, ast.TupleType):
+        return None
+    return [_type_from_ast(item, adt_names) for item in node.items]
+
+
+def _tuple_item_types_from_lltype(typ: LLType) -> list[LLType] | None:
+    text = typ.text.strip()
+    if not (text.startswith("{ ") and text.endswith(" }")):
+        return None
+    inner = text[2:-2].strip()
+    if not inner:
+        return []
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for idx, ch in enumerate(inner):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(inner[start:idx].strip())
+            start = idx + 1
+    parts.append(inner[start:].strip())
+    return [LLType(part) for part in parts]
+
+
+def _zero_init_for_type(typ: LLType) -> str:
+    if typ == I8_PTR:
+        return "null"
+    if _tuple_item_types_from_lltype(typ) is not None:
+        return "zeroinitializer"
+    return "0"
 
 
 def _type_base_name(node: ast.TypeExpr) -> str | None:
@@ -406,12 +449,23 @@ def _value_for_inferred_type(
         return value
     ll_type, call_sig = _lower_value_type(inferred_type, adt_names)
     coerced = _coerce_value(value, ll_type, emitter)
-    return Value(typ=coerced.typ, ir=coerced.ir, callable_sig=value.callable_sig or call_sig)
+    tuple_items = _tuple_item_types_from_type_expr(inferred_type, adt_names)
+    return Value(
+        typ=coerced.typ,
+        ir=coerced.ir,
+        callable_sig=value.callable_sig or call_sig,
+        tuple_items=tuple_items if tuple_items is not None else coerced.tuple_items,
+    )
 
 
 def _pattern_bound_names(pattern: ast.Pattern) -> set[str]:
     if isinstance(pattern, ast.VarPattern):
         return {pattern.name}
+    if isinstance(pattern, ast.TuplePattern):
+        out: set[str] = set()
+        for item in pattern.items:
+            out |= _pattern_bound_names(item)
+        return out
     if isinstance(pattern, ast.ConstructorPattern):
         out: set[str] = set()
         for arg in pattern.args:
@@ -437,6 +491,10 @@ def _collect_free_vars(expr: ast.Expr, bound: set[str], out: list[str], seen: se
             branch_bound = bound | _pattern_bound_names(branch.pattern)
             _collect_free_vars(branch.value, branch_bound, out, seen)
         return
+    if isinstance(expr, ast.TupleExpr):
+        for item in expr.items:
+            _collect_free_vars(item, bound, out, seen)
+        return
     if isinstance(expr, ast.BinaryExpr):
         _collect_free_vars(expr.left, bound, out, seen)
         _collect_free_vars(expr.right, bound, out, seen)
@@ -452,6 +510,7 @@ def _collect_free_vars(expr: ast.Expr, bound: set[str], out: list[str], seen: se
     if isinstance(expr, ast.LambdaExpr):
         inner_bound = bound | {param.name for param in expr.params}
         _collect_free_vars(expr.body, inner_bound, out, seen)
+        return
 
 
 def _gather_lambda_infos(
@@ -490,6 +549,10 @@ def _gather_lambda_infos(
         _gather_lambda_infos(expr.condition, available_locals, sigs, globals_info, adt_names, infos, emitter)
         _gather_lambda_infos(expr.then_branch, available_locals, sigs, globals_info, adt_names, infos, emitter)
         _gather_lambda_infos(expr.else_branch, available_locals, sigs, globals_info, adt_names, infos, emitter)
+        return
+    if isinstance(expr, ast.TupleExpr):
+        for item in expr.items:
+            _gather_lambda_infos(item, available_locals, sigs, globals_info, adt_names, infos, emitter)
         return
     if isinstance(expr, ast.MatchExpr):
         _gather_lambda_infos(expr.scrutinee, available_locals, sigs, globals_info, adt_names, infos, emitter)
@@ -591,6 +654,8 @@ def _infer_expr_type(
         return I1
     if isinstance(expr, ast.StringExpr):
         return I8_PTR
+    if isinstance(expr, ast.TupleExpr):
+        return _tuple_lltype([_infer_expr_type(item, globals_info, sigs, ctor_sigs) for item in expr.items])
     if isinstance(expr, ast.VarExpr):
         if expr.name in globals_info:
             return globals_info[expr.name].typ
@@ -777,7 +842,7 @@ def compile_to_llvm(program: ast.Program) -> str:
             assert info.const_value_ir is not None
             module_lines.append(f"@{name} = private constant {info.typ.text} {info.const_value_ir}")
         else:
-            init = "null" if info.typ == I8_PTR else "0"
+            init = _zero_init_for_type(info.typ)
             module_lines.append(f"@{name} = global {info.typ.text} {init}")
     module_lines.extend(emitter.string_globals)
     if globals_info or emitter.string_globals:
@@ -838,6 +903,11 @@ def _eval_const_expr(expr: ast.Expr, globals_: dict[str, GlobalConst]) -> Global
         return GlobalConst(I64, str(expr.value))
     if isinstance(expr, ast.BoolExpr):
         return GlobalConst(I1, "1" if expr.value else "0")
+    if isinstance(expr, ast.TupleExpr):
+        items = [_eval_const_expr(item, globals_) for item in expr.items]
+        tuple_typ = _tuple_lltype([item.typ for item in items])
+        value_ir = "{" + ", ".join(f"{item.typ.text} {item.value_ir}" for item in items) + "}"
+        return GlobalConst(tuple_typ, value_ir)
     if isinstance(expr, ast.VarExpr):
         ref = globals_.get(expr.name)
         if ref is None:
@@ -916,7 +986,12 @@ def _emit_fn(
         _, call_sig = _lower_value_type(p.type_expr, adt_names)
         pname = f"%{p.name}"
         params.append(f"{typ.text} {pname}")
-        locals_[p.name] = Value(typ=typ, ir=pname, callable_sig=call_sig)
+        locals_[p.name] = Value(
+            typ=typ,
+            ir=pname,
+            callable_sig=call_sig,
+            tuple_items=_tuple_item_types_from_type_expr(p.type_expr, adt_names),
+        )
 
     is_entry_main = fn.name == "main" or fn.name.endswith(".main")
     emitted_name = "main" if is_entry_main else fn.name
@@ -992,6 +1067,18 @@ def _emit_expr(
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = getelementptr inbounds [{length} x i8], ptr {gname}, i64 0, i64 0")
         return Value(I8_PTR, tmp)
+    if isinstance(expr, ast.TupleExpr):
+        items = [_emit_expr(item, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for item in expr.items]
+        tuple_items = [item.typ for item in items]
+        tuple_typ = _tuple_lltype(tuple_items)
+        current = "undef"
+        for idx, item in enumerate(items):
+            next_val = emitter.tmp()
+            emitter.emit(
+                f"  {next_val} = insertvalue {tuple_typ.text} {current}, {item.typ.text} {item.ir}, {idx}"
+            )
+            current = next_val
+        return Value(tuple_typ, current, tuple_items=tuple_items)
     if isinstance(expr, ast.VarExpr):
         val = locals_.get(expr.name)
         if val is not None:
@@ -1188,7 +1275,8 @@ def _emit_if(
         f"  {phi} = phi {then_val.typ.text} [ {then_val.ir}, %{then_end} ], [ {else_val.ir}, %{else_end} ]"
     )
     callable_sig = then_val.callable_sig if then_val.callable_sig == else_val.callable_sig else None
-    return Value(then_val.typ, phi, callable_sig=callable_sig)
+    tuple_items = then_val.tuple_items if then_val.tuple_items == else_val.tuple_items else None
+    return Value(then_val.typ, phi, callable_sig=callable_sig, tuple_items=tuple_items)
 
 
 def _emit_match(
@@ -1503,7 +1591,20 @@ def _finalize_match_result(branch_vals: list[tuple[Value, str]], done_label: str
     callable_sig = branch_vals[0][0].callable_sig
     if any(val.callable_sig != callable_sig for val, _ in branch_vals[1:]):
         callable_sig = None
-    return Value(out_type, phi, callable_sig=callable_sig)
+    tuple_items = branch_vals[0][0].tuple_items
+    if any(val.tuple_items != tuple_items for val, _ in branch_vals[1:]):
+        tuple_items = None
+    return Value(out_type, phi, callable_sig=callable_sig, tuple_items=tuple_items)
+
+
+def _emit_tuple_field(value: Value, idx: int, emitter: Emitter) -> Value:
+    tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
+    if tuple_items is None:
+        raise CodegenError("Tuple operation expects tuple metadata in backend")
+    item_typ = tuple_items[idx]
+    out = emitter.tmp()
+    emitter.emit(f"  {out} = extractvalue {value.typ.text} {value.ir}, {idx}")
+    return Value(item_typ, out, tuple_items=_tuple_item_types_from_lltype(item_typ))
 
 
 def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, CtorSig], emitter: Emitter) -> Value:
@@ -1529,6 +1630,22 @@ def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, 
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value.ir}, ptr {literal_ptr})")
         return Value(I1, tmp)
+    if isinstance(pattern, ast.TuplePattern):
+        tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
+        if tuple_items is None:
+            raise CodegenError("Tuple pattern expects tuple scrutinee")
+        if len(pattern.items) != len(tuple_items):
+            raise CodegenError(
+                f"Tuple pattern expects {len(tuple_items)} items, got {len(pattern.items)}"
+            )
+        acc = Value(I1, "1")
+        for idx, item_pattern in enumerate(pattern.items):
+            field = _emit_tuple_field(value, idx, emitter)
+            test = _emit_pattern_test(item_pattern, field, ctor_sigs, emitter)
+            and_tmp = emitter.tmp()
+            emitter.emit(f"  {and_tmp} = and i1 {acc.ir}, {test.ir}")
+            acc = Value(I1, and_tmp)
+        return acc
     if isinstance(pattern, ast.ConstructorPattern):
         if value.typ != I64:
             raise CodegenError("Constructor pattern expects ADT handle scrutinee")
@@ -1570,6 +1687,13 @@ def _emit_pattern_bind(
         locals_[pattern.name] = value
         return
     if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
+        return
+    if isinstance(pattern, ast.TuplePattern):
+        tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
+        if tuple_items is None:
+            raise CodegenError("Tuple pattern bind expects tuple scrutinee")
+        for idx, sub in enumerate(pattern.items):
+            _emit_pattern_bind(sub, _emit_tuple_field(value, idx, emitter), locals_, ctor_sigs, emitter)
         return
     if isinstance(pattern, ast.ConstructorPattern):
         ctor = ctor_sigs.get(pattern.name)

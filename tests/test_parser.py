@@ -224,6 +224,26 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(empty_call.callee, ast.VarExpr)
         self.assertEqual(empty_call.callee.name, "dict_empty")
 
+    def test_parse_tuple_expression_pattern_and_type(self) -> None:
+        src = """
+        fn swap(pair: (Int, Bool)) -> (Bool, Int) =
+          match pair with
+          | (x, y) -> (y, x)
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.params[0].type_expr, ast.TupleType)
+        self.assertIsInstance(fn_decl.return_type, ast.TupleType)
+        self.assertIsInstance(fn_decl.body, ast.MatchExpr)
+        self.assertIsInstance(fn_decl.body.branches[0].pattern, ast.TuplePattern)
+        self.assertIsInstance(fn_decl.body.branches[0].value, ast.TupleExpr)
+
+    def test_parse_parenthesized_expression_is_not_singleton_tuple(self) -> None:
+        src = "fn main() -> Int = (1)"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.IntExpr)
+
     def test_parse_empty_dict_literal_desugars_to_dict_empty(self) -> None:
         src = "fn xs() -> Dict Int = {}"
         program = parse(src)
