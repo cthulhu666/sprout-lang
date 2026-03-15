@@ -1021,6 +1021,116 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "66")
 
+    def test_stdlib_math_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+                import stdlib.math (abs, clamp, gcd, is_even, is_odd, lcm, max, min, mod, pow, sign)
+
+                fn unwrap_or(value: Maybe Int, fallback: Int) -> Int =
+                  match value with
+                  | Just n -> n
+                  | Nothing -> fallback
+
+                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+                fn main() -> IO Unit =
+                  seq(
+                    print(abs(-7)),
+                    seq(
+                      print(min(3, -2)),
+                      seq(
+                        print(max(3, -2)),
+                        seq(
+                          print(clamp(15, 0, 10)),
+                          seq(
+                            print(sign(-9)),
+                            seq(
+                              print(sign(0)),
+                              seq(
+                                print(sign(9)),
+                                seq(
+                                  print(unwrap_or(pow(2, 10), -1)),
+                                  seq(
+                                    print(unwrap_or(pow(2, -1), -1)),
+                                    seq(
+                                      print(unwrap_or(mod(-17, 5), -1)),
+                                      seq(
+                                        print(unwrap_or(mod(17, 0), -1)),
+                                        seq(
+                                          print(unwrap_or(mod(17, -5), -1)),
+                                          seq(
+                                            print(gcd(54, 24)),
+                                            seq(
+                                              print(gcd(0, 9)),
+                                              seq(
+                                                print(lcm(6, 8)),
+                                                seq(
+                                                  print(lcm(0, 9)),
+                                                  seq(
+                                                    print(is_even(10)),
+                                                    seq(
+                                                      print(is_even(7)),
+                                                      seq(print(is_odd(10)), print(is_odd(7)))
+                                                    )
+                                                  )
+                                                )
+                                              )
+                                            )
+                                          )
+                                        )
+                                      )
+                                    )
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join(
+                    [
+                        "7",
+                        "-2",
+                        "3",
+                        "10",
+                        "-1",
+                        "0",
+                        "1",
+                        "1024",
+                        "-1",
+                        "3",
+                        "-1",
+                        "-1",
+                        "6",
+                        "9",
+                        "24",
+                        "0",
+                        "True",
+                        "False",
+                        "False",
+                        "True",
+                    ]
+                ),
+            )
+
     def test_stdlib_functor_and_foldable_instances(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

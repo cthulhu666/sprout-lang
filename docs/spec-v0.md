@@ -153,7 +153,37 @@ Effect note for v0:
 7. `IO a` is treated as an ordinary type constructor in v0, with no special
    typing rules beyond normal type checking.
 
-## 8. Errors
+## 8. Standard Library Math Module
+
+Sprout v0 includes a normative integer-only standard library math module:
+`stdlib.math`.
+
+Exports:
+
+- `abs(x: Int) -> Int`
+- `min(x: Int, y: Int) -> Int`
+- `max(x: Int, y: Int) -> Int`
+- `clamp(x: Int, lo: Int, hi: Int) -> Int`
+- `sign(x: Int) -> Int`
+- `pow(base: Int, exp: Int) -> Maybe Int`
+- `mod(x: Int, n: Int) -> Maybe Int`
+- `gcd(x: Int, y: Int) -> Int`
+- `lcm(x: Int, y: Int) -> Int`
+- `is_even(x: Int) -> Bool`
+- `is_odd(x: Int) -> Bool`
+
+Semantics:
+
+- `stdlib.math` does not introduce additional numeric types in v0.
+- `mod(x, n)` uses Euclidean modulo.
+- If `n > 0`, `mod(x, n)` returns `Just r` where `0 <= r < n`.
+- If `n <= 0`, `mod(x, n)` returns `Nothing`.
+- `pow(base, exp)` returns `Nothing` when `exp < 0`; otherwise it returns
+  `Just` of the integer power.
+- The presence of `pow` and `mod` in `stdlib.math` does not imply implicit
+  numeric coercions, fractional arithmetic, or floating-point support in v0.
+
+## 9. Errors
 
 Compiler diagnostics must include:
 
@@ -163,36 +193,36 @@ Compiler diagnostics must include:
 
 Prefer one clear root-cause error over cascading follow-up errors.
 
-## 9. Canonical Examples
+## 10. Canonical Examples
 
-### 9.1 Basic function
+### 10.1 Basic function
 
 ```sprout
 fn inc(x: Int) -> Int = x + 1
 ```
 
-### 9.2 Inferred let
+### 10.2 Inferred let
 
 ```sprout
 let x = 10
 let y = x + 5
 ```
 
-### 9.3 Boolean short-circuit
+### 10.3 Boolean short-circuit
 
 ```sprout
 fn safe_div_ok(a: Int, b: Int) -> Bool =
   b != 0 && (a / b) > 0
 ```
 
-### 9.4 If expression
+### 10.4 If expression
 
 ```sprout
 fn sign(n: Int) -> String =
   if n > 0 then "positive" else "zero-or-negative"
 ```
 
-### 9.5 ADT + match
+### 10.5 ADT + match
 
 ```sprout
 type Maybe a =
@@ -205,7 +235,7 @@ fn with_default(m: Maybe Int, d: Int) -> Int =
   | Nothing -> d
 ```
 
-### 9.6 Generic map over Maybe
+### 10.6 Generic map over Maybe
 
 ```sprout
 fn map(m: Maybe a, f: a -> b) -> Maybe b =
@@ -214,28 +244,28 @@ fn map(m: Maybe a, f: a -> b) -> Maybe b =
   | Nothing -> Nothing
 ```
 
-### 9.7 Recursive function
+### 10.7 Recursive function
 
 ```sprout
 fn fact(n: Int) -> Int =
   if n == 0 then 1 else n * fact(n - 1)
 ```
 
-### 9.8 Top-level binding order
+### 10.8 Top-level binding order
 
 ```sprout
 let a = 1
 let b = a + 1
 ```
 
-### 9.9 Main entrypoint
+### 10.9 Main entrypoint
 
 ```sprout
 fn main() -> IO Unit =
   print("hello")
 ```
 
-### 9.10 Non-exhaustive match (compile error)
+### 10.10 Non-exhaustive match (compile error)
 
 ```sprout
 type Maybe a =
@@ -248,3 +278,12 @@ fn bad(m: Maybe Int) -> Int =
 ```
 
 Compiler should report non-exhaustive pattern matching.
+
+### 10.11 Using `stdlib.math`
+
+```sprout
+import stdlib.math as math
+
+fn wrap(idx: Int, size: Int) -> Maybe Int =
+  math.mod(idx, size)
+```

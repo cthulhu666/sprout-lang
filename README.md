@@ -145,6 +145,32 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `when_ok(r, f)` runs `f` for `Ok` and preserves `r`
   - `when_error(r, f)` runs `f` for `Err` and preserves `r`
 
+Math module (in `stdlib/math.sprout`):
+
+- Int-only helper surface; this does not add `Float`, `Decimal`, or fixed-width integer types to v0
+- `abs(x) -> Int`
+- `min(x, y) -> Int`
+- `max(x, y) -> Int`
+- `clamp(x, lo, hi) -> Int`
+- `sign(x) -> Int`
+- `pow(base, exp) -> Maybe Int`
+- `mod(x, n) -> Maybe Int`
+- `gcd(x, y) -> Int`
+- `lcm(x, y) -> Int`
+- `is_even(x) -> Bool`
+- `is_odd(x) -> Bool`
+
+Math semantics:
+
+- `mod(x, n)` is Euclidean modulo
+- when `n > 0`, `mod(x, n)` returns `Just r` with `0 <= r < n`
+- when `n <= 0`, `mod(x, n)` returns `Nothing`
+- `pow(base, exp)` returns `Nothing` when `exp < 0`
+
+For module code, prefer:
+`import stdlib.math as math`
+then call helpers like `math.mod(...)` and `math.gcd(...)`.
+
 Example usage:
 
 ```sprout

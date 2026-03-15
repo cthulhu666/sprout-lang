@@ -1,0 +1,66 @@
+module stdlib.math
+import stdlib.collections (Maybe)
+
+fn int_abs(value: Int) -> Int =
+  if value < 0 then 0 - value
+  else value
+
+fn trunc_remainder(value: Int, divisor: Int) -> Int =
+  value - (value / divisor) * divisor
+
+fn euclidean_remainder(value: Int, modulus: Int) -> Int =
+  if trunc_remainder(value, modulus) < 0 then trunc_remainder(value, modulus) + modulus
+  else trunc_remainder(value, modulus)
+
+export fn abs(value: Int) -> Int =
+  int_abs(value)
+
+export fn min(left: Int, right: Int) -> Int =
+  if left <= right then left
+  else right
+
+export fn max(left: Int, right: Int) -> Int =
+  if left >= right then left
+  else right
+
+export fn clamp(value: Int, lo: Int, hi: Int) -> Int =
+  max(lo, min(value, hi))
+
+export fn sign(value: Int) -> Int =
+  if value < 0 then -1
+  else if value > 0 then 1
+  else 0
+
+export fn mod(value: Int, modulus: Int) -> Maybe Int =
+  if modulus <= 0 then Nothing
+  else Just(euclidean_remainder(value, modulus))
+
+fn pow_loop(base: Int, exp: Int, acc: Int) -> Int =
+  if exp == 0 then acc
+  else pow_loop(base, exp - 1, acc * base)
+
+export fn pow(base: Int, exp: Int) -> Maybe Int =
+  if exp < 0 then Nothing
+  else Just(pow_loop(base, exp, 1))
+
+fn gcd_loop(left: Int, right: Int) -> Int =
+  if right == 0 then left
+  else
+    match mod(left, right) with
+    | Nothing -> left
+    | Just remainder -> gcd_loop(right, remainder)
+
+export fn gcd(left: Int, right: Int) -> Int =
+  gcd_loop(int_abs(left), int_abs(right))
+
+export fn lcm(left: Int, right: Int) -> Int =
+  if left == 0 || right == 0 then 0
+  else int_abs((left / gcd(left, right)) * right)
+
+export fn is_even(value: Int) -> Bool =
+  match mod(value, 2) with
+  | Just remainder -> remainder == 0
+  | Nothing -> false
+
+export fn is_odd(value: Int) -> Bool =
+  is_even(value) == false

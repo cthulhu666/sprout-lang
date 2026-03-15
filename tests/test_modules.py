@@ -511,6 +511,41 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "518")
 
+    def test_import_stdlib_math_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+                import stdlib.math (gcd, lcm, mod, pow)
+
+                fn unwrap_or(value: Maybe Int, fallback: Int) -> Int =
+                  match value with
+                  | Just n -> n
+                  | Nothing -> fallback
+
+                fn main() -> IO Unit =
+                  print(
+                    gcd(54, 24)
+                    + lcm(6, 8)
+                    + unwrap_or(mod(-17, 5), -100)
+                    + unwrap_or(pow(2, 5), -100)
+                    + unwrap_or(mod(9, 0), 1)
+                    + unwrap_or(pow(2, -1), 1)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "67")
+
     def test_import_examples_sentry_api_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
