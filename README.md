@@ -105,8 +105,8 @@ Runtime builtins (host-implemented):
 - `tcp_read(conn: Int) -> String`
 - `tcp_write(conn: Int, payload: String) -> IO Unit`
 - `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int`
-- `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError String`
-- `tcp_write_all(conn: Int, payload: String) -> Result stdlib.net.TcpError Int`
+- `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError Bytes`
+- `tcp_write_all(conn: Int, payload: Bytes) -> Result stdlib.net.TcpError Int`
 - `tcp_close(conn: Int) -> IO Unit`
 - `tcp_close_listener(listener: Int) -> IO Unit`
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
@@ -270,8 +270,10 @@ TCP client helper types (in `stdlib/net.sprout`):
 - `TcpConnection`
 - `TcpListener`
 - `connect(host, port) -> Result TcpError TcpConnection`
-- `read_exact(conn, count) -> Result TcpError String`
+- `read_exact(conn, count) -> Result TcpError Bytes`
 - `write_all(conn, payload) -> Result TcpError Int`
+- `read_exact_utf8(conn, count) -> Result TcpError String`
+- `write_all_utf8(conn, payload) -> Result TcpError Int`
 - `close(conn) -> IO Unit`
 - `listen_local(port) -> TcpListener`
 - `accept(listener) -> TcpConnection`
@@ -379,7 +381,7 @@ Load HTTP helpers:
 - `print_int(...)` external call.
 
 TCP server builtins are available in interpreter and native (`sprout compile --native`) modes.
-Typed TCP client builtins are also available; they still use `String` payloads for now, with `Bytes` planned next for raw protocol data.
+Typed TCP client builtins are also available and now use `Bytes` payloads for raw protocol data.
 Application code should prefer the typed `stdlib.net` wrapper API over bare `Int` socket handles.
 Raw `bytes_*` primitives are internal to `stdlib.*`; application code should use `stdlib.bytes`.
 `to_string` rejects invalid UTF-8 and decoded NUL bytes; `read_c_string` is the intended helper for null-terminated protocol strings.

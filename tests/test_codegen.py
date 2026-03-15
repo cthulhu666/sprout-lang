@@ -252,16 +252,16 @@ class CodegenTests(unittest.TestCase):
             spr_path.write_text(
                 """
                 module main
-                import stdlib.net (Result, TcpConnection, TcpError, connect, read_exact, write_all)
+                import stdlib.net (Result, TcpConnection, TcpError, connect, read_exact_utf8, write_all_utf8)
 
                 fn main() -> IO Unit =
                   match connect("127.0.0.1", 5432) with
                   | Err _ -> print("err")
                   | Ok conn ->
-                      match write_all(conn, "ping") with
+                      match write_all_utf8(conn, "ping") with
                       | Err _ -> print("write")
                       | Ok _ ->
-                          match read_exact(conn, 4) with
+                          match read_exact_utf8(conn, 4) with
                           | Err _ -> print("read")
                           | Ok body -> print(body)
                 """,
@@ -274,7 +274,7 @@ class CodegenTests(unittest.TestCase):
             ir = compile_to_llvm(program)
             self.assertIn("declare i64 @tcp_connect(ptr, i64)", ir)
             self.assertIn("declare i64 @tcp_read_exact(i64, i64)", ir)
-            self.assertIn("declare i64 @tcp_write_all(i64, ptr)", ir)
+            self.assertIn("declare i64 @tcp_write_all(i64, i64)", ir)
 
     def test_compile_env_get_builtin_to_llvm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -631,7 +631,7 @@ class CodegenTests(unittest.TestCase):
             spr_path.write_text(
                 f"""
                 module main
-                import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact, tcp_error_message, write_all)
+                import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact_utf8, tcp_error_message, write_all_utf8)
 
                 fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
 
@@ -639,10 +639,10 @@ class CodegenTests(unittest.TestCase):
                   seq(close(conn), print(message))
 
                 fn with_conn(conn: TcpConnection) -> IO Unit =
-                  match write_all(conn, "ping") with
+                  match write_all_utf8(conn, "ping") with
                   | Err err -> finish(conn, tcp_error_message(err))
                   | Ok _ ->
-                      match read_exact(conn, 4) with
+                      match read_exact_utf8(conn, 4) with
                       | Err err -> finish(conn, tcp_error_message(err))
                       | Ok body -> finish(conn, body)
 

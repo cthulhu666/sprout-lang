@@ -1290,23 +1290,27 @@ long long tcp_read_exact(long long conn, long long count) {
       (long long)(uintptr_t)"count must be >= 0"
     );
   }
-  char* buf = (char*)malloc((size_t)count + 1);
-  if (buf == NULL) tcp_fail("tcp_read_exact: out of memory");
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("tcp_read_exact: out of memory");
+  out->len = (size_t)count;
+  out->data = count == 0 ? NULL : (unsigned char*)malloc((size_t)count);
+  if (count > 0 && out->data == NULL) tcp_fail("tcp_read_exact: out of memory");
   size_t received = 0;
   while (received < (size_t)count) {
-    ssize_t n = recv(g_conn_fd[conn], buf + received, (size_t)count - received, 0);
+    ssize_t n = recv(g_conn_fd[conn], out->data + received, (size_t)count - received, 0);
     if (n == 0) {
-      free(buf);
+      free(out->data);
+      free(out);
       return tcp_net_err0("stdlib.net.TcpEndOfStream");
     }
     if (n < 0) {
-      free(buf);
+      free(out->data);
+      free(out);
       return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
     }
     received += (size_t)n;
   }
-  buf[count] = '\\0';
-  return tcp_net_ok((long long)(uintptr_t)buf);
+  return tcp_net_ok((long long)(uintptr_t)out);
 }
 
 long long tcp_write(long long conn, const char* payload) {
@@ -1323,11 +1327,12 @@ long long tcp_write(long long conn, const char* payload) {
   return 0;
 }
 
-long long tcp_write_all(long long conn, const char* payload) {
+long long tcp_write_all(long long conn, long long payload_h) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
   if (payload == NULL) tcp_fail("tcp_write_all: null payload");
-  size_t len = strlen(payload);
-  const char* p = payload;
+  size_t len = payload->len;
+  const unsigned char* p = payload->data;
   while (len > 0) {
     ssize_t n = send(g_conn_fd[conn], p, len, 0);
     if (n <= 0) {
@@ -1336,7 +1341,7 @@ long long tcp_write_all(long long conn, const char* payload) {
     p += n;
     len -= (size_t)n;
   }
-  return tcp_net_ok((long long)strlen(payload));
+  return tcp_net_ok((long long)payload->len);
 }
 
 long long tcp_close(long long conn) {

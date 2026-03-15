@@ -907,7 +907,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 INT,
                 TFunc(
                     INT,
-                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), STRING),
+                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), TConst("Bytes")),
                 ),
             ),
         ),
@@ -916,7 +916,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             type=TFunc(
                 INT,
                 TFunc(
-                    STRING,
+                    TConst("Bytes"),
                     TApp(TApp(result_type, TConst("stdlib.net.TcpError")), INT),
                 ),
             ),

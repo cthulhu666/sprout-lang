@@ -1,5 +1,7 @@
 module stdlib.net
 
+import stdlib.bytes (Utf8Error, from_string, to_string)
+
 export type TcpError =
   | TcpInvalidArgument String
   | TcpInvalidHandle
@@ -36,11 +38,22 @@ export fn connect(host: String, port: Int) -> Result TcpError TcpConnection =
   | Err err -> Err(err)
   | Ok handle -> Ok(TcpConnection(handle))
 
-export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError String =
+export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError Bytes =
   tcp_read_exact(tcp_connection_handle(conn), count)
 
-export fn write_all(conn: TcpConnection, payload: String) -> Result TcpError Int =
+export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int =
   tcp_write_all(tcp_connection_handle(conn), payload)
+
+export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String =
+  match read_exact(conn, count) with
+  | Err err -> Err(err)
+  | Ok payload ->
+      match to_string(payload) with
+      | Ok text -> Ok(text)
+      | Err utf8_err -> Err(TcpReadFailed(utf8_error_message(utf8_err)))
+
+export fn write_all_utf8(conn: TcpConnection, payload: String) -> Result TcpError Int =
+  write_all(conn, from_string(payload))
 
 export fn close(conn: TcpConnection) -> IO Unit =
   tcp_close(tcp_connection_handle(conn))
@@ -53,3 +66,7 @@ export fn accept(listener: TcpListener) -> TcpConnection =
 
 export fn close_listener(listener: TcpListener) -> IO Unit =
   tcp_close_listener(tcp_listener_handle(listener))
+
+fn utf8_error_message(err: Utf8Error) -> String =
+  match err with
+  | Utf8DecodeError msg -> msg

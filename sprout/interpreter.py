@@ -980,19 +980,19 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                 remaining -= len(chunk)
         except OSError as exc:
             return _tcp_err("TcpReadFailed", str(exc))
-        return _tcp_ok(b"".join(chunks).decode("utf-8", errors="replace"))
+        return _tcp_ok(BytesValue(items=b"".join(chunks)))
 
     def builtin_tcp_write_all(args: list[object]) -> object:
         conn_handle = args[0]
         payload = args[1]
         if not isinstance(conn_handle, int):
             raise RuntimeError("tcp_write_all expects Int connection handle")
-        if not isinstance(payload, str):
-            raise RuntimeError("tcp_write_all expects String payload")
+        if not isinstance(payload, BytesValue):
+            raise RuntimeError("tcp_write_all expects Bytes payload")
         conn = connections.get(conn_handle)
         if conn is None:
             return _tcp_err("TcpInvalidHandle")
-        raw = payload.encode("utf-8")
+        raw = payload.items
         try:
             conn.sendall(raw)
         except OSError as exc:

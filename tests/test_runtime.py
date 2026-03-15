@@ -483,20 +483,28 @@ class RuntimeTests(unittest.TestCase):
             main.write_text(
                 f"""
                 module main
-                import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact, tcp_error_message, write_all)
+                import stdlib.bytes (from_string, to_string)
+                import stdlib.net (TcpConnection, TcpError, close, connect, read_exact, tcp_error_message, write_all)
 
                 fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
 
                 fn finish(conn: TcpConnection, message: String) -> IO Unit =
                   seq(close(conn), print(message))
 
+                fn show_payload(conn: TcpConnection, payload: Bytes) -> IO Unit =
+                  match to_string(payload) with
+                  | Ok text -> finish(conn, text)
+                  | Err err ->
+                      match err with
+                      | Utf8DecodeError msg -> finish(conn, msg)
+
                 fn with_conn(conn: TcpConnection) -> IO Unit =
-                  match write_all(conn, "ping") with
+                  match write_all(conn, from_string("ping")) with
                   | Err err -> finish(conn, tcp_error_message(err))
                   | Ok _ ->
                       match read_exact(conn, 4) with
                       | Err err -> finish(conn, tcp_error_message(err))
-                      | Ok body -> finish(conn, body)
+                      | Ok body -> show_payload(conn, body)
 
                 fn main() -> IO Unit =
                   match connect("127.0.0.1", {port}) with
@@ -540,7 +548,7 @@ class RuntimeTests(unittest.TestCase):
             main.write_text(
                 f"""
                 module main
-                import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact, tcp_error_message)
+                import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact_utf8, tcp_error_message)
 
                 fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
 
@@ -548,7 +556,7 @@ class RuntimeTests(unittest.TestCase):
                   match connect("127.0.0.1", {port}) with
                   | Err err -> print(tcp_error_message(err))
                   | Ok conn ->
-                      match read_exact(conn, 4) with
+                      match read_exact_utf8(conn, 4) with
                       | Ok body -> seq(close(conn), print(body))
                       | Err TcpEndOfStream -> seq(close(conn), print("eof"))
                       | Err err -> seq(close(conn), print(tcp_error_message(err)))
