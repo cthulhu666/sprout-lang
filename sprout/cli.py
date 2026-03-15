@@ -21,6 +21,12 @@ from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 from .typechecker import TypeCheckError, typecheck_program
 
 
+def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
+    if bundle is None:
+        return False
+    return any(path.name == "prelude.sprout" and "stdlib" in path.parts for path in bundle.modules)
+
+
 def cmd_parse(path: Path) -> int:
     bundle = load_module_bundle(path)
     source = bundle.source
@@ -64,7 +70,7 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
     if with_http_stdlib:
         source = with_http_prelude(source)
         bundle = None
-    elif with_stdlib:
+    elif with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -90,7 +96,7 @@ def cmd_run(
     if with_http_stdlib:
         source = with_http_prelude(source)
         bundle = None
-    elif with_stdlib:
+    elif with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -117,7 +123,7 @@ def cmd_compile(
     if with_http_stdlib:
         source = with_http_prelude(source)
         bundle = None
-    elif with_stdlib:
+    elif with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -315,8 +321,8 @@ long long parse_int(const char* s) {
 long long env_get(const char* name) {
   if (name == NULL) tcp_fail("env_get: null name");
   const char* value = getenv(name);
-  if (value == NULL) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
-  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)(uintptr_t)value);
+  if (value == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)value);
 }
 long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
@@ -324,10 +330,10 @@ long long sprout_set_argv(int argc, char** argv) {
   return 0;
 }
 long long argv_get(long long index) {
-  if (index < 0) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
-  if (g_sprout_argv == NULL) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
-  if (index >= (long long)(g_sprout_argc - 1)) return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
-  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)(uintptr_t)g_sprout_argv[index + 1]);
+  if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  if (g_sprout_argv == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  if (index >= (long long)(g_sprout_argc - 1)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)g_sprout_argv[index + 1]);
 }
 const char* read_file(const char* path) {
   if (path == NULL) tcp_fail("read_file: null path");
@@ -579,12 +585,12 @@ static char* upper_copy(const char* text) {
 
 static long long http_err0(const char* ctor_name) {
   long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
-  return sprout_make1(find_ctor_tag_by_name("stdlib.http.Err"), err);
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
 }
 
 static long long http_err1(const char* ctor_name, long long payload) {
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  return sprout_make1(find_ctor_tag_by_name("stdlib.http.Err"), err);
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
 }
 
 static long long http_ok_response(long long status, const char* headers, const char* body) {
@@ -594,7 +600,7 @@ static long long http_ok_response(long long status, const char* headers, const c
     (long long)(uintptr_t)headers,
     (long long)(uintptr_t)body
   );
-  return sprout_make1(find_ctor_tag_by_name("stdlib.http.Ok"), resp);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), resp);
 }
 
 static int parse_http_url(const char* url, HttpUrl* out, char** err) {
@@ -855,9 +861,9 @@ long long vector_get(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_get: null vector");
   if (index < 0 || index >= v->len) {
-    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), v->data[index]);
+  return sprout_make1(find_ctor_tag_by_name("Just"), v->data[index]);
 }
 
 long long vector_set(long long vec, long long index, long long value) {
@@ -918,9 +924,9 @@ long long map_get(long long map_h, const char* key) {
   if (key == NULL) tcp_fail("map_get: null key");
   long long idx = map_find_index(m, key);
   if (idx < 0) {
-    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), m->entries[idx].value);
+  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[idx].value);
 }
 
 long long map_set(long long map_h, const char* key, long long value) {
@@ -987,20 +993,20 @@ long long map_nth_key(long long map_h, long long index) {
   MapVal* m = (MapVal*)(uintptr_t)map_h;
   if (m == NULL) tcp_fail("map_nth_key: null map");
   if (index < 0 || index >= m->len) {
-    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
   char* key = strdup(m->entries[index].key);
   if (key == NULL) tcp_fail("map_nth_key: out of memory");
-  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)(uintptr_t)key);
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)key);
 }
 
 long long map_nth_value(long long map_h, long long index) {
   MapVal* m = (MapVal*)(uintptr_t)map_h;
   if (m == NULL) tcp_fail("map_nth_value: null map");
   if (index < 0 || index >= m->len) {
-    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), m->entries[index].value);
+  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
 }
 
 long long bytes_empty() {
@@ -1021,9 +1027,9 @@ long long bytes_get(long long bytes_h, long long index) {
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) tcp_fail("bytes_get: null bytes");
   if (index < 0 || (size_t)index >= value->len) {
-    return sprout_make0(find_ctor_tag_by_name("stdlib.collections.Nothing"));
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("stdlib.collections.Just"), (long long)value->data[index]);
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)value->data[index]);
 }
 
 long long bytes_slice(long long bytes_h, long long start, long long count) {
@@ -1139,13 +1145,13 @@ long long bytes_to_utf8(long long bytes_h) {
       find_ctor_tag_by_name("stdlib.bytes.Utf8DecodeError"),
       (long long)(uintptr_t)dup_cstr(reason)
     );
-    return sprout_make1(find_ctor_tag_by_name("stdlib.bytes.Err"), err);
+    return sprout_make1(find_ctor_tag_by_name("Err"), err);
   }
   char* out = (char*)malloc(value->len + 1);
   if (out == NULL) tcp_fail("bytes_to_utf8: out of memory");
   if (value->len > 0) memcpy(out, value->data, value->len);
   out[value->len] = '\\0';
-  return sprout_make1(find_ctor_tag_by_name("stdlib.bytes.Ok"), (long long)(uintptr_t)out);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
 }
 
 long long tcp_listen(long long port) {
@@ -1181,17 +1187,17 @@ long long tcp_listen(long long port) {
 }
 
 static long long tcp_net_ok(long long payload) {
-  return sprout_make1(find_ctor_tag_by_name("stdlib.net.Ok"), payload);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), payload);
 }
 
 static long long tcp_net_err0(const char* ctor_name) {
   long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
-  return sprout_make1(find_ctor_tag_by_name("stdlib.net.Err"), err);
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
 }
 
 static long long tcp_net_err1(const char* ctor_name, long long payload) {
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  return sprout_make1(find_ctor_tag_by_name("stdlib.net.Err"), err);
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
 }
 
 long long tcp_connect(const char* host, long long port) {
@@ -1378,15 +1384,12 @@ def _repl_compose_source(
     tail: list[str] | None = None,
     *,
     with_stdlib: bool,
-    with_http_stdlib: bool,
 ) -> str:
     chunks = declarations + (tail or [])
     user_source = "\n\n".join(chunk for chunk in chunks if chunk.strip())
-    if with_http_stdlib:
-        return with_http_prelude(user_source)
     if with_stdlib:
-        return with_prelude(user_source)
-    return user_source
+        return user_source
+    return with_prelude(user_source)
 
 
 def _repl_parse_and_check(
@@ -1394,18 +1397,38 @@ def _repl_parse_and_check(
     tail: list[str] | None = None,
     *,
     with_stdlib: bool,
-    with_http_stdlib: bool,
 ) -> tuple[object, dict[str, str]]:
-    source = _repl_compose_source(
-        declarations,
-        tail,
-        with_stdlib=with_stdlib,
-        with_http_stdlib=with_http_stdlib,
+    source = _repl_compose_source(declarations, tail, with_stdlib=with_stdlib)
+    if not with_stdlib:
+        tree = parse(source)
+        validate_public_surface(tree, None)
+        types = typecheck_program(tree)
+        return tree, types
+
+    imports = "\n".join(
+        [
+            "module stdlib.repl",
+            "import stdlib.collections (Maybe, List, Vec, Dict, Semigroup, Functor, Foldable, list_map, list_fold, list_append, vec_empty, vec_prepend, vec_append, vec_length, vec_get, vec_get_or, vec_set, vec_map, vec_fold, vec_slice, vec_reverse, vec_sum, vec_sum_by, foldable_to_vec, dict_empty, dict_get, dict_set, dict_remove, dict_keys, dict_values)",
+            "import stdlib.collections",
+            "import stdlib.http",
+            "import stdlib.http_client",
+            "import stdlib.net",
+            "import stdlib.bytes",
+            "import stdlib.math",
+            "import stdlib.string",
+            "import stdlib.terminal",
+        ]
     )
-    tree = parse(source)
-    validate_public_surface(tree, None)
-    types = typecheck_program(tree)
-    return tree, types
+    source = f"{imports}\n\n{source}"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = Path(tmpdir) / "repl_session.sprout"
+        temp_path.write_text(source, encoding="utf-8")
+        bundle = load_module_bundle(temp_path)
+        tree = parse(bundle.source)
+        resolve_program_names(tree, bundle)
+        validate_public_surface(tree, bundle)
+        types = typecheck_program(tree)
+        return tree, types
 
 
 def _repl_is_declaration(source: str) -> bool:
@@ -1413,7 +1436,17 @@ def _repl_is_declaration(source: str) -> bool:
     return stripped.startswith(("fn ", "let ", "type ", "class ", "instance ", "export "))
 
 
-def cmd_repl(with_stdlib: bool = True, with_http_stdlib: bool = False) -> int:
+def _repl_lookup_type(types: dict[str, str], name: str) -> str:
+    direct = types.get(name)
+    if direct is not None:
+        return direct
+    qualified = [typ for key, typ in types.items() if key.endswith(f".{name}")]
+    if len(qualified) == 1:
+        return qualified[0]
+    raise KeyError(name)
+
+
+def cmd_repl(with_stdlib: bool = False) -> int:
     declarations: list[str] = []
     repl_counter = 0
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
@@ -1450,15 +1483,13 @@ def cmd_repl(with_stdlib: bool = True, with_http_stdlib: bool = False) -> int:
                 declarations,
                 [f"let {name} = {expr}"],
                 with_stdlib=with_stdlib,
-                with_http_stdlib=with_http_stdlib,
             )
-            emit(types[name])
+            emit(_repl_lookup_type(types, name))
             return
         if _repl_is_declaration(stripped):
             _repl_parse_and_check(
                 declarations + [source],
                 with_stdlib=with_stdlib,
-                with_http_stdlib=with_http_stdlib,
             )
             declarations.append(source)
             emit("ok")
@@ -1470,15 +1501,13 @@ def cmd_repl(with_stdlib: bool = True, with_http_stdlib: bool = False) -> int:
             declarations,
             [f"let {name} = {source}"],
             with_stdlib=with_stdlib,
-            with_http_stdlib=with_http_stdlib,
         )
-        inferred_type = types[name]
+        inferred_type = _repl_lookup_type(types, name)
         main_body = name if inferred_type == "IO Unit" else f"print({name})"
         tree, _ = _repl_parse_and_check(
             declarations,
             [f"let {name} = {source}", f"fn main() -> IO Unit = {main_body}"],
             with_stdlib=with_stdlib,
-            with_http_stdlib=with_http_stdlib,
         )
         lowered = lower_typeclasses(tree)
         typecheck_program(lowered)
@@ -1501,6 +1530,7 @@ def cmd_repl(with_stdlib: bool = True, with_http_stdlib: bool = False) -> int:
                 TokenizeError,
                 TypeCheckError,
                 RuntimeError,
+                ModuleLoadError,
                 SurfaceCheckError,
                 TypeclassLoweringError,
             ) as exc:
@@ -1517,6 +1547,7 @@ def cmd_repl(with_stdlib: bool = True, with_http_stdlib: bool = False) -> int:
             TokenizeError,
             TypeCheckError,
             RuntimeError,
+            ModuleLoadError,
             SurfaceCheckError,
             TypeclassLoweringError,
         ) as exc:
@@ -1567,12 +1598,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit native binary with clang (default writes LLVM .ll text)",
     )
     p_repl = sub.add_parser("repl", help="start a simple interactive Sprout REPL")
-    p_repl.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude (already enabled by default)")
-    p_repl.add_argument(
-        "--with-http-stdlib",
-        action="store_true",
-        help="load stdlib http helpers",
-    )
+    p_repl.add_argument("--with-stdlib", action="store_true", help="load all stdlib modules into the REPL")
 
     return parser
 
@@ -1610,10 +1636,7 @@ def main(argv: list[str] | None = None) -> int:
                 native=args.native,
             )
         if args.command == "repl":
-            return cmd_repl(
-                with_stdlib=(not args.with_http_stdlib) or args.with_stdlib,
-                with_http_stdlib=args.with_http_stdlib,
-            )
+            return cmd_repl(with_stdlib=args.with_stdlib)
     except (
         ParseError,
         TokenizeError,

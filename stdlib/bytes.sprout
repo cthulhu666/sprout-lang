@@ -1,9 +1,4 @@
 module stdlib.bytes
-import stdlib.collections (Maybe)
-
-export type Result e a =
-  | Ok a
-  | Err e
 
 export type Utf8Error =
   | Utf8DecodeError String

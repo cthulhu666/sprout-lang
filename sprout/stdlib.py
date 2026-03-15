@@ -5,12 +5,16 @@ from pathlib import Path
 from .module_loader import parse_header
 
 
+def stdlib_dir() -> Path:
+    return Path(__file__).resolve().parent.parent / "stdlib"
+
+
 def prelude_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "stdlib" / "prelude.sprout"
+    return stdlib_dir() / "prelude.sprout"
 
 
 def http_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "stdlib" / "http.sprout"
+    return stdlib_dir() / "http.sprout"
 
 
 def load_prelude() -> str:
@@ -28,4 +32,4 @@ def with_prelude(user_source: str) -> str:
 
 
 def with_http_prelude(user_source: str) -> str:
-    return f"{load_http()}\n\n{user_source}"
+    return f"{load_prelude()}\n\n{load_http()}\n\n{user_source}"

@@ -66,7 +66,7 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Start REPL: `mise exec -- python -m sprout.cli repl` (loads stdlib by default)
+- Start REPL: `mise exec -- python -m sprout.cli repl` (loads prelude by default)
 - Run tests: `mise exec -- just test`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
 - Build native binary (clang): `mise exec -- just compile-native /tmp/prog.sprout /tmp/prog`
@@ -93,7 +93,7 @@ Runtime builtins (host-implemented):
 - `bytes_append(left: Bytes, right: Bytes) -> Bytes`
 - `bytes_singleton(value: Int) -> Bytes`
 - `bytes_from_utf8(raw: String) -> Bytes`
-- `bytes_to_utf8(value: Bytes) -> stdlib.bytes.Result stdlib.bytes.Utf8Error String`
+- `bytes_to_utf8(value: Bytes) -> Result stdlib.bytes.Utf8Error String`
 - `map_empty() -> Map a`
 - `map_get(m: Map a, key: String) -> Maybe a`
 - `map_set(m: Map a, key: String, value: a) -> Map a`
@@ -103,9 +103,9 @@ Runtime builtins (host-implemented):
 - `tcp_accept(listener: Int) -> Int`
 - `tcp_read(conn: Int) -> String`
 - `tcp_write(conn: Int, payload: String) -> IO Unit`
-- `tcp_connect(host: String, port: Int) -> stdlib.net.Result stdlib.net.TcpError Int`
-- `tcp_read_exact(conn: Int, count: Int) -> stdlib.net.Result stdlib.net.TcpError String`
-- `tcp_write_all(conn: Int, payload: String) -> stdlib.net.Result stdlib.net.TcpError Int`
+- `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int`
+- `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError String`
+- `tcp_write_all(conn: Int, payload: String) -> Result stdlib.net.TcpError Int`
 - `tcp_close(conn: Int) -> IO Unit`
 - `tcp_close_listener(listener: Int) -> IO Unit`
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
@@ -126,11 +126,36 @@ String/runtime helpers are host-implemented primitives. Application code should 
 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
+- `Maybe a` (`Just`, `Nothing`)
 - `map(list, fn) -> List`
 - `fold(list, init, fn) -> value`
 - `filter(list, predicate) -> List`
 - `split_ints(s: String) -> List Int`
-- `Semigroup t` with prelude instances for `String` and `List a`
+- `Vec a` plus foundational helpers:
+  - `vec_empty()`
+  - `vec_prepend(value, vec)`
+  - `vec_append(vec, value)`
+  - `vec_length(vec)`
+  - `vec_get(vec, index) -> Maybe a`
+  - `vec_get_or(vec, index, fallback)`
+  - `vec_set(vec, index, value)`
+  - `vec_map(vec, f)`
+  - `vec_fold(vec, init, f)`
+  - `vec_slice(vec, start, count)`
+  - `vec_reverse(vec)`
+  - `vec_sum(vec)`
+  - `vec_sum_by(vec, f)`
+- `Dict v` plus foundational helpers:
+  - `dict_empty()`
+  - `dict_get(dict, key) -> Maybe v`
+  - `dict_set(dict, key, value)`
+  - `dict_remove(dict, key)`
+  - `dict_keys(dict) -> Vec String`
+  - `dict_values(dict) -> Vec v`
+  - dict literals: `{foo: 1, "bar": 2}`, `{}`
+- `Semigroup t`, `Functor f`, and `Foldable f`
+- `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`
+- prelude instances are currently provided for `String`, `List a`, `Vec a`, and `Dict v`
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
   - forward pipe operator: `value |> f` rewrites to `f(value)`
@@ -212,7 +237,7 @@ Runnable demo:
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 
-- `Result e a` (`Ok`, `Err`)
+- uses foundational prelude `Maybe` and `Result`
 - `HttpResponse(status, headers, body)`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
@@ -239,7 +264,7 @@ HTTP client convenience module (in `stdlib/http_client.sprout`):
 
 TCP client helper types (in `stdlib/net.sprout`):
 
-- `Result e a`
+- uses foundational prelude `Result`
 - `TcpError` variants (`TcpInvalidArgument`, `TcpInvalidHandle`, `TcpConnectFailed`, `TcpReadFailed`, `TcpWriteFailed`, `TcpEndOfStream`)
 - `TcpConnection`
 - `TcpListener`
@@ -257,6 +282,7 @@ Current limitation:
 
 Bytes helpers (in `stdlib/bytes.sprout`):
 
+- uses foundational prelude `Maybe` and `Result`
 - `empty() -> Bytes`
 - `singleton(value) -> Bytes`
 - `length(value) -> Int`
@@ -281,47 +307,14 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 
 Collections module (in `stdlib/collections.sprout`):
 
-- `Maybe a` (`Just`, `Nothing`)
-- `List a` (`Cons`, `Nil`) with helpers:
-  - `list_map(xs, f)`
-  - `list_fold(xs, init, step)`
-- `Vec a` with helpers:
-  - `vec_empty()`
-  - `vec_prepend(value, vec)`
-  - `vec_append(vec, value)`
-  - `vec_length(vec)`
-  - `vec_get(vec, index) -> Maybe a`
-  - `vec_set(vec, index, value)`
-  - `vec_slice(vec, start, count)`
-  - `vec_reverse(vec)`
-  - `vec_map(vec, f)`
-  - `vec_fold(vec, init, f)`
-  - `vec_sum(vec)`
-  - `vec_sum_by(vec, f)`
-- `Dict v` (`Dict (Map v)`) with helpers:
-  - `dict_empty()`
-  - `dict_get(dict, key) -> Maybe v`
-  - `dict_set(dict, key, value)`
-  - `dict_remove(dict, key)`
-  - `dict_keys(dict) -> Vec String`
-  - `dict_values(dict) -> Vec v`
-  - dict literals: `{foo: 1, "bar": 2}`, `{}`
-- `Semigroup t` class:
-  - `append(x, y) -> t`
-  - instances currently provided for `String`, `List a`, `Vec a`, and `Dict v`
-  - law: instance `append` should be associative
-  - `Dict` append is right-biased on duplicate keys
-  - infix sugar: `left ++ right` desugars to semigroup append
-- `Functor f` class:
-  - `fmap(f, xs)`
-- `Foldable f` class:
-  - `fold_values(xs, init, step)`
-- `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`
+- compatibility namespace for the foundational collection/typeclass surface now defined in the prelude
+- existing imports such as `import stdlib.collections (Vec, Dict, Functor, Foldable, vec_append, dict_get)` continue to resolve
+- prefer the unqualified prelude surface in standalone code and the default REPL
 
 Low-level runtime notes:
 
 - `Vector` and `vector_*` builtins exist as backend/runtime primitives.
-- For application code, prefer `stdlib.collections` (`Vec`/`Dict`) as the stable public API.
+- For module code, `stdlib.collections` remains the stable compatibility import path for collection helpers.
 - CLI/module checks reject raw `Vector`/`Map` and `vector_*`/`map_*` usage outside `stdlib.*` modules.
 - Builtin failures now follow one convention:
   `runtime error: builtin \`name\`: detail`
@@ -349,10 +342,11 @@ Application-level example wrapper:
 - `examples/sentry_issue_browser_tui.sprout` is a minimal TUI-oriented scaffold module using the app-level Sentry API layer.
 - `examples/http_get_cli.sprout` is a simple CLI HTTP client that reads its URL from `argv_get(0)` and prints the response body.
 
-Load stdlib prelude explicitly:
+Load stdlib prelude explicitly for standalone files:
 
 - `python3 -m sprout.cli check --with-stdlib your_file.sprout`
 - `python3 -m sprout.cli run --with-stdlib your_file.sprout`
+- module-loaded programs get the foundational prelude implicitly
 
 Load HTTP helpers:
 
@@ -430,9 +424,9 @@ Commands:
 - Native binary (requires `clang`): `python3 -m sprout.cli compile input.sprout --native -o out_bin`
 - REPL: `python3 -m sprout.cli repl`
   - commands: `:type EXPR`, `:t EXPR`, `:help`, `:quit`
-  - stdlib prelude is loaded by default
-  - `--with-http-stdlib` switches to the HTTP helper preload
-  - `--with-stdlib --with-http-stdlib` requests both preloads, but overlapping helper/type names are not reconciled yet
+  - the prelude is loaded by default, so list literals, dict literals, `split_ints(...)`, `foldable_to_vec(...)`, and `++` work without extra flags
+  - add `--with-stdlib` to preload the rest of the modules under `stdlib/`
+  - imported modules use their final path segment (`http.http_ok(...)`, `math.gcd(...)`)
 - Formatter/linter baseline:
   - format in place: `python3 -m sprout.cli fmt your_file.sprout`
   - check formatting only: `python3 -m sprout.cli fmt --check your_file.sprout`

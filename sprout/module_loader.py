@@ -10,6 +10,74 @@ from . import ast
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 DECL_RE = re.compile(r"^\s*(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 EXPORT_DECL_RE = re.compile(r"^\s*export\s+(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
+    "stdlib.collections": {
+    "Just": "Just",
+    "Nothing": "Nothing",
+    "Cons": "Cons",
+    "Nil": "Nil",
+    "Vec": "Vec",
+    "Dict": "Dict",
+    "list_map": "list_map",
+    "list_fold": "list_fold",
+    "list_append": "list_append",
+    "vec_empty": "vec_empty",
+    "vec_prepend": "vec_prepend",
+    "vec_append": "vec_append",
+    "vec_length": "vec_length",
+    "vec_get": "vec_get",
+    "vec_get_or": "vec_get_or",
+    "vec_set": "vec_set",
+    "vec_map": "vec_map",
+    "vec_fold": "vec_fold",
+    "vec_slice": "vec_slice",
+    "vec_reverse": "vec_reverse",
+    "vec_sum": "vec_sum",
+    "vec_sum_by": "vec_sum_by",
+    "foldable_to_vec": "foldable_to_vec",
+    "dict_empty": "dict_empty",
+    "dict_get": "dict_get",
+    "dict_set": "dict_set",
+    "dict_remove": "dict_remove",
+    "dict_keys": "dict_keys",
+    "dict_values": "dict_values",
+    },
+    "stdlib.http": {
+        "Just": "Just",
+        "Nothing": "Nothing",
+        "Ok": "Ok",
+        "Err": "Err",
+    },
+    "stdlib.bytes": {
+        "Ok": "Ok",
+        "Err": "Err",
+    },
+    "stdlib.net": {
+        "Ok": "Ok",
+        "Err": "Err",
+    },
+}
+MODULE_COMPAT_TYPES: dict[str, dict[str, dict[str, str]]] = {
+    "stdlib.collections": {
+    "Maybe": {"Just": "Just", "Nothing": "Nothing"},
+    "List": {"Cons": "Cons", "Nil": "Nil"},
+    "Vec": {"Vec": "Vec"},
+    "Dict": {"Dict": "Dict"},
+    },
+    "stdlib.http": {
+        "Maybe": {"Just": "Just", "Nothing": "Nothing"},
+        "Result": {"Ok": "Ok", "Err": "Err"},
+    },
+    "stdlib.bytes": {
+        "Result": {"Ok": "Ok", "Err": "Err"},
+    },
+    "stdlib.net": {
+        "Result": {"Ok": "Ok", "Err": "Err"},
+    },
+}
+MODULE_COMPAT_CLASSES: dict[str, dict[str, str]] = {
+    "stdlib.collections": {"Semigroup": "Semigroup", "Functor": "Functor", "Foldable": "Foldable"}
+}
 
 
 class ModuleLoadError(ValueError):
@@ -232,6 +300,15 @@ def _module_path(module_name: str) -> Path:
     return Path(*module_name.split(".")).with_suffix(".sprout")
 
 
+def _implicit_prelude_source() -> str:
+    path = Path(__file__).resolve().parent.parent / "stdlib" / "prelude.sprout"
+    return parse_header(path.read_text(encoding="utf-8"), path).body
+
+
+def _implicit_prelude_path() -> Path:
+    return (Path(__file__).resolve().parent.parent / "stdlib" / "prelude.sprout").resolve()
+
+
 def _resolve_module(module_name: str, importer: Path) -> Path:
     rel = _module_path(module_name)
     candidates = [importer.parent / rel, Path.cwd() / rel]
@@ -339,6 +416,37 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
                 )
 
     visit(entry)
+    for path, info in list(modules.items()):
+        compat_values = MODULE_COMPAT_VALUES.get(info.header.module or "")
+        compat_types = MODULE_COMPAT_TYPES.get(info.header.module or "")
+        compat_classes = MODULE_COMPAT_CLASSES.get(info.header.module or "")
+        if compat_values is None and compat_types is None and compat_classes is None:
+            continue
+        compat_names = set(compat_values or {}) | set(compat_types or {}) | set(compat_classes or {})
+        modules[path] = ModuleInfo(
+            path=info.path,
+            header=info.header,
+            declared=info.declared,
+            exported=info.exported | compat_names,
+        )
+    needs_implicit_prelude = any(info.header.module is not None or info.header.imports for info in modules.values())
+    if needs_implicit_prelude:
+        prelude_path = _implicit_prelude_path()
+        prelude_header = parse_header(prelude_path.read_text(encoding="utf-8"), prelude_path)
+        prelude_declared, _, prelude_body = _extract_decl_and_export_names(prelude_header.body)
+        modules[prelude_path] = ModuleInfo(
+            path=prelude_path,
+            header=HeaderInfo(
+                module=None,
+                imports=[],
+                body=prelude_body,
+                body_line_numbers=prelude_header.body_line_numbers,
+            ),
+            declared=prelude_declared,
+            exported=set(),
+        )
+        ordered = [prelude_path] + ordered
+
     for path in ordered:
         validate_module(path)
 
@@ -465,6 +573,22 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
             symbols.class_locals[decl.name] = canonical
             if exported:
                 symbols.exported_classes[decl.name] = canonical
+    for path, module_info in bundle.modules.items():
+        compat_values = MODULE_COMPAT_VALUES.get(module_info.header.module or "")
+        compat_types = MODULE_COMPAT_TYPES.get(module_info.header.module or "")
+        compat_classes = MODULE_COMPAT_CLASSES.get(module_info.header.module or "")
+        if compat_values is None and compat_types is None and compat_classes is None:
+            continue
+        symbols = out[path]
+        for name, canonical in (compat_values or {}).items():
+            symbols.exported_values.setdefault(name, canonical)
+        for name, ctors in (compat_types or {}).items():
+            symbols.exported_types.setdefault(name, name)
+            symbols.exported_type_constructors.setdefault(name, {}).update(ctors)
+            for ctor_name, ctor_canonical in ctors.items():
+                symbols.exported_values.setdefault(ctor_name, ctor_canonical)
+        for name, canonical in (compat_classes or {}).items():
+            symbols.exported_classes.setdefault(name, canonical)
     return out
 
 
@@ -589,6 +713,11 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         elif isinstance(decl, ast.ClassDecl):
             decl.name = symbols.class_locals[decl.name]
 
+    implicit_prelude_path = _implicit_prelude_path()
+
+    def _has_implicit_prelude_provider(paths: set[Path]) -> bool:
+        return implicit_prelude_path in paths
+
     def resolve_value_name(name: str, node: object | None = None) -> str:
         line = getattr(node, "line", None)
         if line is None:
@@ -630,6 +759,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             return symbols.value_locals[name]
         if name in unqualified_values:
             return unqualified_values[name]
+        providers = declared_value_by_name.get(name, set())
+        if _has_implicit_prelude_provider(providers):
+            return name
         if name in all_exported_values:
             providers = sorted(bundle.modules[path].header.module or str(path) for path in declared_value_by_name.get(name, set()))
             raise _node_module_error(
@@ -639,7 +771,6 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                 f"available from: {_fmt_names(providers)}. "
                 f"Use `import module ({name})` or `import module` and qualify it.",
             )
-        providers = declared_value_by_name.get(name, set())
         if providers and module_info.path not in providers:
             raise _node_module_error(
                 bundle,
@@ -690,6 +821,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             return unqualified_types[name]
         if name in unqualified_classes:
             return unqualified_classes[name]
+        providers = declared_type_by_name.get(name, set()) | declared_class_by_name.get(name, set())
+        if _has_implicit_prelude_provider(providers):
+            return name
         if name in all_exported_types or name in all_exported_classes:
             providers = sorted(
                 bundle.modules[path].header.module or str(path)
@@ -701,7 +835,6 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                 f"Type/class {name!r} requires explicit import or qualification; "
                 f"available from: {_fmt_names(providers)}",
             )
-        providers = declared_type_by_name.get(name, set()) | declared_class_by_name.get(name, set())
         if providers and module_info.path not in providers:
             raise _node_module_error(
                 bundle,

@@ -57,14 +57,25 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input="let x = 41\nx + 1\n[1,2,3]\n:t x\n:quit\n",
+            input="let x = 41\nx + 1\n:t x\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
         self.assertIn("ok", run.stdout)
         self.assertIn("42", run.stdout)
-        self.assertIn("Cons(1, Cons(2, Cons(3, Nil)))", run.stdout)
         self.assertIn("Int", run.stdout)
+
+    def test_repl_default_loads_prelude(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":type split_ints(\"1 2 3\")\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("List Int", run.stdout)
 
     def test_repl_help_mentions_type_shorthand(self) -> None:
         run = subprocess.run(
@@ -78,41 +89,43 @@ class CliTests(unittest.TestCase):
         self.assertIn(":type EXPR", run.stdout)
         self.assertIn(":t EXPR", run.stdout)
 
-    def test_repl_with_stdlib_flag_loads_prelude(self) -> None:
+    def test_repl_with_stdlib_flag_loads_all_stdlib_modules(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
             check=False,
             capture_output=True,
             text=True,
-            input=":type split_ints(\"1 2 3\")\n:quit\n",
+            input=":type split_ints(\"1 2 3\")\n:type http.http_ok(\"x\")\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
         self.assertIn("List Int", run.stdout)
+        self.assertIn("String", run.stdout)
 
-    def test_repl_default_supports_list_append_operator(self) -> None:
+    def test_repl_default_supports_list_literals(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],
             check=False,
             capture_output=True,
             text=True,
-            input="[1,2] ++ [3,4]\n:quit\n",
+            input="[1,2,3]\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertIn("Cons(1, Cons(2, Cons(3, Cons(4, Nil))))", run.stdout)
+        self.assertIn("Cons(1, Cons(2, Cons(3, Nil)))", run.stdout)
 
-    def test_repl_with_http_stdlib_loads_http_helpers(self) -> None:
+    def test_repl_with_stdlib_invalid_qualified_lookup_reports_error(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--with-http-stdlib"],
+            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
             check=False,
             capture_output=True,
             text=True,
-            input=":type http_ok(\"x\")\n:quit\n",
+            input=":t collections.Monoid\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertIn("String", run.stdout)
+        self.assertIn("error:", run.stdout)
+        self.assertIn("does not export value 'Monoid'", run.stdout)
 
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """

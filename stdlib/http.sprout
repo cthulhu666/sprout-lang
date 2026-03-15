@@ -3,14 +3,6 @@ module stdlib.http
 # Sprout HTTP helpers (v0)
 # Minimal helpers for request-line parsing and response formatting.
 
-export type Maybe a =
-  | Just a
-  | Nothing
-
-export type Result e a =
-  | Ok a
-  | Err e
-
 export type HttpResponse =
   | HttpResponse Int String String
 

@@ -479,16 +479,16 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("env_get expects String name")
         value = os.environ.get(name)
         if value is None:
-            return ADTValue(constructor="stdlib.collections.Nothing", args=())
-        return ADTValue(constructor="stdlib.collections.Just", args=(value,))
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(value,))
 
     def builtin_argv_get(args: list[object]) -> object:
         index = args[0]
         if not isinstance(index, int):
             raise RuntimeError("argv_get expects Int index")
         if index < 0 or index >= len(program_argv):
-            return ADTValue(constructor="stdlib.collections.Nothing", args=())
-        return ADTValue(constructor="stdlib.collections.Just", args=(program_argv[index],))
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(program_argv[index],))
 
     def builtin_parse_int(args: list[object]) -> object:
         raw = args[0]
@@ -565,8 +565,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(index, int):
             raise RuntimeError("bytes_get expects Int index")
         if index < 0 or index >= len(value.items):
-            return ADTValue(constructor="stdlib.collections.Nothing", args=())
-        return ADTValue(constructor="stdlib.collections.Just", args=(value.items[index],))
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(value.items[index],))
 
     def builtin_bytes_slice(args: list[object]) -> object:
         value = args[0]
@@ -609,14 +609,14 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             decoded = value.items.decode("utf-8")
         except UnicodeDecodeError as exc:
             err = ADTValue(constructor="stdlib.bytes.Utf8DecodeError", args=(str(exc),))
-            return ADTValue(constructor="stdlib.bytes.Err", args=(err,))
+            return ADTValue(constructor="Err", args=(err,))
         if "\x00" in decoded:
             err = ADTValue(
                 constructor="stdlib.bytes.Utf8DecodeError",
                 args=("decoded string contains NUL byte",),
             )
-            return ADTValue(constructor="stdlib.bytes.Err", args=(err,))
-        return ADTValue(constructor="stdlib.bytes.Ok", args=(decoded,))
+            return ADTValue(constructor="Err", args=(err,))
+        return ADTValue(constructor="Ok", args=(decoded,))
 
     def builtin_vector_empty(args: list[object]) -> object:
         return VectorValue(items=())
@@ -635,8 +635,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(index, int):
             raise RuntimeError("vector_get expects Int index")
         if index < 0 or index >= len(vec.items):
-            return ADTValue(constructor="stdlib.collections.Nothing", args=())
-        return ADTValue(constructor="stdlib.collections.Just", args=(vec.items[index],))
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(vec.items[index],))
 
     def builtin_vector_set(args: list[object]) -> object:
         vec = args[0]
@@ -670,8 +670,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(key, str):
             raise RuntimeError("map_get expects String key")
         if key not in map_value.items:
-            return ADTValue(constructor="stdlib.collections.Nothing", args=())
-        return ADTValue(constructor="stdlib.collections.Just", args=(map_value.items[key],))
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(map_value.items[key],))
 
     def builtin_map_set(args: list[object]) -> object:
         map_value = args[0]
@@ -713,8 +713,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("map_nth_key expects Int index")
         keys = list(map_value.items.keys())
         if index < 0 or index >= len(keys):
-            return ADTValue(constructor="stdlib.collections.Nothing", args=())
-        return ADTValue(constructor="stdlib.collections.Just", args=(keys[index],))
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(keys[index],))
 
     def builtin_map_nth_value(args: list[object]) -> object:
         map_value = args[0]
@@ -725,8 +725,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("map_nth_value expects Int index")
         values = list(map_value.items.values())
         if index < 0 or index >= len(values):
-            return ADTValue(constructor="stdlib.collections.Nothing", args=())
-        return ADTValue(constructor="stdlib.collections.Just", args=(values[index],))
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(values[index],))
 
     def _parse_header_block(raw: str) -> list[tuple[str, str]]:
         headers: list[tuple[str, str]] = []
@@ -747,7 +747,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
     def _http_err(constructor: str, payload: object | None = None) -> ADTValue:
         err = ADTValue(constructor=f"stdlib.http.{constructor}", args=() if payload is None else (payload,))
-        return ADTValue(constructor="stdlib.http.Err", args=(err,))
+        return ADTValue(constructor="Err", args=(err,))
 
     def builtin_http_request(args: list[object]) -> object:
         method = args[0]
@@ -785,7 +785,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                     constructor="stdlib.http.HttpResponse",
                     args=(status, response_headers, response_body),
                 )
-                return ADTValue(constructor="stdlib.http.Ok", args=(resp,))
+                return ADTValue(constructor="Ok", args=(resp,))
         except TimeoutError:
             return _http_err("HttpTimeout")
         except urllib.error.HTTPError as exc:
@@ -830,10 +830,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("json_parse expects String")
         try:
             parsed = json.loads(raw)
-            return ADTValue(constructor="stdlib.http.Ok", args=(_json_to_adt(parsed),))
+            return ADTValue(constructor="Ok", args=(_json_to_adt(parsed),))
         except json.JSONDecodeError as exc:
             err = ADTValue(constructor="stdlib.http.JsonDecode", args=(str(exc),))
-            return ADTValue(constructor="stdlib.http.Err", args=(err,))
+            return ADTValue(constructor="Err", args=(err,))
 
     def _term_emit(text: str) -> None:
         if out is None:
@@ -924,11 +924,11 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         return None
 
     def _tcp_ok(value: object) -> ADTValue:
-        return ADTValue(constructor="stdlib.net.Ok", args=(value,))
+        return ADTValue(constructor="Ok", args=(value,))
 
     def _tcp_err(constructor: str, payload: object | None = None) -> ADTValue:
         err = ADTValue(constructor=f"stdlib.net.{constructor}", args=() if payload is None else (payload,))
-        return ADTValue(constructor="stdlib.net.Err", args=(err,))
+        return ADTValue(constructor="Err", args=(err,))
 
     def builtin_tcp_connect(args: list[object]) -> object:
         host = args[0]

@@ -775,11 +775,12 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
 
     p_var = TVar("prelude.print.a")
     vector_var = TVar("prelude.vector.a")
-    maybe_collections = TConst("stdlib.collections.Maybe")
-    maybe_vector_var = TApp(maybe_collections, vector_var)
+    maybe_type = TConst("Maybe")
+    result_type = TConst("Result")
+    maybe_vector_var = TApp(maybe_type, vector_var)
     vector_t = TApp(TConst("Vector"), vector_var)
     map_var = TVar("prelude.map.a")
-    maybe_map_var = TApp(maybe_collections, map_var)
+    maybe_map_var = TApp(maybe_type, map_var)
     map_t = TApp(TConst("Map"), map_var)
     env: dict[str, Scheme] = {
         "print": Scheme(vars=(p_var.name,), type=TFunc(p_var, TApp(TConst("IO"), UNIT))),
@@ -798,11 +799,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         ),
         "env_get": Scheme(
             vars=(),
-            type=TFunc(TConst("String"), TApp(maybe_collections, STRING)),
+            type=TFunc(TConst("String"), TApp(maybe_type, STRING)),
         ),
         "argv_get": Scheme(
             vars=(),
-            type=TFunc(INT, TApp(maybe_collections, STRING)),
+            type=TFunc(INT, TApp(maybe_type, STRING)),
         ),
         "parse_int": Scheme(vars=(), type=TFunc(TConst("String"), INT)),
         "split_words": Scheme(
@@ -816,7 +817,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "str_starts_with": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, BOOL))),
         "bytes_empty": Scheme(vars=(), type=TConst("Bytes")),
         "bytes_length": Scheme(vars=(), type=TFunc(TConst("Bytes"), INT)),
-        "bytes_get": Scheme(vars=(), type=TFunc(TConst("Bytes"), TFunc(INT, TApp(maybe_collections, INT)))),
+        "bytes_get": Scheme(vars=(), type=TFunc(TConst("Bytes"), TFunc(INT, TApp(maybe_type, INT)))),
         "bytes_slice": Scheme(vars=(), type=TFunc(TConst("Bytes"), TFunc(INT, TFunc(INT, TConst("Bytes"))))),
         "bytes_append": Scheme(vars=(), type=TFunc(TConst("Bytes"), TFunc(TConst("Bytes"), TConst("Bytes")))),
         "bytes_singleton": Scheme(vars=(), type=TFunc(INT, TConst("Bytes"))),
@@ -825,7 +826,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(
                 TConst("Bytes"),
-                TApp(TApp(TConst("stdlib.bytes.Result"), TConst("stdlib.bytes.Utf8Error")), STRING),
+                TApp(TApp(result_type, TConst("stdlib.bytes.Utf8Error")), STRING),
             ),
         ),
         "vector_empty": Scheme(vars=(vector_var.name,), type=vector_t),
@@ -838,7 +839,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "map_set": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, TFunc(map_var, map_t)))),
         "map_remove": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, map_t))),
         "map_size": Scheme(vars=(map_var.name,), type=TFunc(map_t, INT)),
-        "map_nth_key": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, TApp(maybe_collections, STRING)))),
+        "map_nth_key": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, TApp(maybe_type, STRING)))),
         "map_nth_value": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, maybe_map_var))),
         "tcp_listen": Scheme(vars=(), type=TFunc(INT, INT)),
         "tcp_accept": Scheme(vars=(), type=TFunc(INT, INT)),
@@ -853,10 +854,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 STRING,
                 TFunc(
                     INT,
-                    TApp(
-                        TApp(TConst("stdlib.net.Result"), TConst("stdlib.net.TcpError")),
-                        INT,
-                    ),
+                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), INT),
                 ),
             ),
         ),
@@ -866,10 +864,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 INT,
                 TFunc(
                     INT,
-                    TApp(
-                        TApp(TConst("stdlib.net.Result"), TConst("stdlib.net.TcpError")),
-                        STRING,
-                    ),
+                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), STRING),
                 ),
             ),
         ),
@@ -879,10 +874,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 INT,
                 TFunc(
                     STRING,
-                    TApp(
-                        TApp(TConst("stdlib.net.Result"), TConst("stdlib.net.TcpError")),
-                        INT,
-                    ),
+                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), INT),
                 ),
             ),
         ),
@@ -901,10 +893,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                             STRING,
                             TFunc(
                                 INT,
-                                TApp(
-                                    TApp(TConst("stdlib.http.Result"), TConst("stdlib.http.HttpError")),
-                                    TConst("stdlib.http.HttpResponse"),
-                                ),
+                                TApp(TApp(result_type, TConst("stdlib.http.HttpError")), TConst("stdlib.http.HttpResponse")),
                             ),
                         ),
                     ),
@@ -915,10 +904,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(
                 STRING,
-                TApp(
-                    TApp(TConst("stdlib.http.Result"), TConst("stdlib.http.JsonError")),
-                    TConst("stdlib.http.Json"),
-                ),
+                TApp(TApp(result_type, TConst("stdlib.http.JsonError")), TConst("stdlib.http.Json")),
             ),
         ),
         "term_clear": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),

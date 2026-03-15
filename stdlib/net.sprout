@@ -1,9 +1,5 @@
 module stdlib.net
 
-export type Result e a =
-  | Ok a
-  | Err e
-
 export type TcpError =
   | TcpInvalidArgument String
   | TcpInvalidHandle
