@@ -19,6 +19,7 @@ Primary design references:
 4. Prefer explicit tradeoff notes over implicit assumptions.
 5. Use repository-managed tools via `mise` and `just` (avoid ad-hoc global tool versions).
 6. Treat the normative spec as a maintained artifact, not a backlog item.
+7. Before making any non-trivial change, present a short high-level implementation overview and wait for user approval.
 
 ## Docs and TODO Hygiene
 
@@ -47,12 +48,13 @@ For any non-trivial language change, include:
 
 1. Problem statement.
 2. Goals and non-goals.
-3. Syntax and semantics impact.
-4. Type-system impact.
-5. Error-message impact.
-6. Compatibility/migration notes.
-7. Tests added/updated.
-8. Spec/docs updated, with the normative vs experimental status made explicit.
+3. High-level implementation overview for approval before editing.
+4. Syntax and semantics impact.
+5. Type-system impact.
+6. Error-message impact.
+7. Compatibility/migration notes.
+8. Tests added/updated.
+9. Spec/docs updated, with the normative vs experimental status made explicit.
 
 ## Code and Testing Expectations
 
@@ -63,6 +65,18 @@ For any non-trivial language change, include:
 5. Preferred execution path for local commands:
    `mise exec -- just <task>`
 6. Spec-affecting changes should also add or update conformance coverage where practical.
+
+## Definition of Done
+
+For coding tasks, work is done only when:
+
+1. The change has been designed at a high level and approved by the user when required.
+2. The implementation is complete.
+3. Relevant docs/spec updates are complete and in sync with the implementation.
+4. Formatting and linting have been run when applicable.
+5. Relevant tests pass.
+6. The changes are committed.
+7. A self-review has been performed before handoff.
 
 ## Directory Conventions
 
