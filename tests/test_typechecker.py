@@ -50,6 +50,15 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertEqual(types["fact"], "Int -> Int")
 
+    def test_type_error_top_level_let_cannot_be_io(self) -> None:
+        src = """
+        let boot = print("boot")
+        fn main() -> IO Unit = print("ok")
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Top-level let bindings must be pure", str(ctx.exception))
+
     def test_typecheck_with_stdlib_loaded(self) -> None:
         src = """
         fn is_even(x: Int) -> Bool =

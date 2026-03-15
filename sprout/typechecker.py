@@ -88,6 +88,11 @@ STRING = TConst("String")
 UNIT = TConst("Unit")
 
 
+def is_io_type(typ: Type, state: "InferState") -> bool:
+    resolved = apply(state.subst, typ)
+    return isinstance(resolved, TApp) and isinstance(resolved.base, TConst) and resolved.base.name == "IO"
+
+
 class InferState:
     def __init__(self) -> None:
         self.next_id = 0
@@ -994,6 +999,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         elif isinstance(decl, ast.LetDecl):
             let_decl = decl
             value_t = infer_expr(let_decl.value, env, state, type_decls, global_methods)
+            if is_io_type(value_t, state):
+                raise tc_error(
+                    "Top-level let bindings must be pure; move effectful work into a function such as main",
+                    let_decl,
+                )
             env[let_decl.name] = generalize(env, value_t, state)
 
     validate_instance_methods(program, class_decls, env, state, type_decls, global_methods)

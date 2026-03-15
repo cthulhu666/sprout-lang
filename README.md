@@ -41,6 +41,11 @@ Normative status:
 - `mise.toml` pinned local toolchain (`python`, `just`)
 - `justfile` common project commands
 
+v0 execution note:
+
+- Top-level `let` bindings must be pure.
+- Effectful work belongs in functions, with `main` as the entrypoint.
+
 ## Tooling (mise + just)
 
 This repo uses [`mise`](https://mise.jdx.dev/) to pin tools and [`just`](https://github.com/casey/just) as task runner.

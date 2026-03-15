@@ -41,6 +41,9 @@ A source file is a sequence of top-level declarations:
 
 Execution starts from `main`.
 
+Top-level `let` declarations must be pure in v0. Effectful work must be placed
+inside functions and triggered from `main` or other function calls.
+
 ## 4. Types
 
 Built-in types:
@@ -89,6 +92,7 @@ let answer = 42
 ```
 
 Bindings are immutable.
+At top level, `let` initializers must not have type `IO a`.
 
 ### 5.3 If expression
 
@@ -135,6 +139,8 @@ Effect note for v0:
 - Effects happen when the call expression is evaluated.
 - v0 does not provide a separate execution model for effectful values.
 - A fuller effect system is deferred to v1.
+- Because top-level `let` bindings must be pure, imported modules do not perform
+  effectful initialization merely by being loaded.
 
 ## 7. Typing Rules (High Level)
 

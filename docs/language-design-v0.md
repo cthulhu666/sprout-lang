@@ -48,7 +48,7 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 9. Top-level evaluation is in source order; `main` is the entrypoint.
 - Semantics: Top-level bindings evaluate in file order; program execution starts at `main`.
 - Rationale: Simple initialization model with a clear start location.
-- Tradeoff: Top-level effects are possible and should be discouraged by style guidance.
+- Tradeoff: To keep modules predictable in v0, top-level `let` bindings must be pure and effectful initialization is pushed into functions.
 
 10. Type errors are compile-time; runtime errors are minimized.
 - Semantics: Static type errors fail compilation. Runtime failures are reserved for unavoidable cases (for example, explicit panic or failed external IO).

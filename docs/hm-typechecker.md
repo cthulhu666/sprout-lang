@@ -59,6 +59,9 @@ point of view. It does not trigger a distinct effect-checking phase.
 5. Infer/check top-level `let` values.
 6. Report success with inferred types, or fail with first clear error.
 
+In v0, inferred top-level `let` types are also checked for purity: a top-level
+binding may not have type `IO a`.
+
 ## Unification (the engine)
 
 `unify(left, right)` tries to make two types equal.
