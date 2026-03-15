@@ -506,6 +506,11 @@ long long str_len(const char* s) {
   return (long long)strlen(s);
 }
 
+_Bool str_eq(const char* left, const char* right) {
+  if (left == NULL || right == NULL) tcp_fail("str_eq: null input");
+  return strcmp(left, right) == 0;
+}
+
 const char* str_slice(const char* s, long long start, long long length) {
   if (s == NULL) tcp_fail("str_slice: null input");
   if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");

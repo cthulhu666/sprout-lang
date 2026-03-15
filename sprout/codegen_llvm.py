@@ -48,6 +48,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
     "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
     "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
+    "str_eq": FnSig(name="str_eq", params=[I8_PTR, I8_PTR], ret=I1),
     "str_find": FnSig(name="str_find", params=[I8_PTR, I8_PTR], ret=I64),
     "str_starts_with": FnSig(name="str_starts_with", params=[I8_PTR, I8_PTR], ret=I1),
     "bytes_empty": FnSig(name="bytes_empty", params=[], ret=I64),
@@ -1081,6 +1082,14 @@ def _emit_binary(
             raise CodegenError("Comparison operands must have same type")
         if left.typ == I8_PTR and expr.op not in {"==", "!="}:
             raise CodegenError("String comparison only supports == and !=")
+        if left.typ == I8_PTR:
+            tmp = emitter.tmp()
+            emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {left.ir}, ptr {right.ir})")
+            if expr.op == "==":
+                return Value(I1, tmp)
+            not_tmp = emitter.tmp()
+            emitter.emit(f"  {not_tmp} = xor i1 {tmp}, true")
+            return Value(I1, not_tmp)
         tmp = emitter.tmp()
         pred = {
             "<": "slt",
