@@ -1,0 +1,138 @@
+module examples.aoc2025_day4
+import stdlib.collections (Vec, vec_append, vec_empty, vec_get_or, vec_length)
+import stdlib.string (concat, length, slice, string_lines)
+
+# Advent of Code 2025 Day 4: Printing Department
+# part1 counts currently accessible rolls.
+# part2 repeatedly removes all currently accessible rolls until stable.
+
+export type Answers =
+  | Answers Int Int
+
+type RowRemoval =
+  | RowRemoval String Int
+
+type GridRemoval =
+  | GridRemoval (Vec String) Int
+
+fn bool_to_int(value: Bool) -> Int =
+  if value then 1
+  else 0
+
+fn line_at(grid: Vec String, row: Int) -> String =
+  vec_get_or(grid, row, "")
+
+fn char_at_or(line: String, col: Int, fallback: String) -> String =
+  if col < 0 then fallback
+  else if col >= length(line) then fallback
+  else slice(line, col, 1)
+
+fn cell_at(grid: Vec String, row: Int, col: Int) -> String =
+  if row < 0 then "."
+  else char_at_or(line_at(grid, row), col, ".")
+
+fn is_roll(grid: Vec String, row: Int, col: Int) -> Bool =
+  cell_at(grid, row, col) == "@"
+
+fn occupied_neighbors(grid: Vec String, row: Int, col: Int) -> Int =
+  bool_to_int(is_roll(grid, row - 1, col - 1))
+  + bool_to_int(is_roll(grid, row - 1, col))
+  + bool_to_int(is_roll(grid, row - 1, col + 1))
+  + bool_to_int(is_roll(grid, row, col - 1))
+  + bool_to_int(is_roll(grid, row, col + 1))
+  + bool_to_int(is_roll(grid, row + 1, col - 1))
+  + bool_to_int(is_roll(grid, row + 1, col))
+  + bool_to_int(is_roll(grid, row + 1, col + 1))
+
+fn is_accessible(grid: Vec String, row: Int, col: Int) -> Bool =
+  is_roll(grid, row, col) && occupied_neighbors(grid, row, col) < 4
+
+fn count_accessible_in_row(grid: Vec String, row: Int, col: Int, width: Int) -> Int =
+  if col >= width then 0
+  else bool_to_int(is_accessible(grid, row, col)) + count_accessible_in_row(grid, row, col + 1, width)
+
+fn count_accessible_rows(grid: Vec String, row: Int, height: Int) -> Int =
+  if row >= height then 0
+  else count_accessible_in_row(grid, row, 0, length(line_at(grid, row))) + count_accessible_rows(grid, row + 1, height)
+
+fn count_accessible_now(grid: Vec String) -> Int =
+  count_accessible_rows(grid, 0, vec_length(grid))
+
+fn remove_accessible_from_row(
+  grid: Vec String,
+  row: Int,
+  col: Int,
+  width: Int,
+  acc: String,
+  removed: Int
+) -> RowRemoval =
+  if col >= width then RowRemoval(acc, removed)
+  else
+    if is_accessible(grid, row, col) then
+      remove_accessible_from_row(grid, row, col + 1, width, concat(acc, "."), removed + 1)
+    else
+      remove_accessible_from_row(
+        grid,
+        row,
+        col + 1,
+        width,
+        concat(acc, char_at_or(line_at(grid, row), col, ".")),
+        removed
+      )
+
+fn remove_accessible_rows(
+  grid: Vec String,
+  row: Int,
+  height: Int,
+  acc: Vec String,
+  removed: Int
+) -> GridRemoval =
+  if row >= height then GridRemoval(acc, removed)
+  else
+    match remove_accessible_from_row(grid, row, 0, length(line_at(grid, row)), "", 0) with
+    | RowRemoval next_row row_removed ->
+        remove_accessible_rows(
+          grid,
+          row + 1,
+          height,
+          vec_append(acc, next_row),
+          removed + row_removed
+        )
+
+fn remove_accessible_once(grid: Vec String) -> GridRemoval =
+  remove_accessible_rows(grid, 0, vec_length(grid), vec_empty(), 0)
+
+fn remove_accessible_layers(grid: Vec String, removed_total: Int) -> Int =
+  match remove_accessible_once(grid) with
+  | GridRemoval next_grid removed_now ->
+      if removed_now == 0 then removed_total
+      else remove_accessible_layers(next_grid, removed_total + removed_now)
+
+fn append_if_non_empty(acc: Vec String, line: String) -> Vec String =
+  if length(line) == 0 then acc
+  else vec_append(acc, line)
+
+fn collect_non_empty_lines(lines: Vec String, index: Int, total: Int, acc: Vec String) -> Vec String =
+  if index >= total then acc
+  else
+    collect_non_empty_lines(
+      lines,
+      index + 1,
+      total,
+      append_if_non_empty(acc, vec_get_or(lines, index, ""))
+    )
+
+fn parse_grid(raw: String) -> Vec String =
+  let_collect_non_empty_lines(string_lines(raw))
+
+fn let_collect_non_empty_lines(lines: Vec String) -> Vec String =
+  collect_non_empty_lines(lines, 0, vec_length(lines), vec_empty())
+
+fn solve_grid(grid: Vec String) -> Answers =
+  Answers(count_accessible_now(grid), remove_accessible_layers(grid, 0))
+
+export fn solve_stdin() -> Answers =
+  solve_grid(parse_grid(read_file("-")))
+
+fn main() -> IO Unit =
+  print(solve_stdin())
