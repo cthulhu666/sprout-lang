@@ -66,7 +66,7 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Start REPL: `mise exec -- python -m sprout.cli repl` (loads prelude by default)
+- Start REPL: `mise exec -- python -m sprout.cli repl` (loads prelude by default; interactive mode supports arrow-key editing and persistent history via `~/.sprout_repl_history`)
 - Run tests: `mise exec -- just test`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
 - Build native binary (clang): `mise exec -- just compile-native /tmp/prog.sprout /tmp/prog`

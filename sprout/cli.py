@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,6 +21,8 @@ from .stdlib import with_http_prelude, with_prelude
 from .tokenizer import TokenizeError
 from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 from .typechecker import TypeCheckError, typecheck_program
+
+_REPL_HISTORY_LIMIT = 1000
 
 
 def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
@@ -1446,6 +1450,39 @@ def _repl_lookup_type(types: dict[str, str], name: str) -> str:
     raise KeyError(name)
 
 
+def _repl_history_path() -> Path:
+    override = os.environ.get("SPROUT_REPL_HISTORY")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".sprout_repl_history"
+
+
+def _configure_repl_readline(history_path: Path | None = None) -> None:
+    try:
+        import readline
+    except ImportError:
+        return
+
+    target = history_path if history_path is not None else _repl_history_path()
+    readline.parse_and_bind("tab: complete")
+    readline.parse_and_bind("set editing-mode emacs")
+    readline.set_history_length(_REPL_HISTORY_LIMIT)
+    if target.exists():
+        try:
+            readline.read_history_file(target)
+        except OSError:
+            pass
+
+    def _write_history() -> None:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            readline.write_history_file(target)
+        except OSError:
+            pass
+
+    atexit.register(_write_history)
+
+
 def cmd_repl(with_stdlib: bool = False) -> int:
     declarations: list[str] = []
     repl_counter = 0
@@ -1514,6 +1551,7 @@ def cmd_repl(with_stdlib: bool = False) -> int:
         run_program(lowered)
 
     if interactive:
+        _configure_repl_readline()
         emit("Sprout REPL. Use :help for commands.")
         while True:
             try:

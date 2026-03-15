@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -126,6 +127,35 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("error:", run.stdout)
         self.assertIn("does not export value 'Monoid'", run.stdout)
+
+    def test_repl_history_path_defaults_to_home_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = tmp
+            try:
+                from sprout.cli import _repl_history_path
+
+                self.assertEqual(_repl_history_path(), Path(tmp) / ".sprout_repl_history")
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_repl_history_path_honors_environment_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            override = str(Path(tmp) / "custom-history")
+            old_value = os.environ.get("SPROUT_REPL_HISTORY")
+            os.environ["SPROUT_REPL_HISTORY"] = override
+            try:
+                from sprout.cli import _repl_history_path
+
+                self.assertEqual(_repl_history_path(), Path(override))
+            finally:
+                if old_value is None:
+                    os.environ.pop("SPROUT_REPL_HISTORY", None)
+                else:
+                    os.environ["SPROUT_REPL_HISTORY"] = old_value
 
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
