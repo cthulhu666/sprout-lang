@@ -195,6 +195,36 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("@f = global ptr null", ir)
         self.assertIn("@g = global ptr null", ir)
 
+    def test_compile_runtime_top_level_multi_arg_lambda_value_to_llvm(self) -> None:
+        src = r"""
+        let add = \(x: Int, y: Int) -> x + y
+
+        fn main() -> Int =
+          print_int(add(20, 22))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("@add = global ptr null", ir)
+        self.assertIn("call i64 %", ir)
+
+    def test_compile_lambda_returning_named_function_value_to_llvm(self) -> None:
+        src = r"""
+        fn inc(x: Int) -> Int = x + 1
+
+        fn outer() -> Bool -> Int -> Int =
+          \flag -> if flag then inc else inc
+
+        fn main() -> Int =
+          print_int(outer()(true)(41))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define ptr @__sprout_lambda_", ir)
+        self.assertIn("call ptr @malloc(i64 %t", ir)
+        self.assertIn("@__sprout_fn_closure_", ir)
+
     def test_compile_tcp_builtins_to_llvm(self) -> None:
         src = """
         fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b

@@ -678,6 +678,8 @@ def infer_expr(
         return _mark_expr_type(expr, out_t)
     lambda_expr = getattr(ast, "LambdaExpr", None)
     if lambda_expr is not None and isinstance(expr, lambda_expr):
+        if not expr.params:
+            raise tc_error("Lambda parameter list cannot be empty", expr)
         local_vars: dict[str, TVar] = {}
         working_env = dict(env)
         param_types: list[Type] = []

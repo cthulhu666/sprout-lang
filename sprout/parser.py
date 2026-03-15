@@ -346,10 +346,12 @@ class Parser:
             start = self.tokens[self.i - 1]
             params: list[ast.Param] = []
             if self.match("SYMBOL", "("):
-                if not self.check("SYMBOL", ")"):
+                if self.check("SYMBOL", ")"):
+                    t = self.current()
+                    raise ParseError(f"Lambda parameter list cannot be empty at {t.line}:{t.column}")
+                params.append(self.parse_param())
+                while self.match("SYMBOL", ","):
                     params.append(self.parse_param())
-                    while self.match("SYMBOL", ","):
-                        params.append(self.parse_param())
                 self.expect("SYMBOL", ")")
             else:
                 params.append(self.parse_lambda_shorthand_param())

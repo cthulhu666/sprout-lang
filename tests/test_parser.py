@@ -83,6 +83,11 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
         self.assertEqual(fn_decl.body.params[0].type_expr.name, "Int")
 
+    def test_parse_lambda_rejects_empty_parameter_list(self) -> None:
+        src = r"fn main() -> Int = \() -> 42"
+        with self.assertRaises(ParseError):
+            parse(src)
+
     def test_parse_lambda_in_call_position(self) -> None:
         src = r"fn main() -> Int = apply(41, \(x) -> x + 1)"
         program = parse(src)
