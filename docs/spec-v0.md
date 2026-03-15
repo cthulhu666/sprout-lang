@@ -146,7 +146,8 @@ type Maybe a =
 - `a || b`: evaluate `b` only if `a` is `false`.
 6. `if`: evaluate condition, then exactly one branch.
 7. `match`: evaluate scrutinee once, then patterns in order, evaluate first matching branch.
-8. Constructors/records/tuples: evaluate fields left-to-right before construction.
+8. Constructors (and tuples, if present in a v0.1 extension) evaluate fields
+   left-to-right before construction.
 9. Top-level declarations evaluate in source order.
 
 Effect note for v0:

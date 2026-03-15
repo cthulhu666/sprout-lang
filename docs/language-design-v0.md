@@ -35,7 +35,7 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 - Rationale: Predictable behavior and explicit branch priority.
 - Tradeoff: Branch order matters; compiler should warn on unreachable patterns.
 
-7. Constructors, tuples, and records evaluate fields left-to-right.
+7. Constructors and tuples evaluate fields left-to-right.
 - Semantics: Evaluate all arguments before value construction.
 - Rationale: Uniform mental model with function calls and operators.
 - Tradeoff: Restricts some reordering optimizations.

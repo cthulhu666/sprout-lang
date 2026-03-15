@@ -5,7 +5,7 @@ This file tracks open design, implementation, and tooling follow-up work.
 ## Current Priorities
 
 1. Resolve the top-level purity story: either tighten the language so non-`IO` expressions cannot hide effects, or narrow the docs so “pure top-level let” does not overclaim what v0 guarantees.
-2. Remove or properly specify tuple/record support in the v0 docs so the normative surface does not mention ghost features.
+2. Remove or properly specify tuple support in the v0 docs so the normative surface does not mention ghost features.
 3. Define unreachable-pattern handling explicitly (warn, error, or ignore) instead of leaving it as advisory design guidance.
 4. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
 5. Add stronger server-side runtime models (multi-reactor as next target).
@@ -28,3 +28,6 @@ This file tracks open design, implementation, and tooling follow-up work.
 4. Add cryptographic/runtime primitives needed for authenticated protocol clients in v1.
    Initial scope: SHA-256, HMAC-SHA-256, base64 encode/decode, byte-wise XOR helpers, and secure random nonce generation suitable for SCRAM-style handshakes.
    First milestone constraints: prioritize protocol/client building blocks over a broad crypto API, keep the surface bytes-oriented, and document security expectations clearly so the feature does not overclaim production-hardening beyond the implemented primitives.
+5. Add records in v1.
+   Initial scope: immutable record values with explicit field names, field access, and straightforward construction/update rules that preserve Sprout's strict evaluation model.
+   First milestone constraints: no row polymorphism, no structural subtyping, no implicit field punning, and no attempt to fold records into the current ADT surface without a dedicated spec.
