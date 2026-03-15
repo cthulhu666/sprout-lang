@@ -11,3 +11,4 @@ This file tracks open design, implementation, and tooling follow-up work.
 5. Add stronger server-side runtime models (multi-reactor as next target).
 6. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
 7. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
+8. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.

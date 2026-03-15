@@ -166,6 +166,9 @@ Math semantics:
 - when `n > 0`, `mod(x, n)` returns `Just r` with `0 <= r < n`
 - when `n <= 0`, `mod(x, n)` returns `Nothing`
 - `pow(base, exp)` returns `Nothing` when `exp < 0`
+- interpreter `Int` arithmetic currently follows host arbitrary-precision integer behavior
+- the current native backend still lowers `Int` to `i64`, so overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are not yet backend-independent outside the backend's current representable range
+- this is a v0 implementation limitation, not the intended long-term meaning of `Int`
 
 For module code, prefer:
 `import stdlib.math as math`

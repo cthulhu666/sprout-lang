@@ -180,6 +180,14 @@ Semantics:
 - If `n <= 0`, `mod(x, n)` returns `Nothing`.
 - `pow(base, exp)` returns `Nothing` when `exp < 0`; otherwise it returns
   `Just` of the integer power.
+- In the interpreter, `Int` arithmetic currently follows host arbitrary-precision
+  integer behavior.
+- In the current native backend, `Int` values are lowered to machine `i64`
+  values. Overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are
+  therefore not yet fully backend-independent once computation leaves the
+  backend's current representable range.
+- This backend range limitation is a temporary implementation constraint in v0,
+  not the intended long-term meaning of `Int`.
 - The presence of `pow` and `mod` in `stdlib.math` does not imply implicit
   numeric coercions, fractional arithmetic, or floating-point support in v0.
 
