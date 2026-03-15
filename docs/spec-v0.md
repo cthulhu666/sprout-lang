@@ -85,6 +85,10 @@ fn add(x: Int, y: Int) -> Int =
 Parameter and return annotations are optional for ordinary functions in v0 when
 the typechecker can infer them.
 
+Multiple parameters in a declaration are surface syntax for a function whose
+type is written with nested arrows. For example, `fn add(x: Int, y: Int) ->
+Int` has type `Int -> Int -> Int`.
+
 ### 5.2 Let binding
 
 ```sprout
@@ -108,6 +112,9 @@ Lambda expressions are anonymous functions.
 - Parameter annotations are optional and follow the same rules as named functions.
 - Lambdas capture surrounding lexical bindings by value.
 - A lambda with parameters `x, y` has function type `tx -> ty -> tr`.
+- v0 function application is exact-arity: calling a function with fewer
+  arguments than it declares is a compile/runtime error in the current contract,
+  not implicit partial application.
 
 ### 5.4 If expression
 
@@ -153,6 +160,7 @@ type Maybe a =
 ## 6. Evaluation Semantics (Strict)
 
 1. Function application: evaluate callee, then args left-to-right, then call.
+   The call must supply exactly the function's declared arity in v0.
 2. Lambda expression: evaluating a lambda produces a closure that captures the current lexical environment.
 3. `let`: evaluate RHS immediately, then bind.
 4. Binary operators: evaluate left operand, then right operand.

@@ -172,6 +172,10 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `when_ok(r, f)` runs `f` for `Ok` and preserves `r`
   - `when_error(r, f)` runs `f` for `Err` and preserves `r`
 
+Current call semantics note: ordinary function calls are exact-arity today.
+Sprout uses nested arrow types for multi-parameter functions, but partial
+application is not implemented yet as a language/runtime feature.
+
 Math module (in `stdlib/math.sprout`):
 
 - Int-only helper surface; this does not add `Float`, `Decimal`, or fixed-width integer types to v0
