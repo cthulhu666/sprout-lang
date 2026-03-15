@@ -1,6 +1,12 @@
 # Sprout Specification v0
 
-This is the normative v0 specification for Sprout.
+This is the normative v0 specification for Sprout core.
+
+It is the source of truth for the stable v0 language surface described here.
+Repository features that are implemented but not specified in this document
+(for example, modules and typeclasses) are experimental extensions and are not
+part of normative v0 until they are specified here or in another normative
+spec document.
 
 ## 1. Scope
 

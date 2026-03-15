@@ -14,6 +14,14 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 - [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)
 
+Normative status:
+
+- `docs/spec-v0.md` defines the stable Sprout core for v0.
+- Features described elsewhere in this README but not specified in `docs/spec-v0.md`
+  are implementation features or experimental extensions.
+- In particular, the current module system and typeclass support are implemented
+  in the prototype, but are not yet part of normative v0.
+
 ## Repository Layout
 
 - `docs/` design and process documents
@@ -312,7 +320,7 @@ Load HTTP helpers:
   `python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/`
 - Collections helper demo:
   `python3 -m sprout.cli run examples/collections_utils_demo.sprout`
-- Typeclass collections demo:
+- Typeclass collections demo (experimental surface area, not normative v0):
   `python3 -m sprout.cli run examples/typeclass_functor_foldable_demo.sprout`
 
 ## Native Backend (Early)
@@ -340,9 +348,13 @@ Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
 - `reactor` (default): event loop / readiness-based echo server
 - `blocking`: simple blocking accept/read/write loop
 
-## Modules (v0)
+## Modules (Experimental)
 
-Sprout now supports file-based modules with top-of-file headers:
+The prototype currently supports file-based modules with top-of-file headers.
+This module system is not yet part of normative v0; treat this section as
+implementation status rather than language spec.
+
+Sprout supports:
 
 - `module a.b.c`
 - `import x.y.z`

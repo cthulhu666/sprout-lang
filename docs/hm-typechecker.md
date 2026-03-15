@@ -2,6 +2,13 @@
 
 This guide explains the current Sprout typechecker in practical terms, without assuming prior language-theory background.
 
+Scope note:
+
+- This guide explains the core HM-style checker that underpins normative v0.
+- Prototype features that sit outside `docs/spec-v0.md`, including the current
+  typeclass surface, should be treated as implementation extensions rather than
+  part of the stable v0 spec.
+
 ## What "HM" means here
 
 HM (Hindley-Milner) is a style of static typing where the compiler can infer many types automatically.
@@ -97,12 +104,15 @@ In `match`, each branch:
 
 The checker also performs a basic ADT exhaustiveness check and reports missing constructors.
 
-## Current limitations (intentional v0)
+## Current limitations (intentional v0 core)
 
 - No typeclasses/traits.
 - Exhaustiveness checking is basic (ADT constructor coverage + catch-all).
 - Diagnostics are improving but still early-stage.
 - No effect typing beyond the simple `IO a` surface type.
+
+Note: the repository prototype contains typeclass-related implementation work,
+but that support is not part of normative v0 yet.
 
 ## Practical reading order for contributors
 
