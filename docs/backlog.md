@@ -18,3 +18,6 @@ This file tracks open design, implementation, and tooling follow-up work.
 1. Add list comprehensions for `List` values in v1.
    Initial scope: `[expr for x in xs]` and `[expr for x in xs if pred]`.
    First milestone constraints: single generator, optional guard, list-only, no pattern generators, and no nested or multi-generator comprehensions.
+2. Add inclusive integer ranges in v1.
+   Initial scope: a dedicated `IntRange` type, `a..b` inclusive syntax, ascending and descending unit-step semantics, and a small helper surface such as `range_contains`, `range_count`, and `range_fold`.
+   First milestone constraints: integer-only, inclusive-only, no custom step syntax, no open-ended ranges, no range patterns, and no immediate redesign of existing slice APIs.
