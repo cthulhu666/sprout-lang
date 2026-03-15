@@ -720,6 +720,35 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "hello")
 
+    def test_http_response_formats_supported_status(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          match http_response(503, "down") with
+          | Ok response -> print(response)
+          | Err _ -> print("err")
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertIn("HTTP/1.1 503 Service Unavailable", out.getvalue())
+        self.assertIn("down", out.getvalue())
+
+    def test_http_response_rejects_unsupported_status(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          match http_response(418, "teapot") with
+          | Ok _ -> print("ok")
+          | Err err ->
+              match err with
+              | HttpUnsupportedStatus code -> print(code)
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "418")
+
     def test_json_parse_invalid(self) -> None:
         src = """
         fn main() -> IO Unit =

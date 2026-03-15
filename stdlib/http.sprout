@@ -12,6 +12,9 @@ export type HttpError =
   | HttpBadStatus Int
   | HttpDecode String
 
+export type HttpStatusError =
+  | HttpUnsupportedStatus Int
+
 export type JsonError =
   | JsonDecode String
 
@@ -43,6 +46,9 @@ export type RequestPathVersion =
 export type RequestLine =
   | RequestLine String RequestPathVersion
 
+type HttpStatusInfo =
+  | HttpStatusInfo String String
+
 fn str_drop(s: String, n: Int) -> String =
   if n >= str_len(s) then ""
   else str_slice(s, n, str_len(s) - n)
@@ -68,32 +74,53 @@ fn parse_request_line_from_line(line: String) -> Maybe RequestLine =
 export fn parse_request_line(raw: String) -> Maybe RequestLine =
   parse_request_line_from_line(first_line(raw))
 
-fn http_status_code_text(status: Int) -> String =
-  if status == 200 then "200"
-  else if status == 400 then "400"
-  else if status == 404 then "404"
-  else "500"
+fn http_status_info(status: Int) -> Maybe HttpStatusInfo =
+  match status with
+  | 200 -> Just(HttpStatusInfo("200", "OK"))
+  | 201 -> Just(HttpStatusInfo("201", "Created"))
+  | 202 -> Just(HttpStatusInfo("202", "Accepted"))
+  | 204 -> Just(HttpStatusInfo("204", "No Content"))
+  | 400 -> Just(HttpStatusInfo("400", "Bad Request"))
+  | 401 -> Just(HttpStatusInfo("401", "Unauthorized"))
+  | 403 -> Just(HttpStatusInfo("403", "Forbidden"))
+  | 404 -> Just(HttpStatusInfo("404", "Not Found"))
+  | 405 -> Just(HttpStatusInfo("405", "Method Not Allowed"))
+  | 409 -> Just(HttpStatusInfo("409", "Conflict"))
+  | 410 -> Just(HttpStatusInfo("410", "Gone"))
+  | 422 -> Just(HttpStatusInfo("422", "Unprocessable Content"))
+  | 429 -> Just(HttpStatusInfo("429", "Too Many Requests"))
+  | 500 -> Just(HttpStatusInfo("500", "Internal Server Error"))
+  | 501 -> Just(HttpStatusInfo("501", "Not Implemented"))
+  | 502 -> Just(HttpStatusInfo("502", "Bad Gateway"))
+  | 503 -> Just(HttpStatusInfo("503", "Service Unavailable"))
+  | 504 -> Just(HttpStatusInfo("504", "Gateway Timeout"))
+  | _ -> Nothing
 
-fn http_reason(status: Int) -> String =
-  if status == 200 then "OK"
-  else if status == 400 then "Bad Request"
-  else if status == 404 then "Not Found"
-  else "Internal Server Error"
+fn http_status_line(info: HttpStatusInfo) -> String =
+  match info with
+  | HttpStatusInfo code reason ->
+      str_concat("HTTP/1.1 ", str_concat(code, str_concat(" ", reason)))
 
-fn http_status_line(status: Int) -> String =
-  str_concat("HTTP/1.1 ", str_concat(http_status_code_text(status), str_concat(" ", http_reason(status))))
-
-export fn http_response(status: Int, body: String) -> String =
-  str_concat(
-    http_status_line(status),
-    str_concat("\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n", body)
-  )
+export fn http_response(status: Int, body: String) -> Result HttpStatusError String =
+  match http_status_info(status) with
+  | Just info ->
+      Ok(
+        str_concat(
+          http_status_line(info),
+          str_concat("\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n", body)
+        )
+      )
+  | Nothing -> Err(HttpUnsupportedStatus(status))
 
 export fn http_ok(body: String) -> String =
-  http_response(200, body)
+  match http_response(200, body) with
+  | Ok response -> response
+  | Err _ -> ""
 
 export fn http_bad_request() -> String =
-  http_response(400, "bad request")
+  match http_response(400, "bad request") with
+  | Ok response -> response
+  | Err _ -> ""
 
 export fn request_line_to_string(req: RequestLine) -> String =
   match req with

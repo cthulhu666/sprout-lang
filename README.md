@@ -241,10 +241,11 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - uses foundational prelude `Maybe` and `Result`
 - `HttpResponse(status, headers, body)`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
+- `HttpStatusError` variants (`HttpUnsupportedStatus`)
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
 - `parse_request_line(raw) -> Maybe RequestLine`
-- `http_response(status, body) -> String`
+- `http_response(status, body) -> Result HttpStatusError String`
 - `http_response_body(resp: HttpResponse) -> String`
 - `http_ok(body) -> String`
 - `http_bad_request() -> String`
@@ -256,6 +257,11 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `json_get_object(value) -> Maybe JsonObject`
 - `json_array_next(array) -> Maybe JsonArrayStep`
 - `json_object_next(object) -> Maybe JsonObjectStep`
+
+`http_response` currently supports a practical fixed subset of common statuses:
+`200`, `201`, `202`, `204`, `400`, `401`, `403`, `404`, `405`, `409`, `410`,
+`422`, `429`, `500`, `501`, `502`, `503`, and `504`. Unsupported codes return
+`Err(HttpUnsupportedStatus(code))` instead of being silently rewritten.
 
 HTTP client convenience module (in `stdlib/http_client.sprout`):
 
