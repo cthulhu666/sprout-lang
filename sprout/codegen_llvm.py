@@ -35,6 +35,7 @@ class CtorSig:
 
 
 EXTERN_SIGS: dict[str, FnSig] = {
+    "malloc": FnSig(name="malloc", params=[I64], ret=I8_PTR),
     "print_int": FnSig(name="print_int", params=[I64], ret=I64),
     "print_str": FnSig(name="print_str", params=[I8_PTR], ret=I64),
     "print_value": FnSig(name="print_value", params=[I64], ret=I64),
@@ -138,6 +139,14 @@ class CallSig:
     ret: LLType
 
 
+@dataclass
+class LambdaInfo:
+    expr: ast.LambdaExpr
+    name: str
+    captures: list[str]
+    call_sig: CallSig
+
+
 class Emitter:
     def __init__(self) -> None:
         self.lines: list[str] = []
@@ -145,7 +154,11 @@ class Emitter:
         self.next_block = 0
         self.current_block: str | None = None
         self.next_str = 0
+        self.next_lambda = 0
         self.string_globals: list[str] = []
+        self.global_defs: list[str] = []
+        self.lifted_defs: list[str] = []
+        self.fn_wrappers: dict[str, str] = {}
 
     def emit(self, line: str) -> None:
         self.lines.append(line)
@@ -256,6 +269,241 @@ def _lower_value_type(node: ast.TypeExpr, adt_names: set[str]) -> tuple[LLType, 
     return _type_from_ast(node, adt_names), None
 
 
+def _closure_struct_type() -> str:
+    return "{ ptr, ptr }"
+
+
+def _env_struct_type(fields: list[Value]) -> str:
+    if not fields:
+        return "{ }"
+    return "{ " + ", ".join(field.typ.text for field in fields) + " }"
+
+
+def _sizeof_struct(struct_text: str, emitter: Emitter) -> str:
+    size_ptr = emitter.tmp()
+    emitter.emit(f"  {size_ptr} = getelementptr {struct_text}, ptr null, i32 1")
+    size = emitter.tmp()
+    emitter.emit(f"  {size} = ptrtoint ptr {size_ptr} to i64")
+    return size
+
+
+def _clone_emitter(emitter: Emitter) -> Emitter:
+    clone = Emitter()
+    clone.next_tmp = emitter.next_tmp
+    clone.next_block = emitter.next_block
+    clone.next_str = emitter.next_str
+    clone.next_lambda = emitter.next_lambda
+    clone.fn_wrappers = dict(emitter.fn_wrappers)
+    return clone
+
+
+def _merge_emitter_state(target: Emitter, source: Emitter) -> None:
+    target.next_tmp = source.next_tmp
+    target.next_block = source.next_block
+    target.next_str = source.next_str
+    target.next_lambda = source.next_lambda
+    target.string_globals.extend(source.string_globals)
+    target.global_defs.extend(source.global_defs)
+    target.lifted_defs.extend(source.lifted_defs)
+    target.fn_wrappers.update(source.fn_wrappers)
+
+
+def _call_sig_from_type_expr(node: ast.TypeExpr | None, adt_names: set[str]) -> CallSig | None:
+    if node is None:
+        return None
+    _, call_sig = _lower_value_type(node, adt_names)
+    return call_sig
+
+
+def _value_call_sig(value: Value, inferred_type: ast.TypeExpr | None, adt_names: set[str]) -> CallSig | None:
+    if value.callable_sig is not None:
+        return value.callable_sig
+    return _call_sig_from_type_expr(inferred_type, adt_names)
+
+
+def _value_for_inferred_type(
+    value: Value,
+    inferred_type: ast.TypeExpr | None,
+    adt_names: set[str],
+    emitter: Emitter,
+) -> Value:
+    if inferred_type is None:
+        return value
+    ll_type, call_sig = _lower_value_type(inferred_type, adt_names)
+    coerced = _coerce_value(value, ll_type, emitter)
+    return Value(typ=coerced.typ, ir=coerced.ir, callable_sig=value.callable_sig or call_sig)
+
+
+def _pattern_bound_names(pattern: ast.Pattern) -> set[str]:
+    if isinstance(pattern, ast.VarPattern):
+        return {pattern.name}
+    if isinstance(pattern, ast.ConstructorPattern):
+        out: set[str] = set()
+        for arg in pattern.args:
+            out |= _pattern_bound_names(arg)
+        return out
+    return set()
+
+
+def _collect_free_vars(expr: ast.Expr, bound: set[str], out: list[str], seen: set[str]) -> None:
+    if isinstance(expr, ast.VarExpr):
+        if expr.name not in bound and expr.name not in seen:
+            seen.add(expr.name)
+            out.append(expr.name)
+        return
+    if isinstance(expr, ast.IfExpr):
+        _collect_free_vars(expr.condition, bound, out, seen)
+        _collect_free_vars(expr.then_branch, bound, out, seen)
+        _collect_free_vars(expr.else_branch, bound, out, seen)
+        return
+    if isinstance(expr, ast.MatchExpr):
+        _collect_free_vars(expr.scrutinee, bound, out, seen)
+        for branch in expr.branches:
+            branch_bound = bound | _pattern_bound_names(branch.pattern)
+            _collect_free_vars(branch.value, branch_bound, out, seen)
+        return
+    if isinstance(expr, ast.BinaryExpr):
+        _collect_free_vars(expr.left, bound, out, seen)
+        _collect_free_vars(expr.right, bound, out, seen)
+        return
+    if isinstance(expr, ast.UnaryExpr):
+        _collect_free_vars(expr.operand, bound, out, seen)
+        return
+    if isinstance(expr, ast.CallExpr):
+        _collect_free_vars(expr.callee, bound, out, seen)
+        for arg in expr.args:
+            _collect_free_vars(arg, bound, out, seen)
+        return
+    if isinstance(expr, ast.LambdaExpr):
+        inner_bound = bound | {param.name for param in expr.params}
+        _collect_free_vars(expr.body, inner_bound, out, seen)
+
+
+def _gather_lambda_infos(
+    expr: ast.Expr,
+    available_locals: list[str],
+    adt_names: set[str],
+    infos: dict[int, LambdaInfo],
+    emitter: Emitter,
+) -> None:
+    if isinstance(expr, ast.LambdaExpr):
+        key = id(expr)
+        if key not in infos:
+            inferred_type = getattr(expr, "inferred_type", None)
+            call_sig = _call_sig_from_type_expr(inferred_type, adt_names)
+            if call_sig is None:
+                raise CodegenError("Lambda expression is missing inferred function type")
+            free_vars: list[str] = []
+            _collect_free_vars(
+                expr.body,
+                {param.name for param in expr.params},
+                free_vars,
+                set(),
+            )
+            captures = [name for name in free_vars if name in available_locals]
+            info = LambdaInfo(
+                expr=expr,
+                name=f"__sprout_lambda_{emitter.next_lambda}",
+                captures=captures,
+                call_sig=call_sig,
+            )
+            emitter.next_lambda += 1
+            infos[key] = info
+        next_locals = list(dict.fromkeys(available_locals + infos[key].captures + [param.name for param in expr.params]))
+        _gather_lambda_infos(expr.body, next_locals, adt_names, infos, emitter)
+        return
+    if isinstance(expr, ast.IfExpr):
+        _gather_lambda_infos(expr.condition, available_locals, adt_names, infos, emitter)
+        _gather_lambda_infos(expr.then_branch, available_locals, adt_names, infos, emitter)
+        _gather_lambda_infos(expr.else_branch, available_locals, adt_names, infos, emitter)
+        return
+    if isinstance(expr, ast.MatchExpr):
+        _gather_lambda_infos(expr.scrutinee, available_locals, adt_names, infos, emitter)
+        for branch in expr.branches:
+            branch_locals = list(dict.fromkeys(available_locals + list(_pattern_bound_names(branch.pattern))))
+            _gather_lambda_infos(branch.value, branch_locals, adt_names, infos, emitter)
+        return
+    if isinstance(expr, ast.BinaryExpr):
+        _gather_lambda_infos(expr.left, available_locals, adt_names, infos, emitter)
+        _gather_lambda_infos(expr.right, available_locals, adt_names, infos, emitter)
+        return
+    if isinstance(expr, ast.UnaryExpr):
+        _gather_lambda_infos(expr.operand, available_locals, adt_names, infos, emitter)
+        return
+    if isinstance(expr, ast.CallExpr):
+        _gather_lambda_infos(expr.callee, available_locals, adt_names, infos, emitter)
+        for arg in expr.args:
+            _gather_lambda_infos(arg, available_locals, adt_names, infos, emitter)
+
+
+def _emit_make_closure(code_ir: str, captures: list[Value], emitter: Emitter) -> Value:
+    size = emitter.tmp()
+    emitter.emit(f"  {size} = add i64 {8 * (len(captures) + 1)}, 0")
+    raw = emitter.tmp()
+    emitter.emit(f"  {raw} = call ptr @malloc(i64 {size})")
+    emitter.emit(f"  store ptr {code_ir}, ptr {raw}")
+    for idx, capture in enumerate(captures, start=1):
+        packed = _pack_to_i64(capture, emitter)
+        slot = emitter.tmp()
+        emitter.emit(f"  {slot} = getelementptr i64, ptr {raw}, i64 {idx}")
+        emitter.emit(f"  store i64 {packed}, ptr {slot}")
+    return Value(I8_PTR, raw)
+
+
+def _emit_closure_call(callee: Value, call_sig: CallSig, args: list[Value], emitter: Emitter) -> Value:
+    if len(args) != len(call_sig.params):
+        raise CodegenError(f"Callable expects {len(call_sig.params)} args, got {len(args)}")
+    code = emitter.tmp()
+    emitter.emit(f"  {code} = load ptr, ptr {callee.ir}")
+    args_ir = [f"ptr {callee.ir}"]
+    for value, param_type in zip(args, call_sig.params):
+        coerced = _coerce_value(value, param_type, emitter)
+        args_ir.append(f"{param_type.text} {coerced.ir}")
+    out = emitter.tmp()
+    emitter.emit(f"  {out} = call {call_sig.ret.text} {code}({', '.join(args_ir)})")
+    return Value(call_sig.ret, out)
+
+
+def _emit_named_function_wrapper(wrapper_name: str, target_name: str, sig: FnSig) -> list[str]:
+    lines = [f"define {sig.ret.text} @{wrapper_name}(ptr %env{''.join(f', {t.text} %a{i}' for i, t in enumerate(sig.params))}) {{", "entry:"]
+    args = ", ".join(f"{t.text} %a{i}" for i, t in enumerate(sig.params))
+    call = f"  %ret = call {sig.ret.text} @{target_name}({args})" if args else f"  %ret = call {sig.ret.text} @{target_name}()"
+    lines.append(call)
+    lines.append(f"  ret {sig.ret.text} %ret")
+    lines.append("}")
+    return lines
+
+
+def _emit_lambda_helper(
+    info: LambdaInfo,
+    globals_info: dict[str, GlobalInfo],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
+    emitter: Emitter,
+) -> None:
+    helper = Emitter()
+    params = ["ptr %env"] + [f"{typ.text} %a{i}" for i, typ in enumerate(info.call_sig.params)]
+    helper.emit(f"define {info.call_sig.ret.text} @{info.name}({', '.join(params)}) {{")
+    helper.label("entry")
+    locals_: dict[str, Value] = {}
+    for idx, capture in enumerate(info.captures, start=1):
+        slot = helper.tmp()
+        helper.emit(f"  {slot} = getelementptr i64, ptr %env, i64 {idx}")
+        raw = helper.tmp()
+        helper.emit(f"  {raw} = load i64, ptr {slot}")
+        locals_[capture] = Value(I64, raw)
+    for idx, param in enumerate(info.expr.params):
+        locals_[param.name] = Value(info.call_sig.params[idx], f"%a{idx}", _call_sig_from_type_expr(param.type_expr, adt_names))
+    ret = _emit_expr(info.expr.body, locals_, globals_info, sigs, ctor_sigs, adt_names, helper)
+    if ret.typ != info.call_sig.ret:
+        raise CodegenError(f"Lambda body type mismatch in backend: {ret.typ.text} vs {info.call_sig.ret.text}")
+    helper.emit(f"  ret {ret.typ.text} {ret.ir}")
+    helper.emit("}")
+    _merge_emitter_state(emitter, helper)
+    emitter.lifted_defs.extend(helper.lines)
+
+
 def _infer_expr_type(
     expr: ast.Expr,
     globals_info: dict[str, GlobalInfo],
@@ -297,6 +545,8 @@ def _infer_expr_type(
         if name in EXTERN_SIGS:
             return EXTERN_SIGS[name].ret
         raise CodegenError(f"Cannot infer top-level let call type for {name}")
+    if isinstance(expr, ast.LambdaExpr):
+        return I8_PTR
     if isinstance(expr, ast.MatchExpr):
         if not expr.branches:
             raise CodegenError("Cannot infer top-level let type for empty match")
@@ -382,6 +632,12 @@ def compile_to_llvm(program: ast.Program) -> str:
     fn_decls = [fn for fn in all_fn_decls if fn.name in reachable_fn_names]
 
     emitter = Emitter()
+    lambda_infos: dict[int, LambdaInfo] = {}
+    for let_decl in runtime_lets:
+        _gather_lambda_infos(let_decl.value, [], adt_names, lambda_infos, emitter)
+    for fn in fn_decls:
+        _gather_lambda_infos(fn.body, [param.name for param in fn.params], adt_names, lambda_infos, emitter)
+
     emitter.emit("; Generated by sprout LLVM backend (v0)")
     emitter.emit("target triple = \"unknown-unknown-unknown\"")
     emitter.emit("")
@@ -406,6 +662,18 @@ def compile_to_llvm(program: ast.Program) -> str:
         emitter.emit("")
 
     for fn in fn_decls:
+        if fn.name == "main" or fn.name.endswith(".main"):
+            continue
+        wrapper_name = f"__sprout_fn_closure_{len(emitter.lifted_defs)}"
+        emitter.lifted_defs.extend(_emit_named_function_wrapper(wrapper_name, fn.name, sigs[fn.name]))
+        emitter.lifted_defs.append("")
+        emitter.fn_wrappers[fn.name] = wrapper_name
+    for info in lambda_infos.values():
+        setattr(info.expr, "_lambda_info", info)
+        _emit_lambda_helper(info, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        emitter.lifted_defs.append("")
+
+    for fn in fn_decls:
         _emit_fn(fn, sigs, ctor_sigs, ctor_reg_meta, globals_info, adt_names, runtime_lets, emitter)
         emitter.emit("")
 
@@ -419,6 +687,12 @@ def compile_to_llvm(program: ast.Program) -> str:
             module_lines.append(f"@{name} = global {info.typ.text} {init}")
     module_lines.extend(emitter.string_globals)
     if globals_info or emitter.string_globals:
+        module_lines.append("")
+    module_lines.extend(emitter.global_defs)
+    if emitter.global_defs:
+        module_lines.append("")
+    module_lines.extend(emitter.lifted_defs)
+    if emitter.lifted_defs:
         module_lines.append("")
     module_lines.extend(emitter.lines[3:])
 
@@ -456,6 +730,9 @@ def _collect_called_functions(expr: ast.Expr) -> set[str]:
                 visit(node.callee)
             for arg in node.args:
                 visit(arg)
+            return
+        if isinstance(node, ast.LambdaExpr):
+            visit(node.body)
             return
 
     visit(expr)
@@ -624,26 +901,20 @@ def _emit_expr(
     if isinstance(expr, ast.VarExpr):
         val = locals_.get(expr.name)
         if val is not None:
-            inferred_type = getattr(expr, "inferred_type", None)
-            if inferred_type is not None:
-                return _coerce_value(val, _type_from_ast(inferred_type, adt_names), emitter)
-            return val
+            return _value_for_inferred_type(val, getattr(expr, "inferred_type", None), adt_names, emitter)
         fn_ref = sigs.get(expr.name)
         if fn_ref is not None:
-            return Value(
-                typ=I8_PTR,
-                ir=f"@{expr.name}",
-                callable_sig=CallSig(params=fn_ref.params, ret=fn_ref.ret),
-            )
+            wrapper_name = emitter.fn_wrappers.get(expr.name)
+            if wrapper_name is None:
+                raise CodegenError(f"Missing closure wrapper for function {expr.name}")
+            closure = _emit_make_closure(f"@{wrapper_name}", [], emitter)
+            return Value(closure.typ, closure.ir, callable_sig=CallSig(params=fn_ref.params, ret=fn_ref.ret))
         global_info = globals_info.get(expr.name)
         if global_info is not None:
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = load {global_info.typ.text}, ptr @{expr.name}")
             out = Value(global_info.typ, tmp)
-            inferred_type = getattr(expr, "inferred_type", None)
-            if inferred_type is not None:
-                out = _coerce_value(out, _type_from_ast(inferred_type, adt_names), emitter)
-            return out
+            return _value_for_inferred_type(out, getattr(expr, "inferred_type", None), adt_names, emitter)
         ctor = ctor_sigs.get(expr.name)
         if ctor is not None:
             if ctor.arg_types:
@@ -652,6 +923,18 @@ def _emit_expr(
             emitter.emit(f"  {tmp} = call i64 @sprout_make0(i64 {ctor.tag})")
             return Value(I64, tmp)
         raise CodegenError(f"Unknown variable in backend: {expr.name}")
+    if isinstance(expr, ast.LambdaExpr):
+        info = getattr(expr, "_lambda_info", None)
+        if info is None:
+            raise CodegenError("Missing lambda lowering metadata in backend")
+        captures = []
+        for name in info.captures:
+            value = locals_.get(name)
+            if value is None:
+                raise CodegenError(f"Unknown captured variable in backend: {name}")
+            captures.append(value)
+        closure = _emit_make_closure(f"@{info.name}", captures, emitter)
+        return Value(closure.typ, closure.ir, callable_sig=info.call_sig)
     if isinstance(expr, ast.UnaryExpr):
         operand = _emit_expr(expr.operand, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
         if expr.op == "-":
@@ -986,10 +1269,7 @@ def _emit_call(
     adt_names: set[str],
     emitter: Emitter,
 ) -> Value:
-    if not isinstance(expr.callee, ast.VarExpr):
-        raise CodegenError("Backend supports direct function calls only")
-    fn_name = expr.callee.name
-    if fn_name == "print":
+    if isinstance(expr.callee, ast.VarExpr) and expr.callee.name == "print":
         if len(expr.args) != 1:
             raise CodegenError("print expects 1 argument")
         arg = _emit_expr(expr.args[0], locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
@@ -1009,8 +1289,13 @@ def _emit_call(
             return Value(I64, tmp)
         raise CodegenError("print backend supports Int/Bool/String only")
 
-    ctor = ctor_sigs.get(fn_name)
-    if ctor is not None:
+    if isinstance(expr.callee, ast.VarExpr):
+        fn_name = expr.callee.name
+    else:
+        fn_name = None
+
+    ctor = ctor_sigs.get(fn_name) if fn_name is not None else None
+    if fn_name is not None and ctor is not None:
         if len(expr.args) != len(ctor.arg_types):
             raise CodegenError(
                 f"Constructor {fn_name} expects {len(ctor.arg_types)} args, got {len(expr.args)}"
@@ -1038,41 +1323,32 @@ def _emit_call(
             )
         return Value(I64, tmp)
 
-    local_callee = locals_.get(fn_name)
-    if local_callee is not None and local_callee.callable_sig is not None:
-        call_sig = local_callee.callable_sig
-        if len(expr.args) != len(call_sig.params):
-            raise CodegenError(
-                f"Callable {fn_name} expects {len(call_sig.params)} args, got {len(expr.args)}"
-            )
+    if fn_name is not None and fn_name in locals_:
+        local_callee = _emit_expr(expr.callee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        call_sig = _value_call_sig(local_callee, getattr(expr.callee, "inferred_type", None), adt_names)
+        if call_sig is None:
+            raise CodegenError(f"Missing callable signature for {fn_name}")
+        args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
+        out = _emit_closure_call(local_callee, call_sig, args, emitter)
+    elif fn_name is not None and (fn_name in sigs or fn_name in EXTERN_SIGS):
+        sig = sigs.get(fn_name) or EXTERN_SIGS.get(fn_name)
+        assert sig is not None
+        if len(expr.args) != len(sig.params):
+            raise CodegenError(f"Function {fn_name} expects {len(sig.params)} args, got {len(expr.args)}")
         args_ir: list[str] = []
-        for arg_expr, param_type in zip(expr.args, call_sig.params):
+        for arg_expr, param_type in zip(expr.args, sig.params):
             arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
-            if arg_val.typ != param_type:
-                raise CodegenError(f"Call type mismatch for callable {fn_name}")
-            args_ir.append(f"{param_type.text} {arg_val.ir}")
+            coerced = _coerce_value(arg_val, param_type, emitter)
+            args_ir.append(f"{param_type.text} {coerced.ir}")
         tmp = emitter.tmp()
-        emitter.emit(f"  {tmp} = call {call_sig.ret.text} {local_callee.ir}({', '.join(args_ir)})")
-        return Value(call_sig.ret, tmp)
+        emitter.emit(f"  {tmp} = call {sig.ret.text} @{fn_name}({', '.join(args_ir)})")
+        out = Value(sig.ret, tmp)
+    else:
+        callee = _emit_expr(expr.callee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        call_sig = _value_call_sig(callee, getattr(expr.callee, "inferred_type", None), adt_names)
+        if call_sig is None:
+            raise CodegenError("Backend expected function-typed callee")
+        args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
+        out = _emit_closure_call(callee, call_sig, args, emitter)
 
-    sig = sigs.get(fn_name)
-    if sig is None:
-        sig = EXTERN_SIGS.get(fn_name)
-    if sig is None:
-        raise CodegenError(f"Unknown function in backend call: {fn_name}")
-    if len(expr.args) != len(sig.params):
-        raise CodegenError(f"Function {fn_name} expects {len(sig.params)} args, got {len(expr.args)}")
-
-    args_ir: list[str] = []
-    for arg_expr, param_type in zip(expr.args, sig.params):
-        arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
-        coerced = _coerce_value(arg_val, param_type, emitter)
-        args_ir.append(f"{param_type.text} {coerced.ir}")
-
-    tmp = emitter.tmp()
-    emitter.emit(f"  {tmp} = call {sig.ret.text} @{fn_name}({', '.join(args_ir)})")
-    out = Value(sig.ret, tmp)
-    inferred_type = getattr(expr, "inferred_type", None)
-    if inferred_type is not None:
-        out = _coerce_value(out, _type_from_ast(inferred_type, adt_names), emitter)
-    return out
+    return _value_for_inferred_type(out, getattr(expr, "inferred_type", None), adt_names, emitter)

@@ -342,6 +342,18 @@ class Parser:
         return expr
 
     def parse_primary(self):
+        if self.match("SYMBOL", "\\"):
+            start = self.tokens[self.i - 1]
+            self.expect("SYMBOL", "(")
+            params: list[ast.Param] = []
+            if not self.check("SYMBOL", ")"):
+                params.append(self.parse_param())
+                while self.match("SYMBOL", ","):
+                    params.append(self.parse_param())
+            self.expect("SYMBOL", ")")
+            self.expect("SYMBOL", "->")
+            body = self.parse_expr()
+            return self.mark(ast.LambdaExpr(params=params, body=body), start)
         if self.match("SYMBOL", "["):
             open_tok = self.tokens[self.i - 1]
             items = []

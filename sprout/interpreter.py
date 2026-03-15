@@ -223,6 +223,16 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
         except RuntimeError as exc:
             raise rt_error(str(exc), expr) from exc
 
+    if isinstance(expr, ast.LambdaExpr):
+        return FunctionValue(
+            name="<lambda>",
+            params=[param.name for param in expr.params],
+            body=expr.body,
+            closure=env,
+            line=getattr(expr, "line", None),
+            column=getattr(expr, "column", None),
+        )
+
     if isinstance(expr, ast.UnaryExpr):
         operand = eval_expr(expr.operand, env)
         if expr.op == "-":

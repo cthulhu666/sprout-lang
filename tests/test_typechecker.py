@@ -115,6 +115,47 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
 
+    def test_typecheck_lambda_expression(self) -> None:
+        src = r"""
+        let inc = \(x) -> x + 1
+        fn main() -> IO Unit =
+          print(inc(41))
+        """
+        prog = parse(src)
+        types = typecheck_program(prog)
+        self.assertEqual(types["inc"], "Int -> Int")
+        let_decl = prog.declarations[0]
+        self.assertEqual(let_decl.value.params[0].type_expr.name, "Int")
+
+    def test_typecheck_lambda_captures_lexical_bindings(self) -> None:
+        src = r"""
+        fn make_adder(base: Int) -> Int -> Int =
+          \(x) -> base + x
+
+        fn main() -> IO Unit =
+          print(make_adder(41)(1))
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["make_adder"], "Int -> Int -> Int")
+
+    def test_typecheck_lambda_annotation_mismatch(self) -> None:
+        src = r"""
+        let bad = \(x: Int) -> str_concat(x, "!")
+        fn main() -> IO Unit = print("ok")
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
+    def test_typecheck_higher_order_lambda_with_shared_annotation_vars(self) -> None:
+        src = r"""
+        let apply = \(f: a -> b, x: a) -> f(x)
+        fn inc(x: Int) -> Int = x + 1
+        fn main() -> IO Unit =
+          print(apply(inc, 41))
+        """
+        types = typecheck_program(parse(src))
+        self.assertRegex(types["apply"], r"^forall t\d+ t\d+\.\s+\(t\d+ -> t\d+\) -> t\d+ -> t\d+$")
+
     def test_type_error_invalid_function_composition(self) -> None:
         src = """
         fn inc(x: Int) -> Int = x + 1

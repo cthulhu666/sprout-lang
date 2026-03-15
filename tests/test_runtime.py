@@ -244,6 +244,58 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "42")
 
+    def test_run_lambda_argument(self) -> None:
+        src = r"""
+        fn apply(x: Int, f: Int -> Int) -> Int =
+          f(x)
+
+        fn main() -> IO Unit =
+          print(apply(20, \(n) -> n + 22))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_run_lambda_closure_captures_outer_value(self) -> None:
+        src = r"""
+        fn main() -> IO Unit =
+          print((\(base) -> (\(x) -> base + x))(40)(2))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_run_lambda_return_value(self) -> None:
+        src = r"""
+        fn make_adder(base: Int) -> Int -> Int =
+          \(x) -> base + x
+
+        fn main() -> IO Unit =
+          print(make_adder(39)(3))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_run_lambda_shadowing_prefers_inner_binding(self) -> None:
+        src = r"""
+        let x = 100
+
+        fn main() -> IO Unit =
+          print((\(x) -> (\(y) -> x + y))(40)(2))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
     def test_tail_recursive_function_does_not_overflow_python_stack(self) -> None:
         src = """
         fn sum_down(n: Int, acc: Int) -> Int =

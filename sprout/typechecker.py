@@ -307,6 +307,17 @@ def _apply_inferred_fn_signature(
     return return_type if return_type is not None else inferred_return
 
 
+def _apply_inferred_lambda_signature(params: list[ast.Param], solved_type: Type) -> None:
+    cursor = solved_type
+    for param in params:
+        cursor = apply({}, cursor)
+        if not isinstance(cursor, TFunc):
+            raise TypeCheckError("Internal error while applying inferred lambda parameter types")
+        if param.type_expr is None:
+            param.type_expr = type_to_ast_expr(cursor.arg)
+        cursor = cursor.ret
+
+
 def _type_expr_key(node: ast.TypeExpr) -> tuple:
     if isinstance(node, ast.TypeName):
         return ("name", node.name)
@@ -413,7 +424,11 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
     def visit_expr(expr: ast.Expr) -> None:
         raw = getattr(expr, "_inferred_type_raw", None)
         if raw is not None:
-            setattr(expr, "inferred_type", type_to_ast_expr(apply(state.subst, raw)))
+            solved = apply(state.subst, raw)
+            setattr(expr, "inferred_type", type_to_ast_expr(solved))
+            lambda_expr = getattr(ast, "LambdaExpr", None)
+            if lambda_expr is not None and isinstance(expr, lambda_expr):
+                _apply_inferred_lambda_signature(expr.params, solved)
         if isinstance(expr, ast.IfExpr):
             visit_expr(expr.condition)
             visit_expr(expr.then_branch)
@@ -435,6 +450,10 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
             visit_expr(expr.callee)
             for arg in expr.args:
                 visit_expr(arg)
+            return
+        lambda_expr = getattr(ast, "LambdaExpr", None)
+        if lambda_expr is not None and isinstance(expr, lambda_expr):
+            visit_expr(expr.body)
             return
 
     for decl in program.declarations:
@@ -657,6 +676,28 @@ def infer_expr(
 
         ensure_exhaustive_match(scrutinee_t, branch_ctors, has_catchall, state, type_decls, expr)
         return _mark_expr_type(expr, out_t)
+    lambda_expr = getattr(ast, "LambdaExpr", None)
+    if lambda_expr is not None and isinstance(expr, lambda_expr):
+        local_vars: dict[str, TVar] = {}
+        working_env = dict(env)
+        param_types: list[Type] = []
+        for param in expr.params:
+            if param.type_expr is None:
+                param_type = state.fresh()
+            else:
+                param_type = parse_type_expr(
+                    param.type_expr,
+                    local_vars,
+                    allow_implicit_type_vars=True,
+                    state=state,
+                )
+            working_env[param.name] = Scheme(vars=(), type=param_type)
+            param_types.append(param_type)
+        body_t = infer_expr(expr.body, working_env, state, type_decls, global_methods)
+        lambda_t = body_t
+        for param_type in reversed(param_types):
+            lambda_t = TFunc(param_type, lambda_t)
+        return _mark_expr_type(expr, lambda_t)
 
     raise tc_error(f"Unsupported expression node: {expr}", expr)
 

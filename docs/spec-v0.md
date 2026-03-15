@@ -94,7 +94,20 @@ let answer = 42
 Bindings are immutable.
 At top level, `let` initializers must not have type `IO a`.
 
-### 5.3 If expression
+### 5.3 Lambda expression
+
+```sprout
+\(x: Int, y: Int) -> x + y
+```
+
+Lambda expressions are anonymous functions.
+
+- Syntax: `\(` parameter-list `)` `->` expression
+- Parameter annotations are optional and follow the same rules as named functions.
+- Lambdas capture surrounding lexical bindings by value.
+- A lambda with parameters `x, y` has function type `tx -> ty -> tr`.
+
+### 5.4 If expression
 
 ```sprout
 if n > 0 then "pos" else "non-pos"
@@ -102,7 +115,7 @@ if n > 0 then "pos" else "non-pos"
 
 Both branches must type-check to the same type.
 
-### 5.4 Match expression
+### 5.5 Match expression
 
 ```sprout
 match m with
@@ -112,7 +125,7 @@ match m with
 
 Patterns are checked top-to-bottom; first match wins.
 
-### 5.5 ADT declaration
+### 5.6 ADT declaration
 
 ```sprout
 type Maybe a =
@@ -123,15 +136,16 @@ type Maybe a =
 ## 6. Evaluation Semantics (Strict)
 
 1. Function application: evaluate callee, then args left-to-right, then call.
-2. `let`: evaluate RHS immediately, then bind.
-3. Binary operators: evaluate left operand, then right operand.
-4. Short-circuiting:
+2. Lambda expression: evaluating a lambda produces a closure that captures the current lexical environment.
+3. `let`: evaluate RHS immediately, then bind.
+4. Binary operators: evaluate left operand, then right operand.
+5. Short-circuiting:
 - `a && b`: evaluate `b` only if `a` is `true`.
 - `a || b`: evaluate `b` only if `a` is `false`.
-5. `if`: evaluate condition, then exactly one branch.
-6. `match`: evaluate scrutinee once, then patterns in order, evaluate first matching branch.
-7. Constructors/records/tuples: evaluate fields left-to-right before construction.
-8. Top-level declarations evaluate in source order.
+6. `if`: evaluate condition, then exactly one branch.
+7. `match`: evaluate scrutinee once, then patterns in order, evaluate first matching branch.
+8. Constructors/records/tuples: evaluate fields left-to-right before construction.
+9. Top-level declarations evaluate in source order.
 
 Effect note for v0:
 
@@ -147,10 +161,11 @@ Effect note for v0:
 1. Every expression has exactly one type after inference/checking.
 2. `if` condition must be `Bool`.
 3. Function application requires argument types to unify with parameter types.
-4. `match` branches must have a unified result type.
-5. Pattern-bound variables are scoped to their branch.
-6. ADT constructors produce values of their declared type.
-7. `IO a` is treated as an ordinary type constructor in v0, with no special
+4. Lambda expressions introduce parameter bindings for their body and infer a function type from parameters to body result.
+5. `match` branches must have a unified result type.
+6. Pattern-bound variables are scoped to their branch.
+7. ADT constructors produce values of their declared type.
+8. `IO a` is treated as an ordinary type constructor in v0, with no special
    typing rules beyond normal type checking.
 
 ## 8. Standard Library Math Module
@@ -259,21 +274,28 @@ fn fact(n: Int) -> Int =
   if n == 0 then 1 else n * fact(n - 1)
 ```
 
-### 10.8 Top-level binding order
+### 10.8 Lambda with capture
+
+```sprout
+fn make_adder(base: Int) -> Int -> Int =
+  \(x) -> base + x
+```
+
+### 10.9 Top-level binding order
 
 ```sprout
 let a = 1
 let b = a + 1
 ```
 
-### 10.9 Main entrypoint
+### 10.10 Main entrypoint
 
 ```sprout
 fn main() -> IO Unit =
   print("hello")
 ```
 
-### 10.10 Non-exhaustive match (compile error)
+### 10.11 Non-exhaustive match (compile error)
 
 ```sprout
 type Maybe a =
@@ -287,7 +309,7 @@ fn bad(m: Maybe Int) -> Int =
 
 Compiler should report non-exhaustive pattern matching.
 
-### 10.11 Using `stdlib.math`
+### 10.12 Using `stdlib.math`
 
 ```sprout
 import stdlib.math as math

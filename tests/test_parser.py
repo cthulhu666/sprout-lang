@@ -55,6 +55,44 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(fn_decl.params[0].type_expr)
         self.assertIsNone(fn_decl.return_type)
 
+    def test_parse_lambda_expression_with_annotations(self) -> None:
+        src = r"""
+        fn main() -> Int = \(x: Int, y: Int) -> x + y
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
+        self.assertEqual([param.name for param in fn_decl.body.params], ["x", "y"])
+        self.assertEqual(fn_decl.body.params[0].type_expr.name, "Int")
+        self.assertEqual(fn_decl.body.params[1].type_expr.name, "Int")
+        self.assertIsInstance(fn_decl.body.body, ast.BinaryExpr)
+        self.assertEqual(fn_decl.body.body.op, "+")
+
+    def test_parse_lambda_in_call_position(self) -> None:
+        src = r"fn main() -> Int = apply(41, \(x) -> x + 1)"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertEqual(len(fn_decl.body.args), 2)
+        self.assertIsInstance(fn_decl.body.args[1], ast.LambdaExpr)
+
+    def test_parse_nested_lambda_expression(self) -> None:
+        src = r"fn main() -> Int = \(x) -> \(y) -> x + y"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
+        self.assertIsInstance(fn_decl.body.body, ast.LambdaExpr)
+
+    def test_parse_lambda_body_respects_expression_precedence(self) -> None:
+        src = r"fn main() -> Int = \(x) -> x + 1 * 2"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
+        self.assertIsInstance(fn_decl.body.body, ast.BinaryExpr)
+        self.assertEqual(fn_decl.body.body.op, "+")
+        self.assertIsInstance(fn_decl.body.body.right, ast.BinaryExpr)
+        self.assertEqual(fn_decl.body.body.right.op, "*")
+
     def test_parse_error_missing_else(self) -> None:
         src = "fn bad(x: Int) -> Int = if x > 0 then 1"
         with self.assertRaises(ParseError):

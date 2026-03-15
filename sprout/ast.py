@@ -120,6 +120,12 @@ class CallExpr(Expr):
 
 
 @dataclass
+class LambdaExpr(Expr):
+    params: list["Param"]
+    body: Expr
+
+
+@dataclass
 class VarExpr(Expr):
     name: str
 
