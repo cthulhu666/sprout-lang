@@ -247,10 +247,14 @@ def parse_type_expr(
 
 def fn_type_from_decl(decl: ast.FnDecl, state: InferState) -> Type:
     local_vars: dict[str, TVar] = {}
-    param_types = [
-        parse_type_expr(param.type_expr, local_vars, allow_implicit_type_vars=True, state=state)
-        for param in decl.params
-    ]
+    param_types = []
+    for param in decl.params:
+        if param.type_expr is None:
+            param_types.append(state.fresh())
+        else:
+            param_types.append(
+                parse_type_expr(param.type_expr, local_vars, allow_implicit_type_vars=True, state=state)
+            )
     ret = (
         parse_type_expr(decl.return_type, local_vars, allow_implicit_type_vars=True, state=state)
         if decl.return_type
@@ -267,15 +271,35 @@ def method_type_from_parts(
     return_type: ast.TypeExpr | None,
     local_vars: dict[str, TVar],
 ) -> Type:
-    param_types = [
-        parse_type_expr(param.type_expr, local_vars, allow_implicit_type_vars=True)
-        for param in params
-    ]
+    param_types = []
+    for param in params:
+        if param.type_expr is None:
+            param_types.append(TVar(f"missing.{param.name}"))
+        else:
+            param_types.append(parse_type_expr(param.type_expr, local_vars, allow_implicit_type_vars=True))
     ret = parse_type_expr(return_type, local_vars, allow_implicit_type_vars=True) if return_type else UNIT
     typ = ret
     for p in reversed(param_types):
         typ = TFunc(p, typ)
     return typ
+
+
+def _apply_inferred_fn_signature(
+    params: list[ast.Param],
+    return_type: ast.TypeExpr | None,
+    solved_type: Type,
+) -> ast.TypeExpr:
+    cursor = solved_type
+    for param in params:
+        cursor = apply({}, cursor)
+        if not isinstance(cursor, TFunc):
+            raise TypeCheckError("Internal error while applying inferred parameter types")
+        if param.type_expr is None:
+            param.type_expr = type_to_ast_expr(cursor.arg)
+        cursor = cursor.ret
+    cursor = apply({}, cursor)
+    inferred_return = type_to_ast_expr(cursor)
+    return return_type if return_type is not None else inferred_return
 
 
 def _type_expr_key(node: ast.TypeExpr) -> tuple:
@@ -503,6 +527,8 @@ def validate_instance_methods(
             body_t = infer_expr(impl.body, working_env, state, type_decls, global_methods)
             expected_return = apply(state.subst, cursor)
             unify_at(state, body_t, expected_return, impl.body)
+            solved_method = apply(state.subst, actual_type)
+            impl.return_type = _apply_inferred_fn_signature(impl.params, impl.return_type, solved_method)
 
 
 def infer_expr(
@@ -960,6 +986,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             unify_at(state, body_t, expected_return, fn_decl.body)
 
             solved_fn = apply(state.subst, fn_t)
+            fn_decl.return_type = _apply_inferred_fn_signature(fn_decl.params, fn_decl.return_type, solved_fn)
             generalized_env = dict(env)
             generalized_env.pop(fn_decl.name, None)
             env[fn_decl.name] = generalize(generalized_env, solved_fn, state)

@@ -63,5 +63,6 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 ## v0 Positioning
 - Default evaluation strategy: strict.
 - Beginner promise: explicit behavior, deterministic execution, clear diagnostics.
+- Annotation stance: infer types wherever they can be determined unambiguously without compromising implementation simplicity, predictable behavior, or diagnostic quality; keep explicit annotations available for clarity.
 - v0 effect model: `IO` is a lightweight annotation only, not a first-class effect system.
 - Future extension path: a real effect system and explicit laziness can be added in later milestones without changing default strict evaluation.

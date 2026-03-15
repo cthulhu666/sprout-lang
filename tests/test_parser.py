@@ -44,6 +44,17 @@ class ParserTests(unittest.TestCase):
         fn_decl = program.declarations[0]
         self.assertIsInstance(fn_decl.body, ast.IfExpr)
 
+    def test_parse_fn_allows_omitted_param_and_return_annotations(self) -> None:
+        src = """
+        fn inc(x) = x + 1
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertEqual(fn_decl.params[0].name, "x")
+        self.assertIsNone(fn_decl.params[0].type_expr)
+        self.assertIsNone(fn_decl.return_type)
+
     def test_parse_error_missing_else(self) -> None:
         src = "fn bad(x: Int) -> Int = if x > 0 then 1"
         with self.assertRaises(ParseError):
@@ -190,6 +201,15 @@ class ParserTests(unittest.TestCase):
         fn_decl = program.declarations[2]
         self.assertEqual(len(fn_decl.constraints), 1)
         self.assertEqual(fn_decl.constraints[0].class_name, "Functor")
+
+    def test_parse_class_method_still_requires_param_type_annotations(self) -> None:
+        src = """
+        class Show t {
+          fn show(x) -> String
+        }
+        """
+        with self.assertRaises(ParseError):
+            parse(src)
 
 
 if __name__ == "__main__":

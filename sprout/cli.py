@@ -72,6 +72,7 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
         resolve_program_names(tree, bundle)
     validate_public_surface(tree, bundle)
     typed = typecheck_program(tree)
+    validate_public_surface(tree, bundle)
     print("ok")
     for name in sorted(typed.keys()):
         print(f"{name}: {typed[name]}")
@@ -97,6 +98,7 @@ def cmd_run(
         resolve_program_names(tree, bundle)
     validate_public_surface(tree, bundle)
     typecheck_program(tree)
+    validate_public_surface(tree, bundle)
     lowered = lower_typeclasses(tree)
     typecheck_program(lowered)
     run_program(lowered, argv=program_args)
@@ -123,6 +125,7 @@ def cmd_compile(
         resolve_program_names(tree, bundle)
     validate_public_surface(tree, bundle)
     typecheck_program(tree)
+    validate_public_surface(tree, bundle)
     lowered = lower_typeclasses(tree)
     typecheck_program(lowered)
     llvm_ir = compile_to_llvm(lowered)
@@ -761,10 +764,17 @@ long long http_request(const char* method, const char* url, const char* headers_
     if (n == 0) break;
     if (n < 0) {
       int recv_errno = errno;
+      int saw_no_response = response.len == 0;
       free(response.data);
       close(fd);
       free_http_url(&parsed);
       if (recv_errno == EAGAIN || recv_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+      if (recv_errno == ECONNRESET && saw_no_response) {
+        return http_err1(
+          "stdlib.http.HttpNetwork",
+          (long long)(uintptr_t)dup_cstr("remote closed connection without response")
+        );
+      }
       return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(recv_errno)));
     }
     buf_append_bytes(&response, chunk, (size_t)n);

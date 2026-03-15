@@ -29,6 +29,27 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("main", types)
         self.assertIn("read_lines", types)
 
+    def test_typecheck_infers_function_param_and_return_types(self) -> None:
+        src = """
+        fn inc(x) = x + 1
+        fn main() -> IO Unit =
+          print(inc(41))
+        """
+        prog = parse(src)
+        types = typecheck_program(prog)
+        self.assertEqual(types["inc"], "Int -> Int")
+        inc = prog.declarations[0]
+        self.assertEqual(inc.params[0].type_expr.name, "Int")
+        self.assertEqual(inc.return_type.name, "Int")
+
+    def test_typecheck_infers_recursive_function_signature(self) -> None:
+        src = """
+        fn fact(n) =
+          if n == 0 then 1 else n * fact(n - 1)
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["fact"], "Int -> Int")
+
     def test_typecheck_with_stdlib_loaded(self) -> None:
         src = """
         fn is_even(x: Int) -> Bool =

@@ -40,7 +40,7 @@ class FnDecl:
 @dataclass
 class Param:
     name: str
-    type_expr: "TypeExpr"
+    type_expr: "TypeExpr | None"
 
 
 @dataclass

@@ -90,6 +90,28 @@ EXTERN_SIGS: dict[str, FnSig] = {
 }
 
 
+STD_HTTP_CTORS = {
+    "Ok",
+    "Err",
+    "HttpResponse",
+    "HttpTimeout",
+    "HttpNetwork",
+    "HttpBadStatus",
+    "HttpDecode",
+    "JsonDecode",
+    "JsonNull",
+    "JsonBool",
+    "JsonInt",
+    "JsonString",
+    "JsonArray",
+    "JsonObject",
+    "JsonArrayNil",
+    "JsonArrayCons",
+    "JsonObjectNil",
+    "JsonObjectCons",
+}
+
+
 @dataclass
 class Value:
     typ: LLType
@@ -151,6 +173,17 @@ class Emitter:
             f"{name} = private unnamed_addr constant [{len(data)} x i8] c\"{body}\""
         )
         return name, len(data)
+
+
+def _ctor_registration_names(name: str) -> list[str]:
+    names = [name]
+    leaf = name.rsplit(".", 1)[-1]
+    if leaf != name:
+        names.append(leaf)
+        return names
+    if leaf in STD_HTTP_CTORS:
+        names.append(f"stdlib.http.{leaf}")
+    return names
 
 
 def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
@@ -357,12 +390,16 @@ def compile_to_llvm(program: ast.Program) -> str:
         emitter.emit(f"declare {ext.ret.text} @{ext.name}({params})")
     emitter.emit("")
 
-    ctor_reg_meta: dict[str, tuple[tuple[str, int], tuple[str, int] | None, int, int]] = {}
+    ctor_reg_meta: dict[str, tuple[list[tuple[str, int]], int, int]] = {}
     for ctor in ctor_sigs.values():
-        primary = emitter.string_const(ctor.name)
-        leaf_name = ctor.name.rsplit(".", 1)[-1]
-        leaf = emitter.string_const(leaf_name) if leaf_name != ctor.name else None
-        ctor_reg_meta[ctor.name] = (primary, leaf, len(ctor.arg_types), ctor.tag)
+        aliases: list[tuple[str, int]] = []
+        seen_names: set[str] = set()
+        for reg_name in _ctor_registration_names(ctor.name):
+            if reg_name in seen_names:
+                continue
+            seen_names.add(reg_name)
+            aliases.append(emitter.string_const(reg_name))
+        ctor_reg_meta[ctor.name] = (aliases, len(ctor.arg_types), ctor.tag)
 
     if runtime_lets:
         _emit_init_globals(runtime_lets, globals_info, sigs, ctor_sigs, adt_names, emitter)
@@ -523,23 +560,15 @@ def _emit_fn(
         emitter.emit(f"  {init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)")
         if runtime_lets:
             emitter.emit("  call void @__sprout_init_globals()")
-        for _, (primary, leaf, arity, tag) in sorted(ctor_reg_meta.items(), key=lambda x: x[1][3]):
-            sname, slen = primary
-            sptr = emitter.tmp()
-            emitter.emit(f"  {sptr} = getelementptr inbounds [{slen} x i8], ptr {sname}, i64 0, i64 0")
-            reg = emitter.tmp()
-            emitter.emit(
-                f"  {reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {sptr}, i64 {arity})"
-            )
-            if leaf is not None:
-                leaf_name, leaf_len = leaf
-                leaf_ptr = emitter.tmp()
+        for _, (aliases, arity, tag) in sorted(ctor_reg_meta.items(), key=lambda x: x[1][2]):
+            for reg_name, reg_len in aliases:
+                reg_ptr = emitter.tmp()
                 emitter.emit(
-                    f"  {leaf_ptr} = getelementptr inbounds [{leaf_len} x i8], ptr {leaf_name}, i64 0, i64 0"
+                    f"  {reg_ptr} = getelementptr inbounds [{reg_len} x i8], ptr {reg_name}, i64 0, i64 0"
                 )
-                leaf_reg = emitter.tmp()
+                reg = emitter.tmp()
                 emitter.emit(
-                    f"  {leaf_reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {leaf_ptr}, i64 {arity})"
+                    f"  {reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {reg_ptr}, i64 {arity})"
                 )
     ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if ret.typ != sig.ret:

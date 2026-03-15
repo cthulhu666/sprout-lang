@@ -778,11 +778,13 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         elif isinstance(decl, ast.ClassDecl):
             for method in decl.methods:
                 for param in method.params:
-                    walk_type(param.type_expr, decl)
+                    if param.type_expr is not None:
+                        walk_type(param.type_expr, decl)
                 walk_type(method.return_type, decl)
         elif isinstance(decl, ast.FnDecl):
             for param in decl.params:
-                walk_type(param.type_expr, decl)
+                if param.type_expr is not None:
+                    walk_type(param.type_expr, decl)
             if decl.return_type is not None:
                 walk_type(decl.return_type, decl)
             for constraint in decl.constraints:
@@ -799,7 +801,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                 walk_type(arg, decl)
             for method in decl.methods:
                 for param in method.params:
-                    walk_type(param.type_expr, decl)
+                    if param.type_expr is not None:
+                        walk_type(param.type_expr, decl)
                 if method.return_type is not None:
                     walk_type(method.return_type, decl)
                 scope = {p.name for p in method.params}

@@ -163,9 +163,9 @@ class Parser:
         self.expect("SYMBOL", "(")
         params: list[ast.Param] = []
         if not self.check("SYMBOL", ")"):
-            params.append(self.parse_param())
+            params.append(self.parse_param(require_type=True))
             while self.match("SYMBOL", ","):
-                params.append(self.parse_param())
+                params.append(self.parse_param(require_type=True))
         self.expect("SYMBOL", ")")
         self.expect("SYMBOL", "->")
         return_type = self.parse_type_expr()
@@ -205,11 +205,15 @@ class Parser:
             raise ParseError(f"Expected at least one constraint argument at {t.line}:{t.column}")
         return self.mark(ast.TypeConstraint(class_name=class_name, args=args), start)
 
-    def parse_param(self) -> ast.Param:
+    def parse_param(self, require_type: bool = False) -> ast.Param:
         tok = self.expect("IDENT", label="parameter name")
         name = tok.value
-        self.expect("SYMBOL", ":")
-        typ = self.parse_type_expr()
+        typ = None
+        if self.match("SYMBOL", ":"):
+            typ = self.parse_type_expr()
+        elif require_type:
+            t = self.current()
+            raise ParseError(f"Expected ':' after parameter name at {t.line}:{t.column}")
         return self.mark(ast.Param(name=name, type_expr=typ), tok)
 
     def parse_let_decl(self) -> ast.LetDecl:

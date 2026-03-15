@@ -17,6 +17,7 @@ In Sprout v0 this means:
 
 - You still get compile-time type safety.
 - You write fewer annotations for local values.
+- Ordinary functions can often omit parameter and return annotations.
 - Functions can be generic (polymorphic) without manual templates.
 
 ## Mental model

@@ -74,9 +74,12 @@ For coding tasks, work is done only when:
 2. The implementation is complete.
 3. Relevant docs/spec updates are complete and in sync with the implementation.
 4. Formatting and linting have been run when applicable.
-5. Relevant tests pass.
-6. The changes are committed.
-7. A self-review has been performed before handoff.
+5. The entire test suite has been run via `mise exec -- just test`.
+6. If sandbox or environment restrictions block the full suite, rerun it with escalated permissions rather than accepting partial verification.
+7. The full suite passes.
+8. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
+9. The changes are committed.
+10. A self-review has been performed before handoff.
 
 ## Directory Conventions
 

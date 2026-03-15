@@ -40,6 +40,18 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("icmp eq i64", ir)
         self.assertIn("call i64 @fact", ir)
 
+    def test_compile_inferred_function_signature_to_llvm(self) -> None:
+        src = """
+        fn inc(x) = x + 1
+
+        fn main() -> Int =
+          inc(5)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define i64 @inc(i64 %x)", ir)
+
     def test_compile_supports_top_level_const_let(self) -> None:
         src = """
         let base = 40
@@ -290,6 +302,20 @@ class CodegenTests(unittest.TestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("declare i64 @http_request(ptr, ptr, ptr, ptr, i64)", ir)
+
+    def test_compile_http_prelude_registers_qualified_runtime_ctors(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
+          | Ok resp -> print(http_response_body(resp))
+          | Err _ -> print("err")
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 2"), 2)
+        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 3"), 2)
+        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 4"), 2)
         self.assertIn("declare i64 @argv_get(i64)", ir)
         self.assertIn("declare i64 @sprout_set_argv(i32, ptr)", ir)
         self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)

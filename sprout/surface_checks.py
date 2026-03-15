@@ -197,7 +197,7 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
                         _ensure_allowed(bundle, arg, "Vector/Map type")
         elif isinstance(decl, ast.FnDecl):
             for param in decl.params:
-                if _walk_type_expr(param.type_expr):
+                if param.type_expr is not None and _walk_type_expr(param.type_expr):
                     _ensure_allowed(bundle, param.type_expr, "Vector/Map type")
             if decl.return_type is not None and _walk_type_expr(decl.return_type):
                 _ensure_allowed(bundle, decl.return_type, "Vector/Map type")
@@ -225,7 +225,7 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
         elif isinstance(decl, ast.ClassDecl):
             for method in decl.methods:
                 for param in method.params:
-                    if _walk_type_expr(param.type_expr):
+                    if param.type_expr is not None and _walk_type_expr(param.type_expr):
                         _ensure_allowed(bundle, param.type_expr, "Vector/Map type")
                 if _walk_type_expr(method.return_type):
                     _ensure_allowed(bundle, method.return_type, "Vector/Map type")
@@ -235,7 +235,7 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
                     _ensure_allowed(bundle, arg, "Vector/Map type")
             for method in decl.methods:
                 for param in method.params:
-                    if _walk_type_expr(param.type_expr):
+                    if param.type_expr is not None and _walk_type_expr(param.type_expr):
                         _ensure_allowed(bundle, param.type_expr, "Vector/Map type")
                 if method.return_type is not None and _walk_type_expr(method.return_type):
                     _ensure_allowed(bundle, method.return_type, "Vector/Map type")

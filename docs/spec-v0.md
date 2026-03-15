@@ -66,8 +66,9 @@ Type forms:
 Type inference:
 
 - Let-bound values are inferred.
-- Function parameters/returns may be inferred unless ambiguity hurts diagnostics.
-- Recursive declarations may require annotations in early compiler milestones.
+- Ordinary function parameters and returns may be inferred.
+- Explicit annotations are still allowed wherever they improve readability or diagnostics.
+- Recursive declarations should infer when constraints are sufficient, but annotations may still be required in difficult or ambiguous cases.
 
 ## 5. Declarations and Expressions
 
@@ -77,6 +78,9 @@ Type inference:
 fn add(x: Int, y: Int) -> Int =
   x + y
 ```
+
+Parameter and return annotations are optional for ordinary functions in v0 when
+the typechecker can infer them.
 
 ### 5.2 Let binding
 

@@ -2,6 +2,10 @@
 
 Sprout is an experimental, statically typed, functional-first programming language focused on being "Haskell for ordinary people": strong type safety, predictable semantics, and approachable syntax.
 
+The v0 core aims to infer types wherever they can be determined unambiguously
+without compromising implementation simplicity, predictable behavior, or
+diagnostic quality.
+
 ## Status
 
 Prototype implementation stage. The repository includes a working tokenizer/parser/typechecker,
