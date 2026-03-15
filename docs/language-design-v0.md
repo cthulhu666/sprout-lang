@@ -55,7 +55,13 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 - Rationale: Safety and trustworthiness are core to the language value proposition.
 - Tradeoff: Requires stronger type-checker implementation and high-quality diagnostics.
 
+11. `IO` is annotation-only in v0.
+- Semantics: `IO a` labels APIs that are expected to perform effects, but effectful calls still execute under the same strict evaluation rules as any other expression.
+- Rationale: Keeps v0 small and honest by matching the current implementation instead of implying a larger effect system.
+- Tradeoff: `IO` does not provide purity boundaries, deferred execution, or effect tracking guarantees in v0.
+
 ## v0 Positioning
 - Default evaluation strategy: strict.
 - Beginner promise: explicit behavior, deterministic execution, clear diagnostics.
-- Future extension path: explicit laziness as an opt-in feature (for example, `Lazy<T>` or `defer`) without changing default semantics.
+- v0 effect model: `IO` is a lightweight annotation only, not a first-class effect system.
+- Future extension path: a real effect system and explicit laziness can be added in later milestones without changing default strict evaluation.

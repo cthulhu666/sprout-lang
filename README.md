@@ -11,6 +11,7 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 
 - [Specification v0 (Normative)](./docs/spec-v0.md)
 - [Language Design v0](./docs/language-design-v0.md)
+- [Effect System v1 Draft](./docs/effect-system-v1-draft.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 - [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)
 
@@ -21,6 +22,8 @@ Normative status:
   are implementation features or experimental extensions.
 - In particular, the current module system and typeclass support are implemented
   in the prototype, but are not yet part of normative v0.
+- In v0, `IO a` is only a lightweight annotation for effectful APIs; a real
+  effect system is deferred to v1.
 
 ## Repository Layout
 
@@ -105,6 +108,10 @@ Runtime builtins (host-implemented):
 - `term_show_cursor() -> IO Unit`
 - `term_read_key() -> String` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
 - `term_write(text: String) -> IO Unit`
+
+`IO a` in v0 is annotation-only. It marks APIs that are expected to perform
+effects, but Sprout v0 does not yet have a separate effect system, purity
+checking, or delayed execution model.
 
 String/runtime helpers are host-implemented primitives. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
 

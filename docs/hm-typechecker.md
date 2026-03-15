@@ -46,6 +46,9 @@ File: `sprout/typechecker.py`
 - `TApp`: type application (`Maybe a`, `IO Unit`).
 - `Scheme`: generalized polymorphic type (`forall a. a -> a`).
 
+In v0, `IO a` is just another surface type constructor from the typechecker’s
+point of view. It does not trigger a distinct effect-checking phase.
+
 ## Inference workflow
 
 1. Parse source into AST.
@@ -109,7 +112,7 @@ The checker also performs a basic ADT exhaustiveness check and reports missing c
 - No typeclasses/traits.
 - Exhaustiveness checking is basic (ADT constructor coverage + catch-all).
 - Diagnostics are improving but still early-stage.
-- No effect typing beyond the simple `IO a` surface type.
+- No effect system beyond the simple `IO a` surface annotation.
 
 Note: the repository prototype contains typeclass-related implementation work,
 but that support is not part of normative v0 yet.

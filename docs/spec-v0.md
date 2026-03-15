@@ -49,7 +49,12 @@ Built-in types:
 - `Bool`
 - `String`
 - `Unit`
-- `IO a` (effect boundary type)
+- `IO a` (surface annotation for effectful APIs in v0)
+
+`IO a` in v0 is a documentation-oriented surface type, not a first-class effect
+system. It marks APIs that are expected to perform effects, but it does not
+introduce effect isolation, delayed execution, purity tracking, or effect
+sequencing semantics beyond ordinary strict evaluation.
 
 Type forms:
 
@@ -120,6 +125,13 @@ type Maybe a =
 7. Constructors/records/tuples: evaluate fields left-to-right before construction.
 8. Top-level declarations evaluate in source order.
 
+Effect note for v0:
+
+- Calling a function typed as `IO a` behaves like any other strict function call.
+- Effects happen when the call expression is evaluated.
+- v0 does not provide a separate execution model for effectful values.
+- A fuller effect system is deferred to v1.
+
 ## 7. Typing Rules (High Level)
 
 1. Every expression has exactly one type after inference/checking.
@@ -128,6 +140,8 @@ type Maybe a =
 4. `match` branches must have a unified result type.
 5. Pattern-bound variables are scoped to their branch.
 6. ADT constructors produce values of their declared type.
+7. `IO a` is treated as an ordinary type constructor in v0, with no special
+   typing rules beyond normal type checking.
 
 ## 8. Errors
 
