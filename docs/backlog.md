@@ -25,3 +25,6 @@ This file tracks open design, implementation, and tooling follow-up work.
    Design doc: [native-adt-lowering-v1.md](./native-adt-lowering-v1.md).
    Initial completed slice: native `Nothing` singleton plus immediate-match optimization for direct constructor-producing scrutinees.
    Planned follow-up: broader constructor forwarding, whole-scrutinee binding support, and specialized representations for tiny ADTs.
+4. Add cryptographic/runtime primitives needed for authenticated protocol clients in v1.
+   Initial scope: SHA-256, HMAC-SHA-256, base64 encode/decode, byte-wise XOR helpers, and secure random nonce generation suitable for SCRAM-style handshakes.
+   First milestone constraints: prioritize protocol/client building blocks over a broad crypto API, keep the surface bytes-oriented, and document security expectations clearly so the feature does not overclaim production-hardening beyond the implemented primitives.
