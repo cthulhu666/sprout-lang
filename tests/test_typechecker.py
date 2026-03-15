@@ -211,6 +211,22 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertIn("combine", types)
 
+    def test_typecheck_instance_method_can_call_concrete_class_method(self) -> None:
+        src = """
+        class Combiner t {
+          fn append(x: t, y: t) -> t
+          fn duplicate(x: t) -> t
+        }
+        instance Combiner String {
+          fn append(x: String, y: String) -> String = str_concat(x, y)
+          fn duplicate(x: String) -> String = append(x, x)
+        }
+        fn main() -> IO Unit where Combiner String =
+          print(duplicate("ab"))
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("main", types)
+
     def test_typecheck_semigroup_append_operator(self) -> None:
         src = """
         type List a =

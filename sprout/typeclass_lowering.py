@@ -32,9 +32,19 @@ def _type_expr_is_concrete(node: ast.TypeExpr) -> bool:
     return False
 
 
+def _type_name_matches(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    left_qualified = "." in left
+    right_qualified = "." in right
+    if left_qualified and right_qualified:
+        return False
+    return left.rsplit(".", 1)[-1] == right.rsplit(".", 1)[-1]
+
+
 def _type_expr_equal(left: ast.TypeExpr, right: ast.TypeExpr) -> bool:
     if isinstance(left, ast.TypeName) and isinstance(right, ast.TypeName):
-        return left.name == right.name or left.name.rsplit(".", 1)[-1] == right.name.rsplit(".", 1)[-1]
+        return _type_name_matches(left.name, right.name)
     if isinstance(left, ast.TypeApply) and isinstance(right, ast.TypeApply):
         return _type_expr_equal(left.base, right.base) and _type_expr_equal(left.arg, right.arg)
     if isinstance(left, ast.TypeArrow) and isinstance(right, ast.TypeArrow):
@@ -91,7 +101,7 @@ def _match_type_expr_pattern(
         return _type_expr_equal(existing, candidate)
 
     if isinstance(pattern, ast.TypeName) and isinstance(candidate, ast.TypeName):
-        return pattern.name == candidate.name or pattern.name.rsplit(".", 1)[-1] == candidate.name.rsplit(".", 1)[-1]
+        return _type_name_matches(pattern.name, candidate.name)
     if isinstance(pattern, ast.TypeApply) and isinstance(candidate, ast.TypeApply):
         return _match_type_expr_pattern(pattern.base, candidate.base, env) and _match_type_expr_pattern(
             pattern.arg, candidate.arg, env

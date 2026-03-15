@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from sprout import parse, run_program, typecheck_program
 from sprout.module_loader import ModuleLoadError, load_module_bundle, load_module_source, resolve_program_names
-from sprout.typeclass_lowering import lower_typeclasses
+from sprout.typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 
 
 class ModuleLoaderTests(unittest.TestCase):
@@ -952,6 +952,65 @@ class ModuleLoaderTests(unittest.TestCase):
             out = io.StringIO()
             run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "10")
+
+    def test_lowering_rejects_namespaced_instances_with_same_leaf_type_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "renderable.sprout").write_text(
+                """
+                module renderable
+                export class Renderable t {
+                  fn render(x: t) -> Int
+                }
+                """,
+                encoding="utf-8",
+            )
+            (root / "a.sprout").write_text(
+                """
+                module a
+                import renderable (Renderable)
+
+                export type Box =
+                  | Box Int
+
+                instance Renderable Box {
+                  fn render(x: Box) -> Int =
+                    match x with
+                    | Box n -> n
+                }
+                """,
+                encoding="utf-8",
+            )
+            (root / "b.sprout").write_text(
+                """
+                module b
+
+                export type Box =
+                  | Box Int
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import b (Box)
+                import renderable (Renderable)
+
+                fn render_box(x: Box) -> Int where Renderable Box =
+                  render(x)
+
+                fn main() -> IO Unit =
+                  print(render_box(Box(7)))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            with self.assertRaises(TypeclassLoweringError):
+                lower_typeclasses(program)
 
 
 if __name__ == "__main__":

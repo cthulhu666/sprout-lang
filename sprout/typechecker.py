@@ -439,6 +439,7 @@ def validate_instance_methods(
     env: dict[str, Scheme],
     state: InferState,
     type_decls: dict[str, TypeDeclInfo],
+    global_methods: dict[str, GlobalMethodInfo],
 ) -> None:
     for decl in program.declarations:
         if not isinstance(decl, ast.InstanceDecl):
@@ -499,7 +500,7 @@ def validate_instance_methods(
                     raise tc_error("Internal error for instance method params", impl)
                 working_env[param.name] = Scheme(vars=(), type=cursor.arg)
                 cursor = cursor.ret
-            body_t = infer_expr(impl.body, working_env, state, type_decls, {})
+            body_t = infer_expr(impl.body, working_env, state, type_decls, global_methods)
             expected_return = apply(state.subst, cursor)
             unify_at(state, body_t, expected_return, impl.body)
 
@@ -968,7 +969,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             value_t = infer_expr(let_decl.value, env, state, type_decls, global_methods)
             env[let_decl.name] = generalize(env, value_t, state)
 
-    validate_instance_methods(program, class_decls, env, state, type_decls)
+    validate_instance_methods(program, class_decls, env, state, type_decls, global_methods)
     _finalize_inferred_expr_types(program, state)
 
     return {name: scheme_to_string(sch, state.subst) for name, sch in env.items()}
