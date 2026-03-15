@@ -483,7 +483,7 @@ class RuntimeTests(unittest.TestCase):
             main.write_text(
                 f"""
                 module main
-                import stdlib.bytes (from_string, to_string)
+                import stdlib.bytes (Utf8Error, from_string, to_string)
                 import stdlib.net (TcpConnection, TcpError, close, connect, read_exact, tcp_error_message, write_all)
 
                 fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
