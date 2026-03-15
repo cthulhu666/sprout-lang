@@ -117,7 +117,7 @@ class TypecheckerTests(unittest.TestCase):
 
     def test_typecheck_lambda_expression(self) -> None:
         src = r"""
-        let inc = \(x) -> x + 1
+        let inc = \x -> x + 1
         fn main() -> IO Unit =
           print(inc(41))
         """

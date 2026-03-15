@@ -103,6 +103,7 @@ At top level, `let` initializers must not have type `IO a`.
 Lambda expressions are anonymous functions.
 
 - Syntax: `\(` parameter-list `)` `->` expression
+- Single-parameter shorthand: `\x -> expression` and `\x: T -> expression`
 - Parameter annotations are optional and follow the same rules as named functions.
 - Lambdas capture surrounding lexical bindings by value.
 - A lambda with parameters `x, y` has function type `tx -> ty -> tr`.

@@ -250,7 +250,7 @@ class RuntimeTests(unittest.TestCase):
           f(x)
 
         fn main() -> IO Unit =
-          print(apply(20, \(n) -> n + 22))
+          print(apply(20, \n -> n + 22))
         """
         program = parse(src)
         typecheck_program(program)
@@ -272,7 +272,7 @@ class RuntimeTests(unittest.TestCase):
     def test_run_lambda_return_value(self) -> None:
         src = r"""
         fn make_adder(base: Int) -> Int -> Int =
-          \(x) -> base + x
+          \x -> base + x
 
         fn main() -> IO Unit =
           print(make_adder(39)(3))

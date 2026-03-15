@@ -369,6 +369,7 @@ Load HTTP helpers:
 - top-level `fn`, `type`, and top-level `let` (constant and runtime-initialized),
 - `Int`/`Bool`/`String` typed params and returns, plus `IO Unit` function return,
 - expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, function composition (`f >> g` means `f(g(x))`), lambdas (`\(x, y) -> ...`), `if`, direct calls, indirect closure calls, recursion,
+  one-arg lambdas may also use the shorthand `\x -> ...`,
 - ADT constructor calls and `match` lowering (constructors with up to 3 fields),
 - generic type variables are currently erased to runtime `i64` handles,
 - closure-backed function values are supported, including captured lambdas and higher-order params/returns,

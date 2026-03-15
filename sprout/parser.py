@@ -344,13 +344,15 @@ class Parser:
     def parse_primary(self):
         if self.match("SYMBOL", "\\"):
             start = self.tokens[self.i - 1]
-            self.expect("SYMBOL", "(")
             params: list[ast.Param] = []
-            if not self.check("SYMBOL", ")"):
-                params.append(self.parse_param())
-                while self.match("SYMBOL", ","):
+            if self.match("SYMBOL", "("):
+                if not self.check("SYMBOL", ")"):
                     params.append(self.parse_param())
-            self.expect("SYMBOL", ")")
+                    while self.match("SYMBOL", ","):
+                        params.append(self.parse_param())
+                self.expect("SYMBOL", ")")
+            else:
+                params.append(self.parse_lambda_shorthand_param())
             self.expect("SYMBOL", "->")
             body = self.parse_expr()
             return self.mark(ast.LambdaExpr(params=params, body=body), start)
@@ -483,6 +485,13 @@ class Parser:
             raise ParseError(f"Expected dict key at {t.line}:{t.column}, got {t.kind} {t.value!r}")
         self.expect("SYMBOL", ":")
         return key, self.parse_expr()
+
+    def parse_lambda_shorthand_param(self) -> ast.Param:
+        tok = self.expect("IDENT", label="parameter name")
+        typ = None
+        if self.match("SYMBOL", ":"):
+            typ = self.parse_type_apply()
+        return self.mark(ast.Param(name=tok.value, type_expr=typ), tok)
 
     def parse_type_expr(self):
         left = self.parse_type_apply()

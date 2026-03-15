@@ -68,6 +68,21 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.body, ast.BinaryExpr)
         self.assertEqual(fn_decl.body.body.op, "+")
 
+    def test_parse_single_arg_lambda_shorthand(self) -> None:
+        src = r"fn main() -> Int = \x -> x + 1"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
+        self.assertEqual([param.name for param in fn_decl.body.params], ["x"])
+        self.assertIsNone(fn_decl.body.params[0].type_expr)
+
+    def test_parse_single_arg_lambda_shorthand_with_annotation(self) -> None:
+        src = r"fn main() -> Int = \x: Int -> x + 1"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
+        self.assertEqual(fn_decl.body.params[0].type_expr.name, "Int")
+
     def test_parse_lambda_in_call_position(self) -> None:
         src = r"fn main() -> Int = apply(41, \(x) -> x + 1)"
         program = parse(src)
@@ -78,6 +93,13 @@ class ParserTests(unittest.TestCase):
 
     def test_parse_nested_lambda_expression(self) -> None:
         src = r"fn main() -> Int = \(x) -> \(y) -> x + y"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
+        self.assertIsInstance(fn_decl.body.body, ast.LambdaExpr)
+
+    def test_parse_nested_single_arg_lambda_expression(self) -> None:
+        src = r"fn main() -> Int = \x -> \y -> x + y"
         program = parse(src)
         fn_decl = program.declarations[0]
         self.assertIsInstance(fn_decl.body, ast.LambdaExpr)
