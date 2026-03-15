@@ -410,12 +410,9 @@ Commands:
   - lint baseline style issues: `python3 -m sprout.cli lint your_file.sprout`
   - current scope: whitespace-aware formatting, comment preservation, trailing-whitespace/tab/final-newline checks
 
-## Roadmap / TODO
+## Backlog
 
-1. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
-2. Add stronger server-side runtime models (multi-reactor as next target).
-3. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
-4. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
+See [docs/backlog.md](./docs/backlog.md) for the current roadmap and follow-up work.
 
 ## Contributing
 
