@@ -698,6 +698,8 @@ def infer_expr(
         out_t = state.fresh()
         branch_ctors: list[str] = []
         has_catchall = False
+        seen_literals: set[tuple[str, object]] = set()
+        reachable_adt_ctors = _resolved_match_adt_constructors(scrutinee_t, state, type_decls)
 
         for branch in expr.branches:
             branch_env = dict(env)
@@ -708,8 +710,21 @@ def infer_expr(
                 state,
                 type_decls,
             )
+            literal_key = _top_level_literal_key(branch.pattern)
+            if has_catchall:
+                raise tc_error("Unreachable match branch", branch.pattern)
+            if literal_key is not None and literal_key in seen_literals:
+                raise tc_error(f"Unreachable match branch for literal {_format_literal_key(literal_key)}", branch.pattern)
+            if ctor_name is not None and ctor_name in branch_ctors:
+                raise tc_error(f"Unreachable match branch for constructor {ctor_name}", branch.pattern)
+            if reachable_adt_ctors is not None and not reachable_adt_ctors:
+                raise tc_error("Unreachable match branch", branch.pattern)
             if ctor_name is not None:
                 branch_ctors.append(ctor_name)
+                if reachable_adt_ctors is not None:
+                    reachable_adt_ctors.discard(ctor_name)
+            if literal_key is not None:
+                seen_literals.add(literal_key)
             if isinstance(branch.pattern, (ast.WildcardPattern, ast.VarPattern)):
                 has_catchall = True
             value_t = infer_expr(branch.value, branch_env, state, type_decls, global_methods)
@@ -840,6 +855,45 @@ def ensure_exhaustive_match(
     if missing:
         miss = ", ".join(missing)
         raise tc_error(f"Non-exhaustive match, missing constructor(s): {miss}", node)
+
+
+def _resolved_match_adt_constructors(
+    scrutinee_t: Type,
+    state: InferState,
+    type_decls: dict[str, TypeDeclInfo],
+) -> set[str] | None:
+    resolved = apply(state.subst, scrutinee_t)
+    adt_name = None
+    if isinstance(resolved, TConst):
+        adt_name = resolved.name
+    elif isinstance(resolved, TApp):
+        base = resolved.base
+        while isinstance(base, TApp):
+            base = base.base
+        if isinstance(base, TConst):
+            adt_name = base.name
+    if adt_name is None or adt_name not in type_decls:
+        return None
+    return set(type_decls[adt_name].constructors.keys())
+
+
+def _top_level_literal_key(pattern: ast.Pattern) -> tuple[str, object] | None:
+    if isinstance(pattern, ast.IntPattern):
+        return ("int", pattern.value)
+    if isinstance(pattern, ast.BoolPattern):
+        return ("bool", pattern.value)
+    if isinstance(pattern, ast.StringPattern):
+        return ("string", pattern.value)
+    return None
+
+
+def _format_literal_key(key: tuple[str, object]) -> str:
+    kind, value = key
+    if kind == "string":
+        return repr(value)
+    if kind == "bool":
+        return "true" if value else "false"
+    return str(value)
 
 
 def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:

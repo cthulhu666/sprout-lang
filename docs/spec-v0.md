@@ -135,6 +135,11 @@ match m with
 ```
 
 Patterns are checked top-to-bottom; first match wins.
+In v0, unreachable top-level branches are a compile error when they are
+shadowed by an earlier `_` or variable pattern, repeat an earlier top-level
+literal or constructor pattern, or appear after all constructors of an ADT have
+already been covered. More advanced nested-pattern subsumption is not part of
+the v0 contract.
 
 Tuple expressions use comma-separated elements inside parentheses:
 
@@ -345,7 +350,23 @@ fn bad(m: Maybe Int) -> Int =
 
 Compiler should report non-exhaustive pattern matching.
 
-### 10.12 Using `stdlib.math`
+### 10.12 Unreachable match branch (compile error)
+
+```sprout
+type Maybe a =
+  | Just a
+  | Nothing
+
+fn bad(m: Maybe Int) -> Int =
+  match m with
+  | Just x -> x
+  | Nothing -> 0
+  | _ -> 1
+```
+
+Compiler should report the final branch as unreachable.
+
+### 10.13 Using `stdlib.math`
 
 ```sprout
 import stdlib.math as math

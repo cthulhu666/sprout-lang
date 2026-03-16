@@ -104,6 +104,83 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
 
+    def test_type_error_unreachable_match_after_wildcard(self) -> None:
+        src = """
+        fn bad(x: Int) -> Int =
+          match x with
+          | _ -> 1
+          | 2 -> 2
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unreachable match branch", str(ctx.exception))
+
+    def test_type_error_unreachable_match_after_variable_pattern(self) -> None:
+        src = """
+        fn bad(x: Int) -> Int =
+          match x with
+          | value -> value
+          | 2 -> 2
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unreachable match branch", str(ctx.exception))
+
+    def test_type_error_unreachable_duplicate_literal_patterns(self) -> None:
+        src = """
+        fn bad(x: Int) -> Int =
+          match x with
+          | 1 -> 10
+          | 1 -> 20
+          | 2 -> 30
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unreachable match branch for literal 1", str(ctx.exception))
+
+    def test_type_error_unreachable_duplicate_constructor_pattern(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn bad(m: Maybe Int) -> Int =
+          match m with
+          | Just x -> x
+          | Just y -> y + 1
+          | Nothing -> 0
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unreachable match branch for constructor Just", str(ctx.exception))
+
+    def test_type_error_unreachable_branch_after_exhaustive_adt_coverage(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn bad(m: Maybe Int) -> Int =
+          match m with
+          | Just x -> x
+          | Nothing -> 0
+          | _ -> 1
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unreachable match branch", str(ctx.exception))
+
+    def test_typecheck_nested_pattern_overlap_is_not_rejected_in_v0(self) -> None:
+        src = """
+        fn ok(pair: (Bool, Bool)) -> Int =
+          match pair with
+          | (true, x) -> 1
+          | (true, y) -> 2
+          | (false, _) -> 3
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["ok"], "(Bool, Bool) -> Int")
+
     def test_typecheck_function_composition(self) -> None:
         src = """
         fn inc(x: Int) -> Int = x + 1
@@ -183,6 +260,18 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
         self.assertIn("Tuple pattern expects 2 items, got 3", str(ctx.exception))
+
+    def test_type_error_unreachable_duplicate_string_literal_pattern(self) -> None:
+        src = """
+        fn bad(s: String) -> Int =
+          match s with
+          | "ok" -> 1
+          | "ok" -> 2
+          | "no" -> 3
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unreachable match branch for literal 'ok'", str(ctx.exception))
 
     def test_typecheck_string_builtins(self) -> None:
         src = """

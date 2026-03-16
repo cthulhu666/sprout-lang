@@ -5,12 +5,11 @@ This file tracks open design, implementation, and tooling follow-up work.
 ## Current Priorities
 
 1. Align function application semantics across the spec, typechecker, interpreter, and native backend by deciding whether partial application belongs in v0 and then implementing that decision consistently.
-2. Define unreachable-pattern handling explicitly (warn, error, or ignore) instead of leaving it as advisory design guidance.
-3. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
-4. Add stronger server-side runtime models (multi-reactor as next target).
-5. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
-6. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
-7. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
+2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
+3. Add stronger server-side runtime models (multi-reactor as next target).
+4. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
+5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
+6. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
 
 ## V1 Roadmap Candidates
 
