@@ -103,6 +103,19 @@ class CliTests(unittest.TestCase):
         self.assertIn("List Int", run.stdout)
         self.assertIn("String", run.stdout)
 
+    def test_repl_with_stdlib_resolves_foldable_to_vec_for_list_literal(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="foldable_to_vec([1,2,3])\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertNotIn("Cannot resolve constraint Foldable", run.stdout)
+        self.assertIn("Vec(", run.stdout)
+
     def test_repl_default_supports_list_literals(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],
