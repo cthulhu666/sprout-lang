@@ -45,8 +45,8 @@ Normative status:
 
 v0 execution note:
 
-- Top-level `let` bindings must be pure.
-- Effectful work belongs in functions, with `main` as the entrypoint.
+- Top-level `let` bindings must not have type `IO a`.
+- Effectful work is expected to live in functions, with `main` as the entrypoint.
 
 ## Tooling (mise + just)
 
@@ -123,6 +123,10 @@ Runtime builtins (host-implemented):
 `IO a` in v0 is annotation-only. It marks APIs that are expected to perform
 effects, but Sprout v0 does not yet have a separate effect system, purity
 checking, or delayed execution model.
+
+That means the current top-level restriction is narrow: Sprout rejects
+top-level `let` bindings whose inferred type is `IO a`, but it does not claim a
+general purity proof for every non-`IO` top-level expression in v0.
 
 String/runtime helpers are host-implemented primitives. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
 

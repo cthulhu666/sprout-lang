@@ -71,7 +71,7 @@ class ModuleLoaderTests(unittest.TestCase):
             resolve_program_names(program, bundle)
             with self.assertRaises(TypeCheckError) as ctx:
                 typecheck_program(program)
-            self.assertIn("Top-level let bindings must be pure", str(ctx.exception))
+            self.assertIn("Top-level let bindings must not have type IO a", str(ctx.exception))
 
     def test_load_module_source_detects_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

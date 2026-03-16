@@ -1088,7 +1088,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             value_t = infer_expr(let_decl.value, env, state, type_decls, global_methods)
             if is_io_type(value_t, state):
                 raise tc_error(
-                    "Top-level let bindings must be pure; move effectful work into a function such as main",
+                    "Top-level let bindings must not have type IO a; move IO-typed work into a function such as main",
                     let_decl,
                 )
             env[let_decl.name] = generalize(env, value_t, state)
