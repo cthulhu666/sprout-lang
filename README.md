@@ -1,3 +1,5 @@
+![Sprout logo](assets/logo.png)
+
 # Sprout
 
 Sprout is an experimental, statically typed, functional-first programming language focused on being "Haskell for ordinary people": strong type safety, predictable semantics, and approachable syntax.
