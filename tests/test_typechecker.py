@@ -154,6 +154,25 @@ class TypecheckerTests(unittest.TestCase):
             typecheck_program(parse(src))
         self.assertIn("Unreachable match branch for constructor Just", str(ctx.exception))
 
+    def test_typecheck_constructor_specific_then_general_branch_is_allowed_in_v0(self) -> None:
+        src = """
+        type NetErr =
+          | TcpEndOfStream
+          | TcpClosed
+
+        type Result a =
+          | Ok a
+          | Err NetErr
+
+        fn show(r: Result String) -> String =
+          match r with
+          | Ok body -> body
+          | Err TcpEndOfStream -> "eof"
+          | Err err -> "other"
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["show"], "Result String -> String")
+
     def test_type_error_unreachable_branch_after_exhaustive_adt_coverage(self) -> None:
         src = """
         type Maybe a =

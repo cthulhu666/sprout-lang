@@ -137,9 +137,10 @@ match m with
 Patterns are checked top-to-bottom; first match wins.
 In v0, unreachable top-level branches are a compile error when they are
 shadowed by an earlier `_` or variable pattern, repeat an earlier top-level
-literal or constructor pattern, or appear after all constructors of an ADT have
-already been covered. More advanced nested-pattern subsumption is not part of
-the v0 contract.
+literal pattern, repeat an earlier top-level constructor branch that already
+covers that constructor completely, or appear after all constructors of an ADT
+have already been covered. More advanced nested-pattern subsumption is not part
+of the v0 contract.
 
 Tuple expressions use comma-separated elements inside parentheses:
 

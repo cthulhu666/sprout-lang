@@ -697,6 +697,7 @@ def infer_expr(
         scrutinee_t = infer_expr(expr.scrutinee, env, state, type_decls, global_methods)
         out_t = state.fresh()
         branch_ctors: list[str] = []
+        covered_ctors: set[str] = set()
         has_catchall = False
         seen_literals: set[tuple[str, object]] = set()
         reachable_adt_ctors = _resolved_match_adt_constructors(scrutinee_t, state, type_decls)
@@ -715,13 +716,15 @@ def infer_expr(
                 raise tc_error("Unreachable match branch", branch.pattern)
             if literal_key is not None and literal_key in seen_literals:
                 raise tc_error(f"Unreachable match branch for literal {_format_literal_key(literal_key)}", branch.pattern)
-            if ctor_name is not None and ctor_name in branch_ctors:
+            if ctor_name is not None and ctor_name in covered_ctors:
                 raise tc_error(f"Unreachable match branch for constructor {ctor_name}", branch.pattern)
             if reachable_adt_ctors is not None and not reachable_adt_ctors:
                 raise tc_error("Unreachable match branch", branch.pattern)
             if ctor_name is not None:
                 branch_ctors.append(ctor_name)
-                if reachable_adt_ctors is not None:
+                if _constructor_pattern_covers_all(branch.pattern):
+                    covered_ctors.add(ctor_name)
+                if reachable_adt_ctors is not None and _constructor_pattern_covers_all(branch.pattern):
                     reachable_adt_ctors.discard(ctor_name)
             if literal_key is not None:
                 seen_literals.add(literal_key)
@@ -894,6 +897,20 @@ def _format_literal_key(key: tuple[str, object]) -> str:
     if kind == "bool":
         return "true" if value else "false"
     return str(value)
+
+
+def _pattern_is_irrefutable_within_value(pattern: ast.Pattern) -> bool:
+    if isinstance(pattern, (ast.WildcardPattern, ast.VarPattern)):
+        return True
+    if isinstance(pattern, ast.TuplePattern):
+        return all(_pattern_is_irrefutable_within_value(item) for item in pattern.items)
+    return False
+
+
+def _constructor_pattern_covers_all(pattern: ast.Pattern) -> bool:
+    if not isinstance(pattern, ast.ConstructorPattern):
+        return False
+    return all(_pattern_is_irrefutable_within_value(arg) for arg in pattern.args)
 
 
 def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
