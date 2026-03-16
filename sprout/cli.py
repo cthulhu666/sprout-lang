@@ -311,6 +311,18 @@ long long print_str(const char* s) {
   printf("%s\\n", s);
   return 0;
 }
+long long print_text(const char* s) {
+  printf("%s", s);
+  return 0;
+}
+long long print_value_part(long long x) {
+  print_inline_value(x);
+  return x;
+}
+long long print_newline(void) {
+  printf("\\n");
+  return 0;
+}
 long long print_value(long long x) {
   print_inline_value(x);
   printf("\\n");

@@ -43,7 +43,10 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "malloc": FnSig(name="malloc", params=[I64], ret=I8_PTR),
     "print_int": FnSig(name="print_int", params=[I64], ret=I64),
     "print_str": FnSig(name="print_str", params=[I8_PTR], ret=I64),
+    "print_text": FnSig(name="print_text", params=[I8_PTR], ret=I64),
     "print_value": FnSig(name="print_value", params=[I64], ret=I64),
+    "print_value_part": FnSig(name="print_value_part", params=[I64], ret=I64),
+    "print_newline": FnSig(name="print_newline", params=[], ret=I64),
     "read_file": FnSig(name="read_file", params=[I8_PTR], ret=I8_PTR),
     "env_get": FnSig(name="env_get", params=[I8_PTR], ret=I64),
     "argv_get": FnSig(name="argv_get", params=[I64], ret=I64),
@@ -1752,6 +1755,57 @@ def _coerce_value(value: Value, target: LLType, emitter: Emitter) -> Value:
     raise CodegenError(f"Cannot coerce {value.typ.text} to {target.text} in backend")
 
 
+def _emit_print_text(text_ir: str, emitter: Emitter) -> Value:
+    tmp = emitter.tmp()
+    emitter.emit(f"  {tmp} = call i64 @print_text(ptr {text_ir})")
+    return Value(I64, tmp)
+
+
+def _emit_print_literal(text: str, emitter: Emitter) -> Value:
+    gname, length = emitter.string_const(text)
+    ptr = emitter.tmp()
+    emitter.emit(f"  {ptr} = getelementptr inbounds [{length} x i8], ptr {gname}, i64 0, i64 0")
+    return _emit_print_text(ptr, emitter)
+
+
+def _emit_print_newline(emitter: Emitter) -> Value:
+    tmp = emitter.tmp()
+    emitter.emit(f"  {tmp} = call i64 @print_newline()")
+    return Value(I64, tmp)
+
+
+def _emit_print_inline_value(value: Value, emitter: Emitter) -> Value:
+    if value.typ == I64:
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = call i64 @print_value_part(i64 {value.ir})")
+        return Value(I64, tmp)
+    if value.typ == I1:
+        widened = emitter.tmp()
+        emitter.emit(f"  {widened} = zext i1 {value.ir} to i64")
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = call i64 @print_value_part(i64 {widened})")
+        return Value(I64, tmp)
+    if value.typ == I8_PTR:
+        return _emit_print_text(value.ir, emitter)
+    if (value.tuple_items or _tuple_item_types_from_lltype(value.typ)) is not None:
+        return _emit_print_tuple_value(value, emitter)
+    raise CodegenError("print backend supports Int/Bool/String/tuple only")
+
+
+def _emit_print_tuple_value(value: Value, emitter: Emitter) -> Value:
+    tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
+    if tuple_items is None:
+        raise CodegenError("Tuple print expects tuple metadata in backend")
+    last = _emit_print_literal("(", emitter)
+    for idx in range(len(tuple_items)):
+        if idx > 0:
+            last = _emit_print_literal(", ", emitter)
+        field = _emit_tuple_field(value, idx, emitter)
+        last = _emit_print_inline_value(field, emitter)
+    last = _emit_print_literal(")", emitter)
+    return last
+
+
 def _emit_call(
     expr: ast.CallExpr,
     locals_: dict[str, Value],
@@ -1779,7 +1833,10 @@ def _emit_call(
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = call i64 @print_str(ptr {arg.ir})")
             return Value(I64, tmp)
-        raise CodegenError("print backend supports Int/Bool/String only")
+        if (arg.tuple_items or _tuple_item_types_from_lltype(arg.typ)) is not None:
+            _emit_print_tuple_value(arg, emitter)
+            return _emit_print_newline(emitter)
+        raise CodegenError("print backend supports Int/Bool/String/tuple only")
 
     if isinstance(expr.callee, ast.VarExpr):
         fn_name = expr.callee.name
