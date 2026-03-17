@@ -90,6 +90,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("forall a b. List a -> (a -> b) -> List b", run.stdout)
 
+    def test_repl_type_query_supports_typeclass_method_values(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":t fmap\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("forall a b c. (a -> b) -> c a -> c b", run.stdout)
+
     def test_repl_help_mentions_type_shorthand(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],

@@ -283,15 +283,21 @@ def type_to_string(typ: Type, type_var_names: dict[str, str] | None = None) -> s
 def scheme_to_string(scheme: Scheme, subst: dict[str, Type]) -> str:
     masked = {k: v for k, v in subst.items() if k not in set(scheme.vars)}
     solved = apply(masked, scheme.type)
-    mapping = _display_type_var_mapping(scheme.vars)
+    ordered_quantified: list[str] = []
+    _collect_type_var_names_in_order(solved, ordered_quantified, set())
+    ordered_quantified = [name for name in ordered_quantified if name in set(scheme.vars)]
+    for name in scheme.vars:
+        if name not in ordered_quantified:
+            ordered_quantified.append(name)
+    mapping = _display_type_var_mapping(ordered_quantified)
     remaining: list[str] = []
     _collect_type_var_names_in_order(solved, remaining, set(mapping))
     if remaining:
         offset = len(mapping)
         mapping.update({name: _friendly_type_var_name(offset + idx) for idx, name in enumerate(remaining)})
     txt = type_to_string(solved, mapping)
-    if scheme.vars:
-        return f"forall {' '.join(mapping[name] for name in scheme.vars)}. {txt}"
+    if ordered_quantified:
+        return f"forall {' '.join(mapping[name] for name in ordered_quantified)}. {txt}"
     return txt
 
 
@@ -568,6 +574,27 @@ def build_global_method_info(class_decls: dict[str, ClassDeclInfo]) -> dict[str,
     return {name: info for name, info in methods.items() if info is not None}
 
 
+def instantiate_global_method(
+    state: InferState,
+    method_info: GlobalMethodInfo,
+) -> tuple[Type, list[Type]]:
+    replacements = {name: state.fresh() for name in ftv(method_info.method_type)}
+    direct_method_args = [replacements[name] for name in method_info.class_info.type_param_vars]
+
+    def go(typ: Type) -> Type:
+        if isinstance(typ, TVar) and typ.name in replacements:
+            return replacements[typ.name]
+        if isinstance(typ, TFunc):
+            return TFunc(go(typ.arg), go(typ.ret))
+        if isinstance(typ, TApp):
+            return TApp(go(typ.base), go(typ.arg))
+        if isinstance(typ, TTuple):
+            return TTuple(tuple(go(item) for item in typ.items))
+        return typ
+
+    return go(method_info.method_type), direct_method_args
+
+
 def validate_instance_methods(
     program: ast.Program,
     class_decls: dict[str, ClassDeclInfo],
@@ -660,9 +687,13 @@ def infer_expr(
         return _mark_expr_type(expr, TTuple(tuple(item_types)))
     if isinstance(expr, ast.VarExpr):
         scheme = env.get(expr.name)
-        if scheme is None:
+        if scheme is not None:
+            return _mark_expr_type(expr, instantiate(state, scheme))
+        method_info = global_methods.get(expr.name)
+        if method_info is None:
             raise tc_error(f"Unknown variable {expr.name}", expr)
-        return _mark_expr_type(expr, instantiate(state, scheme))
+        method_type, _ = instantiate_global_method(state, method_info)
+        return _mark_expr_type(expr, method_type)
     if isinstance(expr, ast.UnaryExpr):
         operand_t = infer_expr(expr.operand, env, state, type_decls, global_methods)
         if expr.op == "-":
@@ -701,19 +732,7 @@ def infer_expr(
         if isinstance(expr.callee, ast.VarExpr) and expr.callee.name not in env:
             direct_method_info = global_methods.get(expr.callee.name)
         if direct_method_info is not None:
-            replacements = {name: state.fresh() for name in ftv(direct_method_info.method_type)}
-            direct_method_args = [replacements[name] for name in direct_method_info.class_info.type_param_vars]
-
-            def go(typ: Type) -> Type:
-                if isinstance(typ, TVar) and typ.name in replacements:
-                    return replacements[typ.name]
-                if isinstance(typ, TFunc):
-                    return TFunc(go(typ.arg), go(typ.ret))
-                if isinstance(typ, TApp):
-                    return TApp(go(typ.base), go(typ.arg))
-                return typ
-
-            callee = go(direct_method_info.method_type)
+            callee, direct_method_args = instantiate_global_method(state, direct_method_info)
         else:
             callee = infer_expr(expr.callee, env, state, type_decls, global_methods)
         result = state.fresh()

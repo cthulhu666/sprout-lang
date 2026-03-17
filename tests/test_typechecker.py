@@ -252,6 +252,13 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertEqual(types["apply"], "forall a b. (a -> b) -> a -> b")
 
+    def test_typecheck_allows_class_method_as_first_class_value(self) -> None:
+        src = """
+        let mapper = fmap
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["mapper"], "forall a b c. (a -> b) -> c a -> c b")
+
     def test_type_error_invalid_function_composition(self) -> None:
         src = """
         fn inc(x: Int) -> Int = x + 1
