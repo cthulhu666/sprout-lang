@@ -250,7 +250,7 @@ class TypecheckerTests(unittest.TestCase):
           print(apply(inc, 41))
         """
         types = typecheck_program(parse(src))
-        self.assertRegex(types["apply"], r"^forall t\d+ t\d+\.\s+\(t\d+ -> t\d+\) -> t\d+ -> t\d+$")
+        self.assertEqual(types["apply"], "forall a b. (a -> b) -> a -> b")
 
     def test_type_error_invalid_function_composition(self) -> None:
         src = """
@@ -260,6 +260,15 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
+
+    def test_type_error_reports_expected_and_actual_call_argument_types(self) -> None:
+        src = """
+        fn bad(xs: List Int) -> List Int =
+          fmap(xs, \\x -> x + 1)
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(with_prelude(src)))
+        self.assertIn("Argument type mismatch: expected a -> b, got List Int", str(ctx.exception))
 
     def test_typecheck_tuples(self) -> None:
         src = """

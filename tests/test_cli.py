@@ -78,6 +78,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("List Int", run.stdout)
 
+    def test_repl_type_output_uses_friendly_type_variables(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":t map\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("forall a b. List a -> (a -> b) -> List b", run.stdout)
+
     def test_repl_help_mentions_type_shorthand(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],
@@ -115,6 +127,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertNotIn("Cannot resolve constraint Foldable", run.stdout)
         self.assertIn("Vec(", run.stdout)
+
+    def test_repl_reports_friendly_argument_type_mismatch(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="let l = [1,2,3]\nfmap(l, \\x -> 2 * x)\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("Argument type mismatch: expected a -> b, got List Int", run.stdout)
 
     def test_repl_default_supports_list_literals(self) -> None:
         run = subprocess.run(

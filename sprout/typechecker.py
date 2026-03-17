@@ -30,6 +30,18 @@ def unify_at(state: "InferState", left: "Type", right: "Type", node: object | No
         raise tc_error(str(exc), node) from exc
 
 
+def _friendly_type_var_name(index: int) -> str:
+    letter = chr(ord("a") + (index % 26))
+    suffix = index // 26
+    if suffix == 0:
+        return letter
+    return f"{letter}{suffix}"
+
+
+def _display_type_var_mapping(vars_: list[str] | tuple[str, ...]) -> dict[str, str]:
+    return {name: _friendly_type_var_name(idx) for idx, name in enumerate(vars_)}
+
+
 class Type:
     pass
 
@@ -154,7 +166,11 @@ def bind_var(state: InferState, name: str, typ: Type) -> None:
     if typ == TVar(name):
         return
     if name in ftv(typ):
-        raise tc_error(f"Occurs check failed: {name} appears in {type_to_string(typ)}")
+        names = sorted({name} | ftv(typ))
+        mapping = _display_type_var_mapping(names)
+        raise tc_error(
+            f"Occurs check failed: {mapping[name]} appears in {type_to_string(typ, mapping)}"
+        )
     state.subst[name] = typ
 
 
@@ -192,7 +208,9 @@ def unify(state: InferState, left: Type, right: Type) -> None:
             unify(state, left_item, right_item)
         return
 
-    raise TypeCheckError(f"Type mismatch: {type_to_string(left)} vs {type_to_string(right)}")
+    names = sorted(ftv(left) | ftv(right))
+    mapping = _display_type_var_mapping(names)
+    raise TypeCheckError(f"Type mismatch: {type_to_string(left, mapping)} vs {type_to_string(right, mapping)}")
 
 
 def instantiate(state: InferState, scheme: Scheme) -> Type:
@@ -218,19 +236,19 @@ def generalize(env: dict[str, Scheme], typ: Type, state: InferState) -> Scheme:
     return Scheme(vars=vars_, type=resolved)
 
 
-def type_to_string(typ: Type) -> str:
+def type_to_string(typ: Type, type_var_names: dict[str, str] | None = None) -> str:
     typ = apply({}, typ)
     if isinstance(typ, TVar):
-        return typ.name
+        return (type_var_names or {}).get(typ.name, typ.name)
     if isinstance(typ, TConst):
         return typ.name
     if isinstance(typ, TApp):
-        return f"{type_to_string(typ.base)} {type_to_string(typ.arg)}"
+        return f"{type_to_string(typ.base, type_var_names)} {type_to_string(typ.arg, type_var_names)}"
     if isinstance(typ, TTuple):
-        return "(" + ", ".join(type_to_string(item) for item in typ.items) + ")"
+        return "(" + ", ".join(type_to_string(item, type_var_names) for item in typ.items) + ")"
     if isinstance(typ, TFunc):
-        left = type_to_string(typ.arg)
-        right = type_to_string(typ.ret)
+        left = type_to_string(typ.arg, type_var_names)
+        right = type_to_string(typ.ret, type_var_names)
         if isinstance(typ.arg, TFunc):
             left = f"({left})"
         return f"{left} -> {right}"
@@ -240,9 +258,14 @@ def type_to_string(typ: Type) -> str:
 def scheme_to_string(scheme: Scheme, subst: dict[str, Type]) -> str:
     masked = {k: v for k, v in subst.items() if k not in set(scheme.vars)}
     solved = apply(masked, scheme.type)
-    txt = type_to_string(solved)
+    mapping = _display_type_var_mapping(scheme.vars)
+    remaining = sorted(ftv(solved) - set(scheme.vars))
+    if remaining:
+        offset = len(mapping)
+        mapping.update({name: _friendly_type_var_name(offset + idx) for idx, name in enumerate(remaining)})
+    txt = type_to_string(solved, mapping)
     if scheme.vars:
-        return f"forall {' '.join(scheme.vars)}. {txt}"
+        return f"forall {' '.join(mapping[name] for name in scheme.vars)}. {txt}"
     return txt
 
 
@@ -671,8 +694,21 @@ def infer_expr(
         typ = callee
         for arg_expr in expr.args:
             arg_t = infer_expr(arg_expr, env, state, type_decls, global_methods)
+            expected_arg_t = apply(state.subst, typ).arg if isinstance(apply(state.subst, typ), TFunc) else None
             next_t = state.fresh()
-            unify_at(state, typ, TFunc(arg_t, next_t), arg_expr)
+            try:
+                unify_at(state, typ, TFunc(arg_t, next_t), arg_expr)
+            except TypeCheckError as exc:
+                if expected_arg_t is not None:
+                    names = sorted(ftv(expected_arg_t) | ftv(arg_t))
+                    mapping = _display_type_var_mapping(names)
+                    raise tc_error(
+                        "Argument type mismatch: "
+                        f"expected {type_to_string(expected_arg_t, mapping)}, "
+                        f"got {type_to_string(arg_t, mapping)}",
+                        arg_expr,
+                    ) from exc
+                raise
             typ = next_t
         unify_at(state, typ, result, expr)
         if direct_method_info is not None:
