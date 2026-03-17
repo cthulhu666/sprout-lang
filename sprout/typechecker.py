@@ -42,6 +42,26 @@ def _display_type_var_mapping(vars_: list[str] | tuple[str, ...]) -> dict[str, s
     return {name: _friendly_type_var_name(idx) for idx, name in enumerate(vars_)}
 
 
+def _collect_type_var_names_in_order(typ: "Type", out: list[str], seen: set[str]) -> None:
+    typ = apply({}, typ)
+    if isinstance(typ, TVar):
+        if typ.name not in seen:
+            seen.add(typ.name)
+            out.append(typ.name)
+        return
+    if isinstance(typ, TFunc):
+        _collect_type_var_names_in_order(typ.arg, out, seen)
+        _collect_type_var_names_in_order(typ.ret, out, seen)
+        return
+    if isinstance(typ, TApp):
+        _collect_type_var_names_in_order(typ.base, out, seen)
+        _collect_type_var_names_in_order(typ.arg, out, seen)
+        return
+    if isinstance(typ, TTuple):
+        for item in typ.items:
+            _collect_type_var_names_in_order(item, out, seen)
+
+
 class Type:
     pass
 
@@ -166,7 +186,9 @@ def bind_var(state: InferState, name: str, typ: Type) -> None:
     if typ == TVar(name):
         return
     if name in ftv(typ):
-        names = sorted({name} | ftv(typ))
+        names = [name]
+        seen = {name}
+        _collect_type_var_names_in_order(typ, names, seen)
         mapping = _display_type_var_mapping(names)
         raise tc_error(
             f"Occurs check failed: {mapping[name]} appears in {type_to_string(typ, mapping)}"
@@ -208,7 +230,10 @@ def unify(state: InferState, left: Type, right: Type) -> None:
             unify(state, left_item, right_item)
         return
 
-    names = sorted(ftv(left) | ftv(right))
+    names: list[str] = []
+    seen: set[str] = set()
+    _collect_type_var_names_in_order(left, names, seen)
+    _collect_type_var_names_in_order(right, names, seen)
     mapping = _display_type_var_mapping(names)
     raise TypeCheckError(f"Type mismatch: {type_to_string(left, mapping)} vs {type_to_string(right, mapping)}")
 
@@ -259,7 +284,8 @@ def scheme_to_string(scheme: Scheme, subst: dict[str, Type]) -> str:
     masked = {k: v for k, v in subst.items() if k not in set(scheme.vars)}
     solved = apply(masked, scheme.type)
     mapping = _display_type_var_mapping(scheme.vars)
-    remaining = sorted(ftv(solved) - set(scheme.vars))
+    remaining: list[str] = []
+    _collect_type_var_names_in_order(solved, remaining, set(mapping))
     if remaining:
         offset = len(mapping)
         mapping.update({name: _friendly_type_var_name(offset + idx) for idx, name in enumerate(remaining)})
@@ -700,7 +726,10 @@ def infer_expr(
                 unify_at(state, typ, TFunc(arg_t, next_t), arg_expr)
             except TypeCheckError as exc:
                 if expected_arg_t is not None:
-                    names = sorted(ftv(expected_arg_t) | ftv(arg_t))
+                    names: list[str] = []
+                    seen: set[str] = set()
+                    _collect_type_var_names_in_order(expected_arg_t, names, seen)
+                    _collect_type_var_names_in_order(arg_t, names, seen)
                     mapping = _display_type_var_mapping(names)
                     raise tc_error(
                         "Argument type mismatch: "
