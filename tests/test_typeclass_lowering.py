@@ -22,7 +22,7 @@ class TypeclassLoweringTests(unittest.TestCase):
         }
         fn show_box(x: Box) -> Int where Renderable Box =
           render(x)
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(show_box(Box(42)))
         """
         program = parse(src)
@@ -45,7 +45,7 @@ class TypeclassLoweringTests(unittest.TestCase):
           render(x)
         fn show_int(x: Int) -> Int where Renderable Int =
           show_any(x)
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(show_int(42))
         """
         program = parse(src)
@@ -63,7 +63,7 @@ class TypeclassLoweringTests(unittest.TestCase):
         }
         fn show_any(x: a) -> Int where Renderable a =
           render(x)
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(show_any(42))
         """
         program = parse(src)
@@ -89,7 +89,7 @@ class TypeclassLoweringTests(unittest.TestCase):
         }
         fn combine(xs: List Int, ys: List Int) -> List Int where Semigroup (List Int) =
           append(xs, ys)
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(combine(Cons(1, Nil), Cons(2, Nil)))
         """
         program = parse(src)

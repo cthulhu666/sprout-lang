@@ -18,7 +18,7 @@ fn sum_any(values: a) -> Int where Summable a =
 fn sum_vec(values: Vec Int) -> Int where Summable (Vec Int) =
   sum_any(values)
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(
     sum_vec(vec_append(vec_append(vec_append(vec_empty(), 3), 4), 5))
   )

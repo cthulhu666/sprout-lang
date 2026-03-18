@@ -33,6 +33,7 @@ class FnDecl:
     name: str
     params: list["Param"]
     return_type: "TypeExpr | None"
+    effects: tuple[str, ...] | None
     constraints: list["TypeConstraint"]
     body: "Expr"
 
@@ -67,6 +68,7 @@ class ClassMethodSig:
     name: str
     params: list["Param"]
     return_type: "TypeExpr"
+    effects: tuple[str, ...] | None
 
 
 @dataclass
@@ -74,6 +76,7 @@ class InstanceMethodImpl:
     name: str
     params: list["Param"]
     return_type: "TypeExpr | None"
+    effects: tuple[str, ...] | None
     body: "Expr"
 
 
@@ -209,6 +212,13 @@ class TypeApply(TypeExpr):
 class TypeArrow(TypeExpr):
     left: TypeExpr
     right: TypeExpr
+    effects: tuple[str, ...] | None = None
+
+
+@dataclass
+class TypeEffect(TypeExpr):
+    base: TypeExpr
+    effects: tuple[str, ...]
 
 
 @dataclass

@@ -9,7 +9,7 @@ This module implements:
 - basic match exhaustiveness for ADTs.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict
 
 from . import ast
@@ -80,6 +80,7 @@ class TConst(Type):
 class TFunc(Type):
     arg: Type
     ret: Type
+    effects: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,13 @@ class TTuple(Type):
 class Scheme:
     vars: tuple[str, ...]
     type: Type
+    effects: frozenset[str] = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class MethodTypeInfo:
+    type: Type
+    effects: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -109,7 +117,7 @@ class TypeDeclInfo:
 class ClassDeclInfo:
     arity: int
     type_param_vars: tuple[str, ...]
-    methods: dict[str, Type]
+    methods: dict[str, MethodTypeInfo]
 
 
 @dataclass(frozen=True)
@@ -117,17 +125,14 @@ class GlobalMethodInfo:
     class_name: str
     class_info: ClassDeclInfo
     method_type: Type
+    effects: frozenset[str] = field(default_factory=frozenset)
 
 
 INT = TConst("Int")
 BOOL = TConst("Bool")
 STRING = TConst("String")
 UNIT = TConst("Unit")
-
-
-def is_io_type(typ: Type, state: "InferState") -> bool:
-    resolved = apply(state.subst, typ)
-    return isinstance(resolved, TApp) and isinstance(resolved.base, TConst) and resolved.base.name == "IO"
+IO_EFFECT = frozenset({"IO"})
 
 
 class InferState:
@@ -147,7 +152,7 @@ def apply(subst: dict[str, Type], typ: Type) -> Type:
             return apply(subst, subst[typ.name])
         return typ
     if isinstance(typ, TFunc):
-        return TFunc(apply(subst, typ.arg), apply(subst, typ.ret))
+        return TFunc(apply(subst, typ.arg), apply(subst, typ.ret), typ.effects)
     if isinstance(typ, TApp):
         return TApp(apply(subst, typ.base), apply(subst, typ.arg))
     if isinstance(typ, TTuple):
@@ -172,6 +177,29 @@ def ftv(typ: Type) -> set[str]:
 
 def ftv_scheme(s: Scheme) -> set[str]:
     return ftv(s.type) - set(s.vars)
+
+
+def effect_set(names: tuple[str, ...] | list[str] | set[str] | frozenset[str] | None) -> frozenset[str]:
+    if not names:
+        return frozenset()
+    return frozenset(names)
+
+
+def effects_to_string(effects: frozenset[str]) -> str:
+    if not effects:
+        return ""
+    return " !{" + ", ".join(sorted(effects)) + "}"
+
+
+def build_function_type(param_types: list[Type], ret: Type, effects: frozenset[str]) -> tuple[Type, frozenset[str]]:
+    if not param_types:
+        return ret, effects
+    typ = ret
+    call_effects = effects
+    for param in reversed(param_types):
+        typ = TFunc(param, typ, call_effects)
+        call_effects = frozenset()
+    return typ, frozenset()
 
 
 def ftv_env(env: dict[str, Scheme]) -> set[str]:
@@ -215,6 +243,10 @@ def unify(state: InferState, left: Type, right: Type) -> None:
     if isinstance(left, TFunc) and isinstance(right, TFunc):
         unify(state, left.arg, right.arg)
         unify(state, left.ret, right.ret)
+        if left.effects != right.effects:
+            raise TypeCheckError(
+                f"Effect mismatch: {effects_to_string(left.effects).strip()} vs {effects_to_string(right.effects).strip()}"
+            )
         return
 
     if isinstance(left, TApp) and isinstance(right, TApp):
@@ -245,7 +277,7 @@ def instantiate(state: InferState, scheme: Scheme) -> Type:
         if isinstance(typ, TVar) and typ.name in repl:
             return repl[typ.name]
         if isinstance(typ, TFunc):
-            return TFunc(go(typ.arg), go(typ.ret))
+            return TFunc(go(typ.arg), go(typ.ret), typ.effects)
         if isinstance(typ, TApp):
             return TApp(go(typ.base), go(typ.arg))
         if isinstance(typ, TTuple):
@@ -255,10 +287,15 @@ def instantiate(state: InferState, scheme: Scheme) -> Type:
     return go(scheme.type)
 
 
-def generalize(env: dict[str, Scheme], typ: Type, state: InferState) -> Scheme:
+def generalize(
+    env: dict[str, Scheme],
+    typ: Type,
+    state: InferState,
+    effects: frozenset[str] = frozenset(),
+) -> Scheme:
     resolved = apply(state.subst, typ)
     vars_ = tuple(sorted(ftv(resolved) - ftv_env(env)))
-    return Scheme(vars=vars_, type=resolved)
+    return Scheme(vars=vars_, type=resolved, effects=effects)
 
 
 def type_to_string(typ: Type, type_var_names: dict[str, str] | None = None) -> str:
@@ -276,7 +313,7 @@ def type_to_string(typ: Type, type_var_names: dict[str, str] | None = None) -> s
         right = type_to_string(typ.ret, type_var_names)
         if isinstance(typ.arg, TFunc):
             left = f"({left})"
-        return f"{left} -> {right}"
+        return f"{left} -> {right}{effects_to_string(typ.effects)}"
     return repr(typ)
 
 
@@ -295,7 +332,7 @@ def scheme_to_string(scheme: Scheme, subst: dict[str, Type]) -> str:
     if remaining:
         offset = len(mapping)
         mapping.update({name: _friendly_type_var_name(offset + idx) for idx, name in enumerate(remaining)})
-    txt = type_to_string(solved, mapping)
+    txt = type_to_string(solved, mapping) + effects_to_string(scheme.effects)
     if ordered_quantified:
         return f"forall {' '.join(mapping[name] for name in ordered_quantified)}. {txt}"
     return txt
@@ -325,7 +362,10 @@ def parse_type_expr(
         return TFunc(
             parse_type_expr(node.left, local_vars, allow_implicit_type_vars, state),
             parse_type_expr(node.right, local_vars, allow_implicit_type_vars, state),
+            effect_set(node.effects),
         )
+    if isinstance(node, ast.TypeEffect):
+        return parse_type_expr(node.base, local_vars, allow_implicit_type_vars, state)
     if isinstance(node, ast.TupleType):
         return TTuple(
             tuple(parse_type_expr(item, local_vars, allow_implicit_type_vars, state) for item in node.items)
@@ -333,43 +373,63 @@ def parse_type_expr(
     raise TypeCheckError(f"Unsupported type expression {node}")
 
 
-def fn_type_from_decl(decl: ast.FnDecl, state: InferState) -> Type:
+def parse_annotated_type_expr(
+    node: ast.TypeExpr,
+    local_vars: dict[str, TVar] | None = None,
+    allow_implicit_type_vars: bool = False,
+    state: InferState | None = None,
+) -> tuple[Type, frozenset[str]]:
+    if isinstance(node, ast.TypeEffect):
+        return (
+            parse_type_expr(node.base, local_vars, allow_implicit_type_vars, state),
+            effect_set(node.effects),
+        )
+    return parse_type_expr(node, local_vars, allow_implicit_type_vars, state), frozenset()
+
+
+def param_annotation_effects(param: ast.Param) -> frozenset[str]:
+    if isinstance(param.type_expr, ast.TypeEffect):
+        return effect_set(param.type_expr.effects)
+    return frozenset()
+
+
+def fn_type_from_decl(decl: ast.FnDecl, state: InferState) -> tuple[Type, frozenset[str]]:
     local_vars: dict[str, TVar] = {}
     param_types = []
     for param in decl.params:
         if param.type_expr is None:
             param_types.append(state.fresh())
         else:
-            param_types.append(
-                parse_type_expr(param.type_expr, local_vars, allow_implicit_type_vars=True, state=state)
+            param_type, _ = parse_annotated_type_expr(
+                param.type_expr, local_vars, allow_implicit_type_vars=True, state=state
             )
+            param_types.append(param_type)
     ret = (
         parse_type_expr(decl.return_type, local_vars, allow_implicit_type_vars=True, state=state)
         if decl.return_type
         else state.fresh()
     )
-    typ = ret
-    for p in reversed(param_types):
-        typ = TFunc(p, typ)
-    return typ
+    return build_function_type(param_types, ret, effect_set(decl.effects))
 
 
 def method_type_from_parts(
     params: list[ast.Param],
     return_type: ast.TypeExpr | None,
+    effects: tuple[str, ...] | None,
     local_vars: dict[str, TVar],
-) -> Type:
+) -> MethodTypeInfo:
     param_types = []
     for param in params:
         if param.type_expr is None:
             param_types.append(TVar(f"missing.{param.name}"))
         else:
-            param_types.append(parse_type_expr(param.type_expr, local_vars, allow_implicit_type_vars=True))
+            param_type, _ = parse_annotated_type_expr(
+                param.type_expr, local_vars, allow_implicit_type_vars=True
+            )
+            param_types.append(param_type)
     ret = parse_type_expr(return_type, local_vars, allow_implicit_type_vars=True) if return_type else UNIT
-    typ = ret
-    for p in reversed(param_types):
-        typ = TFunc(p, typ)
-    return typ
+    typ, zero_arg_effects = build_function_type(param_types, ret, effect_set(effects))
+    return MethodTypeInfo(type=typ, effects=zero_arg_effects)
 
 
 def _apply_inferred_fn_signature(
@@ -407,7 +467,9 @@ def _type_expr_key(node: ast.TypeExpr) -> tuple:
     if isinstance(node, ast.TypeApply):
         return ("apply", _type_expr_key(node.base), _type_expr_key(node.arg))
     if isinstance(node, ast.TypeArrow):
-        return ("arrow", _type_expr_key(node.left), _type_expr_key(node.right))
+        return ("arrow", _type_expr_key(node.left), _type_expr_key(node.right), node.effects)
+    if isinstance(node, ast.TypeEffect):
+        return ("effect", _type_expr_key(node.base), node.effects)
     if isinstance(node, ast.TupleType):
         return ("tuple", tuple(_type_expr_key(item) for item in node.items))
     raise TypeCheckError(f"Unsupported type expression {node}")
@@ -422,7 +484,7 @@ def build_class_decls(program: ast.Program) -> dict[str, ClassDeclInfo]:
             raise tc_error(f"Duplicate class declaration: {decl.name}", decl)
         if len(set(decl.type_params)) != len(decl.type_params):
             raise tc_error(f"Duplicate class type parameter in {decl.name}", decl)
-        method_types: dict[str, Type] = {}
+        method_types: dict[str, MethodTypeInfo] = {}
         class_local_vars: dict[str, TVar] = {
             p: TVar(f"class.{decl.name}.{p}") for p in decl.type_params
         }
@@ -432,6 +494,7 @@ def build_class_decls(program: ast.Program) -> dict[str, ClassDeclInfo]:
             method_types[method.name] = method_type_from_parts(
                 method.params,
                 method.return_type,
+                method.effects,
                 dict(class_local_vars),
             )
         out[decl.name] = ClassDeclInfo(
@@ -481,7 +544,7 @@ def substitute_type_vars(typ: Type, subst: dict[str, Type]) -> Type:
     if isinstance(typ, TVar):
         return subst.get(typ.name, typ)
     if isinstance(typ, TFunc):
-        return TFunc(substitute_type_vars(typ.arg, subst), substitute_type_vars(typ.ret, subst))
+        return TFunc(substitute_type_vars(typ.arg, subst), substitute_type_vars(typ.ret, subst), typ.effects)
     if isinstance(typ, TApp):
         return TApp(substitute_type_vars(typ.base, subst), substitute_type_vars(typ.arg, subst))
     if isinstance(typ, TTuple):
@@ -498,7 +561,8 @@ def type_to_ast_expr(typ: Type) -> ast.TypeExpr:
     if isinstance(typ, TApp):
         return ast.TypeApply(base=type_to_ast_expr(typ.base), arg=type_to_ast_expr(typ.arg))
     if isinstance(typ, TFunc):
-        return ast.TypeArrow(left=type_to_ast_expr(typ.arg), right=type_to_ast_expr(typ.ret))
+        effects = tuple(sorted(typ.effects)) or None
+        return ast.TypeArrow(left=type_to_ast_expr(typ.arg), right=type_to_ast_expr(typ.ret), effects=effects)
     if isinstance(typ, TTuple):
         return ast.TupleType(items=[type_to_ast_expr(item) for item in typ.items])
     raise TypeCheckError(f"Unsupported type for AST conversion: {typ}")
@@ -562,14 +626,15 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
 def build_global_method_info(class_decls: dict[str, ClassDeclInfo]) -> dict[str, GlobalMethodInfo]:
     methods: dict[str, GlobalMethodInfo | None] = {}
     for class_name, class_info in class_decls.items():
-        for method_name, method_type in class_info.methods.items():
+        for method_name, method_info in class_info.methods.items():
             if method_name in methods:
                 methods[method_name] = None
                 continue
             methods[method_name] = GlobalMethodInfo(
                 class_name=class_name,
                 class_info=class_info,
-                method_type=method_type,
+                method_type=method_info.type,
+                effects=method_info.effects,
             )
     return {name: info for name, info in methods.items() if info is not None}
 
@@ -577,7 +642,7 @@ def build_global_method_info(class_decls: dict[str, ClassDeclInfo]) -> dict[str,
 def instantiate_global_method(
     state: InferState,
     method_info: GlobalMethodInfo,
-) -> tuple[Type, list[Type]]:
+) -> tuple[Type, list[Type], frozenset[str]]:
     replacements = {name: state.fresh() for name in ftv(method_info.method_type)}
     direct_method_args = [replacements[name] for name in method_info.class_info.type_param_vars]
 
@@ -585,14 +650,14 @@ def instantiate_global_method(
         if isinstance(typ, TVar) and typ.name in replacements:
             return replacements[typ.name]
         if isinstance(typ, TFunc):
-            return TFunc(go(typ.arg), go(typ.ret))
+            return TFunc(go(typ.arg), go(typ.ret), typ.effects)
         if isinstance(typ, TApp):
             return TApp(go(typ.base), go(typ.arg))
         if isinstance(typ, TTuple):
             return TTuple(tuple(go(item) for item in typ.items))
         return typ
 
-    return go(method_info.method_type), direct_method_args
+    return go(method_info.method_type), direct_method_args, method_info.effects
 
 
 def validate_instance_methods(
@@ -639,12 +704,15 @@ def validate_instance_methods(
 
         for method_name, expected_template in class_info.methods.items():
             impl = method_impls[method_name]
-            expected_type = substitute_type_vars(expected_template, class_subst)
-            actual_type = fn_type_from_decl(
+            expected_info = class_info.methods[method_name]
+            expected_type = substitute_type_vars(expected_info.type, class_subst)
+            expected_effects = expected_info.effects
+            actual_type, actual_effects = fn_type_from_decl(
                 ast.FnDecl(
                     name=impl.name,
                     params=impl.params,
                     return_type=impl.return_type,
+                    effects=impl.effects,
                     constraints=[],
                     body=impl.body,
                 ),
@@ -660,11 +728,23 @@ def validate_instance_methods(
                 cursor = apply(state.subst, cursor)
                 if not isinstance(cursor, TFunc):
                     raise tc_error("Internal error for instance method params", impl)
-                working_env[param.name] = Scheme(vars=(), type=cursor.arg)
+                working_env[param.name] = Scheme(vars=(), type=cursor.arg, effects=param_annotation_effects(param))
                 cursor = cursor.ret
-            body_t = infer_expr(impl.body, working_env, state, type_decls, global_methods)
+            body_t, body_effects = infer_expr(impl.body, working_env, state, type_decls, global_methods)
             expected_return = apply(state.subst, cursor)
             unify_at(state, body_t, expected_return, impl.body)
+            if not body_effects.issubset(expected_effects):
+                missing = body_effects - expected_effects
+                raise tc_error(
+                    f"Instance method {impl.name} requires undeclared effects{effects_to_string(missing)}",
+                    impl.body,
+                )
+            if actual_effects != expected_effects:
+                raise tc_error(
+                    f"Instance method {impl.name} has effects{effects_to_string(actual_effects)} but class requires"
+                    f"{effects_to_string(expected_effects)}",
+                    impl,
+                )
             solved_method = apply(state.subst, actual_type)
             impl.return_type = _apply_inferred_fn_signature(impl.params, impl.return_type, solved_method)
 
@@ -675,56 +755,64 @@ def infer_expr(
     state: InferState,
     type_decls: dict[str, TypeDeclInfo],
     global_methods: dict[str, GlobalMethodInfo],
-) -> Type:
+) -> tuple[Type, frozenset[str]]:
     if isinstance(expr, ast.IntExpr):
-        return _mark_expr_type(expr, INT)
+        return _mark_expr_type(expr, INT), frozenset()
     if isinstance(expr, ast.BoolExpr):
-        return _mark_expr_type(expr, BOOL)
+        return _mark_expr_type(expr, BOOL), frozenset()
     if isinstance(expr, ast.StringExpr):
-        return _mark_expr_type(expr, STRING)
+        return _mark_expr_type(expr, STRING), frozenset()
     if isinstance(expr, ast.TupleExpr):
-        item_types = [infer_expr(item, env, state, type_decls, global_methods) for item in expr.items]
-        return _mark_expr_type(expr, TTuple(tuple(item_types)))
+        item_results = [infer_expr(item, env, state, type_decls, global_methods) for item in expr.items]
+        item_types = [typ for typ, _ in item_results]
+        effects = frozenset().union(*(eff for _, eff in item_results))
+        return _mark_expr_type(expr, TTuple(tuple(item_types))), effects
     if isinstance(expr, ast.VarExpr):
         scheme = env.get(expr.name)
         if scheme is not None:
-            return _mark_expr_type(expr, instantiate(state, scheme))
+            return _mark_expr_type(expr, instantiate(state, scheme)), scheme.effects
         method_info = global_methods.get(expr.name)
         if method_info is None:
             raise tc_error(f"Unknown variable {expr.name}", expr)
-        method_type, _ = instantiate_global_method(state, method_info)
-        return _mark_expr_type(expr, method_type)
+        method_type, _, method_effects = instantiate_global_method(state, method_info)
+        return _mark_expr_type(expr, method_type), method_effects
     if isinstance(expr, ast.UnaryExpr):
-        operand_t = infer_expr(expr.operand, env, state, type_decls, global_methods)
+        operand_t, operand_effects = infer_expr(expr.operand, env, state, type_decls, global_methods)
         if expr.op == "-":
             unify_at(state, operand_t, INT, expr)
-            return _mark_expr_type(expr, INT)
+            return _mark_expr_type(expr, INT), operand_effects
         raise tc_error(f"Unsupported unary operator {expr.op}", expr)
     if isinstance(expr, ast.BinaryExpr):
-        left = infer_expr(expr.left, env, state, type_decls, global_methods)
-        right = infer_expr(expr.right, env, state, type_decls, global_methods)
+        left, left_effects = infer_expr(expr.left, env, state, type_decls, global_methods)
+        right, right_effects = infer_expr(expr.right, env, state, type_decls, global_methods)
         if expr.op == ">>":
             input_t = state.fresh()
             middle_t = state.fresh()
             output_t = state.fresh()
-            unify_at(state, right, TFunc(input_t, middle_t), expr.right)
-            unify_at(state, left, TFunc(middle_t, output_t), expr.left)
-            return _mark_expr_type(expr, TFunc(input_t, output_t))
+            right_resolved = apply(state.subst, right)
+            right_call_effects = right_resolved.effects if isinstance(right_resolved, TFunc) else frozenset()
+            left_resolved = apply(state.subst, left)
+            left_call_effects = left_resolved.effects if isinstance(left_resolved, TFunc) else frozenset()
+            unify_at(state, right, TFunc(input_t, middle_t, right_call_effects), expr.right)
+            unify_at(state, left, TFunc(middle_t, output_t, left_call_effects), expr.left)
+            return _mark_expr_type(expr, TFunc(input_t, output_t, left_call_effects | right_call_effects)), (
+                left_effects | right_effects
+            )
         if expr.op in {"+", "-", "*", "/"}:
             unify_at(state, left, INT, expr.left)
             unify_at(state, right, INT, expr.right)
-            return _mark_expr_type(expr, INT)
+            return _mark_expr_type(expr, INT), (left_effects | right_effects)
         if expr.op in {"<", "<=", ">", ">="}:
             unify_at(state, left, INT, expr.left)
             unify_at(state, right, INT, expr.right)
-            return _mark_expr_type(expr, BOOL)
+            return _mark_expr_type(expr, BOOL), (left_effects | right_effects)
         if expr.op in {"==", "!="}:
             unify_at(state, left, right, expr)
-            return _mark_expr_type(expr, BOOL)
+            return _mark_expr_type(expr, BOOL), (left_effects | right_effects)
         if expr.op in {"&&", "||"}:
             unify_at(state, left, BOOL, expr.left)
             unify_at(state, right, BOOL, expr.right)
-            return _mark_expr_type(expr, BOOL)
+            return _mark_expr_type(expr, BOOL), (left_effects | right_effects)
         raise tc_error(f"Unsupported binary operator {expr.op}", expr)
     if isinstance(expr, ast.CallExpr):
         direct_method_info: GlobalMethodInfo | None = None
@@ -732,17 +820,20 @@ def infer_expr(
         if isinstance(expr.callee, ast.VarExpr) and expr.callee.name not in env:
             direct_method_info = global_methods.get(expr.callee.name)
         if direct_method_info is not None:
-            callee, direct_method_args = instantiate_global_method(state, direct_method_info)
+            callee, direct_method_args, callee_effects = instantiate_global_method(state, direct_method_info)
         else:
-            callee = infer_expr(expr.callee, env, state, type_decls, global_methods)
+            callee, callee_effects = infer_expr(expr.callee, env, state, type_decls, global_methods)
         result = state.fresh()
         typ = callee
+        call_effects = callee_effects
         for arg_expr in expr.args:
-            arg_t = infer_expr(arg_expr, env, state, type_decls, global_methods)
-            expected_arg_t = apply(state.subst, typ).arg if isinstance(apply(state.subst, typ), TFunc) else None
+            arg_t, arg_effects = infer_expr(arg_expr, env, state, type_decls, global_methods)
+            resolved_typ = apply(state.subst, typ)
+            expected_arg_t = resolved_typ.arg if isinstance(resolved_typ, TFunc) else None
+            expected_effects = resolved_typ.effects if isinstance(resolved_typ, TFunc) else frozenset()
             next_t = state.fresh()
             try:
-                unify_at(state, typ, TFunc(arg_t, next_t), arg_expr)
+                unify_at(state, typ, TFunc(arg_t, next_t, expected_effects), arg_expr)
             except TypeCheckError as exc:
                 if expected_arg_t is not None:
                     names: list[str] = []
@@ -757,6 +848,7 @@ def infer_expr(
                         arg_expr,
                     ) from exc
                 raise
+            call_effects |= arg_effects | expected_effects
             typ = next_t
         unify_at(state, typ, result, expr)
         if direct_method_info is not None:
@@ -769,17 +861,18 @@ def infer_expr(
                     args=[type_to_ast_expr(arg) for arg in resolved_args],
                 ),
             )
-        return _mark_expr_type(expr, result)
+        return _mark_expr_type(expr, result), call_effects
     if isinstance(expr, ast.IfExpr):
-        cond = infer_expr(expr.condition, env, state, type_decls, global_methods)
+        cond, cond_effects = infer_expr(expr.condition, env, state, type_decls, global_methods)
         unify_at(state, cond, BOOL, expr.condition)
-        then_t = infer_expr(expr.then_branch, env, state, type_decls, global_methods)
-        else_t = infer_expr(expr.else_branch, env, state, type_decls, global_methods)
+        then_t, then_effects = infer_expr(expr.then_branch, env, state, type_decls, global_methods)
+        else_t, else_effects = infer_expr(expr.else_branch, env, state, type_decls, global_methods)
         unify_at(state, then_t, else_t, expr)
-        return _mark_expr_type(expr, then_t)
+        return _mark_expr_type(expr, then_t), (cond_effects | then_effects | else_effects)
     if isinstance(expr, ast.MatchExpr):
-        scrutinee_t = infer_expr(expr.scrutinee, env, state, type_decls, global_methods)
+        scrutinee_t, scrutinee_effects = infer_expr(expr.scrutinee, env, state, type_decls, global_methods)
         out_t = state.fresh()
+        out_effects = scrutinee_effects
         branch_ctors: list[str] = []
         covered_ctors: set[str] = set()
         has_catchall = False
@@ -814,11 +907,12 @@ def infer_expr(
                 seen_literals.add(literal_key)
             if isinstance(branch.pattern, (ast.WildcardPattern, ast.VarPattern)):
                 has_catchall = True
-            value_t = infer_expr(branch.value, branch_env, state, type_decls, global_methods)
+            value_t, value_effects = infer_expr(branch.value, branch_env, state, type_decls, global_methods)
             unify_at(state, out_t, value_t, branch.value)
+            out_effects |= value_effects
 
         ensure_exhaustive_match(scrutinee_t, branch_ctors, has_catchall, state, type_decls, expr)
-        return _mark_expr_type(expr, out_t)
+        return _mark_expr_type(expr, out_t), out_effects
     lambda_expr = getattr(ast, "LambdaExpr", None)
     if lambda_expr is not None and isinstance(expr, lambda_expr):
         if not expr.params:
@@ -836,13 +930,11 @@ def infer_expr(
                     allow_implicit_type_vars=True,
                     state=state,
                 )
-            working_env[param.name] = Scheme(vars=(), type=param_type)
+            working_env[param.name] = Scheme(vars=(), type=param_type, effects=param_annotation_effects(param))
             param_types.append(param_type)
-        body_t = infer_expr(expr.body, working_env, state, type_decls, global_methods)
-        lambda_t = body_t
-        for param_type in reversed(param_types):
-            lambda_t = TFunc(param_type, lambda_t)
-        return _mark_expr_type(expr, lambda_t)
+        body_t, body_effects = infer_expr(expr.body, working_env, state, type_decls, global_methods)
+        lambda_t, _ = build_function_type(param_types, body_t, body_effects)
+        return _mark_expr_type(expr, lambda_t), frozenset()
 
     raise tc_error(f"Unsupported expression node: {expr}", expr)
 
@@ -1038,28 +1130,39 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
     map_var = TVar("prelude.map.a")
     maybe_map_var = TApp(maybe_type, map_var)
     map_t = TApp(TConst("Map"), map_var)
+
+    def builtin_scheme(
+        params: list[Type],
+        ret: Type,
+        *,
+        vars: tuple[str, ...] = (),
+        effects: frozenset[str] = frozenset(),
+    ) -> Scheme:
+        typ, value_effects = build_function_type(params, ret, effects)
+        return Scheme(vars=vars, type=typ, effects=value_effects)
+
     env: dict[str, Scheme] = {
-        "print": Scheme(vars=(p_var.name,), type=TFunc(p_var, TApp(TConst("IO"), UNIT))),
-        "print_int": Scheme(vars=(), type=TFunc(INT, INT)),
+        "print": builtin_scheme([p_var], UNIT, vars=(p_var.name,), effects=IO_EFFECT),
+        "print_int": builtin_scheme([INT], INT, effects=IO_EFFECT),
         "read_lines": Scheme(
             vars=(),
-            type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
+            type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String")), IO_EFFECT),
         ),
         "read_file": Scheme(
             vars=(),
-            type=TFunc(TConst("String"), TConst("String")),
+            type=TFunc(TConst("String"), TConst("String"), IO_EFFECT),
         ),
         "read_int_lines": Scheme(
             vars=(),
-            type=TFunc(TConst("String"), TApp(TConst("Vector"), INT)),
+            type=TFunc(TConst("String"), TApp(TConst("Vector"), INT), IO_EFFECT),
         ),
         "env_get": Scheme(
             vars=(),
-            type=TFunc(TConst("String"), TApp(maybe_type, STRING)),
+            type=TFunc(TConst("String"), TApp(maybe_type, STRING), IO_EFFECT),
         ),
         "argv_get": Scheme(
             vars=(),
-            type=TFunc(INT, TApp(maybe_type, STRING)),
+            type=TFunc(INT, TApp(maybe_type, STRING), IO_EFFECT),
         ),
         "parse_int": Scheme(vars=(), type=TFunc(TConst("String"), INT)),
         "split_words": Scheme(
@@ -1115,12 +1218,10 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 ),
             ),
         ),
-        "crypto_random_bytes": Scheme(
-            vars=(),
-            type=TFunc(
-                INT,
-                TApp(TApp(result_type, TConst("stdlib.crypto.CryptoError")), TConst("Bytes")),
-            ),
+        "crypto_random_bytes": builtin_scheme(
+            [INT],
+            TApp(TApp(result_type, TConst("stdlib.crypto.CryptoError")), TConst("Bytes")),
+            effects=IO_EFFECT,
         ),
         "vector_empty": Scheme(vars=(vector_var.name,), type=vector_t),
         "vector_length": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, INT)),
@@ -1134,64 +1235,32 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "map_size": Scheme(vars=(map_var.name,), type=TFunc(map_t, INT)),
         "map_nth_key": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, TApp(maybe_type, STRING)))),
         "map_nth_value": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, maybe_map_var))),
-        "tcp_listen": Scheme(vars=(), type=TFunc(INT, INT)),
-        "tcp_accept": Scheme(vars=(), type=TFunc(INT, INT)),
-        "tcp_read": Scheme(vars=(), type=TFunc(INT, STRING)),
-        "tcp_write": Scheme(
-            vars=(),
-            type=TFunc(INT, TFunc(STRING, TApp(TConst("IO"), UNIT))),
+        "tcp_listen": builtin_scheme([INT], INT, effects=IO_EFFECT),
+        "tcp_accept": builtin_scheme([INT], INT, effects=IO_EFFECT),
+        "tcp_read": builtin_scheme([INT], STRING, effects=IO_EFFECT),
+        "tcp_write": builtin_scheme([INT, STRING], UNIT, effects=IO_EFFECT),
+        "tcp_connect": builtin_scheme(
+            [STRING, INT],
+            TApp(TApp(result_type, TConst("stdlib.net.TcpError")), INT),
+            effects=IO_EFFECT,
         ),
-        "tcp_connect": Scheme(
-            vars=(),
-            type=TFunc(
-                STRING,
-                TFunc(
-                    INT,
-                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), INT),
-                ),
-            ),
+        "tcp_read_exact": builtin_scheme(
+            [INT, INT],
+            TApp(TApp(result_type, TConst("stdlib.net.TcpError")), TConst("Bytes")),
+            effects=IO_EFFECT,
         ),
-        "tcp_read_exact": Scheme(
-            vars=(),
-            type=TFunc(
-                INT,
-                TFunc(
-                    INT,
-                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), TConst("Bytes")),
-                ),
-            ),
+        "tcp_write_all": builtin_scheme(
+            [INT, TConst("Bytes")],
+            TApp(TApp(result_type, TConst("stdlib.net.TcpError")), INT),
+            effects=IO_EFFECT,
         ),
-        "tcp_write_all": Scheme(
-            vars=(),
-            type=TFunc(
-                INT,
-                TFunc(
-                    TConst("Bytes"),
-                    TApp(TApp(result_type, TConst("stdlib.net.TcpError")), INT),
-                ),
-            ),
-        ),
-        "tcp_close": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
-        "tcp_close_listener": Scheme(vars=(), type=TFunc(INT, TApp(TConst("IO"), UNIT))),
-        "tcp_echo_serve": Scheme(vars=(), type=TFunc(INT, TFunc(INT, TApp(TConst("IO"), UNIT)))),
-        "http_request": Scheme(
-            vars=(),
-            type=TFunc(
-                STRING,
-                TFunc(
-                    STRING,
-                    TFunc(
-                        STRING,
-                        TFunc(
-                            STRING,
-                            TFunc(
-                                INT,
-                                TApp(TApp(result_type, TConst("stdlib.http.HttpError")), TConst("stdlib.http.HttpResponse")),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
+        "tcp_close": builtin_scheme([INT], UNIT, effects=IO_EFFECT),
+        "tcp_close_listener": builtin_scheme([INT], UNIT, effects=IO_EFFECT),
+        "tcp_echo_serve": builtin_scheme([INT, INT], UNIT, effects=IO_EFFECT),
+        "http_request": builtin_scheme(
+            [STRING, STRING, STRING, STRING, INT],
+            TApp(TApp(result_type, TConst("stdlib.http.HttpError")), TConst("stdlib.http.HttpResponse")),
+            effects=IO_EFFECT,
         ),
         "json_parse": Scheme(
             vars=(),
@@ -1201,12 +1270,12 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             ),
         ),
         "json_stringify": Scheme(vars=(), type=TFunc(TConst("stdlib.json.Json"), STRING)),
-        "term_clear": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),
-        "term_move": Scheme(vars=(), type=TFunc(INT, TFunc(INT, TApp(TConst("IO"), UNIT)))),
-        "term_hide_cursor": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),
-        "term_show_cursor": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),
-        "term_read_key": Scheme(vars=(), type=STRING),
-        "term_write": Scheme(vars=(), type=TFunc(STRING, TApp(TConst("IO"), UNIT))),
+        "term_clear": builtin_scheme([], UNIT, effects=IO_EFFECT),
+        "term_move": builtin_scheme([INT, INT], UNIT, effects=IO_EFFECT),
+        "term_hide_cursor": builtin_scheme([], UNIT, effects=IO_EFFECT),
+        "term_show_cursor": builtin_scheme([], UNIT, effects=IO_EFFECT),
+        "term_read_key": builtin_scheme([], STRING, effects=IO_EFFECT),
+        "term_write": builtin_scheme([STRING], UNIT, effects=IO_EFFECT),
     }
 
     for info in type_decls.values():
@@ -1215,15 +1284,17 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             env[ctor_name] = Scheme(vars=vars_, type=ctor_type)
 
     fn_types: Dict[str, Type] = {}
+    fn_decl_effects: Dict[str, frozenset[str]] = {}
     for decl in program.declarations:
         if not isinstance(decl, ast.FnDecl):
             continue
         fn_decl = decl
         if fn_decl.name in fn_types:
             raise TypeCheckError(f"Duplicate function {fn_decl.name}")
-        fn_t = fn_type_from_decl(fn_decl, state)
+        fn_t, fn_effects = fn_type_from_decl(fn_decl, state)
         fn_types[fn_decl.name] = fn_t
-        env[fn_decl.name] = Scheme(vars=(), type=fn_t)
+        fn_decl_effects[fn_decl.name] = fn_effects
+        env[fn_decl.name] = Scheme(vars=(), type=fn_t, effects=fn_effects)
 
     for decl in program.declarations:
         if isinstance(decl, ast.FnDecl):
@@ -1235,7 +1306,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 cursor = apply(state.subst, cursor)
                 if not isinstance(cursor, TFunc):
                     raise TypeCheckError(f"Internal error for function params in {fn_decl.name}")
-                working_env[param.name] = Scheme(vars=(), type=cursor.arg)
+                working_env[param.name] = Scheme(vars=(), type=cursor.arg, effects=param_annotation_effects(param))
                 cursor = cursor.ret
 
             for constraint in fn_decl.constraints:
@@ -1251,10 +1322,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                     for class_var_name, arg_type in zip(class_info.type_param_vars, instance_args)
                 }
                 for method_name, method_template in class_info.methods.items():
-                    resolved_method_type = substitute_type_vars(method_template, class_subst)
+                    resolved_method_type = substitute_type_vars(method_template.type, class_subst)
                     method_scheme = Scheme(
                         vars=tuple(sorted(ftv(resolved_method_type))),
                         type=resolved_method_type,
+                        effects=method_template.effects,
                     )
                     existing = working_env.get(method_name)
                     if existing is not None and scheme_to_string(existing, state.subst) != scheme_to_string(
@@ -1266,22 +1338,29 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                         )
                     working_env[method_name] = method_scheme
 
-            body_t = infer_expr(fn_decl.body, working_env, state, type_decls, global_methods)
+            body_t, body_effects = infer_expr(fn_decl.body, working_env, state, type_decls, global_methods)
             expected_return = apply(state.subst, cursor)
             unify_at(state, body_t, expected_return, fn_decl.body)
+            declared_effects = effect_set(fn_decl.effects)
+            if not body_effects.issubset(declared_effects):
+                missing = body_effects - declared_effects
+                raise tc_error(
+                    f"Function {fn_decl.name} requires undeclared effects{effects_to_string(missing)}",
+                    fn_decl.body,
+                )
 
             solved_fn = apply(state.subst, fn_t)
             fn_decl.return_type = _apply_inferred_fn_signature(fn_decl.params, fn_decl.return_type, solved_fn)
             generalized_env = dict(env)
             generalized_env.pop(fn_decl.name, None)
-            env[fn_decl.name] = generalize(generalized_env, solved_fn, state)
+            env[fn_decl.name] = generalize(generalized_env, solved_fn, state, fn_decl_effects[fn_decl.name])
 
         elif isinstance(decl, ast.LetDecl):
             let_decl = decl
-            value_t = infer_expr(let_decl.value, env, state, type_decls, global_methods)
-            if is_io_type(value_t, state):
+            value_t, value_effects = infer_expr(let_decl.value, env, state, type_decls, global_methods)
+            if value_effects:
                 raise tc_error(
-                    "Top-level let bindings must not have type IO a; move IO-typed work into a function such as main",
+                    "Top-level let bindings must not perform effects; move effectful work into a function such as main",
                     let_decl,
                 )
             env[let_decl.name] = generalize(env, value_t, state)

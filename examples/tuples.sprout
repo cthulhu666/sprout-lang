@@ -16,7 +16,7 @@ fn describe(sample: (Int, (Int, Int))) -> String =
       else "non-positive tuple"
 
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(
     (
       swap((7, true)),

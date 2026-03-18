@@ -9,5 +9,5 @@ fn map(m: Maybe a, f: a -> b) -> Maybe b =
 
 fn inc(x: Int) -> Int = x + 1
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(map(Just(2), inc))

@@ -54,18 +54,18 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
     def test_tcp_echo_single_connection(self) -> None:
         port = find_free_port(self)
         src = f"""
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn seq(a: Unit !{{IO}}, b: Unit !{{IO}}) -> Unit !{{IO}} = b
 
-        fn handle_conn(conn: Int) -> IO Unit =
+        fn handle_conn(conn: Int) -> Unit !{{IO}} =
           seq(tcp_write(conn, tcp_read(conn)), tcp_close(conn))
 
-        fn serve_once(listener: Int) -> IO Unit =
+        fn serve_once(listener: Int) -> Unit !{{IO}} =
           handle_conn(tcp_accept(listener))
 
-        fn close_after_serve(listener: Int) -> IO Unit =
+        fn close_after_serve(listener: Int) -> Unit !{{IO}} =
           seq(serve_once(listener), tcp_close_listener(listener))
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{{IO}} =
           close_after_serve(tcp_listen({port}))
         """
         program = parse(src)
@@ -84,7 +84,7 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
 
     def test_tcp_echo_serve_builtin_reactor(self) -> None:
         port = find_free_port(self)
-        program = parse(f"fn main() -> IO Unit = tcp_echo_serve({port}, 1)")
+        program = parse(f"fn main() -> Unit !{{IO}} = tcp_echo_serve({port}, 1)")
         typecheck_program(program)
 
         def server() -> None:
@@ -101,7 +101,7 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
 
     def test_tcp_echo_serve_builtin_blocking_backend(self) -> None:
         port = find_free_port(self)
-        program = parse(f"fn main() -> IO Unit = tcp_echo_serve({port}, 1)")
+        program = parse(f"fn main() -> Unit !{{IO}} = tcp_echo_serve({port}, 1)")
         typecheck_program(program)
 
         def server() -> None:
@@ -130,19 +130,19 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
                 import stdlib.bytes (Utf8Error, from_string, to_string)
                 import stdlib.net (TcpConnection, TcpError, close, connect, read_exact, tcp_error_message, write_all)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{{IO}}, b: Unit !{{IO}}) -> Unit !{{IO}} = b
 
-                fn finish(conn: TcpConnection, message: String) -> IO Unit =
+                fn finish(conn: TcpConnection, message: String) -> Unit !{{IO}} =
                   seq(close(conn), print(message))
 
-                fn show_payload(conn: TcpConnection, payload: Bytes) -> IO Unit =
+                fn show_payload(conn: TcpConnection, payload: Bytes) -> Unit !{{IO}} =
                   match to_string(payload) with
                   | Ok text -> finish(conn, text)
                   | Err err ->
                       match err with
                       | Utf8DecodeError msg -> finish(conn, msg)
 
-                fn with_conn(conn: TcpConnection) -> IO Unit =
+                fn with_conn(conn: TcpConnection) -> Unit !{{IO}} =
                   match write_all(conn, from_string("ping")) with
                   | Err err -> finish(conn, tcp_error_message(err))
                   | Ok _ ->
@@ -150,7 +150,7 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
                       | Err err -> finish(conn, tcp_error_message(err))
                       | Ok body -> show_payload(conn, body)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match connect("127.0.0.1", {port}) with
                   | Err err -> print(tcp_error_message(err))
                   | Ok conn -> with_conn(conn)
@@ -169,9 +169,9 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
                 module main
                 import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact_utf8, tcp_error_message)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{{IO}}, b: Unit !{{IO}}) -> Unit !{{IO}} = b
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match connect("127.0.0.1", {port}) with
                   | Err err -> print(tcp_error_message(err))
                   | Ok conn ->
@@ -201,7 +201,7 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
         with running_http_server(self, Handler) as port:
             out = self._run_source(
                 f"""
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match http_request("POST", "http://127.0.0.1:{port}/echo", "X-Test: yes", "hello", 500) with
                   | Ok resp -> print(http_response_body(resp))
                   | Err _ -> print("err")
@@ -222,7 +222,7 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
         with running_http_server(self, Handler) as port:
             out = self._run_source(
                 f"""
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match http_request("GET", "http://127.0.0.1:{port}/missing", "", "", 500) with
                   | Ok _ -> print(0)
                   | Err e ->
@@ -253,18 +253,18 @@ class NativeIoIntegrationTests(unittest.TestCase):
     def test_native_tcp_echo_once(self) -> None:
         port = find_free_port(self)
         src = f"""
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn seq(a: Unit !{{IO}}, b: Unit !{{IO}}) -> Unit !{{IO}} = b
 
-        fn handle_conn(conn: Int) -> IO Unit =
+        fn handle_conn(conn: Int) -> Unit !{{IO}} =
           seq(tcp_write(conn, tcp_read(conn)), tcp_close(conn))
 
-        fn serve_once(listener: Int) -> IO Unit =
+        fn serve_once(listener: Int) -> Unit !{{IO}} =
           handle_conn(tcp_accept(listener))
 
-        fn close_after_serve(listener: Int) -> IO Unit =
+        fn close_after_serve(listener: Int) -> Unit !{{IO}} =
           seq(serve_once(listener), tcp_close_listener(listener))
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{{IO}} =
           close_after_serve(tcp_listen({port}))
         """
         with compiled_native_binary(self, src) as bin_path:
@@ -298,12 +298,12 @@ class NativeIoIntegrationTests(unittest.TestCase):
                 module main
                 import stdlib.net (Result, TcpConnection, TcpError, close, connect, read_exact_utf8, tcp_error_message, write_all_utf8)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{{IO}}, b: Unit !{{IO}}) -> Unit !{{IO}} = b
 
-                fn finish(conn: TcpConnection, message: String) -> IO Unit =
+                fn finish(conn: TcpConnection, message: String) -> Unit !{{IO}} =
                   seq(close(conn), print(message))
 
-                fn with_conn(conn: TcpConnection) -> IO Unit =
+                fn with_conn(conn: TcpConnection) -> Unit !{{IO}} =
                   match write_all_utf8(conn, "ping") with
                   | Err err -> finish(conn, tcp_error_message(err))
                   | Ok _ ->
@@ -311,7 +311,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
                       | Err err -> finish(conn, tcp_error_message(err))
                       | Ok body -> finish(conn, body)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match connect("127.0.0.1", {port}) with
                   | Err err -> print(tcp_error_message(err))
                   | Ok conn -> with_conn(conn)
@@ -339,7 +339,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with running_http_server(self, Handler) as port:
             run = self._run_native(
                 f"""
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match http_request("POST", "http://127.0.0.1:{port}/echo", "X-Test: yes", "hello", 500) with
                   | Ok resp -> print(http_response_body(resp))
                   | Err _ -> print("err")
@@ -361,7 +361,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with running_http_server(self, Handler) as port:
             run = self._run_native(
                 f"""
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match http_request("GET", "http://127.0.0.1:{port}/missing", "", "", 500) with
                   | Ok _ -> print(0)
                   | Err e ->
@@ -404,7 +404,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
                   | HttpBadStatus _ -> "http error status"
                   | HttpDecode msg -> "decode error: " ++ msg
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match argv_get(0) with
                   | Nothing -> print("missing")
                   | Just url ->
@@ -424,7 +424,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with running_tcp_fixture(self, handle) as port:
             run = self._run_native(
                 f"""
-                fn main() -> IO Unit =
+                fn main() -> Unit !{{IO}} =
                   match http_request("GET", "http://127.0.0.1:{port}/", "", "", 500) with
                   | Ok _ -> print("ok")
                   | Err err ->

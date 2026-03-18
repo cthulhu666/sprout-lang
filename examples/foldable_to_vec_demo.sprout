@@ -13,7 +13,7 @@ fn list_to_vec(xs: List Int) -> Vec Int where Foldable List =
 fn vec_to_vec(xs: Vec Int) -> Vec Int where Foldable Vec =
   foldable_to_vec(xs)
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(
     vec_length(list_to_vec(list_sample()))
     + vec_length(vec_to_vec(vec_sample()))

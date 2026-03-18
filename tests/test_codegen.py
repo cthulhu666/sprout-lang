@@ -46,7 +46,7 @@ class CodegenTests(unittest.TestCase):
         src = """
         let base = 40
         let two = 2
-        fn main() -> Int = print_int(base + two)
+        fn main() -> Int !{IO} = print_int(base + two)
         """
         program = parse(src)
         typecheck_program(program)
@@ -60,7 +60,7 @@ class CodegenTests(unittest.TestCase):
         src = """
         fn value() -> Int = 1
         let x = value()
-        fn main() -> Int = print_int(x)
+        fn main() -> Int !{IO} = print_int(x)
         """
         program = parse(src)
         typecheck_program(program)
@@ -71,7 +71,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_with_print_int_external(self) -> None:
         src = """
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(42)
         """
         program = parse(src)
@@ -83,7 +83,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_main_io_unit_with_print_string(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print("hello")
         """
         program = parse(src)
@@ -103,7 +103,7 @@ class CodegenTests(unittest.TestCase):
           | Just x -> x
           | Nothing -> 0
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(unwrap(Just(42)))
         """
         program = parse(src)
@@ -119,7 +119,7 @@ class CodegenTests(unittest.TestCase):
           | Just Int
           | Nothing
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           match if true then Just(42) else Nothing with
           | Just value -> print_int(value)
           | Nothing -> print_int(0)
@@ -144,7 +144,7 @@ class CodegenTests(unittest.TestCase):
           | Just value -> value
           | Nothing -> 0
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           match if true then Just(42) else Nothing with
           | value -> print_int(unwrap(value))
         """
@@ -160,7 +160,7 @@ class CodegenTests(unittest.TestCase):
         type Pair =
           | Pair Int Int
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(Pair(3, 6))
         """
         program = parse(src)
@@ -172,7 +172,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_print_tuple_value(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(((1, 2), 3, "ok"))
         """
         program = parse(src)
@@ -187,7 +187,7 @@ class CodegenTests(unittest.TestCase):
     def test_compile_generic_identity_erased(self) -> None:
         src = """
         fn id(x: a) -> a = x
-        fn main() -> Int = print_int(id(42))
+        fn main() -> Int !{IO} = print_int(id(42))
         """
         program = parse(src)
         typecheck_program(program)
@@ -199,7 +199,7 @@ class CodegenTests(unittest.TestCase):
         src = """
         fn inc(x: Int) -> Int = x + 1
         fn apply(x: Int, f: Int -> Int) -> Int = f(x)
-        fn main() -> Int = print_int(apply(41, inc))
+        fn main() -> Int !{IO} = print_int(apply(41, inc))
         """
         program = parse(src)
         typecheck_program(program)
@@ -213,7 +213,7 @@ class CodegenTests(unittest.TestCase):
         fn make_adder(base: Int) -> Int -> Int =
           \(x) -> base + x
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(make_adder(41)(1))
         """
         program = parse(src)
@@ -230,7 +230,7 @@ class CodegenTests(unittest.TestCase):
         let f = inc
         let g = \(x: Int) -> x + 2
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(f(20) + g(20))
         """
         program = parse(src)
@@ -245,7 +245,7 @@ class CodegenTests(unittest.TestCase):
         src = r"""
         let add = \(x: Int, y: Int) -> x + y
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(add(20, 22))
         """
         program = parse(src)
@@ -261,7 +261,7 @@ class CodegenTests(unittest.TestCase):
         fn outer() -> Bool -> Int -> Int =
           \flag -> if flag then inc else inc
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(outer()(true)(41))
         """
         program = parse(src)
@@ -277,7 +277,7 @@ class CodegenTests(unittest.TestCase):
           match pair with
           | (x, y) -> x + y
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(sum_pair((20, 22)))
         """
         program = parse(src)
@@ -294,7 +294,7 @@ class CodegenTests(unittest.TestCase):
           match pair with
           | (x, y) -> x + y
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(sum_pair((20, 22)))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -323,7 +323,7 @@ class CodegenTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_print_tuple_value(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(((1, 2), 3, "ok"))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -351,8 +351,8 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_tcp_builtins_to_llvm(self) -> None:
         src = """
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
-        fn main() -> IO Unit =
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+        fn main() -> Unit !{IO} =
           seq(
             tcp_write(1, tcp_read(1)),
             seq(tcp_close(1), tcp_close_listener(tcp_listen(8081)))
@@ -378,7 +378,7 @@ class CodegenTests(unittest.TestCase):
                 module main
                 import stdlib.net (Result, TcpConnection, TcpError, connect, read_exact_utf8, write_all_utf8)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match connect("127.0.0.1", 5432) with
                   | Err _ -> print("err")
                   | Ok conn ->
@@ -409,7 +409,7 @@ class CodegenTests(unittest.TestCase):
                 module main
                 import stdlib.collections (Maybe)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match env_get("SPROUT_TEST_ENV_GET") with
                   | Just value -> print(value)
                   | Nothing -> print("missing")
@@ -443,7 +443,7 @@ class CodegenTests(unittest.TestCase):
                   | Ok text -> if text == expected then score else 0
                   | Err _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     value_or_zero(read_u16_be(append(u16_be(1), u16_be(length(u16_be(2))))))
                     + string_score_or_zero(to_string(from_string("zaż")), "zaż", 3)
@@ -488,7 +488,7 @@ class CodegenTests(unittest.TestCase):
                   | "ABCDEFGH" -> 1
                   | _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match to_string(builder_build(sample())) with
                   | Ok text -> print(length(builder_build(builder_empty())) + score(text))
                   | Err _ -> print(0)
@@ -531,12 +531,12 @@ class CodegenTests(unittest.TestCase):
                       + string.length(crypto.base64_encode(xored))
                   | Err _ -> 0
 
-                fn score_random() -> Int =
+                fn score_random() -> Int !{IO} =
                   match crypto.random_bytes(0) with
                   | Ok nonce -> length(nonce)
                   | Err _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(score_decode() + score_xor() + score_random())
                 """,
                 encoding="utf-8",
@@ -555,7 +555,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_string_builtins_to_llvm(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(str_concat(str_slice("sprout", 0, 3), " ok"))
         """
         program = parse(src)
@@ -570,7 +570,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_string_equality_uses_content_compare(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(str_slice("sprout", 0, 3) == "spr")
         """
         program = parse(src)
@@ -581,7 +581,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_http_request_to_llvm(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
           | Ok resp -> print(http_response_body(resp))
           | Err _ -> print("err")
@@ -593,7 +593,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_json_stringify_to_llvm(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(json_stringify(JsonArray(JsonArrayCons(JsonInt(1), JsonArrayNil))))
         """
         program = parse(with_http_prelude(src))
@@ -603,7 +603,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_compile_http_prelude_registers_qualified_runtime_ctors(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
           | Ok resp -> print(http_response_body(resp))
           | Err _ -> print("err")
@@ -623,7 +623,7 @@ class CodegenTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_http_request_program(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
           | Ok resp -> print(http_response_body(resp))
           | Err _ -> print("err")
@@ -655,7 +655,7 @@ class CodegenTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_and_execute(self) -> None:
         src = """
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(42)
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -688,7 +688,7 @@ class CodegenTests(unittest.TestCase):
           | Just Int
           | Nothing
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           match if false then Just(7) else Nothing with
           | Just value -> print_int(value)
           | Nothing -> print_int(0)
@@ -722,7 +722,7 @@ class CodegenTests(unittest.TestCase):
         module main
         import stdlib.collections (Maybe)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match argv_get(0) with
           | Just value -> print(value)
           | Nothing -> print("missing")
@@ -756,7 +756,7 @@ class CodegenTests(unittest.TestCase):
         module main
         import stdlib.collections (Maybe)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match argv_get(0) with
           | Just value -> print(value)
           | Nothing -> print("missing")
@@ -787,10 +787,10 @@ class CodegenTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_short_circuit_and(self) -> None:
         src = """
-        fn side() -> Bool =
+        fn side() -> Bool !{IO} =
           print_int(1) == 1
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           if false && side() then print_int(0) else print_int(42)
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -818,7 +818,7 @@ class CodegenTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_main_io_unit(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print("hello")
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -869,9 +869,9 @@ class CodegenTests(unittest.TestCase):
                 module app.main
                 import stdlib.internal_string (demo, demo_find_ok, demo_len_ok, demo_prefix_ok)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   seq(
                     print(demo()),
                     seq(
@@ -913,9 +913,9 @@ class CodegenTests(unittest.TestCase):
                 module app.main
                 import stdlib.string (slice)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   seq(
                     print(slice("sprout", 0, 3) == "spr"),
                     print(slice("sprout", 0, 3) != "out")
@@ -952,7 +952,7 @@ class CodegenTests(unittest.TestCase):
                 import stdlib.collections (vec_get_or)
                 import stdlib.string (string_lines)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(vec_get_or(string_lines("alpha\\nbeta\\n"), 1, "missing"))
                 """,
                 encoding="utf-8",
@@ -985,7 +985,7 @@ class CodegenTests(unittest.TestCase):
                 module main
                 import stdlib.collections (Maybe)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match env_get("SPROUT_TEST_ENV_GET") with
                   | Just value -> print(value)
                   | Nothing -> print("missing")
@@ -1036,9 +1036,9 @@ class CodegenTests(unittest.TestCase):
                   | Just n -> n
                   | Nothing -> fallback
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   seq(
                     print(
                       int_or(get(slice(append(u16_be(258), u32_be(16909060)), 1, 4), 0), -1)
@@ -1100,7 +1100,7 @@ class CodegenTests(unittest.TestCase):
                   | "ABCDEFGH" -> 1
                   | _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match to_string(builder_build(sample())) with
                   | Ok text -> print(length(builder_build(builder_empty())) + score(text))
                   | Err _ -> print(0)
@@ -1149,12 +1149,12 @@ class CodegenTests(unittest.TestCase):
                       + string.length(crypto.base64_encode(xored))
                   | Err _ -> 0
 
-                fn score_random() -> Int =
+                fn score_random() -> Int !{IO} =
                   match crypto.random_bytes(0) with
                   | Ok nonce -> length(nonce)
                   | Err _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(score_decode() + score_xor() + score_random())
                 """,
                 encoding="utf-8",
@@ -1179,7 +1179,7 @@ class CodegenTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_runtime_builtin_failure_uses_runtime_error_convention(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           tcp_close(1)
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -1216,7 +1216,7 @@ class CodegenTests(unittest.TestCase):
           | Just x -> x
           | Nothing -> 0
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(unwrap(Just(42)))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -1247,7 +1247,7 @@ class CodegenTests(unittest.TestCase):
         type Pair =
           | Pair Int Int
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(Pair(3, 6))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -1277,7 +1277,7 @@ class CodegenTests(unittest.TestCase):
         src = """
         fn inc(x: Int) -> Int = x + 1
         fn apply(x: Int, f: Int -> Int) -> Int = f(x)
-        fn main() -> Int = print_int(apply(41, inc))
+        fn main() -> Int !{IO} = print_int(apply(41, inc))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -1307,7 +1307,7 @@ class CodegenTests(unittest.TestCase):
         fn make_adder(base: Int) -> Int -> Int =
           \(x) -> base + x
 
-        fn main() -> Int =
+        fn main() -> Int !{IO} =
           print_int(make_adder(40)(2))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -1348,7 +1348,7 @@ class CodegenTests(unittest.TestCase):
             )
           )
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(json_stringify(sample()))
         """
         with tempfile.TemporaryDirectory() as tmp:

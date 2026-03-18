@@ -7,5 +7,5 @@ fn fizzbuzz(n: Int) -> String =
   else if rem(n, 5) == 0 then "Buzz"
   else "Number"
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(fizzbuzz(15))

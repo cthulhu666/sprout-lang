@@ -41,10 +41,9 @@ A source file is a sequence of top-level declarations:
 
 Execution starts from `main`.
 
-At top level, `let` initializers must not have type `IO a` in v0. Effectful
-work is expected to be placed inside functions and triggered from `main` or
-other function calls, but v0 does not provide a general purity checker beyond
-this `IO`-typed restriction.
+At top level, `let` initializers must be pure in v0. Effectful work is expected
+to be placed inside functions and triggered from `main` or other function
+calls.
 
 ## 4. Types
 
@@ -54,17 +53,15 @@ Built-in types:
 - `Bool`
 - `String`
 - `Unit`
-- `IO a` (surface annotation for effectful APIs in v0)
 
-`IO a` in v0 is a documentation-oriented surface type, not a first-class effect
-system. It marks APIs that are expected to perform effects, but it does not
-introduce effect isolation, delayed execution, purity tracking, or effect
-sequencing semantics beyond ordinary strict evaluation.
+Effect annotations are attached to function types rather than encoded as an
+ordinary type constructor.
 
 Type forms:
 
 - Type variable: `a`, `b`, `t`
 - Function type: `a -> b`
+- Effectful function type: `a -> b !{IO}`
 - Parameterized type: `Maybe a`, `Result e a`
 - Tuple type: `(a, b, c)`
 
@@ -91,6 +88,9 @@ Multiple parameters in a declaration are surface syntax for a function whose
 type is written with nested arrows. For example, `fn add(x: Int, y: Int) ->
 Int` has type `Int -> Int -> Int`.
 
+Omitted effect annotations mean the function is pure. In v0, the only built-in
+effect label is `IO`.
+
 ### 5.2 Let binding
 
 ```sprout
@@ -98,7 +98,7 @@ let answer = 42
 ```
 
 Bindings are immutable.
-At top level, `let` initializers must not have type `IO a`.
+At top level, `let` initializers must be pure.
 
 ### 5.3 Lambda expression
 
@@ -182,12 +182,11 @@ type Maybe a =
 
 Effect note for v0:
 
-- Calling a function typed as `IO a` behaves like any other strict function call.
+- Calling a function typed with `!{IO}` behaves like any other strict function call.
 - Effects happen when the call expression is evaluated.
-- v0 does not provide a separate execution model for effectful values.
-- A fuller effect system is deferred to v1.
-- Because top-level `let` bindings may not have type `IO a`, imported modules do
-  not perform `IO`-typed initialization merely by being loaded.
+- v0 does not provide delayed execution, effect polymorphism, or handlers.
+- Because top-level `let` bindings must be pure, imported modules do not perform
+  effectful initialization merely by being loaded.
 
 ## 7. Typing Rules (High Level)
 
@@ -198,9 +197,9 @@ Effect note for v0:
 5. `match` branches must have a unified result type.
 6. Pattern-bound variables are scoped to their branch.
 7. ADT constructors produce values of their declared type.
-8. `IO a` is treated as an ordinary type constructor in v0, with no special
-   typing rules beyond normal type checking.
-9. Tuple expressions and tuple patterns use structural, exact-arity typing.
+8. Effect annotations are checked on function types; omitted annotations mean purity.
+9. A pure function body may not call `!{IO}` functions.
+10. Tuple expressions and tuple patterns use structural, exact-arity typing.
 
 ## 8. Standard Library Math Module
 
@@ -333,7 +332,7 @@ let b = a + 1
 ### 10.10 Main entrypoint
 
 ```sprout
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print("hello")
 ```
 

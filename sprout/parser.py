@@ -109,8 +109,14 @@ class Parser:
         self.expect("SYMBOL", ")")
 
         return_type = None
+        effects = None
         if self.match("SYMBOL", "->"):
             return_type = self.parse_type_expr()
+            if isinstance(return_type, ast.TypeEffect):
+                effects = return_type.effects
+                return_type = return_type.base
+            else:
+                effects = self.parse_effect_annotation()
 
         constraints: list[ast.TypeConstraint] = []
         if self.match("KEYWORD", "where"):
@@ -125,6 +131,7 @@ class Parser:
                 name=name,
                 params=params,
                 return_type=return_type,
+                effects=effects,
                 constraints=constraints,
                 body=body,
             ),
@@ -169,8 +176,13 @@ class Parser:
         self.expect("SYMBOL", ")")
         self.expect("SYMBOL", "->")
         return_type = self.parse_type_expr()
+        if isinstance(return_type, ast.TypeEffect):
+            effects = return_type.effects
+            return_type = return_type.base
+        else:
+            effects = self.parse_effect_annotation()
         return self.mark(
-            ast.ClassMethodSig(name=name, params=params, return_type=return_type),
+            ast.ClassMethodSig(name=name, params=params, return_type=return_type, effects=effects),
             start,
         )
 
@@ -185,12 +197,18 @@ class Parser:
                 params.append(self.parse_param())
         self.expect("SYMBOL", ")")
         return_type = None
+        effects = None
         if self.match("SYMBOL", "->"):
             return_type = self.parse_type_expr()
+            if isinstance(return_type, ast.TypeEffect):
+                effects = return_type.effects
+                return_type = return_type.base
+            else:
+                effects = self.parse_effect_annotation()
         self.expect("SYMBOL", "=")
         body = self.parse_expr()
         return self.mark(
-            ast.InstanceMethodImpl(name=name, params=params, return_type=return_type, body=body),
+            ast.InstanceMethodImpl(name=name, params=params, return_type=return_type, effects=effects, body=body),
             start,
         )
 
@@ -522,8 +540,29 @@ class Parser:
         left = self.parse_type_apply()
         if self.match("SYMBOL", "->"):
             right = self.parse_type_expr()
-            return ast.TypeArrow(left=left, right=right)
+            effects = None
+            if isinstance(right, ast.TypeEffect):
+                effects = right.effects
+                right = right.base
+            else:
+                effects = self.parse_effect_annotation()
+            return ast.TypeArrow(left=left, right=right, effects=effects)
+        effects = self.parse_effect_annotation()
+        if effects is not None:
+            return ast.TypeEffect(base=left, effects=effects)
         return left
+
+    def parse_effect_annotation(self) -> tuple[str, ...] | None:
+        if not self.match("SYMBOL", "!"):
+            return None
+        self.expect("SYMBOL", "{")
+        effects: list[str] = []
+        if not self.check("SYMBOL", "}"):
+            effects.append(self.expect("IDENT", label="effect name").value)
+            while self.match("SYMBOL", ","):
+                effects.append(self.expect("IDENT", label="effect name").value)
+        self.expect("SYMBOL", "}")
+        return tuple(effects)
 
     def parse_type_apply(self):
         typ = self.parse_type_atom()

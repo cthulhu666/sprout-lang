@@ -30,7 +30,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module app.main
                 import math.util
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(util.double(21))
                 """,
                 encoding="utf-8",
@@ -60,7 +60,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module app.main
                 import lib
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print("ok")
                 """,
                 encoding="utf-8",
@@ -71,7 +71,7 @@ class ModuleLoaderTests(unittest.TestCase):
             resolve_program_names(program, bundle)
             with self.assertRaises(TypeCheckError) as ctx:
                 typecheck_program(program)
-            self.assertIn("Top-level let bindings must not have type IO a", str(ctx.exception))
+            self.assertIn("Top-level let bindings must not perform effects", str(ctx.exception))
 
     def test_load_module_source_detects_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,7 +109,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import lib (missing)
-                fn main() -> IO Unit = print(0)
+                fn main() -> Unit !{IO} = print(0)
                 """,
                 encoding="utf-8",
             )
@@ -145,7 +145,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import foo.common
                 import bar.common
-                fn main() -> IO Unit = print(0)
+                fn main() -> Unit !{IO} = print(0)
                 """,
                 encoding="utf-8",
             )
@@ -167,7 +167,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import lib (value)
                 fn value() -> Int = 2
-                fn main() -> IO Unit = print(value())
+                fn main() -> Unit !{IO} = print(value())
                 """,
                 encoding="utf-8",
             )
@@ -190,7 +190,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import http as h
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(h.ok())
                 """,
                 encoding="utf-8",
@@ -220,7 +220,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import http
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(http.ok())
                 """,
                 encoding="utf-8",
@@ -256,7 +256,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import a as m
                 import b as m
-                fn main() -> IO Unit = print(0)
+                fn main() -> Unit !{IO} = print(0)
                 """,
                 encoding="utf-8",
             )
@@ -279,7 +279,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import lib as l
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(answer())
                 """,
                 encoding="utf-8",
@@ -309,7 +309,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import lib
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(lib.missing())
                 """,
                 encoding="utf-8",
@@ -337,7 +337,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import lib as good
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(bad.answer())
                 """,
                 encoding="utf-8",
@@ -365,7 +365,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import lib
-                fn main() -> IO Unit = print(hidden())
+                fn main() -> Unit !{IO} = print(hidden())
                 """,
                 encoding="utf-8",
             )
@@ -395,7 +395,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import lib (Token, unwrap)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(unwrap(Token("secret")))
                 """,
                 encoding="utf-8",
@@ -427,7 +427,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import lib (Token, unwrap)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(unwrap(Token("secret")))
                 """,
                 encoding="utf-8",
@@ -455,7 +455,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import lib
-                fn main() -> IO Unit = print(value())
+                fn main() -> Unit !{IO} = print(value())
                 """,
                 encoding="utf-8",
             )
@@ -481,7 +481,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import lib (public)
                 fn use(hidden: Int) -> Int = hidden + public(1)
-                fn main() -> IO Unit = print(use(5))
+                fn main() -> Unit !{IO} = print(use(5))
                 """,
                 encoding="utf-8",
             )
@@ -503,10 +503,10 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.http (Result, HttpError, HttpResponse)
                 import stdlib.http_client (http_get)
 
-                fn use_get(url: String) -> Result HttpError HttpResponse =
+                fn use_get(url: String) -> Result HttpError HttpResponse !{IO} =
                   http_get(url, "", 1000)
 
-                fn main() -> IO Unit = print("ok")
+                fn main() -> Unit !{IO} = print("ok")
                 """,
                 encoding="utf-8",
             )
@@ -535,7 +535,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | Just _ -> "ok"
                   | Nothing -> "missing"
 
-                fn main() -> IO Unit = print(has_count(payload()))
+                fn main() -> Unit !{IO} = print(has_count(payload()))
                 """,
                 encoding="utf-8",
             )
@@ -564,7 +564,7 @@ class ModuleLoaderTests(unittest.TestCase):
                     ]
                   )
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(json_stringify(payload()))
                 """,
                 encoding="utf-8",
@@ -586,7 +586,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import stdlib.net (TcpConnection, TcpError, TcpListener, tcp_error_message)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(tcp_error_message(TcpConnectFailed("refused")))
                 """,
                 encoding="utf-8",
@@ -608,7 +608,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import stdlib.net (TcpConnection)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(TcpConnection(1))
                 """,
                 encoding="utf-8",
@@ -639,7 +639,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | Ok text -> if text == expected then score else 0
                   | Err _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     unwrap_or_zero(read_u16_be(slice(u16_be(513), 0, length(u16_be(513)))))
                     + utf8_score(to_string(from_string("zaż")), "zaż", 3)
@@ -679,7 +679,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | "ABCDEFGH" -> 1
                   | _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match to_string(builder_build(sample())) with
                   | Ok text -> print(text)
                   | Err _ -> print("bad")
@@ -704,7 +704,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.bytes (from_string)
                 import stdlib.crypto as crypto
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     crypto.base64_encode(crypto.sha256(from_string("abc")))
                   )
@@ -734,7 +734,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | Just n -> n
                   | Nothing -> fallback
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     gcd(54, 24)
                     + lcm(6, 8)
@@ -763,7 +763,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import examples.sentry_api (sentry_auth_header)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(sentry_auth_header("abc"))
                 """,
                 encoding="utf-8",
@@ -785,7 +785,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import examples.sentry_issue_browser_tui (run_once)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print("ok")
                 """,
                 encoding="utf-8",
@@ -807,7 +807,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import examples.aoc2025_day3 (solve_stdin)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(solve_stdin())
                 """,
                 encoding="utf-8",
@@ -830,7 +830,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import examples.aoc2025_day4 (solve_stdin)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(solve_stdin())
                 """,
                 encoding="utf-8",
@@ -868,7 +868,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | Just x -> x
                   | Nothing -> -1
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     read_or_missing(
                       dict_set(dict_set(dict_empty(), "a", 1), "b", third_or_zero(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30))),
@@ -900,7 +900,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | Just x -> x
                   | Nothing -> -1
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(read_or_missing({foo: 10, "bar": 20}, "bar"))
                 """,
                 encoding="utf-8",
@@ -930,7 +930,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn sample() -> Vec Int =
                   vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     value_or(
                       vec_get(
@@ -964,7 +964,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn sample() -> Dict Int =
                   dict_set(dict_set(dict_empty(), "alpha", 7), "beta", 11)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(dict_values(sample()), 1, -100)
                     + string.length(vec_get_or(dict_keys(sample()), 0, ""))
@@ -994,7 +994,7 @@ class ModuleLoaderTests(unittest.TestCase):
 
                 fn tens(value: Int) -> Int = value / 10
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(vec_sum(sample()) + vec_sum_by(sample(), tens))
                 """,
                 encoding="utf-8",
@@ -1034,7 +1034,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn sum_vec(xs: Vec Int) -> Int where Functor Vec, Foldable Vec =
                   sum_after_map(xs)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(sum_list(sample_list()) + sum_vec(sample_vec()))
                 """,
                 encoding="utf-8",
@@ -1059,7 +1059,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.collections (vec_get_or)
                 import stdlib.string (string_lines, string_digits)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(string_lines("a\\nb\\n"), 1, "missing")
                   )
@@ -1084,7 +1084,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.collections (vec_get_or)
                 import stdlib.string (string_digits)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(string_digits("x7y3z"), 1, -1)
                   )
@@ -1108,7 +1108,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import stdlib.string as string
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     if string.starts_with(string.concat("sprout", "-lang"), "sprout")
                     then string.slice("abcdef", 1, string.length("abc"))
@@ -1145,9 +1145,9 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn append_list(xs: List Int, ys: List Int) -> List Int where Semigroup (List Int) =
                   append(xs, ys)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   seq(
                     print(append_string("sprout", "-lang")),
                     print(list_count(append_list(Cons(1, Nil), Cons(2, Cons(3, Nil)))))
@@ -1197,7 +1197,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn append_dict(left: Dict Int, right: Dict Int) -> Dict Int where Semigroup (Dict Int) =
                   append(left, right)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(append_vec(left_vec(), right_vec()), 2, -1)
                     + value_or(append_dict(left_dict(), right_dict()), "shared", -1)
@@ -1236,7 +1236,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | Just value -> value
                   | Nothing -> fallback
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(left_vec() ++ right_vec(), 2, -1)
                     + value_or(dict_set(dict_empty(), "a", 1) ++ dict_set(dict_empty(), "a", 7), "a", -1)
@@ -1301,7 +1301,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn render_box(x: Box) -> Int where Renderable Box =
                   render(x)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(render_box(Box(7)))
                 """,
                 encoding="utf-8",

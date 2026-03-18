@@ -5,5 +5,5 @@ fn double(x: Int) -> Int = x + x
 
 fn add(acc: Int, x: Int) -> Int = acc + x
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(fold(map(filter(split_ints("1 2 3 4 5"), is_even), double), 0, add))

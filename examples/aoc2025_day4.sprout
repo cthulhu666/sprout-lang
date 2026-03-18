@@ -133,10 +133,10 @@ fn let_collect_non_empty_lines(lines: Vec String) -> Vec String =
 fn solve_grid(grid: Vec String) -> Answers =
   Answers(count_accessible_now(grid), remove_accessible_layers(grid, 0))
 
-export fn solve_stdin() -> Answers =
+export fn solve_stdin() -> Answers !{IO} =
   read_file("-")
   |> parse_grid
   |> solve_grid
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(solve_stdin())

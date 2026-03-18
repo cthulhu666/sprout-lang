@@ -19,7 +19,7 @@ class RuntimeTests(unittest.TestCase):
         fn fact(n: Int) -> Int =
           if n == 0 then 1 else n * fact(n - 1)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(fact(5))
         """
         program = parse(src)
@@ -40,7 +40,7 @@ class RuntimeTests(unittest.TestCase):
           | Just x -> x
           | Nothing -> d
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(with_default(Just(7), 0))
         """
         program = parse(src)
@@ -55,7 +55,7 @@ class RuntimeTests(unittest.TestCase):
         let a = 1
         let b = a + 2
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(b)
         """
         program = parse(src)
@@ -69,7 +69,7 @@ class RuntimeTests(unittest.TestCase):
         src = """
         fn add(acc: Int, x: Int) -> Int = acc + x
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(fold(split_ints("1, 2 3 4"), 0, add))
         """
         program = parse(with_prelude(src))
@@ -84,7 +84,7 @@ class RuntimeTests(unittest.TestCase):
         fn twice(x: Int) -> Result String Int = Ok(x * 2)
         fn tag(e: String) -> String = str_concat("err:", e)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             result_with_default(
               result_map_error(
@@ -110,7 +110,7 @@ class RuntimeTests(unittest.TestCase):
         fn twice(x: Int) -> Result String Int = Ok(x * 2)
         fn tag(e: String) -> String = str_concat("err:", e)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             result_with_default(
               result_pipe_error(
@@ -139,7 +139,7 @@ class RuntimeTests(unittest.TestCase):
         fn twice(x: Int) -> Result String Int = Ok(x * 2)
         fn tag(e: String) -> String = str_concat("err:", e)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             result_with_default(
               Ok(20)
@@ -159,10 +159,10 @@ class RuntimeTests(unittest.TestCase):
 
     def test_stdlib_when_ok_and_when_error_helpers(self) -> None:
         src = """
-        fn show_ok(x: Int) -> IO Unit = print(x)
-        fn show_err(e: String) -> IO Unit = print(e)
+        fn show_ok(x: Int) -> Unit !{IO} = print(x)
+        fn show_err(e: String) -> Unit !{IO} = print(e)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             result_with_default(
               when_error(
@@ -181,9 +181,9 @@ class RuntimeTests(unittest.TestCase):
 
     def test_stdlib_when_error_runs_effect_and_preserves_result(self) -> None:
         src = """
-        fn show_err(e: String) -> IO Unit = print(e)
+        fn show_err(e: String) -> Unit !{IO} = print(e)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             result_with_default(
               when_error(Err("boom"), show_err),
@@ -211,7 +211,7 @@ class RuntimeTests(unittest.TestCase):
               | Nil -> 0
               | Cons s rest -> parse_int(s) + sum_lines(rest)
 
-            fn main() -> IO Unit =
+            fn main() -> Unit !{{IO}} =
               print(sum_lines(read_lines("{input_path}")))
             """
             program = parse(src)
@@ -225,7 +225,7 @@ class RuntimeTests(unittest.TestCase):
         fn inc(x: Int) -> Int = x + 1
         fn double(x: Int) -> Int = x * 2
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print((double >> inc)(20))
         """
         program = parse(src)
@@ -239,7 +239,7 @@ class RuntimeTests(unittest.TestCase):
         fn apply(x: Int, f: Int -> Int) -> Int =
           f(x)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(apply(20, \n -> n + 22))
         """
         program = parse(src)
@@ -250,7 +250,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_run_lambda_closure_captures_outer_value(self) -> None:
         src = r"""
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print((\(base) -> (\(x) -> base + x))(40)(2))
         """
         program = parse(src)
@@ -264,7 +264,7 @@ class RuntimeTests(unittest.TestCase):
         fn make_adder(base: Int) -> Int -> Int =
           \x -> base + x
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(make_adder(39)(3))
         """
         program = parse(src)
@@ -277,7 +277,7 @@ class RuntimeTests(unittest.TestCase):
         src = r"""
         let x = 100
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print((\(x) -> (\(y) -> x + y))(40)(2))
         """
         program = parse(src)
@@ -292,7 +292,7 @@ class RuntimeTests(unittest.TestCase):
           match pair with
           | (x, y) -> x + y
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(sum_pair((20, 22)))
         """
         program = parse(src)
@@ -303,7 +303,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_run_nested_tuple_match(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match (1, (20, 22)) with
           | (_, (x, y)) -> print(x + y)
         """
@@ -318,7 +318,7 @@ class RuntimeTests(unittest.TestCase):
         fn sum_down(n: Int, acc: Int) -> Int =
           if n == 0 then acc else sum_down(n - 1, acc + n)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(sum_down(5000, 0))
         """
         program = parse(src)
@@ -329,7 +329,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_read_file_builtin_missing_path_reports_runtime_error_convention(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(read_file("/definitely/missing/sprout-runtime-test.txt"))
         """
         program = parse(src)
@@ -341,7 +341,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_tcp_close_unknown_handle_reports_runtime_error_convention(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           tcp_close(1)
         """
         program = parse(src)
@@ -352,9 +352,9 @@ class RuntimeTests(unittest.TestCase):
 
     def test_string_builtins(self) -> None:
         src = """
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           seq(
             print(str_concat(str_slice("sprout-lang", 0, 6), "-ok")),
             seq(
@@ -374,7 +374,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_http_stdlib_echo_response(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(http_echo_response("GET /hello HTTP/1.1\\r\\nHost: local\\r\\n\\r\\n"))
         """
         program = parse(with_http_prelude(src))
@@ -388,7 +388,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_http_stdlib_response_body_helper(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(http_response_body(HttpResponse(200, "h: v", "payload")))
         """
         program = parse(with_http_prelude(src))
@@ -409,7 +409,7 @@ class RuntimeTests(unittest.TestCase):
           | Just field -> json_string_or_default(field)
           | Nothing -> "missing"
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match json_parse("{\\"title\\":\\"hello\\",\\"count\\":2}") with
           | Ok value -> print(title_or_missing(value))
           | Err _ -> print("decode-error")
@@ -422,7 +422,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_http_response_formats_supported_status(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match http_response(503, "down") with
           | Ok response -> print(response)
           | Err _ -> print("err")
@@ -436,7 +436,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_http_response_rejects_unsupported_status(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match http_response(418, "teapot") with
           | Ok _ -> print("ok")
           | Err err ->
@@ -451,7 +451,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_json_parse_invalid(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match json_parse("{bad json}") with
           | Ok _ -> print("ok")
           | Err e ->
@@ -490,7 +490,7 @@ class RuntimeTests(unittest.TestCase):
           | Just items -> first_int_from_items(items)
           | Nothing -> -5
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match json_parse("{\\"items\\":[1,2]}") with
           | Ok value -> print(first_int_from_value(value))
           | Err _ -> print(-6)
@@ -521,7 +521,7 @@ class RuntimeTests(unittest.TestCase):
             )
           )
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(json_stringify(sample()))
         """
         program = parse(with_http_prelude(src))
@@ -544,7 +544,7 @@ class RuntimeTests(unittest.TestCase):
             ]
           )
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(json_stringify(sample()))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -565,9 +565,9 @@ class RuntimeTests(unittest.TestCase):
         import stdlib.bytes (from_string)
         import stdlib.crypto as crypto
 
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           seq(
             print(crypto.base64_encode(crypto.sha256(from_string("abc")))),
             seq(
@@ -618,17 +618,17 @@ class RuntimeTests(unittest.TestCase):
         import stdlib.bytes (length)
         import stdlib.crypto as crypto
 
-        fn random_score() -> Int =
+        fn random_score() -> Int !{IO} =
           match crypto.random_bytes(8) with
           | Ok bytes -> length(bytes)
           | Err _ -> -1
 
-        fn random_error_score() -> Int =
+        fn random_error_score() -> Int !{IO} =
           match crypto.random_bytes(-1) with
           | Ok _ -> -2
           | Err _ -> 0
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(random_score() + random_error_score())
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -645,8 +645,8 @@ class RuntimeTests(unittest.TestCase):
 
     def test_terminal_builtins_emit_ansi(self) -> None:
         src = """
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
-        fn main() -> IO Unit =
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+        fn main() -> Unit !{IO} =
           seq(term_clear(), seq(term_move(2, 3), term_write("x")))
         """
         program = parse(src)
@@ -660,7 +660,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_terminal_read_key_builtin(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(term_read_key())
         """
         program = parse(src)
@@ -681,7 +681,7 @@ class RuntimeTests(unittest.TestCase):
           | Just x -> x
           | Nothing -> fallback
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             value_or(
               vector_get(
@@ -713,7 +713,7 @@ class RuntimeTests(unittest.TestCase):
           | Just x -> x
           | Nothing -> fallback
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             value_or(
               map_get(
@@ -742,7 +742,7 @@ class RuntimeTests(unittest.TestCase):
                 module main
                 import stdlib.collections (vec_append, vec_empty, vec_get_or, vec_reverse, vec_slice)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(
                       vec_reverse(
@@ -780,7 +780,7 @@ class RuntimeTests(unittest.TestCase):
                 fn sample() -> Dict Int =
                   dict_set(dict_set(dict_empty(), "alpha", 7), "beta", 11)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(dict_values(sample()), 0, -100)
                     + string.length(vec_get_or(dict_keys(sample()), 1, ""))
@@ -805,12 +805,12 @@ class RuntimeTests(unittest.TestCase):
                 module main
                 import stdlib.collections (Maybe)
 
-                fn value_or_missing(name: String) -> String =
+                fn value_or_missing(name: String) -> String !{IO} =
                   match env_get(name) with
                   | Just value -> value
                   | Nothing -> "missing"
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(value_or_missing("SPROUT_TEST_ENV_GET"))
                 """,
                 encoding="utf-8",
@@ -838,12 +838,12 @@ class RuntimeTests(unittest.TestCase):
                 module main
                 import stdlib.collections (Maybe)
 
-                fn arg_or_missing(index: Int) -> String =
+                fn arg_or_missing(index: Int) -> String !{IO} =
                   match argv_get(index) with
                   | Just value -> value
                   | Nothing -> "missing"
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(arg_or_missing(0))
                 """,
                 encoding="utf-8",
@@ -881,7 +881,7 @@ class RuntimeTests(unittest.TestCase):
                   | Ok text -> if text == expected then score else fallback
                   | Err _ -> fallback
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     int_or(get(slice(append(u16_be(258), u32_be(16909060)), 1, 4), 0), -1)
                     + int_or(read_u16_be(u16_be(258)), -10)
@@ -924,7 +924,7 @@ class RuntimeTests(unittest.TestCase):
                   | "ABCDEFGH" -> 1
                   | _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match to_string(builder_build(sample())) with
                   | Ok text -> print(length(builder_build(builder_empty())) + score(text))
                   | Err _ -> print(0)
@@ -948,7 +948,7 @@ class RuntimeTests(unittest.TestCase):
                 module main
                 import stdlib.bytes (Result, append, singleton, to_string)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match to_string(append(singleton(255), singleton(97))) with
                   | Ok _ -> print("ok")
                   | Err _ -> print("bad")
@@ -977,7 +977,7 @@ class RuntimeTests(unittest.TestCase):
 
                 fn tens(value: Int) -> Int = value / 10
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(vec_sum(sample()) + vec_sum_by(sample(), tens))
                 """,
                 encoding="utf-8",
@@ -1005,9 +1005,9 @@ class RuntimeTests(unittest.TestCase):
                   | Just n -> n
                   | Nothing -> fallback
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   seq(
                     print(abs(-7)),
                     seq(
@@ -1127,7 +1127,7 @@ class RuntimeTests(unittest.TestCase):
                 fn sum_vec(xs: Vec Int) -> Int where Functor Vec, Foldable Vec =
                   sum_after_map(xs)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(sum_list(sample_list()) + sum_vec(sample_vec()))
                 """,
                 encoding="utf-8",
@@ -1185,9 +1185,9 @@ class RuntimeTests(unittest.TestCase):
                 fn append_dict(left: Dict Int, right: Dict Int) -> Dict Int where Semigroup (Dict Int) =
                   append(left, right)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   seq(
                     print(append_string("sprout", "-lang")),
                     seq(
@@ -1223,14 +1223,14 @@ class RuntimeTests(unittest.TestCase):
                 module main
                 import stdlib.collections (Dict, List, Maybe, Vec, dict_empty, dict_get, dict_set, vec_append, vec_empty, vec_get_or)
 
-                fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
                 fn value_or(d: Dict Int, key: String, fallback: Int) -> Int =
                   match dict_get(d, key) with
                   | Just value -> value
                   | Nothing -> fallback
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   seq(
                     print("sprout" ++ "-lang"),
                     seq(

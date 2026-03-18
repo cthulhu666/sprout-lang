@@ -19,7 +19,7 @@ fn http_error_message(err: HttpError) -> String =
   | HttpBadStatus _ -> "http error status"
   | HttpDecode msg -> "decode error: " ++ msg
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   match argv_get(0) with
   | Nothing -> print("usage: sprout run examples/http_get_cli.sprout <url>")
   | Just url ->

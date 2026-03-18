@@ -21,7 +21,7 @@ class TypecheckerTests(unittest.TestCase):
           | Just x -> Just(f(x))
           | Nothing -> Nothing
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(map(Just(2), fn_inc))
 
         fn fn_inc(x: Int) -> Int = x + 1
@@ -35,7 +35,7 @@ class TypecheckerTests(unittest.TestCase):
     def test_typecheck_infers_function_param_and_return_types(self) -> None:
         src = """
         fn inc(x) = x + 1
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(inc(41))
         """
         prog = parse(src)
@@ -56,11 +56,11 @@ class TypecheckerTests(unittest.TestCase):
     def test_type_error_top_level_let_cannot_be_io(self) -> None:
         src = """
         let boot = print("boot")
-        fn main() -> IO Unit = print("ok")
+        fn main() -> Unit !{IO} = print("ok")
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
-        self.assertIn("Top-level let bindings must not have type IO a", str(ctx.exception))
+        self.assertIn("Top-level let bindings must not perform effects", str(ctx.exception))
 
     def test_typecheck_with_stdlib_loaded(self) -> None:
         src = """
@@ -69,7 +69,7 @@ class TypecheckerTests(unittest.TestCase):
 
         fn add(acc: Int, x: Int) -> Int = acc + x
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(fold(filter(split_ints("1 2 3 4"), is_even), 0, add))
         """
         prog = parse(with_prelude(src))
@@ -109,7 +109,7 @@ class TypecheckerTests(unittest.TestCase):
                   | "ABCDEFGH" -> 1
                   | _ -> 0
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   match to_string(builder_build(sample())) with
                   | Ok text -> print(length(builder_build(builder_empty())) + score(text))
                   | Err _ -> print(0)
@@ -131,7 +131,7 @@ class TypecheckerTests(unittest.TestCase):
                 module main
                 import stdlib.bytes (builder_byte)
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(builder_byte("x"))
                 """,
                 encoding="utf-8",
@@ -153,7 +153,7 @@ class TypecheckerTests(unittest.TestCase):
                 import stdlib.bytes (from_string)
                 import stdlib.crypto as crypto
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(
                     crypto.base64_encode(crypto.sha256(from_string("abc")))
                   )
@@ -175,7 +175,7 @@ class TypecheckerTests(unittest.TestCase):
                 module main
                 import stdlib.crypto as crypto
 
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(crypto.sha256(1))
                 """,
                 encoding="utf-8",
@@ -188,26 +188,26 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("Argument type mismatch", str(ctx.exception))
 
     def test_builtin_effect_audit_snapshot(self) -> None:
-        types = typecheck_program(parse('fn main() -> IO Unit = print("ok")'))
+        types = typecheck_program(parse('fn main() -> Unit !{IO} = print("ok")'))
         expected = {
-            "print": "forall a. a -> IO Unit",
-            "tcp_write": "Int -> String -> IO Unit",
-            "term_write": "String -> IO Unit",
+            "print": "forall a. a -> Unit !{IO}",
+            "tcp_write": "Int -> String -> Unit !{IO}",
+            "term_write": "String -> Unit !{IO}",
             "parse_int": "String -> Int",
             "split_words": "String -> List String",
             "bytes_to_utf8": "Bytes -> Result stdlib.bytes.Utf8Error String",
             "json_stringify": "stdlib.json.Json -> String",
-            "print_int": "Int -> Int",
-            "read_lines": "String -> List String",
-            "read_file": "String -> String",
-            "read_int_lines": "String -> Vector Int",
-            "env_get": "String -> Maybe String",
-            "argv_get": "Int -> Maybe String",
-            "tcp_connect": "String -> Int -> Result stdlib.net.TcpError Int",
-            "tcp_read_exact": "Int -> Int -> Result stdlib.net.TcpError Bytes",
-            "http_request": "String -> String -> String -> String -> Int -> Result stdlib.http.HttpError stdlib.http.HttpResponse",
-            "crypto_random_bytes": "Int -> Result stdlib.crypto.CryptoError Bytes",
-            "term_read_key": "String",
+            "print_int": "Int -> Int !{IO}",
+            "read_lines": "String -> List String !{IO}",
+            "read_file": "String -> String !{IO}",
+            "read_int_lines": "String -> Vector Int !{IO}",
+            "env_get": "String -> Maybe String !{IO}",
+            "argv_get": "Int -> Maybe String !{IO}",
+            "tcp_connect": "String -> Int -> Result stdlib.net.TcpError Int !{IO}",
+            "tcp_read_exact": "Int -> Int -> Result stdlib.net.TcpError Bytes !{IO}",
+            "http_request": "String -> String -> String -> String -> Int -> Result stdlib.http.HttpError stdlib.http.HttpResponse !{IO}",
+            "crypto_random_bytes": "Int -> Result stdlib.crypto.CryptoError Bytes !{IO}",
+            "term_read_key": "String !{IO}",
         }
         for name, expected_type in expected.items():
             self.assertEqual(types[name], expected_type, msg=name)
@@ -334,7 +334,7 @@ class TypecheckerTests(unittest.TestCase):
         fn inc(x: Int) -> Int = x + 1
         fn double(x: Int) -> Int = x * 2
         fn apply(x: Int, f: Int -> Int) -> Int = f(x)
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(apply(20, double >> inc))
         """
         types = typecheck_program(parse(src))
@@ -343,7 +343,7 @@ class TypecheckerTests(unittest.TestCase):
     def test_typecheck_lambda_expression(self) -> None:
         src = r"""
         let inc = \x -> x + 1
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(inc(41))
         """
         prog = parse(src)
@@ -357,7 +357,7 @@ class TypecheckerTests(unittest.TestCase):
         fn make_adder(base: Int) -> Int -> Int =
           \(x) -> base + x
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(make_adder(41)(1))
         """
         types = typecheck_program(parse(src))
@@ -366,7 +366,7 @@ class TypecheckerTests(unittest.TestCase):
     def test_typecheck_lambda_annotation_mismatch(self) -> None:
         src = r"""
         let bad = \(x: Int) -> str_concat(x, "!")
-        fn main() -> IO Unit = print("ok")
+        fn main() -> Unit !{IO} = print("ok")
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
@@ -375,7 +375,7 @@ class TypecheckerTests(unittest.TestCase):
         src = r"""
         let apply = \(f: a -> b, x: a) -> f(x)
         fn inc(x: Int) -> Int = x + 1
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(apply(inc, 41))
         """
         types = typecheck_program(parse(src))
@@ -439,7 +439,7 @@ class TypecheckerTests(unittest.TestCase):
 
     def test_typecheck_string_builtins(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(
             if str_starts_with(str_concat("sprout", "-lang"), "sprout")
             then str_slice("abcdef", 1, str_len("abc"))
@@ -451,7 +451,7 @@ class TypecheckerTests(unittest.TestCase):
 
     def test_typecheck_with_http_stdlib_loaded(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(http_echo_response("GET /ping HTTP/1.1\\r\\n\\r\\n"))
         """
         types = typecheck_program(parse(with_http_prelude(src)))
@@ -468,9 +468,9 @@ class TypecheckerTests(unittest.TestCase):
 
     def test_typecheck_terminal_builtins(self) -> None:
         src = """
-        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           seq(term_hide_cursor(), seq(term_move(1, 1), term_show_cursor()))
         """
         types = typecheck_program(parse(src))
@@ -489,7 +489,7 @@ class TypecheckerTests(unittest.TestCase):
           | Just x -> x
           | Nothing -> 0
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(third_or_zero(vector_append(vector_append(vector_append(vector_empty(), 1), 2), 3)))
         """
         types = typecheck_program(parse(src))
@@ -508,7 +508,7 @@ class TypecheckerTests(unittest.TestCase):
           | Just x -> x
           | Nothing -> fallback
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(find_or(map_set(map_empty(), "a", 7), "a", -1))
         """
         types = typecheck_program(parse(src))
@@ -525,7 +525,7 @@ class TypecheckerTests(unittest.TestCase):
           fn fmap(f: a -> b, xs: List a) -> List b = xs
         }
 
-        fn main() -> IO Unit where Functor List =
+        fn main() -> Unit !{IO} where Functor List =
           print(1)
         """
         types = typecheck_program(parse(src))
@@ -549,7 +549,7 @@ class TypecheckerTests(unittest.TestCase):
         }
         fn combine(xs: List Int, ys: List Int) -> List Int where Semigroup (List Int) =
           append(xs, ys)
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(combine(Cons(1, Nil), Cons(2, Nil)))
         """
         types = typecheck_program(parse(src))
@@ -565,7 +565,7 @@ class TypecheckerTests(unittest.TestCase):
           fn append(x: String, y: String) -> String = str_concat(x, y)
           fn duplicate(x: String) -> String = append(x, x)
         }
-        fn main() -> IO Unit where Combiner String =
+        fn main() -> Unit !{IO} where Combiner String =
           print(duplicate("ab"))
         """
         types = typecheck_program(parse(src))
@@ -591,7 +591,7 @@ class TypecheckerTests(unittest.TestCase):
         }
         let s = "a" ++ "b"
         let xs = [1, 2] ++ [3, 4]
-        fn main() -> IO Unit = print(xs)
+        fn main() -> Unit !{IO} = print(xs)
         """
         types = typecheck_program(parse(src))
         self.assertIn("s", types)
@@ -604,7 +604,7 @@ class TypecheckerTests(unittest.TestCase):
         }
         instance Foldable List {
         }
-        fn main() -> IO Unit = print(1)
+        fn main() -> Unit !{IO} = print(1)
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
@@ -617,14 +617,14 @@ class TypecheckerTests(unittest.TestCase):
         instance Foldable List {
           fn fold_count(xs: List Int) -> Bool = true
         }
-        fn main() -> IO Unit = print(1)
+        fn main() -> Unit !{IO} = print(1)
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
 
     def test_type_error_unknown_class_in_constraint(self) -> None:
         src = """
-        fn main() -> IO Unit where Missing List =
+        fn main() -> Unit !{IO} where Missing List =
           print(1)
         """
         with self.assertRaises(TypeCheckError):
@@ -634,7 +634,7 @@ class TypecheckerTests(unittest.TestCase):
         src = """
         class Foldable f
         instance Foldable List Int
-        fn main() -> IO Unit = print(1)
+        fn main() -> Unit !{IO} = print(1)
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))
@@ -644,7 +644,7 @@ class TypecheckerTests(unittest.TestCase):
         class Foldable f
         instance Foldable List
         instance Foldable List
-        fn main() -> IO Unit = print(1)
+        fn main() -> Unit !{IO} = print(1)
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))

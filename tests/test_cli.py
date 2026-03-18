@@ -208,7 +208,7 @@ class CliTests(unittest.TestCase):
 
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(http_ok("ready"))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,7 +236,7 @@ class CliTests(unittest.TestCase):
         module main
         import stdlib.collections (Maybe)
 
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           match argv_get(0) with
           | Just value -> print(value)
           | Nothing -> print("missing")
@@ -274,7 +274,7 @@ class CliTests(unittest.TestCase):
         }
         fn show_box(x: Box) -> Int where Renderable Box =
           render(x)
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(show_box(Box(42)))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -442,7 +442,7 @@ class CliTests(unittest.TestCase):
     def test_run_rejects_raw_vector_builtins_in_non_stdlib_module(self) -> None:
         src = """
         module app.main
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(vector_length(vector_empty()))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -473,7 +473,7 @@ class CliTests(unittest.TestCase):
                 """
                 module app.main
                 import stdlib.internal (raw_count)
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(raw_count())
                 """,
                 encoding="utf-8",
@@ -490,7 +490,7 @@ class CliTests(unittest.TestCase):
     def test_run_rejects_raw_map_builtins_in_non_stdlib_module(self) -> None:
         src = """
         module app.main
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(map_size(map_empty()))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -508,7 +508,7 @@ class CliTests(unittest.TestCase):
     def test_run_rejects_raw_string_builtins_in_non_stdlib_module(self) -> None:
         src = """
         module app.main
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(str_len("sprout"))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -526,7 +526,7 @@ class CliTests(unittest.TestCase):
     def test_run_rejects_raw_bytes_builtins_in_non_stdlib_module(self) -> None:
         src = """
         module app.main
-        fn main() -> IO Unit =
+        fn main() -> Unit !{IO} =
           print(bytes_length(bytes_singleton(7)))
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -557,7 +557,7 @@ class CliTests(unittest.TestCase):
                 """
                 module app.main
                 import stdlib.internal_string (raw_len)
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(raw_len())
                 """,
                 encoding="utf-8",
@@ -587,7 +587,7 @@ class CliTests(unittest.TestCase):
                 """
                 module app.main
                 import stdlib.internal_bytes (raw_count)
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(raw_count())
                 """,
                 encoding="utf-8",
@@ -617,7 +617,7 @@ class CliTests(unittest.TestCase):
                 """
                 module app.main
                 import stdlib.internal_map (raw_count)
-                fn main() -> IO Unit =
+                fn main() -> Unit !{IO} =
                   print(raw_count())
                 """,
                 encoding="utf-8",

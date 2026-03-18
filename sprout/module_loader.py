@@ -723,7 +723,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "term_read_key",
         "term_write",
     }
-    builtin_types = {"Int", "Bool", "String", "Bytes", "Builder", "IO", "Unit", "List", "Vector", "Map"}
+    builtin_types = {"Int", "Bool", "String", "Bytes", "Builder", "Unit", "List", "Vector", "Map"}
     module_symbols = _build_module_symbols(program, bundle)
 
     all_exported_values: set[str] = set()
@@ -898,6 +898,13 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if isinstance(t, ast.TypeApply):
             walk_type(t.base, node)
             walk_type(t.arg, node)
+            return
+        if isinstance(t, ast.TypeArrow):
+            walk_type(t.left, node)
+            walk_type(t.right, node)
+            return
+        if isinstance(t, ast.TypeEffect):
+            walk_type(t.base, node)
             return
         if isinstance(t, ast.TypeArrow):
             walk_type(t.left, node)

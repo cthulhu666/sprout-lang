@@ -33,18 +33,18 @@ fn tcp_listener_handle(listener: TcpListener) -> Int =
   match listener with
   | TcpListener handle -> handle
 
-export fn connect(host: String, port: Int) -> Result TcpError TcpConnection =
+export fn connect(host: String, port: Int) -> Result TcpError TcpConnection !{IO} =
   match tcp_connect(host, port) with
   | Err err -> Err(err)
   | Ok handle -> Ok(TcpConnection(handle))
 
-export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError Bytes =
+export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError Bytes !{IO} =
   tcp_read_exact(tcp_connection_handle(conn), count)
 
-export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int =
+export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
   tcp_write_all(tcp_connection_handle(conn), payload)
 
-export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String =
+export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String !{IO} =
   match read_exact(conn, count) with
   | Err err -> Err(err)
   | Ok payload ->
@@ -52,19 +52,19 @@ export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError St
       | Ok text -> Ok(text)
       | Err utf8_err -> Err(TcpReadFailed(utf8_error_message(utf8_err)))
 
-export fn write_all_utf8(conn: TcpConnection, payload: String) -> Result TcpError Int =
+export fn write_all_utf8(conn: TcpConnection, payload: String) -> Result TcpError Int !{IO} =
   write_all(conn, from_string(payload))
 
-export fn close(conn: TcpConnection) -> IO Unit =
+export fn close(conn: TcpConnection) -> Unit !{IO} =
   tcp_close(tcp_connection_handle(conn))
 
-export fn listen_local(port: Int) -> TcpListener =
+export fn listen_local(port: Int) -> TcpListener !{IO} =
   TcpListener(tcp_listen(port))
 
-export fn accept(listener: TcpListener) -> TcpConnection =
+export fn accept(listener: TcpListener) -> TcpConnection !{IO} =
   TcpConnection(tcp_accept(tcp_listener_handle(listener)))
 
-export fn close_listener(listener: TcpListener) -> IO Unit =
+export fn close_listener(listener: TcpListener) -> Unit !{IO} =
   tcp_close_listener(tcp_listener_handle(listener))
 
 fn utf8_error_message(err: Utf8Error) -> String =

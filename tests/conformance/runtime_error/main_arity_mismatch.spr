@@ -1,2 +1,2 @@
-fn main(x: Int) -> IO Unit =
+fn main(x: Int) -> Unit !{IO} =
   print(x)

@@ -2223,10 +2223,16 @@ def cmd_repl(with_stdlib: bool = False) -> int:
             with_stdlib=with_stdlib,
         )
         inferred_type = _repl_lookup_type(types, name)
-        main_body = name if inferred_type == "IO Unit" else f"print({name})"
+        if inferred_type.endswith(" !{IO}"):
+            if inferred_type != "Unit !{IO}":
+                emit("error: repl cannot auto-print effectful non-Unit expressions yet")
+                return
+            main_body = name
+        else:
+            main_body = f"print({name})"
         tree, _ = _repl_parse_and_check(
             declarations,
-            [f"let {name} = {source}", f"fn main() -> IO Unit = {main_body}"],
+            [f"let {name} = {source}", f"fn main() -> Unit !{{IO}} = {main_body}"],
             with_stdlib=with_stdlib,
         )
         lowered = lower_typeclasses(tree)

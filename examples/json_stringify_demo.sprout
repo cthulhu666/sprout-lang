@@ -10,5 +10,5 @@ fn payload() -> json.Json =
     ]
   )
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(json_stringify(payload()))

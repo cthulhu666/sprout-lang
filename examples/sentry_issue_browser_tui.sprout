@@ -7,7 +7,7 @@ import stdlib.terminal (term_reset_screen, term_render_line)
 fn issue_count_text(issues: Json) -> String =
   "issues payload loaded"
 
-export fn run_once(org: String, project: String, token: String) -> String =
+export fn run_once(org: String, project: String, token: String) -> String !{IO} =
   match sentry_list_issues(org, project, token, 3000) with
   | Ok issues -> issue_count_text(issues)
   | Err _ -> "request failed"
@@ -15,5 +15,5 @@ export fn run_once(org: String, project: String, token: String) -> String =
 fn boot_message() -> String =
   "sentry tui scaffold: run_once(org, project, token)"
 
-export fn sentry_tui_demo_main() -> IO Unit =
+export fn sentry_tui_demo_main() -> Unit !{IO} =
   term_render_line(1, boot_message())

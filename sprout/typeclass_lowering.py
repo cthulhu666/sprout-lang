@@ -17,7 +17,9 @@ def _copy_type_expr(node: ast.TypeExpr) -> ast.TypeExpr:
     if isinstance(node, ast.TypeApply):
         return ast.TypeApply(base=_copy_type_expr(node.base), arg=_copy_type_expr(node.arg))
     if isinstance(node, ast.TypeArrow):
-        return ast.TypeArrow(left=_copy_type_expr(node.left), right=_copy_type_expr(node.right))
+        return ast.TypeArrow(left=_copy_type_expr(node.left), right=_copy_type_expr(node.right), effects=node.effects)
+    if isinstance(node, ast.TypeEffect):
+        return ast.TypeEffect(base=_copy_type_expr(node.base), effects=node.effects)
     raise TypeclassLoweringError(f"Unsupported type expression in lowering copy: {node}")
 
 
@@ -29,6 +31,8 @@ def _type_expr_is_concrete(node: ast.TypeExpr) -> bool:
         return _type_expr_is_concrete(node.base) and _type_expr_is_concrete(node.arg)
     if isinstance(node, ast.TypeArrow):
         return _type_expr_is_concrete(node.left) and _type_expr_is_concrete(node.right)
+    if isinstance(node, ast.TypeEffect):
+        return _type_expr_is_concrete(node.base)
     return False
 
 
@@ -48,7 +52,13 @@ def _type_expr_equal(left: ast.TypeExpr, right: ast.TypeExpr) -> bool:
     if isinstance(left, ast.TypeApply) and isinstance(right, ast.TypeApply):
         return _type_expr_equal(left.base, right.base) and _type_expr_equal(left.arg, right.arg)
     if isinstance(left, ast.TypeArrow) and isinstance(right, ast.TypeArrow):
-        return _type_expr_equal(left.left, right.left) and _type_expr_equal(left.right, right.right)
+        return (
+            left.effects == right.effects
+            and _type_expr_equal(left.left, right.left)
+            and _type_expr_equal(left.right, right.right)
+        )
+    if isinstance(left, ast.TypeEffect) and isinstance(right, ast.TypeEffect):
+        return left.effects == right.effects and _type_expr_equal(left.base, right.base)
     return False
 
 
@@ -58,7 +68,12 @@ def _type_expr_mangle(node: ast.TypeExpr) -> str:
     if isinstance(node, ast.TypeApply):
         return f"{_type_expr_mangle(node.base)}_{_type_expr_mangle(node.arg)}"
     if isinstance(node, ast.TypeArrow):
-        return f"Fn_{_type_expr_mangle(node.left)}_{_type_expr_mangle(node.right)}"
+        effects = ""
+        if node.effects:
+            effects = "_eff_" + "_".join(node.effects)
+        return f"Fn_{_type_expr_mangle(node.left)}_{_type_expr_mangle(node.right)}{effects}"
+    if isinstance(node, ast.TypeEffect):
+        return f"{_type_expr_mangle(node.base)}_eff_{'_'.join(node.effects)}"
     raise TypeclassLoweringError(f"Unsupported type expression in lowering: {node}")
 
 
@@ -84,7 +99,10 @@ def _substitute_type_expr(node: ast.TypeExpr, subs: dict[str, ast.TypeExpr]) -> 
         return ast.TypeArrow(
             left=_substitute_type_expr(node.left, subs),
             right=_substitute_type_expr(node.right, subs),
+            effects=node.effects,
         )
+    if isinstance(node, ast.TypeEffect):
+        return ast.TypeEffect(base=_substitute_type_expr(node.base, subs), effects=node.effects)
     raise TypeclassLoweringError(f"Unsupported type expression in substitution: {node}")
 
 
@@ -107,9 +125,13 @@ def _match_type_expr_pattern(
             pattern.arg, candidate.arg, env
         )
     if isinstance(pattern, ast.TypeArrow) and isinstance(candidate, ast.TypeArrow):
-        return _match_type_expr_pattern(pattern.left, candidate.left, env) and _match_type_expr_pattern(
-            pattern.right, candidate.right, env
+        return (
+            pattern.effects == candidate.effects
+            and _match_type_expr_pattern(pattern.left, candidate.left, env)
+            and _match_type_expr_pattern(pattern.right, candidate.right, env)
         )
+    if isinstance(pattern, ast.TypeEffect) and isinstance(candidate, ast.TypeEffect):
+        return pattern.effects == candidate.effects and _match_type_expr_pattern(pattern.base, candidate.base, env)
     return False
 
 
@@ -336,6 +358,7 @@ def _rewrite_expr_with_specialization(
                                     name=wrapper_name,
                                     params=user_params,
                                     return_type=target.return_type,
+                                    effects=target.effects,
                                     constraints=[],
                                     body=ast.CallExpr(callee=ast.VarExpr(callee_name), args=wrapper_call_args),
                                 ),
@@ -736,6 +759,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                         name=generated_name,
                         params=method.params,
                         return_type=method.return_type,
+                        effects=method.effects,
                         constraints=[],
                         body=method.body,
                     ),
@@ -772,6 +796,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                     hidden_param_type = ast.TypeArrow(
                         left=ast.TypeName("Unit"),
                         right=ast.TypeName("Unit"),
+                        effects=method_sig.effects,
                     )
                     # Rebuild method type from its class signature and substituted args.
                     if method_sig.params:
@@ -780,6 +805,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                             t = ast.TypeArrow(
                                 left=_substitute_type_expr(p.type_expr, subs),
                                 right=t,
+                                effects=None if p is not method_sig.params[-1] else method_sig.effects,
                             )
                         hidden_param_type = t
                     else:
@@ -815,6 +841,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                         name=decl.name,
                         params=decl.params + hidden_params,
                         return_type=decl.return_type,
+                        effects=decl.effects,
                         constraints=[],
                         body=rewritten_body,
                     ),
@@ -866,6 +893,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                     name=fn.name,
                     params=fn.params,
                     return_type=fn.return_type,
+                    effects=fn.effects,
                     constraints=[],
                     body=rewritten_body,
                 ),
@@ -900,6 +928,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                         name=decl.name,
                         params=decl.params,
                         return_type=decl.return_type,
+                        effects=decl.effects,
                         constraints=[],
                         body=_rewrite_expr_with_specialization(
                             decl.body,

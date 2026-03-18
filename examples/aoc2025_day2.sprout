@@ -84,7 +84,7 @@ let r1 = Cons(Range(11, 22), r2)
 
 fn sample_ranges() -> List Range = r1
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(
     Answers(
       sum_ranges(sample_ranges(), is_repeated_twice),

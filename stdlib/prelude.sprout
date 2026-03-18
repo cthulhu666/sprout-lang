@@ -279,15 +279,15 @@ fn result_pipe_ok(r: Result e a, f: a -> b) -> Result e b =
 fn result_pipe_error(r: Result e a, f: e -> f_err) -> Result f_err a =
   result_map_error(r, f)
 
-fn keep_after(effect: IO Unit, value: a) -> a =
+fn keep_after(effect: Unit !{IO}, value: a) -> a !{IO} =
   value
 
-fn when_ok(r: Result e a, f: a -> IO Unit) -> Result e a =
+fn when_ok(r: Result e a, f: a -> Unit !{IO}) -> Result e a !{IO} =
   match r with
   | Ok x -> keep_after(f(x), r)
   | Err e -> Err(e)
 
-fn when_error(r: Result e a, f: e -> IO Unit) -> Result e a =
+fn when_error(r: Result e a, f: e -> Unit !{IO}) -> Result e a !{IO} =
   match r with
   | Ok x -> Ok(x)
   | Err e -> keep_after(f(e), r)

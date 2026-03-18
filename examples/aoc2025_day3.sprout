@@ -91,14 +91,14 @@ fn parse_all_banks(raw: String) -> Vec (Vec Int) =
 fn let_lines_to_banks(lines: Vec String) -> Vec (Vec Int) =
   lines_to_banks(lines, 0, vec_length(lines), vec_empty())
 
-fn stdin_banks() -> Vec (Vec Int) =
+fn stdin_banks() -> Vec (Vec Int) !{IO} =
   parse_all_banks(read_file("-"))
 
 fn solve_for_banks(banks: Vec (Vec Int)) -> Answers =
   Answers(sum_for_count(banks, 2), sum_for_count(banks, 12))
 
-export fn solve_stdin() -> Answers =
+export fn solve_stdin() -> Answers !{IO} =
   solve_for_banks(stdin_banks())
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(solve_stdin())

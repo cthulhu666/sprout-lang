@@ -1,5 +1,11 @@
 # Effect System v0 Plan
 
+Status note:
+
+- The core of this plan is now implemented in v0 and reflected in the
+  normative spec.
+- This document is kept as design rationale and historical planning context.
+
 This document proposes promoting a minimal real effect system into Sprout v0.
 
 It replaces the earlier assumption that effects are purely a v1 concern. It is

@@ -1,5 +1,11 @@
 # Effect System v1 Draft
 
+Status note:
+
+- The minimal `!{IO}` effect system is now implemented in v0.
+- This document is now about the next effect milestone after that baseline, not
+  about introducing function effects for the first time.
+
 This document is a draft design for Sprout v1 effect handling.
 
 It is not part of normative v0. Its purpose is to define the first major v1
@@ -7,8 +13,8 @@ language milestone after the v0 core is stabilized.
 
 ## 1. Problem Statement
 
-Sprout v0 uses `IO a` only as a lightweight surface annotation. That keeps v0
-small, but it does not provide:
+Sprout v0 now supports explicit closed effects on function types with the
+built-in `IO` label. That is a good baseline, but it still does not provide:
 
 - purity boundaries,
 - effect tracking,
@@ -20,7 +26,7 @@ story.
 
 ## 2. Goals
 
-1. Add a real effect system without changing Sprout’s default strict evaluation.
+1. Extend the current effect system without changing Sprout’s default strict evaluation.
 2. Make effectful code explicit in function types.
 3. Keep the beginner model small enough to explain in one pass.
 4. Support `IO` first, with room for more effects later.
@@ -35,7 +41,7 @@ story.
 
 ## 4. Proposed Direction
 
-The first v1 milestone introduces explicit effect rows on function types.
+The next effect milestone extends the current v0 effect system.
 
 Illustrative surface model:
 
@@ -51,28 +57,29 @@ Interpretation:
 - `!{IO}` means the function may perform IO.
 - Effects are attached to function types, not encoded as ordinary result values.
 
-This replaces the v0 convention where `IO a` is just a surface annotation.
+This extends the current v0 convention where closed effects such as `!{IO}` are
+already part of function types.
 
 ## 5. Core Syntax
 
 Draft syntax for function effects:
 
 ```sprout
-fn inc(x: Int) -> Int !{} = x + 1
+fn inc(x: Int) -> Int = x + 1
 fn print_name(name: String) -> Unit !{IO} = print(name)
 ```
 
 Draft syntax for effect-polymorphic function types:
 
 ```sprout
-fn apply_twice(f: Int -> Int !e, x: Int) -> Int !e =
+fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
   f(f(x))
 ```
 
-Open question:
+Current baseline:
 
-- Whether the syntax should be `-> T !{IO}`, `-> T raises {IO}`, or another
-  beginner-friendlier form.
+- effect syntax stays row-shaped: `!{...}`
+- pure-by-default remains the rule
 
 ## 6. Semantics
 
@@ -107,12 +114,12 @@ fn log_and_return(x: Int) -> Int !{IO} =
 
 Potential internal representation:
 
-- extend function types from `a -> b` to `a -> b !e`,
-- model `e` as either a concrete closed set (`{IO}`) or an effect variable.
+- extend function types from `a -> b !{IO}` to richer row forms,
+- model `e` as an effect-row variable.
 
 ## 8. Diagnostics
 
-The first v1 milestone should prioritize a few high-value diagnostics:
+The next effect milestone should prioritize a few high-value diagnostics:
 
 1. Calling an effectful function from a pure context.
 2. Declaring a function pure when its body performs effects.
@@ -127,51 +134,43 @@ Example style:
 
 ## 9. Builtins and Stdlib Impact
 
-The initial migration target is straightforward:
+The next migration target is straightforward:
 
-1. Builtins like `print`, terminal IO, file IO, TCP, and HTTP become `!{IO}`.
+1. Existing `!{IO}` builtins remain valid.
 2. Pure helpers in `stdlib/prelude.sprout` stay pure.
 3. Result-oriented error handling remains orthogonal to effects.
-4. Existing v0 `IO a`-annotated APIs migrate to explicit effect annotations.
+4. Higher-order helpers gain effect-polymorphic signatures where needed.
 
-Illustrative migration:
-
-v0:
-
-```sprout
-fn main() -> IO Unit = print("hello")
-```
-
-v1 draft:
+Illustrative baseline:
 
 ```sprout
 fn main() -> Unit !{IO} = print("hello")
 ```
 
+Next milestone direction:
+
+- keep the existing closed-effect syntax,
+- add effect polymorphism,
+- and decide whether additional built-in effect labels beyond `IO` are worth
+  exposing.
+
 ## 10. Compatibility and Migration
 
-Migration from v0 should be mostly mechanical:
+Migration from the current v0 baseline should be incremental:
 
-1. `-> IO T` becomes `-> T !{IO}` for effectful APIs.
-2. Pure functions that never relied on `IO` stay unchanged except for optional
-   explicit `!{}` annotations.
-3. Documentation must explain that effects moved from result types into function
-   signatures.
-
-Compatibility note:
-
-- v0 programs using `IO` as an ordinary annotation will need signature updates.
+1. Existing `!{IO}` code remains valid.
+2. Higher-order helpers gain effect-polymorphic signatures.
+3. Documentation explains which new forms are additive versus required.
 
 ## 11. Milestone Plan
 
-Proposed first v1 milestone:
+Proposed next effect milestone:
 
-1. Finalize effect syntax.
-2. Add effect annotations to the parser and AST.
-3. Extend the typechecker with effect checking for pure vs `IO`.
-4. Migrate builtins and a minimal stdlib slice.
-5. Add effect diagnostics and conformance tests.
-6. Update docs and examples.
+1. Add effect polymorphism.
+2. Decide whether open rows or only row variables are needed immediately.
+3. Improve diagnostics around higher-order effect propagation.
+4. Evaluate whether additional built-in effect labels beyond `IO` are worth exposing.
+5. Update docs and examples.
 
 Deferred beyond the first milestone:
 
@@ -182,11 +181,9 @@ Deferred beyond the first milestone:
 
 ## 12. Open Questions
 
-1. Should purity be implicit by default, or should v1 require explicit `!{}`
-   on function signatures?
-2. Should local inference infer effect sets, or require function-level effect
-   annotations for clearer diagnostics?
-3. Should `main` require `!{IO}` explicitly, or may it omit the annotation as
-   a special case?
-4. Should effect syntax be row-based from day one, or start with a single
-   built-in `IO` effect and generalize later?
+1. Should effect polymorphism use only closed row variables like `!{e}`, or do
+   we also want open-row syntax in the next step?
+2. Should local inference infer richer effect sets, or require more explicit
+   function-level effect annotations for clearer diagnostics?
+3. Should Sprout expose more than one built-in effect label after `IO`, or keep
+   the surface minimal longer?

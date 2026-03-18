@@ -6,5 +6,5 @@
 # Example:
 #   SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/tcp_echo_server.sprout
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   tcp_echo_serve(8081, 1000000)

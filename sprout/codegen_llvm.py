@@ -242,14 +242,13 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
             return I64
         if node.name == "Builder":
             return I64
+        if node.name == "Unit":
+            return I64
         if node.name in adt_names or leaf in adt_leaf_names:
             return I64
         if leaf and leaf[0].islower():
             return I64
     if isinstance(node, ast.TypeApply):
-        if isinstance(node.base, ast.TypeName) and node.base.name == "IO":
-            if isinstance(node.arg, ast.TypeName) and node.arg.name == "Unit":
-                return I64
         base_name = _type_base_name(node)
         base_leaf = base_name.rsplit(".", 1)[-1] if base_name is not None else None
         if base_name in adt_names or (base_leaf is not None and base_leaf in adt_leaf_names):
@@ -258,6 +257,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
             return I64
         if base_leaf and base_leaf[0].islower():
             return I64
+    if isinstance(node, ast.TypeEffect):
+        return _type_from_ast(node.base, adt_names)
     if isinstance(node, ast.TypeArrow):
         # Function-typed values are lowered as opaque callable pointers.
         return I8_PTR
@@ -307,6 +308,8 @@ def _type_base_name(node: ast.TypeExpr) -> str | None:
         return node.name
     if isinstance(node, ast.TypeApply):
         return _type_base_name(node.base)
+    if isinstance(node, ast.TypeEffect):
+        return _type_base_name(node.base)
     return None
 
 
@@ -315,15 +318,13 @@ def _check_param_type(node: ast.TypeExpr, adt_names: set[str]) -> LLType:
     return typ
 
 
-def _is_io_unit(node: ast.TypeExpr | None) -> bool:
-    if not isinstance(node, ast.TypeApply):
-        return False
-    if not isinstance(node.base, ast.TypeName) or node.base.name != "IO":
-        return False
-    return isinstance(node.arg, ast.TypeName) and node.arg.name == "Unit"
+def _is_effectful_unit(return_type: ast.TypeExpr | None, effects: tuple[str, ...] | None) -> bool:
+    return isinstance(return_type, ast.TypeName) and return_type.name == "Unit" and effects == ("IO",)
 
 
 def _lower_value_type(node: ast.TypeExpr, adt_names: set[str]) -> tuple[LLType, CallSig | None]:
+    if isinstance(node, ast.TypeEffect):
+        return _lower_value_type(node.base, adt_names)
     if isinstance(node, ast.TypeArrow):
         params_ast: list[ast.TypeExpr] = []
         cursor: ast.TypeExpr = node
@@ -1039,7 +1040,7 @@ def _emit_fn(
     ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if ret.typ != sig.ret:
         raise CodegenError(f"Function {fn.name} body type mismatch in backend: {ret.typ.text} vs {sig.ret.text}")
-    if is_entry_main and _is_io_unit(fn.return_type):
+    if is_entry_main and _is_effectful_unit(fn.return_type, fn.effects):
         emitter.emit("  ret i64 0")
     else:
         emitter.emit(f"  ret {ret.typ.text} {ret.ir}")

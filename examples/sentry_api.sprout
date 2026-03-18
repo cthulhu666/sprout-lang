@@ -22,7 +22,7 @@ fn parse_json_response(resp: HttpResponse) -> Result HttpError Json =
   | Ok value -> Ok(value)
   | Err err -> Err(json_error_to_http_error(err))
 
-export fn sentry_list_issues(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError Json =
+export fn sentry_list_issues(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError Json !{IO} =
   match http_get(sentry_issues_url(org, project), sentry_auth_header(token), timeout_ms) with
   | Ok resp -> parse_json_response(resp)
   | Err err -> Err(err)

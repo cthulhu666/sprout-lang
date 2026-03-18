@@ -1,2 +1,2 @@
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print("hello from sprout")

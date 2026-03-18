@@ -49,21 +49,21 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 9. Top-level evaluation is in source order; `main` is the entrypoint.
 - Semantics: Top-level bindings evaluate in file order; program execution starts at `main`.
 - Rationale: Simple initialization model with a clear start location.
-- Tradeoff: To keep modules predictable in v0, top-level `let` bindings may not have type `IO a`, and `IO`-typed initialization is pushed into functions. This is narrower than full purity because v0 does not enforce a general effect boundary.
+- Tradeoff: To keep modules predictable in v0, top-level `let` bindings must be pure and effectful initialization is pushed into functions.
 
 10. Type errors are compile-time; runtime errors are minimized.
 - Semantics: Static type errors fail compilation. Runtime failures are reserved for unavoidable cases (for example, explicit panic or failed external IO).
 - Rationale: Safety and trustworthiness are core to the language value proposition.
 - Tradeoff: Requires stronger type-checker implementation and high-quality diagnostics.
 
-11. `IO` is annotation-only in v0.
-- Semantics: `IO a` labels APIs that are expected to perform effects, but effectful calls still execute under the same strict evaluation rules as any other expression.
-- Rationale: Keeps v0 small and honest by matching the current implementation instead of implying a larger effect system.
-- Tradeoff: `IO` does not provide purity boundaries, deferred execution, or effect tracking guarantees in v0.
+11. Effects are attached to function types in v0.
+- Semantics: effectful functions are annotated explicitly, for example `fn main() -> Unit !{IO} = ...`; omitted effect annotations mean purity.
+- Rationale: This keeps runtime interaction explicit without changing Sprout's strict execution model.
+- Tradeoff: v0 supports only closed effects with the built-in `IO` label; effect polymorphism and richer effect kinds are deferred.
 
 ## v0 Positioning
 - Default evaluation strategy: strict.
 - Beginner promise: explicit behavior, deterministic execution, clear diagnostics.
 - Annotation stance: infer types wherever they can be determined unambiguously without compromising implementation simplicity, predictable behavior, or diagnostic quality; keep explicit annotations available for clarity.
-- v0 effect model: `IO` is a lightweight annotation only, not a first-class effect system.
-- Future extension path: a real effect system and explicit laziness can be added in later milestones without changing default strict evaluation.
+- v0 effect model: functions are pure by default; effectful functions use explicit `!{IO}` annotations.
+- Future extension path: effect polymorphism, additional effect labels, and explicit laziness can be added in later milestones without changing default strict evaluation.

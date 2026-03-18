@@ -1,6 +1,6 @@
 module app.main
 
-fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
 fn inc(x: Int) -> Int = x + 1
 
@@ -10,13 +10,13 @@ fn double_if_large(x: Int) -> Result String Int =
 fn prefix_error(e: String) -> String =
   "error:" ++ e
 
-fn show_ok(x: Int) -> IO Unit =
+fn show_ok(x: Int) -> Unit !{IO} =
   print(x)
 
-fn show_error(e: String) -> IO Unit =
+fn show_error(e: String) -> Unit !{IO} =
   print(e)
 
-fn nested_ok_demo() -> IO Unit =
+fn nested_ok_demo() -> Unit !{IO} =
   print(
     result_with_default(
       when_error(
@@ -39,7 +39,7 @@ fn nested_ok_demo() -> IO Unit =
     )
   )
 
-fn piped_ok_demo() -> IO Unit =
+fn piped_ok_demo() -> Unit !{IO} =
   print(
     result_with_default(
       Ok(20)
@@ -53,7 +53,7 @@ fn piped_ok_demo() -> IO Unit =
     )
   )
 
-fn piped_err_demo() -> IO Unit =
+fn piped_err_demo() -> Unit !{IO} =
   print(
     result_with_default(
       Ok(3)
@@ -65,5 +65,5 @@ fn piped_err_demo() -> IO Unit =
     )
   )
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   seq(nested_ok_demo(), seq(piped_ok_demo(), piped_err_demo()))

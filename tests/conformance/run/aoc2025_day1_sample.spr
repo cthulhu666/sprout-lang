@@ -63,7 +63,7 @@ let r1 = Cons(L(68), r2)
 
 fn sample_rotations() -> List Rot = r1
 
-fn main() -> IO Unit =
+fn main() -> Unit !{IO} =
   print(
     Answers(
       count_hits(sample_rotations(), normalize_dial(50)),

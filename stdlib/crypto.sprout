@@ -25,5 +25,5 @@ export fn base64_decode(raw: String) -> Result Base64Error Bytes =
 export fn bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes =
   crypto_bytes_xor(left, right)
 
-export fn random_bytes(count: Int) -> Result CryptoError Bytes =
+export fn random_bytes(count: Int) -> Result CryptoError Bytes !{IO} =
   crypto_random_bytes(count)

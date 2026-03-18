@@ -31,11 +31,10 @@ Normative status:
   are implementation features or experimental extensions.
 - In particular, the current module system and typeclass support are implemented
   in the prototype, but are not yet part of normative v0.
-- In v0, `IO a` is only a lightweight annotation for effectful APIs; a real
-  effect system is deferred to v1.
-- The repository also contains a newer proposal to promote a minimal real
-  effect system into v0; until implemented and specified, that plan remains
-  design work rather than current language behavior.
+- The current implementation uses explicit function effects in the v0 core:
+  pure functions omit an annotation and effectful functions use `!{IO}`.
+- `docs/effect-system-v1-draft.md` is now a forward-looking draft for the next
+  effect milestone beyond the implemented v0 baseline.
 
 ## Repository Layout
 
@@ -51,7 +50,7 @@ Normative status:
 
 v0 execution note:
 
-- Top-level `let` bindings must not have type `IO a`.
+- Top-level `let` bindings must be pure.
 - Effectful work is expected to live in functions, with `main` as the entrypoint.
 
 ## Tooling (mise + just)
@@ -91,18 +90,33 @@ Integration-style IO test convention:
 
 Runtime builtins (host-implemented):
 
-IO-annotated effects:
+`!{IO}` builtins:
 
-- `print(x) -> IO Unit`
-- `tcp_write(conn: Int, payload: String) -> IO Unit`
-- `tcp_close(conn: Int) -> IO Unit`
-- `tcp_close_listener(listener: Int) -> IO Unit`
-- `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
-- `term_clear() -> IO Unit`
-- `term_move(row: Int, col: Int) -> IO Unit`
-- `term_hide_cursor() -> IO Unit`
-- `term_show_cursor() -> IO Unit`
-- `term_write(text: String) -> IO Unit`
+- `print(x) -> Unit !{IO}`
+- `print_int(x: Int) -> Int !{IO}` (prints and returns `x`, useful for native backend subset)
+- `read_lines(path: String) -> List String !{IO}`
+- `read_file(path: String) -> String !{IO}`
+- `read_int_lines(path: String) -> Vector Int !{IO}`
+- `env_get(name: String) -> Maybe String !{IO}`
+- `argv_get(index: Int) -> Maybe String !{IO}` (`0` is the first user-supplied program argument)
+- `tcp_listen(port: Int) -> Int !{IO}`
+- `tcp_accept(listener: Int) -> Int !{IO}`
+- `tcp_read(conn: Int) -> String !{IO}`
+- `tcp_write(conn: Int, payload: String) -> Unit !{IO}`
+- `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int !{IO}`
+- `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError Bytes !{IO}`
+- `tcp_write_all(conn: Int, payload: Bytes) -> Result stdlib.net.TcpError Int !{IO}`
+- `tcp_close(conn: Int) -> Unit !{IO}`
+- `tcp_close_listener(listener: Int) -> Unit !{IO}`
+- `tcp_echo_serve(port: Int, max_connections: Int) -> Unit !{IO}`
+- `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO}`
+- `crypto_random_bytes(count: Int) -> Result stdlib.crypto.CryptoError Bytes !{IO}`
+- `term_clear() -> Unit !{IO}`
+- `term_move(row: Int, col: Int) -> Unit !{IO}`
+- `term_hide_cursor() -> Unit !{IO}`
+- `term_show_cursor() -> Unit !{IO}`
+- `term_read_key() -> String !{IO}` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
+- `term_write(text: String) -> Unit !{IO}`
 
 Pure value transforms and runtime-backed persistent data helpers:
 
@@ -148,37 +162,14 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `map_nth_key(m: Map a, index: Int) -> Maybe String`
 - `map_nth_value(m: Map a, index: Int) -> Maybe a`
 
-Runtime-bound builtins that are not `IO`-annotated in v0:
+Effect notes:
 
-- `print_int(x: Int) -> Int` (prints and returns `x`, useful for native backend subset)
-- `read_lines(path: String) -> List String`
-- `read_file(path: String) -> String`
-- `read_int_lines(path: String) -> Vector Int`
-- `env_get(name: String) -> Maybe String`
-- `argv_get(index: Int) -> Maybe String` (`0` is the first user-supplied program argument)
-- `tcp_listen(port: Int) -> Int`
-- `tcp_accept(listener: Int) -> Int`
-- `tcp_read(conn: Int) -> String`
-- `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int`
-- `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError Bytes`
-- `tcp_write_all(conn: Int, payload: Bytes) -> Result stdlib.net.TcpError Int`
-- `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse`
-- `crypto_random_bytes(count: Int) -> Result stdlib.crypto.CryptoError Bytes`
-- `term_read_key() -> String` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
-
-`IO a` in v0 is annotation-only. It marks APIs that are expected to perform
-effects, but Sprout v0 does not yet have a separate effect system, purity
-checking, or delayed execution model.
-
-That means the current top-level restriction is narrow: Sprout rejects
-top-level `let` bindings whose inferred type is `IO a`, but it does not claim a
-general purity proof for every non-`IO` top-level expression in v0.
-
-Current builtin audit note:
-
-- `IO` annotation and actual runtime interaction are not aligned yet for the full builtin surface.
-- In particular, the "runtime-bound but non-`IO`" group above still observes or mutates external state in practice.
-- This is explicit v0 design debt and remains a follow-up design decision, not an intended long-term semantic model.
+- Sprout v0 now tracks the built-in `IO` effect on function types.
+- Pure functions omit an effect annotation.
+- Effectful functions use `!{IO}`, for example `fn main() -> Unit !{IO} = ...`.
+- Effects do not change Sprout's strict execution order; they constrain which
+  functions may call which other functions.
+- Effect polymorphism and richer effect sets are still deferred follow-up work.
 
 String/runtime helpers are host-implemented primitives. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
 
@@ -267,8 +258,8 @@ Example usage:
 fn inc(x: Int) -> Int = x + 1
 fn double_if_large(x: Int) -> Result String Int =
   if x > 10 then Ok(x * 2) else Err("too-small")
-fn show_ok(x: Int) -> IO Unit = print(x)
-fn show_error(e: String) -> IO Unit = print(e)
+fn show_ok(x: Int) -> Unit !{IO} = print(x)
+fn show_error(e: String) -> Unit !{IO} = print(e)
 
 # Nested style
 when_error(
@@ -362,10 +353,10 @@ TCP client helper types (in `stdlib/net.sprout`):
 - `write_all(conn, payload) -> Result TcpError Int`
 - `read_exact_utf8(conn, count) -> Result TcpError String`
 - `write_all_utf8(conn, payload) -> Result TcpError Int`
-- `close(conn) -> IO Unit`
+- `close(conn) -> Unit !{IO}`
 - `listen_local(port) -> TcpListener`
 - `accept(listener) -> TcpConnection`
-- `close_listener(listener) -> IO Unit`
+- `close_listener(listener) -> Unit !{IO}`
 - `tcp_error_message(err) -> String`
 
 `TcpConnection` and `TcpListener` are now exported as opaque handle types; application code can use the types but cannot forge the underlying constructors outside `stdlib.net`.
@@ -408,10 +399,10 @@ Crypto helpers (in `stdlib/crypto.sprout`):
 
 Terminal convenience module (in `stdlib/terminal.sprout`):
 
-- `term_home() -> IO Unit`
-- `term_reset_screen() -> IO Unit`
-- `term_render_line(row, text) -> IO Unit`
-- `term_read_key_once() -> String`
+- `term_home() -> Unit !{IO}`
+- `term_reset_screen() -> Unit !{IO}`
+- `term_render_line(row, text) -> Unit !{IO}`
+- `term_read_key_once() -> String !{IO}`
 
 Collections module (in `stdlib/collections.sprout`):
 
@@ -475,7 +466,7 @@ Load HTTP and JSON helpers:
 `sprout compile` currently supports a small subset:
 
 - top-level `fn`, `type`, and top-level `let` (constant and runtime-initialized),
-- `Int`/`Bool`/`String` typed params and returns, plus `IO Unit` function return,
+- `Int`/`Bool`/`String` typed params and returns, plus effectful returns such as `Unit !{IO}` and `Int !{IO}`,
 - expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, function composition (`f >> g` means `f(g(x))`), lambdas (`\(x, y) -> ...`), `if`, direct calls, indirect closure calls, recursion,
 - tuple expressions/types/patterns with general `n`-tuple arity (`(x, y)`, `(Int, String)`, `match pair with | (x, y) -> ...`),
   one-arg lambdas may also use the shorthand `\x -> ...`,
