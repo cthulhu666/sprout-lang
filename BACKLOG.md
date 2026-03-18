@@ -108,7 +108,7 @@ Definition of done:
 
 - [x] `P0` Define a safer representation for external resource handles (currently `stdlib.net` wrapper ADTs; true opacity still depends on hidden constructors).
 - [x] `P1` Add environment/config helpers such as `env_get(name) -> Maybe String`.
-- [ ] `P1` Define test support for integration-style IO programs that depend on external services.
+- [x] `P1` Define test support for integration-style IO programs that depend on external services.
 
 ### 9) Issue Browser TUI App
 
@@ -146,9 +146,10 @@ Definition of done:
 - [ ] terminal interaction primitives are not yet fully implemented.
 - [x] Module exports now support opaque exported types via `export type Name` and constructor-exporting ADTs via `export type Name(..)`.
 - [x] `env_get(name) -> Maybe String` is available in interpreter and native modes.
+- [x] Integration-style IO tests now have a dedicated harness (`tests/integration_support.py`) and focused suite (`tests/test_integration_io.py`).
 
 ## Next 3 Tasks (Execution Order)
 
-1. Define test support for integration-style IO programs that depend on external services.
-2. Decide how builtins participate in effect tracking; audit the current builtin surface and align types/docs/runtime conventions.
-3. Add a first SCRAM/Postgres client helper slice in stdlib using `stdlib.net`, `stdlib.bytes`, and `stdlib.crypto`.
+1. Decide how builtins participate in effect tracking; audit the current builtin surface and align types/docs/runtime conventions.
+2. Add integration tests with mocked HTTP responses for the external-integration example layer.
+3. Tighten terminal interaction primitives so interactive examples have a more realistic runtime surface.

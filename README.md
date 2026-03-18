@@ -72,8 +72,16 @@ Common tasks:
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
 - Start REPL: `mise exec -- python -m sprout.cli repl` (loads prelude by default; interactive mode supports arrow-key editing and persistent history via `~/.sprout_repl_history`)
 - Run tests: `mise exec -- just test`
+- Run integration-style IO tests: `mise exec -- just test-integration`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
 - Build native binary (clang): `mise exec -- just compile-native /tmp/prog.sprout /tmp/prog`
+
+Integration-style IO test convention:
+
+- Service-backed tests live in [tests/test_integration_io.py](./tests/test_integration_io.py).
+- Shared local-fixture helpers live in [tests/integration_support.py](./tests/integration_support.py).
+- Prefer local mock services on `127.0.0.1` over external hosted dependencies.
+- Keep `just test` as the full suite; use `mise exec -- just test-integration` when iterating on service-backed interpreter/native behavior.
 
 ## Builtin Helpers (v0)
 

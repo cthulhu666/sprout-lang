@@ -6,6 +6,9 @@ default:
 test:
   python3 -m unittest discover -s tests -v
 
+test-integration:
+  python3 -m unittest discover -s tests -p 'test_integration_io.py' -v
+
 parse file:
   python3 -m sprout.cli parse {{file}}
 
