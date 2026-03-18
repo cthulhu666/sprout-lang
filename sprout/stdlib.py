@@ -21,6 +21,10 @@ def json_path() -> Path:
     return stdlib_dir() / "json.sprout"
 
 
+def crypto_path() -> Path:
+    return stdlib_dir() / "crypto.sprout"
+
+
 def load_prelude() -> str:
     path = prelude_path()
     return parse_header(path.read_text(encoding="utf-8"), path).body
@@ -33,6 +37,11 @@ def load_http() -> str:
 
 def load_json() -> str:
     path = json_path()
+    return parse_header(path.read_text(encoding="utf-8"), path).body
+
+
+def load_crypto() -> str:
+    path = crypto_path()
     return parse_header(path.read_text(encoding="utf-8"), path).body
 
 

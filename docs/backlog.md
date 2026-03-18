@@ -23,9 +23,9 @@ This file tracks open design, implementation, and tooling follow-up work.
    Design doc: [native-adt-lowering-v1.md](./native-adt-lowering-v1.md).
    Initial completed slice: native `Nothing` singleton plus immediate-match optimization for direct constructor-producing scrutinees.
    Planned follow-up: broader constructor forwarding, whole-scrutinee binding support, and specialized representations for tiny ADTs.
-4. Add cryptographic/runtime primitives needed for authenticated protocol clients in v1.
-   Initial scope: SHA-256, HMAC-SHA-256, base64 encode/decode, byte-wise XOR helpers, and secure random nonce generation suitable for SCRAM-style handshakes.
-   First milestone constraints: prioritize protocol/client building blocks over a broad crypto API, keep the surface bytes-oriented, and document security expectations clearly so the feature does not overclaim production-hardening beyond the implemented primitives.
+4. Add a first SCRAM/Postgres client helper slice using `stdlib.net`, `stdlib.bytes`, and `stdlib.crypto`.
+   Initial scope: startup-message construction, password-message encoding, client nonce handling, and the first round of SCRAM message parsing/building.
+   First milestone constraints: keep the helper surface small, bytes-oriented, and focused on authenticated connection setup rather than a full database client.
 5. Add records in v1.
    Initial scope: immutable record values with explicit field names, field access, and straightforward construction/update rules that preserve Sprout's strict evaluation model.
    First milestone constraints: no row polymorphism, no structural subtyping, no implicit field punning, and no attempt to fold records into the current ADT surface without a dedicated spec.

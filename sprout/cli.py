@@ -241,6 +241,10 @@ long long sprout_make1(long long tag, long long a0);
 static char* dup_cstr(const char* s);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
+static void sha256_digest(const unsigned char* data, size_t len, unsigned char out[32]);
+static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]);
+static char* base64_encode_bytes(const unsigned char* data, size_t len);
+static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err);
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -1441,6 +1445,395 @@ long long bytes_builder_build(long long builder_h) {
     offset += chunk->len;
   }
   return (long long)(uintptr_t)out;
+}
+
+static uint32_t crypto_rotr32(uint32_t x, uint32_t n) {
+  return (x >> n) | (x << (32 - n));
+}
+
+static uint32_t crypto_ch(uint32_t x, uint32_t y, uint32_t z) {
+  return (x & y) ^ (~x & z);
+}
+
+static uint32_t crypto_maj(uint32_t x, uint32_t y, uint32_t z) {
+  return (x & y) ^ (x & z) ^ (y & z);
+}
+
+static uint32_t crypto_sig0(uint32_t x) {
+  return crypto_rotr32(x, 7) ^ crypto_rotr32(x, 18) ^ (x >> 3);
+}
+
+static uint32_t crypto_sig1(uint32_t x) {
+  return crypto_rotr32(x, 17) ^ crypto_rotr32(x, 19) ^ (x >> 10);
+}
+
+static uint32_t crypto_ep0(uint32_t x) {
+  return crypto_rotr32(x, 2) ^ crypto_rotr32(x, 13) ^ crypto_rotr32(x, 22);
+}
+
+static uint32_t crypto_ep1(uint32_t x) {
+  return crypto_rotr32(x, 6) ^ crypto_rotr32(x, 11) ^ crypto_rotr32(x, 25);
+}
+
+typedef struct {
+  uint32_t state[8];
+  uint64_t bitlen;
+  unsigned char data[64];
+  size_t datalen;
+} Sha256Ctx;
+
+static const uint32_t SHA256_K[64] = {
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+  0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+  0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+  0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+  0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+  0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+static void sha256_transform(Sha256Ctx* ctx, const unsigned char data[64]) {
+  uint32_t m[64];
+  for (size_t i = 0; i < 16; i++) {
+    m[i] =
+      ((uint32_t)data[i * 4] << 24) |
+      ((uint32_t)data[i * 4 + 1] << 16) |
+      ((uint32_t)data[i * 4 + 2] << 8) |
+      ((uint32_t)data[i * 4 + 3]);
+  }
+  for (size_t i = 16; i < 64; i++) {
+    m[i] = crypto_sig1(m[i - 2]) + m[i - 7] + crypto_sig0(m[i - 15]) + m[i - 16];
+  }
+
+  uint32_t a = ctx->state[0];
+  uint32_t b = ctx->state[1];
+  uint32_t c = ctx->state[2];
+  uint32_t d = ctx->state[3];
+  uint32_t e = ctx->state[4];
+  uint32_t f = ctx->state[5];
+  uint32_t g = ctx->state[6];
+  uint32_t h = ctx->state[7];
+
+  for (size_t i = 0; i < 64; i++) {
+    uint32_t t1 = h + crypto_ep1(e) + crypto_ch(e, f, g) + SHA256_K[i] + m[i];
+    uint32_t t2 = crypto_ep0(a) + crypto_maj(a, b, c);
+    h = g;
+    g = f;
+    f = e;
+    e = d + t1;
+    d = c;
+    c = b;
+    b = a;
+    a = t1 + t2;
+  }
+
+  ctx->state[0] += a;
+  ctx->state[1] += b;
+  ctx->state[2] += c;
+  ctx->state[3] += d;
+  ctx->state[4] += e;
+  ctx->state[5] += f;
+  ctx->state[6] += g;
+  ctx->state[7] += h;
+}
+
+static void sha256_init(Sha256Ctx* ctx) {
+  ctx->bitlen = 0;
+  ctx->datalen = 0;
+  ctx->state[0] = 0x6a09e667;
+  ctx->state[1] = 0xbb67ae85;
+  ctx->state[2] = 0x3c6ef372;
+  ctx->state[3] = 0xa54ff53a;
+  ctx->state[4] = 0x510e527f;
+  ctx->state[5] = 0x9b05688c;
+  ctx->state[6] = 0x1f83d9ab;
+  ctx->state[7] = 0x5be0cd19;
+}
+
+static void sha256_update(Sha256Ctx* ctx, const unsigned char* data, size_t len) {
+  for (size_t i = 0; i < len; i++) {
+    ctx->data[ctx->datalen++] = data[i];
+    if (ctx->datalen == 64) {
+      sha256_transform(ctx, ctx->data);
+      ctx->bitlen += 512;
+      ctx->datalen = 0;
+    }
+  }
+}
+
+static void sha256_final(Sha256Ctx* ctx, unsigned char out[32]) {
+  size_t i = ctx->datalen;
+  ctx->bitlen += (uint64_t)ctx->datalen * 8;
+  ctx->data[i++] = 0x80;
+
+  if (i > 56) {
+    while (i < 64) ctx->data[i++] = 0x00;
+    sha256_transform(ctx, ctx->data);
+    i = 0;
+  }
+
+  while (i < 56) ctx->data[i++] = 0x00;
+  for (int j = 7; j >= 0; j--) {
+    ctx->data[i++] = (unsigned char)((ctx->bitlen >> (j * 8)) & 0xff);
+  }
+  sha256_transform(ctx, ctx->data);
+
+  for (size_t j = 0; j < 8; j++) {
+    out[j * 4] = (unsigned char)((ctx->state[j] >> 24) & 0xff);
+    out[j * 4 + 1] = (unsigned char)((ctx->state[j] >> 16) & 0xff);
+    out[j * 4 + 2] = (unsigned char)((ctx->state[j] >> 8) & 0xff);
+    out[j * 4 + 3] = (unsigned char)(ctx->state[j] & 0xff);
+  }
+}
+
+static void sha256_digest(const unsigned char* data, size_t len, unsigned char out[32]) {
+  Sha256Ctx ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, data, len);
+  sha256_final(&ctx, out);
+}
+
+static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]) {
+  unsigned char key_block[64];
+  unsigned char inner[32];
+  unsigned char key_hash[32];
+  if (key_len > 64) {
+    sha256_digest(key, key_len, key_hash);
+    key = key_hash;
+    key_len = 32;
+  }
+  memset(key_block, 0, sizeof(key_block));
+  if (key_len > 0) memcpy(key_block, key, key_len);
+  for (size_t i = 0; i < 64; i++) key_block[i] ^= 0x36;
+
+  Sha256Ctx ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, key_block, 64);
+  sha256_update(&ctx, msg, msg_len);
+  sha256_final(&ctx, inner);
+
+  memset(key_block, 0, sizeof(key_block));
+  memcpy(key_block, key, key_len);
+  for (size_t i = 0; i < 64; i++) key_block[i] ^= 0x5c;
+  sha256_init(&ctx);
+  sha256_update(&ctx, key_block, 64);
+  sha256_update(&ctx, inner, 32);
+  sha256_final(&ctx, out);
+}
+
+static char* base64_encode_bytes(const unsigned char* data, size_t len) {
+  static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t out_len = 4 * ((len + 2) / 3);
+  char* out = (char*)malloc(out_len + 1);
+  if (out == NULL) return NULL;
+  size_t j = 0;
+  for (size_t i = 0; i < len;) {
+    size_t remaining = len - i;
+    unsigned char a = data[i++];
+    unsigned char b = remaining > 1 ? data[i++] : 0;
+    unsigned char c = remaining > 2 ? data[i++] : 0;
+    out[j++] = table[(a >> 2) & 0x3f];
+    out[j++] = table[((a & 0x03) << 4) | (b >> 4)];
+    out[j++] = remaining > 1 ? table[((b & 0x0f) << 2) | (c >> 6)] : '=';
+    out[j++] = remaining > 2 ? table[c & 0x3f] : '=';
+  }
+  out[j] = '\\0';
+  return out;
+}
+
+static int base64_value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err) {
+  size_t len = strlen(text);
+  if (len % 4 != 0) {
+    *err = "invalid base64 length";
+    return 0;
+  }
+
+  size_t size = len / 4 * 3;
+  if (len >= 1 && text[len - 1] == '=') size--;
+  if (len >= 2 && text[len - 2] == '=') size--;
+
+  unsigned char* out = size == 0 ? NULL : (unsigned char*)malloc(size);
+  if (size > 0 && out == NULL) {
+    *err = "out of memory";
+    return 0;
+  }
+
+  size_t j = 0;
+  for (size_t i = 0; i < len; i += 4) {
+    char c0 = text[i];
+    char c1 = text[i + 1];
+    char c2 = text[i + 2];
+    char c3 = text[i + 3];
+    int v0 = base64_value(c0);
+    int v1 = base64_value(c1);
+    if (v0 < 0 || v1 < 0) {
+      free(out);
+      *err = "invalid base64 character";
+      return 0;
+    }
+    if (c2 == '=') {
+      if (c3 != '=') {
+        free(out);
+        *err = "invalid base64 padding";
+        return 0;
+      }
+      if (i + 4 != len) {
+        free(out);
+        *err = "invalid base64 padding";
+        return 0;
+      }
+      out[j++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+      break;
+    }
+    int v2 = base64_value(c2);
+    if (v2 < 0) {
+      free(out);
+      *err = "invalid base64 character";
+      return 0;
+    }
+    if (c3 == '=') {
+      if (i + 4 != len) {
+        free(out);
+        *err = "invalid base64 padding";
+        return 0;
+      }
+      out[j++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+      out[j++] = (unsigned char)(((v1 & 0x0f) << 4) | (v2 >> 2));
+      break;
+    }
+    int v3 = base64_value(c3);
+    if (v3 < 0) {
+      free(out);
+      *err = "invalid base64 character";
+      return 0;
+    }
+    out[j++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+    out[j++] = (unsigned char)(((v1 & 0x0f) << 4) | (v2 >> 2));
+    out[j++] = (unsigned char)(((v2 & 0x03) << 6) | v3);
+  }
+
+  *out_data = out;
+  *out_len = size;
+  return 1;
+}
+
+static long long crypto_err1(const char* ctor_name, const char* payload) {
+  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), (long long)(uintptr_t)dup_cstr(payload));
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+}
+
+static long long crypto_err2(const char* ctor_name, long long a0, long long a1) {
+  long long err = sprout_make2(find_ctor_tag_by_name(ctor_name), a0, a1);
+  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+}
+
+long long crypto_sha256(long long bytes_h) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("crypto_sha256: null bytes");
+  unsigned char digest[32];
+  sha256_digest(value->data, value->len, digest);
+  BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_sha256: out of memory");
+  return (long long)(uintptr_t)out;
+}
+
+long long crypto_hmac_sha256(long long key_h, long long msg_h) {
+  BytesVal* key = (BytesVal*)(uintptr_t)key_h;
+  BytesVal* msg = (BytesVal*)(uintptr_t)msg_h;
+  if (key == NULL || msg == NULL) tcp_fail("crypto_hmac_sha256: null bytes");
+  unsigned char digest[32];
+  hmac_sha256_digest(key->data, key->len, msg->data, msg->len, digest);
+  BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_hmac_sha256: out of memory");
+  return (long long)(uintptr_t)out;
+}
+
+long long crypto_base64_encode(long long bytes_h) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("crypto_base64_encode: null bytes");
+  char* out = base64_encode_bytes(value->data, value->len);
+  if (out == NULL) tcp_fail("crypto_base64_encode: out of memory");
+  return (long long)(uintptr_t)out;
+}
+
+long long crypto_base64_decode(const char* raw) {
+  if (raw == NULL) tcp_fail("crypto_base64_decode: null input");
+  unsigned char* data = NULL;
+  size_t len = 0;
+  const char* err = NULL;
+  if (!base64_decode_bytes(raw, &data, &len, &err)) {
+    return crypto_err1("stdlib.crypto.Base64DecodeError", err);
+  }
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("crypto_base64_decode: out of memory");
+  out->len = len;
+  out->data = len == 0 ? NULL : data;
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+}
+
+long long crypto_bytes_xor(long long left_h, long long right_h) {
+  BytesVal* left = (BytesVal*)(uintptr_t)left_h;
+  BytesVal* right = (BytesVal*)(uintptr_t)right_h;
+  if (left == NULL || right == NULL) tcp_fail("crypto_bytes_xor: null bytes");
+  if (left->len != right->len) {
+    return crypto_err2("stdlib.crypto.BytesXorLengthMismatch", (long long)left->len, (long long)right->len);
+  }
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("crypto_bytes_xor: out of memory");
+  out->len = left->len;
+  out->data = out->len == 0 ? NULL : (unsigned char*)malloc(out->len);
+  if (out->len > 0 && out->data == NULL) tcp_fail("crypto_bytes_xor: out of memory");
+  for (size_t i = 0; i < out->len; i++) out->data[i] = left->data[i] ^ right->data[i];
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+}
+
+long long crypto_random_bytes(long long count) {
+  if (count < 0) {
+    return crypto_err1("stdlib.crypto.CryptoInvalidArgument", "count must be >= 0");
+  }
+  size_t len = (size_t)count;
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("crypto_random_bytes: out of memory");
+  out->len = len;
+  out->data = len == 0 ? NULL : (unsigned char*)malloc(len);
+  if (len > 0 && out->data == NULL) tcp_fail("crypto_random_bytes: out of memory");
+  if (len > 0) {
+    FILE* fp = fopen("/dev/urandom", "rb");
+    if (fp == NULL) {
+      free(out->data);
+      free(out);
+      return crypto_err1("stdlib.crypto.CryptoUnavailable", strerror(errno));
+    }
+    size_t got = fread(out->data, 1, len, fp);
+    if (got != len || ferror(fp)) {
+      int saved_errno = errno;
+      fclose(fp);
+      free(out->data);
+      free(out);
+      return crypto_err1(
+        "stdlib.crypto.CryptoUnavailable",
+        saved_errno != 0 ? strerror(saved_errno) : "failed to read random bytes"
+      );
+    }
+    fclose(fp);
+  }
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
 }
 
 long long tcp_listen(long long port) {

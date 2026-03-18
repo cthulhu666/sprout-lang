@@ -886,6 +886,90 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), '{"title":"hello","count":2,"items":["a",true,null]}')
 
+    def test_stdlib_crypto_helpers(self) -> None:
+        src = """
+        module main
+        import stdlib.bytes (from_string)
+        import stdlib.crypto as crypto
+
+        fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
+
+        fn main() -> IO Unit =
+          seq(
+            print(crypto.base64_encode(crypto.sha256(from_string("abc")))),
+            seq(
+              print(
+                crypto.base64_encode(
+                  crypto.hmac_sha256(
+                    from_string("key"),
+                    from_string("The quick brown fox jumps over the lazy dog")
+                  )
+                )
+              ),
+              seq(
+                match crypto.base64_decode("c3Byb3V0") with
+                | Ok decoded -> print(crypto.base64_encode(decoded))
+                | Err _ -> print("bad"),
+                match crypto.bytes_xor(from_string("abc"), from_string("ABC")) with
+                | Ok bytes -> print(crypto.base64_encode(bytes))
+                | Err _ -> print("bad")
+              )
+            )
+          )
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join(
+                    [
+                        "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=",
+                        "97yD9DBThCSxMpjmqm+xQ+9NWaFJRhdZl0edvC0aPNg=",
+                        "c3Byb3V0",
+                        "ICAg",
+                    ]
+                ),
+            )
+
+    def test_stdlib_crypto_random_bytes_and_errors(self) -> None:
+        src = """
+        module main
+        import stdlib.bytes (length)
+        import stdlib.crypto as crypto
+
+        fn random_score() -> Int =
+          match crypto.random_bytes(8) with
+          | Ok bytes -> length(bytes)
+          | Err _ -> -1
+
+        fn random_error_score() -> Int =
+          match crypto.random_bytes(-1) with
+          | Ok _ -> -2
+          | Err _ -> 0
+
+        fn main() -> IO Unit =
+          print(random_score() + random_error_score())
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "8")
+
     def test_terminal_builtins_emit_ansi(self) -> None:
         src = """
         fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b

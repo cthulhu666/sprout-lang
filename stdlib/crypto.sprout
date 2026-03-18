@@ -1,0 +1,29 @@
+module stdlib.crypto
+
+export type CryptoError =
+  | CryptoInvalidArgument String
+  | CryptoUnavailable String
+
+export type Base64Error =
+  | Base64DecodeError String
+
+export type BytesOpError =
+  | BytesXorLengthMismatch Int Int
+
+export fn sha256(value: Bytes) -> Bytes =
+  crypto_sha256(value)
+
+export fn hmac_sha256(key: Bytes, message: Bytes) -> Bytes =
+  crypto_hmac_sha256(key, message)
+
+export fn base64_encode(value: Bytes) -> String =
+  crypto_base64_encode(value)
+
+export fn base64_decode(raw: String) -> Result Base64Error Bytes =
+  crypto_base64_decode(raw)
+
+export fn bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes =
+  crypto_bytes_xor(left, right)
+
+export fn random_bytes(count: Int) -> Result CryptoError Bytes =
+  crypto_random_bytes(count)

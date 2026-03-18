@@ -1095,6 +1095,33 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             type=TFunc(TConst("Builder"), TFunc(TConst("Builder"), TConst("Builder"))),
         ),
         "bytes_builder_build": Scheme(vars=(), type=TFunc(TConst("Builder"), TConst("Bytes"))),
+        "crypto_sha256": Scheme(vars=(), type=TFunc(TConst("Bytes"), TConst("Bytes"))),
+        "crypto_hmac_sha256": Scheme(vars=(), type=TFunc(TConst("Bytes"), TFunc(TConst("Bytes"), TConst("Bytes")))),
+        "crypto_base64_encode": Scheme(vars=(), type=TFunc(TConst("Bytes"), STRING)),
+        "crypto_base64_decode": Scheme(
+            vars=(),
+            type=TFunc(
+                STRING,
+                TApp(TApp(result_type, TConst("stdlib.crypto.Base64Error")), TConst("Bytes")),
+            ),
+        ),
+        "crypto_bytes_xor": Scheme(
+            vars=(),
+            type=TFunc(
+                TConst("Bytes"),
+                TFunc(
+                    TConst("Bytes"),
+                    TApp(TApp(result_type, TConst("stdlib.crypto.BytesOpError")), TConst("Bytes")),
+                ),
+            ),
+        ),
+        "crypto_random_bytes": Scheme(
+            vars=(),
+            type=TFunc(
+                INT,
+                TApp(TApp(result_type, TConst("stdlib.crypto.CryptoError")), TConst("Bytes")),
+            ),
+        ),
         "vector_empty": Scheme(vars=(vector_var.name,), type=vector_t),
         "vector_length": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, INT)),
         "vector_get": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(INT, maybe_vector_var))),

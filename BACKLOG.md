@@ -22,6 +22,7 @@ Definition of done:
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
+- [ ] `P1` Decide how builtins participate in effect tracking; audit the current builtin surface and classify pure vs effectful operations, then align types/docs/runtime conventions.
 - [ ] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
 
 ### 2) Networking and HTTP Client
@@ -130,6 +131,8 @@ Definition of done:
 - [x] `stdlib.net` wraps TCP connections/listeners in distinct handle types for user-facing APIs.
 - [x] `stdlib.bytes` provides raw byte slicing plus big-endian integer helpers.
 - [x] `stdlib.bytes` now includes UTF-8 encode/decode plus null-terminated string helpers.
+- [x] `stdlib.bytes` now includes an efficient builder API for protocol packet assembly.
+- [x] `stdlib.crypto` provides SHA-256, HMAC-SHA-256, base64, XOR, and entropy helpers for authenticated clients.
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
 - [x] `http_request` builtin and typed HTTP result ADTs are implemented in interpreter and native modes.
 - [x] `stdlib.json` owns JSON types/helpers, and `json_parse` builtin plus basic JSON accessors are implemented there.
@@ -148,4 +151,4 @@ Definition of done:
 
 1. Add fully opaque constructor/private-export support so runtime resource handles cannot be forged.
 2. Define test support for integration-style IO programs that depend on external services.
-3. Add cryptographic/runtime primitives needed for authenticated protocol clients in v1.
+3. Add a first SCRAM/Postgres client helper slice in stdlib using `stdlib.net`, `stdlib.bytes`, and `stdlib.crypto`.

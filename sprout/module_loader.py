@@ -52,6 +52,10 @@ MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
         "Ok": "Ok",
         "Err": "Err",
     },
+    "stdlib.crypto": {
+        "Ok": "Ok",
+        "Err": "Err",
+    },
     "stdlib.net": {
         "Ok": "Ok",
         "Err": "Err",
@@ -71,6 +75,15 @@ MODULE_COMPAT_TYPES: dict[str, dict[str, dict[str, str]]] = {
     "stdlib.bytes": {
         "Result": {"Ok": "Ok", "Err": "Err"},
         "Builder": {"Builder": "Builder"},
+    },
+    "stdlib.crypto": {
+        "Result": {"Ok": "Ok", "Err": "Err"},
+        "Base64Error": {"Base64DecodeError": "Base64DecodeError"},
+        "BytesOpError": {"BytesXorLengthMismatch": "BytesXorLengthMismatch"},
+        "CryptoError": {
+            "CryptoInvalidArgument": "CryptoInvalidArgument",
+            "CryptoUnavailable": "CryptoUnavailable",
+        },
     },
     "stdlib.net": {
         "Result": {"Ok": "Ok", "Err": "Err"},
@@ -653,6 +666,12 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "bytes_builder_u32_be",
         "bytes_builder_append",
         "bytes_builder_build",
+        "crypto_sha256",
+        "crypto_hmac_sha256",
+        "crypto_base64_encode",
+        "crypto_base64_decode",
+        "crypto_bytes_xor",
+        "crypto_random_bytes",
         "vector_empty",
         "vector_length",
         "vector_get",

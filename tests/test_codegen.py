@@ -518,6 +518,51 @@ class CodegenTests(unittest.TestCase):
             self.assertIn("declare i64 @bytes_builder_append(i64, i64)", ir)
             self.assertIn("declare i64 @bytes_builder_build(i64)", ir)
 
+    def test_compile_crypto_builtins_to_llvm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "main.sprout"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.bytes (from_string, length)
+                import stdlib.crypto as crypto
+                import stdlib.string as string
+
+                fn score_decode() -> Int =
+                  match crypto.base64_decode("c3Byb3V0") with
+                  | Ok decoded -> string.length(crypto.base64_encode(crypto.sha256(decoded)))
+                  | Err _ -> 0
+
+                fn score_xor() -> Int =
+                  match crypto.bytes_xor(from_string("abc"), from_string("ABC")) with
+                  | Ok xored ->
+                      string.length(crypto.base64_encode(crypto.hmac_sha256(from_string("key"), from_string("sprout"))))
+                      + string.length(crypto.base64_encode(xored))
+                  | Err _ -> 0
+
+                fn score_random() -> Int =
+                  match crypto.random_bytes(0) with
+                  | Ok nonce -> length(nonce)
+                  | Err _ -> 0
+
+                fn main() -> IO Unit =
+                  print(score_decode() + score_xor() + score_random())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(spr_path)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            ir = compile_to_llvm(program)
+            self.assertIn("declare i64 @crypto_sha256(i64)", ir)
+            self.assertIn("declare i64 @crypto_hmac_sha256(i64, i64)", ir)
+            self.assertIn("declare ptr @crypto_base64_encode(i64)", ir)
+            self.assertIn("declare i64 @crypto_base64_decode(ptr)", ir)
+            self.assertIn("declare i64 @crypto_bytes_xor(i64, i64)", ir)
+            self.assertIn("declare i64 @crypto_random_bytes(i64)", ir)
+
     def test_compile_string_builtins_to_llvm(self) -> None:
         src = """
         fn main() -> IO Unit =
@@ -1220,6 +1265,58 @@ class CodegenTests(unittest.TestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "1")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_crypto_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.bytes (from_string, length)
+                import stdlib.crypto as crypto
+                import stdlib.string as string
+
+                fn score_decode() -> Int =
+                  match crypto.base64_decode("c3Byb3V0") with
+                  | Ok decoded -> string.length(crypto.base64_encode(crypto.sha256(decoded)))
+                  | Err _ -> 0
+
+                fn score_xor() -> Int =
+                  match crypto.bytes_xor(from_string("abc"), from_string("ABC")) with
+                  | Ok xored ->
+                      string.length(crypto.base64_encode(crypto.hmac_sha256(from_string("key"), from_string("sprout"))))
+                      + string.length(crypto.base64_encode(xored))
+                  | Err _ -> 0
+
+                fn score_random() -> Int =
+                  match crypto.random_bytes(0) with
+                  | Ok nonce -> length(nonce)
+                  | Err _ -> 0
+
+                fn main() -> IO Unit =
+                  print(score_decode() + score_xor() + score_random())
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "92")
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")

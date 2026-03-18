@@ -143,6 +143,50 @@ class TypecheckerTests(unittest.TestCase):
                 typecheck_program(prog)
         self.assertIn("Argument type mismatch", str(ctx.exception))
 
+    def test_typecheck_stdlib_crypto_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.bytes (from_string)
+                import stdlib.crypto as crypto
+
+                fn main() -> IO Unit =
+                  print(
+                    crypto.base64_encode(crypto.sha256(from_string("abc")))
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            prog = parse(bundle.source)
+            resolve_program_names(prog, bundle)
+            types = typecheck_program(prog)
+            self.assertIn("main.main", types)
+
+    def test_typecheck_stdlib_crypto_rejects_non_bytes_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.crypto as crypto
+
+                fn main() -> IO Unit =
+                  print(crypto.sha256(1))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            prog = parse(bundle.source)
+            resolve_program_names(prog, bundle)
+            with self.assertRaises(TypeCheckError) as ctx:
+                typecheck_program(prog)
+        self.assertIn("Argument type mismatch", str(ctx.exception))
+
     def test_type_error_if_branches_mismatch(self) -> None:
         src = """
         fn bad(x: Int) -> Int =

@@ -349,6 +349,15 @@ Bytes helpers (in `stdlib/bytes.sprout`):
   - `builder_append(left: Builder, right: Builder) -> Builder`
   - `builder_build(value: Builder) -> Bytes`
 
+Crypto helpers (in `stdlib/crypto.sprout`):
+
+- `sha256(value: Bytes) -> Bytes`
+- `hmac_sha256(key: Bytes, message: Bytes) -> Bytes`
+- `base64_encode(value: Bytes) -> String`
+- `base64_decode(raw: String) -> Result Base64Error Bytes`
+- `bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes`
+- `random_bytes(count: Int) -> Result CryptoError Bytes` (effectful; reads runtime entropy)
+
 Terminal convenience module (in `stdlib/terminal.sprout`):
 
 - `term_home() -> IO Unit`

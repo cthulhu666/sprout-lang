@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass
 import json
+import hashlib
+import hmac
 import os
 from pathlib import Path
 import selectors
@@ -716,6 +720,65 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("builder_build expects Builder")
         return BytesValue(items=b"".join(value.chunks))
 
+    def _crypto_ok(value: object) -> ADTValue:
+        return ADTValue(constructor="Ok", args=(value,))
+
+    def _crypto_err(constructor: str, payload: object | None = None) -> ADTValue:
+        err = ADTValue(
+            constructor=f"stdlib.crypto.{constructor}",
+            args=() if payload is None else (payload,),
+        )
+        return ADTValue(constructor="Err", args=(err,))
+
+    def builtin_crypto_sha256(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, BytesValue):
+            raise RuntimeError("crypto_sha256 expects Bytes")
+        return BytesValue(items=hashlib.sha256(value.items).digest())
+
+    def builtin_crypto_hmac_sha256(args: list[object]) -> object:
+        key = args[0]
+        message = args[1]
+        if not isinstance(key, BytesValue) or not isinstance(message, BytesValue):
+            raise RuntimeError("crypto_hmac_sha256 expects Bytes key and Bytes message")
+        return BytesValue(items=hmac.new(key.items, message.items, hashlib.sha256).digest())
+
+    def builtin_crypto_base64_encode(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, BytesValue):
+            raise RuntimeError("crypto_base64_encode expects Bytes")
+        return base64.b64encode(value.items).decode("ascii")
+
+    def builtin_crypto_base64_decode(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("crypto_base64_decode expects String")
+        try:
+            decoded = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            return _crypto_err("Base64DecodeError", str(exc))
+        return _crypto_ok(BytesValue(items=decoded))
+
+    def builtin_crypto_bytes_xor(args: list[object]) -> object:
+        left = args[0]
+        right = args[1]
+        if not isinstance(left, BytesValue) or not isinstance(right, BytesValue):
+            raise RuntimeError("crypto_bytes_xor expects Bytes")
+        if len(left.items) != len(right.items):
+            return _crypto_err("BytesXorLengthMismatch", len(left.items))
+        return _crypto_ok(BytesValue(items=bytes(a ^ b for a, b in zip(left.items, right.items))))
+
+    def builtin_crypto_random_bytes(args: list[object]) -> object:
+        count = args[0]
+        if not isinstance(count, int):
+            raise RuntimeError("crypto_random_bytes expects Int")
+        if count < 0:
+            return _crypto_err("CryptoInvalidArgument", "count must be >= 0")
+        try:
+            return _crypto_ok(BytesValue(items=os.urandom(count)))
+        except (NotImplementedError, OSError, ValueError) as exc:
+            return _crypto_err("CryptoUnavailable", str(exc))
+
 
     def builtin_vector_empty(args: list[object]) -> object:
         return VectorValue(items=())
@@ -1220,6 +1283,27 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set(
         "bytes_builder_build",
         BuiltinFunction(name="bytes_builder_build", arity=1, fn=builtin_bytes_builder_build),
+    )
+    env.set("crypto_sha256", BuiltinFunction(name="crypto_sha256", arity=1, fn=builtin_crypto_sha256))
+    env.set(
+        "crypto_hmac_sha256",
+        BuiltinFunction(name="crypto_hmac_sha256", arity=2, fn=builtin_crypto_hmac_sha256),
+    )
+    env.set(
+        "crypto_base64_encode",
+        BuiltinFunction(name="crypto_base64_encode", arity=1, fn=builtin_crypto_base64_encode),
+    )
+    env.set(
+        "crypto_base64_decode",
+        BuiltinFunction(name="crypto_base64_decode", arity=1, fn=builtin_crypto_base64_decode),
+    )
+    env.set(
+        "crypto_bytes_xor",
+        BuiltinFunction(name="crypto_bytes_xor", arity=2, fn=builtin_crypto_bytes_xor),
+    )
+    env.set(
+        "crypto_random_bytes",
+        BuiltinFunction(name="crypto_random_bytes", arity=1, fn=builtin_crypto_random_bytes),
     )
     env.set("vector_empty", BuiltinFunction(name="vector_empty", arity=0, fn=builtin_vector_empty))
     env.set("vector_length", BuiltinFunction(name="vector_length", arity=1, fn=builtin_vector_length))
