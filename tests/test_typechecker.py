@@ -330,6 +330,7 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("http_response_body", types)
         self.assertIn("http_request", types)
         self.assertIn("json_parse", types)
+        self.assertIn("json_stringify", types)
         self.assertIn("json_get_field", types)
         self.assertIn("json_get_int", types)
         self.assertIn("json_get_array", types)

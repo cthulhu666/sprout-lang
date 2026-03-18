@@ -115,6 +115,7 @@ Runtime builtins (host-implemented):
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
 - `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse`
 - `json_parse(raw: String) -> Result JsonError Json`
+- `json_stringify(value: Json) -> String`
 - `term_clear() -> IO Unit`
 - `term_move(row: Int, col: Int) -> IO Unit`
 - `term_hide_cursor() -> IO Unit`
@@ -255,6 +256,7 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `HttpStatusError` variants (`HttpUnsupportedStatus`)
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
+- `json_stringify(value: Json) -> String` (compact JSON for the currently representable subset)
 - `parse_request_line(raw) -> Maybe RequestLine`
 - `http_response(status, body) -> Result HttpStatusError String`
 - `http_response_body(resp: HttpResponse) -> String`

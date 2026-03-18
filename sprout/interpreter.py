@@ -855,6 +855,49 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             return ADTValue(constructor="stdlib.http.JsonObject", args=(cursor,))
         raise RuntimeError(f"json_parse unsupported value kind: {type(value).__name__}")
 
+    def _json_ctor_matches(value: ADTValue, name: str) -> bool:
+        return value.constructor == name or value.constructor == f"stdlib.http.{name}"
+
+    def _adt_to_json(value: object) -> object:
+        if not isinstance(value, ADTValue):
+            raise RuntimeError("json_stringify expects Json")
+        if _json_ctor_matches(value, "JsonNull"):
+            return None
+        if _json_ctor_matches(value, "JsonBool"):
+            return value.args[0]
+        if _json_ctor_matches(value, "JsonInt"):
+            return value.args[0]
+        if _json_ctor_matches(value, "JsonString"):
+            return value.args[0]
+        if _json_ctor_matches(value, "JsonArray"):
+            items: list[object] = []
+            cursor = value.args[0]
+            while True:
+                if not isinstance(cursor, ADTValue):
+                    raise RuntimeError("json_stringify expects JsonArray")
+                if _json_ctor_matches(cursor, "JsonArrayNil"):
+                    return items
+                if not _json_ctor_matches(cursor, "JsonArrayCons"):
+                    raise RuntimeError("json_stringify expects JsonArray")
+                items.append(_adt_to_json(cursor.args[0]))
+                cursor = cursor.args[1]
+        if _json_ctor_matches(value, "JsonObject"):
+            out: dict[str, object] = {}
+            cursor = value.args[0]
+            while True:
+                if not isinstance(cursor, ADTValue):
+                    raise RuntimeError("json_stringify expects JsonObject")
+                if _json_ctor_matches(cursor, "JsonObjectNil"):
+                    return out
+                if not _json_ctor_matches(cursor, "JsonObjectCons"):
+                    raise RuntimeError("json_stringify expects JsonObject")
+                key = cursor.args[0]
+                if not isinstance(key, str):
+                    raise RuntimeError("json_stringify expects String object keys")
+                out[key] = _adt_to_json(cursor.args[1])
+                cursor = cursor.args[2]
+        raise RuntimeError("json_stringify expects Json")
+
     def builtin_json_parse(args: list[object]) -> object:
         raw = args[0]
         if not isinstance(raw, str):
@@ -865,6 +908,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         except json.JSONDecodeError as exc:
             err = ADTValue(constructor="stdlib.http.JsonDecode", args=(str(exc),))
             return ADTValue(constructor="Err", args=(err,))
+
+    def builtin_json_stringify(args: list[object]) -> object:
+        return json.dumps(_adt_to_json(args[0]), ensure_ascii=False, separators=(",", ":"))
 
     def _term_emit(text: str) -> None:
         if out is None:
@@ -1093,6 +1139,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("map_nth_value", BuiltinFunction(name="map_nth_value", arity=2, fn=builtin_map_nth_value))
     env.set("http_request", BuiltinFunction(name="http_request", arity=5, fn=builtin_http_request))
     env.set("json_parse", BuiltinFunction(name="json_parse", arity=1, fn=builtin_json_parse))
+    env.set("json_stringify", BuiltinFunction(name="json_stringify", arity=1, fn=builtin_json_stringify))
     env.set("term_clear", BuiltinFunction(name="term_clear", arity=0, fn=builtin_term_clear))
     env.set("term_move", BuiltinFunction(name="term_move", arity=2, fn=builtin_term_move))
     env.set("term_hide_cursor", BuiltinFunction(name="term_hide_cursor", arity=0, fn=builtin_term_hide_cursor))

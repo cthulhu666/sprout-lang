@@ -233,6 +233,7 @@ static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
 static char* dup_cstr(const char* s);
+static void json_append_value(ByteBuf* out, long long value);
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -635,6 +636,148 @@ static long long http_ok_response(long long status, const char* headers, const c
     (long long)(uintptr_t)body
   );
   return sprout_make1(find_ctor_tag_by_name("Ok"), resp);
+}
+
+static void json_append_hex4(ByteBuf* out, unsigned char value) {
+  static const char* hex = "0123456789abcdef";
+  char escaped[6];
+  escaped[0] = '\\\\';
+  escaped[1] = 'u';
+  escaped[2] = '0';
+  escaped[3] = '0';
+  escaped[4] = hex[(value >> 4) & 0x0f];
+  escaped[5] = hex[value & 0x0f];
+  buf_append_bytes(out, escaped, sizeof(escaped));
+}
+
+static void json_append_escaped_string(ByteBuf* out, const char* raw) {
+  if (raw == NULL) tcp_fail("json_stringify: null string");
+  char quote = '"';
+  buf_append_bytes(out, &quote, 1);
+  for (const unsigned char* p = (const unsigned char*)raw; *p != '\\0'; p++) {
+    unsigned char ch = *p;
+    if (ch == '"') {
+      const char escaped_quote[2] = {'\\\\', '"'};
+      buf_append_bytes(out, escaped_quote, 2);
+    } else if (ch == '\\\\') {
+      const char escaped_slash[2] = {'\\\\', '\\\\'};
+      buf_append_bytes(out, escaped_slash, 2);
+    } else if (ch == '\\b') {
+      const char escaped_backspace[2] = {'\\\\', 'b'};
+      buf_append_bytes(out, escaped_backspace, 2);
+    } else if (ch == '\\f') {
+      const char escaped_formfeed[2] = {'\\\\', 'f'};
+      buf_append_bytes(out, escaped_formfeed, 2);
+    } else if (ch == '\\n') {
+      const char escaped_newline[2] = {'\\\\', 'n'};
+      buf_append_bytes(out, escaped_newline, 2);
+    } else if (ch == '\\r') {
+      const char escaped_return[2] = {'\\\\', 'r'};
+      buf_append_bytes(out, escaped_return, 2);
+    } else if (ch == '\\t') {
+      const char escaped_tab[2] = {'\\\\', 't'};
+      buf_append_bytes(out, escaped_tab, 2);
+    } else if (ch < 0x20) {
+      json_append_hex4(out, ch);
+    } else {
+      buf_append_bytes(out, (const char*)p, 1);
+    }
+  }
+  buf_append_bytes(out, &quote, 1);
+}
+
+static const char* json_ctor_name(long long value) {
+  if (!is_obj_handle(value)) return NULL;
+  CtorMeta* meta = find_ctor(unbox_ptr(value)->tag);
+  return meta == NULL ? NULL : meta->name;
+}
+
+static int json_ctor_is(const char* ctor_name, const char* leaf_name) {
+  if (ctor_name == NULL) return 0;
+  if (strcmp(ctor_name, leaf_name) == 0) return 1;
+  size_t ctor_len = strlen(ctor_name);
+  size_t leaf_len = strlen(leaf_name);
+  if (ctor_len <= leaf_len) return 0;
+  if (strcmp(ctor_name + ctor_len - leaf_len, leaf_name) != 0) return 0;
+  return ctor_name[ctor_len - leaf_len - 1] == '.';
+}
+
+static void json_append_array(ByteBuf* out, long long value) {
+  const char* ctor_name = json_ctor_name(value);
+  if (!json_ctor_is(ctor_name, "JsonArray")) {
+    tcp_fail("json_stringify: expects JsonArray");
+  }
+  buf_append_cstr(out, "[");
+  long long cursor = sprout_field(value, 0);
+  int first = 1;
+  while (1) {
+    const char* cursor_name = json_ctor_name(cursor);
+    if (cursor_name == NULL) tcp_fail("json_stringify: expects JsonArray");
+    if (json_ctor_is(cursor_name, "JsonArrayNil")) break;
+    if (!json_ctor_is(cursor_name, "JsonArrayCons")) {
+      tcp_fail("json_stringify: expects JsonArray");
+    }
+    if (!first) buf_append_cstr(out, ",");
+    json_append_value(out, sprout_field(cursor, 0));
+    cursor = sprout_field(cursor, 1);
+    first = 0;
+  }
+  buf_append_cstr(out, "]");
+}
+
+static void json_append_object(ByteBuf* out, long long value) {
+  const char* ctor_name = json_ctor_name(value);
+  if (!json_ctor_is(ctor_name, "JsonObject")) {
+    tcp_fail("json_stringify: expects JsonObject");
+  }
+  buf_append_cstr(out, "{");
+  long long cursor = sprout_field(value, 0);
+  int first = 1;
+  while (1) {
+    const char* cursor_name = json_ctor_name(cursor);
+    if (cursor_name == NULL) tcp_fail("json_stringify: expects JsonObject");
+    if (json_ctor_is(cursor_name, "JsonObjectNil")) break;
+    if (!json_ctor_is(cursor_name, "JsonObjectCons")) {
+      tcp_fail("json_stringify: expects JsonObject");
+    }
+    if (!first) buf_append_cstr(out, ",");
+    json_append_escaped_string(out, (const char*)(uintptr_t)sprout_field(cursor, 0));
+    buf_append_cstr(out, ":");
+    json_append_value(out, sprout_field(cursor, 1));
+    cursor = sprout_field(cursor, 2);
+    first = 0;
+  }
+  buf_append_cstr(out, "}");
+}
+
+static void json_append_value(ByteBuf* out, long long value) {
+  const char* ctor_name = json_ctor_name(value);
+  if (ctor_name == NULL) tcp_fail("json_stringify: expects Json");
+  if (json_ctor_is(ctor_name, "JsonNull")) {
+    buf_append_cstr(out, "null");
+  } else if (json_ctor_is(ctor_name, "JsonBool")) {
+    buf_append_cstr(out, sprout_field(value, 0) != 0 ? "true" : "false");
+  } else if (json_ctor_is(ctor_name, "JsonInt")) {
+    char int_buf[64];
+    snprintf(int_buf, sizeof(int_buf), "%lld", sprout_field(value, 0));
+    buf_append_cstr(out, int_buf);
+  } else if (json_ctor_is(ctor_name, "JsonString")) {
+    json_append_escaped_string(out, (const char*)(uintptr_t)sprout_field(value, 0));
+  } else if (json_ctor_is(ctor_name, "JsonArray")) {
+    json_append_array(out, value);
+  } else if (json_ctor_is(ctor_name, "JsonObject")) {
+    json_append_object(out, value);
+  } else {
+    tcp_fail("json_stringify: expects Json");
+  }
+}
+
+const char* json_stringify(long long value) {
+  ByteBuf out;
+  buf_init(&out);
+  json_append_value(&out, value);
+  if (out.data == NULL) return dup_cstr("");
+  return out.data;
 }
 
 static int parse_http_url(const char* url, HttpUrl* out, char** err) {

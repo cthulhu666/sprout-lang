@@ -828,6 +828,35 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "1")
 
+    def test_json_stringify_compact_and_escaped(self) -> None:
+        src = """
+        fn sample() -> Json =
+          JsonObject(
+            JsonObjectCons(
+              "message",
+              JsonString("hi\\n\\"ok\\""),
+              JsonObjectCons(
+                "items",
+                JsonArray(
+                  JsonArrayCons(
+                    JsonInt(1),
+                    JsonArrayCons(JsonBool(false), JsonArrayCons(JsonNull, JsonArrayNil))
+                  )
+                ),
+                JsonObjectNil
+              )
+            )
+          )
+
+        fn main() -> IO Unit =
+          print(json_stringify(sample()))
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), '{"message":"hi\\n\\"ok\\"","items":[1,false,null]}')
+
     def test_terminal_builtins_emit_ansi(self) -> None:
         src = """
         fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b

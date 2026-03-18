@@ -513,6 +513,16 @@ class CodegenTests(unittest.TestCase):
         ir = compile_to_llvm(program)
         self.assertIn("declare i64 @http_request(ptr, ptr, ptr, ptr, i64)", ir)
 
+    def test_compile_json_stringify_to_llvm(self) -> None:
+        src = """
+        fn main() -> IO Unit =
+          print(json_stringify(JsonArray(JsonArrayCons(JsonInt(1), JsonArrayNil))))
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare ptr @json_stringify(i64)", ir)
+
     def test_compile_http_prelude_registers_qualified_runtime_ctors(self) -> None:
         src = """
         fn main() -> IO Unit =
@@ -1388,6 +1398,48 @@ class CodegenTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=1.0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_json_stringify(self) -> None:
+        src = """
+        fn sample() -> Json =
+          JsonObject(
+            JsonObjectCons(
+              "ok",
+              JsonBool(true),
+              JsonObjectCons(
+                "items",
+                JsonArray(JsonArrayCons(JsonInt(2), JsonArrayCons(JsonString("x\\n"), JsonArrayNil))),
+                JsonObjectNil
+              )
+            )
+          )
+
+        fn main() -> IO Unit =
+          print(json_stringify(sample()))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    "--with-http-stdlib",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(run.stdout.strip(), '{"ok":true,"items":[2,"x\\n"]}')
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_module_http_client_with_argv_and_collections_maybe(self) -> None:

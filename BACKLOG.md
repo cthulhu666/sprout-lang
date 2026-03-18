@@ -46,7 +46,7 @@ Definition of done:
 
 - [x] `P0` Add `json_parse(String) -> Result JsonError Json`.
 - [x] `P0` Add JSON query helpers (`json_get`, `json_get_string`, `json_get_int`, `json_get_array`, etc.).
-- [ ] `P1` Add `json_stringify(Json) -> String` for debug and payload building.
+- [x] `P1` Add `json_stringify(Json) -> String` for debug and payload building.
 - [ ] `P1` Add tests for malformed input and edge cases.
 
 ### 4) Terminal UI Runtime

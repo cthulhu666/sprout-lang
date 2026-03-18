@@ -1163,6 +1163,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
                 TApp(TApp(result_type, TConst("stdlib.http.JsonError")), TConst("stdlib.http.Json")),
             ),
         ),
+        "json_stringify": Scheme(vars=(), type=TFunc(TConst("stdlib.http.Json"), STRING)),
         "term_clear": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),
         "term_move": Scheme(vars=(), type=TFunc(INT, TFunc(INT, TApp(TConst("IO"), UNIT)))),
         "term_hide_cursor": Scheme(vars=(), type=TApp(TConst("IO"), UNIT)),

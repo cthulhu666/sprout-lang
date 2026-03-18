@@ -669,6 +669,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "tcp_echo_serve",
         "http_request",
         "json_parse",
+        "json_stringify",
         "term_clear",
         "term_move",
         "term_hide_cursor",
