@@ -1,5 +1,6 @@
 module examples.sentry_api
-import stdlib.http (Maybe, Result, HttpError, http_response_body, HttpResponse, Json, JsonError, json_get_field, json_get_string)
+import stdlib.http (Maybe, Result, HttpError, http_response_body, HttpResponse)
+import stdlib.json (Json, JsonError, json_get_field, json_get_string)
 import stdlib.http_client (http_get)
 import stdlib.string as string
 

@@ -101,25 +101,25 @@ EXTERN_SIGS: dict[str, FnSig] = {
 }
 
 
-STD_HTTP_CTORS = {
-    "Ok",
-    "Err",
-    "HttpResponse",
-    "HttpTimeout",
-    "HttpNetwork",
-    "HttpBadStatus",
-    "HttpDecode",
-    "JsonDecode",
-    "JsonNull",
-    "JsonBool",
-    "JsonInt",
-    "JsonString",
-    "JsonArray",
-    "JsonObject",
-    "JsonArrayNil",
-    "JsonArrayCons",
-    "JsonObjectNil",
-    "JsonObjectCons",
+QUALIFIED_LEAF_CTORS = {
+    "Ok": "stdlib.http.Ok",
+    "Err": "stdlib.http.Err",
+    "HttpResponse": "stdlib.http.HttpResponse",
+    "HttpTimeout": "stdlib.http.HttpTimeout",
+    "HttpNetwork": "stdlib.http.HttpNetwork",
+    "HttpBadStatus": "stdlib.http.HttpBadStatus",
+    "HttpDecode": "stdlib.http.HttpDecode",
+    "JsonDecode": "stdlib.json.JsonDecode",
+    "JsonNull": "stdlib.json.JsonNull",
+    "JsonBool": "stdlib.json.JsonBool",
+    "JsonInt": "stdlib.json.JsonInt",
+    "JsonString": "stdlib.json.JsonString",
+    "JsonArray": "stdlib.json.JsonArray",
+    "JsonObject": "stdlib.json.JsonObject",
+    "JsonArrayNil": "stdlib.json.JsonArrayNil",
+    "JsonArrayCons": "stdlib.json.JsonArrayCons",
+    "JsonObjectNil": "stdlib.json.JsonObjectNil",
+    "JsonObjectCons": "stdlib.json.JsonObjectCons",
 }
 
 
@@ -207,8 +207,9 @@ def _ctor_registration_names(name: str) -> list[str]:
     if leaf != name:
         names.append(leaf)
         return names
-    if leaf in STD_HTTP_CTORS:
-        names.append(f"stdlib.http.{leaf}")
+    qualified = QUALIFIED_LEAF_CTORS.get(leaf)
+    if qualified is not None:
+        names.append(qualified)
     return names
 
 

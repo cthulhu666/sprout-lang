@@ -1,0 +1,22 @@
+module examples.json_stringify_demo
+import stdlib.json as json
+
+fn payload() -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons(
+      "title",
+      json.JsonString("hello"),
+      json.JsonObjectCons(
+        "count",
+        json.JsonInt(2),
+        json.JsonObjectCons(
+          "items",
+          json.JsonArray(json.JsonArrayCons(json.JsonString("a"), json.JsonArrayCons(json.JsonBool(true), json.JsonArrayNil))),
+          json.JsonObjectNil
+        )
+      )
+    )
+  )
+
+fn main() -> IO Unit =
+  print(json_stringify(payload()))

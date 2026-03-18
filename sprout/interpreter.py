@@ -830,33 +830,33 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
     def _json_to_adt(value: object) -> ADTValue:
         if value is None:
-            return ADTValue(constructor="stdlib.http.JsonNull", args=())
+            return ADTValue(constructor="stdlib.json.JsonNull", args=())
         if isinstance(value, bool):
-            return ADTValue(constructor="stdlib.http.JsonBool", args=(value,))
+            return ADTValue(constructor="stdlib.json.JsonBool", args=(value,))
         if isinstance(value, int):
-            return ADTValue(constructor="stdlib.http.JsonInt", args=(value,))
+            return ADTValue(constructor="stdlib.json.JsonInt", args=(value,))
         if isinstance(value, str):
-            return ADTValue(constructor="stdlib.http.JsonString", args=(value,))
+            return ADTValue(constructor="stdlib.json.JsonString", args=(value,))
         if isinstance(value, list):
-            cursor = ADTValue(constructor="stdlib.http.JsonArrayNil", args=())
+            cursor = ADTValue(constructor="stdlib.json.JsonArrayNil", args=())
             for item in reversed(value):
                 cursor = ADTValue(
-                    constructor="stdlib.http.JsonArrayCons",
+                    constructor="stdlib.json.JsonArrayCons",
                     args=(_json_to_adt(item), cursor),
                 )
-            return ADTValue(constructor="stdlib.http.JsonArray", args=(cursor,))
+            return ADTValue(constructor="stdlib.json.JsonArray", args=(cursor,))
         if isinstance(value, dict):
-            cursor = ADTValue(constructor="stdlib.http.JsonObjectNil", args=())
+            cursor = ADTValue(constructor="stdlib.json.JsonObjectNil", args=())
             for key, item in reversed(list(value.items())):
                 cursor = ADTValue(
-                    constructor="stdlib.http.JsonObjectCons",
+                    constructor="stdlib.json.JsonObjectCons",
                     args=(str(key), _json_to_adt(item), cursor),
                 )
-            return ADTValue(constructor="stdlib.http.JsonObject", args=(cursor,))
+            return ADTValue(constructor="stdlib.json.JsonObject", args=(cursor,))
         raise RuntimeError(f"json_parse unsupported value kind: {type(value).__name__}")
 
     def _json_ctor_matches(value: ADTValue, name: str) -> bool:
-        return value.constructor == name or value.constructor == f"stdlib.http.{name}"
+        return value.constructor == name or value.constructor == f"stdlib.json.{name}"
 
     def _adt_to_json(value: object) -> object:
         if not isinstance(value, ADTValue):
@@ -906,7 +906,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             parsed = json.loads(raw)
             return ADTValue(constructor="Ok", args=(_json_to_adt(parsed),))
         except json.JSONDecodeError as exc:
-            err = ADTValue(constructor="stdlib.http.JsonDecode", args=(str(exc),))
+            err = ADTValue(constructor="stdlib.json.JsonDecode", args=(str(exc),))
             return ADTValue(constructor="Err", args=(err,))
 
     def builtin_json_stringify(args: list[object]) -> object:

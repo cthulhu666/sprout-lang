@@ -114,8 +114,8 @@ Runtime builtins (host-implemented):
 - `tcp_close_listener(listener: Int) -> IO Unit`
 - `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
 - `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse`
-- `json_parse(raw: String) -> Result JsonError Json`
-- `json_stringify(value: Json) -> String`
+- `json_parse(raw: String) -> Result stdlib.json.JsonError stdlib.json.Json`
+- `json_stringify(value: stdlib.json.Json) -> String`
 - `term_clear() -> IO Unit`
 - `term_move(row: Int, col: Int) -> IO Unit`
 - `term_hide_cursor() -> IO Unit`
@@ -254,15 +254,19 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `HttpResponse(status, headers, body)`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
 - `HttpStatusError` variants (`HttpUnsupportedStatus`)
-- `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
-- `JsonArrayStep` / `JsonObjectStep` traversal ADTs
-- `json_stringify(value: Json) -> String` (compact JSON for the currently representable subset)
 - `parse_request_line(raw) -> Maybe RequestLine`
 - `http_response(status, body) -> Result HttpStatusError String`
 - `http_response_body(resp: HttpResponse) -> String`
 - `http_ok(body) -> String`
 - `http_bad_request() -> String`
 - `http_echo_response(raw_request) -> String`
+
+JSON stdlib helpers (in `stdlib/json.sprout`):
+
+- `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
+- `JsonArrayStep` / `JsonObjectStep` traversal ADTs
+- `json_parse(raw) -> Result JsonError Json`
+- `json_stringify(value: Json) -> String` (compact JSON for the currently representable subset)
 - `json_get_field(value, key) -> Maybe Json`
 - `json_get_string(value) -> Maybe String`
 - `json_get_int(value) -> Maybe Int`
@@ -370,7 +374,7 @@ Load stdlib prelude explicitly for standalone files:
 - `python3 -m sprout.cli run --with-stdlib your_file.sprout`
 - module-loaded programs get the foundational prelude implicitly
 
-Load HTTP helpers:
+Load HTTP and JSON helpers:
 
 - `python3 -m sprout.cli check --with-http-stdlib your_file.sprout`
 - `python3 -m sprout.cli run --with-http-stdlib your_file.sprout`

@@ -47,6 +47,7 @@ Definition of done:
 - [x] `P0` Add `json_parse(String) -> Result JsonError Json`.
 - [x] `P0` Add JSON query helpers (`json_get`, `json_get_string`, `json_get_int`, `json_get_array`, etc.).
 - [x] `P1` Add `json_stringify(Json) -> String` for debug and payload building.
+- [ ] `P2` Reimplement `json_stringify` in Sprout once string/escaping primitives make that practical, keeping host builtins reserved for impossible or efficiency-critical operations.
 - [ ] `P1` Add tests for malformed input and edge cases.
 
 ### 4) Terminal UI Runtime
@@ -124,13 +125,14 @@ Definition of done:
 
 - [x] Modules with explicit exports (`export`) are implemented.
 - [x] HTTP response helpers exist in `stdlib/http.sprout`.
+- [x] JSON types and helpers exist in `stdlib/json.sprout`.
 - [x] `stdlib.net` defines typed TCP client result/error helpers.
 - [x] `stdlib.net` wraps TCP connections/listeners in distinct handle types for user-facing APIs.
 - [x] `stdlib.bytes` provides raw byte slicing plus big-endian integer helpers.
 - [x] `stdlib.bytes` now includes UTF-8 encode/decode plus null-terminated string helpers.
 - [x] Swappable TCP server model exists (`reactor`, `blocking`) for server-side runtime.
 - [x] `http_request` builtin and typed HTTP result ADTs are implemented in interpreter and native modes.
-- [x] `json_parse` builtin and basic JSON accessors are implemented.
+- [x] `stdlib.json` owns JSON types/helpers, and `json_parse` builtin plus basic JSON accessors are implemented there.
 - [x] `stdlib.collections` now uses runtime-backed `Vector` for `Vec` indexing helpers.
 - [x] `stdlib.collections` now uses runtime-backed `Map` for `Dict` helpers.
 - [x] Runtime builtin failures now use a shared `runtime error: builtin ...` convention in interpreter and native paths.

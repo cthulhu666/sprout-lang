@@ -452,6 +452,35 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
+    def test_import_stdlib_json_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.json as json
+
+                fn payload() -> json.Json =
+                  json.JsonObject(json.JsonObjectCons("count", json.JsonInt(2), json.JsonObjectNil))
+
+                fn has_count(value: json.Json) -> String =
+                  match json.json_get_field(value, "count") with
+                  | Just _ -> "ok"
+                  | Nothing -> "missing"
+
+                fn main() -> IO Unit = print(has_count(payload()))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ok")
+
     def test_import_stdlib_net_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
