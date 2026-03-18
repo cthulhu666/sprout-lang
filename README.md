@@ -17,6 +17,7 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 
 - [Specification v0 (Normative)](./docs/spec-v0.md)
 - [Language Design v0](./docs/language-design-v0.md)
+- [Effect System v0 Plan](./docs/effect-system-v0-plan.md)
 - [Effect System v1 Draft](./docs/effect-system-v1-draft.md)
 - [Int Ranges v1 Draft](./docs/int-ranges-v1-draft.md)
 - [Sequencing Sugar v1 Draft](./docs/sequencing-sugar-v1-draft.md)
@@ -32,6 +33,9 @@ Normative status:
   in the prototype, but are not yet part of normative v0.
 - In v0, `IO a` is only a lightweight annotation for effectful APIs; a real
   effect system is deferred to v1.
+- The repository also contains a newer proposal to promote a minimal real
+  effect system into v0; until implemented and specified, that plan remains
+  design work rather than current language behavior.
 
 ## Repository Layout
 

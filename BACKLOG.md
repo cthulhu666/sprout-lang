@@ -148,9 +148,10 @@ Definition of done:
 - [x] `env_get(name) -> Maybe String` is available in interpreter and native modes.
 - [x] Integration-style IO tests now have a dedicated harness (`tests/integration_support.py`) and focused suite (`tests/test_integration_io.py`).
 - [x] The builtin surface is now explicitly audited in the docs as `IO`-annotated, pure, or runtime-bound-but-non-`IO` in v0.
+- [x] There is now an explicit design plan for promoting a minimal real effect system into v0: [docs/effect-system-v0-plan.md](./docs/effect-system-v0-plan.md).
 
 ## Next 3 Tasks (Execution Order)
 
-1. Decide how builtins participate in effect tracking and clean up the current runtime-bound-but-non-`IO` builtin set.
-2. Add integration tests with mocked HTTP responses for the external-integration example layer.
-3. Tighten terminal interaction primitives so interactive examples have a more realistic runtime surface.
+1. Finalize the v0 effect-system design choices: syntax, `main`, and whether effect polymorphism ships in the first milestone.
+2. Implement parser/typechecker support for effectful function types and update the normative spec accordingly.
+3. Migrate builtins from `IO a` / runtime-bound plain returns to the new v0 effect model.
