@@ -66,6 +66,13 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "bytes_singleton": FnSig(name="bytes_singleton", params=[I64], ret=I64),
     "bytes_from_utf8": FnSig(name="bytes_from_utf8", params=[I8_PTR], ret=I64),
     "bytes_to_utf8": FnSig(name="bytes_to_utf8", params=[I64], ret=I64),
+    "bytes_builder_empty": FnSig(name="bytes_builder_empty", params=[], ret=I64),
+    "bytes_builder_bytes": FnSig(name="bytes_builder_bytes", params=[I64], ret=I64),
+    "bytes_builder_byte": FnSig(name="bytes_builder_byte", params=[I64], ret=I64),
+    "bytes_builder_u16_be": FnSig(name="bytes_builder_u16_be", params=[I64], ret=I64),
+    "bytes_builder_u32_be": FnSig(name="bytes_builder_u32_be", params=[I64], ret=I64),
+    "bytes_builder_append": FnSig(name="bytes_builder_append", params=[I64, I64], ret=I64),
+    "bytes_builder_build": FnSig(name="bytes_builder_build", params=[I64], ret=I64),
     "vector_empty": FnSig(name="vector_empty", params=[], ret=I64),
     "vector_length": FnSig(name="vector_length", params=[I64], ret=I64),
     "vector_get": FnSig(name="vector_get", params=[I64, I64], ret=I64),
@@ -226,6 +233,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
         if node.name == "String":
             return I8_PTR
         if node.name == "Bytes":
+            return I64
+        if node.name == "Builder":
             return I64
         if node.name in adt_names or leaf in adt_leaf_names:
             return I64

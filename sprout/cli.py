@@ -211,6 +211,12 @@ typedef struct {
 } BytesVal;
 
 typedef struct {
+  size_t len;
+  size_t count;
+  BytesVal** chunks;
+} BuilderVal;
+
+typedef struct {
   char* host;
   char* port;
   char* path;
@@ -234,6 +240,7 @@ long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
 static char* dup_cstr(const char* s);
 static void json_append_value(ByteBuf* out, long long value);
+static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -1329,6 +1336,111 @@ long long bytes_to_utf8(long long bytes_h) {
   if (value->len > 0) memcpy(out, value->data, value->len);
   out[value->len] = '\\0';
   return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+}
+
+static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx) {
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail(ctx);
+  out->len = len;
+  out->data = len == 0 ? NULL : (unsigned char*)malloc(len);
+  if (len > 0 && out->data == NULL) tcp_fail(ctx);
+  if (len > 0) memcpy(out->data, data, len);
+  return out;
+}
+
+static BuilderVal* builder_alloc(size_t len, size_t count) {
+  BuilderVal* out = (BuilderVal*)malloc(sizeof(BuilderVal));
+  if (out == NULL) tcp_fail("bytes_builder: out of memory");
+  out->len = len;
+  out->count = count;
+  out->chunks = count == 0 ? NULL : (BytesVal**)malloc(count * sizeof(BytesVal*));
+  if (count > 0 && out->chunks == NULL) tcp_fail("bytes_builder: out of memory");
+  return out;
+}
+
+static long long sprout_div_floor(long long left, long long right) {
+  long long q = left / right;
+  long long r = left % right;
+  if (r != 0 && ((r > 0) != (right > 0))) q -= 1;
+  return q;
+}
+
+long long bytes_builder_empty(void) {
+  return (long long)(uintptr_t)builder_alloc(0, 0);
+}
+
+long long bytes_builder_bytes(long long bytes_h) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_builder_bytes: null bytes");
+  BuilderVal* out = builder_alloc(value->len, value->len == 0 ? 0 : 1);
+  if (out->count == 1) out->chunks[0] = value;
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_byte(long long value) {
+  if (value < 0 || value > 255) tcp_fail("bytes_builder_byte: byte out of range");
+  unsigned char data[1] = {(unsigned char)value};
+  BytesVal* chunk = bytes_from_chunk_bytes(data, 1, "bytes_builder_byte: out of memory");
+  BuilderVal* out = builder_alloc(1, 1);
+  out->chunks[0] = chunk;
+  return (long long)(uintptr_t)out;
+}
+
+static unsigned char builder_mod_256(long long value) {
+  long long q = sprout_div_floor(value, 256);
+  return (unsigned char)(value - q * 256);
+}
+
+long long bytes_builder_u16_be(long long value) {
+  unsigned char data[2];
+  data[0] = builder_mod_256(sprout_div_floor(value, 256));
+  data[1] = builder_mod_256(value);
+  BytesVal* chunk = bytes_from_chunk_bytes(data, 2, "bytes_builder_u16_be: out of memory");
+  BuilderVal* out = builder_alloc(2, 1);
+  out->chunks[0] = chunk;
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_u32_be(long long value) {
+  unsigned char data[4];
+  data[0] = builder_mod_256(sprout_div_floor(value, 16777216));
+  data[1] = builder_mod_256(sprout_div_floor(value, 65536));
+  data[2] = builder_mod_256(sprout_div_floor(value, 256));
+  data[3] = builder_mod_256(value);
+  BytesVal* chunk = bytes_from_chunk_bytes(data, 4, "bytes_builder_u32_be: out of memory");
+  BuilderVal* out = builder_alloc(4, 1);
+  out->chunks[0] = chunk;
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_append(long long left_h, long long right_h) {
+  BuilderVal* left = (BuilderVal*)(uintptr_t)left_h;
+  BuilderVal* right = (BuilderVal*)(uintptr_t)right_h;
+  if (left == NULL || right == NULL) tcp_fail("bytes_builder_append: null builder");
+  if (left->count == 0) return right_h;
+  if (right->count == 0) return left_h;
+  BuilderVal* out = builder_alloc(left->len + right->len, left->count + right->count);
+  for (size_t i = 0; i < left->count; i++) out->chunks[i] = left->chunks[i];
+  for (size_t i = 0; i < right->count; i++) out->chunks[left->count + i] = right->chunks[i];
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_build(long long builder_h) {
+  BuilderVal* value = (BuilderVal*)(uintptr_t)builder_h;
+  if (value == NULL) tcp_fail("bytes_builder_build: null builder");
+  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
+  if (out == NULL) tcp_fail("bytes_builder_build: out of memory");
+  out->len = value->len;
+  out->data = out->len == 0 ? NULL : (unsigned char*)malloc(out->len);
+  if (out->len > 0 && out->data == NULL) tcp_fail("bytes_builder_build: out of memory");
+  size_t offset = 0;
+  for (size_t i = 0; i < value->count; i++) {
+    BytesVal* chunk = value->chunks[i];
+    if (chunk == NULL) tcp_fail("bytes_builder_build: null chunk");
+    if (chunk->len > 0) memcpy(out->data + offset, chunk->data, chunk->len);
+    offset += chunk->len;
+  }
+  return (long long)(uintptr_t)out;
 }
 
 long long tcp_listen(long long port) {

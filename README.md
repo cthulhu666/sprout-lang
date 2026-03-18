@@ -325,6 +325,7 @@ Current limitation:
 Bytes helpers (in `stdlib/bytes.sprout`):
 
 - uses foundational prelude `Maybe` and `Result`
+- `Builder` opaque type for efficient packet construction
 - `empty() -> Bytes`
 - `singleton(value) -> Bytes`
 - `length(value) -> Int`
@@ -339,6 +340,14 @@ Bytes helpers (in `stdlib/bytes.sprout`):
 - `to_string(value) -> Result Utf8Error String`
 - `c_string(raw) -> Bytes`
 - `read_c_string(value) -> Result Utf8Error String`
+- builder helpers:
+  - `builder_empty() -> Builder`
+  - `builder_bytes(value: Bytes) -> Builder`
+  - `builder_byte(value: Int) -> Builder`
+  - `builder_u16_be(value: Int) -> Builder`
+  - `builder_u32_be(value: Int) -> Builder`
+  - `builder_append(left: Builder, right: Builder) -> Builder`
+  - `builder_build(value: Builder) -> Bytes`
 
 Terminal convenience module (in `stdlib/terminal.sprout`):
 

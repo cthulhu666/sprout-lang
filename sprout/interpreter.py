@@ -59,6 +59,11 @@ class BytesValue:
 
 
 @dataclass(frozen=True)
+class BuilderValue:
+    chunks: tuple[bytes, ...]
+
+
+@dataclass(frozen=True)
 class TupleValue:
     items: tuple[object, ...]
 
@@ -203,6 +208,8 @@ def format_value(value: object) -> str:
         return "{" + rendered + "}"
     if isinstance(value, BytesValue):
         return "Bytes[" + ", ".join(str(item) for item in value.items) + "]"
+    if isinstance(value, BuilderValue):
+        return "Builder(" + ", ".join(repr(chunk) for chunk in value.chunks) + ")"
     if isinstance(value, TupleValue):
         return "(" + ", ".join(format_value(item) for item in value.items) + ")"
     if value is None:
@@ -648,6 +655,67 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             )
             return ADTValue(constructor="Err", args=(err,))
         return ADTValue(constructor="Ok", args=(decoded,))
+
+    def builtin_bytes_builder_empty(args: list[object]) -> object:
+        return BuilderValue(chunks=())
+
+    def _builder_bytes_from_value(value: object) -> bytes:
+        if isinstance(value, BytesValue):
+            return value.items
+        raise RuntimeError("builder_bytes expects Bytes")
+
+    def builtin_bytes_builder_bytes(args: list[object]) -> object:
+        value = args[0]
+        return BuilderValue(chunks=(_builder_bytes_from_value(value),))
+
+    def builtin_bytes_builder_byte(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, int):
+            raise RuntimeError("builder_byte expects Int")
+        if value < 0 or value > 255:
+            raise RuntimeError("builder_byte expects byte in 0..255")
+        return BuilderValue(chunks=(bytes([value]),))
+
+    def _builder_mod_256(value: int) -> int:
+        return value - (value // 256) * 256
+
+    def builtin_bytes_builder_u16_be(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, int):
+            raise RuntimeError("builder_u16_be expects Int")
+        return BuilderValue(
+            chunks=(
+                bytes([_builder_mod_256(value // 256)]),
+                bytes([_builder_mod_256(value)]),
+            )
+        )
+
+    def builtin_bytes_builder_u32_be(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, int):
+            raise RuntimeError("builder_u32_be expects Int")
+        return BuilderValue(
+            chunks=(
+                bytes([_builder_mod_256(value // 16777216)]),
+                bytes([_builder_mod_256(value // 65536)]),
+                bytes([_builder_mod_256(value // 256)]),
+                bytes([_builder_mod_256(value)]),
+            )
+        )
+
+    def builtin_bytes_builder_append(args: list[object]) -> object:
+        left = args[0]
+        right = args[1]
+        if not isinstance(left, BuilderValue) or not isinstance(right, BuilderValue):
+            raise RuntimeError("builder_append expects Builder")
+        return BuilderValue(chunks=left.chunks + right.chunks)
+
+    def builtin_bytes_builder_build(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, BuilderValue):
+            raise RuntimeError("builder_build expects Builder")
+        return BytesValue(items=b"".join(value.chunks))
+
 
     def builtin_vector_empty(args: list[object]) -> object:
         return VectorValue(items=())
@@ -1125,6 +1193,34 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("bytes_singleton", BuiltinFunction(name="bytes_singleton", arity=1, fn=builtin_bytes_singleton))
     env.set("bytes_from_utf8", BuiltinFunction(name="bytes_from_utf8", arity=1, fn=builtin_bytes_from_utf8))
     env.set("bytes_to_utf8", BuiltinFunction(name="bytes_to_utf8", arity=1, fn=builtin_bytes_to_utf8))
+    env.set(
+        "bytes_builder_empty",
+        BuiltinFunction(name="bytes_builder_empty", arity=0, fn=builtin_bytes_builder_empty),
+    )
+    env.set(
+        "bytes_builder_bytes",
+        BuiltinFunction(name="bytes_builder_bytes", arity=1, fn=builtin_bytes_builder_bytes),
+    )
+    env.set(
+        "bytes_builder_byte",
+        BuiltinFunction(name="bytes_builder_byte", arity=1, fn=builtin_bytes_builder_byte),
+    )
+    env.set(
+        "bytes_builder_u16_be",
+        BuiltinFunction(name="bytes_builder_u16_be", arity=1, fn=builtin_bytes_builder_u16_be),
+    )
+    env.set(
+        "bytes_builder_u32_be",
+        BuiltinFunction(name="bytes_builder_u32_be", arity=1, fn=builtin_bytes_builder_u32_be),
+    )
+    env.set(
+        "bytes_builder_append",
+        BuiltinFunction(name="bytes_builder_append", arity=2, fn=builtin_bytes_builder_append),
+    )
+    env.set(
+        "bytes_builder_build",
+        BuiltinFunction(name="bytes_builder_build", arity=1, fn=builtin_bytes_builder_build),
+    )
     env.set("vector_empty", BuiltinFunction(name="vector_empty", arity=0, fn=builtin_vector_empty))
     env.set("vector_length", BuiltinFunction(name="vector_length", arity=1, fn=builtin_vector_length))
     env.set("vector_get", BuiltinFunction(name="vector_get", arity=2, fn=builtin_vector_get))

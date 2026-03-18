@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 import unittest
 
 from sprout import TypeCheckError, parse, typecheck_program
+from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude, with_prelude
 
 
@@ -82,6 +85,63 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("result_pipe_error", types)
         self.assertIn("when_ok", types)
         self.assertIn("when_error", types)
+
+    def test_typecheck_stdlib_bytes_builder_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.bytes (Builder, Result, Utf8Error, builder_append, builder_build, builder_byte, builder_bytes, builder_empty, builder_u16_be, builder_u32_be, from_string, length, to_string)
+
+                fn sample() -> Builder =
+                  builder_append(
+                    builder_append(builder_empty(), builder_byte(65)),
+                    builder_append(
+                      builder_u16_be(16963),
+                      builder_append(builder_u32_be(1145390663), builder_bytes(from_string("H")))
+                    )
+                  )
+
+                fn score(text: String) -> Int =
+                  match text with
+                  | "ABCDEFGH" -> 1
+                  | _ -> 0
+
+                fn main() -> IO Unit =
+                  match to_string(builder_build(sample())) with
+                  | Ok text -> print(length(builder_build(builder_empty())) + score(text))
+                  | Err _ -> print(0)
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            prog = parse(bundle.source)
+            resolve_program_names(prog, bundle)
+            types = typecheck_program(prog)
+            self.assertTrue(any(value == "Builder" for value in types.values()))
+
+    def test_typecheck_stdlib_bytes_builder_rejects_non_int_byte(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.bytes (builder_byte)
+
+                fn main() -> IO Unit =
+                  print(builder_byte("x"))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            prog = parse(bundle.source)
+            resolve_program_names(prog, bundle)
+            with self.assertRaises(TypeCheckError) as ctx:
+                typecheck_program(prog)
+        self.assertIn("Argument type mismatch", str(ctx.exception))
 
     def test_type_error_if_branches_mismatch(self) -> None:
         src = """

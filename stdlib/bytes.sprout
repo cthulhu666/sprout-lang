@@ -27,6 +27,27 @@ export fn from_string(raw: String) -> Bytes =
 export fn to_string(value: Bytes) -> Result Utf8Error String =
   bytes_to_utf8(value)
 
+export fn builder_empty() -> Builder =
+  bytes_builder_empty()
+
+export fn builder_bytes(value: Bytes) -> Builder =
+  bytes_builder_bytes(value)
+
+export fn builder_byte(value: Int) -> Builder =
+  bytes_builder_byte(value)
+
+export fn builder_u16_be(value: Int) -> Builder =
+  bytes_builder_u16_be(value)
+
+export fn builder_u32_be(value: Int) -> Builder =
+  bytes_builder_u32_be(value)
+
+export fn builder_append(left: Builder, right: Builder) -> Builder =
+  bytes_builder_append(left, right)
+
+export fn builder_build(value: Builder) -> Bytes =
+  bytes_builder_build(value)
+
 fn mod_256(value: Int) -> Int =
   value - (value / 256) * 256
 

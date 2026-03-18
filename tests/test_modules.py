@@ -570,6 +570,44 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "518")
 
+    def test_import_stdlib_bytes_builder_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.bytes (Builder, Result, Utf8Error, builder_append, builder_build, builder_byte, builder_bytes, builder_empty, builder_u16_be, builder_u32_be, from_string, length, to_string)
+
+                fn sample() -> Builder =
+                  builder_append(
+                    builder_append(builder_empty(), builder_byte(65)),
+                    builder_append(
+                      builder_u16_be(16963),
+                      builder_append(builder_u32_be(1145390663), builder_bytes(from_string("H")))
+                    )
+                  )
+
+                fn score(text: String) -> Int =
+                  match text with
+                  | "ABCDEFGH" -> 1
+                  | _ -> 0
+
+                fn main() -> IO Unit =
+                  match to_string(builder_build(sample())) with
+                  | Ok text -> print(text)
+                  | Err _ -> print("bad")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ABCDEFGH")
+
     def test_import_stdlib_math_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

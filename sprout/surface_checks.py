@@ -46,6 +46,13 @@ RAW_BYTES_BUILTINS = {
     "bytes_singleton",
     "bytes_from_utf8",
     "bytes_to_utf8",
+    "bytes_builder_empty",
+    "bytes_builder_bytes",
+    "bytes_builder_byte",
+    "bytes_builder_u16_be",
+    "bytes_builder_u32_be",
+    "bytes_builder_append",
+    "bytes_builder_build",
 }
 
 

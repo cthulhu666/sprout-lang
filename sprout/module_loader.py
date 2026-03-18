@@ -70,6 +70,7 @@ MODULE_COMPAT_TYPES: dict[str, dict[str, dict[str, str]]] = {
     },
     "stdlib.bytes": {
         "Result": {"Ok": "Ok", "Err": "Err"},
+        "Builder": {"Builder": "Builder"},
     },
     "stdlib.net": {
         "Result": {"Ok": "Ok", "Err": "Err"},
@@ -645,6 +646,13 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "bytes_singleton",
         "bytes_from_utf8",
         "bytes_to_utf8",
+        "bytes_builder_empty",
+        "bytes_builder_bytes",
+        "bytes_builder_byte",
+        "bytes_builder_u16_be",
+        "bytes_builder_u32_be",
+        "bytes_builder_append",
+        "bytes_builder_build",
         "vector_empty",
         "vector_length",
         "vector_get",
@@ -677,7 +685,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "term_read_key",
         "term_write",
     }
-    builtin_types = {"Int", "Bool", "String", "Bytes", "IO", "Unit", "List", "Vector", "Map"}
+    builtin_types = {"Int", "Bool", "String", "Bytes", "Builder", "IO", "Unit", "List", "Vector", "Map"}
     module_symbols = _build_module_symbols(program, bundle)
 
     all_exported_values: set[str] = set()
