@@ -1,13 +1,13 @@
 module stdlib.crypto
 
-export type CryptoError =
+export type CryptoError(..) =
   | CryptoInvalidArgument String
   | CryptoUnavailable String
 
-export type Base64Error =
+export type Base64Error(..) =
   | Base64DecodeError String
 
-export type BytesOpError =
+export type BytesOpError(..) =
   | BytesXorLengthMismatch Int Int
 
 export fn sha256(value: Bytes) -> Bytes =

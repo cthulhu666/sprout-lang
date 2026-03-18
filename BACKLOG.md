@@ -144,11 +144,11 @@ Definition of done:
 - [x] Prelude now includes `pipe` plus `result_pipe*` helpers for lighter `Result` pipelines.
 - [x] CLI formatter/linter baseline exists (`fmt`, `fmt --check`, `lint`).
 - [ ] terminal interaction primitives are not yet fully implemented.
-- [ ] fully opaque external-resource handles are not yet implemented.
+- [x] Module exports now support opaque exported types via `export type Name` and constructor-exporting ADTs via `export type Name(..)`.
 - [x] `env_get(name) -> Maybe String` is available in interpreter and native modes.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Add fully opaque constructor/private-export support so runtime resource handles cannot be forged.
-2. Define test support for integration-style IO programs that depend on external services.
+1. Define test support for integration-style IO programs that depend on external services.
+2. Decide how builtins participate in effect tracking; audit the current builtin surface and align types/docs/runtime conventions.
 3. Add a first SCRAM/Postgres client helper slice in stdlib using `stdlib.net`, `stdlib.bytes`, and `stdlib.crypto`.

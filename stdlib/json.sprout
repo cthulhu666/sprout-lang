@@ -1,9 +1,9 @@
 module stdlib.json
 
-export type JsonError =
+export type JsonError(..) =
   | JsonDecode String
 
-export type Json =
+export type Json(..) =
   | JsonNull
   | JsonBool Bool
   | JsonInt Int
@@ -11,18 +11,18 @@ export type Json =
   | JsonArray JsonArray
   | JsonObject JsonObject
 
-export type JsonArray =
+export type JsonArray(..) =
   | JsonArrayCons Json JsonArray
   | JsonArrayNil
 
-export type JsonObject =
+export type JsonObject(..) =
   | JsonObjectCons String Json JsonObject
   | JsonObjectNil
 
-export type JsonArrayStep =
+export type JsonArrayStep(..) =
   | JsonArrayStep Json JsonArray
 
-export type JsonObjectStep =
+export type JsonObjectStep(..) =
   | JsonObjectStep String Json JsonObject
 
 export fn null() -> Json =

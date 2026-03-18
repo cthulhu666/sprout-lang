@@ -10,6 +10,7 @@ from . import ast
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 DECL_RE = re.compile(r"^\s*(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 EXPORT_DECL_RE = re.compile(r"^\s*export\s+(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+EXPORT_TYPE_ALL_CTORS_RE = re.compile(r"^(\s*)export\s+type\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\.\.\)")
 MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
     "stdlib.collections": {
     "Just": "Just",
@@ -74,7 +75,7 @@ MODULE_COMPAT_TYPES: dict[str, dict[str, dict[str, str]]] = {
     },
     "stdlib.bytes": {
         "Result": {"Ok": "Ok", "Err": "Err"},
-        "Builder": {"Builder": "Builder"},
+        "Builder": {},
     },
     "stdlib.crypto": {
         "Result": {"Ok": "Ok", "Err": "Err"},
@@ -131,6 +132,7 @@ class ModuleInfo:
     header: HeaderInfo
     declared: set[str]
     exported: set[str]
+    exported_type_constructors: set[str]
 
 
 @dataclass(frozen=True)
@@ -277,11 +279,20 @@ def parse_header(source: str, path: Path) -> HeaderInfo:
     )
 
 
-def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], str]:
+def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], set[str], str]:
     declared: set[str] = set()
     explicit_exports: set[str] = set()
+    exported_type_constructors: set[str] = set()
     out_lines: list[str] = []
     for line in body.splitlines():
+        m_export_type = EXPORT_TYPE_ALL_CTORS_RE.match(line)
+        if m_export_type is not None:
+            indent, name = m_export_type.groups()
+            declared.add(name)
+            explicit_exports.add(name)
+            exported_type_constructors.add(name)
+            out_lines.append(f"{indent}type {name}{line[m_export_type.end():]}")
+            continue
         m_export = EXPORT_DECL_RE.match(line)
         if m_export is not None:
             name = m_export.group(2)
@@ -296,11 +307,14 @@ def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], str]:
     sanitized = "\n".join(out_lines)
     if body.endswith("\n"):
         sanitized += "\n"
-    return declared, explicit_exports, sanitized
+    return declared, explicit_exports, exported_type_constructors, sanitized
 
 
 def _find_decl_line(body: str, body_line_numbers: tuple[int, ...], name: str) -> int:
     for source_line_no, line in zip(body_line_numbers, body.splitlines()):
+        m_export_type = EXPORT_TYPE_ALL_CTORS_RE.match(line)
+        if m_export_type is not None and m_export_type.group(2) == name:
+            return source_line_no
         m_export = EXPORT_DECL_RE.match(line)
         if m_export is not None and m_export.group(2) == name:
             return source_line_no
@@ -359,7 +373,7 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
 
         seen.add(path)
         ordered.append(path)
-        declared, exported, sanitized_body = _extract_decl_and_export_names(header.body)
+        declared, exported, exported_type_constructors, sanitized_body = _extract_decl_and_export_names(header.body)
         modules[path] = ModuleInfo(
             path=path,
             header=HeaderInfo(
@@ -370,6 +384,7 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             ),
             declared=declared,
             exported=exported,
+            exported_type_constructors=exported_type_constructors,
         )
 
     def validate_module(path: Path) -> None:
@@ -437,17 +452,19 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
         if compat_values is None and compat_types is None and compat_classes is None:
             continue
         compat_names = set(compat_values or {}) | set(compat_types or {}) | set(compat_classes or {})
+        compat_ctor_exports = {name for name, ctors in (compat_types or {}).items() if ctors}
         modules[path] = ModuleInfo(
             path=info.path,
             header=info.header,
             declared=info.declared,
             exported=info.exported | compat_names,
+            exported_type_constructors=info.exported_type_constructors | compat_ctor_exports,
         )
     needs_implicit_prelude = any(info.header.module is not None or info.header.imports for info in modules.values())
     if needs_implicit_prelude:
         prelude_path = _implicit_prelude_path()
         prelude_header = parse_header(prelude_path.read_text(encoding="utf-8"), prelude_path)
-        prelude_declared, _, prelude_body = _extract_decl_and_export_names(prelude_header.body)
+        prelude_declared, _, _, prelude_body = _extract_decl_and_export_names(prelude_header.body)
         modules[prelude_path] = ModuleInfo(
             path=prelude_path,
             header=HeaderInfo(
@@ -458,6 +475,7 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             ),
             declared=prelude_declared,
             exported=set(),
+            exported_type_constructors=set(),
         )
         ordered = [prelude_path] + ordered
 
@@ -573,14 +591,15 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
             symbols.type_locals[decl.name] = canonical
             if exported:
                 symbols.exported_types[decl.name] = canonical
+            export_ctors = decl.name in module_info.exported_type_constructors
             ctor_exports: dict[str, str] = {}
             for ctor in decl.constructors:
                 ctor_canonical = _qualify_name(module_name, ctor.name)
                 symbols.value_locals[ctor.name] = ctor_canonical
-                if exported:
+                if export_ctors:
                     ctor_exports[ctor.name] = ctor_canonical
                     symbols.exported_values[ctor.name] = ctor_canonical
-            if exported:
+            if export_ctors:
                 symbols.exported_type_constructors[decl.name] = ctor_exports
         elif isinstance(decl, ast.ClassDecl):
             canonical = _qualify_name(module_name, decl.name)

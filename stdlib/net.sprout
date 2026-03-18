@@ -2,7 +2,7 @@ module stdlib.net
 
 import stdlib.bytes (Utf8Error, from_string, to_string)
 
-export type TcpError =
+export type TcpError(..) =
   | TcpInvalidArgument String
   | TcpInvalidHandle
   | TcpConnectFailed String

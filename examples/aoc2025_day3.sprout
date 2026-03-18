@@ -6,7 +6,7 @@ import stdlib.string (string_digits, string_lines)
 # For each bank line, pick digits in-order to maximize resulting number.
 # part1 uses 2 picks; part2 uses 12 picks.
 
-export type Answers =
+export type Answers(..) =
   | Answers Int Int
 
 type Shrink =

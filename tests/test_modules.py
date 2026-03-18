@@ -374,6 +374,72 @@ class ModuleLoaderTests(unittest.TestCase):
             with self.assertRaises(ModuleLoadError):
                 resolve_program_names(program, bundle)
 
+    def test_exported_type_without_ctor_export_hides_constructor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                export type Token =
+                  | Token String
+
+                export fn unwrap(value: Token) -> String =
+                  match value with
+                  | Token raw -> raw
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib (Token, unwrap)
+
+                fn main() -> IO Unit =
+                  print(unwrap(Token("secret")))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError) as ctx:
+                resolve_program_names(program, bundle)
+            self.assertIn("Value 'Token' is not exported by any imported module", str(ctx.exception))
+
+    def test_exported_type_with_all_constructors_keeps_constructor_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                export type Token(..) =
+                  | Token String
+
+                export fn unwrap(value: Token) -> String =
+                  match value with
+                  | Token raw -> raw
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import lib (Token, unwrap)
+
+                fn main() -> IO Unit =
+                  print(unwrap(Token("secret")))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "secret")
+
     def test_import_without_explicit_export_cannot_use_symbol(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -532,6 +598,26 @@ class ModuleLoaderTests(unittest.TestCase):
             out = io.StringIO()
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "refused")
+
+    def test_import_stdlib_net_handles_are_opaque(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.net (TcpConnection)
+
+                fn main() -> IO Unit =
+                  print(TcpConnection(1))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError) as ctx:
+                resolve_program_names(program, bundle)
+            self.assertIn("Value 'TcpConnection' is not exported by any imported module", str(ctx.exception))
 
     def test_import_stdlib_bytes_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1185,7 +1271,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 module a
                 import renderable (Renderable)
 
-                export type Box =
+                export type Box(..) =
                   | Box Int
 
                 instance Renderable Box {
@@ -1200,7 +1286,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module b
 
-                export type Box =
+                export type Box(..) =
                   | Box Int
                 """,
                 encoding="utf-8",

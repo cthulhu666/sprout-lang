@@ -319,8 +319,7 @@ TCP client helper types (in `stdlib/net.sprout`):
 - `close_listener(listener) -> IO Unit`
 - `tcp_error_message(err) -> String`
 
-Current limitation:
-- `TcpConnection(...)` and `TcpListener(...)` constructors are still public because Sprout does not yet support hidden/export-private constructors, so this is safer than bare `Int` but not fully opaque yet.
+`TcpConnection` and `TcpListener` are now exported as opaque handle types; application code can use the types but cannot forge the underlying constructors outside `stdlib.net`.
 
 Bytes helpers (in `stdlib/bytes.sprout`):
 
@@ -463,7 +462,7 @@ Sprout supports:
 - `import x.y.z as alias`
 - `import x.y.z (name1, name2)`
 - `import x.y.z as alias (name1, name2)`
-- `export fn ...`, `export type ...`, `export let ...` (top-level only)
+- `export fn ...`, `export type Name`, `export type Name(..)`, `export let ...` (top-level only)
 
 Resolution:
 
@@ -473,7 +472,8 @@ Resolution:
 - bare `import x.y.z` introduces a namespace qualifier using the last path segment (`z.symbol`)
 - `import x.y.z as alias` introduces `alias.symbol`
 - `import x.y.z (name1, name2)` imports only those names unqualified
-- importing an exported type also makes its constructors available to pattern matches and calls
+- importing `export type Name` exposes the type name only
+- importing `export type Name(..)` also exposes the type's constructors for pattern matches and calls
 - top-level declarations are internally namespaced by module, so imported modules no longer flatten into one global scope
 
 Export behavior:

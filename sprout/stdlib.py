@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .module_loader import parse_header
+from .module_loader import _extract_decl_and_export_names, parse_header
 
 
 def stdlib_dir() -> Path:
@@ -27,22 +27,30 @@ def crypto_path() -> Path:
 
 def load_prelude() -> str:
     path = prelude_path()
-    return parse_header(path.read_text(encoding="utf-8"), path).body
+    header = parse_header(path.read_text(encoding="utf-8"), path)
+    _, _, _, body = _extract_decl_and_export_names(header.body)
+    return body
 
 
 def load_http() -> str:
     path = http_path()
-    return parse_header(path.read_text(encoding="utf-8"), path).body
+    header = parse_header(path.read_text(encoding="utf-8"), path)
+    _, _, _, body = _extract_decl_and_export_names(header.body)
+    return body
 
 
 def load_json() -> str:
     path = json_path()
-    return parse_header(path.read_text(encoding="utf-8"), path).body
+    header = parse_header(path.read_text(encoding="utf-8"), path)
+    _, _, _, body = _extract_decl_and_export_names(header.body)
+    return body
 
 
 def load_crypto() -> str:
     path = crypto_path()
-    return parse_header(path.read_text(encoding="utf-8"), path).body
+    header = parse_header(path.read_text(encoding="utf-8"), path)
+    _, _, _, body = _extract_decl_and_export_names(header.body)
+    return body
 
 
 def with_prelude(user_source: str) -> str:
