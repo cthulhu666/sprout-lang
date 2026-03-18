@@ -123,11 +123,13 @@ String -> Result String Int !{IO}
 Deferred follow-up shape:
 
 ```sprout
-fn apply_twice(f: Int -> Int !e, x: Int) -> Int !e =
+fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
   f(f(x))
 ```
 
-This is not part of the first implementation.
+This is not part of the first implementation. When effect polymorphism is
+added, it should keep the same brace-based row shape as closed effects rather
+than switching to a separate `!e` notation.
 
 ## 8. Typing Model
 
@@ -261,3 +263,12 @@ Potential later sugar:
 - `!IO` as shorthand for `!{IO}`
 
 That shorthand is intentionally deferred until the base design is implemented.
+
+When effect polymorphism is added later, the preferred spelling is:
+
+```sprout
+!{e}
+```
+
+rather than a separate bare form like `!e`, so the syntax after `!` stays
+uniformly row-shaped.
