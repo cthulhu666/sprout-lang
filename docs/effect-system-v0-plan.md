@@ -48,14 +48,14 @@ Promote a minimal effect system into v0 by attaching effects to function types.
 Illustrative surface:
 
 ```sprout
-fn parse_age(raw: String) -> Result String Int !{}
+fn parse_age(raw: String) -> Result String Int
 fn env_get(name: String) -> Maybe String !{IO}
 fn http_request(url: String) -> Result HttpError HttpResponse !{IO}
 ```
 
 Interpretation:
 
-- `!{}` means the function is pure.
+- omitted effect annotation means the function is pure.
 - `!{IO}` means the function may interact with the outside world.
 - Effects are properties of function calls, not ordinary return wrappers.
 
@@ -94,14 +94,22 @@ The syntax should be row-shaped from day one:
 ```
 
 That keeps the surface extensible without requiring multiple effect kinds
-immediately.
+immediately. In ordinary source, `!{}` should be optional; omission means pure.
+
+The first implementation should support only closed effects:
+
+- omitted annotation, meaning pure
+- `!{IO}`
+
+Effect polymorphism is intentionally deferred to the next slice after the basic
+closed-effect model works end to end.
 
 ## 7. Surface Syntax
 
 Function declarations:
 
 ```sprout
-fn inc(x: Int) -> Int !{} = x + 1
+fn inc(x: Int) -> Int = x + 1
 fn print_name(name: String) -> Unit !{IO} = print(name)
 ```
 
@@ -112,18 +120,14 @@ Int -> Int !{}
 String -> Result String Int !{IO}
 ```
 
-Higher-order examples:
+Deferred follow-up shape:
 
 ```sprout
 fn apply_twice(f: Int -> Int !e, x: Int) -> Int !e =
   f(f(x))
 ```
 
-Open question:
-
-- whether effect-polymorphic syntax should ship in the first parser milestone,
-  or whether the first implementation should support only closed effects and add
-  effect variables afterward.
+This is not part of the first implementation.
 
 ## 8. Typing Model
 
@@ -131,7 +135,8 @@ At a high level:
 
 1. Every function type carries an effect set or effect variable.
 2. Calling a function contributes its effect set to the surrounding context.
-3. A function declared pure must typecheck with `!{}`.
+3. A function with no effect annotation is pure by default and must typecheck
+   with `!{}`.
 4. A function declared with `!{IO}` may call pure or `IO`-effectful functions.
 5. `Result` and `Maybe` remain ordinary value types and do not imply effects.
 
@@ -161,6 +166,8 @@ fn main() -> Unit !{IO} =
 ```
 
 This keeps the language honest and avoids another special case.
+
+For ordinary non-`main` functions, omitted effect annotation should mean pure.
 
 ## 11. Builtin Migration
 
@@ -218,6 +225,8 @@ Recommended order:
 4. Migrate builtins.
 5. Update examples and stdlib wrappers.
 6. Update the normative spec.
+7. Add effect polymorphism as a follow-up slice if the closed-effect core
+   behaves well.
 
 ## 14. Diagnostics
 
@@ -233,12 +242,22 @@ Diagnostics should say:
 - where the effect escaped
 - what signature change would fix it
 
-## 15. Open Questions
+## 15. Settled Direction
 
-1. Should purity be implicit by default, with omitted effects treated as `!{}`?
-2. Should effect-polymorphic function types ship in the first milestone, or
-   follow immediately after closed-effect support?
-3. Should the syntax stay row-shaped from day one even if only `IO` exists at
-   first?
-4. Should `Unit !{IO}` replace `IO Unit` everywhere immediately, or is there
-   value in a very short parser-level transition period?
+The current recommended direction is:
+
+1. Pure by default: omitted effect annotation means `!{}`.
+2. Effectful functions use explicit row syntax, starting with `!{IO}`.
+3. `main` follows the same rules as every other function; there is no special
+   case.
+4. The syntax break from `-> IO T` to effectful function types should be
+   immediate rather than transitional.
+5. The first implementation supports only closed effects.
+6. Effect polymorphism follows as the next slice rather than shipping in the
+   first implementation.
+
+Potential later sugar:
+
+- `!IO` as shorthand for `!{IO}`
+
+That shorthand is intentionally deferred until the base design is implemented.
