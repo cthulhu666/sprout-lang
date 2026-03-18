@@ -87,12 +87,23 @@ Integration-style IO test convention:
 
 Runtime builtins (host-implemented):
 
+IO-annotated effects:
+
 - `print(x) -> IO Unit`
-- `print_int(x: Int) -> Int` (prints and returns `x`, useful for native backend subset)
-- `read_lines(path: String) -> List String`
-- `env_get(name: String) -> Maybe String`
-- `argv_get(index: Int) -> Maybe String` (`0` is the first user-supplied program argument)
+- `tcp_write(conn: Int, payload: String) -> IO Unit`
+- `tcp_close(conn: Int) -> IO Unit`
+- `tcp_close_listener(listener: Int) -> IO Unit`
+- `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
+- `term_clear() -> IO Unit`
+- `term_move(row: Int, col: Int) -> IO Unit`
+- `term_hide_cursor() -> IO Unit`
+- `term_show_cursor() -> IO Unit`
+- `term_write(text: String) -> IO Unit`
+
+Pure value transforms and runtime-backed persistent data helpers:
+
 - `parse_int(s: String) -> Int`
+- `split_words(s: String) -> List String`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
 - `str_slice(s: String, start: Int, len: Int) -> String`
@@ -106,30 +117,50 @@ Runtime builtins (host-implemented):
 - `bytes_singleton(value: Int) -> Bytes`
 - `bytes_from_utf8(raw: String) -> Bytes`
 - `bytes_to_utf8(value: Bytes) -> Result stdlib.bytes.Utf8Error String`
+- `bytes_builder_empty() -> Builder`
+- `bytes_builder_bytes(value: Bytes) -> Builder`
+- `bytes_builder_byte(value: Int) -> Builder`
+- `bytes_builder_u16_be(value: Int) -> Builder`
+- `bytes_builder_u32_be(value: Int) -> Builder`
+- `bytes_builder_append(left: Builder, right: Builder) -> Builder`
+- `bytes_builder_build(value: Builder) -> Bytes`
+- `crypto_sha256(value: Bytes) -> Bytes`
+- `crypto_hmac_sha256(key: Bytes, msg: Bytes) -> Bytes`
+- `crypto_base64_encode(value: Bytes) -> String`
+- `crypto_base64_decode(raw: String) -> Result stdlib.crypto.Base64Error Bytes`
+- `crypto_bytes_xor(left: Bytes, right: Bytes) -> Result stdlib.crypto.BytesOpError Bytes`
 - `map_empty() -> Map a`
 - `map_get(m: Map a, key: String) -> Maybe a`
 - `map_set(m: Map a, key: String, value: a) -> Map a`
 - `map_remove(m: Map a, key: String) -> Map a`
 - `map_size(m: Map a) -> Int`
+- `json_parse(raw: String) -> Result stdlib.json.JsonError stdlib.json.Json`
+- `json_stringify(value: stdlib.json.Json) -> String`
+- `vector_empty() -> Vector a`
+- `vector_length(v: Vector a) -> Int`
+- `vector_get(v: Vector a, index: Int) -> Maybe a`
+- `vector_set(v: Vector a, index: Int, value: a) -> Vector a`
+- `vector_append(v: Vector a, value: a) -> Vector a`
+- `map_nth_key(m: Map a, index: Int) -> Maybe String`
+- `map_nth_value(m: Map a, index: Int) -> Maybe a`
+
+Runtime-bound builtins that are not `IO`-annotated in v0:
+
+- `print_int(x: Int) -> Int` (prints and returns `x`, useful for native backend subset)
+- `read_lines(path: String) -> List String`
+- `read_file(path: String) -> String`
+- `read_int_lines(path: String) -> Vector Int`
+- `env_get(name: String) -> Maybe String`
+- `argv_get(index: Int) -> Maybe String` (`0` is the first user-supplied program argument)
 - `tcp_listen(port: Int) -> Int`
 - `tcp_accept(listener: Int) -> Int`
 - `tcp_read(conn: Int) -> String`
-- `tcp_write(conn: Int, payload: String) -> IO Unit`
 - `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int`
 - `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError Bytes`
 - `tcp_write_all(conn: Int, payload: Bytes) -> Result stdlib.net.TcpError Int`
-- `tcp_close(conn: Int) -> IO Unit`
-- `tcp_close_listener(listener: Int) -> IO Unit`
-- `tcp_echo_serve(port: Int, max_connections: Int) -> IO Unit`
 - `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse`
-- `json_parse(raw: String) -> Result stdlib.json.JsonError stdlib.json.Json`
-- `json_stringify(value: stdlib.json.Json) -> String`
-- `term_clear() -> IO Unit`
-- `term_move(row: Int, col: Int) -> IO Unit`
-- `term_hide_cursor() -> IO Unit`
-- `term_show_cursor() -> IO Unit`
+- `crypto_random_bytes(count: Int) -> Result stdlib.crypto.CryptoError Bytes`
 - `term_read_key() -> String` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
-- `term_write(text: String) -> IO Unit`
 
 `IO a` in v0 is annotation-only. It marks APIs that are expected to perform
 effects, but Sprout v0 does not yet have a separate effect system, purity
@@ -138,6 +169,12 @@ checking, or delayed execution model.
 That means the current top-level restriction is narrow: Sprout rejects
 top-level `let` bindings whose inferred type is `IO a`, but it does not claim a
 general purity proof for every non-`IO` top-level expression in v0.
+
+Current builtin audit note:
+
+- `IO` annotation and actual runtime interaction are not aligned yet for the full builtin surface.
+- In particular, the "runtime-bound but non-`IO`" group above still observes or mutates external state in practice.
+- This is explicit v0 design debt and remains a follow-up design decision, not an intended long-term semantic model.
 
 String/runtime helpers are host-implemented primitives. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
 

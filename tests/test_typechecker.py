@@ -187,6 +187,31 @@ class TypecheckerTests(unittest.TestCase):
                 typecheck_program(prog)
         self.assertIn("Argument type mismatch", str(ctx.exception))
 
+    def test_builtin_effect_audit_snapshot(self) -> None:
+        types = typecheck_program(parse('fn main() -> IO Unit = print("ok")'))
+        expected = {
+            "print": "forall a. a -> IO Unit",
+            "tcp_write": "Int -> String -> IO Unit",
+            "term_write": "String -> IO Unit",
+            "parse_int": "String -> Int",
+            "split_words": "String -> List String",
+            "bytes_to_utf8": "Bytes -> Result stdlib.bytes.Utf8Error String",
+            "json_stringify": "stdlib.json.Json -> String",
+            "print_int": "Int -> Int",
+            "read_lines": "String -> List String",
+            "read_file": "String -> String",
+            "read_int_lines": "String -> Vector Int",
+            "env_get": "String -> Maybe String",
+            "argv_get": "Int -> Maybe String",
+            "tcp_connect": "String -> Int -> Result stdlib.net.TcpError Int",
+            "tcp_read_exact": "Int -> Int -> Result stdlib.net.TcpError Bytes",
+            "http_request": "String -> String -> String -> String -> Int -> Result stdlib.http.HttpError stdlib.http.HttpResponse",
+            "crypto_random_bytes": "Int -> Result stdlib.crypto.CryptoError Bytes",
+            "term_read_key": "String",
+        }
+        for name, expected_type in expected.items():
+            self.assertEqual(types[name], expected_type, msg=name)
+
     def test_type_error_if_branches_mismatch(self) -> None:
         src = """
         fn bad(x: Int) -> Int =

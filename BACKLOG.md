@@ -22,7 +22,7 @@ Definition of done:
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
-- [ ] `P1` Decide how builtins participate in effect tracking; audit the current builtin surface and classify pure vs effectful operations, then align types/docs/runtime conventions.
+- [~] `P1` Decide how builtins participate in effect tracking; the builtin surface is now audited/documented, but the design decision and convention cleanup are still open.
 - [ ] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
 
 ### 2) Networking and HTTP Client
@@ -147,9 +147,10 @@ Definition of done:
 - [x] Module exports now support opaque exported types via `export type Name` and constructor-exporting ADTs via `export type Name(..)`.
 - [x] `env_get(name) -> Maybe String` is available in interpreter and native modes.
 - [x] Integration-style IO tests now have a dedicated harness (`tests/integration_support.py`) and focused suite (`tests/test_integration_io.py`).
+- [x] The builtin surface is now explicitly audited in the docs as `IO`-annotated, pure, or runtime-bound-but-non-`IO` in v0.
 
 ## Next 3 Tasks (Execution Order)
 
-1. Decide how builtins participate in effect tracking; audit the current builtin surface and align types/docs/runtime conventions.
+1. Decide how builtins participate in effect tracking and clean up the current runtime-bound-but-non-`IO` builtin set.
 2. Add integration tests with mocked HTTP responses for the external-integration example layer.
 3. Tighten terminal interaction primitives so interactive examples have a more realistic runtime surface.
