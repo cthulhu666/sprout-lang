@@ -25,6 +25,36 @@ export type JsonArrayStep =
 export type JsonObjectStep =
   | JsonObjectStep String Json JsonObject
 
+export fn null() -> Json =
+  JsonNull
+
+export fn bool(value: Bool) -> Json =
+  JsonBool(value)
+
+export fn int(value: Int) -> Json =
+  JsonInt(value)
+
+export fn string(value: String) -> Json =
+  JsonString(value)
+
+fn json_array_from_list(items: List Json) -> JsonArray =
+  match items with
+  | Nil -> JsonArrayNil
+  | Cons item rest -> JsonArrayCons(item, json_array_from_list(rest))
+
+export fn array_from_list(items: List Json) -> Json =
+  JsonArray(json_array_from_list(items))
+
+fn json_object_from_pairs(items: List (String, Json)) -> JsonObject =
+  match items with
+  | Nil -> JsonObjectNil
+  | Cons pair rest ->
+      match pair with
+      | (key, value) -> JsonObjectCons(key, value, json_object_from_pairs(rest))
+
+export fn object_from_pairs(items: List (String, Json)) -> Json =
+  JsonObject(json_object_from_pairs(items))
+
 fn json_object_find(obj: JsonObject, key: String) -> Maybe Json =
   match obj with
   | JsonObjectNil -> Nothing

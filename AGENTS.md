@@ -20,6 +20,8 @@ Primary design references:
 5. Use repository-managed tools via `mise` and `just` (avoid ad-hoc global tool versions).
 6. Treat the normative spec as a maintained artifact, not a backlog item.
 7. Before making any non-trivial change, present a short high-level implementation overview and wait for user approval.
+8. Explicitly call out any proposal to add a new builtin or to keep functionality in the host runtime instead of implementing it in Sprout; builtin/runtime additions require user approval up front.
+9. Prefer fixing root-cause issues over introducing workarounds when the root cause is reasonably tractable.
 
 ## Docs and TODO Hygiene
 
@@ -95,6 +97,8 @@ For coding tasks, work is done only when:
 1. Keep host-side builtins minimal and effect-oriented.
 2. Prefer implementing pure helpers in `stdlib/prelude.sprout`.
 3. When moving functionality from builtin to stdlib, add/adjust conformance tests.
+4. Add a builtin only when the feature is impossible to implement in Sprout or cannot be implemented efficiently enough in Sprout with the current language/runtime surface.
+5. If a feature could plausibly live in Sprout stdlib, discuss that tradeoff with the user before implementing it as a builtin.
 
 ## Commit Guidance
 

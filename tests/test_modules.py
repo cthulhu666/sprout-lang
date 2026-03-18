@@ -462,7 +462,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.json as json
 
                 fn payload() -> json.Json =
-                  json.JsonObject(json.JsonObjectCons("count", json.JsonInt(2), json.JsonObjectNil))
+                  json.object_from_pairs([("count", json.int(2))])
 
                 fn has_count(value: json.Json) -> String =
                   match json.json_get_field(value, "count") with
@@ -480,6 +480,36 @@ class ModuleLoaderTests(unittest.TestCase):
             out = io.StringIO()
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
+
+    def test_qualified_module_value_resolution_inside_tuple_expr(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.json as json
+
+                fn payload() -> json.Json =
+                  json.object_from_pairs(
+                    [
+                      ("title", json.string("hello")),
+                      ("count", json.int(2))
+                    ]
+                  )
+
+                fn main() -> IO Unit =
+                  print(json_stringify(payload()))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), '{"title":"hello","count":2}')
 
     def test_import_stdlib_net_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

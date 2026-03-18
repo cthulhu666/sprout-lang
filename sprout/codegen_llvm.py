@@ -1738,6 +1738,14 @@ def _pack_to_i64(value: Value, emitter: Emitter) -> str:
         out = emitter.tmp()
         emitter.emit(f"  {out} = ptrtoint ptr {value.ir} to i64")
         return out
+    if (value.tuple_items or _tuple_item_types_from_lltype(value.typ)) is not None:
+        size = _sizeof_struct(value.typ.text, emitter)
+        raw = emitter.tmp()
+        emitter.emit(f"  {raw} = call ptr @malloc(i64 {size})")
+        emitter.emit(f"  store {value.typ.text} {value.ir}, ptr {raw}")
+        out = emitter.tmp()
+        emitter.emit(f"  {out} = ptrtoint ptr {raw} to i64")
+        return out
     raise CodegenError("Cannot pack value to i64")
 
 
@@ -1746,6 +1754,12 @@ def _coerce_value(value: Value, target: LLType, emitter: Emitter) -> Value:
         return value
     if target == I64:
         return Value(I64, _pack_to_i64(value, emitter))
+    if value.typ == I64 and _tuple_item_types_from_lltype(target) is not None:
+        ptr = emitter.tmp()
+        emitter.emit(f"  {ptr} = inttoptr i64 {value.ir} to ptr")
+        out = emitter.tmp()
+        emitter.emit(f"  {out} = load {target.text}, ptr {ptr}")
+        return Value(target, out, tuple_items=_tuple_item_types_from_lltype(target))
     if value.typ == I64 and target == I1:
         out = emitter.tmp()
         emitter.emit(f"  {out} = trunc i64 {value.ir} to i1")

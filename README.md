@@ -265,6 +265,7 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
+- builder helpers: `null()`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`
 - `json_parse(raw) -> Result JsonError Json`
 - `json_stringify(value: Json) -> String` (compact JSON for the currently representable subset)
 - `json_get_field(value, key) -> Maybe Json`
@@ -274,6 +275,21 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 - `json_get_object(value) -> Maybe JsonObject`
 - `json_array_next(array) -> Maybe JsonArrayStep`
 - `json_object_next(object) -> Maybe JsonObjectStep`
+
+Example:
+
+```sprout
+import stdlib.json as json
+
+fn payload() -> json.Json =
+  json.object_from_pairs(
+    [
+      ("title", json.string("hello")),
+      ("count", json.int(2)),
+      ("items", json.array_from_list([json.string("a"), json.bool(true)]))
+    ]
+  )
+```
 
 `http_response` currently supports a practical fixed subset of common statuses:
 `200`, `201`, `202`, `204`, `400`, `401`, `403`, `404`, `405`, `409`, `410`,

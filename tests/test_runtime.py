@@ -857,6 +857,35 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), '{"message":"hi\\n\\"ok\\"","items":[1,false,null]}')
 
+    def test_json_builder_helpers(self) -> None:
+        src = """
+        module test.main
+        import stdlib.json as json
+
+        fn sample() -> json.Json =
+          json.object_from_pairs(
+            [
+              ("title", json.string("hello")),
+              ("count", json.int(2)),
+              ("items", json.array_from_list([json.string("a"), json.bool(true), json.null()]))
+            ]
+          )
+
+        fn main() -> IO Unit =
+          print(json_stringify(sample()))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), '{"title":"hello","count":2,"items":["a",true,null]}')
+
     def test_terminal_builtins_emit_ansi(self) -> None:
         src = """
         fn seq(a: IO Unit, b: IO Unit) -> IO Unit = b
