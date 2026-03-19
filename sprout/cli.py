@@ -358,6 +358,18 @@ long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argv = argv;
   return 0;
 }
+long long sprout_nothing(void) {
+  if (g_nothing_singleton == NULL) {
+    long long tag = find_ctor_tag_by_name("Nothing");
+    g_nothing_singleton = (SproutObj*)malloc(sizeof(SproutObj));
+    g_nothing_singleton->tag = tag;
+    g_nothing_singleton->f0 = 0;
+    g_nothing_singleton->f1 = 0;
+    g_nothing_singleton->f2 = 0;
+    register_obj(g_nothing_singleton);
+  }
+  return box_ptr(g_nothing_singleton);
+}
 long long argv_get(long long index) {
   if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   if (g_sprout_argv == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));

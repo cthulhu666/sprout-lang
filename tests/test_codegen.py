@@ -113,6 +113,26 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call i64 @sprout_tag", ir)
         self.assertIn("call i64 @sprout_field", ir)
 
+    def test_compile_nothing_uses_native_singleton_helper(self) -> None:
+        src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn make_none() -> MaybeInt =
+          Nothing
+
+        fn main() -> Int !{IO} =
+          match make_none() with
+          | Nothing -> print_int(0)
+          | Just value -> print_int(value)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("call i64 @sprout_nothing()", ir)
+        self.assertNotIn("call i64 @sprout_make0(i64", ir)
+
     def test_compile_direct_constructor_match_avoids_materializing_maybe(self) -> None:
         src = """
         type MaybeInt =
@@ -152,7 +172,7 @@ class CodegenTests(unittest.TestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("call i64 @sprout_make1(i64 0, i64 42)", ir)
-        self.assertIn("call i64 @sprout_make0(i64 1)", ir)
+        self.assertIn("call i64 @sprout_nothing()", ir)
         self.assertIn("call i64 @sprout_tag", ir)
 
     def test_compile_print_adt_value(self) -> None:
@@ -374,6 +394,44 @@ class CodegenTests(unittest.TestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "((1, 2), 3, ok)")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_nothing_singleton_execution(self) -> None:
+        src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn make_none() -> MaybeInt =
+          Nothing
+
+        fn main() -> Int !{IO} =
+          match make_none() with
+          | Nothing -> print_int(0)
+          | Just value -> print_int(value)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "0")
             self.assertEqual(run.returncode, 0)
 
     def test_compile_tcp_builtins_to_llvm(self) -> None:
