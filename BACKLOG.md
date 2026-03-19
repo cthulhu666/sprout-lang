@@ -24,7 +24,7 @@ Definition of done:
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 - [~] `P1` Decide how builtins participate in effect tracking; the builtin surface is now audited/documented, but the design decision and convention cleanup are still open.
 - [ ] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
-- [ ] `P2` Revisit function composition operator direction; current `f >> g == f(g(x))` is counterintuitive and should likely align with Elm/F# conventions.
+- [x] `P2` Align function composition operator direction with Elm/F# conventions; `f >> g` now means `g(f(x))` and `f << g` means `f(g(x))`.
 
 ### 2) Networking and HTTP Client
 
