@@ -59,11 +59,11 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 11. Effects are attached to function types in v0.
 - Semantics: effectful functions are annotated explicitly, for example `fn main() -> Unit !{IO} = ...`; omitted effect annotations mean purity.
 - Rationale: This keeps runtime interaction explicit without changing Sprout's strict execution model.
-- Tradeoff: v0 supports only closed effects with the built-in `IO` label; effect polymorphism and richer effect kinds are deferred.
+- Tradeoff: v0 currently supports closed effects with the built-in `IO` label plus restricted singleton effect variables such as `!{e}`; mixed/open rows and richer effect labels are still deferred.
 
 ## v0 Positioning
 - Default evaluation strategy: strict.
 - Beginner promise: explicit behavior, deterministic execution, clear diagnostics.
 - Annotation stance: infer types wherever they can be determined unambiguously without compromising implementation simplicity, predictable behavior, or diagnostic quality; keep explicit annotations available for clarity.
-- v0 effect model: functions are pure by default; effectful functions use explicit `!{IO}` annotations.
-- Future extension path: effect polymorphism, additional effect labels, and explicit laziness can be added in later milestones without changing default strict evaluation.
+- v0 effect model: functions are pure by default; effectful functions use explicit `!{IO}` annotations, and higher-order helpers may abstract over a single effect variable with `!{e}`.
+- Future extension path: mixed/open effect rows, additional effect labels, and explicit laziness can be added in later milestones without changing default strict evaluation.

@@ -62,8 +62,17 @@ Type forms:
 - Type variable: `a`, `b`, `t`
 - Function type: `a -> b`
 - Effectful function type: `a -> b !{IO}`
+- Restricted effect-polymorphic function type: `a -> b !{e}`
 - Parameterized type: `Maybe a`, `Result e a`
 - Tuple type: `(a, b, c)`
+
+For this v0 milestone, effect annotations support only:
+
+- closed rows: omitted annotation (pure) and `!{IO}`
+- singleton effect variables: `!{e}`
+
+Mixed or multi-entry rows such as `!{IO, e}` and `!{e, f}` are not part of the
+language contract yet.
 
 Type inference:
 
@@ -184,7 +193,9 @@ Effect note for v0:
 
 - Calling a function typed with `!{IO}` behaves like any other strict function call.
 - Effects happen when the call expression is evaluated.
-- v0 does not provide delayed execution, effect polymorphism, or handlers.
+- v0 provides only restricted effect polymorphism via singleton effect variables
+  such as `!{e}`.
+- v0 does not provide delayed execution, mixed/open effect rows, or handlers.
 - Because top-level `let` bindings must be pure, imported modules do not perform
   effectful initialization merely by being loaded.
 
@@ -198,8 +209,13 @@ Effect note for v0:
 6. Pattern-bound variables are scoped to their branch.
 7. ADT constructors produce values of their declared type.
 8. Effect annotations are checked on function types; omitted annotations mean purity.
-9. A pure function body may not call `!{IO}` functions.
-10. Tuple expressions and tuple patterns use structural, exact-arity typing.
+9. Function types may quantify a singleton effect variable `!{e}`; use sites
+   instantiate it with either purity or a concrete closed effect supported in v0.
+10. `main` must use a concrete effect annotation when effectful; it may not be
+    effect-polymorphic.
+11. A pure function body may not call `!{IO}` functions unless it is allowed by
+    the surrounding singleton effect variable instantiation.
+12. Tuple expressions and tuple patterns use structural, exact-arity typing.
 
 ## 8. Standard Library Math Module
 

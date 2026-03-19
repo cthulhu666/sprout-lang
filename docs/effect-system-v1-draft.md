@@ -2,7 +2,8 @@
 
 Status note:
 
-- The minimal `!{IO}` effect system is now implemented in v0.
+- The minimal `!{IO}` effect system and restricted singleton effect variables
+  such as `!{e}` are now implemented in v0.
 - This document is now about the next effect milestone after that baseline, not
   about introducing function effects for the first time.
 
@@ -14,7 +15,8 @@ language milestone after the v0 core is stabilized.
 ## 1. Problem Statement
 
 Sprout v0 now supports explicit closed effects on function types with the
-built-in `IO` label. That is a good baseline, but it still does not provide:
+built-in `IO` label plus restricted singleton effect variables such as `!{e}`.
+That is a good baseline, but it still does not provide:
 
 - purity boundaries,
 - effect tracking,
@@ -29,7 +31,7 @@ story.
 1. Extend the current effect system without changing Sprout’s default strict evaluation.
 2. Make effectful code explicit in function types.
 3. Keep the beginner model small enough to explain in one pass.
-4. Support `IO` first, with room for more effects later.
+4. Add richer rows or additional labels later, if they remain worth the complexity.
 5. Preserve readable diagnostics and predictable execution order.
 
 ## 3. Non-Goals
@@ -55,6 +57,7 @@ Interpretation:
 
 - `!{}` means the function is pure.
 - `!{IO}` means the function may perform IO.
+- `!{e}` means a singleton effect variable.
 - Effects are attached to function types, not encoded as ordinary result values.
 
 This extends the current v0 convention where closed effects such as `!{IO}` are
@@ -80,6 +83,7 @@ Current baseline:
 
 - effect syntax stays row-shaped: `!{...}`
 - pure-by-default remains the rule
+- mixed/open rows remain deferred
 
 ## 6. Semantics
 
@@ -166,11 +170,10 @@ Migration from the current v0 baseline should be incremental:
 
 Proposed next effect milestone:
 
-1. Add effect polymorphism.
-2. Decide whether open rows or only row variables are needed immediately.
-3. Improve diagnostics around higher-order effect propagation.
-4. Evaluate whether additional built-in effect labels beyond `IO` are worth exposing.
-5. Update docs and examples.
+1. Explore whether open rows or only row variables are needed next.
+2. Improve diagnostics around higher-order effect propagation.
+3. Evaluate whether additional built-in effect labels beyond `IO` are worth exposing.
+4. Update docs and examples.
 
 Deferred beyond the first milestone:
 
@@ -181,8 +184,7 @@ Deferred beyond the first milestone:
 
 ## 12. Open Questions
 
-1. Should effect polymorphism use only closed row variables like `!{e}`, or do
-   we also want open-row syntax in the next step?
+1. Should the next effect milestone add open rows, or keep only singleton row variables?
 2. Should local inference infer richer effect sets, or require more explicit
    function-level effect annotations for clearer diagnostics?
 3. Should Sprout expose more than one built-in effect label after `IO`, or keep

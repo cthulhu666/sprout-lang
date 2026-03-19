@@ -259,6 +259,25 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "42")
 
+    def test_run_effect_polymorphic_helper_with_pure_and_io_instantiations(self) -> None:
+        src = """
+        fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
+          f(f(x))
+
+        fn inc(x: Int) -> Int = x + 1
+
+        fn show(x: Int) -> Int !{IO} =
+          print_int(x)
+
+        fn main() -> Unit !{IO} =
+          print(apply_twice(inc, 20) + apply_twice(show, 1))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "1\n1\n23")
+
     def test_run_lambda_return_value(self) -> None:
         src = r"""
         fn make_adder(base: Int) -> Int -> Int =

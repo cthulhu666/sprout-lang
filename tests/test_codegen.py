@@ -1302,6 +1302,40 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.returncode, 42)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_compile_effect_polymorphic_higher_order(self) -> None:
+        src = """
+        fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
+          f(f(x))
+
+        fn show(x: Int) -> Int !{IO} =
+          print_int(x)
+
+        fn main() -> Int !{IO} =
+          apply_twice(show, 1)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout, "1\n1\n")
+            self.assertEqual(run.returncode, 1)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_lambda_closure(self) -> None:
         src = r"""
         fn make_adder(base: Int) -> Int -> Int =

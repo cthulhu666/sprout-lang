@@ -2,15 +2,16 @@
 
 Status note:
 
-- The core of this plan is now implemented in v0 and reflected in the
-  normative spec.
+- The core of this plan, including restricted singleton effect variables, is
+  now implemented in v0 and reflected in the normative spec.
 - This document is kept as design rationale and historical planning context.
 
-This document proposes promoting a minimal real effect system into Sprout v0.
+This document proposed promoting a minimal real effect system into Sprout v0.
 
-It replaces the earlier assumption that effects are purely a v1 concern. It is
-not yet normative, but it is intended to become the design basis for the next
-foundational language milestone.
+It replaces the earlier assumption that effects were purely a v1 concern. The
+core of that plan is now implemented in v0, including restricted singleton
+effect variables. This document remains as historical rationale for the
+foundational shift.
 
 ## 1. Problem Statement
 
@@ -102,13 +103,13 @@ The syntax should be row-shaped from day one:
 That keeps the surface extensible without requiring multiple effect kinds
 immediately. In ordinary source, `!{}` should be optional; omission means pure.
 
-The first implementation should support only closed effects:
+The original first implementation target was only closed effects:
 
 - omitted annotation, meaning pure
 - `!{IO}`
 
-Effect polymorphism is intentionally deferred to the next slice after the basic
-closed-effect model works end to end.
+The next slice after the basic closed-effect model is restricted singleton
+effect polymorphism, written as `!{e}`.
 
 ## 7. Surface Syntax
 

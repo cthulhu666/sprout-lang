@@ -32,7 +32,11 @@ Normative status:
 - In particular, the current module system and typeclass support are implemented
   in the prototype, but are not yet part of normative v0.
 - The current implementation uses explicit function effects in the v0 core:
-  pure functions omit an annotation and effectful functions use `!{IO}`.
+  pure functions omit an annotation, effectful functions use `!{IO}`, and
+  higher-order helpers may use restricted singleton effect variables such as
+  `!{e}`.
+- Mixed/open effect rows are not supported yet; keep `!{IO}` and `!{e}` cases
+  concrete for now.
 - `docs/effect-system-v1-draft.md` is now a forward-looking draft for the next
   effect milestone beyond the implemented v0 baseline.
 
@@ -167,9 +171,13 @@ Effect notes:
 - Sprout v0 now tracks the built-in `IO` effect on function types.
 - Pure functions omit an effect annotation.
 - Effectful functions use `!{IO}`, for example `fn main() -> Unit !{IO} = ...`.
+- Restricted effect polymorphism is supported for higher-order helpers via
+  singleton effect variables such as:
+  `fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(f(x))`.
+- `main` stays concrete when effectful; do not use `!{e}` on `main`.
 - Effects do not change Sprout's strict execution order; they constrain which
   functions may call which other functions.
-- Effect polymorphism and richer effect sets are still deferred follow-up work.
+- Mixed/open effect rows and additional effect labels are still deferred follow-up work.
 
 String/runtime helpers are host-implemented primitives. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
 
