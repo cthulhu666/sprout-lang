@@ -278,7 +278,7 @@ class Parser:
 
     def _pipe_into_call(self, left: ast.Expr, rhs: ast.Expr) -> ast.Expr:
         if isinstance(rhs, ast.CallExpr):
-            return ast.CallExpr(callee=rhs.callee, args=[left] + rhs.args)
+            return ast.CallExpr(callee=rhs.callee, args=rhs.args + [left])
         return ast.CallExpr(callee=rhs, args=[left])
 
     def parse_logical_or(self):

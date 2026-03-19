@@ -155,7 +155,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(callee.callee.right, ast.BinaryExpr)
         self.assertEqual(callee.callee.right.op, "<<")
 
-    def test_parse_forward_pipe_desugars_to_call(self) -> None:
+    def test_parse_pipe_desugars_to_unary_call(self) -> None:
         src = "fn main() -> Int = 20 |> inc"
         program = parse(src)
         fn_decl = program.declarations[0]
@@ -167,7 +167,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.args[0], ast.IntExpr)
         self.assertEqual(fn_decl.body.args[0].value, 20)
 
-    def test_parse_forward_pipe_into_existing_call(self) -> None:
+    def test_parse_pipe_appends_into_existing_call(self) -> None:
         src = "fn main() -> Int = Ok(20) |> result_pipe_ok(inc)"
         program = parse(src)
         fn_decl = program.declarations[0]
@@ -176,9 +176,9 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
         self.assertEqual(fn_decl.body.callee.name, "result_pipe_ok")
         self.assertEqual(len(fn_decl.body.args), 2)
-        self.assertIsInstance(fn_decl.body.args[0], ast.CallExpr)
-        self.assertIsInstance(fn_decl.body.args[1], ast.VarExpr)
-        self.assertEqual(fn_decl.body.args[1].name, "inc")
+        self.assertIsInstance(fn_decl.body.args[0], ast.VarExpr)
+        self.assertEqual(fn_decl.body.args[0].name, "inc")
+        self.assertIsInstance(fn_decl.body.args[1], ast.CallExpr)
 
     def test_parse_semigroup_append_operator_desugars_to_append_call(self) -> None:
         src = "fn main() -> List Int = [1, 2] ++ [3, 4]"

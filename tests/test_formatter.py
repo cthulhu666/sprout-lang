@@ -7,10 +7,10 @@ from sprout.formatter import format_source, lint_source
 
 class FormatterTests(unittest.TestCase):
     def test_format_source_normalizes_spacing_without_erasing_surface_sugar(self) -> None:
-        src = 'fn main()->Result String Int=Ok(20)|>result_pipe_ok(inc)  #demo'
+        src = 'fn main()->Result String Int=Ok(20)|>result_map(inc)  #demo'
         self.assertEqual(
             format_source(src),
-            'fn main() -> Result String Int = Ok(20) |> result_pipe_ok(inc)  #demo\n',
+            'fn main() -> Result String Int = Ok(20) |> result_map(inc)  #demo\n',
         )
 
     def test_format_source_preserves_comment_only_lines(self) -> None:

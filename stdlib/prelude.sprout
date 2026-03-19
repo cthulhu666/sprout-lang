@@ -247,47 +247,47 @@ instance Semigroup (Dict v) {
 fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
   fold_values(vec_append_flip, vec_empty(), xs)
 
-fn pipe(value: a, f: a -> b) -> b =
+fn pipe(f: a -> b, value: a) -> b =
   f(value)
 
-fn result_map(r: Result e a, f: a -> b) -> Result e b =
+fn result_map(f: a -> b, r: Result e a) -> Result e b =
   match r with
   | Ok x -> Ok(f(x))
   | Err e -> Err(e)
 
-fn result_map_error(r: Result e a, f: e -> f_err) -> Result f_err a =
+fn result_map_error(f: e -> f_err, r: Result e a) -> Result f_err a =
   match r with
   | Ok x -> Ok(x)
   | Err e -> Err(f(e))
 
-fn result_and_then(r: Result e a, f: a -> Result e b) -> Result e b =
+fn result_and_then(f: a -> Result e b, r: Result e a) -> Result e b =
   match r with
   | Ok x -> f(x)
   | Err e -> Err(e)
 
-fn result_with_default(r: Result e a, fallback: a) -> a =
+fn result_with_default(fallback: a, r: Result e a) -> a =
   match r with
   | Ok x -> x
   | Err _ -> fallback
 
-fn result_pipe(r: Result e a, f: a -> Result e b) -> Result e b =
-  result_and_then(r, f)
+fn result_pipe(f: a -> Result e b, r: Result e a) -> Result e b =
+  result_and_then(f, r)
 
-fn result_pipe_ok(r: Result e a, f: a -> b) -> Result e b =
-  result_map(r, f)
+fn result_pipe_ok(f: a -> b, r: Result e a) -> Result e b =
+  result_map(f, r)
 
-fn result_pipe_error(r: Result e a, f: e -> f_err) -> Result f_err a =
-  result_map_error(r, f)
+fn result_pipe_error(f: e -> f_err, r: Result e a) -> Result f_err a =
+  result_map_error(f, r)
 
 fn keep_after(effect: Unit !{IO}, value: a) -> a !{IO} =
   value
 
-fn when_ok(r: Result e a, f: a -> Unit !{IO}) -> Result e a !{IO} =
+fn when_ok(f: a -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   match r with
   | Ok x -> keep_after(f(x), r)
   | Err e -> Err(e)
 
-fn when_error(r: Result e a, f: e -> Unit !{IO}) -> Result e a !{IO} =
+fn when_error(f: e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   match r with
   | Ok x -> Ok(x)
   | Err e -> keep_after(f(e), r)

@@ -23,6 +23,8 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 - Semantics: Arithmetic and comparison operators are strict in both operands.
 - Function composition operators follow the same operand evaluation order:
   `f >> g` means `\x -> g(f(x))` and `f << g` means `\x -> f(g(x))`.
+- The pipe operator follows the same operand evaluation order:
+  `x |> f` means `f(x)`, and `x |> g(a)` means `g(a, x)`.
 - Rationale: Keeps operator behavior aligned with regular function-call evaluation.
 - Tradeoff: Same optimization limits as strict call evaluation.
 

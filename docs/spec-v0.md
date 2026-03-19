@@ -175,6 +175,14 @@ Composition operators are ordinary binary operators on functions:
 
 They associate to the right, so `f >> g >> h` means `\x -> h(g(f(x)))`.
 
+The pipe operator is a binary operator that threads a value into the final
+argument position of the expression on its right:
+
+- `value |> f` means `f(value)`
+- `value |> g(a, b)` means `g(a, b, value)`
+
+It associates to the left, so `x |> f(a) |> g(b)` means `g(b, f(a, x))`.
+
 ### 5.6 ADT declaration
 
 ```sprout

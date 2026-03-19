@@ -87,14 +87,14 @@ class RuntimeTests(unittest.TestCase):
         fn main() -> Unit !{IO} =
           print(
             result_with_default(
+              0,
               result_map_error(
+                tag,
                 result_and_then(
-                  result_map(Ok(20), plus1),
-                  twice
-                ),
-                tag
-              ),
-              0
+                  twice,
+                  result_map(plus1, Ok(20))
+                )
+              )
             )
           )
         """
@@ -113,17 +113,17 @@ class RuntimeTests(unittest.TestCase):
         fn main() -> Unit !{IO} =
           print(
             result_with_default(
+              0,
               result_pipe_error(
+                tag,
                 result_pipe_ok(
+                  plus1,
                   result_pipe(
-                    Ok(pipe(20, plus1)),
-                    twice
-                  ),
-                  plus1
-                ),
-                tag
-              ),
-              0
+                    twice,
+                    Ok(pipe(plus1, 20))
+                  )
+                )
+              )
             )
           )
         """
@@ -133,7 +133,7 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "43")
 
-    def test_forward_pipe_operator_with_result_helpers(self) -> None:
+    def test_pipe_operator_with_result_helpers(self) -> None:
         src = """
         fn plus1(x: Int) -> Int = x + 1
         fn twice(x: Int) -> Result String Int = Ok(x * 2)
@@ -142,12 +142,12 @@ class RuntimeTests(unittest.TestCase):
         fn main() -> Unit !{IO} =
           print(
             result_with_default(
+              0,
               Ok(20)
               |> result_pipe_ok(plus1)
               |> result_pipe(twice)
               |> result_pipe_ok(plus1)
-              |> result_pipe_error(tag),
-              0
+              |> result_pipe_error(tag)
             )
           )
         """
@@ -165,11 +165,11 @@ class RuntimeTests(unittest.TestCase):
         fn main() -> Unit !{IO} =
           print(
             result_with_default(
+              0,
               when_error(
-                when_ok(Ok(42), show_ok),
-                show_err
-              ),
-              0
+                show_err,
+                when_ok(show_ok, Ok(42))
+              )
             )
           )
         """
@@ -186,8 +186,8 @@ class RuntimeTests(unittest.TestCase):
         fn main() -> Unit !{IO} =
           print(
             result_with_default(
-              when_error(Err("boom"), show_err),
-              7
+              7,
+              when_error(show_err, Err("boom"))
             )
           )
         """

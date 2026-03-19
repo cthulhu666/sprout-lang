@@ -215,20 +215,21 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - prelude instances are currently provided for `String`, `List a`, `Vec a`, and `Dict v`
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
-  - forward pipe operator: `value |> f` rewrites to `f(value)`
+  - forward pipe operator: `value |> f` rewrites to `f(value)`, and
+    `value |> g(a, b)` rewrites to `g(a, b, value)`
   - function composition operators:
     `f >> g` rewrites to `\x -> g(f(x))`
     `f << g` rewrites to `\x -> f(g(x))`
-  - `pipe(value, f)`
-  - `result_map(r, f)`
-  - `result_map_error(r, f)`
-  - `result_and_then(r, f)`
-  - `result_with_default(r, fallback)`
-  - `result_pipe(r, f)` aliases `result_and_then` in pipeline style
-  - `result_pipe_ok(r, f)` aliases `result_map` in pipeline style
-  - `result_pipe_error(r, f)` aliases `result_map_error` in pipeline style
-  - `when_ok(r, f)` runs `f` for `Ok` and preserves `r`
-  - `when_error(r, f)` runs `f` for `Err` and preserves `r`
+  - `pipe(f, value)`
+  - `result_map(f, r)`
+  - `result_map_error(f, r)`
+  - `result_and_then(f, r)`
+  - `result_with_default(fallback, r)`
+  - `result_pipe(f, r)` aliases `result_and_then` in pipeline style
+  - `result_pipe_ok(f, r)` aliases `result_map` in pipeline style
+  - `result_pipe_error(f, r)` aliases `result_map_error` in pipeline style
+  - `when_ok(f, r)` runs `f` for `Ok` and preserves `r`
+  - `when_error(f, r)` runs `f` for `Err` and preserves `r`
 
 Current call semantics note: ordinary function values support under-application.
 Sprout uses nested arrow types for multi-parameter functions, so `f(x)` returns
@@ -274,17 +275,17 @@ fn show_error(e: String) -> Unit !{IO} = print(e)
 
 # Nested style
 when_error(
+  show_error,
   when_ok(
+    show_ok,
     result_pipe_ok(
+      inc,
       result_pipe(
-        Ok(pipe(20, inc)),
-        double_if_large
+        double_if_large,
+        Ok(pipe(inc, 20))
       ),
-      inc
-    ),
-    show_ok
-  ),
-  show_error
+    )
+  )
 )
 
 # Piped style

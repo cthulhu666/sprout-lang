@@ -20,11 +20,11 @@ fn show_error(e: String) -> Unit !{IO} =
 
 fn manual_result_flow(seed: Result String Int) -> Result String Int =
   result_pipe_error(
+    prefix_error,
     result_pipe_ok(
-      result_pipe(seed, double_if_large),
-      inc
-    ),
-    prefix_error
+      inc,
+      result_pipe(double_if_large, seed)
+    )
   )
 
 fn piped_result_flow(seed: Result String Int) -> Result String Int =
@@ -36,13 +36,13 @@ fn piped_result_flow(seed: Result String Int) -> Result String Int =
 fn print_result(r: Result String Int, fallback: Int) -> Unit !{IO} =
   print(
     result_with_default(
-      when_error(when_ok(r, show_ok), show_error),
-      fallback
+      fallback,
+      when_error(show_error, when_ok(show_ok, r))
     )
   )
 
 fn manual_ok_demo() -> Unit !{IO} =
-  print_result(manual_result_flow(Ok(pipe(20, inc))), 0)
+  print_result(manual_result_flow(Ok(pipe(inc, 20))), 0)
 
 fn piped_ok_demo() -> Unit !{IO} =
   print_result(piped_result_flow(Ok(21)), 0)
