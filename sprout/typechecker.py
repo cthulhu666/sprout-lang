@@ -991,7 +991,6 @@ def infer_expr(
             callee, direct_method_args, callee_effects = instantiate_global_method(state, direct_method_info)
         else:
             callee, callee_effects = infer_expr(expr.callee, env, state, type_decls, global_methods)
-        result = state.fresh()
         typ = callee
         call_effects = callee_effects
         for arg_expr in expr.args:
@@ -1019,7 +1018,6 @@ def infer_expr(
             call_effects = merge_effects(state, call_effects, arg_effects)
             call_effects = merge_effects(state, call_effects, expected_effects)
             typ = next_t
-        unify_at(state, typ, result, expr)
         if direct_method_info is not None:
             resolved_args = [apply(state.subst, arg, state.effect_subst) for arg in direct_method_args]
             setattr(
@@ -1030,7 +1028,7 @@ def infer_expr(
                     args=[type_to_ast_expr(arg) for arg in resolved_args],
                 ),
             )
-        return _mark_expr_type(expr, result), call_effects
+        return _mark_expr_type(expr, typ), call_effects
     if isinstance(expr, ast.IfExpr):
         cond, cond_effects = infer_expr(expr.condition, env, state, type_decls, global_methods)
         unify_at(state, cond, BOOL, expr.condition)

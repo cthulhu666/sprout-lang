@@ -230,9 +230,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `when_ok(r, f)` runs `f` for `Ok` and preserves `r`
   - `when_error(r, f)` runs `f` for `Err` and preserves `r`
 
-Current call semantics note: ordinary function calls are exact-arity today.
-Sprout uses nested arrow types for multi-parameter functions, but partial
-application is not implemented yet as a language/runtime feature.
+Current call semantics note: ordinary function values support under-application.
+Sprout uses nested arrow types for multi-parameter functions, so `f(x)` returns
+another function value when `f` still has remaining parameters.
 
 Math module (in `stdlib/math.sprout`):
 

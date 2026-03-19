@@ -448,8 +448,11 @@ def _expr_callable_sig(
         callee_sig = _expr_callable_sig(expr.callee, sigs, globals_info, adt_names)
         if callee_sig is None:
             return None
-        if len(expr.args) != len(callee_sig.params):
+        if len(expr.args) > len(callee_sig.params):
             return None
+        remaining = callee_sig.params[len(expr.args) :]
+        if remaining:
+            return CallSig(params=remaining, ret=callee_sig.ret, ret_callable_sig=callee_sig.ret_callable_sig)
         return callee_sig.ret_callable_sig
     return None
 
@@ -632,6 +635,78 @@ def _emit_named_function_wrapper(wrapper_name: str, target_name: str, sig: FnSig
     return lines
 
 
+def _emit_partial_direct_wrapper(wrapper_name: str, target_name: str, sig: FnSig, applied_count: int) -> list[str]:
+    remaining = sig.params[applied_count:]
+    lines = [f"define {sig.ret.text} @{wrapper_name}(ptr %env{''.join(f', {t.text} %a{i}' for i, t in enumerate(remaining))}) {{", "entry:"]
+    arg_values: list[str] = []
+    for idx, typ in enumerate(sig.params[:applied_count], start=1):
+        slot = f"%slot{idx - 1}"
+        raw = f"%raw{idx - 1}"
+        val = f"%cap{idx - 1}"
+        lines.append(f"  {slot} = getelementptr i64, ptr %env, i64 {idx}")
+        lines.append(f"  {raw} = load i64, ptr {slot}")
+        if typ == I64:
+            arg_values.append(f"i64 {raw}")
+        elif typ == I1:
+            lines.append(f"  {val} = trunc i64 {raw} to i1")
+            arg_values.append(f"i1 {val}")
+        elif typ == I8_PTR:
+            lines.append(f"  {val} = inttoptr i64 {raw} to ptr")
+            arg_values.append(f"{typ.text} {val}")
+        else:
+            ptr = f"%ptr{idx - 1}"
+            lines.append(f"  {ptr} = inttoptr i64 {raw} to ptr")
+            lines.append(f"  {val} = load {typ.text}, ptr {ptr}")
+            arg_values.append(f"{typ.text} {val}")
+    arg_values.extend(f"{t.text} %a{i}" for i, t in enumerate(remaining))
+    call = (
+        f"  %ret = call {sig.ret.text} @{target_name}({', '.join(arg_values)})"
+        if arg_values
+        else f"  %ret = call {sig.ret.text} @{target_name}()"
+    )
+    lines.append(call)
+    lines.append(f"  ret {sig.ret.text} %ret")
+    lines.append("}")
+    return lines
+
+
+def _emit_partial_closure_wrapper(wrapper_name: str, call_sig: CallSig, applied_count: int) -> list[str]:
+    remaining = call_sig.params[applied_count:]
+    lines = [f"define {call_sig.ret.text} @{wrapper_name}(ptr %env{''.join(f', {t.text} %a{i}' for i, t in enumerate(remaining))}) {{", "entry:"]
+    lines.append("  %callee_slot = getelementptr i64, ptr %env, i64 1")
+    lines.append("  %callee_raw = load i64, ptr %callee_slot")
+    lines.append("  %callee = inttoptr i64 %callee_raw to ptr")
+    arg_values: list[str] = []
+    for idx, typ in enumerate(call_sig.params[:applied_count], start=2):
+        slot = f"%slot{idx - 1}"
+        raw = f"%raw{idx - 1}"
+        val = f"%cap{idx - 1}"
+        lines.append(f"  {slot} = getelementptr i64, ptr %env, i64 {idx}")
+        lines.append(f"  {raw} = load i64, ptr {slot}")
+        if typ == I64:
+            arg_values.append(f"i64 {raw}")
+        elif typ == I1:
+            lines.append(f"  {val} = trunc i64 {raw} to i1")
+            arg_values.append(f"i1 {val}")
+        elif typ == I8_PTR:
+            lines.append(f"  {val} = inttoptr i64 {raw} to ptr")
+            arg_values.append(f"{typ.text} {val}")
+        else:
+            ptr = f"%ptr{idx - 1}"
+            lines.append(f"  {ptr} = inttoptr i64 {raw} to ptr")
+            lines.append(f"  {val} = load {typ.text}, ptr {ptr}")
+            arg_values.append(f"{typ.text} {val}")
+    arg_values.extend(f"{t.text} %a{i}" for i, t in enumerate(remaining))
+    lines.append(
+        f"  %ret = call {call_sig.ret.text} %callee(ptr %callee, {', '.join(arg_values)})"
+        if arg_values
+        else f"  %ret = call {call_sig.ret.text} %callee(ptr %callee)"
+    )
+    lines.append(f"  ret {call_sig.ret.text} %ret")
+    lines.append("}")
+    return lines
+
+
 def _emit_lambda_helper(
     info: LambdaInfo,
     globals_info: dict[str, GlobalInfo],
@@ -702,9 +777,9 @@ def _infer_expr_type(
         if name in ctor_sigs:
             return I64
         if name in sigs:
-            return sigs[name].ret
+            return I8_PTR if len(expr.args) < len(sigs[name].params) else sigs[name].ret
         if name in EXTERN_SIGS:
-            return EXTERN_SIGS[name].ret
+            return I8_PTR if len(expr.args) < len(EXTERN_SIGS[name].params) else EXTERN_SIGS[name].ret
         raise CodegenError(f"Cannot infer top-level let call type for {name}")
     if isinstance(expr, ast.LambdaExpr):
         return I8_PTR
@@ -1910,26 +1985,65 @@ def _emit_call(
         if call_sig is None:
             raise CodegenError(f"Missing callable signature for {fn_name}")
         args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
-        out = _emit_closure_call(local_callee, call_sig, args, emitter)
+        if len(args) < len(call_sig.params):
+            wrapper_name = f"__sprout_partial_{emitter.next_lambda}"
+            emitter.next_lambda += 1
+            emitter.lifted_defs.extend(_emit_partial_closure_wrapper(wrapper_name, call_sig, len(args)))
+            emitter.lifted_defs.append("")
+            closure = _emit_make_closure(f"@{wrapper_name}", [local_callee, *args], emitter)
+            remaining_sig = CallSig(
+                params=call_sig.params[len(args) :],
+                ret=call_sig.ret,
+                ret_callable_sig=call_sig.ret_callable_sig,
+            )
+            out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
+        else:
+            out = _emit_closure_call(local_callee, call_sig, args, emitter)
     elif fn_name is not None and (fn_name in sigs or fn_name in EXTERN_SIGS):
         sig = sigs.get(fn_name) or EXTERN_SIGS.get(fn_name)
         assert sig is not None
-        if len(expr.args) != len(sig.params):
+        if len(expr.args) > len(sig.params):
             raise CodegenError(f"Function {fn_name} expects {len(sig.params)} args, got {len(expr.args)}")
-        args_ir: list[str] = []
-        for arg_expr, param_type in zip(expr.args, sig.params):
-            arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
-            coerced = _coerce_value(arg_val, param_type, emitter)
-            args_ir.append(f"{param_type.text} {coerced.ir}")
-        tmp = emitter.tmp()
-        emitter.emit(f"  {tmp} = call {sig.ret.text} @{fn_name}({', '.join(args_ir)})")
-        out = Value(sig.ret, tmp, callable_sig=sig.ret_callable_sig)
+        args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
+        if len(args) < len(sig.params):
+            wrapper_name = f"__sprout_partial_{emitter.next_lambda}"
+            emitter.next_lambda += 1
+            emitter.lifted_defs.extend(_emit_partial_direct_wrapper(wrapper_name, fn_name, sig, len(args)))
+            emitter.lifted_defs.append("")
+            closure = _emit_make_closure(f"@{wrapper_name}", args, emitter)
+            remaining_sig = CallSig(
+                params=sig.params[len(args) :],
+                ret=sig.ret,
+                ret_callable_sig=sig.ret_callable_sig,
+            )
+            out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
+        else:
+            args_ir: list[str] = []
+            for arg_val, param_type in zip(args, sig.params):
+                coerced = _coerce_value(arg_val, param_type, emitter)
+                args_ir.append(f"{param_type.text} {coerced.ir}")
+            tmp = emitter.tmp()
+            emitter.emit(f"  {tmp} = call {sig.ret.text} @{fn_name}({', '.join(args_ir)})")
+            out = Value(sig.ret, tmp, callable_sig=sig.ret_callable_sig)
     else:
         callee = _emit_expr(expr.callee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
         call_sig = _value_call_sig(callee, getattr(expr.callee, "inferred_type", None), adt_names)
         if call_sig is None:
             raise CodegenError("Backend expected function-typed callee")
         args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
-        out = _emit_closure_call(callee, call_sig, args, emitter)
+        if len(args) < len(call_sig.params):
+            wrapper_name = f"__sprout_partial_{emitter.next_lambda}"
+            emitter.next_lambda += 1
+            emitter.lifted_defs.extend(_emit_partial_closure_wrapper(wrapper_name, call_sig, len(args)))
+            emitter.lifted_defs.append("")
+            closure = _emit_make_closure(f"@{wrapper_name}", [callee, *args], emitter)
+            remaining_sig = CallSig(
+                params=call_sig.params[len(args) :],
+                ret=call_sig.ret,
+                ret_callable_sig=call_sig.ret_callable_sig,
+            )
+            out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
+        else:
+            out = _emit_closure_call(callee, call_sig, args, emitter)
 
     return _value_for_inferred_type(out, getattr(expr, "inferred_type", None), adt_names, emitter)

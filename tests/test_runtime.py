@@ -263,6 +263,33 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "39")
 
+    def test_run_partial_application_of_named_function(self) -> None:
+        src = """
+        fn add(x: Int, y: Int) -> Int = x + y
+        let inc = add(1)
+
+        fn main() -> Unit !{IO} =
+          print(inc(41))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_run_partial_application_of_builtin(self) -> None:
+        src = """
+        let greet = str_concat("hi ")
+
+        fn main() -> Unit !{IO} =
+          print(greet("sprout"))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "hi sprout")
+
     def test_run_lambda_argument(self) -> None:
         src = r"""
         fn apply(x: Int, f: Int -> Int) -> Int =

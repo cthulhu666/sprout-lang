@@ -7,9 +7,12 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 
 1. Function application is strict.
 - Semantics: Evaluate callee first, then arguments left-to-right. All arguments are evaluated before entering the function body.
-- Current v0 contract: calls are exact-arity. Multi-parameter declarations still have nested-arrow types, but `f(x)` does not implicitly produce a partially applied function when `f` declares more parameters.
+- Current v0 contract: calls support under-application. Multi-parameter
+  declarations still have nested-arrow types, and `f(x)` produces a function
+  value when `f` declares more parameters.
 - Rationale: Deterministic order makes programs easier to reason about and debug.
-- Tradeoff: Gives the compiler less freedom to reorder evaluation and makes higher-order pipeline style more verbose until partial application is explicitly designed.
+- Tradeoff: Requires closure-backed partial applications and consistent runtime
+  behavior across user-defined functions and builtins.
 
 2. `let` bindings evaluate immediately.
 - Semantics: `let x = expr` evaluates `expr` at bind time, then binds `x` immutably.

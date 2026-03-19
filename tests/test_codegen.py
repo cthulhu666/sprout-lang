@@ -224,6 +224,33 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call ptr @malloc(i64 %t", ir)
         self.assertIn("getelementptr i64, ptr %env, i64 1", ir)
 
+    def test_compile_partial_application_of_named_function_to_llvm(self) -> None:
+        src = """
+        fn add(x: Int, y: Int) -> Int = x + y
+        let inc = add(1)
+
+        fn main() -> Int !{IO} =
+          print_int(inc(41))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define i64 @__sprout_partial_", ir)
+        self.assertIn("@inc = global ptr null", ir)
+
+    def test_compile_partial_application_of_builtin_to_llvm(self) -> None:
+        src = """
+        let greet = str_concat("hi ")
+
+        fn main() -> Unit !{IO} =
+          print(greet("sprout"))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define ptr @__sprout_partial_", ir)
+        self.assertIn("@greet = global ptr null", ir)
+
     def test_compile_runtime_top_level_function_value_let_to_llvm(self) -> None:
         src = r"""
         fn inc(x: Int) -> Int = x + 1
@@ -1343,6 +1370,37 @@ class CodegenTests(unittest.TestCase):
 
         fn main() -> Int !{IO} =
           print_int(make_adder(40)(2))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "42")
+            self.assertEqual(run.returncode, 42)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_compile_partial_application_of_named_function(self) -> None:
+        src = """
+        fn add(x: Int, y: Int) -> Int = x + y
+        let inc = add(1)
+
+        fn main() -> Int !{IO} =
+          print_int(inc(41))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

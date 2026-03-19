@@ -415,6 +415,21 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertEqual(types["make_adder"], "Int -> Int -> Int")
 
+    def test_typecheck_partial_application_of_named_function(self) -> None:
+        src = """
+        fn add(x: Int, y: Int) -> Int = x + y
+        let inc = add(1)
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["inc"], "Int -> Int")
+
+    def test_typecheck_partial_application_of_builtin(self) -> None:
+        src = """
+        let greet = str_concat("hi ")
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["greet"], "String -> String")
+
     def test_typecheck_lambda_annotation_mismatch(self) -> None:
         src = r"""
         let bad = \(x: Int) -> str_concat(x, "!")
@@ -454,6 +469,14 @@ class TypecheckerTests(unittest.TestCase):
         fn inc(x: Int) -> Int = x + 1
         fn is_even(x: Int) -> Bool = (x / 2) * 2 == x
         fn bad(x: Int) -> Int = (inc << is_even)(x)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
+    def test_type_error_overapplication_of_named_function(self) -> None:
+        src = """
+        fn add(x: Int, y: Int) -> Int = x + y
+        fn bad() -> Int = add(1, 2, 3)
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))

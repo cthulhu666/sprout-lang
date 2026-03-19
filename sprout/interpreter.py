@@ -96,6 +96,13 @@ class FunctionValue:
 
 
 @dataclass
+class PartialFunction:
+    callee: object
+    args: list[object]
+    remaining_arity: int
+
+
+@dataclass
 class ComposedFunction:
     outer: object
     inner: object
@@ -365,12 +372,23 @@ def apply_callable(callee: object, args: list[object]) -> object:
             args = [intermediate]
             continue
 
+        if isinstance(callee, PartialFunction):
+            if len(args) > callee.remaining_arity:
+                total_arity = len(callee.args) + callee.remaining_arity
+                raise rt_error(f"Function expects at most {total_arity} args, got {len(callee.args) + len(args)}")
+            partial = callee
+            callee = partial.callee
+            args = [*partial.args, *args]
+            continue
+
         if isinstance(callee, FunctionValue):
-            if len(args) != len(callee.params):
+            if len(args) > len(callee.params):
                 raise rt_error(
-                    f"Function {callee.name} expects {len(callee.params)} args, got {len(args)}",
+                    f"Function {callee.name} expects at most {len(callee.params)} args, got {len(args)}",
                     callee,
                 )
+            if len(args) < len(callee.params):
+                return PartialFunction(callee=callee, args=list(args), remaining_arity=len(callee.params) - len(args))
             call_env = Env(parent=callee.closure)
             for name, value in zip(callee.params, args):
                 call_env.set(name, value)
@@ -382,8 +400,10 @@ def apply_callable(callee: object, args: list[object]) -> object:
             return result
 
         if isinstance(callee, BuiltinFunction):
-            if len(args) != callee.arity:
-                raise RuntimeError(f"Builtin {callee.name} expects {callee.arity} args, got {len(args)}")
+            if len(args) > callee.arity:
+                raise RuntimeError(f"Builtin {callee.name} expects at most {callee.arity} args, got {len(args)}")
+            if len(args) < callee.arity:
+                return PartialFunction(callee=callee, args=list(args), remaining_arity=callee.arity - len(args))
             try:
                 return callee.fn(args)
             except RuntimeError as exc:
@@ -407,7 +427,7 @@ def apply_callable(callee: object, args: list[object]) -> object:
 
 
 def _is_callable(value: object) -> bool:
-    return isinstance(value, (FunctionValue, BuiltinFunction, ConstructorValue, ComposedFunction))
+    return isinstance(value, (FunctionValue, BuiltinFunction, ConstructorValue, PartialFunction, ComposedFunction))
 
 
 def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | None:
@@ -1377,7 +1397,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if entry_name is not None:
             main = env.get(entry_name)
             if isinstance(main, FunctionValue):
-                apply_callable(main, [])
+                result = apply_callable(main, [])
+                if isinstance(result, PartialFunction):
+                    total_arity = len(result.args) + result.remaining_arity
+                    raise rt_error(f"Function {main.name} expects {total_arity} args, got 0", main)
     finally:
         for conn in connections.values():
             conn.close()
