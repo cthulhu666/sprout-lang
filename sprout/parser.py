@@ -14,6 +14,7 @@ class ParseError(ValueError):
 class Parser:
     tokens: list[Token]
     i: int = 0
+    pipe_tmp_counter: int = 0
 
     def current(self) -> Token:
         return self.tokens[self.i]
@@ -278,8 +279,65 @@ class Parser:
 
     def _pipe_into_call(self, left: ast.Expr, rhs: ast.Expr) -> ast.Expr:
         if isinstance(rhs, ast.CallExpr):
-            return ast.CallExpr(callee=rhs.callee, args=rhs.args + [left])
+            tmp_name = self._fresh_pipe_tmp_name(left, rhs)
+            tmp_expr = ast.attach_loc(ast.VarExpr(name=tmp_name), getattr(left, "line", 0), getattr(left, "column", 0))
+            body = ast.CallExpr(callee=rhs.callee, args=[*rhs.args, tmp_expr])
+            lam = ast.attach_loc(
+                ast.LambdaExpr(params=[ast.Param(name=tmp_name, type_expr=None)], body=body),
+                getattr(left, "line", 0),
+                getattr(left, "column", 0),
+            )
+            return ast.CallExpr(callee=lam, args=[left])
         return ast.CallExpr(callee=rhs, args=[left])
+
+    def _fresh_pipe_tmp_name(self, left: ast.Expr, rhs: ast.Expr) -> str:
+        used = self._expr_names(left) | self._expr_names(rhs)
+        while True:
+            name = f"__sprout_pipe_{self.pipe_tmp_counter}"
+            self.pipe_tmp_counter += 1
+            if name not in used:
+                return name
+
+    def _expr_names(self, expr: ast.Expr) -> set[str]:
+        names: set[str] = set()
+
+        def walk(node: ast.Expr) -> None:
+            if isinstance(node, ast.VarExpr):
+                names.add(node.name)
+                return
+            if isinstance(node, ast.LambdaExpr):
+                for param in node.params:
+                    names.add(param.name)
+                walk(node.body)
+                return
+            if isinstance(node, ast.CallExpr):
+                walk(node.callee)
+                for arg in node.args:
+                    walk(arg)
+                return
+            if isinstance(node, ast.IfExpr):
+                walk(node.condition)
+                walk(node.then_branch)
+                walk(node.else_branch)
+                return
+            if isinstance(node, ast.MatchExpr):
+                walk(node.scrutinee)
+                for branch in node.branches:
+                    walk(branch.value)
+                return
+            if isinstance(node, ast.BinaryExpr):
+                walk(node.left)
+                walk(node.right)
+                return
+            if isinstance(node, ast.UnaryExpr):
+                walk(node.operand)
+                return
+            if isinstance(node, ast.TupleExpr):
+                for item in node.items:
+                    walk(item)
+
+        walk(expr)
+        return names
 
     def parse_logical_or(self):
         expr = self.parse_logical_and()

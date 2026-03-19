@@ -157,6 +157,25 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "43")
 
+    def test_pipe_operator_preserves_left_to_right_evaluation_order(self) -> None:
+        src = """
+        fn then_io(a: Unit !{IO}, b: Int) -> Int !{IO} = b
+        fn add(x: Int, y: Int) -> Int = x + y
+        fn mark(label: String, value: Int) -> Int !{IO} =
+          then_io(print(label), value)
+
+        fn main() -> Unit !{IO} =
+          print(
+            mark("left", 1)
+            |> add(mark("arg", 2))
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "left\narg\n3")
+
     def test_stdlib_when_ok_and_when_error_helpers(self) -> None:
         src = """
         fn show_ok(x: Int) -> Unit !{IO} = print(x)

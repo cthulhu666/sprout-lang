@@ -105,7 +105,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "json_stringify": FnSig(name="json_stringify", params=[I64], ret=I8_PTR),
     "sprout_set_argv": FnSig(name="sprout_set_argv", params=[I32, I8_PTR], ret=I64),
     "sprout_register_ctor": FnSig(name="sprout_register_ctor", params=[I64, I8_PTR, I64], ret=I64),
-    "sprout_nothing": FnSig(name="sprout_nothing", params=[], ret=I64),
+    "sprout_nothing": FnSig(name="sprout_nothing", params=[I64], ret=I64),
     "sprout_make0": FnSig(name="sprout_make0", params=[I64], ret=I64),
     "sprout_make1": FnSig(name="sprout_make1", params=[I64, I64], ret=I64),
     "sprout_make2": FnSig(name="sprout_make2", params=[I64, I64, I64], ret=I64),
@@ -1203,7 +1203,7 @@ def _emit_expr(
                 raise CodegenError(f"Constructor {ctor.name} requires arguments")
             tmp = emitter.tmp()
             if ctor.name.rsplit(".", 1)[-1] == "Nothing":
-                emitter.emit(f"  {tmp} = call i64 @sprout_nothing()")
+                emitter.emit(f"  {tmp} = call i64 @sprout_nothing(i64 {ctor.tag})")
             else:
                 emitter.emit(f"  {tmp} = call i64 @sprout_make0(i64 {ctor.tag})")
             return Value(I64, tmp)
@@ -1963,7 +1963,7 @@ def _emit_call(
         if len(ctor.arg_types) == 0:
             tmp = emitter.tmp()
             if fn_name.rsplit(".", 1)[-1] == "Nothing":
-                emitter.emit(f"  {tmp} = call i64 @sprout_nothing()")
+                emitter.emit(f"  {tmp} = call i64 @sprout_nothing(i64 {ctor.tag})")
             else:
                 emitter.emit(f"  {tmp} = call i64 @sprout_make0(i64 {ctor.tag})")
             return Value(I64, tmp)

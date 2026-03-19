@@ -173,12 +173,18 @@ class ParserTests(unittest.TestCase):
         fn_decl = program.declarations[0]
         self.assertIsInstance(fn_decl, ast.FnDecl)
         self.assertIsInstance(fn_decl.body, ast.CallExpr)
-        self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
-        self.assertEqual(fn_decl.body.callee.name, "result_pipe_ok")
-        self.assertEqual(len(fn_decl.body.args), 2)
-        self.assertIsInstance(fn_decl.body.args[0], ast.VarExpr)
-        self.assertEqual(fn_decl.body.args[0].name, "inc")
-        self.assertIsInstance(fn_decl.body.args[1], ast.CallExpr)
+        self.assertEqual(len(fn_decl.body.args), 1)
+        self.assertIsInstance(fn_decl.body.args[0], ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.LambdaExpr)
+        self.assertEqual(len(fn_decl.body.callee.params), 1)
+        inner = fn_decl.body.callee.body
+        self.assertIsInstance(inner, ast.CallExpr)
+        self.assertIsInstance(inner.callee, ast.VarExpr)
+        self.assertEqual(inner.callee.name, "result_pipe_ok")
+        self.assertEqual(len(inner.args), 2)
+        self.assertIsInstance(inner.args[0], ast.VarExpr)
+        self.assertEqual(inner.args[0].name, "inc")
+        self.assertIsInstance(inner.args[1], ast.VarExpr)
 
     def test_parse_semigroup_append_operator_desugars_to_append_call(self) -> None:
         src = "fn main() -> List Int = [1, 2] ++ [3, 4]"

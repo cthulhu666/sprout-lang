@@ -944,6 +944,11 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             for arg in e.args:
                 walk_expr(arg, e, current_scope)
             return
+        if isinstance(e, ast.LambdaExpr):
+            lambda_scope = set(current_scope)
+            lambda_scope |= {param.name for param in e.params}
+            walk_expr(e.body, e, lambda_scope)
+            return
         if isinstance(e, ast.TupleExpr):
             for item in e.items:
                 walk_expr(item, e, current_scope)
