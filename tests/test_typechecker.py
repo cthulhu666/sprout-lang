@@ -376,7 +376,18 @@ class TypecheckerTests(unittest.TestCase):
         fn double(x: Int) -> Int = x * 2
         fn apply(x: Int, f: Int -> Int) -> Int = f(x)
         fn main() -> Unit !{IO} =
-          print(apply(20, double >> inc))
+          print(apply(20, inc >> double))
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("main", types)
+
+    def test_typecheck_reverse_function_composition(self) -> None:
+        src = """
+        fn inc(x: Int) -> Int = x + 1
+        fn double(x: Int) -> Int = x * 2
+        fn apply(x: Int, f: Int -> Int) -> Int = f(x)
+        fn main() -> Unit !{IO} =
+          print(apply(20, double << inc))
         """
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
@@ -433,7 +444,16 @@ class TypecheckerTests(unittest.TestCase):
         src = """
         fn inc(x: Int) -> Int = x + 1
         fn is_even(x: Int) -> Bool = (x / 2) * 2 == x
-        fn bad(x: Int) -> Int = (inc >> is_even)(x)
+        fn bad(x: Int) -> Int = (is_even >> inc)(x)
+        """
+        with self.assertRaises(TypeCheckError):
+            typecheck_program(parse(src))
+
+    def test_type_error_invalid_reverse_function_composition(self) -> None:
+        src = """
+        fn inc(x: Int) -> Int = x + 1
+        fn is_even(x: Int) -> Bool = (x / 2) * 2 == x
+        fn bad(x: Int) -> Int = (inc << is_even)(x)
         """
         with self.assertRaises(TypeCheckError):
             typecheck_program(parse(src))

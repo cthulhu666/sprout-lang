@@ -949,7 +949,7 @@ def infer_expr(
     if isinstance(expr, ast.BinaryExpr):
         left, left_effects = infer_expr(expr.left, env, state, type_decls, global_methods)
         right, right_effects = infer_expr(expr.right, env, state, type_decls, global_methods)
-        if expr.op == ">>":
+        if expr.op in {"<<", ">>"}:
             input_t = state.fresh()
             middle_t = state.fresh()
             output_t = state.fresh()
@@ -957,8 +957,12 @@ def infer_expr(
             right_call_effects = right_resolved.effects if isinstance(right_resolved, TFunc) else PURE_EFFECT
             left_resolved = apply(state.subst, left, state.effect_subst)
             left_call_effects = left_resolved.effects if isinstance(left_resolved, TFunc) else PURE_EFFECT
-            unify_at(state, right, TFunc(input_t, middle_t, right_call_effects), expr.right)
-            unify_at(state, left, TFunc(middle_t, output_t, left_call_effects), expr.left)
+            if expr.op == ">>":
+                unify_at(state, left, TFunc(input_t, middle_t, left_call_effects), expr.left)
+                unify_at(state, right, TFunc(middle_t, output_t, right_call_effects), expr.right)
+            else:
+                unify_at(state, right, TFunc(input_t, middle_t, right_call_effects), expr.right)
+                unify_at(state, left, TFunc(middle_t, output_t, left_call_effects), expr.left)
             return _mark_expr_type(expr, TFunc(input_t, output_t, merge_effects(state, left_call_effects, right_call_effects))), (
                 merge_effects(state, left_effects, right_effects)
             )

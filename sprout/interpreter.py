@@ -97,8 +97,8 @@ class FunctionValue:
 
 @dataclass
 class ComposedFunction:
-    left: object
-    right: object
+    outer: object
+    inner: object
 
 
 @dataclass
@@ -284,13 +284,15 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
                 raise rt_error("'||' expects Bool on the right", expr.right)
             return right
 
-        if expr.op == ">>":
+        if expr.op in {"<<", ">>"}:
             right = eval_expr(expr.right, env)
             if not _is_callable(left):
-                raise rt_error("Left side of '>>' must be a function", expr.left)
+                raise rt_error(f"Left side of '{expr.op}' must be a function", expr.left)
             if not _is_callable(right):
-                raise rt_error("Right side of '>>' must be a function", expr.right)
-            return ComposedFunction(left=left, right=right)
+                raise rt_error(f"Right side of '{expr.op}' must be a function", expr.right)
+            if expr.op == ">>":
+                return ComposedFunction(outer=right, inner=left)
+            return ComposedFunction(outer=left, inner=right)
 
         right = eval_expr(expr.right, env)
 
@@ -358,8 +360,8 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
 def apply_callable(callee: object, args: list[object]) -> object:
     while True:
         if isinstance(callee, ComposedFunction):
-            intermediate = apply_callable(callee.right, args)
-            callee = callee.left
+            intermediate = apply_callable(callee.inner, args)
+            callee = callee.outer
             args = [intermediate]
             continue
 

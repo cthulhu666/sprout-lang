@@ -335,9 +335,11 @@ class Parser:
 
     def parse_composition(self):
         expr = self.parse_unary()
-        if self.match("SYMBOL", ">>"):
+        if self.check("SYMBOL") and self.current().value in {"<<", ">>"}:
+            op_value = self.current().value
+            self.advance()
             op = self.tokens[self.i - 1]
-            return self.mark(ast.BinaryExpr(op=">>", left=expr, right=self.parse_composition()), op)
+            return self.mark(ast.BinaryExpr(op=op_value, left=expr, right=self.parse_composition()), op)
         return expr
 
     def parse_unary(self):

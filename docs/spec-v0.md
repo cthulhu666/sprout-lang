@@ -166,6 +166,13 @@ match pair with
 | (x, y) -> x
 ```
 
+Composition operators are ordinary binary operators on functions:
+
+- `f >> g` means `\x -> g(f(x))`
+- `f << g` means `\x -> f(g(x))`
+
+They associate to the right, so `f >> g >> h` means `\x -> h(g(f(x)))`.
+
 ### 5.6 ADT declaration
 
 ```sprout

@@ -16,7 +16,7 @@ fn add100(n: Int) -> Int =
   n + 100
 
 fn normalize_dial(n: Int) -> Int =
-  (mod100 >> add100)(n)
+  (mod100 << add100)(n)
 
 fn dial_after(dial: Int, rot: Rot) -> Int =
   match rot with

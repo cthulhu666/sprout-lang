@@ -18,6 +18,8 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 
 3. Binary operators evaluate left operand, then right operand.
 - Semantics: Arithmetic and comparison operators are strict in both operands.
+- Function composition operators follow the same operand evaluation order:
+  `f >> g` means `\x -> g(f(x))` and `f << g` means `\x -> f(g(x))`.
 - Rationale: Keeps operator behavior aligned with regular function-call evaluation.
 - Tradeoff: Same optimization limits as strict call evaluation.
 

@@ -226,13 +226,42 @@ class RuntimeTests(unittest.TestCase):
         fn double(x: Int) -> Int = x * 2
 
         fn main() -> Unit !{IO} =
-          print((double >> inc)(20))
+          print((inc >> double)(20))
         """
         program = parse(src)
         typecheck_program(program)
         out = io.StringIO()
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_run_reverse_function_composition(self) -> None:
+        src = """
+        fn inc(x: Int) -> Int = x + 1
+        fn double(x: Int) -> Int = x * 2
+
+        fn main() -> Unit !{IO} =
+          print((double << inc)(20))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_run_right_associative_forward_function_composition(self) -> None:
+        src = """
+        fn inc(x: Int) -> Int = x + 1
+        fn double(x: Int) -> Int = x * 2
+        fn dec(x: Int) -> Int = x - 3
+
+        fn main() -> Unit !{IO} =
+          print((inc >> double >> dec)(20))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "39")
 
     def test_run_lambda_argument(self) -> None:
         src = r"""

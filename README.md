@@ -216,6 +216,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
   - forward pipe operator: `value |> f` rewrites to `f(value)`
+  - function composition operators:
+    `f >> g` rewrites to `\x -> g(f(x))`
+    `f << g` rewrites to `\x -> f(g(x))`
   - `pipe(value, f)`
   - `result_map(r, f)`
   - `result_map_error(r, f)`
@@ -475,7 +478,7 @@ Load HTTP and JSON helpers:
 
 - top-level `fn`, `type`, and top-level `let` (constant and runtime-initialized),
 - `Int`/`Bool`/`String` typed params and returns, plus effectful returns such as `Unit !{IO}` and `Int !{IO}`,
-- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, function composition (`f >> g` means `f(g(x))`), lambdas (`\(x, y) -> ...`), `if`, direct calls, indirect closure calls, recursion,
+- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, function composition (`f >> g` means `g(f(x))`, `f << g` means `f(g(x))`), lambdas (`\(x, y) -> ...`), `if`, direct calls, indirect closure calls, recursion,
 - tuple expressions/types/patterns with general `n`-tuple arity (`(x, y)`, `(Int, String)`, `match pair with | (x, y) -> ...`),
   one-arg lambdas may also use the shorthand `\x -> ...`,
   and empty lambda parameter lists are currently rejected,
