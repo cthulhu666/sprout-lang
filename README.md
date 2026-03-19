@@ -297,7 +297,7 @@ Ok(20)
 ```
 
 Runnable demo:
-- `python3 -m sprout.cli run --with-stdlib examples/result_control_flow_demo.sprout`
+- `python3 -m sprout.cli run --with-stdlib examples/result_demo.sprout`
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 
@@ -468,7 +468,7 @@ Load HTTP and JSON helpers:
 - Example HTTP GET CLI:
   `python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/`
 - Collections helper demo:
-  `python3 -m sprout.cli run examples/collections_utils_demo.sprout`
+  `python3 -m sprout.cli run examples/collections_demo.sprout`
 - Typeclass collections demo (experimental surface area, not normative v0):
   `python3 -m sprout.cli run examples/typeclass_functor_foldable_demo.sprout`
 

@@ -1,6 +1,5 @@
-module app.main
-import stdlib.collections (Maybe)
-import stdlib.http (Result, HttpError, http_response_body)
+module examples.http_get_cli
+import stdlib.http (HttpError, http_response_body)
 import stdlib.http_client (http_get)
 
 # Simple HTTP GET CLI client.

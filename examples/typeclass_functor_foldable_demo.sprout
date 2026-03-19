@@ -1,4 +1,4 @@
-module app.main
+module examples.typeclass_functor_foldable_demo
 import stdlib.collections (Functor, Foldable, List, Vec, vec_append, vec_empty)
 
 fn add_one(x: Int) -> Int = x + 1
@@ -14,7 +14,7 @@ fn map_and_sum_vec(xs: Vec Int) -> Int where Functor Vec, Foldable Vec =
   map_and_sum(xs)
 
 fn sample_list() -> List Int =
-  Cons(1, Cons(2, Cons(3, Nil)))
+  [1, 2, 3]
 
 fn sample_vec() -> Vec Int =
   vec_append(vec_append(vec_append(vec_empty(), 4), 5), 6)

@@ -341,7 +341,7 @@ class CliTests(unittest.TestCase):
                 "-m",
                 "sprout.cli",
                 "run",
-                "examples/foldable_to_vec_demo.sprout",
+                "examples/foldable_demo.sprout",
             ],
             check=False,
             capture_output=True,
@@ -357,7 +357,7 @@ class CliTests(unittest.TestCase):
                 "-m",
                 "sprout.cli",
                 "run",
-                "examples/collections_utils_demo.sprout",
+                "examples/collections_demo.sprout",
             ],
             check=False,
             capture_output=True,
@@ -374,7 +374,7 @@ class CliTests(unittest.TestCase):
                 "sprout.cli",
                 "run",
                 "--with-stdlib",
-                "examples/result_control_flow_demo.sprout",
+                "examples/result_demo.sprout",
             ],
             check=False,
             capture_output=True,
@@ -385,7 +385,7 @@ class CliTests(unittest.TestCase):
 
     def test_compile_all_examples(self) -> None:
         example_flags = {
-            "examples/result_control_flow_demo.sprout": ["--with-stdlib"],
+            "examples/result_demo.sprout": ["--with-stdlib"],
         }
         failures: list[tuple[Path, str, str]] = []
         for path in sorted(Path("examples").glob("*.sprout")):
@@ -425,7 +425,7 @@ class CliTests(unittest.TestCase):
                     "-m",
                     "sprout.cli",
                     "compile",
-                    "examples/foldable_to_vec_demo.sprout",
+                    "examples/foldable_demo.sprout",
                     "--native",
                     "-o",
                     str(out),

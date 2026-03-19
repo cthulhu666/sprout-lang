@@ -1,12 +1,16 @@
-module app.main
-import stdlib.collections (Dict, Vec, dict_keys, dict_set, dict_remove, dict_empty, dict_values, vec_append, vec_empty, vec_get_or, vec_reverse, vec_slice, vec_sum_by)
+module examples.collections_demo
+import stdlib.collections (Dict, Vec, dict_keys, dict_remove, dict_values, foldable_to_vec, vec_get_or, vec_reverse, vec_slice, vec_sum_by)
 import stdlib.string as string
 
+# Demonstrates current stdlib collection helpers and literals.
+
+fn half(value: Int) -> Int = value / 10
+
 fn sample_vec() -> Vec Int =
-  vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40)
+  foldable_to_vec([10, 20, 30, 40])
 
 fn sample_dict() -> Dict Int =
-  dict_set(dict_set(dict_empty(), "first", 7), "second", 11)
+  {first: 7, second: 11}
 
 fn main() -> Unit !{IO} =
   print(
@@ -19,5 +23,3 @@ fn main() -> Unit !{IO} =
     + string.length(vec_get_or(dict_keys(sample_dict()), 1, ""))
     + vec_sum_by(sample_vec(), half)
   )
-
-fn half(value: Int) -> Int = value / 10

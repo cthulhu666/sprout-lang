@@ -1,0 +1,54 @@
+module examples.result_demo
+
+# Compares a manual result flow with the preferred piped style.
+
+fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+
+fn inc(x: Int) -> Int = x + 1
+
+fn double_if_large(x: Int) -> Result String Int =
+  if x > 10 then Ok(x * 2) else Err("too-small")
+
+fn prefix_error(e: String) -> String =
+  "error:" ++ e
+
+fn show_ok(x: Int) -> Unit !{IO} =
+  print(x)
+
+fn show_error(e: String) -> Unit !{IO} =
+  print(e)
+
+fn manual_result_flow(seed: Result String Int) -> Result String Int =
+  result_pipe_error(
+    result_pipe_ok(
+      result_pipe(seed, double_if_large),
+      inc
+    ),
+    prefix_error
+  )
+
+fn piped_result_flow(seed: Result String Int) -> Result String Int =
+  seed
+  |> result_pipe(double_if_large)
+  |> result_pipe_ok(inc)
+  |> result_pipe_error(prefix_error)
+
+fn print_result(r: Result String Int, fallback: Int) -> Unit !{IO} =
+  print(
+    result_with_default(
+      when_error(when_ok(r, show_ok), show_error),
+      fallback
+    )
+  )
+
+fn manual_ok_demo() -> Unit !{IO} =
+  print_result(manual_result_flow(Ok(pipe(20, inc))), 0)
+
+fn piped_ok_demo() -> Unit !{IO} =
+  print_result(piped_result_flow(Ok(21)), 0)
+
+fn piped_error_demo() -> Unit !{IO} =
+  print_result(piped_result_flow(Ok(3)), 7)
+
+fn main() -> Unit !{IO} =
+  then_io(manual_ok_demo(), then_io(piped_ok_demo(), piped_error_demo()))

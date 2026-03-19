@@ -1,16 +1,16 @@
 # One-shot TCP echo server (interpreter runtime builtins).
 # Run and connect once to localhost:8081.
 
-fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
 fn handle_conn(conn: Int) -> Unit !{IO} =
-  seq(tcp_write(conn, tcp_read(conn)), tcp_close(conn))
+  then_io(tcp_write(conn, tcp_read(conn)), tcp_close(conn))
 
 fn serve_once(listener: Int) -> Unit !{IO} =
   handle_conn(tcp_accept(listener))
 
 fn close_after_serve(listener: Int) -> Unit !{IO} =
-  seq(serve_once(listener), tcp_close_listener(listener))
+  then_io(serve_once(listener), tcp_close_listener(listener))
 
 fn main() -> Unit !{IO} =
   close_after_serve(tcp_listen(8081))

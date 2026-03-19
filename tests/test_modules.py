@@ -798,14 +798,14 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
-    def test_import_examples_aoc2025_day3_module(self) -> None:
+    def test_import_examples_aoc_2025_day_3_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             main = root / "main.sprout"
             main.write_text(
                 """
                 module main
-                import examples.aoc2025_day3 (solve_stdin)
+                import examples.aoc_2025_day_3 (solve_stdin)
 
                 fn main() -> Unit !{IO} =
                   print(solve_stdin())
@@ -821,14 +821,14 @@ class ModuleLoaderTests(unittest.TestCase):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Answers(357, 3121910778619)")
 
-    def test_import_examples_aoc2025_day4_module(self) -> None:
+    def test_import_examples_aoc_2025_day_4_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             main = root / "main.sprout"
             main.write_text(
                 """
                 module main
-                import examples.aoc2025_day4 (solve_stdin)
+                import examples.aoc_2025_day_4 (solve_stdin)
 
                 fn main() -> Unit !{IO} =
                   print(solve_stdin())

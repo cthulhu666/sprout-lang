@@ -1,4 +1,4 @@
-module app.main
+module examples.modules_demo
 import stdlib.http (http_ok)
 
 fn main() -> Unit !{IO} =

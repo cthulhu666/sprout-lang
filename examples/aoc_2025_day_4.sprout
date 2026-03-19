@@ -1,4 +1,4 @@
-module examples.aoc2025_day4
+module examples.aoc_2025_day_4
 import stdlib.collections (Vec, vec_append, vec_empty, vec_get_or, vec_length)
 import stdlib.string (concat, length, slice, string_lines)
 
@@ -125,9 +125,9 @@ fn collect_non_empty_lines(lines: Vec String, index: Int, total: Int, acc: Vec S
 fn parse_grid(raw: String) -> Vec String =
   raw
   |> string_lines
-  |> let_collect_non_empty_lines
+  |> collect_non_empty_lines_all
 
-fn let_collect_non_empty_lines(lines: Vec String) -> Vec String =
+fn collect_non_empty_lines_all(lines: Vec String) -> Vec String =
   collect_non_empty_lines(lines, 0, vec_length(lines), vec_empty())
 
 fn solve_grid(grid: Vec String) -> Answers =

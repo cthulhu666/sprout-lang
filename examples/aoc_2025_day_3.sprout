@@ -1,4 +1,4 @@
-module examples.aoc2025_day3
+module examples.aoc_2025_day_3
 import stdlib.collections (Vec, vec_empty, vec_append, vec_length, vec_get_or, vec_set)
 import stdlib.string (string_digits, string_lines)
 
@@ -48,9 +48,9 @@ fn fold_prefix_int(digits: Vec Int, index: Int, count: Int, acc: Int) -> Int =
   else fold_prefix_int(digits, index + 1, count, acc * 10 + vec_get_or(digits, index, 0))
 
 fn best_value_vec(bank: Vec Int, count: Int) -> Int =
-  let_best_value_with_len(bank, vec_length(bank), count)
+  best_value_with_len(bank, vec_length(bank), count)
 
-fn let_best_value_with_len(bank: Vec Int, len: Int, count: Int) -> Int =
+fn best_value_with_len(bank: Vec Int, len: Int, count: Int) -> Int =
   if count <= 0 then 0
   else if count > len then 0
   else
@@ -86,9 +86,9 @@ fn lines_to_banks(lines: Vec String, index: Int, total: Int, acc: Vec (Vec Int))
     )
 
 fn parse_all_banks(raw: String) -> Vec (Vec Int) =
-  let_lines_to_banks(string_lines(raw))
+  lines_to_banks_all(string_lines(raw))
 
-fn let_lines_to_banks(lines: Vec String) -> Vec (Vec Int) =
+fn lines_to_banks_all(lines: Vec String) -> Vec (Vec Int) =
   lines_to_banks(lines, 0, vec_length(lines), vec_empty())
 
 fn stdin_banks() -> Vec (Vec Int) !{IO} =

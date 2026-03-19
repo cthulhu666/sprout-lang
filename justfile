@@ -51,7 +51,7 @@ compile-native file out:
 compile-examples:
   for file in examples/*.sprout; do \
     flags=""; \
-    if [ "$file" = "examples/result_control_flow_demo.sprout" ]; then flags="--with-stdlib"; fi; \
+    if [ "$file" = "examples/result_demo.sprout" ]; then flags="--with-stdlib"; fi; \
     out="/tmp/$(basename "$file" .sprout).ll"; \
     python3 -m sprout.cli compile $flags "$file" -o "$out"; \
     echo "OK $file"; \

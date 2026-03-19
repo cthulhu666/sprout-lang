@@ -1,4 +1,4 @@
-module app.main
+module examples.http_echo_server
 import stdlib.http (http_echo_response)
 
 # Multi-connection HTTP echo server (minimal v0).
@@ -9,17 +9,17 @@ import stdlib.http (http_echo_response)
 # Then:
 #   curl -i http://127.0.0.1:8081/hello
 
-fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
 fn handle_conn(conn: Int) -> Unit !{IO} =
-  seq(
+  then_io(
     tcp_write(conn, http_echo_response(tcp_read(conn))),
     tcp_close(conn)
   )
 
 fn serve_n(listener: Int, remaining: Int) -> Unit !{IO} =
   if remaining == 0 then tcp_close_listener(listener)
-  else seq(handle_conn(tcp_accept(listener)), serve_n(listener, remaining - 1))
+  else then_io(handle_conn(tcp_accept(listener)), serve_n(listener, remaining - 1))
 
 fn main() -> Unit !{IO} =
   serve_n(tcp_listen(8081), 1000000)

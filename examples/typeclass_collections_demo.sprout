@@ -1,4 +1,4 @@
-module app.main
+module examples.typeclass_collections_demo
 import stdlib.collections (Vec, vec_append, vec_empty, vec_fold)
 
 class Summable c {
