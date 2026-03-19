@@ -9,6 +9,10 @@ This file tracks open design, implementation, and tooling follow-up work.
 3. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
 4. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
 5. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
+6. Add a native memory-management roadmap and first managed-heap slice.
+   Design doc: [native-memory-management-v1-draft.md](./native-memory-management-v1-draft.md).
+   V1 scope: allocation visibility, centralized managed allocation for Sprout values, then a simple non-moving stop-the-world mark-sweep collector.
+   V2 direction: pause/throughput improvements only after v1 is measured, likely via incremental or generational follow-up work if justified.
 
 ## V1 Roadmap Candidates
 
