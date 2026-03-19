@@ -19,31 +19,31 @@ type Vec a =
 type Dict v =
   | Dict (Map v)
 
-fn map(xs: List a, f: a -> b) -> List b =
+fn map(f: a -> b, xs: List a) -> List b =
   match xs with
   | Nil -> Nil
-  | Cons x rest -> Cons(f(x), map(rest, f))
+  | Cons x rest -> Cons(f(x), map(f, rest))
 
-fn fold(xs: List a, init: b, f: b -> a -> b) -> b =
+fn fold(f: b -> a -> b, init: b, xs: List a) -> b =
   match xs with
   | Nil -> init
-  | Cons x rest -> fold(rest, f(init, x), f)
+  | Cons x rest -> fold(f, f(init, x), rest)
 
-fn filter(xs: List a, pred: a -> Bool) -> List a =
+fn filter(pred: a -> Bool, xs: List a) -> List a =
   match xs with
   | Nil -> Nil
   | Cons x rest ->
-      if pred(x) then Cons(x, filter(rest, pred))
-      else filter(rest, pred)
+      if pred(x) then Cons(x, filter(pred, rest))
+      else filter(pred, rest)
 
 fn split_ints(s: String) -> List Int =
-  map(split_words(s), parse_int)
+  map(parse_int, split_words(s))
 
-fn list_map(xs: List a, f: a -> b) -> List b =
-  map(xs, f)
+fn list_map(f: a -> b, xs: List a) -> List b =
+  map(f, xs)
 
-fn list_fold(xs: List a, init: b, step: b -> a -> b) -> b =
-  fold(xs, init, step)
+fn list_fold(step: b -> a -> b, init: b, xs: List a) -> b =
+  fold(step, init, xs)
 
 fn list_append(left: List a, right: List a) -> List a =
   match left with
@@ -67,7 +67,7 @@ fn vec_prepend(value: a, vec: Vec a) -> Vec a =
   | Vec raw ->
       Vec(vec_prepend_into(vector_empty(), value, raw, 0, vector_length(raw)))
 
-fn vec_append(vec: Vec a, value: a) -> Vec a =
+fn vec_append(value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_append(raw, value))
 
@@ -75,60 +75,60 @@ fn vec_length(vec: Vec a) -> Int =
   match vec with
   | Vec raw -> vector_length(raw)
 
-fn vec_get(vec: Vec a, index: Int) -> Maybe a =
+fn vec_get(index: Int, vec: Vec a) -> Maybe a =
   match vec with
   | Vec raw -> vector_get(raw, index)
 
-fn vec_get_or(vec: Vec a, index: Int, fallback: a) -> a =
-  match vec_get(vec, index) with
+fn vec_get_or(index: Int, fallback: a, vec: Vec a) -> a =
+  match vec_get(index, vec) with
   | Just value -> value
   | Nothing -> fallback
 
-fn vec_set(vec: Vec a, index: Int, value: a) -> Vec a =
+fn vec_set(index: Int, value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_set(raw, index, value))
 
-fn vec_map_indexed(vec: Vec a, f: a -> b, index: Int, total: Int, acc: Vec b) -> Vec b =
+fn vec_map_indexed(f: a -> b, vec: Vec a, index: Int, total: Int, acc: Vec b) -> Vec b =
   if index >= total then acc
   else
-    match vec_get(vec, index) with
+    match vec_get(index, vec) with
     | Nothing -> acc
-    | Just value -> vec_map_indexed(vec, f, index + 1, total, vec_append(acc, f(value)))
+    | Just value -> vec_map_indexed(f, vec, index + 1, total, vec_append(f(value), acc))
 
-fn vec_map(vec: Vec a, f: a -> b) -> Vec b =
-  vec_map_indexed(vec, f, 0, vec_length(vec), vec_empty())
+fn vec_map(f: a -> b, vec: Vec a) -> Vec b =
+  vec_map_indexed(f, vec, 0, vec_length(vec), vec_empty())
 
-fn vec_fold_indexed(vec: Vec a, acc: b, f: b -> a -> b, index: Int, total: Int) -> b =
+fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) -> b =
   if index >= total then acc
   else
-    match vec_get(vec, index) with
+    match vec_get(index, vec) with
     | Nothing -> acc
-    | Just value -> vec_fold_indexed(vec, f(acc, value), f, index + 1, total)
+    | Just value -> vec_fold_indexed(f, f(acc, value), vec, index + 1, total)
 
-fn vec_fold(vec: Vec a, init: b, f: b -> a -> b) -> b =
-  vec_fold_indexed(vec, init, f, 0, vec_length(vec))
+fn vec_fold(f: b -> a -> b, init: b, vec: Vec a) -> b =
+  vec_fold_indexed(f, init, vec, 0, vec_length(vec))
 
-fn vec_slice_from(vec: Vec a, start: Int, count: Int, index: Int, total: Int, acc: Vec a) -> Vec a =
+fn vec_slice_from(start: Int, count: Int, vec: Vec a, index: Int, total: Int, acc: Vec a) -> Vec a =
   if index >= total then acc
   else if index < start then
-    vec_slice_from(vec, start, count, index + 1, total, acc)
+    vec_slice_from(start, count, vec, index + 1, total, acc)
   else if index >= start + count then acc
   else
-    match vec_get(vec, index) with
+    match vec_get(index, vec) with
     | Nothing -> acc
-    | Just value -> vec_slice_from(vec, start, count, index + 1, total, vec_append(acc, value))
+    | Just value -> vec_slice_from(start, count, vec, index + 1, total, vec_append(value, acc))
 
-fn vec_slice(vec: Vec a, start: Int, count: Int) -> Vec a =
+fn vec_slice(start: Int, count: Int, vec: Vec a) -> Vec a =
   if count <= 0 then vec_empty()
   else
-    vec_slice_from(vec, if start < 0 then 0 else start, count, 0, vec_length(vec), vec_empty())
+    vec_slice_from(if start < 0 then 0 else start, count, vec, 0, vec_length(vec), vec_empty())
 
 fn vec_reverse_from(vec: Vec a, index: Int, acc: Vec a) -> Vec a =
   if index < 0 then acc
   else
-    match vec_get(vec, index) with
+    match vec_get(index, vec) with
     | Nothing -> acc
-    | Just value -> vec_reverse_from(vec, index - 1, vec_append(acc, value))
+    | Just value -> vec_reverse_from(vec, index - 1, vec_append(value, acc))
 
 fn vec_reverse(vec: Vec a) -> Vec a =
   vec_reverse_from(vec, vec_length(vec) - 1, vec_empty())
@@ -136,23 +136,23 @@ fn vec_reverse(vec: Vec a) -> Vec a =
 fn add_ints(left: Int, right: Int) -> Int = left + right
 
 fn vec_sum(vec: Vec Int) -> Int =
-  vec_fold(vec, 0, add_ints)
+  vec_fold(add_ints, 0, vec)
 
-fn vec_sum_by(vec: Vec a, f: a -> Int) -> Int =
-  vec_sum(vec_map(vec, f))
+fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
+  vec_sum(vec_map(f, vec))
 
 fn dict_empty() -> Dict v =
   Dict(map_empty())
 
-fn dict_get(dict: Dict v, key: String) -> Maybe v =
+fn dict_get(key: String, dict: Dict v) -> Maybe v =
   match dict with
   | Dict raw -> map_get(raw, key)
 
-fn dict_set(dict: Dict v, key: String, value: v) -> Dict v =
+fn dict_set(key: String, value: v, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_set(raw, key, value))
 
-fn dict_remove(dict: Dict v, key: String) -> Dict v =
+fn dict_remove(key: String, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_remove(raw, key))
 
@@ -161,7 +161,7 @@ fn dict_keys_from(raw: Map v, index: Int, total: Int, acc: Vec String) -> Vec St
   else
     match map_nth_key(raw, index) with
     | Nothing -> acc
-    | Just key -> dict_keys_from(raw, index + 1, total, vec_append(acc, key))
+    | Just key -> dict_keys_from(raw, index + 1, total, vec_append(key, acc))
 
 fn dict_keys(dict: Dict v) -> Vec String =
   match dict with
@@ -172,7 +172,7 @@ fn dict_values_from(raw: Map v, index: Int, total: Int, acc: Vec v) -> Vec v =
   else
     match map_nth_value(raw, index) with
     | Nothing -> acc
-    | Just value -> dict_values_from(raw, index + 1, total, vec_append(acc, value))
+    | Just value -> dict_values_from(raw, index + 1, total, vec_append(value, acc))
 
 fn dict_values(dict: Dict v) -> Vec v =
   match dict with
@@ -187,7 +187,7 @@ class Functor f {
 }
 
 class Foldable f {
-  fn fold_values(xs: f a, init: b, step: b -> a -> b) -> b
+  fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
 }
 
 instance Semigroup String {
@@ -202,30 +202,30 @@ instance Semigroup (List a) {
 
 instance Functor List {
   fn fmap(f: a -> b, xs: List a) -> List b =
-    list_map(xs, f)
+    list_map(f, xs)
 }
 
 instance Foldable List {
-  fn fold_values(xs: List a, init: b, step: b -> a -> b) -> b =
-    list_fold(xs, init, step)
+  fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
+    list_fold(step, init, xs)
 }
 
 instance Functor Vec {
   fn fmap(f: a -> b, xs: Vec a) -> Vec b =
-    vec_map(xs, f)
+    vec_map(f, xs)
 }
 
 instance Foldable Vec {
-  fn fold_values(xs: Vec a, init: b, step: b -> a -> b) -> b =
-    vec_fold(xs, init, step)
+  fn fold_values(step: b -> a -> b, init: b, xs: Vec a) -> b =
+    vec_fold(step, init, xs)
 }
 
 fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
-  vec_append(acc, item)
+  vec_append(item, acc)
 
 instance Semigroup (Vec a) {
   fn append(x: Vec a, y: Vec a) -> Vec a =
-    vec_fold(y, x, vec_append_flip)
+    vec_fold(vec_append_flip, x, y)
 }
 
 fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict v =
@@ -236,7 +236,7 @@ fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict 
     | Just key ->
         match map_nth_value(raw, index) with
         | Nothing -> acc
-        | Just value -> dict_append_entries(dict_set(acc, key, value), raw, index + 1, total)
+        | Just value -> dict_append_entries(dict_set(key, value, acc), raw, index + 1, total)
 
 instance Semigroup (Dict v) {
   fn append(x: Dict v, y: Dict v) -> Dict v =
@@ -245,7 +245,7 @@ instance Semigroup (Dict v) {
 }
 
 fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
-  fold_values(xs, vec_empty(), vec_append_flip)
+  fold_values(vec_append_flip, vec_empty(), xs)
 
 fn pipe(value: a, f: a -> b) -> b =
   f(value)

@@ -70,7 +70,7 @@ class RuntimeTests(unittest.TestCase):
         fn add(acc: Int, x: Int) -> Int = acc + x
 
         fn main() -> Unit !{IO} =
-          print(fold(split_ints("1, 2 3 4"), 0, add))
+          print(fold(add, 0, split_ints("1, 2 3 4")))
         """
         program = parse(with_prelude(src))
         typecheck_program(program)
@@ -820,15 +820,15 @@ class RuntimeTests(unittest.TestCase):
                 fn main() -> Unit !{IO} =
                   print(
                     vec_get_or(
+                      0,
+                      -1,
                       vec_reverse(
                         vec_slice(
-                          vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40),
                           1,
-                          2
+                          2,
+                          vec_append(40, vec_append(30, vec_append(20, vec_append(10, vec_empty()))))
                         )
-                      ),
-                      0,
-                      -1
+                      )
                     )
                   )
                 """,
@@ -853,12 +853,12 @@ class RuntimeTests(unittest.TestCase):
                 import stdlib.string as string
 
                 fn sample() -> Dict Int =
-                  dict_set(dict_set(dict_empty(), "alpha", 7), "beta", 11)
+                  dict_set("beta", 11, dict_set("alpha", 7, dict_empty()))
 
                 fn main() -> Unit !{IO} =
                   print(
-                    vec_get_or(dict_values(sample()), 0, -100)
-                    + string.length(vec_get_or(dict_keys(sample()), 1, ""))
+                    vec_get_or(0, -100, dict_values(sample()))
+                    + string.length(vec_get_or(1, "", dict_keys(sample())))
                   )
                 """,
                 encoding="utf-8",
@@ -1048,12 +1048,12 @@ class RuntimeTests(unittest.TestCase):
                 import stdlib.collections (Vec, vec_append, vec_empty, vec_sum, vec_sum_by)
 
                 fn sample() -> Vec Int =
-                  vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30)
+                  vec_append(30, vec_append(20, vec_append(10, vec_empty())))
 
                 fn tens(value: Int) -> Int = value / 10
 
                 fn main() -> Unit !{IO} =
-                  print(vec_sum(sample()) + vec_sum_by(sample(), tens))
+                  print(vec_sum(sample()) + vec_sum_by(tens, sample()))
                 """,
                 encoding="utf-8",
             )
@@ -1191,10 +1191,10 @@ class RuntimeTests(unittest.TestCase):
                   Cons(1, Cons(2, Cons(3, Nil)))
 
                 fn sample_vec() -> Vec Int =
-                  vec_append(vec_append(vec_append(vec_empty(), 4), 5), 6)
+                  vec_append(6, vec_append(5, vec_append(4, vec_empty())))
 
                 fn sum_after_map(xs: c) -> Int where Functor c, Foldable c =
-                  fold_values(fmap(add_one, xs), 0, add)
+                  fold_values(add, 0, fmap(add_one, xs))
 
                 fn sum_list(xs: List Int) -> Int where Functor List, Foldable List =
                   sum_after_map(xs)
@@ -1227,19 +1227,19 @@ class RuntimeTests(unittest.TestCase):
                 import stdlib.collections (Dict, List, Maybe, Semigroup, Vec, dict_empty, dict_get, dict_set, vec_append, vec_empty, vec_get_or)
 
                 fn left_vec() -> Vec Int =
-                  vec_append(vec_append(vec_empty(), 1), 2)
+                  vec_append(2, vec_append(1, vec_empty()))
 
                 fn right_vec() -> Vec Int =
-                  vec_append(vec_empty(), 3)
+                  vec_append(3, vec_empty())
 
                 fn left_dict() -> Dict Int =
-                  dict_set(dict_set(dict_empty(), "a", 1), "shared", 7)
+                  dict_set("shared", 7, dict_set("a", 1, dict_empty()))
 
                 fn right_dict() -> Dict Int =
-                  dict_set(dict_set(dict_empty(), "b", 2), "shared", 9)
+                  dict_set("shared", 9, dict_set("b", 2, dict_empty()))
 
                 fn value_or(d: Dict Int, key: String, fallback: Int) -> Int =
-                  match dict_get(d, key) with
+                  match dict_get(key, d) with
                   | Just value -> value
                   | Nothing -> fallback
 
@@ -1268,7 +1268,7 @@ class RuntimeTests(unittest.TestCase):
                     seq(
                       print(list_count(append_list(Cons(1, Nil), Cons(2, Cons(3, Nil))))),
                       seq(
-                        print(vec_get_or(append_vec(left_vec(), right_vec()), 2, -1)),
+                        print(vec_get_or(2, -1, append_vec(left_vec(), right_vec()))),
                         print(
                           value_or(append_dict(left_dict(), right_dict()), "shared", -1)
                           + value_or(append_dict(left_dict(), right_dict()), "b", -1)
@@ -1301,7 +1301,7 @@ class RuntimeTests(unittest.TestCase):
                 fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
                 fn value_or(d: Dict Int, key: String, fallback: Int) -> Int =
-                  match dict_get(d, key) with
+                  match dict_get(key, d) with
                   | Just value -> value
                   | Nothing -> fallback
 
@@ -1311,8 +1311,8 @@ class RuntimeTests(unittest.TestCase):
                     seq(
                       print([1, 2] ++ [3, 4]),
                       seq(
-                        print(vec_get_or(vec_append(vec_empty(), 1) ++ vec_append(vec_empty(), 2), 1, -1)),
-                        print(value_or(dict_set(dict_empty(), "x", 1) ++ dict_set(dict_empty(), "x", 9), "x", -1))
+                        print(vec_get_or(1, -1, vec_append(1, vec_empty()) ++ vec_append(2, vec_empty()))),
+                        print(value_or(dict_set("x", 1, dict_empty()) ++ dict_set("x", 9, dict_empty()), "x", -1))
                       )
                     )
                   )

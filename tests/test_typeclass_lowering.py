@@ -103,7 +103,7 @@ class TypeclassLoweringTests(unittest.TestCase):
     def test_lowering_resolves_concrete_constraint_from_call_argument_types(self) -> None:
         src = """
         class Foldable f {
-          fn fold_values(xs: f a, init: b, f: b -> a -> b) -> b
+          fn fold_values(f: b -> a -> b, init: b, xs: f a) -> b
         }
         type List a =
           | Cons a (List a)
@@ -112,19 +112,19 @@ class TypeclassLoweringTests(unittest.TestCase):
           | Vec (List a)
         fn vec_empty() -> Vec a =
           Vec(Nil)
-        fn vec_append(xs: Vec a, x: a) -> Vec a =
+        fn vec_append(x: a, xs: Vec a) -> Vec a =
           match xs with
           | Vec items -> Vec(Cons(x, items))
-        fn vec_append_flip(xs: Vec a) -> a -> Vec a =
-          \\x -> vec_append(xs, x)
+        fn vec_append_flip(acc: Vec a, x: a) -> Vec a =
+          vec_append(x, acc)
         instance Foldable List {
-          fn fold_values(xs: List a, init: b, f: b -> a -> b) -> b =
+          fn fold_values(f: b -> a -> b, init: b, xs: List a) -> b =
             match xs with
             | Nil -> init
-            | Cons x rest -> fold_values(rest, f(init, x), f)
+            | Cons x rest -> fold_values(f, f(init, x), rest)
         }
         fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
-          fold_values(xs, vec_empty(), vec_append_flip)
+          fold_values(vec_append_flip, vec_empty(), xs)
         let xs = foldable_to_vec(Cons(1, Cons(2, Nil)))
         """
         program = parse(src)

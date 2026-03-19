@@ -980,7 +980,7 @@ class CodegenTests(unittest.TestCase):
                 import stdlib.string (string_lines)
 
                 fn main() -> Unit !{IO} =
-                  print(vec_get_or(string_lines("alpha\\nbeta\\n"), 1, "missing"))
+                  print(vec_get_or(1, "missing", string_lines("alpha\\nbeta\\n")))
                 """,
                 encoding="utf-8",
             )

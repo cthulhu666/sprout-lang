@@ -7,7 +7,7 @@ class Summable c {
 
 instance Summable (Vec Int) {
   fn sum_values(xs: Vec Int) -> Int =
-    vec_fold(xs, 0, add)
+    vec_fold(add, 0, xs)
 }
 
 fn add(acc: Int, value: Int) -> Int = acc + value
@@ -20,5 +20,5 @@ fn sum_vec(values: Vec Int) -> Int where Summable (Vec Int) =
 
 fn main() -> Unit !{IO} =
   print(
-    sum_vec(vec_append(vec_append(vec_append(vec_empty(), 3), 4), 5))
+    sum_vec(vec_append(5, vec_append(4, vec_append(3, vec_empty()))))
   )

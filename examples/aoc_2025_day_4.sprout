@@ -20,7 +20,7 @@ fn bool_to_int(value: Bool) -> Int =
   else 0
 
 fn line_at(grid: Vec String, row: Int) -> String =
-  vec_get_or(grid, row, "")
+  vec_get_or(row, "", grid)
 
 fn char_at_or(line: String, col: Int, fallback: String) -> String =
   if col < 0 then fallback
@@ -95,7 +95,7 @@ fn remove_accessible_rows(
           grid,
           row + 1,
           height,
-          vec_append(acc, next_row),
+          vec_append(next_row, acc),
           removed + row_removed
         )
 
@@ -110,7 +110,7 @@ fn remove_accessible_layers(grid: Vec String, removed_total: Int) -> Int =
 
 fn append_if_non_empty(acc: Vec String, line: String) -> Vec String =
   if length(line) == 0 then acc
-  else vec_append(acc, line)
+  else vec_append(line, acc)
 
 fn collect_non_empty_lines(lines: Vec String, index: Int, total: Int, acc: Vec String) -> Vec String =
   if index >= total then acc
@@ -119,7 +119,7 @@ fn collect_non_empty_lines(lines: Vec String, index: Int, total: Int, acc: Vec S
       lines,
       index + 1,
       total,
-      append_if_non_empty(acc, vec_get_or(lines, index, ""))
+      append_if_non_empty(acc, vec_get_or(index, "", lines))
     )
 
 fn parse_grid(raw: String) -> Vec String =

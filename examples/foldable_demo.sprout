@@ -5,7 +5,7 @@ fn list_sample() -> List Int =
   [1, 2, 3]
 
 fn vec_sample() -> Vec Int =
-  vec_append(vec_append(vec_empty(), 4), 5)
+  vec_append(5, vec_append(4, vec_empty()))
 
 fn list_to_vec(xs: List Int) -> Vec Int where Foldable List =
   foldable_to_vec(xs)

@@ -88,7 +88,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertIn("forall a b. List a -> (a -> b) -> List b", run.stdout)
+        self.assertIn("forall a b. (a -> b) -> List a -> List b", run.stdout)
 
     def test_repl_type_query_supports_typeclass_method_values(self) -> None:
         run = subprocess.run(

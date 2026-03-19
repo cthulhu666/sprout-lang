@@ -859,19 +859,19 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.collections (Vec, Dict, Maybe, vec_append, vec_empty, vec_get, vec_length, dict_empty, dict_get, dict_set)
 
                 fn third_or_zero(v: Vec Int) -> Int =
-                  match vec_get(v, 2) with
+                  match vec_get(2, v) with
                   | Just x -> x
                   | Nothing -> 0
 
                 fn read_or_missing(d: Dict Int, key: String) -> Int =
-                  match dict_get(d, key) with
+                  match dict_get(key, d) with
                   | Just x -> x
                   | Nothing -> -1
 
                 fn main() -> Unit !{IO} =
                   print(
                     read_or_missing(
-                      dict_set(dict_set(dict_empty(), "a", 1), "b", third_or_zero(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30))),
+                      dict_set("b", third_or_zero(vec_append(30, vec_append(20, vec_append(10, vec_empty())))), dict_set("a", 1, dict_empty())),
                       "b"
                     )
                   )
@@ -896,7 +896,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.collections (Dict, Maybe, dict_empty, dict_get, dict_set)
 
                 fn read_or_missing(d: Dict Int, key: String) -> Int =
-                  match dict_get(d, key) with
+                  match dict_get(key, d) with
                   | Just x -> x
                   | Nothing -> -1
 
@@ -928,15 +928,12 @@ class ModuleLoaderTests(unittest.TestCase):
                   | Nothing -> fallback
 
                 fn sample() -> Vec Int =
-                  vec_append(vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30), 40)
+                  vec_append(40, vec_append(30, vec_append(20, vec_append(10, vec_empty()))))
 
                 fn main() -> Unit !{IO} =
                   print(
                     value_or(
-                      vec_get(
-                        vec_reverse(vec_slice(sample(), 1, 2)),
-                        0
-                      ),
+                      vec_get(0, vec_reverse(vec_slice(1, 2, sample()))),
                       -1
                     )
                   )
@@ -962,12 +959,12 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.string as string
 
                 fn sample() -> Dict Int =
-                  dict_set(dict_set(dict_empty(), "alpha", 7), "beta", 11)
+                  dict_set("beta", 11, dict_set("alpha", 7, dict_empty()))
 
                 fn main() -> Unit !{IO} =
                   print(
-                    vec_get_or(dict_values(sample()), 1, -100)
-                    + string.length(vec_get_or(dict_keys(sample()), 0, ""))
+                    vec_get_or(1, -100, dict_values(sample()))
+                    + string.length(vec_get_or(0, "", dict_keys(sample())))
                   )
                 """,
                 encoding="utf-8",
@@ -990,12 +987,12 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.collections (Vec, vec_append, vec_empty, vec_sum, vec_sum_by)
 
                 fn sample() -> Vec Int =
-                  vec_append(vec_append(vec_append(vec_empty(), 10), 20), 30)
+                  vec_append(30, vec_append(20, vec_append(10, vec_empty())))
 
                 fn tens(value: Int) -> Int = value / 10
 
                 fn main() -> Unit !{IO} =
-                  print(vec_sum(sample()) + vec_sum_by(sample(), tens))
+                  print(vec_sum(sample()) + vec_sum_by(tens, sample()))
                 """,
                 encoding="utf-8",
             )
@@ -1020,13 +1017,13 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn add(acc: Int, x: Int) -> Int = acc + x
 
                 fn sum_after_map(xs: c) -> Int where Functor c, Foldable c =
-                  fold_values(fmap(add_one, xs), 0, add)
+                  fold_values(add, 0, fmap(add_one, xs))
 
                 fn sample_list() -> List Int =
                   Cons(1, Cons(2, Cons(3, Nil)))
 
                 fn sample_vec() -> Vec Int =
-                  vec_append(vec_append(vec_append(vec_empty(), 4), 5), 6)
+                  vec_append(6, vec_append(5, vec_append(4, vec_empty())))
 
                 fn sum_list(xs: List Int) -> Int where Functor List, Foldable List =
                   sum_after_map(xs)
@@ -1061,7 +1058,7 @@ class ModuleLoaderTests(unittest.TestCase):
 
                 fn main() -> Unit !{IO} =
                   print(
-                    vec_get_or(string_lines("a\\nb\\n"), 1, "missing")
+                    vec_get_or(1, "missing", string_lines("a\\nb\\n"))
                   )
                 """,
                 encoding="utf-8",
@@ -1086,7 +1083,7 @@ class ModuleLoaderTests(unittest.TestCase):
 
                 fn main() -> Unit !{IO} =
                   print(
-                    vec_get_or(string_digits("x7y3z"), 1, -1)
+                    vec_get_or(1, -1, string_digits("x7y3z"))
                   )
                 """,
                 encoding="utf-8",
@@ -1175,19 +1172,19 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.collections (Dict, Maybe, Semigroup, Vec, dict_empty, dict_get, dict_set, vec_append, vec_empty, vec_get_or)
 
                 fn left_vec() -> Vec Int =
-                  vec_append(vec_append(vec_empty(), 1), 2)
+                  vec_append(2, vec_append(1, vec_empty()))
 
                 fn right_vec() -> Vec Int =
-                  vec_append(vec_empty(), 3)
+                  vec_append(3, vec_empty())
 
                 fn left_dict() -> Dict Int =
-                  dict_set(dict_set(dict_empty(), "a", 1), "shared", 7)
+                  dict_set("shared", 7, dict_set("a", 1, dict_empty()))
 
                 fn right_dict() -> Dict Int =
-                  dict_set(dict_set(dict_empty(), "b", 2), "shared", 9)
+                  dict_set("shared", 9, dict_set("b", 2, dict_empty()))
 
                 fn value_or(d: Dict Int, key: String, fallback: Int) -> Int =
-                  match dict_get(d, key) with
+                  match dict_get(key, d) with
                   | Just value -> value
                   | Nothing -> fallback
 
@@ -1199,7 +1196,7 @@ class ModuleLoaderTests(unittest.TestCase):
 
                 fn main() -> Unit !{IO} =
                   print(
-                    vec_get_or(append_vec(left_vec(), right_vec()), 2, -1)
+                    vec_get_or(2, -1, append_vec(left_vec(), right_vec()))
                     + value_or(append_dict(left_dict(), right_dict()), "shared", -1)
                     + value_or(append_dict(left_dict(), right_dict()), "b", -1)
                   )
@@ -1226,20 +1223,20 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.collections (Dict, List, Maybe, Vec, dict_empty, dict_get, dict_set, vec_append, vec_empty, vec_get_or)
 
                 fn left_vec() -> Vec Int =
-                  vec_append(vec_append(vec_empty(), 1), 2)
+                  vec_append(2, vec_append(1, vec_empty()))
 
                 fn right_vec() -> Vec Int =
-                  vec_append(vec_empty(), 3)
+                  vec_append(3, vec_empty())
 
                 fn value_or(d: Dict Int, key: String, fallback: Int) -> Int =
-                  match dict_get(d, key) with
+                  match dict_get(key, d) with
                   | Just value -> value
                   | Nothing -> fallback
 
                 fn main() -> Unit !{IO} =
                   print(
-                    vec_get_or(left_vec() ++ right_vec(), 2, -1)
-                    + value_or(dict_set(dict_empty(), "a", 1) ++ dict_set(dict_empty(), "a", 7), "a", -1)
+                    vec_get_or(2, -1, left_vec() ++ right_vec())
+                    + value_or(dict_set("a", 1, dict_empty()) ++ dict_set("a", 7, dict_empty()), "a", -1)
                   )
                 """,
                 encoding="utf-8",

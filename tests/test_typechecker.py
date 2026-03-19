@@ -16,13 +16,13 @@ class TypecheckerTests(unittest.TestCase):
           | Just a
           | Nothing
 
-        fn map(m: Maybe a, f: a -> b) -> Maybe b =
+        fn map(f: a -> b, m: Maybe a) -> Maybe b =
           match m with
           | Just x -> Just(f(x))
           | Nothing -> Nothing
 
         fn main() -> Unit !{IO} =
-          print(map(Just(2), fn_inc))
+          print(map(fn_inc, Just(2)))
 
         fn fn_inc(x: Int) -> Int = x + 1
         """
@@ -70,7 +70,7 @@ class TypecheckerTests(unittest.TestCase):
         fn add(acc: Int, x: Int) -> Int = acc + x
 
         fn main() -> Unit !{IO} =
-          print(fold(filter(split_ints("1 2 3 4"), is_even), 0, add))
+          print(fold(add, 0, filter(is_even, split_ints("1 2 3 4"))))
         """
         prog = parse(with_prelude(src))
         types = typecheck_program(prog)

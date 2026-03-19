@@ -184,29 +184,29 @@ String/runtime helpers are host-implemented primitives. Application code should 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
 - `Maybe a` (`Just`, `Nothing`)
-- `map(list, fn) -> List`
-- `fold(list, init, fn) -> value`
-- `filter(list, predicate) -> List`
+- `map(fn, list) -> List`
+- `fold(fn, init, list) -> value`
+- `filter(predicate, list) -> List`
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
   - `vec_empty()`
   - `vec_prepend(value, vec)`
-  - `vec_append(vec, value)`
+  - `vec_append(value, vec)`
   - `vec_length(vec)`
-  - `vec_get(vec, index) -> Maybe a`
-  - `vec_get_or(vec, index, fallback)`
-  - `vec_set(vec, index, value)`
-  - `vec_map(vec, f)`
-  - `vec_fold(vec, init, f)`
-  - `vec_slice(vec, start, count)`
+  - `vec_get(index, vec) -> Maybe a`
+  - `vec_get_or(index, fallback, vec)`
+  - `vec_set(index, value, vec)`
+  - `vec_map(f, vec)`
+  - `vec_fold(f, init, vec)`
+  - `vec_slice(start, count, vec)`
   - `vec_reverse(vec)`
   - `vec_sum(vec)`
-  - `vec_sum_by(vec, f)`
+  - `vec_sum_by(f, vec)`
 - `Dict v` plus foundational helpers:
   - `dict_empty()`
-  - `dict_get(dict, key) -> Maybe v`
-  - `dict_set(dict, key, value)`
-  - `dict_remove(dict, key)`
+  - `dict_get(key, dict) -> Maybe v`
+  - `dict_set(key, value, dict)`
+  - `dict_remove(key, dict)`
   - `dict_keys(dict) -> Vec String`
   - `dict_values(dict) -> Vec v`
   - dict literals: `{foo: 1, "bar": 2}`, `{}`

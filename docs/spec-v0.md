@@ -330,7 +330,7 @@ fn swap(pair: (Int, Bool)) -> (Bool, Int) =
 ### 10.6 Generic map over Maybe
 
 ```sprout
-fn map(m: Maybe a, f: a -> b) -> Maybe b =
+fn map(f: a -> b, m: Maybe a) -> Maybe b =
   match m with
   | Just x -> Just(f(x))
   | Nothing -> Nothing

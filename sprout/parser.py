@@ -413,7 +413,7 @@ class Parser:
                 out = self.mark(
                     ast.CallExpr(
                         callee=self.mark(ast.VarExpr(name="dict_set"), open_tok),
-                        args=[out, self.mark(ast.StringExpr(value=key), open_tok), value],
+                        args=[self.mark(ast.StringExpr(value=key), open_tok), value, out],
                     ),
                     open_tok,
                 )

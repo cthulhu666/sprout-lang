@@ -15,11 +15,11 @@ fn sample_dict() -> Dict Int =
 fn main() -> Unit !{IO} =
   print(
     vec_get_or(
-      vec_reverse(vec_slice(sample_vec(), 1, 2)),
       0,
-      -1
+      -1,
+      vec_reverse(vec_slice(1, 2, sample_vec()))
     )
-    + vec_get_or(dict_values(dict_remove(sample_dict(), "first")), 0, -100)
-    + string.length(vec_get_or(dict_keys(sample_dict()), 1, ""))
-    + vec_sum_by(sample_vec(), half)
+    + vec_get_or(0, -100, dict_values(dict_remove("first", sample_dict())))
+    + string.length(vec_get_or(1, "", dict_keys(sample_dict())))
+    + vec_sum_by(half, sample_vec())
   )

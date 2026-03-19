@@ -22,12 +22,12 @@ fn shrink_for_digit(digits: Vec Int, size: Int, drops: Int, digit: Int) -> Shrin
   if size <= 0 then Shrink(size, drops)
   else if drops <= 0 then Shrink(size, drops)
   else
-    if vec_get_or(digits, size - 1, 0) < digit then shrink_for_digit(digits, size - 1, drops - 1, digit)
+    if vec_get_or(size - 1, 0, digits) < digit then shrink_for_digit(digits, size - 1, drops - 1, digit)
     else Shrink(size, drops)
 
 fn write_at_or_append(digits: Vec Int, index: Int, digit: Int) -> Vec Int =
-  if index < vec_length(digits) then vec_set(digits, index, digit)
-  else vec_append(digits, digit)
+  if index < vec_length(digits) then vec_set(index, digit, digits)
+  else vec_append(digit, digits)
 
 fn push_digit(digits: Vec Int, size: Int, drops: Int, digit: Int) -> PickState =
   match shrink_for_digit(digits, size, drops, digit) with
@@ -37,7 +37,7 @@ fn push_digit(digits: Vec Int, size: Int, drops: Int, digit: Int) -> PickState =
 fn pick_digits(bank: Vec Int, index: Int, total: Int, digits: Vec Int, size: Int, drops: Int) -> PickState =
   if index >= total then PickState(digits, SizeDrops(size, drops))
   else
-    match push_digit(digits, size, drops, vec_get_or(bank, index, 0)) with
+    match push_digit(digits, size, drops, vec_get_or(index, 0, bank)) with
     | PickState next_digits sd ->
         match sd with
         | SizeDrops next_size next_drops ->
@@ -45,7 +45,7 @@ fn pick_digits(bank: Vec Int, index: Int, total: Int, digits: Vec Int, size: Int
 
 fn fold_prefix_int(digits: Vec Int, index: Int, count: Int, acc: Int) -> Int =
   if index >= count then acc
-  else fold_prefix_int(digits, index + 1, count, acc * 10 + vec_get_or(digits, index, 0))
+  else fold_prefix_int(digits, index + 1, count, acc * 10 + vec_get_or(index, 0, digits))
 
 fn best_value_vec(bank: Vec Int, count: Int) -> Int =
   best_value_with_len(bank, vec_length(bank), count)
@@ -65,7 +65,7 @@ fn sum_best_values(banks: Vec (Vec Int), index: Int, total: Int, count: Int, acc
       index + 1,
       total,
       count,
-      acc + best_value_vec(vec_get_or(banks, index, vec_empty()), count)
+      acc + best_value_vec(vec_get_or(index, vec_empty(), banks), count)
     )
 
 fn sum_for_count(banks: Vec (Vec Int), count: Int) -> Int =
@@ -73,7 +73,7 @@ fn sum_for_count(banks: Vec (Vec Int), count: Int) -> Int =
 
 fn append_if_non_empty_bank(banks: Vec (Vec Int), bank: Vec Int) -> Vec (Vec Int) =
   if vec_length(bank) == 0 then banks
-  else vec_append(banks, bank)
+  else vec_append(bank, banks)
 
 fn lines_to_banks(lines: Vec String, index: Int, total: Int, acc: Vec (Vec Int)) -> Vec (Vec Int) =
   if index >= total then acc
@@ -82,7 +82,7 @@ fn lines_to_banks(lines: Vec String, index: Int, total: Int, acc: Vec (Vec Int))
       lines,
       index + 1,
       total,
-      append_if_non_empty_bank(acc, string_digits(vec_get_or(lines, index, "")))
+      append_if_non_empty_bank(acc, string_digits(vec_get_or(index, "", lines)))
     )
 
 fn parse_all_banks(raw: String) -> Vec (Vec Int) =

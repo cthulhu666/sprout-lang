@@ -229,12 +229,12 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
         self.assertEqual(fn_decl.body.callee.name, "dict_set")
 
-        first_arg = fn_decl.body.args[0]
-        self.assertIsInstance(first_arg, ast.CallExpr)
-        self.assertIsInstance(first_arg.callee, ast.VarExpr)
-        self.assertEqual(first_arg.callee.name, "dict_set")
+        third_arg = fn_decl.body.args[2]
+        self.assertIsInstance(third_arg, ast.CallExpr)
+        self.assertIsInstance(third_arg.callee, ast.VarExpr)
+        self.assertEqual(third_arg.callee.name, "dict_set")
 
-        empty_call = first_arg.args[0]
+        empty_call = third_arg.args[2]
         self.assertIsInstance(empty_call, ast.CallExpr)
         self.assertIsInstance(empty_call.callee, ast.VarExpr)
         self.assertEqual(empty_call.callee.name, "dict_empty")

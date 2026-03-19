@@ -5,7 +5,7 @@ fn add_one(x: Int) -> Int = x + 1
 fn add(acc: Int, x: Int) -> Int = acc + x
 
 fn map_and_sum(xs: c) -> Int where Functor c, Foldable c =
-  fold_values(fmap(add_one, xs), 0, add)
+  fold_values(add, 0, fmap(add_one, xs))
 
 fn map_and_sum_list(xs: List Int) -> Int where Functor List, Foldable List =
   map_and_sum(xs)
@@ -17,7 +17,7 @@ fn sample_list() -> List Int =
   [1, 2, 3]
 
 fn sample_vec() -> Vec Int =
-  vec_append(vec_append(vec_append(vec_empty(), 4), 5), 6)
+  vec_append(6, vec_append(5, vec_append(4, vec_empty())))
 
 fn main() -> Unit !{IO} =
   print(map_and_sum_list(sample_list()) + map_and_sum_vec(sample_vec()))
