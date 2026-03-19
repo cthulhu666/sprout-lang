@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 import shutil
 import subprocess
@@ -1245,6 +1246,70 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "1")
             self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_debug_alloc_report_is_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.bytes (append, builder_append, builder_build, builder_byte, builder_empty, empty, length, singleton)
+
+                fn force(x: a, y: b) -> b = y
+
+                fn main() -> Int !{IO} =
+                  force(
+                    vec_empty(),
+                    force(
+                      dict_empty(),
+                      print_int(
+                        length(append(empty(), singleton(65))) +
+                        length(builder_build(builder_append(builder_empty(), builder_byte(66))))
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+
+            default_run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(default_run.stdout.strip(), "2")
+            self.assertEqual(default_run.stderr, "")
+            self.assertEqual(default_run.returncode, 2)
+
+            debug_env = os.environ.copy()
+            debug_env["SPROUT_DEBUG_ALLOC"] = "1"
+            debug_run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=debug_env,
+            )
+            self.assertEqual(debug_run.stdout.strip(), "2")
+            self.assertEqual(debug_run.returncode, 2)
+            self.assertIn("[sprout alloc]", debug_run.stderr)
+            self.assertIn("sprout_obj=", debug_run.stderr)
+            self.assertIn("vector=", debug_run.stderr)
+            self.assertIn("map=", debug_run.stderr)
+            self.assertIn("bytes=", debug_run.stderr)
+            self.assertIn("builder=", debug_run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_crypto_helpers(self) -> None:

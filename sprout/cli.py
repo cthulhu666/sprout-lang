@@ -234,6 +234,13 @@ static long long g_next_listener_handle = 1;
 static long long g_next_conn_handle = 1;
 static int g_sprout_argc = 0;
 static char** g_sprout_argv = NULL;
+static int g_debug_alloc_enabled = 0;
+static int g_debug_alloc_report_registered = 0;
+static long long g_debug_alloc_sprout_obj = 0;
+static long long g_debug_alloc_vector = 0;
+static long long g_debug_alloc_map = 0;
+static long long g_debug_alloc_bytes = 0;
+static long long g_debug_alloc_builder = 0;
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -245,6 +252,51 @@ static void sha256_digest(const unsigned char* data, size_t len, unsigned char o
 static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]);
 static char* base64_encode_bytes(const unsigned char* data, size_t len);
 static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err);
+
+static int sprout_debug_alloc_truthy(const char* value) {
+  if (value == NULL || value[0] == '\\0') return 0;
+  if (strcmp(value, "0") == 0) return 0;
+  if (strcmp(value, "false") == 0) return 0;
+  if (strcmp(value, "off") == 0) return 0;
+  return 1;
+}
+
+static void sprout_debug_alloc_report(void) {
+  if (!g_debug_alloc_enabled) return;
+  fprintf(
+    stderr,
+    "[sprout alloc] sprout_obj=%lld vector=%lld map=%lld bytes=%lld builder=%lld\\n",
+    g_debug_alloc_sprout_obj,
+    g_debug_alloc_vector,
+    g_debug_alloc_map,
+    g_debug_alloc_bytes,
+    g_debug_alloc_builder
+  );
+}
+
+static void sprout_debug_alloc_maybe_enable(void) {
+  if (g_debug_alloc_enabled) return;
+  if (!sprout_debug_alloc_truthy(getenv("SPROUT_DEBUG_ALLOC"))) return;
+  g_debug_alloc_enabled = 1;
+  if (!g_debug_alloc_report_registered) {
+    atexit(sprout_debug_alloc_report);
+    g_debug_alloc_report_registered = 1;
+  }
+}
+
+static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
+  if (g_debug_alloc_enabled) (*counter)++;
+  void* out = malloc(size);
+  if (out == NULL) tcp_fail(ctx);
+  return out;
+}
+
+static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, const char* ctx) {
+  if (g_debug_alloc_enabled) (*counter)++;
+  void* out = realloc(ptr, size);
+  if (out == NULL) tcp_fail(ctx);
+  return out;
+}
 
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
@@ -356,11 +408,16 @@ long long env_get(const char* name) {
 long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
   g_sprout_argv = argv;
+  sprout_debug_alloc_maybe_enable();
   return 0;
 }
 long long sprout_nothing(long long tag) {
   if (g_nothing_singleton == NULL) {
-    g_nothing_singleton = (SproutObj*)malloc(sizeof(SproutObj));
+    g_nothing_singleton = (SproutObj*)sprout_alloc_counted(
+      &g_debug_alloc_sprout_obj,
+      sizeof(SproutObj),
+      "sprout_nothing: out of memory"
+    );
     g_nothing_singleton->tag = tag;
     g_nothing_singleton->f0 = 0;
     g_nothing_singleton->f1 = 0;
@@ -448,8 +505,12 @@ long long read_int_lines(const char* path) {
     if (end == buf || *end != '\\0') tcp_fail("read_int_lines: invalid integer line");
     if (v->len == v->cap) {
       long long new_cap = v->cap == 0 ? 8 : (v->cap * 2);
-      long long* new_data = (long long*)realloc(v->data, (size_t)new_cap * sizeof(long long));
-      if (new_data == NULL) tcp_fail("read_int_lines: out of memory");
+      long long* new_data = (long long*)sprout_realloc_counted(
+        &g_debug_alloc_vector,
+        v->data,
+        (size_t)new_cap * sizeof(long long),
+        "read_int_lines: out of memory"
+      );
       v->data = new_data;
       v->cap = new_cap;
     }
@@ -470,7 +531,11 @@ long long sprout_make0(long long tag) {
   CtorMeta* meta = find_ctor(tag);
   if (meta != NULL && strcmp(meta->name, "Nothing") == 0) {
     if (g_nothing_singleton == NULL) {
-      g_nothing_singleton = (SproutObj*)malloc(sizeof(SproutObj));
+      g_nothing_singleton = (SproutObj*)sprout_alloc_counted(
+        &g_debug_alloc_sprout_obj,
+        sizeof(SproutObj),
+        "sprout_make0: out of memory"
+      );
       g_nothing_singleton->tag = tag;
       g_nothing_singleton->f0 = 0;
       g_nothing_singleton->f1 = 0;
@@ -479,7 +544,11 @@ long long sprout_make0(long long tag) {
     }
     return box_ptr(g_nothing_singleton);
   }
-  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  SproutObj* o = (SproutObj*)sprout_alloc_counted(
+    &g_debug_alloc_sprout_obj,
+    sizeof(SproutObj),
+    "sprout_make0: out of memory"
+  );
   o->tag = tag;
   o->f0 = 0;
   o->f1 = 0;
@@ -488,7 +557,11 @@ long long sprout_make0(long long tag) {
   return box_ptr(o);
 }
 long long sprout_make1(long long tag, long long a0) {
-  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  SproutObj* o = (SproutObj*)sprout_alloc_counted(
+    &g_debug_alloc_sprout_obj,
+    sizeof(SproutObj),
+    "sprout_make1: out of memory"
+  );
   o->tag = tag;
   o->f0 = a0;
   o->f1 = 0;
@@ -497,7 +570,11 @@ long long sprout_make1(long long tag, long long a0) {
   return box_ptr(o);
 }
 long long sprout_make2(long long tag, long long a0, long long a1) {
-  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  SproutObj* o = (SproutObj*)sprout_alloc_counted(
+    &g_debug_alloc_sprout_obj,
+    sizeof(SproutObj),
+    "sprout_make2: out of memory"
+  );
   o->tag = tag;
   o->f0 = a0;
   o->f1 = a1;
@@ -506,7 +583,11 @@ long long sprout_make2(long long tag, long long a0, long long a1) {
   return box_ptr(o);
 }
 long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
-  SproutObj* o = (SproutObj*)malloc(sizeof(SproutObj));
+  SproutObj* o = (SproutObj*)sprout_alloc_counted(
+    &g_debug_alloc_sprout_obj,
+    sizeof(SproutObj),
+    "sprout_make3: out of memory"
+  );
   o->tag = tag;
   o->f0 = a0;
   o->f1 = a1;
@@ -1042,8 +1123,7 @@ long long http_request(const char* method, const char* url, const char* headers_
 }
 
 long long vector_empty() {
-  VectorVal* v = (VectorVal*)malloc(sizeof(VectorVal));
-  if (v == NULL) tcp_fail("vector_empty: out of memory");
+  VectorVal* v = (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), "vector_empty: out of memory");
   v->len = 0;
   v->cap = 0;
   v->data = NULL;
@@ -1068,16 +1148,18 @@ long long vector_get(long long vec, long long index) {
 long long vector_set(long long vec, long long index, long long value) {
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) tcp_fail("vector_set: null vector");
-  VectorVal* out = (VectorVal*)malloc(sizeof(VectorVal));
-  if (out == NULL) tcp_fail("vector_set: out of memory");
+  VectorVal* out = (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), "vector_set: out of memory");
   out->len = src->len;
   out->cap = src->len;
   if (out->cap == 0) {
     out->data = NULL;
     return (long long)(uintptr_t)out;
   }
-  out->data = (long long*)malloc((size_t)out->cap * sizeof(long long));
-  if (out->data == NULL) tcp_fail("vector_set: out of memory");
+  out->data = (long long*)sprout_alloc_counted(
+    &g_debug_alloc_vector,
+    (size_t)out->cap * sizeof(long long),
+    "vector_set: out of memory"
+  );
   memcpy(out->data, src->data, (size_t)out->len * sizeof(long long));
   if (index >= 0 && index < out->len) {
     out->data[index] = value;
@@ -1088,12 +1170,14 @@ long long vector_set(long long vec, long long index, long long value) {
 long long vector_append(long long vec, long long value) {
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) tcp_fail("vector_append: null vector");
-  VectorVal* out = (VectorVal*)malloc(sizeof(VectorVal));
-  if (out == NULL) tcp_fail("vector_append: out of memory");
+  VectorVal* out = (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), "vector_append: out of memory");
   out->len = src->len + 1;
   out->cap = out->len;
-  out->data = (long long*)malloc((size_t)out->cap * sizeof(long long));
-  if (out->data == NULL) tcp_fail("vector_append: out of memory");
+  out->data = (long long*)sprout_alloc_counted(
+    &g_debug_alloc_vector,
+    (size_t)out->cap * sizeof(long long),
+    "vector_append: out of memory"
+  );
   if (src->len > 0) {
     memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
   }
@@ -1102,8 +1186,7 @@ long long vector_append(long long vec, long long value) {
 }
 
 long long map_empty() {
-  MapVal* m = (MapVal*)malloc(sizeof(MapVal));
-  if (m == NULL) tcp_fail("map_empty: out of memory");
+  MapVal* m = (MapVal*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(MapVal), "map_empty: out of memory");
   m->len = 0;
   m->cap = 0;
   m->entries = NULL;
@@ -1135,12 +1218,14 @@ long long map_set(long long map_h, const char* key, long long value) {
   long long existing = map_find_index(src, key);
   long long out_len = existing >= 0 ? src->len : (src->len + 1);
 
-  MapVal* out = (MapVal*)malloc(sizeof(MapVal));
-  if (out == NULL) tcp_fail("map_set: out of memory");
+  MapVal* out = (MapVal*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(MapVal), "map_set: out of memory");
   out->len = out_len;
   out->cap = out_len;
-  out->entries = out_len == 0 ? NULL : (MapEntry*)malloc((size_t)out_len * sizeof(MapEntry));
-  if (out_len > 0 && out->entries == NULL) tcp_fail("map_set: out of memory");
+  out->entries = out_len == 0 ? NULL : (MapEntry*)sprout_alloc_counted(
+    &g_debug_alloc_map,
+    (size_t)out_len * sizeof(MapEntry),
+    "map_set: out of memory"
+  );
 
   for (long long i = 0; i < src->len; i++) {
     out->entries[i].key = strdup(src->entries[i].key);
@@ -1164,12 +1249,14 @@ long long map_remove(long long map_h, const char* key) {
   long long remove_idx = map_find_index(src, key);
   if (remove_idx < 0) return map_h;
 
-  MapVal* out = (MapVal*)malloc(sizeof(MapVal));
-  if (out == NULL) tcp_fail("map_remove: out of memory");
+  MapVal* out = (MapVal*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(MapVal), "map_remove: out of memory");
   out->len = src->len - 1;
   out->cap = out->len;
-  out->entries = out->len == 0 ? NULL : (MapEntry*)malloc((size_t)out->len * sizeof(MapEntry));
-  if (out->len > 0 && out->entries == NULL) tcp_fail("map_remove: out of memory");
+  out->entries = out->len == 0 ? NULL : (MapEntry*)sprout_alloc_counted(
+    &g_debug_alloc_map,
+    (size_t)out->len * sizeof(MapEntry),
+    "map_remove: out of memory"
+  );
 
   long long j = 0;
   for (long long i = 0; i < src->len; i++) {
@@ -1209,8 +1296,7 @@ long long map_nth_value(long long map_h, long long index) {
 }
 
 long long bytes_empty() {
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("bytes_empty: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "bytes_empty: out of memory");
   out->len = 0;
   out->data = NULL;
   return (long long)(uintptr_t)out;
@@ -1239,11 +1325,13 @@ long long bytes_slice(long long bytes_h, long long start, long long count) {
   size_t c = (size_t)count;
   if (s > value->len) s = value->len;
   if (s + c > value->len) c = value->len - s;
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("bytes_slice: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "bytes_slice: out of memory");
   out->len = c;
-  out->data = c == 0 ? NULL : (unsigned char*)malloc(c);
-  if (c > 0 && out->data == NULL) tcp_fail("bytes_slice: out of memory");
+  out->data = c == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    c,
+    "bytes_slice: out of memory"
+  );
   if (c > 0) memcpy(out->data, value->data + s, c);
   return (long long)(uintptr_t)out;
 }
@@ -1252,11 +1340,13 @@ long long bytes_append(long long left_h, long long right_h) {
   BytesVal* left = (BytesVal*)(uintptr_t)left_h;
   BytesVal* right = (BytesVal*)(uintptr_t)right_h;
   if (left == NULL || right == NULL) tcp_fail("bytes_append: null bytes");
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("bytes_append: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "bytes_append: out of memory");
   out->len = left->len + right->len;
-  out->data = out->len == 0 ? NULL : (unsigned char*)malloc(out->len);
-  if (out->len > 0 && out->data == NULL) tcp_fail("bytes_append: out of memory");
+  out->data = out->len == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    out->len,
+    "bytes_append: out of memory"
+  );
   if (left->len > 0) memcpy(out->data, left->data, left->len);
   if (right->len > 0) memcpy(out->data + left->len, right->data, right->len);
   return (long long)(uintptr_t)out;
@@ -1264,11 +1354,9 @@ long long bytes_append(long long left_h, long long right_h) {
 
 long long bytes_singleton(long long value) {
   if (value < 0 || value > 255) tcp_fail("bytes_singleton: byte out of range");
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("bytes_singleton: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "bytes_singleton: out of memory");
   out->len = 1;
-  out->data = (unsigned char*)malloc(1);
-  if (out->data == NULL) tcp_fail("bytes_singleton: out of memory");
+  out->data = (unsigned char*)sprout_alloc_counted(&g_debug_alloc_bytes, 1, "bytes_singleton: out of memory");
   out->data[0] = (unsigned char)value;
   return (long long)(uintptr_t)out;
 }
@@ -1276,11 +1364,13 @@ long long bytes_singleton(long long value) {
 long long bytes_from_utf8(const char* raw) {
   if (raw == NULL) tcp_fail("bytes_from_utf8: null input");
   size_t len = strlen(raw);
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("bytes_from_utf8: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "bytes_from_utf8: out of memory");
   out->len = len;
-  out->data = len == 0 ? NULL : (unsigned char*)malloc(len);
-  if (len > 0 && out->data == NULL) tcp_fail("bytes_from_utf8: out of memory");
+  out->data = len == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    len,
+    "bytes_from_utf8: out of memory"
+  );
   if (len > 0) memcpy(out->data, raw, len);
   return (long long)(uintptr_t)out;
 }
@@ -1354,22 +1444,22 @@ long long bytes_to_utf8(long long bytes_h) {
 }
 
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx) {
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail(ctx);
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), ctx);
   out->len = len;
-  out->data = len == 0 ? NULL : (unsigned char*)malloc(len);
-  if (len > 0 && out->data == NULL) tcp_fail(ctx);
+  out->data = len == 0 ? NULL : (unsigned char*)sprout_alloc_counted(&g_debug_alloc_bytes, len, ctx);
   if (len > 0) memcpy(out->data, data, len);
   return out;
 }
 
 static BuilderVal* builder_alloc(size_t len, size_t count) {
-  BuilderVal* out = (BuilderVal*)malloc(sizeof(BuilderVal));
-  if (out == NULL) tcp_fail("bytes_builder: out of memory");
+  BuilderVal* out = (BuilderVal*)sprout_alloc_counted(&g_debug_alloc_builder, sizeof(BuilderVal), "bytes_builder: out of memory");
   out->len = len;
   out->count = count;
-  out->chunks = count == 0 ? NULL : (BytesVal**)malloc(count * sizeof(BytesVal*));
-  if (count > 0 && out->chunks == NULL) tcp_fail("bytes_builder: out of memory");
+  out->chunks = count == 0 ? NULL : (BytesVal**)sprout_alloc_counted(
+    &g_debug_alloc_builder,
+    count * sizeof(BytesVal*),
+    "bytes_builder: out of memory"
+  );
   return out;
 }
 
@@ -1443,11 +1533,13 @@ long long bytes_builder_append(long long left_h, long long right_h) {
 long long bytes_builder_build(long long builder_h) {
   BuilderVal* value = (BuilderVal*)(uintptr_t)builder_h;
   if (value == NULL) tcp_fail("bytes_builder_build: null builder");
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("bytes_builder_build: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "bytes_builder_build: out of memory");
   out->len = value->len;
-  out->data = out->len == 0 ? NULL : (unsigned char*)malloc(out->len);
-  if (out->len > 0 && out->data == NULL) tcp_fail("bytes_builder_build: out of memory");
+  out->data = out->len == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    out->len,
+    "bytes_builder_build: out of memory"
+  );
   size_t offset = 0;
   for (size_t i = 0; i < value->count; i++) {
     BytesVal* chunk = value->chunks[i];
