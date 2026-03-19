@@ -298,6 +298,13 @@ static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, 
   return out;
 }
 
+static char* sprout_strdup_counted(long long* counter, const char* text, const char* ctx) {
+  size_t len = strlen(text);
+  char* out = (char*)sprout_alloc_counted(counter, len + 1, ctx);
+  memcpy(out, text, len + 1);
+  return out;
+}
+
 static long long box_ptr(SproutObj* p) {
   return (long long)(uintptr_t)p;
 }
@@ -486,8 +493,11 @@ long long read_int_lines(const char* path) {
   if (path == NULL) tcp_fail("read_int_lines: null path");
   FILE* f = fopen(path, "r");
   if (f == NULL) tcp_fail("read_int_lines: cannot open file");
-  VectorVal* v = (VectorVal*)malloc(sizeof(VectorVal));
-  if (v == NULL) tcp_fail("read_int_lines: out of memory");
+  VectorVal* v = (VectorVal*)sprout_alloc_counted(
+    &g_debug_alloc_vector,
+    sizeof(VectorVal),
+    "read_int_lines: out of memory"
+  );
   v->len = 0;
   v->cap = 0;
   v->data = NULL;
@@ -1228,15 +1238,13 @@ long long map_set(long long map_h, const char* key, long long value) {
   );
 
   for (long long i = 0; i < src->len; i++) {
-    out->entries[i].key = strdup(src->entries[i].key);
-    if (out->entries[i].key == NULL) tcp_fail("map_set: out of memory");
+    out->entries[i].key = sprout_strdup_counted(&g_debug_alloc_map, src->entries[i].key, "map_set: out of memory");
     out->entries[i].value = src->entries[i].value;
   }
   if (existing >= 0) {
     out->entries[existing].value = value;
   } else {
-    out->entries[src->len].key = strdup(key);
-    if (out->entries[src->len].key == NULL) tcp_fail("map_set: out of memory");
+    out->entries[src->len].key = sprout_strdup_counted(&g_debug_alloc_map, key, "map_set: out of memory");
     out->entries[src->len].value = value;
   }
   return (long long)(uintptr_t)out;
@@ -1261,8 +1269,7 @@ long long map_remove(long long map_h, const char* key) {
   long long j = 0;
   for (long long i = 0; i < src->len; i++) {
     if (i == remove_idx) continue;
-    out->entries[j].key = strdup(src->entries[i].key);
-    if (out->entries[j].key == NULL) tcp_fail("map_remove: out of memory");
+    out->entries[j].key = sprout_strdup_counted(&g_debug_alloc_map, src->entries[i].key, "map_remove: out of memory");
     out->entries[j].value = src->entries[i].value;
     j++;
   }
@@ -1281,8 +1288,7 @@ long long map_nth_key(long long map_h, long long index) {
   if (index < 0 || index >= m->len) {
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  char* key = strdup(m->entries[index].key);
-  if (key == NULL) tcp_fail("map_nth_key: out of memory");
+  char* key = sprout_strdup_counted(&g_debug_alloc_map, m->entries[index].key, "map_nth_key: out of memory");
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)key);
 }
 
@@ -1773,7 +1779,11 @@ static int base64_decode_bytes(const char* text, unsigned char** out_data, size_
   if (len >= 1 && text[len - 1] == '=') size--;
   if (len >= 2 && text[len - 2] == '=') size--;
 
-  unsigned char* out = size == 0 ? NULL : (unsigned char*)malloc(size);
+  unsigned char* out = size == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    size,
+    "crypto_base64_decode: out of memory"
+  );
   if (size > 0 && out == NULL) {
     *err = "out of memory";
     return 0;
@@ -1883,8 +1893,7 @@ long long crypto_base64_decode(const char* raw) {
   if (!base64_decode_bytes(raw, &data, &len, &err)) {
     return crypto_err1("stdlib.crypto.Base64DecodeError", err);
   }
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("crypto_base64_decode: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "crypto_base64_decode: out of memory");
   out->len = len;
   out->data = len == 0 ? NULL : data;
   return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
@@ -1897,11 +1906,13 @@ long long crypto_bytes_xor(long long left_h, long long right_h) {
   if (left->len != right->len) {
     return crypto_err2("stdlib.crypto.BytesXorLengthMismatch", (long long)left->len, (long long)right->len);
   }
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("crypto_bytes_xor: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "crypto_bytes_xor: out of memory");
   out->len = left->len;
-  out->data = out->len == 0 ? NULL : (unsigned char*)malloc(out->len);
-  if (out->len > 0 && out->data == NULL) tcp_fail("crypto_bytes_xor: out of memory");
+  out->data = out->len == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    out->len,
+    "crypto_bytes_xor: out of memory"
+  );
   for (size_t i = 0; i < out->len; i++) out->data[i] = left->data[i] ^ right->data[i];
   return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
 }
@@ -1911,11 +1922,13 @@ long long crypto_random_bytes(long long count) {
     return crypto_err1("stdlib.crypto.CryptoInvalidArgument", "count must be >= 0");
   }
   size_t len = (size_t)count;
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("crypto_random_bytes: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "crypto_random_bytes: out of memory");
   out->len = len;
-  out->data = len == 0 ? NULL : (unsigned char*)malloc(len);
-  if (len > 0 && out->data == NULL) tcp_fail("crypto_random_bytes: out of memory");
+  out->data = len == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    len,
+    "crypto_random_bytes: out of memory"
+  );
   if (len > 0) {
     FILE* fp = fopen("/dev/urandom", "rb");
     if (fp == NULL) {
@@ -2071,11 +2084,13 @@ long long tcp_read_exact(long long conn, long long count) {
       (long long)(uintptr_t)"count must be >= 0"
     );
   }
-  BytesVal* out = (BytesVal*)malloc(sizeof(BytesVal));
-  if (out == NULL) tcp_fail("tcp_read_exact: out of memory");
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), "tcp_read_exact: out of memory");
   out->len = (size_t)count;
-  out->data = count == 0 ? NULL : (unsigned char*)malloc((size_t)count);
-  if (count > 0 && out->data == NULL) tcp_fail("tcp_read_exact: out of memory");
+  out->data = count == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    (size_t)count,
+    "tcp_read_exact: out of memory"
+  );
   size_t received = 0;
   while (received < (size_t)count) {
     ssize_t n = recv(g_conn_fd[conn], out->data + received, (size_t)count - received, 0);

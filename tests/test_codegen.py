@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unittest
 import shutil
 import subprocess
@@ -1251,25 +1252,48 @@ class CodegenTests(unittest.TestCase):
     def test_native_debug_alloc_report_is_opt_in(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
+            ints_path = tmp_path / "ints.txt"
             spr_path = tmp_path / "prog.sprout"
             bin_path = tmp_path / "prog"
+            ints_path.write_text("10\n20\n", encoding="utf-8")
             spr_path.write_text(
-                """
+                f"""
                 module main
-                import stdlib.bytes (append, builder_append, builder_build, builder_byte, builder_empty, empty, length, singleton)
+                import stdlib.bytes (from_string, length)
+                import stdlib.collections (dict_empty, dict_keys, dict_remove, dict_set, vec_length)
+                import stdlib.crypto as crypto
 
                 fn force(x: a, y: b) -> b = y
 
-                fn main() -> Int !{IO} =
-                  force(
-                    vec_empty(),
-                    force(
-                      dict_empty(),
-                      print_int(
-                        length(append(empty(), singleton(65))) +
-                        length(builder_build(builder_append(builder_empty(), builder_byte(66))))
+                fn map_score() -> Int =
+                  vec_length(
+                    dict_keys(
+                      dict_remove(
+                        "a",
+                        dict_set("b", 2, dict_set("a", 1, dict_empty()))
                       )
                     )
+                  )
+
+                fn score_decode() -> Int =
+                  match crypto.base64_decode("c3Byb3V0") with
+                  | Ok decoded -> length(decoded)
+                  | Err _ -> 0
+
+                fn score_xor() -> Int =
+                  match crypto.bytes_xor(from_string("abc"), from_string("ABC")) with
+                  | Ok xored -> length(xored)
+                  | Err _ -> 0
+
+                fn score_random() -> Int !{{IO}} =
+                  match crypto.random_bytes(0) with
+                  | Ok nonce -> length(nonce)
+                  | Err _ -> 0
+
+                fn main() -> Int !{{IO}} =
+                  force(
+                    read_int_lines("{ints_path.as_posix()}"),
+                    print_int(map_score() + score_decode() + score_xor() + score_random())
                   )
                 """,
                 encoding="utf-8",
@@ -1289,9 +1313,9 @@ class CodegenTests(unittest.TestCase):
             )
 
             default_run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(default_run.stdout.strip(), "2")
+            self.assertEqual(default_run.stdout.strip(), "10")
             self.assertEqual(default_run.stderr, "")
-            self.assertEqual(default_run.returncode, 2)
+            self.assertEqual(default_run.returncode, 10)
 
             debug_env = os.environ.copy()
             debug_env["SPROUT_DEBUG_ALLOC"] = "1"
@@ -1302,14 +1326,19 @@ class CodegenTests(unittest.TestCase):
                 text=True,
                 env=debug_env,
             )
-            self.assertEqual(debug_run.stdout.strip(), "2")
-            self.assertEqual(debug_run.returncode, 2)
-            self.assertIn("[sprout alloc]", debug_run.stderr)
-            self.assertIn("sprout_obj=", debug_run.stderr)
-            self.assertIn("vector=", debug_run.stderr)
-            self.assertIn("map=", debug_run.stderr)
-            self.assertIn("bytes=", debug_run.stderr)
-            self.assertIn("builder=", debug_run.stderr)
+            self.assertEqual(debug_run.stdout.strip(), "10")
+            self.assertEqual(debug_run.returncode, 10)
+            match = re.search(
+                r"\[sprout alloc\] sprout_obj=(\d+) vector=(\d+) map=(\d+) bytes=(\d+) builder=(\d+)",
+                debug_run.stderr,
+            )
+            self.assertIsNotNone(match)
+            assert match is not None
+            self.assertGreater(int(match.group(1)), 0)
+            self.assertEqual(int(match.group(2)), 5)
+            self.assertEqual(int(match.group(3)), 12)
+            self.assertEqual(int(match.group(4)), 9)
+            self.assertEqual(int(match.group(5)), 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_crypto_helpers(self) -> None:
