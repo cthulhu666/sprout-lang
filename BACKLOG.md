@@ -24,6 +24,7 @@ Definition of done:
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 - [~] `P1` Decide how builtins participate in effect tracking; the builtin surface is now audited/documented, but the design decision and convention cleanup are still open.
 - [ ] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
+- [ ] `P2` Revisit function composition operator direction; current `f >> g == f(g(x))` is counterintuitive and should likely align with Elm/F# conventions.
 
 ### 2) Networking and HTTP Client
 
@@ -152,6 +153,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Finalize the v0 effect-system design choices: syntax, `main`, and whether effect polymorphism ships in the first milestone.
-2. Implement parser/typechecker support for effectful function types and update the normative spec accordingly.
-3. Migrate builtins from `IO a` / runtime-bound plain returns to the new v0 effect model.
+1. Extend the v0 effect system beyond singleton rows: decide and implement mixed/open row support such as `!{IO, e}`.
+2. Refine effect granularity beyond the current built-in `IO` label where that distinction materially improves language ergonomics or safety.
+3. Audit higher-order stdlib helpers for places where restricted effect polymorphism can simplify APIs or remove duplicated pure/IO variants.

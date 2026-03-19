@@ -212,6 +212,47 @@ class TypecheckerTests(unittest.TestCase):
         for name, expected_type in expected.items():
             self.assertEqual(types[name], expected_type, msg=name)
 
+    def test_typecheck_generalizes_singleton_effect_variable(self) -> None:
+        src = """
+        fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
+          f(f(x))
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["apply_twice"], "forall e0. (Int -> Int !{e0}) -> Int -> Int !{e0}")
+
+    def test_typecheck_instantiates_singleton_effect_variable_to_io(self) -> None:
+        src = """
+        fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
+          f(f(x))
+
+        fn show(x: Int) -> Int !{IO} =
+          print_int(x)
+
+        fn main() -> Int !{IO} =
+          apply_twice(show, 20)
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["apply_twice"], "forall e0. (Int -> Int !{e0}) -> Int -> Int !{e0}")
+        self.assertEqual(types["show"], "Int -> Int !{IO}")
+        self.assertEqual(types["main"], "Int !{IO}")
+
+    def test_typecheck_specializes_singleton_effect_variable_to_pure_when_needed(self) -> None:
+        src = """
+        fn call_once(f: Int -> Int !{e}, x: Int) -> Int =
+          f(x)
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["call_once"], "(Int -> Int) -> Int -> Int")
+
+    def test_typecheck_rejects_effect_polymorphic_main(self) -> None:
+        src = """
+        fn main() -> Unit !{e} =
+          print("x")
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("main must not be effect-polymorphic", str(ctx.exception))
+
     def test_type_error_if_branches_mismatch(self) -> None:
         src = """
         fn bad(x: Int) -> Int =

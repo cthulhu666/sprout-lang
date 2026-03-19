@@ -555,13 +555,17 @@ class Parser:
     def parse_effect_annotation(self) -> tuple[str, ...] | None:
         if not self.match("SYMBOL", "!"):
             return None
-        self.expect("SYMBOL", "{")
+        start = self.expect("SYMBOL", "{")
         effects: list[str] = []
         if not self.check("SYMBOL", "}"):
             effects.append(self.expect("IDENT", label="effect name").value)
             while self.match("SYMBOL", ","):
                 effects.append(self.expect("IDENT", label="effect name").value)
         self.expect("SYMBOL", "}")
+        if len(effects) > 1:
+            raise ParseError(
+                f"Only singleton effect rows are supported at {start.line}:{start.column}; mixed or multi-effect rows are not supported yet"
+            )
         return tuple(effects)
 
     def parse_type_apply(self):

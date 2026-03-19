@@ -253,6 +253,36 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.callee, ast.VarExpr)
         self.assertEqual(fn_decl.body.callee.name, "dict_empty")
 
+    def test_parse_effect_polymorphic_arrow(self) -> None:
+        src = """
+        fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
+          f(f(x))
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertEqual(fn_decl.effects, ("e",))
+        self.assertIsInstance(fn_decl.params[0].type_expr, ast.TypeArrow)
+        self.assertEqual(fn_decl.params[0].type_expr.effects, ("e",))
+
+    def test_parse_rejects_mixed_effect_rows(self) -> None:
+        src = """
+        fn bad() -> Unit !{IO, e} =
+          print("x")
+        """
+        with self.assertRaises(ParseError) as ctx:
+            parse(src)
+        self.assertIn("Only singleton effect rows are supported", str(ctx.exception))
+
+    def test_parse_rejects_multiple_effect_variables(self) -> None:
+        src = """
+        fn bad(f: Int -> Int !{e, f}) -> Int =
+          f(1)
+        """
+        with self.assertRaises(ParseError) as ctx:
+            parse(src)
+        self.assertIn("Only singleton effect rows are supported", str(ctx.exception))
+
     def test_parse_class_instance_and_where_constraints(self) -> None:
         src = """
         class Functor f {
