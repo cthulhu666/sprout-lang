@@ -56,8 +56,9 @@ Native mode:
   the generated native runtime.
 - Some helper-local buffers are freed explicitly.
 - A first non-moving mark-sweep collector now exists in the native runtime,
-  but it currently runs only at process exit as a safe baseline.
-- Mid-execution GC triggering and fuller root coverage remain follow-up work.
+  with both exit-time collection and a default threshold-triggered
+  mid-execution policy.
+- Fuller root coverage, validation, and threshold tuning remain follow-up work.
 
 ## Why GC Is The Default Direction For This Profile
 
@@ -237,7 +238,8 @@ Current implementation status:
 Remaining work before this stage can be considered fully complete:
 - extend the current shadow-root strategy to all live mid-execution values that
   can survive allocations,
-- define the normal mid-execution collection policy,
+- keep validating and tuning the current threshold-triggered mid-execution
+  policy,
 - add stronger reclamation-focused tests once collection can run mid-program.
 
 ## V2 Direction
