@@ -210,6 +210,9 @@ Current implementation status:
   storage scanning,
 - the native runtime now has a temporary shadow-root stack for backend-managed
   live values,
+- the backend currently uses that stack for function/lambda parameters,
+  closure construction, tuple packing, constructor packing, and pattern-bound
+  locals in match/destructuring paths,
 - the collector marks from those roots and sweeps managed heap nodes,
 - collection currently runs at process exit via `atexit(...)`,
 - opt-in debug logging exists for validation,

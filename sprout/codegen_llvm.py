@@ -1486,11 +1486,12 @@ def _emit_match(
 
         emitter.label(branch_label)
         branch_locals = dict(locals_)
-        _emit_pattern_bind(branch.pattern, scrut, branch_locals, ctor_sigs, emitter)
+        rooted = _emit_pattern_bind(branch.pattern, scrut, branch_locals, ctor_sigs, emitter)
         value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, adt_names, emitter)
         end_block = emitter.current_block
         if end_block is None:
             raise CodegenError("Internal backend error: missing match branch block")
+        _emit_pop_temp_roots(rooted, emitter)
         branch_vals.append((value, end_block))
         emitter.emit(f"  br label %{done_label}")
 
@@ -1686,11 +1687,12 @@ def _emit_direct_ctor_match_case(
 
         emitter.label(branch_label)
         branch_locals = dict(locals_)
-        _emit_direct_ctor_pattern_bind(branch.pattern, ctor, payloads, branch_locals, ctor_sigs, emitter)
+        rooted = _emit_direct_ctor_pattern_bind(branch.pattern, ctor, payloads, branch_locals, ctor_sigs, emitter)
         value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, adt_names, emitter)
         end_block = emitter.current_block
         if end_block is None:
             raise CodegenError("Internal backend error: missing direct constructor branch block")
+        _emit_pop_temp_roots(rooted, emitter)
         branch_vals.append((value, end_block))
         emitter.emit(f"  br label %{done_label}")
         current_fail = fail_label
@@ -1732,17 +1734,18 @@ def _emit_direct_ctor_pattern_bind(
     locals_: dict[str, Value],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
-) -> None:
+) -> int:
     if isinstance(pattern, (ast.WildcardPattern, ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
-        return
+        return 0
     if isinstance(pattern, ast.VarPattern):
         raise CodegenError("Direct constructor match does not support top-level variable patterns")
     if isinstance(pattern, ast.ConstructorPattern):
         if pattern.name != ctor.name:
-            return
+            return 0
+        rooted = 0
         for sub, value in zip(pattern.args, payloads):
-            _emit_pattern_bind(sub, value, locals_, ctor_sigs, emitter)
-        return
+            rooted += _emit_pattern_bind(sub, value, locals_, ctor_sigs, emitter)
+        return rooted
     raise CodegenError("Unsupported pattern form in direct constructor bind")
 
 
@@ -1851,29 +1854,31 @@ def _emit_pattern_bind(
     locals_: dict[str, Value],
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
-) -> None:
+) -> int:
     if isinstance(pattern, ast.WildcardPattern):
-        return
+        return 0
     if isinstance(pattern, ast.VarPattern):
         locals_[pattern.name] = value
-        return
+        return _emit_push_temp_root(value, emitter)
     if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
-        return
+        return 0
     if isinstance(pattern, ast.TuplePattern):
         tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
         if tuple_items is None:
             raise CodegenError("Tuple pattern bind expects tuple scrutinee")
+        rooted = 0
         for idx, sub in enumerate(pattern.items):
-            _emit_pattern_bind(sub, _emit_tuple_field(value, idx, emitter), locals_, ctor_sigs, emitter)
-        return
+            rooted += _emit_pattern_bind(sub, _emit_tuple_field(value, idx, emitter), locals_, ctor_sigs, emitter)
+        return rooted
     if isinstance(pattern, ast.ConstructorPattern):
         ctor = ctor_sigs.get(pattern.name)
         if ctor is None:
             raise CodegenError(f"Unknown constructor in backend bind: {pattern.name}")
+        rooted = 0
         for idx, (sub, arg_typ) in enumerate(zip(pattern.args, ctor.arg_types)):
             field = _emit_ctor_field(value.ir, idx, arg_typ, emitter)
-            _emit_pattern_bind(sub, field, locals_, ctor_sigs, emitter)
-        return
+            rooted += _emit_pattern_bind(sub, field, locals_, ctor_sigs, emitter)
+        return rooted
     raise CodegenError("Unsupported pattern form in backend")
 
 

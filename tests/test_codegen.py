@@ -114,6 +114,8 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call i64 @sprout_make1(i64 0, i64 42)", ir)
         self.assertIn("call i64 @sprout_tag", ir)
         self.assertIn("call i64 @sprout_field", ir)
+        self.assertIn("call i64 @sprout_gc_push_i64_root(ptr", ir)
+        self.assertIn("call i64 @sprout_gc_pop_roots(i64 1)", ir)
 
     def test_compile_nothing_uses_native_singleton_helper(self) -> None:
         src = """
@@ -376,6 +378,8 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("define i64 @sum_pair({ i64, i64 } %pair)", ir)
         self.assertIn("extractvalue { i64, i64 } %pair, 0", ir)
         self.assertIn("extractvalue { i64, i64 } %pair, 1", ir)
+        self.assertIn("call i64 @sprout_gc_push_i64_root(ptr", ir)
+        self.assertIn("call i64 @sprout_gc_pop_roots(i64 2)", ir)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_tuple_match(self) -> None:
