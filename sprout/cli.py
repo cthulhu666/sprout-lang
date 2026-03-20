@@ -171,10 +171,21 @@ typedef struct {
   long long f2;
 } SproutObj;
 
-typedef struct ObjNode {
-  SproutObj* ptr;
-  struct ObjNode* next;
-} ObjNode;
+typedef enum {
+  SPROUT_HEAP_OBJ = 1,
+  SPROUT_HEAP_CLOSURE = 2,
+  SPROUT_HEAP_VECTOR = 3,
+  SPROUT_HEAP_MAP = 4,
+  SPROUT_HEAP_BYTES = 5,
+  SPROUT_HEAP_BUILDER = 6
+} SproutHeapKind;
+
+typedef struct ManagedNode {
+  void* ptr;
+  SproutHeapKind kind;
+  size_t aux_slots;
+  struct ManagedNode* next;
+} ManagedNode;
 
 typedef struct {
   long long tag;
@@ -222,7 +233,7 @@ typedef struct {
   char* path;
 } HttpUrl;
 
-static ObjNode* g_objs = NULL;
+static ManagedNode* g_heap_nodes = NULL;
 static SproutObj* g_nothing_singleton = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
@@ -246,6 +257,7 @@ static long long g_debug_alloc_builder = 0;
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
+static CtorMeta* find_ctor(long long tag);
 static char* dup_cstr(const char* s);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
@@ -315,11 +327,25 @@ static SproutObj* unbox_ptr(long long h) {
   return (SproutObj*)(uintptr_t)h;
 }
 
+static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slots) {
+  ManagedNode* n = (ManagedNode*)malloc(sizeof(ManagedNode));
+  if (n == NULL) tcp_fail("register_managed_ptr: out of memory");
+  n->ptr = ptr;
+  n->kind = kind;
+  n->aux_slots = aux_slots;
+  n->next = g_heap_nodes;
+  g_heap_nodes = n;
+}
+
+static ManagedNode* find_managed_ptr(void* ptr) {
+  for (ManagedNode* n = g_heap_nodes; n != NULL; n = n->next) {
+    if (n->ptr == ptr) return n;
+  }
+  return NULL;
+}
+
 static void register_obj(SproutObj* p) {
-  ObjNode* n = (ObjNode*)malloc(sizeof(ObjNode));
-  n->ptr = p;
-  n->next = g_objs;
-  g_objs = n;
+  register_managed_ptr(p, SPROUT_HEAP_OBJ, 0);
 }
 
 static SproutObj* sprout_alloc_obj_raw(const char* ctx) {
@@ -345,11 +371,16 @@ static long long sprout_make_registered_obj(long long tag, long long f0, long lo
 
 void* sprout_alloc_closure_env(long long size) {
   if (size < 0) tcp_fail("sprout_alloc_closure_env: size must be >= 0");
-  return sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
+  void* out = sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
+  size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
+  register_managed_ptr(out, SPROUT_HEAP_CLOSURE, slots);
+  return out;
 }
 
 static VectorVal* sprout_alloc_vector_val(const char* ctx) {
-  return (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), ctx);
+  VectorVal* out = (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_VECTOR, 0);
+  return out;
 }
 
 static long long* sprout_alloc_vector_data(size_t count, const char* ctx) {
@@ -361,7 +392,9 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
 }
 
 static MapVal* sprout_alloc_map_val(const char* ctx) {
-  return (MapVal*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(MapVal), ctx);
+  MapVal* out = (MapVal*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(MapVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_MAP, 0);
+  return out;
 }
 
 static MapEntry* sprout_alloc_map_entries(size_t count, const char* ctx) {
@@ -369,7 +402,9 @@ static MapEntry* sprout_alloc_map_entries(size_t count, const char* ctx) {
 }
 
 static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
-  return (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), ctx);
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_BYTES, 0);
+  return out;
 }
 
 static unsigned char* sprout_alloc_bytes_data(size_t count, const char* ctx) {
@@ -377,7 +412,9 @@ static unsigned char* sprout_alloc_bytes_data(size_t count, const char* ctx) {
 }
 
 static BuilderVal* sprout_alloc_builder_val(const char* ctx) {
-  return (BuilderVal*)sprout_alloc_counted(&g_debug_alloc_builder, sizeof(BuilderVal), ctx);
+  BuilderVal* out = (BuilderVal*)sprout_alloc_counted(&g_debug_alloc_builder, sizeof(BuilderVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_BUILDER, 0);
+  return out;
 }
 
 static BytesVal** sprout_alloc_builder_chunks(size_t count, const char* ctx) {
@@ -385,10 +422,55 @@ static BytesVal** sprout_alloc_builder_chunks(size_t count, const char* ctx) {
 }
 
 static int is_obj_handle(long long h) {
-  uintptr_t u = (uintptr_t)h;
-  for (ObjNode* n = g_objs; n != NULL; n = n->next) {
-    if ((uintptr_t)n->ptr == u) return 1;
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)h);
+  return node != NULL && node->kind == SPROUT_HEAP_OBJ;
+}
+
+static size_t sprout_heap_child_count(ManagedNode* node) {
+  if (node == NULL) return 0;
+  switch (node->kind) {
+    case SPROUT_HEAP_OBJ: {
+      CtorMeta* meta = find_ctor(((SproutObj*)node->ptr)->tag);
+      return meta == NULL || meta->arity < 0 ? 0 : (size_t)meta->arity;
+    }
+    case SPROUT_HEAP_CLOSURE:
+      return node->aux_slots;
+    case SPROUT_HEAP_VECTOR:
+      return (size_t)((VectorVal*)node->ptr)->len;
+    case SPROUT_HEAP_MAP:
+      return (size_t)((MapVal*)node->ptr)->len;
+    case SPROUT_HEAP_BYTES:
+      return 0;
+    case SPROUT_HEAP_BUILDER:
+      return ((BuilderVal*)node->ptr)->count;
   }
+  return 0;
+}
+
+static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
+  if (node == NULL) tcp_fail("sprout_heap_child_value: null node");
+  switch (node->kind) {
+    case SPROUT_HEAP_OBJ: {
+      SproutObj* obj = (SproutObj*)node->ptr;
+      if (index == 0) return obj->f0;
+      if (index == 1) return obj->f1;
+      if (index == 2) return obj->f2;
+      break;
+    }
+    case SPROUT_HEAP_CLOSURE: {
+      long long* slots = (long long*)node->ptr;
+      return slots[index + 1];
+    }
+    case SPROUT_HEAP_VECTOR:
+      return ((VectorVal*)node->ptr)->data[index];
+    case SPROUT_HEAP_MAP:
+      return ((MapVal*)node->ptr)->entries[index].value;
+    case SPROUT_HEAP_BYTES:
+      break;
+    case SPROUT_HEAP_BUILDER:
+      return (long long)(uintptr_t)((BuilderVal*)node->ptr)->chunks[index];
+  }
+  tcp_fail("sprout_heap_child_value: index out of range");
   return 0;
 }
 
