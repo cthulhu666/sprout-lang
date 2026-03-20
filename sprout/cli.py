@@ -103,6 +103,7 @@ _REPL_STDLIB_EXTRA_NAMES = frozenset(
     }
 )
 _REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
+_REPL_COMPLETER_DELIMS = " \t\n`~!@#$%^&*()-=+[{]}\\|;,'\"<>/?"
 
 
 def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
@@ -2960,6 +2961,13 @@ def _repl_completion_matches(
     return sorted(name for name in names if name.startswith(prefix))
 
 
+def _repl_readline_tab_binding(readline_module: object) -> str:
+    doc = getattr(readline_module, "__doc__", "") or ""
+    if "libedit" in doc.lower():
+        return "bind ^I rl_complete"
+    return "tab: complete"
+
+
 def _configure_repl_readline(
     declarations: list[str],
     *,
@@ -2972,8 +2980,10 @@ def _configure_repl_readline(
         return
 
     target = history_path if history_path is not None else _repl_history_path()
-    readline.parse_and_bind("tab: complete")
+    readline.parse_and_bind(_repl_readline_tab_binding(readline))
     readline.parse_and_bind("set editing-mode emacs")
+    if hasattr(readline, "set_completer_delims"):
+        readline.set_completer_delims(_REPL_COMPLETER_DELIMS)
     readline.set_history_length(_REPL_HISTORY_LIMIT)
 
     def _complete(text: str, state: int) -> str | None:

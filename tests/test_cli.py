@@ -301,6 +301,22 @@ class CliTests(unittest.TestCase):
         self.assertIn("http", with_stdlib)
         self.assertIn("http_client", with_stdlib)
 
+    def test_repl_readline_tab_binding_uses_libedit_form_when_needed(self) -> None:
+        from sprout.cli import _repl_readline_tab_binding
+
+        class FakeReadline:
+            __doc__ = "Importing this module enables command line editing using libedit readline."
+
+        self.assertEqual(_repl_readline_tab_binding(FakeReadline), "bind ^I rl_complete")
+
+    def test_repl_readline_tab_binding_uses_gnu_readline_form_otherwise(self) -> None:
+        from sprout.cli import _repl_readline_tab_binding
+
+        class FakeReadline:
+            __doc__ = "GNU readline support"
+
+        self.assertEqual(_repl_readline_tab_binding(FakeReadline), "tab: complete")
+
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
         fn main() -> Unit !{IO} =
