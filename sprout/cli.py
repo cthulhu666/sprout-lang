@@ -258,8 +258,20 @@ static int g_listener_fd[2048];
 static int g_listener_used[2048];
 static int g_conn_fd[2048];
 static int g_conn_used[2048];
-static long long g_next_listener_handle = 1;
-static long long g_next_conn_handle = 1;
+
+static long long alloc_listener_handle(void) {
+  for (long long h = 1; h < 2048; h++) {
+    if (!g_listener_used[h]) return h;
+  }
+  return -1;
+}
+
+static long long alloc_conn_handle(void) {
+  for (long long h = 1; h < 2048; h++) {
+    if (!g_conn_used[h]) return h;
+  }
+  return -1;
+}
 static int g_sprout_argc = 0;
 static char** g_sprout_argv = NULL;
 static int g_debug_alloc_enabled = 0;
@@ -2444,8 +2456,8 @@ long long tcp_listen(long long port) {
     close(fd);
     tcp_fail("tcp_listen: listen failed");
   }
-  long long h = g_next_listener_handle++;
-  if (h >= 2048) {
+  long long h = alloc_listener_handle();
+  if (h < 0) {
     close(fd);
     tcp_fail("tcp_listen: handle table full");
   }
@@ -2519,8 +2531,8 @@ long long tcp_connect(const char* host, long long port) {
     return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)error_msg);
   }
 
-  long long h = g_next_conn_handle++;
-  if (h >= 2048) {
+  long long h = alloc_conn_handle();
+  if (h < 0) {
     close(fd);
     return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)"connection table full");
   }
@@ -2535,8 +2547,8 @@ long long tcp_accept(long long listener) {
   }
   int fd = accept(g_listener_fd[listener], NULL, NULL);
   if (fd < 0) tcp_fail("tcp_accept: accept failed");
-  long long h = g_next_conn_handle++;
-  if (h >= 2048) {
+  long long h = alloc_conn_handle();
+  if (h < 0) {
     close(fd);
     tcp_fail("tcp_accept: connection table full");
   }

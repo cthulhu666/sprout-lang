@@ -234,6 +234,42 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
+    def test_import_stdlib_http_server_parse_and_render_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.http_server (HttpRequest, HttpServerResponse, ok, parse, render, request_body, request_header, request_path, with_header)
+
+                fn show(req: HttpRequest) -> String =
+                  match request_header("Host", req) with
+                  | Nothing -> request_path(req)
+                  | Just host -> str_concat(request_path(req), str_concat(":", str_concat(host, str_concat(":", request_body(req)))))
+
+                fn main() -> Unit !{IO} =
+                  match parse("POST /hello HTTP/1.1\\r\\nHost: local\\r\\nContent-Length: 5\\r\\n\\r\\nhello") with
+                  | Err _ -> print("parse-err")
+                  | Ok req ->
+                      match render(with_header("X-Test", "yes", ok(show(req)))) with
+                      | Err _ -> print("render-err")
+                      | Ok raw -> print(raw)
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            rendered = out.getvalue().strip()
+            self.assertIn("HTTP/1.1 200 OK", rendered)
+            self.assertIn("x-test: yes", rendered)
+            self.assertTrue(rendered.endswith("/hello:local:hello"), msg=rendered)
+
     def test_load_module_source_rejects_duplicate_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

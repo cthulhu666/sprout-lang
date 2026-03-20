@@ -236,6 +236,37 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
             )
         self.assertEqual(out, "404")
 
+    def test_http_server_module_serves_structured_request(self) -> None:
+        port = find_free_port(self)
+        outbox: list[str] = []
+        src = f"""
+        module main
+        import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, request_method, serve_n, with_header)
+
+        fn handle(req: HttpRequest) -> HttpServerResponse =
+          with_header("X-Reply", request_method(req), ok(request_body(req)))
+
+        fn main() -> Unit !{{IO}} =
+          serve_n({port}, 1, handle)
+        """
+
+        def server() -> None:
+            outbox.append(self._run_module_source(src))
+
+        worker = BackgroundWorker(server, name="interpreter-http-server")
+        worker.start()
+        try:
+            response = tcp_roundtrip(
+                port,
+                b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\n\r\nhello",
+            ).decode("utf-8", errors="replace")
+        finally:
+            worker.join_ok(self, timeout=2.0, alive_message="http server did not exit after one connection")
+        self.assertEqual(outbox, [""])
+        self.assertIn("HTTP/1.1 200 OK", response)
+        self.assertIn("x-reply: POST", response)
+        self.assertTrue(response.endswith("hello"), msg=response)
+
 
 @unittest.skipUnless(shutil.which("clang"), "clang not installed")
 class NativeIoIntegrationTests(unittest.TestCase):
@@ -438,6 +469,75 @@ class NativeIoIntegrationTests(unittest.TestCase):
             )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertIn("remote closed connection without response", run.stdout)
+
+    def test_native_http_server_module_serves_structured_request(self) -> None:
+        port = find_free_port(self)
+        src = f"""
+        module main
+        import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, request_path, serve_n, with_header)
+
+        fn handle(req: HttpRequest) -> HttpServerResponse =
+          with_header("X-Path", request_path(req), ok(request_body(req)))
+
+        fn main() -> Unit !{{IO}} =
+          serve_n({port}, 1, handle)
+        """
+        with compiled_native_binary(self, src) as bin_path:
+            proc = subprocess.Popen(
+                [str(bin_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                response = tcp_roundtrip(
+                    port,
+                    b"POST /native HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\n\r\nhello",
+                ).decode("utf-8", errors="replace")
+                stdout, stderr = proc.communicate(timeout=2.0)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.communicate(timeout=2.0)
+        self.assertEqual(proc.returncode, 0, msg=stderr)
+        self.assertEqual(stdout, "")
+        self.assertIn("HTTP/1.1 200 OK", response)
+        self.assertIn("x-path: /native", response)
+        self.assertTrue(response.endswith("hello"), msg=response)
+
+    def test_native_tcp_accept_reuses_closed_connection_slots(self) -> None:
+        port = find_free_port(self)
+        src = f"""
+        fn then_io(a: Unit !{{IO}}, b: Unit !{{IO}}) -> Unit !{{IO}} = b
+
+        fn handle(conn: Int) -> Unit !{{IO}} =
+          tcp_close(conn)
+
+        fn serve(listener: Int, remaining: Int) -> Unit !{{IO}} =
+          if remaining == 0 then tcp_close_listener(listener)
+          else then_io(handle(tcp_accept(listener)), serve(listener, remaining - 1))
+
+        fn main() -> Unit !{{IO}} =
+          serve(tcp_listen({port}), 2100)
+        """
+        with compiled_native_binary(self, src) as bin_path:
+            proc = subprocess.Popen(
+                [str(bin_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                for _ in range(2100):
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                        pass
+                stdout, stderr = proc.communicate(timeout=5.0)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.communicate(timeout=2.0)
+        self.assertEqual(proc.returncode, 0, msg=stderr)
+        self.assertEqual(stdout, "")
 
 
 if __name__ == "__main__":

@@ -122,6 +122,8 @@ Runtime builtins (host-implemented):
 - `term_read_key() -> String !{IO}` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
 - `term_write(text: String) -> Unit !{IO}`
 
+Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
+
 Pure value transforms and runtime-backed persistent data helpers:
 
 - `parse_int(s: String) -> Int`
@@ -312,6 +314,33 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `http_ok(body) -> String`
 - `http_bad_request() -> String`
 - `http_echo_response(raw_request) -> String`
+
+Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
+
+- `HttpRequest` request values with accessor helpers
+- `HttpServerResponse` response values built via helper functions
+- `HttpServerError` variants (`HttpInvalidRequest`, `HttpServerUnsupportedStatus`)
+- `parse(raw) -> Result HttpServerError HttpRequest`
+- `render(resp) -> Result HttpServerError String`
+- `response(status, body) -> HttpServerResponse`
+- `ok(body) -> HttpServerResponse`
+- `bad_request(body) -> HttpServerResponse`
+- `not_found(body) -> HttpServerResponse`
+- `with_header(name, value, resp) -> HttpServerResponse`
+- `request_method(req) -> String`
+- `request_path(req) -> String`
+- `request_version(req) -> String`
+- `request_body(req) -> String`
+- `request_header(name, req) -> Maybe String`
+- `serve_n(port, max_connections, handler) -> Unit !{IO}`
+
+Current experimental scope:
+
+- HTTP/1.1 request line parsing plus header parsing into a `Dict String`
+- `Content-Length` request bodies
+- `Connection: close` responses only
+- sequential request handling per accepted connection
+- no keep-alive, chunked transfer encoding, TLS, or multi-reactor native server runtime yet
 
 JSON stdlib helpers (in `stdlib/json.sprout`):
 
