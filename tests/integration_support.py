@@ -81,7 +81,13 @@ def running_tcp_fixture(
         with listener:
             conn, _ = listener.accept()
             with conn:
-                handler(conn)
+                try:
+                    handler(conn)
+                except ConnectionAbortedError:
+                    # Native TCP tests can race fixture teardown on macOS and report
+                    # an aborted connection even though the client-side behavior under
+                    # test already completed.
+                    return
 
     worker = BackgroundWorker(serve, name="tcp-fixture")
     worker.start()
@@ -93,6 +99,19 @@ def running_tcp_fixture(
         except OSError:
             pass
         worker.join_ok(case, timeout=1.0, alive_message="tcp fixture did not exit")
+
+
+def wait_for_tcp_server(port: int, *, timeout: float = 2.0) -> None:
+    deadline = time.time() + timeout
+    last_error: OSError | None = None
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for local tcp server on port {port}: {last_error}")
 
 
 def tcp_roundtrip(port: int, request: bytes, *, timeout: float = 2.0, recv_size: int = 4096) -> bytes:

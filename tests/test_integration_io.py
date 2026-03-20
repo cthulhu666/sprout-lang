@@ -23,6 +23,7 @@ from integration_support import (
     running_http_server,
     running_tcp_fixture,
     tcp_roundtrip,
+    wait_for_tcp_server,
 )
 from sprout import parse, run_program, typecheck_program
 from sprout.module_loader import load_module_bundle, resolve_program_names
@@ -528,6 +529,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
                 text=True,
             )
             try:
+                wait_for_tcp_server(port)
                 for _ in range(2100):
                     with socket.create_connection(("127.0.0.1", port), timeout=0.5):
                         pass
