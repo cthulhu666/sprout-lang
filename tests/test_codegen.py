@@ -219,6 +219,7 @@ class CodegenTests(unittest.TestCase):
         ir = compile_to_llvm(program)
         self.assertIn("declare ptr @sprout_alloc_tuple_blob(i64)", ir)
         self.assertIn("call ptr @sprout_alloc_tuple_blob(i64", ir)
+        self.assertIn("call i64 @sprout_gc_push_scan_root(ptr", ir)
         self.assertNotIn("call ptr @malloc(i64", ir)
 
     def test_compile_generic_identity_erased(self) -> None:
@@ -259,7 +260,32 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("define ptr @__sprout_fn_closure_", ir)
         self.assertIn("define i64 @__sprout_lambda_", ir)
         self.assertIn("call ptr @sprout_alloc_closure_env(i64 %t", ir)
+        self.assertIn("call i64 @sprout_gc_push_i64_root(ptr", ir)
+        self.assertIn("call i64 @sprout_gc_push_ptr_root(ptr", ir)
+        self.assertIn("call i64 @sprout_gc_pop_roots(i64", ir)
         self.assertIn("getelementptr i64, ptr %env, i64 1", ir)
+
+    def test_compile_function_params_root_managed_values(self) -> None:
+        src = """
+        type Box =
+          | Box Int
+
+        fn keep(box: Box, pair: (Int, String), f: Int -> Int) -> Int =
+          match box with
+          | Box(x) -> f(x)
+
+        fn inc(x: Int) -> Int = x + 1
+
+        fn main() -> Int !{IO} =
+          print_int(keep(Box(1), (2, "ok"), inc))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("call i64 @sprout_gc_push_i64_root(ptr", ir)
+        self.assertIn("call i64 @sprout_gc_push_scan_root(ptr", ir)
+        self.assertIn("call i64 @sprout_gc_push_ptr_root(ptr", ir)
+        self.assertIn("call i64 @sprout_gc_pop_roots(i64 3)", ir)
 
     def test_compile_partial_application_of_named_function_to_llvm(self) -> None:
         src = """

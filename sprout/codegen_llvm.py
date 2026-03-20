@@ -115,6 +115,10 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_gc_register_i64_root": FnSig(name="sprout_gc_register_i64_root", params=[I8_PTR], ret=I64),
     "sprout_gc_register_ptr_root": FnSig(name="sprout_gc_register_ptr_root", params=[I8_PTR], ret=I64),
     "sprout_gc_register_scan_root": FnSig(name="sprout_gc_register_scan_root", params=[I8_PTR, I64], ret=I64),
+    "sprout_gc_push_i64_root": FnSig(name="sprout_gc_push_i64_root", params=[I8_PTR], ret=I64),
+    "sprout_gc_push_ptr_root": FnSig(name="sprout_gc_push_ptr_root", params=[I8_PTR], ret=I64),
+    "sprout_gc_push_scan_root": FnSig(name="sprout_gc_push_scan_root", params=[I8_PTR, I64], ret=I64),
+    "sprout_gc_pop_roots": FnSig(name="sprout_gc_pop_roots", params=[I64], ret=I64),
     "sprout_tag": FnSig(name="sprout_tag", params=[I64], ret=I64),
     "sprout_field": FnSig(name="sprout_field", params=[I64, I64], ret=I64),
 }
@@ -361,6 +365,40 @@ def _sizeof_struct(struct_text: str, emitter: Emitter) -> str:
     return size
 
 
+def _emit_push_temp_root(value: Value, emitter: Emitter) -> int:
+    tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
+    if value.typ == I64:
+        slot = emitter.tmp()
+        emitter.emit(f"  {slot} = alloca i64")
+        emitter.emit(f"  store i64 {value.ir}, ptr {slot}")
+        reg = emitter.tmp()
+        emitter.emit(f"  {reg} = call i64 @sprout_gc_push_i64_root(ptr {slot})")
+        return 1
+    if value.typ == I8_PTR:
+        slot = emitter.tmp()
+        emitter.emit(f"  {slot} = alloca ptr")
+        emitter.emit(f"  store ptr {value.ir}, ptr {slot}")
+        reg = emitter.tmp()
+        emitter.emit(f"  {reg} = call i64 @sprout_gc_push_ptr_root(ptr {slot})")
+        return 1
+    if tuple_items is not None:
+        slot = emitter.tmp()
+        emitter.emit(f"  {slot} = alloca {value.typ.text}")
+        emitter.emit(f"  store {value.typ.text} {value.ir}, ptr {slot}")
+        size = _sizeof_struct(value.typ.text, emitter)
+        reg = emitter.tmp()
+        emitter.emit(f"  {reg} = call i64 @sprout_gc_push_scan_root(ptr {slot}, i64 {size})")
+        return 1
+    return 0
+
+
+def _emit_pop_temp_roots(count: int, emitter: Emitter) -> None:
+    if count <= 0:
+        return
+    reg = emitter.tmp()
+    emitter.emit(f"  {reg} = call i64 @sprout_gc_pop_roots(i64 {count})")
+
+
 def _clone_emitter(emitter: Emitter) -> Emitter:
     clone = Emitter()
     clone.next_tmp = emitter.next_tmp
@@ -604,6 +642,9 @@ def _gather_lambda_infos(
 
 
 def _emit_make_closure(code_ir: str, captures: list[Value], emitter: Emitter) -> Value:
+    rooted = 0
+    for capture in captures:
+        rooted += _emit_push_temp_root(capture, emitter)
     size = emitter.tmp()
     emitter.emit(f"  {size} = add i64 {8 * (len(captures) + 1)}, 0")
     raw = emitter.tmp()
@@ -614,6 +655,7 @@ def _emit_make_closure(code_ir: str, captures: list[Value], emitter: Emitter) ->
         slot = emitter.tmp()
         emitter.emit(f"  {slot} = getelementptr i64, ptr {raw}, i64 {idx}")
         emitter.emit(f"  store i64 {packed}, ptr {slot}")
+    _emit_pop_temp_roots(rooted, emitter)
     return Value(I8_PTR, raw)
 
 
@@ -727,6 +769,7 @@ def _emit_lambda_helper(
     helper.emit(f"define {info.call_sig.ret.text} @{info.name}({', '.join(params)}) {{")
     helper.label("entry")
     locals_: dict[str, Value] = {}
+    rooted = _emit_push_temp_root(Value(I8_PTR, "%env"), helper)
     for idx, capture in enumerate(info.captures, start=1):
         slot = helper.tmp()
         helper.emit(f"  {slot} = getelementptr i64, ptr %env, i64 {idx}")
@@ -734,10 +777,13 @@ def _emit_lambda_helper(
         helper.emit(f"  {raw} = load i64, ptr {slot}")
         locals_[capture] = Value(I64, raw)
     for idx, param in enumerate(info.expr.params):
-        locals_[param.name] = Value(info.call_sig.params[idx], f"%a{idx}", _call_sig_from_type_expr(param.type_expr, adt_names))
+        value = Value(info.call_sig.params[idx], f"%a{idx}", _call_sig_from_type_expr(param.type_expr, adt_names))
+        rooted += _emit_push_temp_root(value, helper)
+        locals_[param.name] = value
     ret = _emit_expr(info.expr.body, locals_, globals_info, sigs, ctor_sigs, adt_names, helper)
     if ret.typ != info.call_sig.ret:
         raise CodegenError(f"Lambda body type mismatch in backend: {ret.typ.text} vs {info.call_sig.ret.text}")
+    _emit_pop_temp_roots(rooted, helper)
     helper.emit(f"  ret {ret.typ.text} {ret.ir}")
     helper.emit("}")
     _merge_emitter_state(emitter, helper)
@@ -1103,6 +1149,7 @@ def _emit_fn(
         emitted_params = params
     emitter.emit(f"define {sig.ret.text} @{emitted_name}({', '.join(emitted_params)}) {{")
     emitter.label("entry")
+    rooted = 0
     if is_entry_main:
         init_argv = emitter.tmp()
         emitter.emit(f"  {init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)")
@@ -1118,9 +1165,13 @@ def _emit_fn(
                 emitter.emit(
                     f"  {reg} = call i64 @sprout_register_ctor(i64 {tag}, ptr {reg_ptr}, i64 {arity})"
                 )
+    else:
+        for value in locals_.values():
+            rooted += _emit_push_temp_root(value, emitter)
     ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if ret.typ != sig.ret:
         raise CodegenError(f"Function {fn.name} body type mismatch in backend: {ret.typ.text} vs {sig.ret.text}")
+    _emit_pop_temp_roots(rooted, emitter)
     if is_entry_main and _is_effectful_unit(fn.return_type, fn.effects):
         emitter.emit("  ret i64 0")
     else:
@@ -1854,10 +1905,12 @@ def _pack_to_i64(value: Value, emitter: Emitter) -> str:
         emitter.emit(f"  {out} = ptrtoint ptr {value.ir} to i64")
         return out
     if (value.tuple_items or _tuple_item_types_from_lltype(value.typ)) is not None:
+        rooted = _emit_push_temp_root(value, emitter)
         size = _sizeof_struct(value.typ.text, emitter)
         raw = emitter.tmp()
         emitter.emit(f"  {raw} = call ptr @sprout_alloc_tuple_blob(i64 {size})")
         emitter.emit(f"  store {value.typ.text} {value.ir}, ptr {raw}")
+        _emit_pop_temp_roots(rooted, emitter)
         out = emitter.tmp()
         emitter.emit(f"  {out} = ptrtoint ptr {raw} to i64")
         return out
@@ -1987,11 +2040,20 @@ def _emit_call(
             else:
                 emitter.emit(f"  {tmp} = call i64 @sprout_make0(i64 {ctor.tag})")
             return Value(I64, tmp)
-        packed_args: list[str] = []
+        rooted_args = 0
+        coerced_args: list[Value] = []
         for arg_expr, typ in zip(expr.args, ctor.arg_types):
             arg_val = _emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
             coerced = _coerce_value(arg_val, typ, emitter)
+            coerced_args.append(coerced)
+            rooted_args += _emit_push_temp_root(coerced, emitter)
+        packed_args: list[str] = []
+        for coerced in coerced_args:
             packed_args.append(_pack_to_i64(coerced, emitter))
+        _emit_pop_temp_roots(rooted_args, emitter)
+        rooted_packed = 0
+        for packed in packed_args:
+            rooted_packed += _emit_push_temp_root(Value(I64, packed), emitter)
         tmp = emitter.tmp()
         if len(packed_args) == 1:
             emitter.emit(f"  {tmp} = call i64 @sprout_make1(i64 {ctor.tag}, i64 {packed_args[0]})")
@@ -2004,10 +2066,12 @@ def _emit_call(
                 "  "
                 + f"{tmp} = call i64 @sprout_make3(i64 {ctor.tag}, i64 {packed_args[0]}, i64 {packed_args[1]}, i64 {packed_args[2]})"
             )
+        _emit_pop_temp_roots(rooted_packed, emitter)
         return Value(I64, tmp)
 
     if fn_name is not None and fn_name in locals_:
         local_callee = _emit_expr(expr.callee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        rooted_callee = _emit_push_temp_root(local_callee, emitter)
         call_sig = _value_call_sig(local_callee, getattr(expr.callee, "inferred_type", None), adt_names)
         if call_sig is None:
             raise CodegenError(f"Missing callable signature for {fn_name}")
@@ -2026,6 +2090,7 @@ def _emit_call(
             out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
         else:
             out = _emit_closure_call(local_callee, call_sig, args, emitter)
+        _emit_pop_temp_roots(rooted_callee, emitter)
     elif fn_name is not None and (fn_name in sigs or fn_name in EXTERN_SIGS):
         sig = sigs.get(fn_name) or EXTERN_SIGS.get(fn_name)
         assert sig is not None
@@ -2054,6 +2119,7 @@ def _emit_call(
             out = Value(sig.ret, tmp, callable_sig=sig.ret_callable_sig)
     else:
         callee = _emit_expr(expr.callee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        rooted_callee = _emit_push_temp_root(callee, emitter)
         call_sig = _value_call_sig(callee, getattr(expr.callee, "inferred_type", None), adt_names)
         if call_sig is None:
             raise CodegenError("Backend expected function-typed callee")
@@ -2072,5 +2138,6 @@ def _emit_call(
             out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
         else:
             out = _emit_closure_call(callee, call_sig, args, emitter)
+        _emit_pop_temp_roots(rooted_callee, emitter)
 
     return _value_for_inferred_type(out, getattr(expr, "inferred_type", None), adt_names, emitter)

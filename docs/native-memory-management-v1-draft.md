@@ -208,14 +208,16 @@ Current implementation status:
 - the native runtime can register managed roots for scalar runtime globals,
 - the native runtime can also register aggregate global roots via conservative
   storage scanning,
+- the native runtime now has a temporary shadow-root stack for backend-managed
+  live values,
 - the collector marks from those roots and sweeps managed heap nodes,
 - collection currently runs at process exit via `atexit(...)`,
 - opt-in debug logging exists for validation,
 - debug allocation reporting now includes a `gc_swept` count.
 
 Remaining work before this stage can be considered fully complete:
-- define a sound mid-execution root strategy instead of relying only on
-  exit-time global rooting,
+- extend the current shadow-root strategy to all live mid-execution values that
+  can survive allocations,
 - define the normal mid-execution collection policy,
 - add stronger reclamation-focused tests once collection can run mid-program.
 

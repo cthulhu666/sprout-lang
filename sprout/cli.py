@@ -250,6 +250,7 @@ typedef struct {
 
 static ManagedNode* g_heap_nodes = NULL;
 static RootNode* g_root_nodes = NULL;
+static RootNode* g_temp_root_nodes = NULL;
 static SproutObj* g_nothing_singleton = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
@@ -460,6 +461,41 @@ long long sprout_gc_register_scan_root(void* slot, long long size_bytes) {
   return 0;
 }
 
+static long long sprout_gc_push_root(void* slot, SproutRootKind kind, size_t aux_words) {
+  RootNode* node = (RootNode*)malloc(sizeof(RootNode));
+  if (node == NULL) tcp_fail("sprout_gc_push_root: out of memory");
+  node->slot = slot;
+  node->kind = kind;
+  node->aux_words = aux_words;
+  node->next = g_temp_root_nodes;
+  g_temp_root_nodes = node;
+  return 0;
+}
+
+long long sprout_gc_push_i64_root(void* slot) {
+  return sprout_gc_push_root(slot, SPROUT_ROOT_I64, 0);
+}
+
+long long sprout_gc_push_ptr_root(void* slot) {
+  return sprout_gc_push_root(slot, SPROUT_ROOT_PTR, 0);
+}
+
+long long sprout_gc_push_scan_root(void* slot, long long size_bytes) {
+  if (size_bytes < 0) tcp_fail("sprout_gc_push_scan_root: size must be >= 0");
+  return sprout_gc_push_root(slot, SPROUT_ROOT_SCAN, ((size_t)size_bytes) / sizeof(uintptr_t));
+}
+
+long long sprout_gc_pop_roots(long long count) {
+  if (count < 0) tcp_fail("sprout_gc_pop_roots: count must be >= 0");
+  for (long long i = 0; i < count; i++) {
+    if (g_temp_root_nodes == NULL) tcp_fail("sprout_gc_pop_roots: root stack underflow");
+    RootNode* next = g_temp_root_nodes->next;
+    free(g_temp_root_nodes);
+    g_temp_root_nodes = next;
+  }
+  return 0;
+}
+
 void* sprout_alloc_tuple_blob(long long size_bytes) {
   if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
   void* out = sprout_alloc_counted(&g_debug_alloc_sprout_obj, (size_t)size_bytes, "sprout_alloc_tuple_blob: out of memory");
@@ -594,6 +630,19 @@ static void sprout_gc_mark_ptr(void* ptr) {
 
 static void sprout_gc_mark_roots(void) {
   for (RootNode* root = g_root_nodes; root != NULL; root = root->next) {
+    if (root->kind == SPROUT_ROOT_I64) {
+      sprout_gc_mark_value(*(long long*)root->slot);
+    } else if (root->kind == SPROUT_ROOT_PTR) {
+      sprout_gc_mark_ptr(*(void**)root->slot);
+    } else {
+      for (size_t i = 0; i < root->aux_words; i++) {
+        uintptr_t word = 0;
+        memcpy(&word, (char*)root->slot + (i * sizeof(uintptr_t)), sizeof(uintptr_t));
+        sprout_gc_mark_ptr((void*)word);
+      }
+    }
+  }
+  for (RootNode* root = g_temp_root_nodes; root != NULL; root = root->next) {
     if (root->kind == SPROUT_ROOT_I64) {
       sprout_gc_mark_value(*(long long*)root->slot);
     } else if (root->kind == SPROUT_ROOT_PTR) {
