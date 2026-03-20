@@ -417,6 +417,40 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.returncode, 42)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_compile_reachable_helper_inside_tuple_expr(self) -> None:
+        src = """
+        fn bump(x: Int) -> Int = x + 1
+
+        fn pair(x: Int) -> (Int, Int) =
+          (bump(x), bump(x + 1))
+
+        fn main() -> Int !{IO} =
+          match pair(40) with
+          | (left, right) -> print_int(left + right)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "83")
+            self.assertEqual(run.returncode, 83)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_print_tuple_value(self) -> None:
         src = """
         fn main() -> Unit !{IO} =

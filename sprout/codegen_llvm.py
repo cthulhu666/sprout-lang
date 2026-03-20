@@ -1041,6 +1041,10 @@ def _collect_called_functions(expr: ast.Expr) -> set[str]:
             for branch in node.branches:
                 visit(branch.value)
             return
+        if isinstance(node, ast.TupleExpr):
+            for item in node.items:
+                visit(item)
+            return
         if isinstance(node, ast.BinaryExpr):
             visit(node.left)
             visit(node.right)
