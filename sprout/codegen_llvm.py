@@ -111,6 +111,8 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_make2": FnSig(name="sprout_make2", params=[I64, I64, I64], ret=I64),
     "sprout_make3": FnSig(name="sprout_make3", params=[I64, I64, I64, I64], ret=I64),
     "sprout_alloc_closure_env": FnSig(name="sprout_alloc_closure_env", params=[I64], ret=I8_PTR),
+    "sprout_gc_register_i64_root": FnSig(name="sprout_gc_register_i64_root", params=[I8_PTR], ret=I64),
+    "sprout_gc_register_ptr_root": FnSig(name="sprout_gc_register_ptr_root", params=[I8_PTR], ret=I64),
     "sprout_tag": FnSig(name="sprout_tag", params=[I64], ret=I64),
     "sprout_field": FnSig(name="sprout_field", params=[I64, I64], ret=I64),
 }
@@ -1143,6 +1145,12 @@ def _emit_init_globals(
                 f"Global init type mismatch for {let_decl.name}: {value.typ.text} vs {info.typ.text}"
             )
         emitter.emit(f"  store {value.typ.text} {value.ir}, ptr @{let_decl.name}")
+        if info.typ == I64:
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_register_i64_root(ptr @{let_decl.name})")
+        elif info.typ == I8_PTR:
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_register_ptr_root(ptr @{let_decl.name})")
     emitter.emit("  ret void")
     emitter.emit("}")
 

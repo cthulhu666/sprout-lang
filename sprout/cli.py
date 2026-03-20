@@ -184,8 +184,20 @@ typedef struct ManagedNode {
   void* ptr;
   SproutHeapKind kind;
   size_t aux_slots;
+  int marked;
   struct ManagedNode* next;
 } ManagedNode;
+
+typedef enum {
+  SPROUT_ROOT_I64 = 1,
+  SPROUT_ROOT_PTR = 2
+} SproutRootKind;
+
+typedef struct RootNode {
+  void* slot;
+  SproutRootKind kind;
+  struct RootNode* next;
+} RootNode;
 
 typedef struct {
   long long tag;
@@ -234,6 +246,7 @@ typedef struct {
 } HttpUrl;
 
 static ManagedNode* g_heap_nodes = NULL;
+static RootNode* g_root_nodes = NULL;
 static SproutObj* g_nothing_singleton = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
@@ -247,12 +260,14 @@ static int g_sprout_argc = 0;
 static char** g_sprout_argv = NULL;
 static int g_debug_alloc_enabled = 0;
 static int g_debug_alloc_report_registered = 0;
+static int g_gc_collect_registered = 0;
 static long long g_debug_alloc_sprout_obj = 0;
 static long long g_debug_alloc_closure = 0;
 static long long g_debug_alloc_vector = 0;
 static long long g_debug_alloc_map = 0;
 static long long g_debug_alloc_bytes = 0;
 static long long g_debug_alloc_builder = 0;
+static long long g_debug_gc_swept = 0;
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -265,6 +280,7 @@ static void sha256_digest(const unsigned char* data, size_t len, unsigned char o
 static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]);
 static char* base64_encode_bytes(const unsigned char* data, size_t len);
 static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err);
+static void sprout_gc_collect(void);
 
 static int sprout_debug_alloc_truthy(const char* value) {
   if (value == NULL || value[0] == '\\0') return 0;
@@ -278,13 +294,14 @@ static void sprout_debug_alloc_report(void) {
   if (!g_debug_alloc_enabled) return;
   fprintf(
     stderr,
-    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld\\n",
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld gc_swept=%lld\\n",
     g_debug_alloc_sprout_obj,
     g_debug_alloc_closure,
     g_debug_alloc_vector,
     g_debug_alloc_map,
     g_debug_alloc_bytes,
-    g_debug_alloc_builder
+    g_debug_alloc_builder,
+    g_debug_gc_swept
   );
 }
 
@@ -296,6 +313,12 @@ static void sprout_debug_alloc_maybe_enable(void) {
     atexit(sprout_debug_alloc_report);
     g_debug_alloc_report_registered = 1;
   }
+}
+
+static void sprout_gc_maybe_register(void) {
+  if (g_gc_collect_registered) return;
+  atexit(sprout_gc_collect);
+  g_gc_collect_registered = 1;
 }
 
 static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
@@ -333,6 +356,7 @@ static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slot
   n->ptr = ptr;
   n->kind = kind;
   n->aux_slots = aux_slots;
+  n->marked = 0;
   n->next = g_heap_nodes;
   g_heap_nodes = n;
 }
@@ -342,6 +366,15 @@ static ManagedNode* find_managed_ptr(void* ptr) {
     if (n->ptr == ptr) return n;
   }
   return NULL;
+}
+
+static void register_root_slot(void* slot, SproutRootKind kind) {
+  RootNode* node = (RootNode*)malloc(sizeof(RootNode));
+  if (node == NULL) tcp_fail("register_root_slot: out of memory");
+  node->slot = slot;
+  node->kind = kind;
+  node->next = g_root_nodes;
+  g_root_nodes = node;
 }
 
 static void register_obj(SproutObj* p) {
@@ -375,6 +408,16 @@ void* sprout_alloc_closure_env(long long size) {
   size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
   register_managed_ptr(out, SPROUT_HEAP_CLOSURE, slots);
   return out;
+}
+
+long long sprout_gc_register_i64_root(void* slot) {
+  register_root_slot(slot, SPROUT_ROOT_I64);
+  return 0;
+}
+
+long long sprout_gc_register_ptr_root(void* slot) {
+  register_root_slot(slot, SPROUT_ROOT_PTR);
+  return 0;
 }
 
 static VectorVal* sprout_alloc_vector_val(const char* ctx) {
@@ -474,6 +517,101 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
   return 0;
 }
 
+static void sprout_gc_mark_ptr(void* ptr);
+
+static void sprout_gc_mark_value(long long value) {
+  sprout_gc_mark_ptr((void*)(uintptr_t)value);
+}
+
+static void sprout_gc_mark_node(ManagedNode* node) {
+  if (node == NULL || node->marked) return;
+  node->marked = 1;
+  size_t child_count = sprout_heap_child_count(node);
+  for (size_t i = 0; i < child_count; i++) {
+    long long child = sprout_heap_child_value(node, i);
+    sprout_gc_mark_value(child);
+  }
+}
+
+static void sprout_gc_mark_ptr(void* ptr) {
+  ManagedNode* node = find_managed_ptr(ptr);
+  if (node != NULL) sprout_gc_mark_node(node);
+}
+
+static void sprout_gc_mark_roots(void) {
+  for (RootNode* root = g_root_nodes; root != NULL; root = root->next) {
+    if (root->kind == SPROUT_ROOT_I64) {
+      sprout_gc_mark_value(*(long long*)root->slot);
+    } else {
+      sprout_gc_mark_ptr(*(void**)root->slot);
+    }
+  }
+}
+
+static void sprout_gc_free_payload(ManagedNode* node) {
+  switch (node->kind) {
+    case SPROUT_HEAP_OBJ:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_CLOSURE:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_VECTOR: {
+      VectorVal* value = (VectorVal*)node->ptr;
+      free(value->data);
+      free(value);
+      return;
+    }
+    case SPROUT_HEAP_MAP: {
+      MapVal* value = (MapVal*)node->ptr;
+      for (long long i = 0; i < value->len; i++) free(value->entries[i].key);
+      free(value->entries);
+      free(value);
+      return;
+    }
+    case SPROUT_HEAP_BYTES: {
+      BytesVal* value = (BytesVal*)node->ptr;
+      free(value->data);
+      free(value);
+      return;
+    }
+    case SPROUT_HEAP_BUILDER: {
+      BuilderVal* value = (BuilderVal*)node->ptr;
+      free(value->chunks);
+      free(value);
+      return;
+    }
+  }
+}
+
+static void sprout_gc_sweep(void) {
+  ManagedNode* prev = NULL;
+  ManagedNode* node = g_heap_nodes;
+  while (node != NULL) {
+    ManagedNode* next = node->next;
+    if (!node->marked) {
+      if (node->ptr == g_nothing_singleton) g_nothing_singleton = NULL;
+      sprout_gc_free_payload(node);
+      if (prev == NULL) {
+        g_heap_nodes = next;
+      } else {
+        prev->next = next;
+      }
+      free(node);
+      g_debug_gc_swept++;
+    } else {
+      node->marked = 0;
+      prev = node;
+    }
+    node = next;
+  }
+}
+
+static void sprout_gc_collect(void) {
+  sprout_gc_mark_roots();
+  sprout_gc_sweep();
+}
+
 static CtorMeta* find_ctor(long long tag) {
   for (long long i = 0; i < g_ctor_meta_len; i++) {
     if (g_ctor_meta[i].tag == tag) return &g_ctor_meta[i];
@@ -562,6 +700,7 @@ long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
   g_sprout_argv = argv;
   sprout_debug_alloc_maybe_enable();
+  sprout_gc_maybe_register();
   return 0;
 }
 long long sprout_nothing(long long tag) {

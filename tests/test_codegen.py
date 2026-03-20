@@ -1329,7 +1329,7 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(debug_run.stdout.strip(), "10")
             self.assertEqual(debug_run.returncode, 10)
             match = re.search(
-                r"\[sprout alloc\] sprout_obj=(\d+) closure=(\d+) vector=(\d+) map=(\d+) bytes=(\d+) builder=(\d+)",
+                r"\[sprout alloc\] sprout_obj=(\d+) closure=(\d+) vector=(\d+) map=(\d+) bytes=(\d+) builder=(\d+) gc_swept=(\d+)",
                 debug_run.stderr,
             )
             self.assertIsNotNone(match)
@@ -1340,6 +1340,7 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(int(match.group(4)), 12)
             self.assertEqual(int(match.group(5)), 9)
             self.assertEqual(int(match.group(6)), 0)
+            self.assertGreater(int(match.group(7)), 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_crypto_helpers(self) -> None:
@@ -1615,10 +1616,11 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "42")
             self.assertEqual(run.returncode, 42)
-            match = re.search(r"closure=(\d+)", run.stderr)
+            match = re.search(r"closure=(\d+).*gc_swept=(\d+)", run.stderr)
             self.assertIsNotNone(match)
             assert match is not None
             self.assertGreater(int(match.group(1)), 0)
+            self.assertGreater(int(match.group(2)), 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_partial_application_of_named_function(self) -> None:

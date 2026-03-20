@@ -49,8 +49,10 @@ Native mode:
   backend.
 - Vectors, maps, bytes, builders, and many helper buffers allocate manually in
   the generated native runtime.
-- Some helper-local buffers are freed explicitly, but general Sprout-managed
-  values are not reclaimed in a structured way yet.
+- Some helper-local buffers are freed explicitly.
+- A first non-moving mark-sweep collector now exists in the native runtime,
+  but it currently runs only at process exit as a safe baseline.
+- Mid-execution GC triggering and fuller root coverage remain follow-up work.
 
 ## Why GC Is The Default Direction
 
@@ -152,6 +154,8 @@ Add lightweight instrumentation:
 - optional debug logging for object creation,
 - a small stress test that allocates many short-lived ADTs/closures.
 
+Status: completed.
+
 This stage exists to measure the runtime before designing policy.
 
 ### Stage 1: Centralized Allocation
@@ -168,6 +172,9 @@ Expected outcome:
 - explicit distinction between managed values and helper-local buffers,
 - easier runtime auditing.
 
+Status: completed for ADTs, closure environments, and the current
+vector/map/bytes/builder runtime value types.
+
 ### Stage 2: Heap Metadata
 
 Add the minimal metadata required for a collector.
@@ -181,6 +188,9 @@ Examples:
 The implementation does not need a perfect generalized object model on day one,
 but it does need enough structure to walk all managed references correctly.
 
+Status: completed for the current managed heap kinds, with per-kind traversal
+hooks in the native runtime.
+
 ### Stage 3: First Stop-The-World Mark-Sweep Collector
 
 Add:
@@ -191,6 +201,20 @@ Add:
 4. validation tests for reclamation safety.
 
 The collector should start simple and prioritize correctness over heuristics.
+
+Status: partially completed.
+
+Current implementation status:
+- the native runtime can register managed roots for scalar runtime globals,
+- the collector marks from those roots and sweeps managed heap nodes,
+- collection currently runs at process exit via `atexit(...)`,
+- debug allocation reporting now includes a `gc_swept` count.
+
+Remaining work before this stage can be considered fully complete:
+- define and implement a broader root model beyond the current global-scalar
+  registration path,
+- trigger collection during execution instead of only at process exit,
+- add stronger reclamation-focused tests once collection can run mid-program.
 
 ## V2 Direction
 
