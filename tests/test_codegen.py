@@ -1727,7 +1727,7 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.returncode, 42)
             self.assertRegex(
                 run.stderr,
-                r"\[sprout gc\] cycle=\d+ reason=atexit heap_before=\d+ heap_after=\d+ swept=\d+",
+                r"\[sprout gc\] cycle=\d+ reason=atexit threshold=\d+ heap_before=\d+ heap_after=\d+ swept=\d+",
             )
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
@@ -1766,8 +1766,8 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "3")
             self.assertEqual(run.returncode, 0)
-            self.assertIn("reason=threshold", run.stderr)
-            self.assertIn("reason=atexit", run.stderr)
+            self.assertIn("reason=threshold threshold=1", run.stderr)
+            self.assertIn("reason=atexit threshold=1", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_default_threshold_collects_during_execution(self) -> None:
@@ -1808,7 +1808,7 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "1200")
             self.assertEqual(run.returncode, 176)
-            self.assertIn("reason=threshold", run.stderr)
+            self.assertIn("reason=threshold threshold=1024", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_off_disables_mid_execution_collection(self) -> None:
@@ -1851,7 +1851,86 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.stdout.strip(), "1200")
             self.assertEqual(run.returncode, 176)
             self.assertNotIn("reason=threshold", run.stderr)
-            self.assertIn("reason=atexit", run.stderr)
+            self.assertIn("reason=atexit threshold=0", run.stderr)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_gc_threshold_preserves_live_vector_flow(self) -> None:
+        src = """
+        module main
+        import stdlib.collections (Vec, vec_append, vec_empty, vec_get_or, vec_length)
+
+        fn build(n: Int, acc: Vec Int) -> Vec Int =
+          if n == 0 then acc else build(n - 1, vec_append(n, acc))
+
+        fn score(vec: Vec Int) -> Int =
+          vec_length(vec) + vec_get_or(0, 0, vec)
+
+        fn main() -> Int !{IO} =
+          print_int(score(build(200, vec_empty())))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            env["SPROUT_GC_THRESHOLD"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.stdout.strip(), "400")
+            self.assertEqual(run.returncode, 144)
+            self.assertIn("reason=threshold threshold=1", run.stderr)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_gc_threshold_preserves_live_builder_flow(self) -> None:
+        src = """
+        module main
+        import stdlib.bytes (Builder, builder_append, builder_build, builder_byte, builder_empty, length)
+
+        fn build(n: Int, acc: Builder) -> Builder =
+          if n == 0 then acc else build(n - 1, builder_append(acc, builder_byte(65)))
+
+        fn main() -> Int !{IO} =
+          print_int(length(builder_build(build(64, builder_empty()))))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            env["SPROUT_GC_THRESHOLD"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.stdout.strip(), "64")
+            self.assertEqual(run.returncode, 64)
+            self.assertIn("reason=threshold threshold=1", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_tuple_global_root_keeps_children_live_at_exit(self) -> None:

@@ -227,9 +227,11 @@ Current implementation status:
 - collection currently runs at process exit via `atexit(...)`,
 - the native profile now also enables threshold-triggered mid-execution
   collection by default using a fixed managed-node threshold,
+- the current default threshold is `1024` managed heap nodes,
 - `SPROUT_GC_THRESHOLD=<positive-int>` overrides that threshold and
   `SPROUT_GC_THRESHOLD=off` disables in-process collection,
-- opt-in debug logging exists for validation,
+- opt-in debug logging exists for validation and now reports the active
+  threshold with each cycle,
 - debug allocation reporting now includes a `gc_swept` count.
 
 Remaining work before this stage can be considered fully complete:

@@ -361,9 +361,10 @@ static void sprout_gc_log_cycle(
   if (!g_debug_gc_enabled) return;
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s heap_before=%lld heap_after=%lld swept=%lld\\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld swept=%lld\\n",
     g_gc_cycle_count,
     reason,
+    g_gc_threshold,
     heap_before,
     heap_after,
     swept_delta
