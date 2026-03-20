@@ -267,7 +267,7 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             rendered = out.getvalue().strip()
             self.assertIn("HTTP/1.1 200 OK", rendered)
-            self.assertIn("x-test: yes", rendered)
+            self.assertIn("\r\nx-test: yes\r\n\r\n", rendered)
             self.assertTrue(rendered.endswith("/hello:local:hello"), msg=rendered)
 
     def test_load_module_source_rejects_duplicate_aliases(self) -> None:

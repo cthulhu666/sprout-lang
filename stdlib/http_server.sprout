@@ -204,7 +204,7 @@ fn inject_headers(base: String, extra: String) -> String =
   else if str_find(base, "\r\n\r\n") < 0 then base
   else
     str_concat(
-      str_take(base, str_find(base, "\r\n\r\n")),
+      str_take(base, str_find(base, "\r\n\r\n") + 2),
       str_concat(extra, str_drop(base, str_find(base, "\r\n\r\n")))
     )
 
