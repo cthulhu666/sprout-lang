@@ -221,6 +221,8 @@ Current implementation status:
 - native runtime helpers now also root managed arguments and freshly allocated
   managed pointers across the main allocation-heavy helper families, including
   vectors/maps, bytes/builders, crypto helpers, and network result wrappers,
+- the main native runtime helper surface has now been audited for this
+  root-coverage class of bug, with only narrower path-specific gaps left,
 - the collector marks from those roots and sweeps managed heap nodes,
 - collection currently runs at process exit via `atexit(...)`,
 - opt-in debug logging exists for validation,

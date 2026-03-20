@@ -12,7 +12,7 @@ This file tracks open design, implementation, and tooling follow-up work.
 6. Continue native memory-management v1.
    Design doc: [native-memory-management-v1-draft.md](./native-memory-management-v1-draft.md).
    Completed groundwork: allocation visibility, centralized managed allocation for Sprout values, heap metadata hooks, and an initial exit-time non-moving stop-the-world mark-sweep collector.
-   Remaining v1 scope: finish the remaining live managed-value paths that still sit outside the current shadow-root coverage, define normal mid-execution collection policy, and add stronger reclamation-focused validation.
+   Remaining v1 scope: close the remaining path-specific live-value gaps outside the current shadow-root coverage, define normal mid-execution collection policy, and add stronger reclamation-focused validation.
    V2 direction: pause/throughput improvements only after v1 is measured, likely via incremental or generational follow-up work if justified.
 
 ## V1 Roadmap Candidates

@@ -739,6 +739,9 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("SPROUT_GC_PUSH_PTR_LOCAL(out);", runtime_source)
         self.assertIn("SPROUT_GC_PUSH_I64_LOCAL(err);", runtime_source)
         self.assertIn("long long rooted_payload = payload;", runtime_source)
+        self.assertIn('BytesVal* out = sprout_alloc_bytes_val("crypto_bytes_xor: out of memory");', runtime_source)
+        self.assertIn("long long result = sprout_make1(find_ctor_tag_by_name(\"Ok\"), (long long)(uintptr_t)out);", runtime_source)
+        self.assertIn("SPROUT_GC_POP_LOCALS(3);", runtime_source)
         self.assertIn("SPROUT_GC_POP_LOCALS(2);", runtime_source)
 
     def test_compile_string_builtins_to_llvm(self) -> None:

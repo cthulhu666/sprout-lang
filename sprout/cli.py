@@ -2349,11 +2349,13 @@ long long crypto_bytes_xor(long long left_h, long long right_h) {
     return crypto_err2("stdlib.crypto.BytesXorLengthMismatch", (long long)left->len, (long long)right->len);
   }
   BytesVal* out = sprout_alloc_bytes_val("crypto_bytes_xor: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
   out->len = left->len;
   out->data = sprout_alloc_bytes_data(out->len, "crypto_bytes_xor: out of memory");
   for (size_t i = 0; i < out->len; i++) out->data[i] = left->data[i] ^ right->data[i];
-  SPROUT_GC_POP_LOCALS(2);
-  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(3);
+  return result;
 }
 
 long long crypto_random_bytes(long long count) {
