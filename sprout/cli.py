@@ -267,6 +267,7 @@ static int g_debug_alloc_report_registered = 0;
 static int g_debug_gc_enabled = 0;
 static int g_gc_collect_registered = 0;
 static int g_gc_active = 0;
+static int g_gc_threshold_enabled = 0;
 static long long g_debug_alloc_sprout_obj = 0;
 static long long g_debug_alloc_closure = 0;
 static long long g_debug_alloc_vector = 0;
@@ -276,6 +277,7 @@ static long long g_debug_alloc_builder = 0;
 static long long g_debug_gc_swept = 0;
 static long long g_gc_cycle_count = 0;
 static long long g_managed_heap_count = 0;
+static long long g_gc_threshold = 0;
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -330,6 +332,19 @@ static void sprout_debug_gc_maybe_enable(void) {
   g_debug_gc_enabled = 1;
 }
 
+static void sprout_gc_threshold_maybe_enable(void) {
+  if (g_gc_threshold_enabled) return;
+  const char* raw = getenv("SPROUT_GC_THRESHOLD");
+  if (raw == NULL || raw[0] == '\\0') return;
+  char* end = NULL;
+  long long parsed = strtoll(raw, &end, 10);
+  if (end == raw || *end != '\\0' || parsed <= 0) {
+    tcp_fail("SPROUT_GC_THRESHOLD: expected positive integer");
+  }
+  g_gc_threshold = parsed;
+  g_gc_threshold_enabled = 1;
+}
+
 static void sprout_gc_maybe_register(void) {
   if (g_gc_collect_registered) return;
   atexit(sprout_gc_collect);
@@ -352,6 +367,13 @@ static void sprout_gc_log_cycle(
     heap_after,
     swept_delta
   );
+}
+
+static void sprout_gc_maybe_collect_threshold(void) {
+  if (!g_gc_threshold_enabled) return;
+  if (g_gc_active) return;
+  if (g_managed_heap_count < g_gc_threshold) return;
+  sprout_gc_collect_with_reason("threshold");
 }
 
 static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
@@ -417,6 +439,7 @@ static void register_obj(SproutObj* p) {
 }
 
 static SproutObj* sprout_alloc_obj_raw(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
   return (SproutObj*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(SproutObj), ctx);
 }
 
@@ -439,6 +462,7 @@ static long long sprout_make_registered_obj(long long tag, long long f0, long lo
 
 void* sprout_alloc_closure_env(long long size) {
   if (size < 0) tcp_fail("sprout_alloc_closure_env: size must be >= 0");
+  sprout_gc_maybe_collect_threshold();
   void* out = sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
   size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
   register_managed_ptr(out, SPROUT_HEAP_CLOSURE, slots);
@@ -513,12 +537,14 @@ long long sprout_gc_pop_roots(long long count) {
 
 void* sprout_alloc_tuple_blob(long long size_bytes) {
   if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
+  sprout_gc_maybe_collect_threshold();
   void* out = sprout_alloc_counted(&g_debug_alloc_sprout_obj, (size_t)size_bytes, "sprout_alloc_tuple_blob: out of memory");
   register_managed_ptr(out, SPROUT_HEAP_TUPLE, ((size_t)size_bytes) / sizeof(uintptr_t));
   return out;
 }
 
 static VectorVal* sprout_alloc_vector_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
   VectorVal* out = (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), ctx);
   register_managed_ptr(out, SPROUT_HEAP_VECTOR, 0);
   return out;
@@ -533,6 +559,7 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
 }
 
 static MapVal* sprout_alloc_map_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
   MapVal* out = (MapVal*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(MapVal), ctx);
   register_managed_ptr(out, SPROUT_HEAP_MAP, 0);
   return out;
@@ -543,6 +570,7 @@ static MapEntry* sprout_alloc_map_entries(size_t count, const char* ctx) {
 }
 
 static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
   BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), ctx);
   register_managed_ptr(out, SPROUT_HEAP_BYTES, 0);
   return out;
@@ -553,6 +581,7 @@ static unsigned char* sprout_alloc_bytes_data(size_t count, const char* ctx) {
 }
 
 static BuilderVal* sprout_alloc_builder_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
   BuilderVal* out = (BuilderVal*)sprout_alloc_counted(&g_debug_alloc_builder, sizeof(BuilderVal), ctx);
   register_managed_ptr(out, SPROUT_HEAP_BUILDER, 0);
   return out;
@@ -840,6 +869,7 @@ long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argv = argv;
   sprout_debug_alloc_maybe_enable();
   sprout_debug_gc_maybe_enable();
+  sprout_gc_threshold_maybe_enable();
   sprout_gc_maybe_register();
   return 0;
 }

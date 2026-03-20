@@ -1731,6 +1731,45 @@ class CodegenTests(unittest.TestCase):
             )
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_gc_threshold_collects_during_execution_and_preserves_live_values(self) -> None:
+        src = """
+        module main
+        import stdlib.bytes (from_string, length)
+        import stdlib.crypto as crypto
+
+        fn main() -> Unit !{IO} =
+          match crypto.bytes_xor(from_string("abc"), from_string("ABC")) with
+          | Ok out -> print(length(out))
+          | Err _ -> print(0)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            env["SPROUT_GC_THRESHOLD"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.stdout.strip(), "3")
+            self.assertEqual(run.returncode, 0)
+            self.assertIn("reason=threshold", run.stderr)
+            self.assertIn("reason=atexit", run.stderr)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_tuple_global_root_keeps_children_live_at_exit(self) -> None:
         src = """
         type Box =
