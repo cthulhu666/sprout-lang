@@ -1623,6 +1623,103 @@ class CodegenTests(unittest.TestCase):
             self.assertGreater(int(match.group(2)), 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_debug_gc_logs_exit_collection(self) -> None:
+        src = """
+        type Box =
+          | Box Int
+
+        fn make_box(x: Int) -> Box =
+          Box(x)
+
+        fn main() -> Int !{IO} =
+          match make_box(42) with
+          | Box(x) -> print_int(x)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.stdout.strip(), "42")
+            self.assertEqual(run.returncode, 42)
+            self.assertRegex(
+                run.stderr,
+                r"\[sprout gc\] cycle=\d+ reason=atexit heap_before=\d+ heap_after=\d+ swept=\d+",
+            )
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_gc_stress_preserves_live_closure_via_stack_scan(self) -> None:
+        src = r"""
+        type Box =
+          | Box Int
+
+        fn make_adder(base: Int) -> Int -> Int =
+          \(x) -> base + x
+
+        fn churn(n: Int) -> Int =
+          if n == 0 then
+            0
+          else
+            match Box(n) with
+            | Box(_) -> churn(n - 1)
+
+        fn after(_: Int, x: Int) -> Int =
+          x
+
+        fn apply_after_churn(f: Int -> Int, x: Int, n: Int) -> Int =
+          after(churn(n), f(x))
+
+        fn main() -> Int !{IO} =
+          print_int(apply_after_churn(make_adder(40), 2, 200))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            env["SPROUT_GC_STRESS"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.stdout.strip(), "42")
+            self.assertEqual(run.returncode, 42)
+            alloc_cycles = re.findall(
+                r"\[sprout gc\] cycle=\d+ reason=alloc heap_before=\d+ heap_after=\d+ swept=\d+",
+                run.stderr,
+            )
+            self.assertGreater(len(alloc_cycles), 0)
+            self.assertIn("reason=atexit", run.stderr)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_partial_application_of_named_function(self) -> None:
         src = """
         fn add(x: Int, y: Int) -> Int = x + y

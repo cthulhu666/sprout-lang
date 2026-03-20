@@ -260,7 +260,10 @@ static int g_sprout_argc = 0;
 static char** g_sprout_argv = NULL;
 static int g_debug_alloc_enabled = 0;
 static int g_debug_alloc_report_registered = 0;
+static int g_debug_gc_enabled = 0;
 static int g_gc_collect_registered = 0;
+static int g_gc_stress_enabled = 0;
+static int g_gc_active = 0;
 static long long g_debug_alloc_sprout_obj = 0;
 static long long g_debug_alloc_closure = 0;
 static long long g_debug_alloc_vector = 0;
@@ -268,6 +271,9 @@ static long long g_debug_alloc_map = 0;
 static long long g_debug_alloc_bytes = 0;
 static long long g_debug_alloc_builder = 0;
 static long long g_debug_gc_swept = 0;
+static long long g_gc_cycle_count = 0;
+static long long g_managed_heap_count = 0;
+static void* g_stack_bottom = NULL;
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -281,6 +287,7 @@ static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const u
 static char* base64_encode_bytes(const unsigned char* data, size_t len);
 static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err);
 static void sprout_gc_collect(void);
+static void sprout_gc_collect_with_reason(const char* reason);
 
 static int sprout_debug_alloc_truthy(const char* value) {
   if (value == NULL || value[0] == '\\0') return 0;
@@ -315,13 +322,49 @@ static void sprout_debug_alloc_maybe_enable(void) {
   }
 }
 
+static void sprout_debug_gc_maybe_enable(void) {
+  if (g_debug_gc_enabled) return;
+  if (!sprout_debug_alloc_truthy(getenv("SPROUT_DEBUG_GC"))) return;
+  g_debug_gc_enabled = 1;
+}
+
+static void sprout_gc_stress_maybe_enable(void) {
+  if (g_gc_stress_enabled) return;
+  if (!sprout_debug_alloc_truthy(getenv("SPROUT_GC_STRESS"))) return;
+  g_gc_stress_enabled = 1;
+}
+
 static void sprout_gc_maybe_register(void) {
   if (g_gc_collect_registered) return;
   atexit(sprout_gc_collect);
   g_gc_collect_registered = 1;
 }
 
+static void sprout_gc_log_cycle(
+  const char* reason,
+  long long heap_before,
+  long long heap_after,
+  long long swept_delta
+) {
+  if (!g_debug_gc_enabled) return;
+  fprintf(
+    stderr,
+    "[sprout gc] cycle=%lld reason=%s heap_before=%lld heap_after=%lld swept=%lld\\n",
+    g_gc_cycle_count,
+    reason,
+    heap_before,
+    heap_after,
+    swept_delta
+  );
+}
+
+static void sprout_gc_maybe_collect_before_alloc(void) {
+  if (!g_gc_stress_enabled || g_gc_active) return;
+  sprout_gc_collect_with_reason("alloc");
+}
+
 static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
+  sprout_gc_maybe_collect_before_alloc();
   if (g_debug_alloc_enabled) (*counter)++;
   void* out = malloc(size);
   if (out == NULL) tcp_fail(ctx);
@@ -359,6 +402,7 @@ static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slot
   n->marked = 0;
   n->next = g_heap_nodes;
   g_heap_nodes = n;
+  g_managed_heap_count++;
 }
 
 static ManagedNode* find_managed_ptr(void* ptr) {
@@ -538,6 +582,20 @@ static void sprout_gc_mark_ptr(void* ptr) {
   if (node != NULL) sprout_gc_mark_node(node);
 }
 
+static void sprout_gc_mark_conservative_stack(void) {
+  if (g_stack_bottom == NULL) return;
+  uintptr_t marker = 0;
+  uintptr_t start = (uintptr_t)&marker;
+  uintptr_t end = (uintptr_t)g_stack_bottom;
+  uintptr_t low = start < end ? start : end;
+  uintptr_t high = start < end ? end : start;
+  for (uintptr_t addr = low; addr + sizeof(uintptr_t) <= high; addr += sizeof(uintptr_t)) {
+    uintptr_t candidate = 0;
+    memcpy(&candidate, (void*)addr, sizeof(uintptr_t));
+    sprout_gc_mark_ptr((void*)candidate);
+  }
+}
+
 static void sprout_gc_mark_roots(void) {
   for (RootNode* root = g_root_nodes; root != NULL; root = root->next) {
     if (root->kind == SPROUT_ROOT_I64) {
@@ -546,6 +604,7 @@ static void sprout_gc_mark_roots(void) {
       sprout_gc_mark_ptr(*(void**)root->slot);
     }
   }
+  sprout_gc_mark_conservative_stack();
 }
 
 static void sprout_gc_free_payload(ManagedNode* node) {
@@ -599,6 +658,7 @@ static void sprout_gc_sweep(void) {
       }
       free(node);
       g_debug_gc_swept++;
+      g_managed_heap_count--;
     } else {
       node->marked = 0;
       prev = node;
@@ -608,8 +668,19 @@ static void sprout_gc_sweep(void) {
 }
 
 static void sprout_gc_collect(void) {
+  sprout_gc_collect_with_reason("atexit");
+}
+
+static void sprout_gc_collect_with_reason(const char* reason) {
+  if (g_gc_active) return;
+  g_gc_active = 1;
+  long long heap_before = g_managed_heap_count;
+  long long swept_before = g_debug_gc_swept;
+  g_gc_cycle_count++;
   sprout_gc_mark_roots();
   sprout_gc_sweep();
+  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, g_debug_gc_swept - swept_before);
+  g_gc_active = 0;
 }
 
 static CtorMeta* find_ctor(long long tag) {
@@ -697,9 +768,13 @@ long long env_get(const char* name) {
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)value);
 }
 long long sprout_set_argv(int argc, char** argv) {
+  uintptr_t stack_marker = 0;
   g_sprout_argc = argc;
   g_sprout_argv = argv;
+  g_stack_bottom = (void*)&stack_marker;
   sprout_debug_alloc_maybe_enable();
+  sprout_debug_gc_maybe_enable();
+  sprout_gc_stress_maybe_enable();
   sprout_gc_maybe_register();
   return 0;
 }

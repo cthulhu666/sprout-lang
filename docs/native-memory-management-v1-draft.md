@@ -206,14 +206,17 @@ Status: partially completed.
 
 Current implementation status:
 - the native runtime can register managed roots for scalar runtime globals,
+- the native runtime also performs a conservative stack scan when collecting,
 - the collector marks from those roots and sweeps managed heap nodes,
 - collection currently runs at process exit via `atexit(...)`,
+- opt-in debug logging and stress-triggered collection exist for validation,
 - debug allocation reporting now includes a `gc_swept` count.
 
 Remaining work before this stage can be considered fully complete:
-- define and implement a broader root model beyond the current global-scalar
-  registration path,
-- trigger collection during execution instead of only at process exit,
+- replace or tighten the current conservative root strategy where precision is
+  needed,
+- define the normal mid-execution collection policy instead of relying only on
+  debug/stress triggering,
 - add stronger reclamation-focused tests once collection can run mid-program.
 
 ## V2 Direction
