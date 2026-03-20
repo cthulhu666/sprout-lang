@@ -250,6 +250,57 @@ class CliTests(unittest.TestCase):
                 else:
                     os.environ["SPROUT_REPL_HISTORY"] = old_value
 
+    def test_repl_declared_names_include_declared_symbols(self) -> None:
+        from sprout.cli import _repl_declared_names
+
+        names = _repl_declared_names(
+            [
+                "let answer = 42",
+                "fn double(x: Int) -> Int = x + x",
+                "type MaybeInt = | Some Int | None",
+                "class Renderable t { fn render(x: t) -> Int }",
+                "instance Renderable MaybeInt { fn render(x: MaybeInt) -> Int = 0 }",
+            ]
+        )
+
+        self.assertIn("answer", names)
+        self.assertIn("double", names)
+        self.assertIn("MaybeInt", names)
+        self.assertIn("Some", names)
+        self.assertIn("None", names)
+        self.assertIn("Renderable", names)
+        self.assertIn("render", names)
+
+    def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
+        from sprout.cli import _repl_completion_matches
+
+        self.assertEqual(_repl_completion_matches(":t", ":t", [], with_stdlib=False), [":t", ":type"])
+        matches = _repl_completion_matches("sp", "sp", [], with_stdlib=False)
+        self.assertIn("split_ints", matches)
+
+    def test_repl_completion_matches_declared_names(self) -> None:
+        from sprout.cli import _repl_completion_matches
+
+        matches = _repl_completion_matches(
+            "ans",
+            "ans",
+            ["let answer = 42", "fn annotate(x: Int) -> Int = x"],
+            with_stdlib=False,
+        )
+
+        self.assertIn("answer", matches)
+        self.assertNotIn("annotate", matches)
+
+    def test_repl_completion_matches_stdlib_module_names_with_flag(self) -> None:
+        from sprout.cli import _repl_completion_matches
+
+        without_stdlib = _repl_completion_matches("htt", "htt", [], with_stdlib=False)
+        with_stdlib = _repl_completion_matches("htt", "htt", [], with_stdlib=True)
+
+        self.assertNotIn("http", without_stdlib)
+        self.assertIn("http", with_stdlib)
+        self.assertIn("http_client", with_stdlib)
+
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
         fn main() -> Unit !{IO} =

@@ -5,6 +5,7 @@ import atexit
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,84 @@ from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_program, unify
 
 _REPL_HISTORY_LIMIT = 1000
+_REPL_COMMANDS = (
+    ":help",
+    ":quit",
+    ":q",
+    ":exit",
+    ":type",
+    ":t",
+    ":instances",
+    ":i",
+)
+_REPL_PRELUDE_NAMES = frozenset(
+    {
+        "Bool",
+        "Cons",
+        "Dict",
+        "Err",
+        "False",
+        "Foldable",
+        "Functor",
+        "Int",
+        "IO",
+        "Just",
+        "List",
+        "Maybe",
+        "Nil",
+        "Nothing",
+        "Ok",
+        "Result",
+        "Semigroup",
+        "String",
+        "True",
+        "Unit",
+        "Vec",
+        "filter",
+        "fmap",
+        "fold",
+        "foldable_to_vec",
+        "list_append",
+        "list_fold",
+        "list_map",
+        "map",
+        "print",
+        "split_ints",
+        "vec_append",
+        "vec_empty",
+        "vec_fold",
+        "vec_get",
+        "vec_get_or",
+        "vec_length",
+        "vec_map",
+        "vec_prepend",
+        "vec_reverse",
+        "vec_set",
+        "vec_slice",
+        "vec_sum",
+        "vec_sum_by",
+    }
+)
+_REPL_STDLIB_EXTRA_NAMES = frozenset(
+    {
+        "bytes",
+        "collections",
+        "crypto",
+        "dict_empty",
+        "dict_get",
+        "dict_keys",
+        "dict_remove",
+        "dict_set",
+        "dict_values",
+        "http",
+        "http_client",
+        "math",
+        "net",
+        "string",
+        "terminal",
+    }
+)
+_REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
 
 
 def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
@@ -2848,7 +2927,45 @@ def _repl_history_path() -> Path:
     return Path.home() / ".sprout_repl_history"
 
 
-def _configure_repl_readline(history_path: Path | None = None) -> None:
+def _repl_declared_names(declarations: list[str]) -> set[str]:
+    names: set[str] = set()
+    for source in declarations:
+        tree = parse(source)
+        for decl in tree.declarations:
+            if isinstance(decl, ast.FnDecl | ast.LetDecl | ast.ClassDecl | ast.TypeDecl):
+                names.add(decl.name)
+            if isinstance(decl, ast.TypeDecl):
+                names.update(ctor.name for ctor in decl.constructors)
+            elif isinstance(decl, ast.ClassDecl):
+                names.update(method.name for method in decl.methods)
+            elif isinstance(decl, ast.InstanceDecl):
+                names.update(method.name for method in decl.methods)
+    return names
+
+
+def _repl_completion_matches(
+    text: str,
+    line_buffer: str,
+    declarations: list[str],
+    *,
+    with_stdlib: bool,
+) -> list[str]:
+    token_match = _REPL_TOKEN_RE.search(line_buffer)
+    prefix = token_match.group(0) if token_match is not None else text
+    names = set(_REPL_COMMANDS)
+    names.update(_REPL_PRELUDE_NAMES)
+    names.update(_repl_declared_names(declarations))
+    if with_stdlib:
+        names.update(_REPL_STDLIB_EXTRA_NAMES)
+    return sorted(name for name in names if name.startswith(prefix))
+
+
+def _configure_repl_readline(
+    declarations: list[str],
+    *,
+    with_stdlib: bool,
+    history_path: Path | None = None,
+) -> None:
     try:
         import readline
     except ImportError:
@@ -2858,6 +2975,19 @@ def _configure_repl_readline(history_path: Path | None = None) -> None:
     readline.parse_and_bind("tab: complete")
     readline.parse_and_bind("set editing-mode emacs")
     readline.set_history_length(_REPL_HISTORY_LIMIT)
+
+    def _complete(text: str, state: int) -> str | None:
+        matches = _repl_completion_matches(
+            text,
+            readline.get_line_buffer(),
+            declarations,
+            with_stdlib=with_stdlib,
+        )
+        if state < len(matches):
+            return matches[state]
+        return None
+
+    readline.set_completer(_complete)
     if target.exists():
         try:
             readline.read_history_file(target)
@@ -2969,7 +3099,7 @@ def cmd_repl(with_stdlib: bool = False) -> int:
         run_program(lowered)
 
     if interactive:
-        _configure_repl_readline()
+        _configure_repl_readline(declarations, with_stdlib=with_stdlib)
         emit("Sprout REPL. Use :help for commands.")
         while True:
             try:
