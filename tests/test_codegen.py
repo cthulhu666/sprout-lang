@@ -725,6 +725,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_native_runtime_roots_managed_args_in_key_allocating_helpers(self) -> None:
         runtime_source = Path(sprout_cli.__file__).read_text(encoding="utf-8")
+        self.assertIn("#define SPROUT_GC_PUSH_PTR_LOCAL(slot_name)", runtime_source)
         self.assertIn("long long rooted_vec = vec;", runtime_source)
         self.assertIn("long long rooted_map = map_h;", runtime_source)
         self.assertIn("long long rooted_builder = builder_h;", runtime_source)
@@ -734,6 +735,10 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("long long rooted_key = key_h;", runtime_source)
         self.assertIn("long long rooted_msg = msg_h;", runtime_source)
         self.assertIn("SPROUT_GC_PUSH_I64_LOCAL(rooted_value);", runtime_source)
+        self.assertIn("SPROUT_GC_PUSH_PTR_LOCAL(chunk);", runtime_source)
+        self.assertIn("SPROUT_GC_PUSH_PTR_LOCAL(out);", runtime_source)
+        self.assertIn("SPROUT_GC_PUSH_I64_LOCAL(err);", runtime_source)
+        self.assertIn("long long rooted_payload = payload;", runtime_source)
         self.assertIn("SPROUT_GC_POP_LOCALS(2);", runtime_source)
 
     def test_compile_string_builtins_to_llvm(self) -> None:

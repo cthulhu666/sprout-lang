@@ -501,6 +501,11 @@ long long sprout_gc_pop_roots(long long count) {
   (void)sprout_gc_tmp_ignored; \
 } while (0)
 
+#define SPROUT_GC_PUSH_PTR_LOCAL(slot_name) do { \
+  long long sprout_gc_tmp_ignored = sprout_gc_push_ptr_root(&(slot_name)); \
+  (void)sprout_gc_tmp_ignored; \
+} while (0)
+
 #define SPROUT_GC_POP_LOCALS(count_value) do { \
   long long sprout_gc_tmp_ignored = sprout_gc_pop_roots((count_value)); \
   (void)sprout_gc_tmp_ignored; \
@@ -906,6 +911,7 @@ long long read_int_lines(const char* path) {
   FILE* f = fopen(path, "r");
   if (f == NULL) tcp_fail("read_int_lines: cannot open file");
   VectorVal* v = sprout_alloc_vector_val("read_int_lines: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(v);
   v->len = 0;
   v->cap = 0;
   v->data = NULL;
@@ -931,6 +937,7 @@ long long read_int_lines(const char* path) {
     v->len++;
   }
   fclose(f);
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)v;
 }
 long long sprout_register_ctor(long long tag, const char* name, long long arity) {
@@ -1088,12 +1095,20 @@ static char* upper_copy(const char* text) {
 
 static long long http_err0(const char* ctor_name) {
   long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 static long long http_err1(const char* ctor_name, long long payload) {
+  long long rooted_payload = payload;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_payload);
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(2);
+  return out;
 }
 
 static long long http_ok_response(long long status, const char* headers, const char* body) {
@@ -1103,7 +1118,10 @@ static long long http_ok_response(long long status, const char* headers, const c
     (long long)(uintptr_t)headers,
     (long long)(uintptr_t)body
   );
-  return sprout_make1(find_ctor_tag_by_name("Ok"), resp);
+  SPROUT_GC_PUSH_I64_LOCAL(resp);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), resp);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 static void json_append_hex4(ByteBuf* out, unsigned char value) {
@@ -1502,12 +1520,17 @@ long long vector_length(long long vec) {
 }
 
 long long vector_get(long long vec, long long index) {
+  long long rooted_vec = vec;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_get: null vector");
   if (index < 0 || index >= v->len) {
+    SPROUT_GC_POP_LOCALS(1);
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), v->data[index]);
+  long long out = sprout_make1(find_ctor_tag_by_name("Just"), v->data[index]);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 long long vector_set(long long vec, long long index, long long value) {
@@ -1569,14 +1592,19 @@ static long long map_find_index(MapVal* m, const char* key) {
 }
 
 long long map_get(long long map_h, const char* key) {
+  long long rooted_map = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
   MapVal* m = (MapVal*)(uintptr_t)map_h;
   if (m == NULL) tcp_fail("map_get: null map");
   if (key == NULL) tcp_fail("map_get: null key");
   long long idx = map_find_index(m, key);
   if (idx < 0) {
+    SPROUT_GC_POP_LOCALS(1);
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[idx].value);
+  long long out = sprout_make1(find_ctor_tag_by_name("Just"), m->entries[idx].value);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 long long map_set(long long map_h, const char* key, long long value) {
@@ -1644,22 +1672,32 @@ long long map_size(long long map_h) {
 }
 
 long long map_nth_key(long long map_h, long long index) {
+  long long rooted_map = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
   MapVal* m = (MapVal*)(uintptr_t)map_h;
   if (m == NULL) tcp_fail("map_nth_key: null map");
   if (index < 0 || index >= m->len) {
+    SPROUT_GC_POP_LOCALS(1);
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
   char* key = sprout_strdup_counted(&g_debug_alloc_map, m->entries[index].key, "map_nth_key: out of memory");
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)key);
+  long long out = sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)key);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 long long map_nth_value(long long map_h, long long index) {
+  long long rooted_map = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
   MapVal* m = (MapVal*)(uintptr_t)map_h;
   if (m == NULL) tcp_fail("map_nth_value: null map");
   if (index < 0 || index >= m->len) {
+    SPROUT_GC_POP_LOCALS(1);
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
+  long long out = sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 long long bytes_empty() {
@@ -1799,8 +1837,10 @@ long long bytes_to_utf8(long long bytes_h) {
       find_ctor_tag_by_name("stdlib.bytes.Utf8DecodeError"),
       (long long)(uintptr_t)dup_cstr(reason)
     );
-    SPROUT_GC_POP_LOCALS(1);
-    return sprout_make1(find_ctor_tag_by_name("Err"), err);
+    SPROUT_GC_PUSH_I64_LOCAL(err);
+    long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+    SPROUT_GC_POP_LOCALS(2);
+    return out;
   }
   char* out = (char*)malloc(value->len + 1);
   if (out == NULL) tcp_fail("bytes_to_utf8: out of memory");
@@ -1852,8 +1892,10 @@ long long bytes_builder_byte(long long value) {
   if (value < 0 || value > 255) tcp_fail("bytes_builder_byte: byte out of range");
   unsigned char data[1] = {(unsigned char)value};
   BytesVal* chunk = bytes_from_chunk_bytes(data, 1, "bytes_builder_byte: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(chunk);
   BuilderVal* out = builder_alloc(1, 1);
   out->chunks[0] = chunk;
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
@@ -1867,8 +1909,10 @@ long long bytes_builder_u16_be(long long value) {
   data[0] = builder_mod_256(sprout_div_floor(value, 256));
   data[1] = builder_mod_256(value);
   BytesVal* chunk = bytes_from_chunk_bytes(data, 2, "bytes_builder_u16_be: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(chunk);
   BuilderVal* out = builder_alloc(2, 1);
   out->chunks[0] = chunk;
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
@@ -1879,8 +1923,10 @@ long long bytes_builder_u32_be(long long value) {
   data[2] = builder_mod_256(sprout_div_floor(value, 256));
   data[3] = builder_mod_256(value);
   BytesVal* chunk = bytes_from_chunk_bytes(data, 4, "bytes_builder_u32_be: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(chunk);
   BuilderVal* out = builder_alloc(4, 1);
   out->chunks[0] = chunk;
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
@@ -2220,12 +2266,22 @@ static int base64_decode_bytes(const char* text, unsigned char** out_data, size_
 
 static long long crypto_err1(const char* ctor_name, const char* payload) {
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), (long long)(uintptr_t)dup_cstr(payload));
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 static long long crypto_err2(const char* ctor_name, long long a0, long long a1) {
+  long long rooted_a0 = a0;
+  long long rooted_a1 = a1;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_a0);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_a1);
   long long err = sprout_make2(find_ctor_tag_by_name(ctor_name), a0, a1);
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(3);
+  return out;
 }
 
 long long crypto_sha256(long long bytes_h) {
@@ -2272,9 +2328,12 @@ long long crypto_base64_decode(const char* raw) {
     return crypto_err1("stdlib.crypto.Base64DecodeError", err);
   }
   BytesVal* out = sprout_alloc_bytes_val("crypto_base64_decode: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
   out->len = len;
   out->data = len == 0 ? NULL : data;
-  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
 }
 
 long long crypto_bytes_xor(long long left_h, long long right_h) {
@@ -2303,11 +2362,13 @@ long long crypto_random_bytes(long long count) {
   }
   size_t len = (size_t)count;
   BytesVal* out = sprout_alloc_bytes_val("crypto_random_bytes: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
   out->len = len;
   out->data = sprout_alloc_bytes_data(len, "crypto_random_bytes: out of memory");
   if (len > 0) {
     FILE* fp = fopen("/dev/urandom", "rb");
     if (fp == NULL) {
+      SPROUT_GC_POP_LOCALS(1);
       free(out->data);
       free(out);
       return crypto_err1("stdlib.crypto.CryptoUnavailable", strerror(errno));
@@ -2316,6 +2377,7 @@ long long crypto_random_bytes(long long count) {
     if (got != len || ferror(fp)) {
       int saved_errno = errno;
       fclose(fp);
+      SPROUT_GC_POP_LOCALS(1);
       free(out->data);
       free(out);
       return crypto_err1(
@@ -2325,7 +2387,9 @@ long long crypto_random_bytes(long long count) {
     }
     fclose(fp);
   }
-  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
 }
 
 long long tcp_listen(long long port) {
@@ -2361,17 +2425,29 @@ long long tcp_listen(long long port) {
 }
 
 static long long tcp_net_ok(long long payload) {
-  return sprout_make1(find_ctor_tag_by_name("Ok"), payload);
+  long long rooted_payload = payload;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_payload);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 static long long tcp_net_err0(const char* ctor_name) {
   long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
 static long long tcp_net_err1(const char* ctor_name, long long payload) {
+  long long rooted_payload = payload;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_payload);
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  return sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(2);
+  return out;
 }
 
 long long tcp_connect(const char* host, long long port) {
@@ -2461,24 +2537,29 @@ long long tcp_read_exact(long long conn, long long count) {
     );
   }
   BytesVal* out = sprout_alloc_bytes_val("tcp_read_exact: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
   out->len = (size_t)count;
   out->data = sprout_alloc_bytes_data((size_t)count, "tcp_read_exact: out of memory");
   size_t received = 0;
   while (received < (size_t)count) {
     ssize_t n = recv(g_conn_fd[conn], out->data + received, (size_t)count - received, 0);
     if (n == 0) {
+      SPROUT_GC_POP_LOCALS(1);
       free(out->data);
       free(out);
       return tcp_net_err0("stdlib.net.TcpEndOfStream");
     }
     if (n < 0) {
+      SPROUT_GC_POP_LOCALS(1);
       free(out->data);
       free(out);
       return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
     }
     received += (size_t)n;
   }
-  return tcp_net_ok((long long)(uintptr_t)out);
+  long long result = tcp_net_ok((long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
 }
 
 long long tcp_write(long long conn, const char* payload) {
