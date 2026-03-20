@@ -218,6 +218,8 @@ Current implementation status:
 - the backend currently uses that stack for function/lambda parameters,
   closure construction, tuple packing, constructor packing, and pattern-bound
   locals in match/destructuring paths,
+- native runtime helpers now also root managed arguments in key allocation-heavy
+  paths such as vectors, maps, bytes/builders, and crypto helpers,
 - the collector marks from those roots and sweeps managed heap nodes,
 - collection currently runs at process exit via `atexit(...)`,
 - opt-in debug logging exists for validation,

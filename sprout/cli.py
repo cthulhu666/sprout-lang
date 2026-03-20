@@ -496,6 +496,16 @@ long long sprout_gc_pop_roots(long long count) {
   return 0;
 }
 
+#define SPROUT_GC_PUSH_I64_LOCAL(slot_name) do { \
+  long long sprout_gc_tmp_ignored = sprout_gc_push_i64_root(&(slot_name)); \
+  (void)sprout_gc_tmp_ignored; \
+} while (0)
+
+#define SPROUT_GC_POP_LOCALS(count_value) do { \
+  long long sprout_gc_tmp_ignored = sprout_gc_pop_roots((count_value)); \
+  (void)sprout_gc_tmp_ignored; \
+} while (0)
+
 void* sprout_alloc_tuple_blob(long long size_bytes) {
   if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
   void* out = sprout_alloc_counted(&g_debug_alloc_sprout_obj, (size_t)size_bytes, "sprout_alloc_tuple_blob: out of memory");
@@ -1501,6 +1511,10 @@ long long vector_get(long long vec, long long index) {
 }
 
 long long vector_set(long long vec, long long index, long long value) {
+  long long rooted_vec = vec;
+  long long rooted_value = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) tcp_fail("vector_set: null vector");
   VectorVal* out = sprout_alloc_vector_val("vector_set: out of memory");
@@ -1508,17 +1522,23 @@ long long vector_set(long long vec, long long index, long long value) {
   out->cap = src->len;
   if (out->cap == 0) {
     out->data = NULL;
+    SPROUT_GC_POP_LOCALS(2);
     return (long long)(uintptr_t)out;
   }
   out->data = sprout_alloc_vector_data((size_t)out->cap, "vector_set: out of memory");
   memcpy(out->data, src->data, (size_t)out->len * sizeof(long long));
   if (index >= 0 && index < out->len) {
-    out->data[index] = value;
+    out->data[index] = rooted_value;
   }
+  SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
 
 long long vector_append(long long vec, long long value) {
+  long long rooted_vec = vec;
+  long long rooted_value = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) tcp_fail("vector_append: null vector");
   VectorVal* out = sprout_alloc_vector_val("vector_append: out of memory");
@@ -1528,7 +1548,8 @@ long long vector_append(long long vec, long long value) {
   if (src->len > 0) {
     memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
   }
-  out->data[src->len] = value;
+  out->data[src->len] = rooted_value;
+  SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
 
@@ -1559,6 +1580,10 @@ long long map_get(long long map_h, const char* key) {
 }
 
 long long map_set(long long map_h, const char* key, long long value) {
+  long long rooted_map = map_h;
+  long long rooted_value = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   MapVal* src = (MapVal*)(uintptr_t)map_h;
   if (src == NULL) tcp_fail("map_set: null map");
   if (key == NULL) tcp_fail("map_set: null key");
@@ -1575,20 +1600,26 @@ long long map_set(long long map_h, const char* key, long long value) {
     out->entries[i].value = src->entries[i].value;
   }
   if (existing >= 0) {
-    out->entries[existing].value = value;
+    out->entries[existing].value = rooted_value;
   } else {
     out->entries[src->len].key = sprout_strdup_counted(&g_debug_alloc_map, key, "map_set: out of memory");
-    out->entries[src->len].value = value;
+    out->entries[src->len].value = rooted_value;
   }
+  SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
 
 long long map_remove(long long map_h, const char* key) {
+  long long rooted_map = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
   MapVal* src = (MapVal*)(uintptr_t)map_h;
   if (src == NULL) tcp_fail("map_remove: null map");
   if (key == NULL) tcp_fail("map_remove: null key");
   long long remove_idx = map_find_index(src, key);
-  if (remove_idx < 0) return map_h;
+  if (remove_idx < 0) {
+    SPROUT_GC_POP_LOCALS(1);
+    return map_h;
+  }
 
   MapVal* out = sprout_alloc_map_val("map_remove: out of memory");
   out->len = src->len - 1;
@@ -1602,6 +1633,7 @@ long long map_remove(long long map_h, const char* key) {
     out->entries[j].value = src->entries[i].value;
     j++;
   }
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
@@ -1653,6 +1685,8 @@ long long bytes_get(long long bytes_h, long long index) {
 }
 
 long long bytes_slice(long long bytes_h, long long start, long long count) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) tcp_fail("bytes_slice: null bytes");
   if (start < 0 || count < 0) tcp_fail("bytes_slice: start/count must be >= 0");
@@ -1664,10 +1698,15 @@ long long bytes_slice(long long bytes_h, long long start, long long count) {
   out->len = c;
   out->data = sprout_alloc_bytes_data(c, "bytes_slice: out of memory");
   if (c > 0) memcpy(out->data, value->data + s, c);
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
 long long bytes_append(long long left_h, long long right_h) {
+  long long rooted_left = left_h;
+  long long rooted_right = right_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_left);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
   BytesVal* left = (BytesVal*)(uintptr_t)left_h;
   BytesVal* right = (BytesVal*)(uintptr_t)right_h;
   if (left == NULL || right == NULL) tcp_fail("bytes_append: null bytes");
@@ -1676,6 +1715,7 @@ long long bytes_append(long long left_h, long long right_h) {
   out->data = sprout_alloc_bytes_data(out->len, "bytes_append: out of memory");
   if (left->len > 0) memcpy(out->data, left->data, left->len);
   if (right->len > 0) memcpy(out->data + left->len, right->data, right->len);
+  SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
 
@@ -1749,6 +1789,8 @@ static int utf8_validate(const unsigned char* data, size_t len, const char** rea
 }
 
 long long bytes_to_utf8(long long bytes_h) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) tcp_fail("bytes_to_utf8: null bytes");
   const char* reason = NULL;
@@ -1757,12 +1799,14 @@ long long bytes_to_utf8(long long bytes_h) {
       find_ctor_tag_by_name("stdlib.bytes.Utf8DecodeError"),
       (long long)(uintptr_t)dup_cstr(reason)
     );
+    SPROUT_GC_POP_LOCALS(1);
     return sprout_make1(find_ctor_tag_by_name("Err"), err);
   }
   char* out = (char*)malloc(value->len + 1);
   if (out == NULL) tcp_fail("bytes_to_utf8: out of memory");
   if (value->len > 0) memcpy(out, value->data, value->len);
   out[value->len] = '\\0';
+  SPROUT_GC_POP_LOCALS(1);
   return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
 }
 
@@ -1794,10 +1838,13 @@ long long bytes_builder_empty(void) {
 }
 
 long long bytes_builder_bytes(long long bytes_h) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) tcp_fail("bytes_builder_bytes: null bytes");
   BuilderVal* out = builder_alloc(value->len, value->len == 0 ? 0 : 1);
   if (out->count == 1) out->chunks[0] = value;
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
@@ -1838,18 +1885,31 @@ long long bytes_builder_u32_be(long long value) {
 }
 
 long long bytes_builder_append(long long left_h, long long right_h) {
+  long long rooted_left = left_h;
+  long long rooted_right = right_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_left);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
   BuilderVal* left = (BuilderVal*)(uintptr_t)left_h;
   BuilderVal* right = (BuilderVal*)(uintptr_t)right_h;
   if (left == NULL || right == NULL) tcp_fail("bytes_builder_append: null builder");
-  if (left->count == 0) return right_h;
-  if (right->count == 0) return left_h;
+  if (left->count == 0) {
+    SPROUT_GC_POP_LOCALS(2);
+    return right_h;
+  }
+  if (right->count == 0) {
+    SPROUT_GC_POP_LOCALS(2);
+    return left_h;
+  }
   BuilderVal* out = builder_alloc(left->len + right->len, left->count + right->count);
   for (size_t i = 0; i < left->count; i++) out->chunks[i] = left->chunks[i];
   for (size_t i = 0; i < right->count; i++) out->chunks[left->count + i] = right->chunks[i];
+  SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
 
 long long bytes_builder_build(long long builder_h) {
+  long long rooted_builder = builder_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_builder);
   BuilderVal* value = (BuilderVal*)(uintptr_t)builder_h;
   if (value == NULL) tcp_fail("bytes_builder_build: null builder");
   BytesVal* out = sprout_alloc_bytes_val("bytes_builder_build: out of memory");
@@ -1862,6 +1922,7 @@ long long bytes_builder_build(long long builder_h) {
     if (chunk->len > 0) memcpy(out->data + offset, chunk->data, chunk->len);
     offset += chunk->len;
   }
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
@@ -2168,21 +2229,29 @@ static long long crypto_err2(const char* ctor_name, long long a0, long long a1) 
 }
 
 long long crypto_sha256(long long bytes_h) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) tcp_fail("crypto_sha256: null bytes");
   unsigned char digest[32];
   sha256_digest(value->data, value->len, digest);
   BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_sha256: out of memory");
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
 long long crypto_hmac_sha256(long long key_h, long long msg_h) {
+  long long rooted_key = key_h;
+  long long rooted_msg = msg_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_key);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_msg);
   BytesVal* key = (BytesVal*)(uintptr_t)key_h;
   BytesVal* msg = (BytesVal*)(uintptr_t)msg_h;
   if (key == NULL || msg == NULL) tcp_fail("crypto_hmac_sha256: null bytes");
   unsigned char digest[32];
   hmac_sha256_digest(key->data, key->len, msg->data, msg->len, digest);
   BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_hmac_sha256: out of memory");
+  SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
 
@@ -2209,16 +2278,22 @@ long long crypto_base64_decode(const char* raw) {
 }
 
 long long crypto_bytes_xor(long long left_h, long long right_h) {
+  long long rooted_left = left_h;
+  long long rooted_right = right_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_left);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
   BytesVal* left = (BytesVal*)(uintptr_t)left_h;
   BytesVal* right = (BytesVal*)(uintptr_t)right_h;
   if (left == NULL || right == NULL) tcp_fail("crypto_bytes_xor: null bytes");
   if (left->len != right->len) {
+    SPROUT_GC_POP_LOCALS(2);
     return crypto_err2("stdlib.crypto.BytesXorLengthMismatch", (long long)left->len, (long long)right->len);
   }
   BytesVal* out = sprout_alloc_bytes_val("crypto_bytes_xor: out of memory");
   out->len = left->len;
   out->data = sprout_alloc_bytes_data(out->len, "crypto_bytes_xor: out of memory");
   for (size_t i = 0; i < out->len; i++) out->data[i] = left->data[i] ^ right->data[i];
+  SPROUT_GC_POP_LOCALS(2);
   return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
 }
 

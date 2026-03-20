@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 
 from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
+from sprout import cli as sprout_cli
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude
 
@@ -721,6 +722,19 @@ class CodegenTests(unittest.TestCase):
             self.assertIn("declare i64 @crypto_base64_decode(ptr)", ir)
             self.assertIn("declare i64 @crypto_bytes_xor(i64, i64)", ir)
             self.assertIn("declare i64 @crypto_random_bytes(i64)", ir)
+
+    def test_native_runtime_roots_managed_args_in_key_allocating_helpers(self) -> None:
+        runtime_source = Path(sprout_cli.__file__).read_text(encoding="utf-8")
+        self.assertIn("long long rooted_vec = vec;", runtime_source)
+        self.assertIn("long long rooted_map = map_h;", runtime_source)
+        self.assertIn("long long rooted_builder = builder_h;", runtime_source)
+        self.assertIn("long long rooted_bytes = bytes_h;", runtime_source)
+        self.assertIn("long long rooted_left = left_h;", runtime_source)
+        self.assertIn("long long rooted_right = right_h;", runtime_source)
+        self.assertIn("long long rooted_key = key_h;", runtime_source)
+        self.assertIn("long long rooted_msg = msg_h;", runtime_source)
+        self.assertIn("SPROUT_GC_PUSH_I64_LOCAL(rooted_value);", runtime_source)
+        self.assertIn("SPROUT_GC_POP_LOCALS(2);", runtime_source)
 
     def test_compile_string_builtins_to_llvm(self) -> None:
         src = """
