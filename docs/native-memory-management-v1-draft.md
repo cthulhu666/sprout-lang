@@ -206,17 +206,17 @@ Status: partially completed.
 
 Current implementation status:
 - the native runtime can register managed roots for scalar runtime globals,
-- the native runtime also performs a conservative stack scan when collecting,
+- the native runtime can also register aggregate global roots via conservative
+  storage scanning,
 - the collector marks from those roots and sweeps managed heap nodes,
 - collection currently runs at process exit via `atexit(...)`,
-- opt-in debug logging and stress-triggered collection exist for validation,
+- opt-in debug logging exists for validation,
 - debug allocation reporting now includes a `gc_swept` count.
 
 Remaining work before this stage can be considered fully complete:
-- replace or tighten the current conservative root strategy where precision is
-  needed,
-- define the normal mid-execution collection policy instead of relying only on
-  debug/stress triggering,
+- define a sound mid-execution root strategy instead of relying only on
+  exit-time global rooting,
+- define the normal mid-execution collection policy,
 - add stronger reclamation-focused tests once collection can run mid-program.
 
 ## V2 Direction
@@ -298,7 +298,7 @@ half-designed collector.
 2. centralize managed allocation for Sprout values,
 3. formalize root enumeration points,
 4. ship a simple non-moving stop-the-world mark-sweep collector,
-5. validate correctness with focused stress and regression coverage.
+5. validate correctness with focused collector and regression coverage.
 
 ### V2
 

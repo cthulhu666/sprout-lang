@@ -111,8 +111,10 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_make2": FnSig(name="sprout_make2", params=[I64, I64, I64], ret=I64),
     "sprout_make3": FnSig(name="sprout_make3", params=[I64, I64, I64, I64], ret=I64),
     "sprout_alloc_closure_env": FnSig(name="sprout_alloc_closure_env", params=[I64], ret=I8_PTR),
+    "sprout_alloc_tuple_blob": FnSig(name="sprout_alloc_tuple_blob", params=[I64], ret=I8_PTR),
     "sprout_gc_register_i64_root": FnSig(name="sprout_gc_register_i64_root", params=[I8_PTR], ret=I64),
     "sprout_gc_register_ptr_root": FnSig(name="sprout_gc_register_ptr_root", params=[I8_PTR], ret=I64),
+    "sprout_gc_register_scan_root": FnSig(name="sprout_gc_register_scan_root", params=[I8_PTR, I64], ret=I64),
     "sprout_tag": FnSig(name="sprout_tag", params=[I64], ret=I64),
     "sprout_field": FnSig(name="sprout_field", params=[I64, I64], ret=I64),
 }
@@ -1134,6 +1136,20 @@ def _emit_init_globals(
     adt_names: set[str],
     emitter: Emitter,
 ) -> None:
+    def emit_root_registration(slot_ir: str, typ: LLType) -> None:
+        if typ == I64:
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_register_i64_root(ptr {slot_ir})")
+            return
+        if typ == I8_PTR:
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_register_ptr_root(ptr {slot_ir})")
+            return
+        if _tuple_item_types_from_lltype(typ) is not None:
+            size = _sizeof_struct(typ.text, emitter)
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_register_scan_root(ptr {slot_ir}, i64 {size})")
+
     emitter.emit("define void @__sprout_init_globals() {")
     emitter.label("entry")
     locals_: dict[str, Value] = {}
@@ -1145,12 +1161,7 @@ def _emit_init_globals(
                 f"Global init type mismatch for {let_decl.name}: {value.typ.text} vs {info.typ.text}"
             )
         emitter.emit(f"  store {value.typ.text} {value.ir}, ptr @{let_decl.name}")
-        if info.typ == I64:
-            reg = emitter.tmp()
-            emitter.emit(f"  {reg} = call i64 @sprout_gc_register_i64_root(ptr @{let_decl.name})")
-        elif info.typ == I8_PTR:
-            reg = emitter.tmp()
-            emitter.emit(f"  {reg} = call i64 @sprout_gc_register_ptr_root(ptr @{let_decl.name})")
+        emit_root_registration(f"@{let_decl.name}", info.typ)
     emitter.emit("  ret void")
     emitter.emit("}")
 
@@ -1845,7 +1856,7 @@ def _pack_to_i64(value: Value, emitter: Emitter) -> str:
     if (value.tuple_items or _tuple_item_types_from_lltype(value.typ)) is not None:
         size = _sizeof_struct(value.typ.text, emitter)
         raw = emitter.tmp()
-        emitter.emit(f"  {raw} = call ptr @malloc(i64 {size})")
+        emitter.emit(f"  {raw} = call ptr @sprout_alloc_tuple_blob(i64 {size})")
         emitter.emit(f"  store {value.typ.text} {value.ir}, ptr {raw}")
         out = emitter.tmp()
         emitter.emit(f"  {out} = ptrtoint ptr {raw} to i64")

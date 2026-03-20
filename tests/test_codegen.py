@@ -206,6 +206,21 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("call i64 @print_text(ptr", ir)
         self.assertIn("call i64 @print_value_part(i64", ir)
 
+    def test_compile_tuple_packing_uses_gc_managed_blob(self) -> None:
+        src = """
+        type Wrap =
+          | Wrap (Int, String)
+
+        fn main() -> Unit !{IO} =
+          print(Wrap((1, "ok")))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare ptr @sprout_alloc_tuple_blob(i64)", ir)
+        self.assertIn("call ptr @sprout_alloc_tuple_blob(i64", ir)
+        self.assertNotIn("call ptr @malloc(i64", ir)
+
     def test_compile_generic_identity_erased(self) -> None:
         src = """
         fn id(x: a) -> a = x
@@ -1664,30 +1679,21 @@ class CodegenTests(unittest.TestCase):
             )
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_gc_stress_preserves_live_closure_via_stack_scan(self) -> None:
-        src = r"""
+    def test_native_tuple_global_root_keeps_children_live_at_exit(self) -> None:
+        src = """
         type Box =
           | Box Int
 
-        fn make_adder(base: Int) -> Int -> Int =
-          \(x) -> base + x
-
-        fn churn(n: Int) -> Int =
-          if n == 0 then
-            0
-          else
-            match Box(n) with
-            | Box(_) -> churn(n - 1)
-
-        fn after(_: Int, x: Int) -> Int =
-          x
-
-        fn apply_after_churn(f: Int -> Int, x: Int, n: Int) -> Int =
-          after(churn(n), f(x))
+        let pair = (Box(1), Box(2))
 
         fn main() -> Int !{IO} =
-          print_int(apply_after_churn(make_adder(40), 2, 200))
+          match pair with
+          | (Box(x), Box(y)) -> print_int(x + y)
         """
+        program = parse(src)
+        typecheck_program(program)
+        llvm_ir = compile_to_llvm(program)
+        self.assertIn("call i64 @sprout_gc_register_scan_root(ptr @pair", llvm_ir)
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.spr"
@@ -1707,17 +1713,16 @@ class CodegenTests(unittest.TestCase):
                 check=True,
             )
             env = os.environ.copy()
+            env["SPROUT_DEBUG_ALLOC"] = "1"
             env["SPROUT_DEBUG_GC"] = "1"
-            env["SPROUT_GC_STRESS"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
-            self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
-            alloc_cycles = re.findall(
-                r"\[sprout gc\] cycle=\d+ reason=alloc heap_before=\d+ heap_after=\d+ swept=\d+",
-                run.stderr,
-            )
-            self.assertGreater(len(alloc_cycles), 0)
+            self.assertEqual(run.stdout.strip(), "3")
+            self.assertEqual(run.returncode, 3)
             self.assertIn("reason=atexit", run.stderr)
+            alloc_match = re.search(r"gc_swept=(\d+)", run.stderr)
+            self.assertIsNotNone(alloc_match)
+            assert alloc_match is not None
+            self.assertEqual(int(alloc_match.group(1)), 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_partial_application_of_named_function(self) -> None:
