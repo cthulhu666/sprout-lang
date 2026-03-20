@@ -225,8 +225,10 @@ Current implementation status:
   root-coverage class of bug, with only narrower path-specific gaps left,
 - the collector marks from those roots and sweeps managed heap nodes,
 - collection currently runs at process exit via `atexit(...)`,
-- opt-in threshold-triggered mid-execution collection now exists for validation
-  via `SPROUT_GC_THRESHOLD=<positive-int>`,
+- the native profile now also enables threshold-triggered mid-execution
+  collection by default using a fixed managed-node threshold,
+- `SPROUT_GC_THRESHOLD=<positive-int>` overrides that threshold and
+  `SPROUT_GC_THRESHOLD=off` disables in-process collection,
 - opt-in debug logging exists for validation,
 - debug allocation reporting now includes a `gc_swept` count.
 

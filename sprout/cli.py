@@ -267,7 +267,6 @@ static int g_debug_alloc_report_registered = 0;
 static int g_debug_gc_enabled = 0;
 static int g_gc_collect_registered = 0;
 static int g_gc_active = 0;
-static int g_gc_threshold_enabled = 0;
 static long long g_debug_alloc_sprout_obj = 0;
 static long long g_debug_alloc_closure = 0;
 static long long g_debug_alloc_vector = 0;
@@ -277,7 +276,7 @@ static long long g_debug_alloc_builder = 0;
 static long long g_debug_gc_swept = 0;
 static long long g_gc_cycle_count = 0;
 static long long g_managed_heap_count = 0;
-static long long g_gc_threshold = 0;
+static long long g_gc_threshold = 1024;
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -333,16 +332,18 @@ static void sprout_debug_gc_maybe_enable(void) {
 }
 
 static void sprout_gc_threshold_maybe_enable(void) {
-  if (g_gc_threshold_enabled) return;
   const char* raw = getenv("SPROUT_GC_THRESHOLD");
   if (raw == NULL || raw[0] == '\\0') return;
+  if (!sprout_debug_alloc_truthy(raw)) {
+    g_gc_threshold = 0;
+    return;
+  }
   char* end = NULL;
   long long parsed = strtoll(raw, &end, 10);
   if (end == raw || *end != '\\0' || parsed <= 0) {
     tcp_fail("SPROUT_GC_THRESHOLD: expected positive integer");
   }
   g_gc_threshold = parsed;
-  g_gc_threshold_enabled = 1;
 }
 
 static void sprout_gc_maybe_register(void) {
@@ -370,7 +371,7 @@ static void sprout_gc_log_cycle(
 }
 
 static void sprout_gc_maybe_collect_threshold(void) {
-  if (!g_gc_threshold_enabled) return;
+  if (g_gc_threshold <= 0) return;
   if (g_gc_active) return;
   if (g_managed_heap_count < g_gc_threshold) return;
   sprout_gc_collect_with_reason("threshold");
