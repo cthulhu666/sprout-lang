@@ -83,3 +83,4 @@ Source:
 3. New syntax must justify learning cost.
 4. Features ship with diagnostics and tests.
 5. Prefer explicit extension points over hidden magic.
+6. Keep memory management abstract in core-language design docs unless the proposal intentionally adds visible ownership, lifetime, destructor, or allocator semantics.

@@ -1,8 +1,13 @@
 # Native Memory Management V1 Draft
 
-This document outlines a pragmatic native memory-management roadmap for Sprout
-under the assumption that the long-term runtime will use garbage collection.
-It is a design and planning document, not part of the normative language spec.
+This document outlines a pragmatic hosted-runtime memory-management roadmap for
+Sprout, centered on a garbage-collected native runtime profile. It is a design
+and planning document, not part of the normative language spec.
+
+This draft does not make garbage collection part of the Sprout core-language
+contract. See `docs/memory-management-abstraction.md` for the cross-cutting
+design constraint that core-language memory management should remain abstract
+unless Sprout explicitly adopts visible resource or lifetime semantics.
 
 ## Problem Statement
 
@@ -54,7 +59,7 @@ Native mode:
   but it currently runs only at process exit as a safe baseline.
 - Mid-execution GC triggering and fuller root coverage remain follow-up work.
 
-## Why GC Is The Default Direction
+## Why GC Is The Default Direction For This Profile
 
 Sprout already leans toward:
 

@@ -73,4 +73,5 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 - Beginner promise: explicit behavior, deterministic execution, clear diagnostics.
 - Annotation stance: infer types wherever they can be determined unambiguously without compromising implementation simplicity, predictable behavior, or diagnostic quality; keep explicit annotations available for clarity.
 - v0 effect model: functions are pure by default; effectful functions use explicit `!{IO}` annotations, and higher-order helpers may abstract over a single effect variable with `!{e}`.
+- Memory-management stance: keep memory management abstract at the core-language level unless Sprout explicitly introduces visible ownership, lifetime, destructor, or allocator semantics; runtime/profile documents must state any concrete strategy separately.
 - Future extension path: mixed/open effect rows, additional effect labels, and explicit laziness can be added in later milestones without changing default strict evaluation.
