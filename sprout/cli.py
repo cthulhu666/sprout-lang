@@ -320,6 +320,27 @@ static void register_obj(SproutObj* p) {
   g_objs = n;
 }
 
+static SproutObj* sprout_alloc_obj_raw(const char* ctx) {
+  return (SproutObj*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(SproutObj), ctx);
+}
+
+static SproutObj* sprout_init_obj(SproutObj* obj, long long tag, long long f0, long long f1, long long f2) {
+  obj->tag = tag;
+  obj->f0 = f0;
+  obj->f1 = f1;
+  obj->f2 = f2;
+  return obj;
+}
+
+static long long sprout_box_registered_obj(SproutObj* obj) {
+  register_obj(obj);
+  return box_ptr(obj);
+}
+
+static long long sprout_make_registered_obj(long long tag, long long f0, long long f1, long long f2, const char* ctx) {
+  return sprout_box_registered_obj(sprout_init_obj(sprout_alloc_obj_raw(ctx), tag, f0, f1, f2));
+}
+
 static int is_obj_handle(long long h) {
   uintptr_t u = (uintptr_t)h;
   for (ObjNode* n = g_objs; n != NULL; n = n->next) {
@@ -420,15 +441,7 @@ long long sprout_set_argv(int argc, char** argv) {
 }
 long long sprout_nothing(long long tag) {
   if (g_nothing_singleton == NULL) {
-    g_nothing_singleton = (SproutObj*)sprout_alloc_counted(
-      &g_debug_alloc_sprout_obj,
-      sizeof(SproutObj),
-      "sprout_nothing: out of memory"
-    );
-    g_nothing_singleton->tag = tag;
-    g_nothing_singleton->f0 = 0;
-    g_nothing_singleton->f1 = 0;
-    g_nothing_singleton->f2 = 0;
+    g_nothing_singleton = sprout_init_obj(sprout_alloc_obj_raw("sprout_nothing: out of memory"), tag, 0, 0, 0);
     register_obj(g_nothing_singleton);
   }
   return box_ptr(g_nothing_singleton);
@@ -541,69 +554,21 @@ long long sprout_make0(long long tag) {
   CtorMeta* meta = find_ctor(tag);
   if (meta != NULL && strcmp(meta->name, "Nothing") == 0) {
     if (g_nothing_singleton == NULL) {
-      g_nothing_singleton = (SproutObj*)sprout_alloc_counted(
-        &g_debug_alloc_sprout_obj,
-        sizeof(SproutObj),
-        "sprout_make0: out of memory"
-      );
-      g_nothing_singleton->tag = tag;
-      g_nothing_singleton->f0 = 0;
-      g_nothing_singleton->f1 = 0;
-      g_nothing_singleton->f2 = 0;
+      g_nothing_singleton = sprout_init_obj(sprout_alloc_obj_raw("sprout_make0: out of memory"), tag, 0, 0, 0);
       register_obj(g_nothing_singleton);
     }
     return box_ptr(g_nothing_singleton);
   }
-  SproutObj* o = (SproutObj*)sprout_alloc_counted(
-    &g_debug_alloc_sprout_obj,
-    sizeof(SproutObj),
-    "sprout_make0: out of memory"
-  );
-  o->tag = tag;
-  o->f0 = 0;
-  o->f1 = 0;
-  o->f2 = 0;
-  register_obj(o);
-  return box_ptr(o);
+  return sprout_make_registered_obj(tag, 0, 0, 0, "sprout_make0: out of memory");
 }
 long long sprout_make1(long long tag, long long a0) {
-  SproutObj* o = (SproutObj*)sprout_alloc_counted(
-    &g_debug_alloc_sprout_obj,
-    sizeof(SproutObj),
-    "sprout_make1: out of memory"
-  );
-  o->tag = tag;
-  o->f0 = a0;
-  o->f1 = 0;
-  o->f2 = 0;
-  register_obj(o);
-  return box_ptr(o);
+  return sprout_make_registered_obj(tag, a0, 0, 0, "sprout_make1: out of memory");
 }
 long long sprout_make2(long long tag, long long a0, long long a1) {
-  SproutObj* o = (SproutObj*)sprout_alloc_counted(
-    &g_debug_alloc_sprout_obj,
-    sizeof(SproutObj),
-    "sprout_make2: out of memory"
-  );
-  o->tag = tag;
-  o->f0 = a0;
-  o->f1 = a1;
-  o->f2 = 0;
-  register_obj(o);
-  return box_ptr(o);
+  return sprout_make_registered_obj(tag, a0, a1, 0, "sprout_make2: out of memory");
 }
 long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
-  SproutObj* o = (SproutObj*)sprout_alloc_counted(
-    &g_debug_alloc_sprout_obj,
-    sizeof(SproutObj),
-    "sprout_make3: out of memory"
-  );
-  o->tag = tag;
-  o->f0 = a0;
-  o->f1 = a1;
-  o->f2 = a2;
-  register_obj(o);
-  return box_ptr(o);
+  return sprout_make_registered_obj(tag, a0, a1, a2, "sprout_make3: out of memory");
 }
 long long sprout_tag(long long h) {
   return unbox_ptr(h)->tag;
