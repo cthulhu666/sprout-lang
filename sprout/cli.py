@@ -237,6 +237,7 @@ static char** g_sprout_argv = NULL;
 static int g_debug_alloc_enabled = 0;
 static int g_debug_alloc_report_registered = 0;
 static long long g_debug_alloc_sprout_obj = 0;
+static long long g_debug_alloc_closure = 0;
 static long long g_debug_alloc_vector = 0;
 static long long g_debug_alloc_map = 0;
 static long long g_debug_alloc_bytes = 0;
@@ -265,8 +266,9 @@ static void sprout_debug_alloc_report(void) {
   if (!g_debug_alloc_enabled) return;
   fprintf(
     stderr,
-    "[sprout alloc] sprout_obj=%lld vector=%lld map=%lld bytes=%lld builder=%lld\\n",
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld\\n",
     g_debug_alloc_sprout_obj,
+    g_debug_alloc_closure,
     g_debug_alloc_vector,
     g_debug_alloc_map,
     g_debug_alloc_bytes,
@@ -339,6 +341,11 @@ static long long sprout_box_registered_obj(SproutObj* obj) {
 
 static long long sprout_make_registered_obj(long long tag, long long f0, long long f1, long long f2, const char* ctx) {
   return sprout_box_registered_obj(sprout_init_obj(sprout_alloc_obj_raw(ctx), tag, f0, f1, f2));
+}
+
+void* sprout_alloc_closure_env(long long size) {
+  if (size < 0) tcp_fail("sprout_alloc_closure_env: size must be >= 0");
+  return sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
 }
 
 static int is_obj_handle(long long h) {

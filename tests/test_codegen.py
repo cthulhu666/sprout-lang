@@ -227,7 +227,7 @@ class CodegenTests(unittest.TestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("define i64 @apply(i64 %x, ptr %f)", ir)
-        self.assertIn("call ptr @malloc(i64 %t", ir)
+        self.assertIn("call ptr @sprout_alloc_closure_env(i64 %t", ir)
         self.assertIn("load ptr, ptr %f", ir)
 
     def test_compile_lambda_with_capture_to_llvm(self) -> None:
@@ -243,7 +243,7 @@ class CodegenTests(unittest.TestCase):
         ir = compile_to_llvm(program)
         self.assertIn("define ptr @__sprout_fn_closure_", ir)
         self.assertIn("define i64 @__sprout_lambda_", ir)
-        self.assertIn("call ptr @malloc(i64 %t", ir)
+        self.assertIn("call ptr @sprout_alloc_closure_env(i64 %t", ir)
         self.assertIn("getelementptr i64, ptr %env, i64 1", ir)
 
     def test_compile_partial_application_of_named_function_to_llvm(self) -> None:
@@ -317,7 +317,7 @@ class CodegenTests(unittest.TestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("define ptr @__sprout_lambda_", ir)
-        self.assertIn("call ptr @malloc(i64 %t", ir)
+        self.assertIn("call ptr @sprout_alloc_closure_env(i64 %t", ir)
         self.assertIn("@__sprout_fn_closure_", ir)
 
     def test_compile_tuple_match_to_llvm(self) -> None:
@@ -1329,16 +1329,17 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(debug_run.stdout.strip(), "10")
             self.assertEqual(debug_run.returncode, 10)
             match = re.search(
-                r"\[sprout alloc\] sprout_obj=(\d+) vector=(\d+) map=(\d+) bytes=(\d+) builder=(\d+)",
+                r"\[sprout alloc\] sprout_obj=(\d+) closure=(\d+) vector=(\d+) map=(\d+) bytes=(\d+) builder=(\d+)",
                 debug_run.stderr,
             )
             self.assertIsNotNone(match)
             assert match is not None
             self.assertGreater(int(match.group(1)), 0)
-            self.assertEqual(int(match.group(2)), 5)
-            self.assertEqual(int(match.group(3)), 12)
-            self.assertEqual(int(match.group(4)), 9)
-            self.assertEqual(int(match.group(5)), 0)
+            self.assertEqual(int(match.group(2)), 0)
+            self.assertEqual(int(match.group(3)), 5)
+            self.assertEqual(int(match.group(4)), 12)
+            self.assertEqual(int(match.group(5)), 9)
+            self.assertEqual(int(match.group(6)), 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_crypto_helpers(self) -> None:
@@ -1581,6 +1582,43 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
             self.assertEqual(run.returncode, 42)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_debug_alloc_report_counts_closures(self) -> None:
+        src = r"""
+        fn make_adder(base: Int) -> Int -> Int =
+          \(x) -> base + x
+
+        fn main() -> Int !{IO} =
+          print_int(make_adder(40)(2))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_ALLOC"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.stdout.strip(), "42")
+            self.assertEqual(run.returncode, 42)
+            match = re.search(r"closure=(\d+)", run.stderr)
+            self.assertIsNotNone(match)
+            assert match is not None
+            self.assertGreater(int(match.group(1)), 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_partial_application_of_named_function(self) -> None:

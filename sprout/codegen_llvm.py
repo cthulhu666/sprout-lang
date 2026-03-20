@@ -110,6 +110,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_make1": FnSig(name="sprout_make1", params=[I64, I64], ret=I64),
     "sprout_make2": FnSig(name="sprout_make2", params=[I64, I64, I64], ret=I64),
     "sprout_make3": FnSig(name="sprout_make3", params=[I64, I64, I64, I64], ret=I64),
+    "sprout_alloc_closure_env": FnSig(name="sprout_alloc_closure_env", params=[I64], ret=I8_PTR),
     "sprout_tag": FnSig(name="sprout_tag", params=[I64], ret=I64),
     "sprout_field": FnSig(name="sprout_field", params=[I64, I64], ret=I64),
 }
@@ -602,7 +603,7 @@ def _emit_make_closure(code_ir: str, captures: list[Value], emitter: Emitter) ->
     size = emitter.tmp()
     emitter.emit(f"  {size} = add i64 {8 * (len(captures) + 1)}, 0")
     raw = emitter.tmp()
-    emitter.emit(f"  {raw} = call ptr @malloc(i64 {size})")
+    emitter.emit(f"  {raw} = call ptr @sprout_alloc_closure_env(i64 {size})")
     emitter.emit(f"  store ptr {code_ir}, ptr {raw}")
     for idx, capture in enumerate(captures, start=1):
         packed = _pack_to_i64(capture, emitter)
