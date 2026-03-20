@@ -399,6 +399,24 @@ def _emit_pop_temp_roots(count: int, emitter: Emitter) -> None:
     emitter.emit(f"  {reg} = call i64 @sprout_gc_pop_roots(i64 {count})")
 
 
+def _emit_exprs_with_temp_roots(
+    exprs: list[ast.Expr],
+    locals_: dict[str, Value],
+    globals_info: dict[str, tuple[LLType, str]],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorInfo],
+    adt_names: set[str],
+    emitter: Emitter,
+) -> tuple[list[Value], int]:
+    rooted = 0
+    values: list[Value] = []
+    for expr in exprs:
+        value = _emit_expr(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        values.append(value)
+        rooted += _emit_push_temp_root(value, emitter)
+    return values, rooted
+
+
 def _clone_emitter(emitter: Emitter) -> Emitter:
     clone = Emitter()
     clone.next_tmp = emitter.next_tmp
@@ -2080,7 +2098,9 @@ def _emit_call(
         call_sig = _value_call_sig(local_callee, getattr(expr.callee, "inferred_type", None), adt_names)
         if call_sig is None:
             raise CodegenError(f"Missing callable signature for {fn_name}")
-        args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
+        args, rooted_args = _emit_exprs_with_temp_roots(
+            expr.args, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter
+        )
         if len(args) < len(call_sig.params):
             wrapper_name = f"__sprout_partial_{emitter.next_lambda}"
             emitter.next_lambda += 1
@@ -2095,13 +2115,16 @@ def _emit_call(
             out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
         else:
             out = _emit_closure_call(local_callee, call_sig, args, emitter)
+        _emit_pop_temp_roots(rooted_args, emitter)
         _emit_pop_temp_roots(rooted_callee, emitter)
     elif fn_name is not None and (fn_name in sigs or fn_name in EXTERN_SIGS):
         sig = sigs.get(fn_name) or EXTERN_SIGS.get(fn_name)
         assert sig is not None
         if len(expr.args) > len(sig.params):
             raise CodegenError(f"Function {fn_name} expects {len(sig.params)} args, got {len(expr.args)}")
-        args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
+        args, rooted_args = _emit_exprs_with_temp_roots(
+            expr.args, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter
+        )
         if len(args) < len(sig.params):
             wrapper_name = f"__sprout_partial_{emitter.next_lambda}"
             emitter.next_lambda += 1
@@ -2122,13 +2145,16 @@ def _emit_call(
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = call {sig.ret.text} @{fn_name}({', '.join(args_ir)})")
             out = Value(sig.ret, tmp, callable_sig=sig.ret_callable_sig)
+        _emit_pop_temp_roots(rooted_args, emitter)
     else:
         callee = _emit_expr(expr.callee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
         rooted_callee = _emit_push_temp_root(callee, emitter)
         call_sig = _value_call_sig(callee, getattr(expr.callee, "inferred_type", None), adt_names)
         if call_sig is None:
             raise CodegenError("Backend expected function-typed callee")
-        args = [_emit_expr(arg_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for arg_expr in expr.args]
+        args, rooted_args = _emit_exprs_with_temp_roots(
+            expr.args, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter
+        )
         if len(args) < len(call_sig.params):
             wrapper_name = f"__sprout_partial_{emitter.next_lambda}"
             emitter.next_lambda += 1
@@ -2143,6 +2169,7 @@ def _emit_call(
             out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
         else:
             out = _emit_closure_call(callee, call_sig, args, emitter)
+        _emit_pop_temp_roots(rooted_args, emitter)
         _emit_pop_temp_roots(rooted_callee, emitter)
 
     return _value_for_inferred_type(out, getattr(expr, "inferred_type", None), adt_names, emitter)

@@ -13,6 +13,7 @@ from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
 from sprout import cli as sprout_cli
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude
+from tests.integration_support import compiled_native_binary, running_tcp_fixture
 
 
 class CodegenTests(unittest.TestCase):
@@ -1931,6 +1932,110 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.stdout.strip(), "64")
             self.assertEqual(run.returncode, 64)
             self.assertIn("reason=threshold threshold=1", run.stderr)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_gc_threshold_preserves_direct_call_argument_values(self) -> None:
+        src = """
+        module main
+        import stdlib.bytes (from_string, length)
+        import stdlib.crypto as crypto
+
+        fn keep(left: Bytes, n: Int) -> Int =
+          length(left) + n
+
+        fn churn(n: Int) -> Int =
+          if n == 0 then 7 else
+            match crypto.bytes_xor(from_string("abc"), from_string("ABC")) with
+            | Ok _ -> churn(n - 1)
+            | Err _ -> 0
+
+        fn main() -> Int !{IO} =
+          print_int(keep(from_string("abc"), churn(32)))
+        """
+        with compiled_native_binary(self, src) as bin_path:
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            env["SPROUT_GC_THRESHOLD"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+        self.assertEqual(run.stdout.strip(), "10")
+        self.assertEqual(run.returncode, 10)
+        self.assertIn("reason=threshold threshold=1", run.stderr)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_gc_threshold_preserves_local_function_call_argument_values(self) -> None:
+        src = """
+        module main
+        import stdlib.bytes (from_string, length)
+        import stdlib.crypto as crypto
+
+        fn keep(left: Bytes, n: Int) -> Int =
+          length(left) + n
+
+        fn apply(f: Bytes -> Int -> Int) -> Int =
+          f(from_string("abc"), churn(32))
+
+        fn churn(n: Int) -> Int =
+          if n == 0 then 7 else
+            match crypto.bytes_xor(from_string("abc"), from_string("ABC")) with
+            | Ok _ -> churn(n - 1)
+            | Err _ -> 0
+
+        fn main() -> Int !{IO} =
+          print_int(apply(keep))
+        """
+        with compiled_native_binary(self, src) as bin_path:
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            env["SPROUT_GC_THRESHOLD"] = "1"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+        self.assertEqual(run.stdout.strip(), "10")
+        self.assertEqual(run.returncode, 10)
+        self.assertIn("reason=threshold threshold=1", run.stderr)
+
+    def test_runtime_managed_bytes_error_paths_do_not_manually_free_gc_objects(self) -> None:
+        runtime_src = Path(sprout_cli.__file__).read_text(encoding="utf-8")
+        random_bytes_body = re.search(
+            r"long long crypto_random_bytes\(long long count\) \{.*?^}",
+            runtime_src,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(random_bytes_body)
+        assert random_bytes_body is not None
+        self.assertNotIn("free(out->data);", random_bytes_body.group(0))
+        self.assertNotIn("free(out);", random_bytes_body.group(0))
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_tcp_read_exact_eof_survives_exit_gc(self) -> None:
+        src = """
+        module main
+        import stdlib.bytes (length)
+        import stdlib.net (close, connect, read_exact, tcp_error_message)
+
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+
+        fn main() -> Unit !{IO} =
+          match connect("127.0.0.1", PORT) with
+          | Err err -> print(tcp_error_message(err))
+          | Ok conn ->
+              match read_exact(conn, 4) with
+              | Ok payload -> seq(close(conn), print_int(length(payload)))
+              | Err TcpEndOfStream -> seq(close(conn), print("eof"))
+              | Err err -> seq(close(conn), print(tcp_error_message(err)))
+        """
+
+        def handle(conn) -> None:
+            conn.sendall(b"hi")
+
+        with running_tcp_fixture(self, handle) as port:
+            source = src.replace("PORT", str(port))
+            with compiled_native_binary(self, source) as bin_path:
+                env = os.environ.copy()
+                env["SPROUT_DEBUG_GC"] = "1"
+                env["SPROUT_GC_THRESHOLD"] = "1"
+                run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+        self.assertEqual(run.stdout.strip(), "eof")
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertIn("reason=atexit threshold=1", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_tuple_global_root_keeps_children_live_at_exit(self) -> None:

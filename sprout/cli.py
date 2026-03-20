@@ -2403,8 +2403,6 @@ long long crypto_random_bytes(long long count) {
     FILE* fp = fopen("/dev/urandom", "rb");
     if (fp == NULL) {
       SPROUT_GC_POP_LOCALS(1);
-      free(out->data);
-      free(out);
       return crypto_err1("stdlib.crypto.CryptoUnavailable", strerror(errno));
     }
     size_t got = fread(out->data, 1, len, fp);
@@ -2412,8 +2410,6 @@ long long crypto_random_bytes(long long count) {
       int saved_errno = errno;
       fclose(fp);
       SPROUT_GC_POP_LOCALS(1);
-      free(out->data);
-      free(out);
       return crypto_err1(
         "stdlib.crypto.CryptoUnavailable",
         saved_errno != 0 ? strerror(saved_errno) : "failed to read random bytes"
@@ -2579,14 +2575,10 @@ long long tcp_read_exact(long long conn, long long count) {
     ssize_t n = recv(g_conn_fd[conn], out->data + received, (size_t)count - received, 0);
     if (n == 0) {
       SPROUT_GC_POP_LOCALS(1);
-      free(out->data);
-      free(out);
       return tcp_net_err0("stdlib.net.TcpEndOfStream");
     }
     if (n < 0) {
       SPROUT_GC_POP_LOCALS(1);
-      free(out->data);
-      free(out);
       return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
     }
     received += (size_t)n;
