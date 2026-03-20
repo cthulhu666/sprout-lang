@@ -567,8 +567,9 @@ Commands:
 - LLVM IR output: `python3 -m sprout.cli compile input.sprout -o out.ll`
 - Native binary (requires `clang`): `python3 -m sprout.cli compile input.sprout --native -o out_bin`
 - REPL: `python3 -m sprout.cli repl`
-  - commands: `:type EXPR`, `:t EXPR`, `:help`, `:quit`
+  - commands: `:type EXPR`, `:t EXPR`, `:instances TYPE`, `:i TYPE`, `:help`, `:quit`
   - the prelude is loaded by default, so list literals, dict literals, `split_ints(...)`, `foldable_to_vec(...)`, and `++` work without extra flags
+  - `:instances TYPE` lists matching unary typeclass instances for a type, including constructor-head matches such as `List Int` reporting `Functor List`
   - add `--with-stdlib` to preload the rest of the modules under `stdlib/`
   - imported modules use their final path segment (`http.http_ok(...)`, `math.gcd(...)`)
 - Formatter/linter baseline:

@@ -102,6 +102,33 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("forall a b c. (a -> b) -> c a -> c b", run.stdout)
 
+    def test_repl_instances_lists_matching_typeclass_instances(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":instances List Int\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("Instances for List Int:", run.stdout)
+        self.assertIn("Foldable List", run.stdout)
+        self.assertIn("Functor List", run.stdout)
+        self.assertIn("Semigroup (List a)", run.stdout)
+
+    def test_repl_instances_shorthand_reports_no_matches(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":i Int\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("No instances for Int", run.stdout)
+
     def test_repl_help_mentions_type_shorthand(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],
@@ -113,6 +140,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertIn(":type EXPR", run.stdout)
         self.assertIn(":t EXPR", run.stdout)
+        self.assertIn(":instances TYPE", run.stdout)
+        self.assertIn(":i TYPE", run.stdout)
+
+    def test_repl_instances_supports_qualified_types_with_stdlib(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":instances collections.Vec Int\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("Instances for Vec Int:", run.stdout)
+        self.assertIn("Foldable Vec", run.stdout)
+        self.assertIn("Functor Vec", run.stdout)
+        self.assertIn("Semigroup (Vec a)", run.stdout)
 
     def test_repl_with_stdlib_flag_loads_all_stdlib_modules(self) -> None:
         run = subprocess.run(

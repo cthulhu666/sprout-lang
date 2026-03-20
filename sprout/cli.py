@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 
+from . import ast
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .formatter import format_source, lint_source
@@ -20,7 +21,7 @@ from .surface_checks import SurfaceCheckError, validate_public_surface
 from .stdlib import with_http_prelude, with_prelude
 from .tokenizer import TokenizeError
 from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
-from .typechecker import TypeCheckError, typecheck_program
+from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_program, unify
 
 _REPL_HISTORY_LIMIT = 1000
 
@@ -2742,6 +2743,104 @@ def _repl_lookup_type(types: dict[str, str], name: str) -> str:
     raise KeyError(name)
 
 
+def _type_expr_to_string(node: ast.TypeExpr) -> str:
+    if isinstance(node, ast.TypeName):
+        return node.name
+    if isinstance(node, ast.TypeApply):
+        base = _type_expr_to_string(node.base)
+        arg = _type_expr_to_string(node.arg)
+        if isinstance(node.arg, (ast.TypeApply, ast.TypeArrow, ast.TypeEffect)):
+            arg = f"({arg})"
+        return f"{base} {arg}"
+    if isinstance(node, ast.TypeArrow):
+        left = _type_expr_to_string(node.left)
+        right = _type_expr_to_string(node.right)
+        if isinstance(node.left, ast.TypeArrow):
+            left = f"({left})"
+        suffix = ""
+        if node.effects:
+            suffix = " !{" + ", ".join(node.effects) + "}"
+        return f"{left} -> {right}{suffix}"
+    if isinstance(node, ast.TypeEffect):
+        return _type_expr_to_string(node.base) + " !{" + ", ".join(node.effects) + "}"
+    if isinstance(node, ast.TupleType):
+        return "(" + ", ".join(_type_expr_to_string(item) for item in node.items) + ")"
+    raise TypeError(f"Unsupported type expression: {node!r}")
+
+
+def _type_expr_outermost_base(node: ast.TypeExpr) -> ast.TypeExpr:
+    current = node
+    while isinstance(current, ast.TypeApply):
+        current = current.base
+    return current
+
+
+def _type_expr_matches_query(pattern: ast.TypeExpr, query: ast.TypeExpr) -> bool:
+    candidates = [query]
+    query_base = _type_expr_outermost_base(query)
+    if query_base is not query:
+        candidates.append(query_base)
+    for candidate in candidates:
+        state = InferState()
+        try:
+            unify(
+                state,
+                parse_type_expr(pattern, allow_implicit_type_vars=True, state=state),
+                parse_type_expr(candidate),
+            )
+        except TypeCheckError:
+            continue
+        return True
+    return False
+
+
+def _repl_lookup_param_type(
+    declarations: list[str],
+    type_expr_source: str,
+    *,
+    with_stdlib: bool,
+) -> ast.TypeExpr:
+    probe_name = "__repl_instances_probe"
+    tree, _ = _repl_parse_and_check(
+        declarations,
+        [f"fn {probe_name}(__value: {type_expr_source}) -> Int = 0"],
+        with_stdlib=with_stdlib,
+    )
+    for decl in tree.declarations:
+        if isinstance(decl, ast.FnDecl) and (decl.name == probe_name or decl.name.endswith(f".{probe_name}")):
+            param = decl.params[0]
+            if param.type_expr is None:
+                raise TypeCheckError("Internal error: REPL instance query lost its type annotation")
+            return param.type_expr
+    raise TypeCheckError("Internal error: REPL instance query probe was not found")
+
+
+def _repl_instances_for_type(
+    declarations: list[str],
+    type_expr_source: str,
+    *,
+    with_stdlib: bool,
+) -> tuple[str, list[str]]:
+    tree, _ = _repl_parse_and_check(declarations, with_stdlib=with_stdlib)
+    query_type = _repl_lookup_param_type(declarations, type_expr_source, with_stdlib=with_stdlib)
+    matches: list[str] = []
+    for decl in tree.declarations:
+        if not isinstance(decl, ast.InstanceDecl):
+            continue
+        if len(decl.constraint.args) != 1:
+            continue
+        if _type_expr_matches_query(decl.constraint.args[0], query_type):
+            rendered_args = " ".join(
+                _type_expr_to_string(arg)
+                if not isinstance(arg, (ast.TypeApply, ast.TypeArrow, ast.TypeEffect))
+                else f"({_type_expr_to_string(arg)})"
+                for arg in decl.constraint.args
+            )
+            matches.append(f"{decl.constraint.class_name} {rendered_args}")
+    matches.sort()
+    return _type_expr_to_string(query_type), matches
+
+
 def _repl_history_path() -> Path:
     override = os.environ.get("SPROUT_REPL_HISTORY")
     if override:
@@ -2791,16 +2890,21 @@ def cmd_repl(with_stdlib: bool = False) -> int:
         if stripped in {":quit", ":q", ":exit"}:
             raise EOFError
         if stripped == ":help":
-            emit("Commands: :type EXPR, :t EXPR, :quit, :help")
+            emit("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help")
             return
         if stripped.startswith("module ") or stripped.startswith("import "):
             emit("error: repl does not support module/import headers")
             return
         type_expr: str | None = None
+        instance_type: str | None = None
         if stripped.startswith(":type "):
             type_expr = stripped[len(":type ") :].strip()
         elif stripped.startswith(":t "):
             type_expr = stripped[len(":t ") :].strip()
+        elif stripped.startswith(":instances "):
+            instance_type = stripped[len(":instances ") :].strip()
+        elif stripped.startswith(":i "):
+            instance_type = stripped[len(":i ") :].strip()
         if type_expr is not None:
             expr = type_expr
             if expr == "":
@@ -2814,6 +2918,22 @@ def cmd_repl(with_stdlib: bool = False) -> int:
                 with_stdlib=with_stdlib,
             )
             emit(_repl_lookup_type(types, name))
+            return
+        if instance_type is not None:
+            if instance_type == "":
+                emit("error: :instances expects a type")
+                return
+            query_type, matches = _repl_instances_for_type(
+                declarations,
+                instance_type,
+                with_stdlib=with_stdlib,
+            )
+            if not matches:
+                emit(f"No instances for {query_type}")
+                return
+            emit(f"Instances for {query_type}:")
+            for match in matches:
+                emit(match)
             return
         if _repl_is_declaration(stripped):
             _repl_parse_and_check(
