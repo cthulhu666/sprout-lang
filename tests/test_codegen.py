@@ -2009,7 +2009,7 @@ class CodegenTests(unittest.TestCase):
         src = """
         module main
         import stdlib.bytes (length)
-        import stdlib.net (close, connect, read_exact, tcp_error_message)
+        import stdlib.net (TcpEndOfStream, close, connect, read_exact, tcp_error_message)
 
         fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
