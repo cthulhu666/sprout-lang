@@ -225,7 +225,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("does not export value 'Monoid'", run.stdout)
 
     def test_repl_session_tracks_imports_and_declarations(self) -> None:
-        from sprout.cli import _ReplSession, _repl_lookup_type, _repl_parse_submission, _repl_run_submission
+        from sprout.repl import _ReplSession, _repl_lookup_type, _repl_parse_submission, _repl_run_submission
 
         session = _ReplSession()
         session.add_import("import stdlib.http")
@@ -268,7 +268,7 @@ class CliTests(unittest.TestCase):
             old_home = os.environ.get("HOME")
             os.environ["HOME"] = tmp
             try:
-                from sprout.cli import _repl_history_path
+                from sprout.repl import _repl_history_path
 
                 self.assertEqual(_repl_history_path(), Path(tmp) / ".sprout_repl_history")
             finally:
@@ -283,7 +283,7 @@ class CliTests(unittest.TestCase):
             old_value = os.environ.get("SPROUT_REPL_HISTORY")
             os.environ["SPROUT_REPL_HISTORY"] = override
             try:
-                from sprout.cli import _repl_history_path
+                from sprout.repl import _repl_history_path
 
                 self.assertEqual(_repl_history_path(), Path(override))
             finally:
@@ -293,7 +293,7 @@ class CliTests(unittest.TestCase):
                     os.environ["SPROUT_REPL_HISTORY"] = old_value
 
     def test_repl_declared_names_include_declared_symbols(self) -> None:
-        from sprout.cli import _repl_declared_names
+        from sprout.repl import _repl_declared_names
 
         names = _repl_declared_names(
             [
@@ -314,14 +314,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("render", names)
 
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
-        from sprout.cli import _repl_completion_matches
+        from sprout.repl import _repl_completion_matches
 
         self.assertEqual(_repl_completion_matches(":t", ":t", [], []), [":t", ":type"])
         matches = _repl_completion_matches("sp", "sp", [], [])
         self.assertIn("split_ints", matches)
 
     def test_repl_completion_matches_declared_names(self) -> None:
-        from sprout.cli import _repl_completion_matches
+        from sprout.repl import _repl_completion_matches
 
         matches = _repl_completion_matches(
             "ans",
@@ -334,7 +334,7 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("annotate", matches)
 
     def test_repl_completion_matches_stdlib_module_names(self) -> None:
-        from sprout.cli import _repl_completion_matches
+        from sprout.repl import _repl_completion_matches
 
         matches = _repl_completion_matches("htt", "htt", [], [])
 
@@ -342,7 +342,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("http_client", matches)
 
     def test_repl_completion_matches_imported_aliases_and_names(self) -> None:
-        from sprout.cli import _repl_completion_matches
+        from sprout.repl import _repl_completion_matches
 
         alias_matches = _repl_completion_matches(
             "str",
@@ -361,7 +361,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("from_string", name_matches)
 
     def test_repl_readline_tab_binding_uses_libedit_form_when_needed(self) -> None:
-        from sprout.cli import _repl_readline_tab_binding
+        from sprout.repl import _repl_readline_tab_binding
 
         class FakeReadline:
             __doc__ = "Importing this module enables command line editing using libedit readline."
@@ -369,7 +369,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(_repl_readline_tab_binding(FakeReadline), "bind ^I rl_complete")
 
     def test_repl_readline_tab_binding_uses_gnu_readline_form_otherwise(self) -> None:
-        from sprout.cli import _repl_readline_tab_binding
+        from sprout.repl import _repl_readline_tab_binding
 
         class FakeReadline:
             __doc__ = "GNU readline support"
