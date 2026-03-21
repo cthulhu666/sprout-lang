@@ -2043,7 +2043,7 @@ class CodegenTests(unittest.TestCase):
         src = """
         module main
         import stdlib.bytes (length)
-        import stdlib.net (TcpEndOfStream, close, connect, read_exact, tcp_error_message)
+        import stdlib.net (TcpError, close, connect, read_exact, tcp_error_message)
 
         fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
@@ -2052,7 +2052,7 @@ class CodegenTests(unittest.TestCase):
           | Err err -> print(tcp_error_message(err))
           | Ok conn ->
               match read_exact(conn, 4) with
-              | Ok payload -> seq(close(conn), print_int(length(payload)))
+              | Ok payload -> seq(close(conn), print(length(payload)))
               | Err TcpEndOfStream -> seq(close(conn), print("eof"))
               | Err err -> seq(close(conn), print(tcp_error_message(err)))
         """
