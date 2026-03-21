@@ -1063,6 +1063,12 @@ long long repl_instances(const char* source) {
   tcp_fail("repl_instances: not supported in native backend");
   return 0;
 }
+long long repl_instances_in_source(const char* module_source, const char* type_expr_source) {
+  (void)module_source;
+  (void)type_expr_source;
+  tcp_fail("repl_instances_in_source: not supported in native backend");
+  return 0;
+}
 long long repl_complete(const char* source) {
   (void)source;
   tcp_fail("repl_complete: not supported in native backend");

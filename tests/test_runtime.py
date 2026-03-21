@@ -866,7 +866,7 @@ class RuntimeTests(unittest.TestCase):
                 seq(
                   print(render_type_result(repl_type_of("answer"))),
                     seq(
-                      print(render_instances_result(repl_instances("List Int"))),
+                      print(render_instances_result(repl_instances_in_source("module app.repl", "List Int"))),
                       seq(
                       print(render_completion_result(repl_complete("str"))),
                       seq(

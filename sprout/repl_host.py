@@ -5,7 +5,7 @@ import io
 import re
 from pathlib import Path
 import tempfile
-from typing import TextIO
+from typing import Callable, TextIO
 
 from . import ast
 from .interpreter import RuntimeError, run_program
@@ -21,6 +21,7 @@ __all__ = [
     "hosted_repl_session",
     "reset_hosted_repl_session",
     "infer_type_in_source",
+    "instances_in_source",
 ]
 
 _REPL_COMMANDS = (
@@ -151,6 +152,40 @@ def _repl_parse_and_check_source(
         return tree, types
 
 
+def _repl_lookup_param_type(
+    parse_and_check: Callable[[list[str]], tuple[object, dict[str, str]]],
+    type_expr_source: str,
+) -> ast.TypeExpr:
+    probe_name = "__repl_instances_probe"
+    tree, _ = parse_and_check([f"fn {probe_name}(__value: {type_expr_source}) -> Int = 0"])
+    for decl in tree.declarations:
+        if isinstance(decl, ast.FnDecl) and (decl.name == probe_name or decl.name.endswith(f".{probe_name}")):
+            param = decl.params[0]
+            if param.type_expr is None:
+                raise TypeCheckError("Internal error: REPL instance query lost its type annotation")
+            return param.type_expr
+    raise TypeCheckError("Internal error: REPL instance query probe was not found")
+
+
+def _repl_render_instances(tree: ast.Program, query_type: ast.TypeExpr) -> tuple[str, list[str]]:
+    matches: list[str] = []
+    for decl in tree.declarations:
+        if not isinstance(decl, ast.InstanceDecl):
+            continue
+        if len(decl.constraint.args) != 1:
+            continue
+        if _type_expr_matches_query(decl.constraint.args[0], query_type):
+            rendered_args = " ".join(
+                _type_expr_to_string(arg)
+                if not isinstance(arg, (ast.TypeApply, ast.TypeArrow, ast.TypeEffect))
+                else f"({_type_expr_to_string(arg)})"
+                for arg in decl.constraint.args
+            )
+            matches.append(f"{decl.constraint.class_name} {rendered_args}")
+    matches.sort()
+    return _type_expr_to_string(query_type), matches
+
+
 @dataclass
 class ReplSession:
     imports: list[str] = field(default_factory=list)
@@ -210,35 +245,12 @@ class ReplSession:
         return _repl_lookup_type(types, name)
 
     def _lookup_param_type(self, type_expr_source: str) -> ast.TypeExpr:
-        probe_name = "__repl_instances_probe"
-        tree, _ = self._parse_and_check([f"fn {probe_name}(__value: {type_expr_source}) -> Int = 0"])
-        for decl in tree.declarations:
-            if isinstance(decl, ast.FnDecl) and (decl.name == probe_name or decl.name.endswith(f".{probe_name}")):
-                param = decl.params[0]
-                if param.type_expr is None:
-                    raise TypeCheckError("Internal error: REPL instance query lost its type annotation")
-                return param.type_expr
-        raise TypeCheckError("Internal error: REPL instance query probe was not found")
+        return _repl_lookup_param_type(self._parse_and_check, type_expr_source)
 
     def instances_for_type(self, type_expr_source: str) -> tuple[str, list[str]]:
         tree, _ = self.parse_and_check()
         query_type = self._lookup_param_type(type_expr_source)
-        matches: list[str] = []
-        for decl in tree.declarations:
-            if not isinstance(decl, ast.InstanceDecl):
-                continue
-            if len(decl.constraint.args) != 1:
-                continue
-            if _type_expr_matches_query(decl.constraint.args[0], query_type):
-                rendered_args = " ".join(
-                    _type_expr_to_string(arg)
-                    if not isinstance(arg, (ast.TypeApply, ast.TypeArrow, ast.TypeEffect))
-                    else f"({_type_expr_to_string(arg)})"
-                    for arg in decl.constraint.args
-                )
-                matches.append(f"{decl.constraint.class_name} {rendered_args}")
-        matches.sort()
-        return _type_expr_to_string(query_type), matches
+        return _repl_render_instances(tree, query_type)
 
     def completion_matches(self, text: str, line_buffer: str) -> list[str]:
         return _repl_completion_matches(text, line_buffer, self.imports, self.declarations)
@@ -284,6 +296,12 @@ def infer_type_in_source(source: str, expr: str) -> str:
     name = "__repl_source_value"
     _, types = _repl_parse_and_check_source(source, [f"let {name} = {expr}"])
     return _repl_lookup_type(types, name)
+
+
+def instances_in_source(source: str, type_expr_source: str) -> tuple[str, list[str]]:
+    tree, _ = _repl_parse_and_check_source(source)
+    query_type = _repl_lookup_param_type(lambda tail: _repl_parse_and_check_source(source, tail), type_expr_source)
+    return _repl_render_instances(tree, query_type)
 
 
 def _repl_lookup_type(types: dict[str, str], name: str) -> str:

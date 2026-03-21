@@ -1231,6 +1231,19 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(_instances)
 
+    def builtin_repl_instances_in_source(args: list[object]) -> object:
+        module_source = args[0]
+        type_expr_source = args[1]
+        if not isinstance(module_source, str) or not isinstance(type_expr_source, str):
+            raise RuntimeError("repl_instances_in_source expects String module source and String type")
+        from .repl_host import instances_in_source
+
+        def _instances() -> TupleValue:
+            query_type, matches = instances_in_source(module_source, type_expr_source)
+            return TupleValue(items=(query_type, _repl_vec_string(matches)))
+
+        return _repl_wrap(_instances)
+
     def builtin_repl_complete(args: list[object]) -> object:
         line_buffer = args[0]
         if not isinstance(line_buffer, str):
@@ -1507,6 +1520,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("repl_type_of", BuiltinFunction(name="repl_type_of", arity=1, fn=builtin_repl_type_of))
     env.set("repl_type_of_in_source", BuiltinFunction(name="repl_type_of_in_source", arity=2, fn=builtin_repl_type_of_in_source))
     env.set("repl_instances", BuiltinFunction(name="repl_instances", arity=1, fn=builtin_repl_instances))
+    env.set("repl_instances_in_source", BuiltinFunction(name="repl_instances_in_source", arity=2, fn=builtin_repl_instances_in_source))
     env.set("repl_complete", BuiltinFunction(name="repl_complete", arity=1, fn=builtin_repl_complete))
     env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))
     env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))

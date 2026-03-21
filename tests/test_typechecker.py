@@ -216,6 +216,7 @@ class TypecheckerTests(unittest.TestCase):
             "repl_type_of": "String -> Result String String !{IO}",
             "repl_type_of_in_source": "String -> String -> Result String String !{IO}",
             "repl_instances": "String -> Result String (String, Vec String) !{IO}",
+            "repl_instances_in_source": "String -> String -> Result String (String, Vec String) !{IO}",
             "repl_complete": "String -> (String, Vec String) !{IO}",
             "repl_reset_session": "Unit !{IO}",
         }
@@ -579,6 +580,7 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("repl_type_of", types)
         self.assertIn("repl_type_of_in_source", types)
         self.assertIn("repl_instances", types)
+        self.assertIn("repl_instances_in_source", types)
         self.assertIn("repl_complete", types)
         self.assertIn("repl_reset_session", types)
 

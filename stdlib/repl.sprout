@@ -215,7 +215,7 @@ fn handle_type_command(line: String, prefix: String, imports: Vec String, declar
 
 fn handle_instances_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), imports, declarations)
-  else Continue(render_instances_result(repl_instances(trim(drop_prefix(line, prefix)))), imports, declarations)
+  else Continue(render_instances_result(repl_instances_in_source(session_source(imports, declarations), trim(drop_prefix(line, prefix)))), imports, declarations)
 
 fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
   if line == "" then Continue(vec_empty(), imports, declarations)

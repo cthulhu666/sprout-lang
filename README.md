@@ -136,6 +136,7 @@ Experimental host-REPL builtins:
 - `repl_type_of(source: String) -> Result String String !{IO}`
 - `repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}`
 - `repl_instances(source: String) -> Result String (String, Vec String) !{IO}`
+- `repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}`
 - `repl_complete(line_buffer: String) -> (String, Vec String) !{IO}`
 - `repl_reset_session() -> Unit !{IO}`
 

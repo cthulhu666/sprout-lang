@@ -1476,6 +1476,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             TApp(TApp(result_type, STRING), TTuple((STRING, TApp(TConst("Vec"), STRING)))),
             effects=IO_EFFECT,
         ),
+        "repl_instances_in_source": builtin_scheme(
+            [STRING, STRING],
+            TApp(TApp(result_type, STRING), TTuple((STRING, TApp(TConst("Vec"), STRING)))),
+            effects=IO_EFFECT,
+        ),
         "repl_complete": builtin_scheme(
             [STRING],
             TTuple((STRING, TApp(TConst("Vec"), STRING))),
