@@ -61,8 +61,9 @@ Current experimental runtime progress:
    experimental interpreter-backed service bridge.
 3. `stdlib/repl.sprout` now owns the Sprout-hosted REPL frontend, with
    `examples/repl_hosted.sprout` kept as a thin wrapper/example entrypoint.
-   Interactive line editing, history traversal, and completion behavior now
-   live in Sprout code rather than Python readline policy.
+   Interactive-mode detection, line editing, history traversal, and
+   completion behavior now live in Sprout code rather than Python readline
+   policy.
 4. Native compiled programs do not support that session bridge yet.
 
 ## Target Architecture

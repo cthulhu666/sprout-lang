@@ -1,5 +1,5 @@
 module stdlib.repl
-import stdlib.terminal (term_read_key_once, term_read_line_once)
+import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_line_once)
 import stdlib.string as string
 
 fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
@@ -241,7 +241,7 @@ export fn repl_loop(prompt: Maybe String, history: Vec String) -> Unit !{IO} =
 export fn main() -> Unit !{IO} =
   then_io(
     repl_reset_session(),
-    match env_get("SPROUT_REPL_INTERACTIVE") with
-    | Just _ -> then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> "), vec_empty()))
-    | Nothing -> repl_loop(Nothing, vec_empty())
+    if term_is_interactive_once()
+    then then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> "), vec_empty()))
+    else repl_loop(Nothing, vec_empty())
   )

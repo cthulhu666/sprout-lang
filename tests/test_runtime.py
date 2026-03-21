@@ -795,6 +795,17 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "eof")
 
+    def test_terminal_is_interactive_builtin(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          print(term_is_interactive())
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "False")
+
     def test_repl_service_builtins_track_session_and_capture_expression_output(self) -> None:
         src = """
         type Maybe a =

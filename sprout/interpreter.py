@@ -1152,6 +1152,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             line = line[:-1]
         return ADTValue(constructor="Just", args=(line,))
 
+    def builtin_term_is_interactive(args: list[object]) -> object:
+        return getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()
+
     def _repl_ok(value: object) -> ADTValue:
         return ADTValue(constructor="Ok", args=(value,))
 
@@ -1485,6 +1488,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("term_show_cursor", BuiltinFunction(name="term_show_cursor", arity=0, fn=builtin_term_show_cursor))
     env.set("term_read_key", BuiltinFunction(name="term_read_key", arity=0, fn=builtin_term_read_key))
     env.set("term_read_line", BuiltinFunction(name="term_read_line", arity=0, fn=builtin_term_read_line))
+    env.set("term_is_interactive", BuiltinFunction(name="term_is_interactive", arity=0, fn=builtin_term_is_interactive))
     env.set("repl_add_import", BuiltinFunction(name="repl_add_import", arity=1, fn=builtin_repl_add_import))
     env.set(
         "repl_add_declaration",

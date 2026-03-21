@@ -963,6 +963,9 @@ long long term_read_line(void) {
   }
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)line);
 }
+_Bool term_is_interactive(void) {
+  return isatty(fileno(stdin)) && isatty(fileno(stdout));
+}
 long long term_clear(void) {
   fputs("\x1b[2J\x1b[H", stdout);
   fflush(stdout);

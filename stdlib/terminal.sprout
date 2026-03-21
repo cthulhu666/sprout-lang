@@ -16,3 +16,6 @@ export fn term_read_key_once() -> String !{IO} =
 
 export fn term_read_line_once() -> Maybe String !{IO} =
   term_read_line()
+
+export fn term_is_interactive_once() -> Bool !{IO} =
+  term_is_interactive()

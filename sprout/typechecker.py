@@ -1445,6 +1445,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "term_show_cursor": builtin_scheme([], UNIT, effects=IO_EFFECT),
         "term_read_key": builtin_scheme([], STRING, effects=IO_EFFECT),
         "term_read_line": builtin_scheme([], TApp(maybe_type, STRING), effects=IO_EFFECT),
+        "term_is_interactive": builtin_scheme([], BOOL, effects=IO_EFFECT),
         "repl_add_import": builtin_scheme(
             [STRING],
             TApp(TApp(result_type, STRING), UNIT),

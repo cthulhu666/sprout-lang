@@ -109,6 +109,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "term_show_cursor": FnSig(name="term_show_cursor", params=[], ret=I64),
     "term_read_key": FnSig(name="term_read_key", params=[], ret=I8_PTR),
     "term_read_line": FnSig(name="term_read_line", params=[], ret=I64),
+    "term_is_interactive": FnSig(name="term_is_interactive", params=[], ret=I1),
     "term_write": FnSig(name="term_write", params=[I8_PTR], ret=I64),
     "repl_add_import": FnSig(name="repl_add_import", params=[I8_PTR], ret=I64),
     "repl_add_declaration": FnSig(name="repl_add_declaration", params=[I8_PTR], ret=I64),

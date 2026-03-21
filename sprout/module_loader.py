@@ -729,6 +729,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "term_show_cursor",
         "term_read_key",
         "term_read_line",
+        "term_is_interactive",
         "repl_add_import",
         "repl_add_declaration",
         "repl_eval_expr",
