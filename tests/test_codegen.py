@@ -1288,7 +1288,7 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_submit_line_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_service_builtin_reports_unsupported_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1296,12 +1296,10 @@ class CodegenTests(unittest.TestCase):
             spr_path.write_text(
                 """
                 module main
-                import stdlib.collections (Maybe)
-
                 fn main() -> Unit !{IO} =
-                  match repl_submit_line(":help") with
-                  | Just _ -> print("ok")
-                  | Nothing -> print("quit")
+                  match repl_type_of("1") with
+                  | Ok _ -> print("ok")
+                  | Err message -> print(message)
                 """,
                 encoding="utf-8",
             )
@@ -1321,7 +1319,7 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.returncode, 1)
             self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_submit_line`: not supported in native backend", run.stderr)
+            self.assertIn("runtime error: builtin `repl_type_of`: not supported in native backend", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_bytes_helpers(self) -> None:

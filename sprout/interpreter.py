@@ -16,6 +16,12 @@ import urllib.error
 import urllib.request
 
 from . import ast
+from .module_loader import ModuleLoadError
+from .parser import ParseError
+from .surface_checks import SurfaceCheckError
+from .tokenizer import TokenizeError
+from .typeclass_lowering import TypeclassLoweringError
+from .typechecker import TypeCheckError
 
 
 class RuntimeError(ValueError):
@@ -1114,24 +1120,77 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             line = line[:-1]
         return ADTValue(constructor="Just", args=(line,))
 
-    def builtin_repl_submit_line(args: list[object]) -> object:
+    def _repl_ok(value: object) -> ADTValue:
+        return ADTValue(constructor="Ok", args=(value,))
+
+    def _repl_err(message: str) -> ADTValue:
+        return ADTValue(constructor="Err", args=(message,))
+
+    def _repl_vec_string(items: tuple[str, ...] | list[str]) -> ADTValue:
+        return ADTValue(constructor="Vec", args=(VectorValue(items=tuple(items)),))
+
+    def _repl_wrap(action: Callable[[], object]) -> ADTValue:
+        try:
+            return _repl_ok(action())
+        except (
+            ParseError,
+            TokenizeError,
+            TypeCheckError,
+            RuntimeError,
+            ModuleLoadError,
+            SurfaceCheckError,
+            TypeclassLoweringError,
+        ) as exc:
+            return _repl_err(str(exc))
+
+    def builtin_repl_add_import(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
-            raise RuntimeError("repl_submit_line expects String")
-        from .repl import hosted_repl_driver
+            raise RuntimeError("repl_add_import expects String")
+        from .repl import hosted_repl_session
 
-        outcome = hosted_repl_driver().handle_line(source)
-        if outcome.should_exit:
-            return ADTValue(constructor="Nothing", args=())
-        return ADTValue(
-            constructor="Just",
-            args=(ADTValue(constructor="Vec", args=(VectorValue(items=tuple(outcome.lines)),)),),
-        )
+        return _repl_wrap(lambda: hosted_repl_session().add_import(source))
+
+    def builtin_repl_add_declaration(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("repl_add_declaration expects String")
+        from .repl import hosted_repl_session
+
+        return _repl_wrap(lambda: hosted_repl_session().add_declaration(source))
+
+    def builtin_repl_eval_expr(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("repl_eval_expr expects String")
+        from .repl import hosted_repl_session
+
+        return _repl_wrap(lambda: _repl_vec_string(hosted_repl_session().eval_expression_lines(source)))
+
+    def builtin_repl_type_of(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("repl_type_of expects String")
+        from .repl import hosted_repl_session
+
+        return _repl_wrap(lambda: hosted_repl_session().infer_type(source))
+
+    def builtin_repl_instances(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("repl_instances expects String")
+        from .repl import hosted_repl_session
+
+        def _instances() -> TupleValue:
+            query_type, matches = hosted_repl_session().instances_for_type(source)
+            return TupleValue(items=(query_type, _repl_vec_string(matches)))
+
+        return _repl_wrap(_instances)
 
     def builtin_repl_reset_session(args: list[object]) -> object:
-        from .repl import reset_hosted_repl_driver
+        from .repl import reset_hosted_repl_session
 
-        reset_hosted_repl_driver()
+        reset_hosted_repl_session()
         return None
 
     def builtin_term_write(args: list[object]) -> object:
@@ -1385,7 +1444,14 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("term_show_cursor", BuiltinFunction(name="term_show_cursor", arity=0, fn=builtin_term_show_cursor))
     env.set("term_read_key", BuiltinFunction(name="term_read_key", arity=0, fn=builtin_term_read_key))
     env.set("term_read_line", BuiltinFunction(name="term_read_line", arity=0, fn=builtin_term_read_line))
-    env.set("repl_submit_line", BuiltinFunction(name="repl_submit_line", arity=1, fn=builtin_repl_submit_line))
+    env.set("repl_add_import", BuiltinFunction(name="repl_add_import", arity=1, fn=builtin_repl_add_import))
+    env.set(
+        "repl_add_declaration",
+        BuiltinFunction(name="repl_add_declaration", arity=1, fn=builtin_repl_add_declaration),
+    )
+    env.set("repl_eval_expr", BuiltinFunction(name="repl_eval_expr", arity=1, fn=builtin_repl_eval_expr))
+    env.set("repl_type_of", BuiltinFunction(name="repl_type_of", arity=1, fn=builtin_repl_type_of))
+    env.set("repl_instances", BuiltinFunction(name="repl_instances", arity=1, fn=builtin_repl_instances))
     env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))
     env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))

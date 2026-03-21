@@ -126,10 +126,14 @@ Runtime builtins (host-implemented):
 
 Experimental host-REPL builtins:
 
-- `repl_submit_line(source: String) -> Maybe (Vec String) !{IO}`
+- `repl_add_import(source: String) -> Result String Unit !{IO}`
+- `repl_add_declaration(source: String) -> Result String Unit !{IO}`
+- `repl_eval_expr(source: String) -> Result String (Vec String) !{IO}`
+- `repl_type_of(source: String) -> Result String String !{IO}`
+- `repl_instances(source: String) -> Result String (String, Vec String) !{IO}`
 - `repl_reset_session() -> Unit !{IO}`
 
-These are implementation hooks for a future Sprout-hosted REPL frontend. They are currently interpreter-backed; native compiled programs currently report a runtime error if they call them.
+These are implementation hooks for the Sprout-hosted REPL frontend. They are currently interpreter-backed; native compiled programs currently report a runtime error if they call them.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 

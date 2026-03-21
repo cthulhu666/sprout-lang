@@ -21,9 +21,7 @@ from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_
 
 __all__ = [
     "cmd_repl",
-    "ReplDriver",
     "ReplSession",
-    "ReplOutcome",
     "repl_history_path",
     "repl_readline_tab_binding",
 ]
@@ -111,9 +109,8 @@ _REPL_COMPLETER_DELIMS = " \t\n`~!@#$%^&*()-=+[{]}\\|;,'\"<>/?"
 _REPL_MODULE_NAME = "app.repl"
 _REPL_PROMPT = "sprout> "
 _REPL_BANNER = "Sprout REPL. Use :help for commands."
-_REPL_HELP_TEXT = "Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines"
 _REPL_INTERACTIVE_ENV = "SPROUT_REPL_INTERACTIVE"
-_HOSTED_DRIVER: ReplDriver | None = None
+_HOSTED_SESSION: ReplSession | None = None
 
 
 def _repl_compose_source(
@@ -251,102 +248,23 @@ class ReplSession:
         typecheck_program(lowered)
         run_program(lowered, stdout=stdout)
 
-    def submit(self, source: str, stdout: TextIO | None = None) -> ReplOutcome:
-        command = _repl_parse_command(source)
-        if isinstance(command, str):
-            if command == "quit":
-                return ReplOutcome(should_exit=True)
-            if command == "help":
-                return ReplOutcome((_REPL_HELP_TEXT,))
-            raise ValueError(f"Unknown REPL command kind {command!r}")
-        return _repl_run_submission(self, command, stdout=stdout)
-
-
-@dataclass(frozen=True)
-class _ReplSubmission:
-    kind: str
-    value: str = ""
-
-
-@dataclass(frozen=True)
-class ReplOutcome:
-    lines: tuple[str, ...] = ()
-    should_exit: bool = False
-
-
-@dataclass
-class ReplDriver:
-    session: ReplSession = field(default_factory=ReplSession)
-    prompt: str = _REPL_PROMPT
-    banner: str = _REPL_BANNER
-
-    def handle_line(self, source: str) -> ReplOutcome:
+    def eval_expression_lines(self, source: str) -> tuple[str, ...]:
         capture = io.StringIO()
-        try:
-            outcome = self.session.submit(source, stdout=capture)
-        except (
-            ParseError,
-            TokenizeError,
-            TypeCheckError,
-            RuntimeError,
-            ModuleLoadError,
-            SurfaceCheckError,
-            TypeclassLoweringError,
-        ) as exc:
-            captured = tuple(capture.getvalue().splitlines())
-            return ReplOutcome((*captured, f"error: {exc}"))
-        captured = tuple(capture.getvalue().splitlines())
-        if not captured:
-            return outcome
-        return ReplOutcome((*outcome.lines, *captured), should_exit=outcome.should_exit)
+        self.run_expression(source, stdout=capture)
+        return tuple(capture.getvalue().splitlines())
 
 
-def hosted_repl_driver() -> ReplDriver:
-    global _HOSTED_DRIVER
-    if _HOSTED_DRIVER is None:
-        _HOSTED_DRIVER = ReplDriver()
-    return _HOSTED_DRIVER
+def hosted_repl_session() -> ReplSession:
+    global _HOSTED_SESSION
+    if _HOSTED_SESSION is None:
+        _HOSTED_SESSION = ReplSession()
+    return _HOSTED_SESSION
 
 
-def reset_hosted_repl_driver() -> ReplDriver:
-    global _HOSTED_DRIVER
-    _HOSTED_DRIVER = ReplDriver()
-    return _HOSTED_DRIVER
-
-
-def _repl_is_declaration(source: str) -> bool:
-    stripped = source.strip()
-    return stripped.startswith(("fn ", "let ", "type ", "class ", "instance ", "export "))
-
-
-def _repl_parse_submission(source: str) -> _ReplSubmission:
-    stripped = source.strip()
-    if stripped == "":
-        return _ReplSubmission("empty")
-    if stripped.startswith("module "):
-        return _ReplSubmission("module")
-    if stripped.startswith("import "):
-        return _ReplSubmission("import", source)
-    if stripped.startswith(":type "):
-        return _ReplSubmission("type", stripped[len(":type ") :].strip())
-    if stripped.startswith(":t "):
-        return _ReplSubmission("type", stripped[len(":t ") :].strip())
-    if stripped.startswith(":instances "):
-        return _ReplSubmission("instances", stripped[len(":instances ") :].strip())
-    if stripped.startswith(":i "):
-        return _ReplSubmission("instances", stripped[len(":i ") :].strip())
-    if _repl_is_declaration(stripped):
-        return _ReplSubmission("declaration", source)
-    return _ReplSubmission("expression", source)
-
-
-def _repl_parse_command(source: str) -> _ReplSubmission | str:
-    stripped = source.strip()
-    if stripped in {":quit", ":q", ":exit"}:
-        return "quit"
-    if stripped == ":help":
-        return "help"
-    return _repl_parse_submission(source)
+def reset_hosted_repl_session() -> ReplSession:
+    global _HOSTED_SESSION
+    _HOSTED_SESSION = ReplSession()
+    return _HOSTED_SESSION
 
 
 def _repl_lookup_type(types: dict[str, str], name: str) -> str:
@@ -515,42 +433,8 @@ def _configure_repl_readline(
     atexit.register(_write_history)
 
 
-def _repl_run_submission(
-    session: ReplSession,
-    submission: _ReplSubmission,
-    stdout: TextIO | None = None,
-) -> ReplOutcome:
-    match submission.kind:
-        case "empty":
-            return ReplOutcome()
-        case "module":
-            return ReplOutcome(("error: repl manages its module header automatically; use `import ...` directly",))
-        case "import":
-            session.add_import(submission.value)
-            return ReplOutcome(("ok",))
-        case "type":
-            if submission.value == "":
-                return ReplOutcome(("error: :type expects an expression",))
-            return ReplOutcome((session.infer_type(submission.value),))
-        case "instances":
-            if submission.value == "":
-                return ReplOutcome(("error: :instances expects a type",))
-            query_type, matches = session.instances_for_type(submission.value)
-            if not matches:
-                return ReplOutcome((f"No instances for {query_type}",))
-            return ReplOutcome((f"Instances for {query_type}:", *matches))
-        case "declaration":
-            session.add_declaration(submission.value)
-            return ReplOutcome(("ok",))
-        case "expression":
-            session.run_expression(submission.value, stdout=stdout)
-            return ReplOutcome()
-        case _:
-            raise ValueError(f"Unknown REPL submission kind {submission.kind!r}")
-
-
 def cmd_repl() -> int:
-    driver = reset_hosted_repl_driver()
+    session = reset_hosted_repl_session()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
     entry = Path(__file__).resolve().parent.parent / "examples" / "repl_hosted.sprout"
     bundle = load_module_bundle(entry)
@@ -564,7 +448,7 @@ def cmd_repl() -> int:
     old_mode = os.environ.get(_REPL_INTERACTIVE_ENV)
     try:
         if interactive:
-            _configure_repl_readline(driver.session)
+            _configure_repl_readline(session)
             os.environ[_REPL_INTERACTIVE_ENV] = "1"
         else:
             os.environ.pop(_REPL_INTERACTIVE_ENV, None)

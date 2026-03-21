@@ -790,11 +790,15 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "eof")
 
-    def test_repl_submit_line_builtin_tracks_session_and_captures_expression_output(self) -> None:
+    def test_repl_service_builtins_track_session_and_capture_expression_output(self) -> None:
         src = """
         type Maybe a =
           | Just a
           | Nothing
+
+        type Result e a =
+          | Ok a
+          | Err e
 
         type Vec a =
           | Vec (Vector a)
@@ -808,25 +812,50 @@ class RuntimeTests(unittest.TestCase):
               | Just text -> text
               | Nothing -> fallback
 
-        fn render_submission(source: String) -> String !{IO} =
-          match repl_submit_line(source) with
-          | Just lines -> first_or(lines, "<empty>")
-          | Nothing -> "<exit>"
+        fn render_unit_result(result: Result String Unit) -> String =
+          match result with
+          | Ok _ -> "ok"
+          | Err message -> str_concat("error: ", message)
+
+        fn render_type_result(result: Result String String) -> String =
+          match result with
+          | Ok value -> value
+          | Err message -> str_concat("error: ", message)
+
+        fn render_expr_result(result: Result String (Vec String)) -> String =
+          match result with
+          | Ok lines -> first_or(lines, "<empty>")
+          | Err message -> str_concat("error: ", message)
+
+        fn render_instances_result(result: Result String (String, Vec String)) -> String =
+          match result with
+          | Err message -> str_concat("error: ", message)
+          | Ok pair ->
+              match pair with
+              | (query_type, Vec raw) ->
+                  if vector_length(raw) == 0 then str_concat("No instances for ", query_type)
+                  else first_or(Vec(raw), "<empty>")
 
         fn main() -> Unit !{IO} =
           seq(
             repl_reset_session(),
             seq(
-              print(render_submission("1 + 1")),
+              print(render_expr_result(repl_eval_expr("1 + 1"))),
               seq(
-                print(render_submission("let answer = 41")),
+                print(render_unit_result(repl_add_declaration("let answer = 41"))),
                 seq(
-                  print(render_submission(":type answer")),
+                  print(render_type_result(repl_type_of("answer"))),
                   seq(
-                    repl_reset_session(),
+                    print(render_instances_result(repl_instances("List Int"))),
                     seq(
-                      print(render_submission(":type answer")),
-                      print(render_submission(":quit"))
+                      print(render_unit_result(repl_add_import("import stdlib.string"))),
+                      seq(
+                        print(render_expr_result(repl_eval_expr("string.concat(\\"a\\", \\"b\\")"))),
+                        seq(
+                          print(render_type_result(repl_type_of("missing_name"))),
+                          repl_reset_session()
+                        )
+                      )
                     )
                   )
                 )
@@ -842,8 +871,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[0], "2")
         self.assertEqual(lines[1], "ok")
         self.assertEqual(lines[2], "Int")
-        self.assertTrue(lines[3].startswith("error: "))
-        self.assertEqual(lines[4], "<exit>")
+        self.assertEqual(lines[3], "Foldable List")
+        self.assertEqual(lines[4], "ok")
+        self.assertEqual(lines[5], "ab")
+        self.assertTrue(lines[6].startswith("error: "))
 
     def test_vector_builtins(self) -> None:
         src = """

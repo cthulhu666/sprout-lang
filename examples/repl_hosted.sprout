@@ -1,5 +1,6 @@
 module examples.repl_hosted
 import stdlib.terminal (term_read_line_once)
+import stdlib.string as string
 
 fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
@@ -21,6 +22,100 @@ fn render_lines(lines: Vec String, index: Int) -> Unit !{IO} =
   | Just line -> then_io(print(line), render_lines(lines, index + 1))
   | Nothing -> term_noop()
 
+fn single_line(text: String) -> Vec String =
+  vec_append(text, vec_empty())
+
+fn char_at(raw: String, index: Int) -> String =
+  string.slice(raw, index, 1)
+
+fn trim_left(raw: String) -> String =
+  if string.length(raw) == 0 then raw
+  else if char_at(raw, 0) == " " then trim_left(string.slice(raw, 1, string.length(raw) - 1))
+  else if char_at(raw, 0) == "\t" then trim_left(string.slice(raw, 1, string.length(raw) - 1))
+  else raw
+
+fn trim_right(raw: String) -> String =
+  if string.length(raw) == 0 then raw
+  else if char_at(raw, string.length(raw) - 1) == " " then trim_right(string.slice(raw, 0, string.length(raw) - 1))
+  else if char_at(raw, string.length(raw) - 1) == "\t" then trim_right(string.slice(raw, 0, string.length(raw) - 1))
+  else raw
+
+fn trim(raw: String) -> String =
+  trim_right(trim_left(raw))
+
+fn drop_prefix(raw: String, prefix: String) -> String =
+  string.slice(raw, string.length(prefix), string.length(raw) - string.length(prefix))
+
+fn render_error(message: String) -> Vec String =
+  single_line("error: " ++ message)
+
+fn render_unit_result(result: Result String Unit) -> Vec String =
+  match result with
+  | Ok _ -> single_line("ok")
+  | Err message -> render_error(message)
+
+fn render_type_result(result: Result String String) -> Vec String =
+  match result with
+  | Ok inferred -> single_line(inferred)
+  | Err message -> render_error(message)
+
+fn render_expr_result(result: Result String (Vec String)) -> Vec String =
+  match result with
+  | Ok lines -> lines
+  | Err message -> render_error(message)
+
+fn render_instances_result(result: Result String (String, Vec String)) -> Vec String =
+  match result with
+  | Err message -> render_error(message)
+  | Ok pair ->
+      match pair with
+      | (query_type, matches) ->
+          if vec_length(matches) == 0 then single_line("No instances for " ++ query_type)
+          else single_line("Instances for " ++ query_type ++ ":") ++ matches
+
+fn help_lines() -> Vec String =
+  single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines")
+
+fn is_declaration(raw: String) -> Bool =
+  string.starts_with(raw, "fn ")
+  || string.starts_with(raw, "let ")
+  || string.starts_with(raw, "type ")
+  || string.starts_with(raw, "class ")
+  || string.starts_with(raw, "instance ")
+  || string.starts_with(raw, "export ")
+
+fn handle_type_command(line: String, prefix: String) -> Maybe (Vec String) !{IO} =
+  if trim(drop_prefix(line, prefix)) == "" then Just(render_error(":type expects an expression"))
+  else Just(render_type_result(repl_type_of(trim(drop_prefix(line, prefix)))))
+
+fn handle_instances_command(line: String, prefix: String) -> Maybe (Vec String) !{IO} =
+  if trim(drop_prefix(line, prefix)) == "" then Just(render_error(":instances expects a type"))
+  else Just(render_instances_result(repl_instances(trim(drop_prefix(line, prefix)))))
+
+fn handle_trimmed_submission(line: String) -> Maybe (Vec String) !{IO} =
+  if line == "" then Just(vec_empty())
+  else if line == ":help" then Just(help_lines())
+  else if line == ":quit" || line == ":q" || line == ":exit" then Nothing
+  else if line == "module" || string.starts_with(line, "module ") then
+    Just(render_error("repl manages its module header automatically; use `import ...` directly"))
+  else if string.starts_with(line, ":type ") then
+    handle_type_command(line, ":type ")
+  else if string.starts_with(line, ":t ") then
+    handle_type_command(line, ":t ")
+  else if string.starts_with(line, ":instances ") then
+    handle_instances_command(line, ":instances ")
+  else if string.starts_with(line, ":i ") then
+    handle_instances_command(line, ":i ")
+  else if string.starts_with(line, "import ") then
+    Just(render_unit_result(repl_add_import(line)))
+  else if is_declaration(line) then
+    Just(render_unit_result(repl_add_declaration(line)))
+  else
+    Just(render_expr_result(repl_eval_expr(line)))
+
+fn handle_submission(raw: String) -> Maybe (Vec String) !{IO} =
+  handle_trimmed_submission(trim(raw))
+
 fn continue_loop(result: Maybe (Vec String), prompt: Maybe String) -> Unit !{IO} =
   match result with
   | Just lines -> then_io(render_lines(lines, 0), repl_loop(prompt))
@@ -30,7 +125,7 @@ fn repl_loop(prompt: Maybe String) -> Unit !{IO} =
   then_io(
     show_prompt(prompt),
     match term_read_line_once() with
-    | Just line -> continue_loop(repl_submit_line(line), prompt)
+    | Just line -> continue_loop(handle_submission(line), prompt)
     | Nothing -> finish_loop(prompt)
   )
 

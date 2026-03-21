@@ -1445,9 +1445,29 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "term_show_cursor": builtin_scheme([], UNIT, effects=IO_EFFECT),
         "term_read_key": builtin_scheme([], STRING, effects=IO_EFFECT),
         "term_read_line": builtin_scheme([], TApp(maybe_type, STRING), effects=IO_EFFECT),
-        "repl_submit_line": builtin_scheme(
+        "repl_add_import": builtin_scheme(
             [STRING],
-            TApp(maybe_type, TApp(TConst("Vec"), STRING)),
+            TApp(TApp(result_type, STRING), UNIT),
+            effects=IO_EFFECT,
+        ),
+        "repl_add_declaration": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), UNIT),
+            effects=IO_EFFECT,
+        ),
+        "repl_eval_expr": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), TApp(TConst("Vec"), STRING)),
+            effects=IO_EFFECT,
+        ),
+        "repl_type_of": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), STRING),
+            effects=IO_EFFECT,
+        ),
+        "repl_instances": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), TTuple((STRING, TApp(TConst("Vec"), STRING)))),
             effects=IO_EFFECT,
         ),
         "repl_reset_session": builtin_scheme([], UNIT, effects=IO_EFFECT),

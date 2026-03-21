@@ -992,9 +992,29 @@ long long term_write(const char* text) {
   fflush(stdout);
   return 0;
 }
-long long repl_submit_line(const char* source) {
+long long repl_add_import(const char* source) {
   (void)source;
-  tcp_fail("repl_submit_line: not supported in native backend");
+  tcp_fail("repl_add_import: not supported in native backend");
+  return 0;
+}
+long long repl_add_declaration(const char* source) {
+  (void)source;
+  tcp_fail("repl_add_declaration: not supported in native backend");
+  return 0;
+}
+long long repl_eval_expr(const char* source) {
+  (void)source;
+  tcp_fail("repl_eval_expr: not supported in native backend");
+  return 0;
+}
+long long repl_type_of(const char* source) {
+  (void)source;
+  tcp_fail("repl_type_of: not supported in native backend");
+  return 0;
+}
+long long repl_instances(const char* source) {
+  (void)source;
+  tcp_fail("repl_instances: not supported in native backend");
   return 0;
 }
 long long repl_reset_session(void) {

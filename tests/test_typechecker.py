@@ -209,7 +209,11 @@ class TypecheckerTests(unittest.TestCase):
             "crypto_random_bytes": "Int -> Result stdlib.crypto.CryptoError Bytes !{IO}",
             "term_read_key": "String !{IO}",
             "term_read_line": "Maybe String !{IO}",
-            "repl_submit_line": "String -> Maybe Vec String !{IO}",
+            "repl_add_import": "String -> Result String Unit !{IO}",
+            "repl_add_declaration": "String -> Result String Unit !{IO}",
+            "repl_eval_expr": "String -> Result String Vec String !{IO}",
+            "repl_type_of": "String -> Result String String !{IO}",
+            "repl_instances": "String -> Result String (String, Vec String) !{IO}",
             "repl_reset_session": "Unit !{IO}",
         }
         for name, expected_type in expected.items():
@@ -565,7 +569,11 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("term_move", types)
         self.assertIn("term_read_key", types)
         self.assertIn("term_read_line", types)
-        self.assertIn("repl_submit_line", types)
+        self.assertIn("repl_add_import", types)
+        self.assertIn("repl_add_declaration", types)
+        self.assertIn("repl_eval_expr", types)
+        self.assertIn("repl_type_of", types)
+        self.assertIn("repl_instances", types)
         self.assertIn("repl_reset_session", types)
 
     def test_typecheck_vector_builtins(self) -> None:

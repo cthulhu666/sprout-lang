@@ -235,45 +235,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(session.declarations, ["let answer = 41"])
         self.assertEqual(session.infer_type("answer + 1"), "Int")
         self.assertEqual(session.infer_type("http.http_ok(\"x\")"), "String")
+        self.assertEqual(session.eval_expression_lines("answer + 1"), ("42",))
+        query_type, matches = session.instances_for_type("List Int")
+        self.assertEqual(query_type, "List Int")
+        self.assertIn("Functor List", matches)
         self.assertIn("http", session.completion_matches("htt", "htt"))
         self.assertIn("answer", session.completion_matches("ans", "ans"))
-        self.assertEqual(session.submit(""), session.submit("   "))
-        self.assertEqual(session.submit("import stdlib.string").lines, ("ok",))
-        self.assertEqual(session.submit("let x = 1").lines, ("ok",))
-        self.assertEqual(session.submit(":type answer").lines, ("Int",))
-        self.assertEqual(
-            session.submit(":help").lines,
-            ("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines",),
-        )
-        self.assertTrue(session.submit(":quit").should_exit)
-
-    def test_repl_driver_exposes_frontend_contract(self) -> None:
-        from sprout.repl import ReplDriver
-
-        driver = ReplDriver()
-
-        self.assertEqual(driver.banner, "Sprout REPL. Use :help for commands.")
-        self.assertEqual(driver.prompt, "sprout> ")
-        self.assertEqual(driver.handle_line(":help").lines, (driver.session.submit(":help").lines[0],))
-        self.assertTrue(driver.handle_line(":quit").should_exit)
-        self.assertEqual(driver.handle_line(":type 1").lines, ("Int",))
-
-    def test_repl_driver_renders_diagnostics_as_outcomes(self) -> None:
-        from sprout.repl import ReplDriver
-
-        driver = ReplDriver()
-        outcome = driver.handle_line(":type missing_name")
-
-        self.assertFalse(outcome.should_exit)
-        self.assertEqual(len(outcome.lines), 1)
-        self.assertTrue(outcome.lines[0].startswith("error: "))
-
-    def test_repl_driver_captures_expression_output_as_lines(self) -> None:
-        from sprout.repl import ReplDriver
-
-        driver = ReplDriver()
-
-        self.assertEqual(driver.handle_line("1 + 1").lines, ("2",))
 
     def test_repl_imports_and_prelude_append_work_together(self) -> None:
         run = subprocess.run(

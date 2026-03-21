@@ -56,8 +56,10 @@ between “plain REPL” and “REPL with preloaded stdlib mode”.
 Current experimental runtime progress:
 
 1. `term_read_line()` now provides line-oriented stdin input.
-2. `repl_submit_line(...)` and `repl_reset_session()` expose the hosted REPL
-   session through an experimental interpreter-backed bridge.
+2. `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
+   `repl_type_of(...)`, `repl_instances(...)`, and `repl_reset_session()`
+   expose the hosted REPL session through an experimental interpreter-backed
+   service bridge.
 3. `examples/repl_hosted.sprout` is now the first Sprout-hosted REPL frontend.
 4. Native compiled programs do not support that session bridge yet.
 
