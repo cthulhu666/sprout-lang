@@ -247,6 +247,27 @@ class CliTests(unittest.TestCase):
         )
         self.assertTrue(session.submit(":quit").should_exit)
 
+    def test_repl_driver_exposes_frontend_contract(self) -> None:
+        from sprout.repl import ReplDriver
+
+        driver = ReplDriver()
+
+        self.assertEqual(driver.banner, "Sprout REPL. Use :help for commands.")
+        self.assertEqual(driver.prompt, "sprout> ")
+        self.assertEqual(driver.handle_line(":help").lines, (driver.session.submit(":help").lines[0],))
+        self.assertTrue(driver.handle_line(":quit").should_exit)
+        self.assertEqual(driver.handle_line(":type 1").lines, ("Int",))
+
+    def test_repl_driver_renders_diagnostics_as_outcomes(self) -> None:
+        from sprout.repl import ReplDriver
+
+        driver = ReplDriver()
+        outcome = driver.handle_line(":type missing_name")
+
+        self.assertFalse(outcome.should_exit)
+        self.assertEqual(len(outcome.lines), 1)
+        self.assertTrue(outcome.lines[0].startswith("error: "))
+
     def test_repl_imports_and_prelude_append_work_together(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],

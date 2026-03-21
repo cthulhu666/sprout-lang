@@ -19,6 +19,7 @@ from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_
 
 __all__ = [
     "cmd_repl",
+    "ReplDriver",
     "ReplSession",
     "ReplOutcome",
     "repl_history_path",
@@ -106,6 +107,8 @@ _REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
 _REPL_HISTORY_LIMIT = 1000
 _REPL_COMPLETER_DELIMS = " \t\n`~!@#$%^&*()-=+[{]}\\|;,'\"<>/?"
 _REPL_MODULE_NAME = "app.repl"
+_REPL_PROMPT = "sprout> "
+_REPL_BANNER = "Sprout REPL. Use :help for commands."
 _REPL_HELP_TEXT = "Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines"
 
 
@@ -265,6 +268,27 @@ class _ReplSubmission:
 class ReplOutcome:
     lines: tuple[str, ...] = ()
     should_exit: bool = False
+
+
+@dataclass
+class ReplDriver:
+    session: ReplSession = field(default_factory=ReplSession)
+    prompt: str = _REPL_PROMPT
+    banner: str = _REPL_BANNER
+
+    def handle_line(self, source: str) -> ReplOutcome:
+        try:
+            return self.session.submit(source)
+        except (
+            ParseError,
+            TokenizeError,
+            TypeCheckError,
+            RuntimeError,
+            ModuleLoadError,
+            SurfaceCheckError,
+            TypeclassLoweringError,
+        ) as exc:
+            return ReplOutcome((f"error: {exc}",))
 
 
 def _repl_is_declaration(source: str) -> bool:
@@ -499,24 +523,24 @@ def _repl_run_submission(session: ReplSession, submission: _ReplSubmission) -> R
 
 
 def cmd_repl() -> int:
-    session = ReplSession()
+    driver = ReplDriver()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
 
     def emit(text: str) -> None:
         print(text)
 
     def process_submission(source: str) -> bool:
-        outcome = session.submit(source)
+        outcome = driver.handle_line(source)
         for line in outcome.lines:
             emit(line)
         return outcome.should_exit
 
     if interactive:
-        _configure_repl_readline(session)
-        emit("Sprout REPL. Use :help for commands.")
+        _configure_repl_readline(driver.session)
+        emit(driver.banner)
         while True:
             try:
-                line = input("sprout> ")
+                line = input(driver.prompt)
             except EOFError:
                 emit("")
                 break
@@ -525,16 +549,6 @@ def cmd_repl() -> int:
                     break
             except EOFError:
                 break
-            except (
-                ParseError,
-                TokenizeError,
-                TypeCheckError,
-                RuntimeError,
-                ModuleLoadError,
-                SurfaceCheckError,
-                TypeclassLoweringError,
-            ) as exc:
-                emit(f"error: {exc}")
         return 0
 
     for raw in sys.stdin:
@@ -543,16 +557,6 @@ def cmd_repl() -> int:
                 break
         except EOFError:
             break
-        except (
-            ParseError,
-            TokenizeError,
-            TypeCheckError,
-            RuntimeError,
-            ModuleLoadError,
-            SurfaceCheckError,
-            TypeclassLoweringError,
-        ) as exc:
-            emit(f"error: {exc}")
     return 0
 
 
