@@ -796,12 +796,17 @@ class RuntimeTests(unittest.TestCase):
           | Just a
           | Nothing
 
+        type Vec a =
+          | Vec (Vector a)
+
         fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
-        fn first_or(lines: Vector String, fallback: String) -> String =
-          match vector_get(lines, 0) with
-          | Just text -> text
-          | Nothing -> fallback
+        fn first_or(lines: Vec String, fallback: String) -> String =
+          match lines with
+          | Vec raw ->
+              match vector_get(raw, 0) with
+              | Just text -> text
+              | Nothing -> fallback
 
         fn render_submission(source: String) -> String !{IO} =
           match repl_submit_line(source) with

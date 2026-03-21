@@ -1,0 +1,43 @@
+module examples.repl_hosted
+import stdlib.terminal (term_read_line_once)
+
+fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+
+fn term_noop() -> Unit !{IO} =
+  term_write("")
+
+fn show_prompt(prompt: Maybe String) -> Unit !{IO} =
+  match prompt with
+  | Just text -> term_write(text)
+  | Nothing -> term_noop()
+
+fn finish_loop(prompt: Maybe String) -> Unit !{IO} =
+  match prompt with
+  | Just _ -> print("")
+  | Nothing -> term_noop()
+
+fn render_lines(lines: Vec String, index: Int) -> Unit !{IO} =
+  match vec_get(index, lines) with
+  | Just line -> then_io(print(line), render_lines(lines, index + 1))
+  | Nothing -> term_noop()
+
+fn continue_loop(result: Maybe (Vec String), prompt: Maybe String) -> Unit !{IO} =
+  match result with
+  | Just lines -> then_io(render_lines(lines, 0), repl_loop(prompt))
+  | Nothing -> finish_loop(prompt)
+
+fn repl_loop(prompt: Maybe String) -> Unit !{IO} =
+  then_io(
+    show_prompt(prompt),
+    match term_read_line_once() with
+    | Just line -> continue_loop(repl_submit_line(line), prompt)
+    | Nothing -> finish_loop(prompt)
+  )
+
+fn main() -> Unit !{IO} =
+  then_io(
+    repl_reset_session(),
+    match env_get("SPROUT_REPL_INTERACTIVE") with
+    | Just _ -> then_io(print("Sprout REPL. Use :help for commands."), repl_loop(Just("sprout> ")))
+    | Nothing -> repl_loop(Nothing)
+  )

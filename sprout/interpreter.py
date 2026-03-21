@@ -477,7 +477,6 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     out = stdout
     program_argv = [] if argv is None else argv
     env = Env()
-    repl_driver: object | None = None
     echo_backend = _build_echo_backend()
     listeners: dict[int, socket.socket] = {}
     connections: dict[int, socket.socket] = {}
@@ -1099,6 +1098,13 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         return os.environ.get("SPROUT_TERM_KEY", "q")
 
     def builtin_term_read_line(args: list[object]) -> object:
+        interactive_term = getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()
+        if interactive_term:
+            try:
+                line = input("")
+            except EOFError:
+                return ADTValue(constructor="Nothing", args=())
+            return ADTValue(constructor="Just", args=(line,))
         line = sys.stdin.readline()
         if line == "":
             return ADTValue(constructor="Nothing", args=())
@@ -1109,22 +1115,23 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         return ADTValue(constructor="Just", args=(line,))
 
     def builtin_repl_submit_line(args: list[object]) -> object:
-        nonlocal repl_driver
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_submit_line expects String")
-        if repl_driver is None:
-            from .repl import ReplDriver
+        from .repl import hosted_repl_driver
 
-            repl_driver = ReplDriver()
-        outcome = repl_driver.handle_line(source)
+        outcome = hosted_repl_driver().handle_line(source)
         if outcome.should_exit:
             return ADTValue(constructor="Nothing", args=())
-        return ADTValue(constructor="Just", args=(VectorValue(items=tuple(outcome.lines)),))
+        return ADTValue(
+            constructor="Just",
+            args=(ADTValue(constructor="Vec", args=(VectorValue(items=tuple(outcome.lines)),)),),
+        )
 
     def builtin_repl_reset_session(args: list[object]) -> object:
-        nonlocal repl_driver
-        repl_driver = None
+        from .repl import reset_hosted_repl_driver
+
+        reset_hosted_repl_driver()
         return None
 
     def builtin_term_write(args: list[object]) -> object:

@@ -58,7 +58,8 @@ Current experimental runtime progress:
 1. `term_read_line()` now provides line-oriented stdin input.
 2. `repl_submit_line(...)` and `repl_reset_session()` expose the hosted REPL
    session through an experimental interpreter-backed bridge.
-3. Native compiled programs do not support that session bridge yet.
+3. `examples/repl_hosted.sprout` is now the first Sprout-hosted REPL frontend.
+4. Native compiled programs do not support that session bridge yet.
 
 ## Target Architecture
 

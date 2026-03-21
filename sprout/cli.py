@@ -962,6 +962,36 @@ long long term_read_line(void) {
   }
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)line);
 }
+long long term_clear(void) {
+  fputs("\x1b[2J\x1b[H", stdout);
+  fflush(stdout);
+  return 0;
+}
+long long term_move(long long row, long long col) {
+  fprintf(stdout, "\x1b[%lld;%lldH", row, col);
+  fflush(stdout);
+  return 0;
+}
+long long term_hide_cursor(void) {
+  fputs("\x1b[?25l", stdout);
+  fflush(stdout);
+  return 0;
+}
+long long term_show_cursor(void) {
+  fputs("\x1b[?25h", stdout);
+  fflush(stdout);
+  return 0;
+}
+const char* term_read_key(void) {
+  const char* value = getenv("SPROUT_TERM_KEY");
+  return value == NULL ? "q" : value;
+}
+long long term_write(const char* text) {
+  if (text == NULL) tcp_fail("term_write: null text");
+  fputs(text, stdout);
+  fflush(stdout);
+  return 0;
+}
 long long repl_submit_line(const char* source) {
   (void)source;
   tcp_fail("repl_submit_line: not supported in native backend");

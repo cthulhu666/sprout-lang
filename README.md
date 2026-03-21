@@ -78,7 +78,7 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Start REPL: `mise exec -- python -m sprout.cli repl` (loads the foundational prelude by default; interactive mode supports arrow-key editing, tab completion, persistent history via `~/.sprout_repl_history`, and ordinary `import ...` lines inside the session)
+- Start REPL: `mise exec -- python -m sprout.cli repl` (launches the Sprout-hosted frontend in [examples/repl_hosted.sprout](./examples/repl_hosted.sprout); loads the foundational prelude by default; interactive mode supports arrow-key editing, tab completion, persistent history via `~/.sprout_repl_history`, and ordinary `import ...` lines inside the session)
 - Run tests: `mise exec -- just test`
 - Run integration-style IO tests: `mise exec -- just test-integration`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
@@ -126,7 +126,7 @@ Runtime builtins (host-implemented):
 
 Experimental host-REPL builtins:
 
-- `repl_submit_line(source: String) -> Maybe (Vector String) !{IO}`
+- `repl_submit_line(source: String) -> Maybe (Vec String) !{IO}`
 - `repl_reset_session() -> Unit !{IO}`
 
 These are implementation hooks for a future Sprout-hosted REPL frontend. They are currently interpreter-backed; native compiled programs currently report a runtime error if they call them.

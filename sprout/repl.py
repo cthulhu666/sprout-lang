@@ -112,6 +112,8 @@ _REPL_MODULE_NAME = "app.repl"
 _REPL_PROMPT = "sprout> "
 _REPL_BANNER = "Sprout REPL. Use :help for commands."
 _REPL_HELP_TEXT = "Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines"
+_REPL_INTERACTIVE_ENV = "SPROUT_REPL_INTERACTIVE"
+_HOSTED_DRIVER: ReplDriver | None = None
 
 
 def _repl_compose_source(
@@ -297,6 +299,19 @@ class ReplDriver:
         if not captured:
             return outcome
         return ReplOutcome((*outcome.lines, *captured), should_exit=outcome.should_exit)
+
+
+def hosted_repl_driver() -> ReplDriver:
+    global _HOSTED_DRIVER
+    if _HOSTED_DRIVER is None:
+        _HOSTED_DRIVER = ReplDriver()
+    return _HOSTED_DRIVER
+
+
+def reset_hosted_repl_driver() -> ReplDriver:
+    global _HOSTED_DRIVER
+    _HOSTED_DRIVER = ReplDriver()
+    return _HOSTED_DRIVER
 
 
 def _repl_is_declaration(source: str) -> bool:
@@ -535,40 +550,30 @@ def _repl_run_submission(
 
 
 def cmd_repl() -> int:
-    driver = ReplDriver()
+    driver = reset_hosted_repl_driver()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    entry = Path(__file__).resolve().parent.parent / "examples" / "repl_hosted.sprout"
+    bundle = load_module_bundle(entry)
+    tree = parse(bundle.source)
+    resolve_program_names(tree, bundle)
+    validate_public_surface(tree, bundle)
+    typecheck_program(tree)
+    lowered = lower_typeclasses(tree)
+    typecheck_program(lowered)
 
-    def emit(text: str) -> None:
-        print(text)
-
-    def process_submission(source: str) -> bool:
-        outcome = driver.handle_line(source)
-        for line in outcome.lines:
-            emit(line)
-        return outcome.should_exit
-
-    if interactive:
-        _configure_repl_readline(driver.session)
-        emit(driver.banner)
-        while True:
-            try:
-                line = input(driver.prompt)
-            except EOFError:
-                emit("")
-                break
-            try:
-                if process_submission(line):
-                    break
-            except EOFError:
-                break
-        return 0
-
-    for raw in sys.stdin:
-        try:
-            if process_submission(raw.rstrip("\n")):
-                break
-        except EOFError:
-            break
+    old_mode = os.environ.get(_REPL_INTERACTIVE_ENV)
+    try:
+        if interactive:
+            _configure_repl_readline(driver.session)
+            os.environ[_REPL_INTERACTIVE_ENV] = "1"
+        else:
+            os.environ.pop(_REPL_INTERACTIVE_ENV, None)
+        run_program(lowered)
+    finally:
+        if old_mode is None:
+            os.environ.pop(_REPL_INTERACTIVE_ENV, None)
+        else:
+            os.environ[_REPL_INTERACTIVE_ENV] = old_mode
     return 0
 
 
