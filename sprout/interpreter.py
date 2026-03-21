@@ -1101,7 +1101,26 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         return None
 
     def builtin_term_read_key(args: list[object]) -> object:
-        return os.environ.get("SPROUT_TERM_KEY", "q")
+        interactive_term = getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()
+        if interactive_term:
+            try:
+                import termios
+                import tty
+
+                fd = sys.stdin.fileno()
+                old_settings = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    ch = sys.stdin.read(1)
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                return ch
+            except (ImportError, OSError, AttributeError):
+                pass
+        ch = sys.stdin.read(1)
+        if ch == "":
+            return ""
+        return ch
 
     def builtin_term_read_line(args: list[object]) -> object:
         interactive_term = getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()

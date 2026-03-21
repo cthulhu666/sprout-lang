@@ -760,7 +760,7 @@ class RuntimeTests(unittest.TestCase):
         program = parse(src)
         typecheck_program(program)
         out = io.StringIO()
-        with patch.dict(os.environ, {"SPROUT_TERM_KEY": "j"}, clear=False):
+        with patch("sys.stdin", io.StringIO("j")):
             run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "j")
 

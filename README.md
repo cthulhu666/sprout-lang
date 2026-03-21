@@ -120,7 +120,7 @@ Runtime builtins (host-implemented):
 - `term_move(row: Int, col: Int) -> Unit !{IO}`
 - `term_hide_cursor() -> Unit !{IO}`
 - `term_show_cursor() -> Unit !{IO}`
-- `term_read_key() -> String !{IO}` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
+- `term_read_key() -> String !{IO}` (reads one key from stdin; in TTY mode it reads immediately without waiting for newline)
 - `term_read_line() -> Maybe String !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF)
 - `term_write(text: String) -> Unit !{IO}`
 

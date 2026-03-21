@@ -159,6 +159,7 @@ def cmd_compile(
 #include <netdb.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <termios.h>
 #include <unistd.h>
 
 typedef struct {
@@ -983,8 +984,38 @@ long long term_show_cursor(void) {
   return 0;
 }
 const char* term_read_key(void) {
-  const char* value = getenv("SPROUT_TERM_KEY");
-  return value == NULL ? "q" : value;
+  static char buf[2] = {0, 0};
+  buf[0] = '\\0';
+  buf[1] = '\\0';
+  if (!isatty(STDIN_FILENO)) {
+    int ch = getchar();
+    if (ch == EOF) return buf;
+    buf[0] = (char)ch;
+    return buf;
+  }
+  struct termios oldt;
+  if (tcgetattr(STDIN_FILENO, &oldt) != 0) {
+    int ch = getchar();
+    if (ch == EOF) return buf;
+    buf[0] = (char)ch;
+    return buf;
+  }
+  struct termios raw = oldt;
+  raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+  raw.c_cc[VMIN] = 1;
+  raw.c_cc[VTIME] = 0;
+  if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+    int ch = getchar();
+    if (ch == EOF) return buf;
+    buf[0] = (char)ch;
+    return buf;
+  }
+  char ch = '\\0';
+  ssize_t count = read(STDIN_FILENO, &ch, 1);
+  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+  if (count <= 0) return buf;
+  buf[0] = ch;
+  return buf;
 }
 long long term_write(const char* text) {
   if (text == NULL) tcp_fail("term_write: null text");
