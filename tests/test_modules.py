@@ -1158,6 +1158,26 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "bcd")
 
+    def test_import_stdlib_repl_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.repl as repl
+
+                fn main() -> Unit !{IO} =
+                  print(repl.main)
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            types = typecheck_program(program)
+            self.assertIn("Unit !{IO}", [typ for name, typ in types.items() if name.endswith(".main") or name == "main"])
+
     def test_import_stdlib_semigroup_instances(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

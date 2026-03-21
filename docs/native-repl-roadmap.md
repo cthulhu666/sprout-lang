@@ -60,7 +60,8 @@ Current experimental runtime progress:
    `repl_type_of(...)`, `repl_instances(...)`, and `repl_reset_session()`
    expose the hosted REPL session through an experimental interpreter-backed
    service bridge.
-3. `examples/repl_hosted.sprout` is now the first Sprout-hosted REPL frontend.
+3. `stdlib/repl.sprout` now owns the Sprout-hosted REPL frontend, with
+   `examples/repl_hosted.sprout` kept as a thin wrapper/example entrypoint.
 4. Native compiled programs do not support that session bridge yet.
 
 ## Target Architecture

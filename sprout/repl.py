@@ -436,7 +436,7 @@ def _configure_repl_readline(
 def cmd_repl() -> int:
     session = reset_hosted_repl_session()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
-    entry = Path(__file__).resolve().parent.parent / "examples" / "repl_hosted.sprout"
+    entry = Path(__file__).resolve().parent.parent / "stdlib" / "repl.sprout"
     bundle = load_module_bundle(entry)
     tree = parse(bundle.source)
     resolve_program_names(tree, bundle)
