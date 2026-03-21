@@ -2813,6 +2813,9 @@ class _ReplSession:
     def instances_for_type(self, type_expr_source: str) -> tuple[str, list[str]]:
         return _repl_instances_for_type(self.imports, self.declarations, type_expr_source)
 
+    def completion_matches(self, text: str, line_buffer: str) -> list[str]:
+        return _repl_completion_matches(text, line_buffer, self.imports, self.declarations)
+
     def run_expression(self, source: str) -> None:
         self.repl_counter += 1
         name = f"__repl_value_{self.repl_counter}"
@@ -3016,8 +3019,7 @@ def _repl_readline_tab_binding(readline_module: object) -> str:
 
 
 def _configure_repl_readline(
-    imports: list[str],
-    declarations: list[str],
+    session: _ReplSession,
     history_path: Path | None = None,
 ) -> None:
     try:
@@ -3033,12 +3035,7 @@ def _configure_repl_readline(
     readline.set_history_length(_REPL_HISTORY_LIMIT)
 
     def _complete(text: str, state: int) -> str | None:
-        matches = _repl_completion_matches(
-            text,
-            readline.get_line_buffer(),
-            imports,
-            declarations,
-        )
+        matches = session.completion_matches(text, readline.get_line_buffer())
         if state < len(matches):
             return matches[state]
         return None
@@ -3120,7 +3117,7 @@ def cmd_repl() -> int:
         session.run_expression(source)
 
     if interactive:
-        _configure_repl_readline(session.imports, session.declarations)
+        _configure_repl_readline(session)
         emit("Sprout REPL. Use :help for commands.")
         while True:
             try:

@@ -235,6 +235,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(session.declarations, ["let answer = 41"])
         self.assertEqual(session.infer_type("answer + 1"), "Int")
         self.assertEqual(session.infer_type("http.http_ok(\"x\")"), "String")
+        self.assertIn("http", session.completion_matches("htt", "htt"))
+        self.assertIn("answer", session.completion_matches("ans", "ans"))
 
     def test_repl_imports_and_prelude_append_work_together(self) -> None:
         run = subprocess.run(
