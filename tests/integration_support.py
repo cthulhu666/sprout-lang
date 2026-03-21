@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import errno
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import socket
@@ -79,15 +80,19 @@ def running_tcp_fixture(
 
     def serve() -> None:
         with listener:
-            conn, _ = listener.accept()
-            with conn:
-                try:
+            try:
+                conn, _ = listener.accept()
+                with conn:
                     handler(conn)
-                except ConnectionAbortedError:
-                    # Native TCP tests can race fixture teardown on macOS and report
-                    # an aborted connection even though the client-side behavior under
-                    # test already completed.
+            except ConnectionAbortedError:
+                # Native TCP tests can race fixture teardown on macOS and report an
+                # aborted connection even though the client-side behavior under test
+                # already completed.
+                return
+            except OSError as exc:
+                if exc.errno == errno.ECONNABORTED:
                     return
+                raise
 
     worker = BackgroundWorker(serve, name="tcp-fixture")
     worker.start()
@@ -101,17 +106,16 @@ def running_tcp_fixture(
         worker.join_ok(case, timeout=1.0, alive_message="tcp fixture did not exit")
 
 
-def wait_for_tcp_server(port: int, *, timeout: float = 2.0) -> None:
+def connect_with_retry(port: int, *, timeout: float = 2.0, connect_timeout: float = 0.5) -> socket.socket:
     deadline = time.time() + timeout
     last_error: OSError | None = None
     while time.time() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                return
+            return socket.create_connection(("127.0.0.1", port), timeout=connect_timeout)
         except OSError as exc:
             last_error = exc
             time.sleep(0.02)
-    raise AssertionError(f"timed out waiting for local tcp server on port {port}: {last_error}")
+    raise AssertionError(f"timed out connecting to local tcp server on port {port}: {last_error}")
 
 
 def tcp_roundtrip(port: int, request: bytes, *, timeout: float = 2.0, recv_size: int = 4096) -> bytes:
@@ -153,5 +157,9 @@ def compiled_native_binary(
             cmd.append("--with-http-stdlib")
         cmd.extend([str(spr_path), "--native", "-o", str(bin_path)])
         compile_proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
-        case.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
+        case.assertEqual(
+            compile_proc.returncode,
+            0,
+            msg=f"stdout:\n{compile_proc.stdout}\nstderr:\n{compile_proc.stderr}",
+        )
         yield bin_path
