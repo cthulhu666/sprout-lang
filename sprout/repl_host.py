@@ -20,6 +20,7 @@ __all__ = [
     "ReplSession",
     "hosted_repl_session",
     "reset_hosted_repl_session",
+    "infer_type_in_source",
 ]
 
 _REPL_COMMANDS = (
@@ -124,6 +125,24 @@ def _repl_parse_and_check(
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = Path(tmpdir) / "repl_session.sprout"
         temp_path.write_text(source, encoding="utf-8")
+        bundle = load_module_bundle(temp_path)
+        tree = parse(bundle.source)
+        resolve_program_names(tree, bundle)
+        validate_public_surface(tree, bundle)
+        types = typecheck_program(tree)
+        return tree, types
+
+
+def _repl_parse_and_check_source(
+    source: str,
+    tail: list[str] | None = None,
+) -> tuple[object, dict[str, str]]:
+    chunks = [source.strip()]
+    chunks.extend(chunk for chunk in (tail or []) if chunk.strip())
+    composed = "\n\n".join(chunk for chunk in chunks if chunk)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = Path(tmpdir) / "repl_session.sprout"
+        temp_path.write_text(composed, encoding="utf-8")
         bundle = load_module_bundle(temp_path)
         tree = parse(bundle.source)
         resolve_program_names(tree, bundle)
@@ -259,6 +278,12 @@ def reset_hosted_repl_session() -> ReplSession:
     global _HOSTED_SESSION
     _HOSTED_SESSION = ReplSession()
     return _HOSTED_SESSION
+
+
+def infer_type_in_source(source: str, expr: str) -> str:
+    name = "__repl_source_value"
+    _, types = _repl_parse_and_check_source(source, [f"let {name} = {expr}"])
+    return _repl_lookup_type(types, name)
 
 
 def _repl_lookup_type(types: dict[str, str], name: str) -> str:

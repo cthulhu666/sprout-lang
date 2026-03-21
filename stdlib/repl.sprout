@@ -2,6 +2,10 @@ module stdlib.repl
 import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_line_once)
 import stdlib.string as string
 
+type SubmissionResult =
+  | Continue (Vec String) (Vec String) (Vec String)
+  | Exit
+
 fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
 fn term_noop() -> Unit !{IO} =
@@ -192,56 +196,74 @@ fn is_declaration(raw: String) -> Bool =
   || string.starts_with(raw, "instance ")
   || string.starts_with(raw, "export ")
 
-fn handle_type_command(line: String, prefix: String) -> Maybe (Vec String) !{IO} =
-  if trim(drop_prefix(line, prefix)) == "" then Just(render_error(":type expects an expression"))
-  else Just(render_type_result(repl_type_of(trim(drop_prefix(line, prefix)))))
+fn append_source_block(acc: String, block: String) -> String =
+  if block == "" then acc
+  else if acc == "" then block
+  else acc ++ "\n\n" ++ block
 
-fn handle_instances_command(line: String, prefix: String) -> Maybe (Vec String) !{IO} =
-  if trim(drop_prefix(line, prefix)) == "" then Just(render_error(":instances expects a type"))
-  else Just(render_instances_result(repl_instances(trim(drop_prefix(line, prefix)))))
+fn append_source_blocks(acc: String, blocks: Vec String, index: Int) -> String =
+  match vec_get(index, blocks) with
+  | Just block -> append_source_blocks(append_source_block(acc, block), blocks, index + 1)
+  | Nothing -> acc
 
-fn handle_trimmed_submission(line: String) -> Maybe (Vec String) !{IO} =
-  if line == "" then Just(vec_empty())
-  else if line == ":help" then Just(help_lines())
-  else if line == ":quit" || line == ":q" || line == ":exit" then Nothing
+fn session_source(imports: Vec String, declarations: Vec String) -> String =
+  append_source_blocks(append_source_blocks("module app.repl", imports, 0), declarations, 0)
+
+fn handle_type_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":type expects an expression"), imports, declarations)
+  else Continue(render_type_result(repl_type_of_in_source(session_source(imports, declarations), trim(drop_prefix(line, prefix)))), imports, declarations)
+
+fn handle_instances_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), imports, declarations)
+  else Continue(render_instances_result(repl_instances(trim(drop_prefix(line, prefix)))), imports, declarations)
+
+fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  if line == "" then Continue(vec_empty(), imports, declarations)
+  else if line == ":help" then Continue(help_lines(), imports, declarations)
+  else if line == ":quit" || line == ":q" || line == ":exit" then Exit
   else if line == "module" || string.starts_with(line, "module ") then
-    Just(render_error("repl manages its module header automatically; use `import ...` directly"))
+    Continue(render_error("repl manages its module header automatically; use `import ...` directly"), imports, declarations)
   else if string.starts_with(line, ":type ") then
-    handle_type_command(line, ":type ")
+    handle_type_command(line, ":type ", imports, declarations)
   else if string.starts_with(line, ":t ") then
-    handle_type_command(line, ":t ")
+    handle_type_command(line, ":t ", imports, declarations)
   else if string.starts_with(line, ":instances ") then
-    handle_instances_command(line, ":instances ")
+    handle_instances_command(line, ":instances ", imports, declarations)
   else if string.starts_with(line, ":i ") then
-    handle_instances_command(line, ":i ")
+    handle_instances_command(line, ":i ", imports, declarations)
   else if string.starts_with(line, "import ") then
-    Just(render_unit_result(repl_add_import(line)))
+    match repl_add_import(line) with
+    | Ok _ -> Continue(single_line("ok"), vec_append(line, imports), declarations)
+    | Err message -> Continue(render_error(message), imports, declarations)
   else if is_declaration(line) then
-    Just(render_unit_result(repl_add_declaration(line)))
+    match repl_add_declaration(line) with
+    | Ok _ -> Continue(single_line("ok"), imports, vec_append(line, declarations))
+    | Err message -> Continue(render_error(message), imports, declarations)
   else
-    Just(render_expr_result(repl_eval_expr(line)))
+    Continue(render_expr_result(repl_eval_expr(line)), imports, declarations)
 
-fn handle_submission(raw: String) -> Maybe (Vec String) !{IO} =
-  handle_trimmed_submission(trim(raw))
+fn handle_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  handle_trimmed_submission(trim(raw), imports, declarations)
 
 fn push_history(history: Vec String, raw: String) -> Vec String =
   if trim(raw) == "" then history
   else vec_append(raw, history)
 
-fn continue_loop(result: Maybe (Vec String), prompt: Maybe String, history: Vec String) -> Unit !{IO} =
+fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec String) -> Unit !{IO} =
   match result with
-  | Just lines -> then_io(render_lines(prompt, lines, 0), repl_loop(prompt, history))
-  | Nothing -> finish_loop(prompt)
+  | Continue lines next_imports next_declarations ->
+      then_io(render_lines(prompt, lines, 0), repl_loop(prompt, history, next_imports, next_declarations))
+  | Exit -> finish_loop(prompt)
 
-export fn repl_loop(prompt: Maybe String, history: Vec String) -> Unit !{IO} =
+export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
   match read_submission(prompt, history) with
-  | Just line -> continue_loop(handle_submission(line), prompt, push_history(history, line))
+  | Just line -> continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
   | Nothing -> finish_loop(prompt)
 
 export fn main() -> Unit !{IO} =
   then_io(
     repl_reset_session(),
     if term_is_interactive_once()
-    then then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> "), vec_empty()))
-    else repl_loop(Nothing, vec_empty())
+    then then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> "), vec_empty(), vec_empty(), vec_empty()))
+    else repl_loop(Nothing, vec_empty(), vec_empty(), vec_empty())
   )

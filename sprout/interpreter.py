@@ -1210,6 +1210,15 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(lambda: hosted_repl_session().infer_type(source))
 
+    def builtin_repl_type_of_in_source(args: list[object]) -> object:
+        module_source = args[0]
+        expr = args[1]
+        if not isinstance(module_source, str) or not isinstance(expr, str):
+            raise RuntimeError("repl_type_of_in_source expects String module source and String expression")
+        from .repl_host import infer_type_in_source
+
+        return _repl_wrap(lambda: infer_type_in_source(module_source, expr))
+
     def builtin_repl_instances(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
@@ -1496,6 +1505,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     )
     env.set("repl_eval_expr", BuiltinFunction(name="repl_eval_expr", arity=1, fn=builtin_repl_eval_expr))
     env.set("repl_type_of", BuiltinFunction(name="repl_type_of", arity=1, fn=builtin_repl_type_of))
+    env.set("repl_type_of_in_source", BuiltinFunction(name="repl_type_of_in_source", arity=2, fn=builtin_repl_type_of_in_source))
     env.set("repl_instances", BuiltinFunction(name="repl_instances", arity=1, fn=builtin_repl_instances))
     env.set("repl_complete", BuiltinFunction(name="repl_complete", arity=1, fn=builtin_repl_complete))
     env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))

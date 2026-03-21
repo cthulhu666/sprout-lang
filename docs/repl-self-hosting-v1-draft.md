@@ -70,6 +70,7 @@ repl_add_import(source: String) -> Result String Unit !{IO}
 repl_add_declaration(source: String) -> Result String Unit !{IO}
 repl_eval_expr(source: String) -> Result String (Vec String) !{IO}
 repl_type_of(source: String) -> Result String String !{IO}
+repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}
 repl_instances(source: String) -> Result String (String, Vec String) !{IO}
 repl_complete(line_buffer: String) -> (String, Vec String) !{IO}
 repl_reset_session() -> Unit !{IO}
@@ -77,7 +78,9 @@ repl_reset_session() -> Unit !{IO}
 
 Those hooks are useful for bootstrapping, but they encode full REPL policy in
 the host runtime. They are too high-level to support a real Sprout-owned
-session engine.
+session engine. `repl_type_of_in_source(...)` is a first step toward the
+intended v1 direction because it operates on an explicit source snapshot rather
+than implicit host-owned REPL state.
 
 ## 6. Proposed v1 Direction
 
