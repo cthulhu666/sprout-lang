@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import atexit
 from dataclasses import dataclass, field
+import io
 import os
 import re
 from pathlib import Path
 import sys
 import tempfile
+from typing import TextIO
 
 from . import ast
 from .interpreter import RuntimeError, run_program
@@ -232,7 +234,7 @@ class ReplSession:
     def completion_matches(self, text: str, line_buffer: str) -> list[str]:
         return _repl_completion_matches(text, line_buffer, self.imports, self.declarations)
 
-    def run_expression(self, source: str) -> None:
+    def run_expression(self, source: str, stdout: TextIO | None = None) -> None:
         name = self._next_temp_name()
         _, types = self._parse_and_check([f"let {name} = {source}"])
         inferred_type = _repl_lookup_type(types, name)
@@ -245,9 +247,9 @@ class ReplSession:
         tree, _ = self._parse_and_check([f"let {name} = {source}", f"fn main() -> Unit !{{IO}} = {main_body}"])
         lowered = lower_typeclasses(tree)
         typecheck_program(lowered)
-        run_program(lowered)
+        run_program(lowered, stdout=stdout)
 
-    def submit(self, source: str) -> ReplOutcome:
+    def submit(self, source: str, stdout: TextIO | None = None) -> ReplOutcome:
         command = _repl_parse_command(source)
         if isinstance(command, str):
             if command == "quit":
@@ -255,7 +257,7 @@ class ReplSession:
             if command == "help":
                 return ReplOutcome((_REPL_HELP_TEXT,))
             raise ValueError(f"Unknown REPL command kind {command!r}")
-        return _repl_run_submission(self, command)
+        return _repl_run_submission(self, command, stdout=stdout)
 
 
 @dataclass(frozen=True)
@@ -277,8 +279,9 @@ class ReplDriver:
     banner: str = _REPL_BANNER
 
     def handle_line(self, source: str) -> ReplOutcome:
+        capture = io.StringIO()
         try:
-            return self.session.submit(source)
+            outcome = self.session.submit(source, stdout=capture)
         except (
             ParseError,
             TokenizeError,
@@ -288,7 +291,12 @@ class ReplDriver:
             SurfaceCheckError,
             TypeclassLoweringError,
         ) as exc:
-            return ReplOutcome((f"error: {exc}",))
+            captured = tuple(capture.getvalue().splitlines())
+            return ReplOutcome((*captured, f"error: {exc}"))
+        captured = tuple(capture.getvalue().splitlines())
+        if not captured:
+            return outcome
+        return ReplOutcome((*outcome.lines, *captured), should_exit=outcome.should_exit)
 
 
 def _repl_is_declaration(source: str) -> bool:
@@ -492,7 +500,11 @@ def _configure_repl_readline(
     atexit.register(_write_history)
 
 
-def _repl_run_submission(session: ReplSession, submission: _ReplSubmission) -> ReplOutcome:
+def _repl_run_submission(
+    session: ReplSession,
+    submission: _ReplSubmission,
+    stdout: TextIO | None = None,
+) -> ReplOutcome:
     match submission.kind:
         case "empty":
             return ReplOutcome()
@@ -516,7 +528,7 @@ def _repl_run_submission(session: ReplSession, submission: _ReplSubmission) -> R
             session.add_declaration(submission.value)
             return ReplOutcome(("ok",))
         case "expression":
-            session.run_expression(submission.value)
+            session.run_expression(submission.value, stdout=stdout)
             return ReplOutcome()
         case _:
             raise ValueError(f"Unknown REPL submission kind {submission.kind!r}")

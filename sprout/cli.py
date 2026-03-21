@@ -962,6 +962,15 @@ long long term_read_line(void) {
   }
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)line);
 }
+long long repl_submit_line(const char* source) {
+  (void)source;
+  tcp_fail("repl_submit_line: not supported in native backend");
+  return 0;
+}
+long long repl_reset_session(void) {
+  tcp_fail("repl_reset_session: not supported in native backend");
+  return 0;
+}
 long long read_int_lines(const char* path) {
   if (path == NULL) tcp_fail("read_int_lines: null path");
   FILE* f = fopen(path, "r");

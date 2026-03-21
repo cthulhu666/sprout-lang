@@ -124,6 +124,13 @@ Runtime builtins (host-implemented):
 - `term_read_line() -> Maybe String !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF)
 - `term_write(text: String) -> Unit !{IO}`
 
+Experimental host-REPL builtins:
+
+- `repl_submit_line(source: String) -> Maybe (Vector String) !{IO}`
+- `repl_reset_session() -> Unit !{IO}`
+
+These are implementation hooks for a future Sprout-hosted REPL frontend. They are currently interpreter-backed; native compiled programs currently report a runtime error if they call them.
+
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 
 Pure value transforms and runtime-backed persistent data helpers:

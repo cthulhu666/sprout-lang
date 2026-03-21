@@ -209,6 +209,8 @@ class TypecheckerTests(unittest.TestCase):
             "crypto_random_bytes": "Int -> Result stdlib.crypto.CryptoError Bytes !{IO}",
             "term_read_key": "String !{IO}",
             "term_read_line": "Maybe String !{IO}",
+            "repl_submit_line": "String -> Maybe Vector String !{IO}",
+            "repl_reset_session": "Unit !{IO}",
         }
         for name, expected_type in expected.items():
             self.assertEqual(types[name], expected_type, msg=name)
@@ -563,6 +565,8 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("term_move", types)
         self.assertIn("term_read_key", types)
         self.assertIn("term_read_line", types)
+        self.assertIn("repl_submit_line", types)
+        self.assertIn("repl_reset_session", types)
 
     def test_typecheck_vector_builtins(self) -> None:
         src = """

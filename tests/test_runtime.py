@@ -790,6 +790,56 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "eof")
 
+    def test_repl_submit_line_builtin_tracks_session_and_captures_expression_output(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+
+        fn first_or(lines: Vector String, fallback: String) -> String =
+          match vector_get(lines, 0) with
+          | Just text -> text
+          | Nothing -> fallback
+
+        fn render_submission(source: String) -> String !{IO} =
+          match repl_submit_line(source) with
+          | Just lines -> first_or(lines, "<empty>")
+          | Nothing -> "<exit>"
+
+        fn main() -> Unit !{IO} =
+          seq(
+            repl_reset_session(),
+            seq(
+              print(render_submission("1 + 1")),
+              seq(
+                print(render_submission("let answer = 41")),
+                seq(
+                  print(render_submission(":type answer")),
+                  seq(
+                    repl_reset_session(),
+                    seq(
+                      print(render_submission(":type answer")),
+                      print(render_submission(":quit"))
+                    )
+                  )
+                )
+              )
+            )
+          )
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], "2")
+        self.assertEqual(lines[1], "ok")
+        self.assertEqual(lines[2], "Int")
+        self.assertTrue(lines[3].startswith("error: "))
+        self.assertEqual(lines[4], "<exit>")
+
     def test_vector_builtins(self) -> None:
         src = """
         type Maybe a =

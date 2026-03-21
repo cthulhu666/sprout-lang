@@ -53,6 +53,13 @@ Today the REPL behaves like a synthetic module-backed session with:
 This is already closer to the desired long-term surface than the earlier split
 between “plain REPL” and “REPL with preloaded stdlib mode”.
 
+Current experimental runtime progress:
+
+1. `term_read_line()` now provides line-oriented stdin input.
+2. `repl_submit_line(...)` and `repl_reset_session()` expose the hosted REPL
+   session through an experimental interpreter-backed bridge.
+3. Native compiled programs do not support that session bridge yet.
+
 ## Target Architecture
 
 ### 1. Session Engine

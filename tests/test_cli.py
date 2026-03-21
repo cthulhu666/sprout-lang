@@ -268,6 +268,13 @@ class CliTests(unittest.TestCase):
         self.assertEqual(len(outcome.lines), 1)
         self.assertTrue(outcome.lines[0].startswith("error: "))
 
+    def test_repl_driver_captures_expression_output_as_lines(self) -> None:
+        from sprout.repl import ReplDriver
+
+        driver = ReplDriver()
+
+        self.assertEqual(driver.handle_line("1 + 1").lines, ("2",))
+
     def test_repl_imports_and_prelude_append_work_together(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],

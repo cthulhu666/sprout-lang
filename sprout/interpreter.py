@@ -477,6 +477,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     out = stdout
     program_argv = [] if argv is None else argv
     env = Env()
+    repl_driver: object | None = None
     echo_backend = _build_echo_backend()
     listeners: dict[int, socket.socket] = {}
     connections: dict[int, socket.socket] = {}
@@ -1107,6 +1108,25 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             line = line[:-1]
         return ADTValue(constructor="Just", args=(line,))
 
+    def builtin_repl_submit_line(args: list[object]) -> object:
+        nonlocal repl_driver
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("repl_submit_line expects String")
+        if repl_driver is None:
+            from .repl import ReplDriver
+
+            repl_driver = ReplDriver()
+        outcome = repl_driver.handle_line(source)
+        if outcome.should_exit:
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(VectorValue(items=tuple(outcome.lines)),))
+
+    def builtin_repl_reset_session(args: list[object]) -> object:
+        nonlocal repl_driver
+        repl_driver = None
+        return None
+
     def builtin_term_write(args: list[object]) -> object:
         text = args[0]
         if not isinstance(text, str):
@@ -1358,6 +1378,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("term_show_cursor", BuiltinFunction(name="term_show_cursor", arity=0, fn=builtin_term_show_cursor))
     env.set("term_read_key", BuiltinFunction(name="term_read_key", arity=0, fn=builtin_term_read_key))
     env.set("term_read_line", BuiltinFunction(name="term_read_line", arity=0, fn=builtin_term_read_line))
+    env.set("repl_submit_line", BuiltinFunction(name="repl_submit_line", arity=1, fn=builtin_repl_submit_line))
+    env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))
     env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))
     env.set("tcp_accept", BuiltinFunction(name="tcp_accept", arity=1, fn=builtin_tcp_accept))
