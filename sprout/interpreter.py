@@ -1101,6 +1101,21 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         return None
 
     def builtin_term_read_key(args: list[object]) -> object:
+        def _normalize_key(ch: str) -> str:
+            if ch == "":
+                return ""
+            if ch == "\x04":
+                return "ctrl-d"
+            if ch in {"\x7f", "\b"}:
+                return "backspace"
+            if ch == "\x1b":
+                return "escape"
+            if ch in {"\n", "\r"}:
+                return "enter"
+            if ch == "\t":
+                return "tab"
+            return ch
+
         interactive_term = getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()
         if interactive_term:
             try:
@@ -1114,13 +1129,11 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                     ch = sys.stdin.read(1)
                 finally:
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                return ch
+                return _normalize_key(ch)
             except (ImportError, OSError, AttributeError):
                 pass
         ch = sys.stdin.read(1)
-        if ch == "":
-            return ""
-        return ch
+        return _normalize_key(ch)
 
     def builtin_term_read_line(args: list[object]) -> object:
         interactive_term = getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()

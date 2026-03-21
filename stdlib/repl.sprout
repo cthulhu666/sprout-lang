@@ -46,7 +46,10 @@ fn drop_last(raw: String) -> String =
   else string.slice(raw, 0, string.length(raw) - 1)
 
 fn redraw_input(prompt: String, current: String) -> Unit !{IO} =
-  term_write("\r\x1b[2K" ++ prompt ++ current)
+  keep_after(
+    term_write("\r" ++ prompt ++ current ++ " "),
+    term_write("\r" ++ prompt ++ current)
+  )
 
 fn ignore_key(value: String !{IO}) -> Unit !{IO} =
   term_noop()
@@ -60,13 +63,13 @@ fn ignore_escape_sequence() -> Unit !{IO} =
 
 fn interactive_read_line_step(prompt: String, current: String, key: String) -> Maybe String !{IO} =
   if key == "" then Nothing
-  else if key == "\x04" then if current == "" then keep_after(print(""), Nothing) else interactive_read_line_loop(prompt, current)
-  else if key == "\n" || key == "\r" then keep_after(print(""), Just(current))
-  else if key == "\x7f" || key == "\b" then
+  else if key == "ctrl-d" then if current == "" then keep_after(print(""), Nothing) else interactive_read_line_loop(prompt, current)
+  else if key == "enter" then keep_after(print(""), Just(current))
+  else if key == "backspace" then
     keep_after(redraw_input(prompt, drop_last(current)), interactive_read_line_loop(prompt, drop_last(current)))
-  else if key == "\x1b" then
+  else if key == "escape" then
     keep_after(ignore_escape_sequence(), interactive_read_line_loop(prompt, current))
-  else if key == "\t" then
+  else if key == "tab" then
     interactive_read_line_loop(prompt, current)
   else
     keep_after(redraw_input(prompt, current ++ key), interactive_read_line_loop(prompt, current ++ key))

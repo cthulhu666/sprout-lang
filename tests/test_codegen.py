@@ -1277,6 +1277,10 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.stdout.strip(), "j")
             self.assertEqual(run.returncode, 0)
 
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="\x04")
+            self.assertEqual(run.stdout.strip(), "ctrl-d")
+            self.assertEqual(run.returncode, 0)
+
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_term_read_line_builtin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

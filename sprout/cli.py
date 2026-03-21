@@ -985,36 +985,42 @@ long long term_show_cursor(void) {
 }
 const char* term_read_key(void) {
   static char buf[2] = {0, 0};
+  static const char* token_ctrl_d = "ctrl-d";
+  static const char* token_backspace = "backspace";
+  static const char* token_escape = "escape";
+  static const char* token_enter = "enter";
+  static const char* token_tab = "tab";
   buf[0] = '\\0';
   buf[1] = '\\0';
+  int ch = EOF;
   if (!isatty(STDIN_FILENO)) {
-    int ch = getchar();
-    if (ch == EOF) return buf;
-    buf[0] = (char)ch;
-    return buf;
+    ch = getchar();
+  } else {
+    struct termios oldt;
+    if (tcgetattr(STDIN_FILENO, &oldt) != 0) {
+      ch = getchar();
+    } else {
+      struct termios raw = oldt;
+      raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+      raw.c_cc[VMIN] = 1;
+      raw.c_cc[VTIME] = 0;
+      if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+        ch = getchar();
+      } else {
+        char byte = '\\0';
+        ssize_t count = read(STDIN_FILENO, &byte, 1);
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        if (count > 0) ch = (unsigned char)byte;
+      }
+    }
   }
-  struct termios oldt;
-  if (tcgetattr(STDIN_FILENO, &oldt) != 0) {
-    int ch = getchar();
-    if (ch == EOF) return buf;
-    buf[0] = (char)ch;
-    return buf;
-  }
-  struct termios raw = oldt;
-  raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-  raw.c_cc[VMIN] = 1;
-  raw.c_cc[VTIME] = 0;
-  if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
-    int ch = getchar();
-    if (ch == EOF) return buf;
-    buf[0] = (char)ch;
-    return buf;
-  }
-  char ch = '\\0';
-  ssize_t count = read(STDIN_FILENO, &ch, 1);
-  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-  if (count <= 0) return buf;
-  buf[0] = ch;
+  if (ch == EOF) return buf;
+  if (ch == 4) return token_ctrl_d;
+  if (ch == 8 || ch == 127) return token_backspace;
+  if (ch == 27) return token_escape;
+  if (ch == '\\n' || ch == '\\r') return token_enter;
+  if (ch == '\\t') return token_tab;
+  buf[0] = (char)ch;
   return buf;
 }
 long long term_write(const char* text) {
