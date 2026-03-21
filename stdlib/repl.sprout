@@ -7,14 +7,19 @@ fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 fn term_noop() -> Unit !{IO} =
   term_write("")
 
+fn write_line(prompt: Maybe String, text: String) -> Unit !{IO} =
+  match prompt with
+  | Just _ -> term_write(text ++ "\r\n")
+  | Nothing -> print(text)
+
 fn finish_loop(prompt: Maybe String) -> Unit !{IO} =
   match prompt with
-  | Just _ -> print("")
+  | Just _ -> term_write("\r\n")
   | Nothing -> term_noop()
 
-fn render_lines(lines: Vec String, index: Int) -> Unit !{IO} =
+fn render_lines(prompt: Maybe String, lines: Vec String, index: Int) -> Unit !{IO} =
   match vec_get(index, lines) with
-  | Just line -> then_io(print(line), render_lines(lines, index + 1))
+  | Just line -> then_io(write_line(prompt, line), render_lines(prompt, lines, index + 1))
   | Nothing -> term_noop()
 
 fn single_line(text: String) -> Vec String =
@@ -63,8 +68,8 @@ fn ignore_escape_sequence() -> Unit !{IO} =
 
 fn interactive_read_line_step(prompt: String, current: String, key: String) -> Maybe String !{IO} =
   if key == "" then Nothing
-  else if key == "ctrl-d" then if current == "" then keep_after(print(""), Nothing) else interactive_read_line_loop(prompt, current)
-  else if key == "enter" then keep_after(print(""), Just(current))
+  else if key == "ctrl-d" then if current == "" then keep_after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, current)
+  else if key == "enter" then keep_after(term_write("\r\n"), Just(current))
   else if key == "backspace" then
     keep_after(redraw_input(prompt, drop_last(current)), interactive_read_line_loop(prompt, drop_last(current)))
   else if key == "escape" then
@@ -157,7 +162,7 @@ fn handle_submission(raw: String) -> Maybe (Vec String) !{IO} =
 
 fn continue_loop(result: Maybe (Vec String), prompt: Maybe String) -> Unit !{IO} =
   match result with
-  | Just lines -> then_io(render_lines(lines, 0), repl_loop(prompt))
+  | Just lines -> then_io(render_lines(prompt, lines, 0), repl_loop(prompt))
   | Nothing -> finish_loop(prompt)
 
 export fn repl_loop(prompt: Maybe String) -> Unit !{IO} =
@@ -169,6 +174,6 @@ export fn main() -> Unit !{IO} =
   then_io(
     repl_reset_session(),
     match env_get("SPROUT_REPL_INTERACTIVE") with
-    | Just _ -> then_io(print("Sprout REPL. Use :help for commands."), repl_loop(Just("sprout> ")))
+    | Just _ -> then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> ")))
     | Nothing -> repl_loop(Nothing)
   )
