@@ -1,22 +1,29 @@
 from __future__ import annotations
 
+import atexit
 from dataclasses import dataclass, field
+import os
 import re
 from pathlib import Path
+import sys
 import tempfile
 
 from . import ast
-from .interpreter import run_program
-from .module_loader import load_module_bundle, resolve_program_names
-from .parser import parse
-from .surface_checks import validate_public_surface
+from .interpreter import RuntimeError, run_program
+from .module_loader import ModuleLoadError, load_module_bundle, resolve_program_names
+from .parser import ParseError, parse
+from .surface_checks import SurfaceCheckError, validate_public_surface
+from .tokenizer import TokenizeError
 from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_program, unify
 
 __all__ = [
+    "cmd_repl",
     "ReplSession",
     "ReplSubmission",
     "ReplOutcome",
+    "repl_history_path",
+    "repl_readline_tab_binding",
     "lookup_type",
     "parse_submission",
     "parse_command",
@@ -104,6 +111,8 @@ _REPL_STDLIB_EXTRA_NAMES = frozenset(
     }
 )
 _REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
+_REPL_HISTORY_LIMIT = 1000
+_REPL_COMPLETER_DELIMS = " \t\n`~!@#$%^&*()-=+[{]}\\|;,'\"<>/?"
 _REPL_MODULE_NAME = "app.repl"
 
 
@@ -350,6 +359,13 @@ def _type_expr_matches_query(pattern: ast.TypeExpr, query: ast.TypeExpr) -> bool
     return False
 
 
+def _repl_history_path() -> Path:
+    override = os.environ.get("SPROUT_REPL_HISTORY")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".sprout_repl_history"
+
+
 def _repl_declared_names(declarations: list[str]) -> set[str]:
     names: set[str] = set()
     for source in declarations:
@@ -402,6 +418,52 @@ def _repl_completion_matches(
     return sorted(name for name in names if name.startswith(prefix))
 
 
+def _repl_readline_tab_binding(readline_module: object) -> str:
+    doc = getattr(readline_module, "__doc__", "") or ""
+    if "libedit" in doc.lower():
+        return "bind ^I rl_complete"
+    return "tab: complete"
+
+
+def _configure_repl_readline(
+    session: _ReplSession,
+    history_path: Path | None = None,
+) -> None:
+    try:
+        import readline
+    except ImportError:
+        return
+
+    target = history_path if history_path is not None else _repl_history_path()
+    readline.parse_and_bind(_repl_readline_tab_binding(readline))
+    readline.parse_and_bind("set editing-mode emacs")
+    if hasattr(readline, "set_completer_delims"):
+        readline.set_completer_delims(_REPL_COMPLETER_DELIMS)
+    readline.set_history_length(_REPL_HISTORY_LIMIT)
+
+    def _complete(text: str, state: int) -> str | None:
+        matches = session.completion_matches(text, readline.get_line_buffer())
+        if state < len(matches):
+            return matches[state]
+        return None
+
+    readline.set_completer(_complete)
+    if target.exists():
+        try:
+            readline.read_history_file(target)
+        except OSError:
+            pass
+
+    def _write_history() -> None:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            readline.write_history_file(target)
+        except OSError:
+            pass
+
+    atexit.register(_write_history)
+
+
 def _repl_run_submission(session: _ReplSession, submission: _ReplSubmission) -> _ReplOutcome:
     match submission.kind:
         case "empty":
@@ -432,6 +494,67 @@ def _repl_run_submission(session: _ReplSession, submission: _ReplSubmission) -> 
             raise ValueError(f"Unknown REPL submission kind {submission.kind!r}")
 
 
+def cmd_repl() -> int:
+    session = _ReplSession()
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+
+    def emit(text: str) -> None:
+        print(text)
+
+    def process_submission(source: str) -> None:
+        if isinstance((command := _repl_parse_command(source)), str):
+            if command == "quit":
+                raise EOFError
+            if command == "help":
+                emit("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines")
+                return
+            raise ValueError(f"Unknown REPL command kind {command!r}")
+        for line in _repl_run_submission(session, command).lines:
+            emit(line)
+
+    if interactive:
+        _configure_repl_readline(session)
+        emit("Sprout REPL. Use :help for commands.")
+        while True:
+            try:
+                line = input("sprout> ")
+            except EOFError:
+                emit("")
+                break
+            try:
+                process_submission(line)
+            except EOFError:
+                break
+            except (
+                ParseError,
+                TokenizeError,
+                TypeCheckError,
+                RuntimeError,
+                ModuleLoadError,
+                SurfaceCheckError,
+                TypeclassLoweringError,
+            ) as exc:
+                emit(f"error: {exc}")
+        return 0
+
+    for raw in sys.stdin:
+        try:
+            process_submission(raw.rstrip("\n"))
+        except EOFError:
+            break
+        except (
+            ParseError,
+            TokenizeError,
+            TypeCheckError,
+            RuntimeError,
+            ModuleLoadError,
+            SurfaceCheckError,
+            TypeclassLoweringError,
+        ) as exc:
+            emit(f"error: {exc}")
+    return 0
+
+
 ReplSession = _ReplSession
 ReplSubmission = _ReplSubmission
 ReplOutcome = _ReplOutcome
@@ -442,3 +565,5 @@ run_submission = _repl_run_submission
 declared_names = _repl_declared_names
 imported_names = _repl_imported_names
 completion_matches = _repl_completion_matches
+repl_history_path = _repl_history_path
+repl_readline_tab_binding = _repl_readline_tab_binding
