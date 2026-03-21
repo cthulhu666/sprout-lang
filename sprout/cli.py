@@ -2793,22 +2793,56 @@ class _ReplSession:
     declarations: list[str] = field(default_factory=list)
     repl_counter: int = 0
 
+    def _compose_source(
+        self,
+        tail: list[str] | None = None,
+        *,
+        imports: list[str] | None = None,
+        declarations: list[str] | None = None,
+    ) -> str:
+        session_imports = self.imports if imports is None else imports
+        session_declarations = self.declarations if declarations is None else declarations
+        chunks = [f"module {_REPL_MODULE_NAME}"]
+        chunks.extend(imp for imp in session_imports if imp.strip())
+        chunks.extend(chunk for chunk in session_declarations + (tail or []) if chunk.strip())
+        return "\n\n".join(chunks)
+
+    def _parse_and_check(
+        self,
+        tail: list[str] | None = None,
+        *,
+        imports: list[str] | None = None,
+        declarations: list[str] | None = None,
+    ) -> tuple[object, dict[str, str]]:
+        source = self._compose_source(tail, imports=imports, declarations=declarations)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_path = Path(tmpdir) / "repl_session.sprout"
+            temp_path.write_text(source, encoding="utf-8")
+            bundle = load_module_bundle(temp_path)
+            tree = parse(bundle.source)
+            resolve_program_names(tree, bundle)
+            validate_public_surface(tree, bundle)
+            types = typecheck_program(tree)
+            return tree, types
+
+    def parse_and_check(self, tail: list[str] | None = None) -> tuple[object, dict[str, str]]:
+        return self._parse_and_check(tail)
+
+    def _next_temp_name(self) -> str:
+        self.repl_counter += 1
+        return f"__repl_value_{self.repl_counter}"
+
     def add_import(self, source: str) -> None:
-        _repl_parse_and_check(self.imports + [source], self.declarations)
+        self._parse_and_check(imports=self.imports + [source])
         self.imports.append(source)
 
     def add_declaration(self, source: str) -> None:
-        _repl_parse_and_check(self.imports, self.declarations + [source])
+        self._parse_and_check(declarations=self.declarations + [source])
         self.declarations.append(source)
 
     def infer_type(self, expr: str) -> str:
-        self.repl_counter += 1
-        name = f"__repl_value_{self.repl_counter}"
-        _, types = _repl_parse_and_check(
-            self.imports,
-            self.declarations,
-            [f"let {name} = {expr}"],
-        )
+        name = self._next_temp_name()
+        _, types = self._parse_and_check([f"let {name} = {expr}"])
         return _repl_lookup_type(types, name)
 
     def instances_for_type(self, type_expr_source: str) -> tuple[str, list[str]]:
@@ -2818,13 +2852,8 @@ class _ReplSession:
         return _repl_completion_matches(text, line_buffer, self.imports, self.declarations)
 
     def run_expression(self, source: str) -> None:
-        self.repl_counter += 1
-        name = f"__repl_value_{self.repl_counter}"
-        _, types = _repl_parse_and_check(
-            self.imports,
-            self.declarations,
-            [f"let {name} = {source}"],
-        )
+        name = self._next_temp_name()
+        _, types = self._parse_and_check([f"let {name} = {source}"])
         inferred_type = _repl_lookup_type(types, name)
         if inferred_type.endswith(" !{IO}"):
             if inferred_type != "Unit !{IO}":
@@ -2832,11 +2861,7 @@ class _ReplSession:
             main_body = name
         else:
             main_body = f"print({name})"
-        tree, _ = _repl_parse_and_check(
-            self.imports,
-            self.declarations,
-            [f"let {name} = {source}", f"fn main() -> Unit !{{IO}} = {main_body}"],
-        )
+        tree, _ = self._parse_and_check([f"let {name} = {source}", f"fn main() -> Unit !{{IO}} = {main_body}"])
         lowered = lower_typeclasses(tree)
         typecheck_program(lowered)
         run_program(lowered)

@@ -225,16 +225,18 @@ class CliTests(unittest.TestCase):
         self.assertIn("does not export value 'Monoid'", run.stdout)
 
     def test_repl_session_tracks_imports_and_declarations(self) -> None:
-        from sprout.cli import _ReplSession, _repl_parse_submission
+        from sprout.cli import _ReplSession, _repl_lookup_type, _repl_parse_submission
 
         session = _ReplSession()
         session.add_import("import stdlib.http")
         session.add_declaration("let answer = 41")
+        _, types = session.parse_and_check(["let temp = answer + 1"])
 
         self.assertEqual(session.imports, ["import stdlib.http"])
         self.assertEqual(session.declarations, ["let answer = 41"])
         self.assertEqual(session.infer_type("answer + 1"), "Int")
         self.assertEqual(session.infer_type("http.http_ok(\"x\")"), "String")
+        self.assertEqual(_repl_lookup_type(types, "temp"), "Int")
         self.assertIn("http", session.completion_matches("htt", "htt"))
         self.assertIn("answer", session.completion_matches("ans", "ans"))
         self.assertEqual(_repl_parse_submission(""), _repl_parse_submission("   "))
