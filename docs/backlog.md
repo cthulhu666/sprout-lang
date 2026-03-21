@@ -16,6 +16,9 @@ This file tracks open design, implementation, and tooling follow-up work.
    Completed groundwork: allocation visibility, centralized managed allocation for Sprout values, heap metadata hooks, and an initial non-moving stop-the-world mark-sweep collector with default threshold-triggered in-process collection in the native profile.
    Remaining v1 scope: close the remaining path-specific live-value gaps outside the current shadow-root coverage, tune the current default threshold (`1024` managed nodes) with more measurements, and keep expanding reclamation-focused validation.
    V2 direction: pause/throughput improvements only after v1 is measured, likely via incremental or generational follow-up work if justified.
+7. Normalize the REPL around a future native implementation.
+   Design doc: [native-repl-roadmap.md](./native-repl-roadmap.md).
+   Near-term scope: keep one REPL session model, extract session logic from CLI policy, identify missing runtime hooks, and stage a minimal Sprout-hosted REPL app before attempting full terminal polish.
 
 ## V1 Roadmap Candidates
 

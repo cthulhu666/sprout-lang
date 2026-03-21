@@ -20,6 +20,7 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 - [Effect System v0 Plan](./docs/effect-system-v0-plan.md)
 - [Effect System v1 Draft](./docs/effect-system-v1-draft.md)
 - [Int Ranges v1 Draft](./docs/int-ranges-v1-draft.md)
+- [Native REPL Roadmap](./docs/native-repl-roadmap.md)
 - [Sequencing Sugar v1 Draft](./docs/sequencing-sugar-v1-draft.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 - [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)
