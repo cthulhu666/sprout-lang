@@ -225,9 +225,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("does not export value 'Monoid'", run.stdout)
 
     def test_repl_session_tracks_imports_and_declarations(self) -> None:
-        from sprout.repl import _ReplSession, _repl_lookup_type, _repl_parse_submission, _repl_run_submission
+        from sprout.repl import ReplSession, lookup_type, parse_submission, run_submission
 
-        session = _ReplSession()
+        session = ReplSession()
         session.add_import("import stdlib.http")
         session.add_declaration("let answer = 41")
         _, types = session.parse_and_check(["let temp = answer + 1"])
@@ -236,18 +236,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(session.declarations, ["let answer = 41"])
         self.assertEqual(session.infer_type("answer + 1"), "Int")
         self.assertEqual(session.infer_type("http.http_ok(\"x\")"), "String")
-        self.assertEqual(_repl_lookup_type(types, "temp"), "Int")
+        self.assertEqual(lookup_type(types, "temp"), "Int")
         self.assertIn("http", session.completion_matches("htt", "htt"))
         self.assertIn("answer", session.completion_matches("ans", "ans"))
-        self.assertEqual(_repl_parse_submission(""), _repl_parse_submission("   "))
-        self.assertEqual(_repl_parse_submission("import stdlib.http").kind, "import")
-        self.assertEqual(_repl_parse_submission("let z = 1").kind, "declaration")
-        self.assertEqual(_repl_parse_submission(":type z").kind, "type")
-        self.assertEqual(_repl_parse_submission(":instances Int").kind, "instances")
-        self.assertEqual(_repl_parse_submission("module app.main").kind, "module")
-        self.assertEqual(_repl_parse_submission("z + 1").kind, "expression")
-        self.assertEqual(_repl_run_submission(session, _repl_parse_submission("let x = 1")).lines, ("ok",))
-        self.assertEqual(_repl_run_submission(session, _repl_parse_submission(":type answer")).lines, ("Int",))
+        self.assertEqual(parse_submission(""), parse_submission("   "))
+        self.assertEqual(parse_submission("import stdlib.http").kind, "import")
+        self.assertEqual(parse_submission("let z = 1").kind, "declaration")
+        self.assertEqual(parse_submission(":type z").kind, "type")
+        self.assertEqual(parse_submission(":instances Int").kind, "instances")
+        self.assertEqual(parse_submission("module app.main").kind, "module")
+        self.assertEqual(parse_submission("z + 1").kind, "expression")
+        self.assertEqual(run_submission(session, parse_submission("let x = 1")).lines, ("ok",))
+        self.assertEqual(run_submission(session, parse_submission(":type answer")).lines, ("Int",))
 
     def test_repl_imports_and_prelude_append_work_together(self) -> None:
         run = subprocess.run(
@@ -268,9 +268,9 @@ class CliTests(unittest.TestCase):
             old_home = os.environ.get("HOME")
             os.environ["HOME"] = tmp
             try:
-                from sprout.repl import _repl_history_path
+                from sprout.repl import repl_history_path
 
-                self.assertEqual(_repl_history_path(), Path(tmp) / ".sprout_repl_history")
+                self.assertEqual(repl_history_path(), Path(tmp) / ".sprout_repl_history")
             finally:
                 if old_home is None:
                     os.environ.pop("HOME", None)
@@ -283,9 +283,9 @@ class CliTests(unittest.TestCase):
             old_value = os.environ.get("SPROUT_REPL_HISTORY")
             os.environ["SPROUT_REPL_HISTORY"] = override
             try:
-                from sprout.repl import _repl_history_path
+                from sprout.repl import repl_history_path
 
-                self.assertEqual(_repl_history_path(), Path(override))
+                self.assertEqual(repl_history_path(), Path(override))
             finally:
                 if old_value is None:
                     os.environ.pop("SPROUT_REPL_HISTORY", None)
@@ -293,9 +293,9 @@ class CliTests(unittest.TestCase):
                     os.environ["SPROUT_REPL_HISTORY"] = old_value
 
     def test_repl_declared_names_include_declared_symbols(self) -> None:
-        from sprout.repl import _repl_declared_names
+        from sprout.repl import declared_names
 
-        names = _repl_declared_names(
+        names = declared_names(
             [
                 "let answer = 42",
                 "fn double(x: Int) -> Int = x + x",
@@ -314,16 +314,16 @@ class CliTests(unittest.TestCase):
         self.assertIn("render", names)
 
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
-        from sprout.repl import _repl_completion_matches
+        from sprout.repl import completion_matches
 
-        self.assertEqual(_repl_completion_matches(":t", ":t", [], []), [":t", ":type"])
-        matches = _repl_completion_matches("sp", "sp", [], [])
+        self.assertEqual(completion_matches(":t", ":t", [], []), [":t", ":type"])
+        matches = completion_matches("sp", "sp", [], [])
         self.assertIn("split_ints", matches)
 
     def test_repl_completion_matches_declared_names(self) -> None:
-        from sprout.repl import _repl_completion_matches
+        from sprout.repl import completion_matches
 
-        matches = _repl_completion_matches(
+        matches = completion_matches(
             "ans",
             "ans",
             [],
@@ -334,23 +334,23 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("annotate", matches)
 
     def test_repl_completion_matches_stdlib_module_names(self) -> None:
-        from sprout.repl import _repl_completion_matches
+        from sprout.repl import completion_matches
 
-        matches = _repl_completion_matches("htt", "htt", [], [])
+        matches = completion_matches("htt", "htt", [], [])
 
         self.assertIn("http", matches)
         self.assertIn("http_client", matches)
 
     def test_repl_completion_matches_imported_aliases_and_names(self) -> None:
-        from sprout.repl import _repl_completion_matches
+        from sprout.repl import completion_matches
 
-        alias_matches = _repl_completion_matches(
+        alias_matches = completion_matches(
             "str",
             "str",
             ["import stdlib.string", "import stdlib.bytes (from_string)"],
             [],
         )
-        name_matches = _repl_completion_matches(
+        name_matches = completion_matches(
             "fr",
             "fr",
             ["import stdlib.string", "import stdlib.bytes (from_string)"],
@@ -361,20 +361,20 @@ class CliTests(unittest.TestCase):
         self.assertIn("from_string", name_matches)
 
     def test_repl_readline_tab_binding_uses_libedit_form_when_needed(self) -> None:
-        from sprout.repl import _repl_readline_tab_binding
+        from sprout.repl import repl_readline_tab_binding
 
         class FakeReadline:
             __doc__ = "Importing this module enables command line editing using libedit readline."
 
-        self.assertEqual(_repl_readline_tab_binding(FakeReadline), "bind ^I rl_complete")
+        self.assertEqual(repl_readline_tab_binding(FakeReadline), "bind ^I rl_complete")
 
     def test_repl_readline_tab_binding_uses_gnu_readline_form_otherwise(self) -> None:
-        from sprout.repl import _repl_readline_tab_binding
+        from sprout.repl import repl_readline_tab_binding
 
         class FakeReadline:
             __doc__ = "GNU readline support"
 
-        self.assertEqual(_repl_readline_tab_binding(FakeReadline), "tab: complete")
+        self.assertEqual(repl_readline_tab_binding(FakeReadline), "tab: complete")
 
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """

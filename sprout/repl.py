@@ -13,6 +13,19 @@ from .surface_checks import validate_public_surface
 from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_program, unify
 
+__all__ = [
+    "ReplSession",
+    "ReplSubmission",
+    "ReplOutcome",
+    "lookup_type",
+    "parse_submission",
+    "parse_command",
+    "run_submission",
+    "declared_names",
+    "imported_names",
+    "completion_matches",
+]
+
 _REPL_COMMANDS = (
     ":help",
     ":quit",
@@ -417,3 +430,15 @@ def _repl_run_submission(session: _ReplSession, submission: _ReplSubmission) -> 
             return _ReplOutcome()
         case _:
             raise ValueError(f"Unknown REPL submission kind {submission.kind!r}")
+
+
+ReplSession = _ReplSession
+ReplSubmission = _ReplSubmission
+ReplOutcome = _ReplOutcome
+lookup_type = _repl_lookup_type
+parse_submission = _repl_parse_submission
+parse_command = _repl_parse_command
+run_submission = _repl_run_submission
+declared_names = _repl_declared_names
+imported_names = _repl_imported_names
+completion_matches = _repl_completion_matches
