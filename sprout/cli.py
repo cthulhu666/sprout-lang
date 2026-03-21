@@ -5,6 +5,7 @@ import atexit
 import json
 import os
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from pathlib import Path
 import re
 import shutil
@@ -2841,9 +2842,36 @@ class _ReplSession:
         run_program(lowered)
 
 
+@dataclass(frozen=True)
+class _ReplSubmission:
+    kind: str
+    value: str = ""
+
+
 def _repl_is_declaration(source: str) -> bool:
     stripped = source.strip()
     return stripped.startswith(("fn ", "let ", "type ", "class ", "instance ", "export "))
+
+
+def _repl_parse_submission(source: str) -> _ReplSubmission:
+    stripped = source.strip()
+    if stripped == "":
+        return _ReplSubmission("empty")
+    if stripped.startswith("module "):
+        return _ReplSubmission("module")
+    if stripped.startswith("import "):
+        return _ReplSubmission("import", source)
+    if stripped.startswith(":type "):
+        return _ReplSubmission("type", stripped[len(":type ") :].strip())
+    if stripped.startswith(":t "):
+        return _ReplSubmission("type", stripped[len(":t ") :].strip())
+    if stripped.startswith(":instances "):
+        return _ReplSubmission("instances", stripped[len(":instances ") :].strip())
+    if stripped.startswith(":i "):
+        return _ReplSubmission("instances", stripped[len(":i ") :].strip())
+    if _repl_is_declaration(stripped):
+        return _ReplSubmission("declaration", source)
+    return _ReplSubmission("expression", source)
 
 
 def _repl_lookup_type(types: dict[str, str], name: str) -> str:
@@ -3057,6 +3085,40 @@ def _configure_repl_readline(
     atexit.register(_write_history)
 
 
+def _repl_run_submission(session: _ReplSession, submission: _ReplSubmission, emit: Callable[[str], None]) -> None:
+    match submission.kind:
+        case "empty":
+            return
+        case "module":
+            emit("error: repl manages its module header automatically; use `import ...` directly")
+        case "import":
+            session.add_import(submission.value)
+            emit("ok")
+        case "type":
+            if submission.value == "":
+                emit("error: :type expects an expression")
+                return
+            emit(session.infer_type(submission.value))
+        case "instances":
+            if submission.value == "":
+                emit("error: :instances expects a type")
+                return
+            query_type, matches = session.instances_for_type(submission.value)
+            if not matches:
+                emit(f"No instances for {query_type}")
+                return
+            emit(f"Instances for {query_type}:")
+            for match in matches:
+                emit(match)
+        case "declaration":
+            session.add_declaration(submission.value)
+            emit("ok")
+        case "expression":
+            session.run_expression(submission.value)
+        case _:
+            raise ValueError(f"Unknown REPL submission kind {submission.kind!r}")
+
+
 def cmd_repl() -> int:
     session = _ReplSession()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
@@ -3066,55 +3128,12 @@ def cmd_repl() -> int:
 
     def process_submission(source: str) -> None:
         stripped = source.strip()
-        if stripped == "":
-            return
         if stripped in {":quit", ":q", ":exit"}:
             raise EOFError
         if stripped == ":help":
             emit("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines")
             return
-        if stripped.startswith("module "):
-            emit("error: repl manages its module header automatically; use `import ...` directly")
-            return
-        if stripped.startswith("import "):
-            session.add_import(source)
-            emit("ok")
-            return
-        type_expr: str | None = None
-        instance_type: str | None = None
-        if stripped.startswith(":type "):
-            type_expr = stripped[len(":type ") :].strip()
-        elif stripped.startswith(":t "):
-            type_expr = stripped[len(":t ") :].strip()
-        elif stripped.startswith(":instances "):
-            instance_type = stripped[len(":instances ") :].strip()
-        elif stripped.startswith(":i "):
-            instance_type = stripped[len(":i ") :].strip()
-        if type_expr is not None:
-            expr = type_expr
-            if expr == "":
-                emit("error: :type expects an expression")
-                return
-            emit(session.infer_type(expr))
-            return
-        if instance_type is not None:
-            if instance_type == "":
-                emit("error: :instances expects a type")
-                return
-            query_type, matches = session.instances_for_type(instance_type)
-            if not matches:
-                emit(f"No instances for {query_type}")
-                return
-            emit(f"Instances for {query_type}:")
-            for match in matches:
-                emit(match)
-            return
-        if _repl_is_declaration(stripped):
-            session.add_declaration(source)
-            emit("ok")
-            return
-
-        session.run_expression(source)
+        _repl_run_submission(session, _repl_parse_submission(source), emit)
 
     if interactive:
         _configure_repl_readline(session)
