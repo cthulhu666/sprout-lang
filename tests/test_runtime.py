@@ -841,6 +841,10 @@ class RuntimeTests(unittest.TestCase):
                   if vector_length(raw) == 0 then str_concat("No instances for ", query_type)
                   else first_or(Vec(raw), "<empty>")
 
+        fn render_completion_result(result: (String, Vec String)) -> String =
+          match result with
+          | (prefix, lines) -> str_concat(prefix, str_concat(":", first_or(lines, "<empty>")))
+
         fn main() -> Unit !{IO} =
           seq(
             repl_reset_session(),
@@ -850,15 +854,18 @@ class RuntimeTests(unittest.TestCase):
                 print(render_unit_result(repl_add_declaration("let answer = 41"))),
                 seq(
                   print(render_type_result(repl_type_of("answer"))),
-                  seq(
-                    print(render_instances_result(repl_instances("List Int"))),
                     seq(
+                      print(render_instances_result(repl_instances("List Int"))),
+                      seq(
+                        print(render_completion_result(repl_complete("str"))),
+                        seq(
                       print(render_unit_result(repl_add_import("import stdlib.string"))),
                       seq(
                         print(render_expr_result(repl_eval_expr("string.concat(\\"a\\", \\"b\\")"))),
                         seq(
                           print(render_type_result(repl_type_of("missing_name"))),
                           repl_reset_session()
+                        )
                         )
                       )
                     )
@@ -877,9 +884,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[1], "ok")
         self.assertEqual(lines[2], "Int")
         self.assertEqual(lines[3], "Foldable List")
-        self.assertEqual(lines[4], "ok")
-        self.assertEqual(lines[5], "ab")
-        self.assertTrue(lines[6].startswith("error: "))
+        self.assertEqual(lines[4], "str:string")
+        self.assertEqual(lines[5], "ok")
+        self.assertEqual(lines[6], "ab")
+        self.assertTrue(lines[7].startswith("error: "))
 
     def test_vector_builtins(self) -> None:
         src = """

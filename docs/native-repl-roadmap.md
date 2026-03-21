@@ -56,11 +56,13 @@ Current experimental runtime progress:
 
 1. `term_read_line()` now provides line-oriented stdin input.
 2. `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
-   `repl_type_of(...)`, `repl_instances(...)`, and `repl_reset_session()`
-   expose the hosted REPL session through an experimental interpreter-backed
-   service bridge.
+   `repl_type_of(...)`, `repl_instances(...)`, `repl_complete(...)`, and
+   `repl_reset_session()` expose the hosted REPL session through an
+   experimental interpreter-backed service bridge.
 3. `stdlib/repl.sprout` now owns the Sprout-hosted REPL frontend, with
    `examples/repl_hosted.sprout` kept as a thin wrapper/example entrypoint.
+   Interactive line editing, history traversal, and completion behavior now
+   live in Sprout code rather than Python readline policy.
 4. Native compiled programs do not support that session bridge yet.
 
 ## Target Architecture

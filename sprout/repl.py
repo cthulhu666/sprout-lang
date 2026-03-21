@@ -228,6 +228,9 @@ class ReplSession:
     def completion_matches(self, text: str, line_buffer: str) -> list[str]:
         return _repl_completion_matches(text, line_buffer, self.imports, self.declarations)
 
+    def completion_candidates(self, line_buffer: str) -> tuple[str, list[str]]:
+        return _repl_completion_candidates(line_buffer, self.imports, self.declarations)
+
     def run_expression(self, source: str, stdout: TextIO | None = None) -> None:
         name = self._next_temp_name()
         _, types = self._parse_and_check([f"let {name} = {source}"])
@@ -367,6 +370,24 @@ def _repl_completion_matches(
 ) -> list[str]:
     token_match = _REPL_TOKEN_RE.search(line_buffer)
     prefix = token_match.group(0) if token_match is not None else text
+    return _repl_completion_from_prefix(prefix, imports, declarations)
+
+
+def _repl_completion_candidates(
+    line_buffer: str,
+    imports: list[str],
+    declarations: list[str],
+) -> tuple[str, list[str]]:
+    token_match = _REPL_TOKEN_RE.search(line_buffer)
+    prefix = token_match.group(0) if token_match is not None else ""
+    return prefix, _repl_completion_from_prefix(prefix, imports, declarations)
+
+
+def _repl_completion_from_prefix(
+    prefix: str,
+    imports: list[str],
+    declarations: list[str],
+) -> list[str]:
     names = set(_REPL_COMMANDS)
     names.update(_REPL_PRELUDE_NAMES)
     names.update(_REPL_STDLIB_EXTRA_NAMES)

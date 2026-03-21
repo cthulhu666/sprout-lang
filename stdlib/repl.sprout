@@ -50,6 +50,11 @@ fn drop_last(raw: String) -> String =
   if string.length(raw) == 0 then raw
   else string.slice(raw, 0, string.length(raw) - 1)
 
+fn drop_last_count(raw: String, count: Int) -> String =
+  if count <= 0 then raw
+  else if count >= string.length(raw) then ""
+  else string.slice(raw, 0, string.length(raw) - count)
+
 fn redraw_input(prompt: String, current: String) -> Unit !{IO} =
   keep_after(
     term_write("\r" ++ prompt ++ current ++ " "),
@@ -59,35 +64,94 @@ fn redraw_input(prompt: String, current: String) -> Unit !{IO} =
 fn ignore_key(value: String !{IO}) -> Unit !{IO} =
   term_noop()
 
-fn ignore_escape_sequence_second(second: String) -> Unit !{IO} =
-  if second == "[" then ignore_key(term_read_key_once())
-  else term_noop()
+fn escape_token(second: String, third: String) -> String =
+  if second != "[" then "escape"
+  else if third == "A" then "up"
+  else if third == "B" then "down"
+  else if third == "C" then "right"
+  else if third == "D" then "left"
+  else "escape"
 
-fn ignore_escape_sequence() -> Unit !{IO} =
-  ignore_escape_sequence_second(term_read_key_once())
+fn read_escape_token_second(second: String) -> String !{IO} =
+  if second == "[" then escape_token(second, term_read_key_once())
+  else second
 
-fn interactive_read_line_step(prompt: String, current: String, key: String) -> Maybe String !{IO} =
+fn read_escape_token() -> String !{IO} =
+  read_escape_token_second(term_read_key_once())
+
+fn history_value(index: Int, fallback: String, history: Vec String) -> String =
+  vec_get_or(index, fallback, history)
+
+fn history_prev(current: String, history: Vec String, browse_index: Int, draft: String) -> (String, Int, String) =
+  if vec_length(history) == 0 then (current, browse_index, draft)
+  else if browse_index < 0 then
+    (history_value(vec_length(history) - 1, current, history), vec_length(history) - 1, current)
+  else if browse_index == 0 then
+    (current, browse_index, draft)
+  else
+    (history_value(browse_index - 1, current, history), browse_index - 1, draft)
+
+fn history_next(current: String, history: Vec String, browse_index: Int, draft: String) -> (String, Int, String) =
+  if browse_index < 0 then (current, browse_index, draft)
+  else if browse_index + 1 >= vec_length(history) then (draft, -1, draft)
+  else (history_value(browse_index + 1, current, history), browse_index + 1, draft)
+
+fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit !{IO} =
+  match vec_get(index, matches) with
+  | Just line -> then_io(term_write(line ++ "\r\n"), render_interactive_match_lines(matches, index + 1))
+  | Nothing -> term_noop()
+
+fn apply_completion(current: String, prefix: String, matches: Vec String) -> String =
+  if prefix == "" then current
+  else if vec_length(matches) != 1 then current
+  else drop_last_count(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
+
+fn complete_current_line(prompt: String, history: Vec String, current: String) -> Maybe String !{IO} =
+  match repl_complete(current) with
+  | (prefix, matches) ->
+      if prefix == "" then interactive_read_line_loop(prompt, history, current, -1, current)
+      else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, current, -1, current)
+      else if vec_length(matches) == 1 then
+        keep_after(
+          redraw_input(prompt, apply_completion(current, prefix, matches)),
+          interactive_read_line_loop(prompt, history, apply_completion(current, prefix, matches), -1, apply_completion(current, prefix, matches))
+        )
+      else
+        keep_after(
+          then_io(term_write("\r\n"), render_interactive_match_lines(matches, 0)),
+          keep_after(redraw_input(prompt, current), interactive_read_line_loop(prompt, history, current, -1, current))
+        )
+
+fn interactive_read_line_step(prompt: String, history: Vec String, current: String, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
   if key == "" then Nothing
-  else if key == "ctrl-d" then if current == "" then keep_after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, current)
+  else if key == "ctrl-d" then if current == "" then keep_after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, history, current, browse_index, draft)
   else if key == "enter" then keep_after(term_write("\r\n"), Just(current))
   else if key == "backspace" then
-    keep_after(redraw_input(prompt, drop_last(current)), interactive_read_line_loop(prompt, drop_last(current)))
+    keep_after(redraw_input(prompt, drop_last(current)), interactive_read_line_loop(prompt, history, drop_last(current), -1, drop_last(current)))
   else if key == "escape" then
-    keep_after(ignore_escape_sequence(), interactive_read_line_loop(prompt, current))
+    interactive_read_line_step(prompt, history, current, browse_index, draft, read_escape_token())
   else if key == "tab" then
-    interactive_read_line_loop(prompt, current)
+    complete_current_line(prompt, history, current)
+  else if key == "up" then
+    match history_prev(current, history, browse_index, draft) with
+    | (next_current, next_index, next_draft) ->
+        keep_after(redraw_input(prompt, next_current), interactive_read_line_loop(prompt, history, next_current, next_index, next_draft))
+  else if key == "down" then
+    match history_next(current, history, browse_index, draft) with
+    | (next_current, next_index, next_draft) ->
+        keep_after(redraw_input(prompt, next_current), interactive_read_line_loop(prompt, history, next_current, next_index, next_draft))
   else
-    keep_after(redraw_input(prompt, current ++ key), interactive_read_line_loop(prompt, current ++ key))
+    keep_after(redraw_input(prompt, current ++ key), interactive_read_line_loop(prompt, history, current ++ key, -1, current ++ key))
 
-fn interactive_read_line_loop(prompt: String, current: String) -> Maybe String !{IO} =
-  interactive_read_line_step(prompt, current, term_read_key_once())
+fn interactive_read_line_loop(prompt: String, history: Vec String, current: String, browse_index: Int, draft: String) -> Maybe String !{IO} =
+  interactive_read_line_step(prompt, history, current, browse_index, draft, term_read_key_once())
 
-fn interactive_read_line(prompt: String) -> Maybe String !{IO} =
-  keep_after(redraw_input(prompt, ""), interactive_read_line_loop(prompt, ""))
+fn interactive_read_line(prompt: String, history: Vec String) -> Maybe String !{IO} =
+  keep_after(redraw_input(prompt, ""), interactive_read_line_loop(prompt, history, "", -1, ""))
 
-fn read_submission(prompt: Maybe String) -> Maybe String !{IO} =
+fn read_submission(prompt: Maybe String, history: Vec String) -> Maybe String !{IO} =
   match prompt with
-  | Just text -> interactive_read_line(text)
+  | Just text -> interactive_read_line(text, history)
   | Nothing -> term_read_line_once()
 
 fn render_error(message: String) -> Vec String =
@@ -160,20 +224,24 @@ fn handle_trimmed_submission(line: String) -> Maybe (Vec String) !{IO} =
 fn handle_submission(raw: String) -> Maybe (Vec String) !{IO} =
   handle_trimmed_submission(trim(raw))
 
-fn continue_loop(result: Maybe (Vec String), prompt: Maybe String) -> Unit !{IO} =
+fn push_history(history: Vec String, raw: String) -> Vec String =
+  if trim(raw) == "" then history
+  else vec_append(raw, history)
+
+fn continue_loop(result: Maybe (Vec String), prompt: Maybe String, history: Vec String) -> Unit !{IO} =
   match result with
-  | Just lines -> then_io(render_lines(prompt, lines, 0), repl_loop(prompt))
+  | Just lines -> then_io(render_lines(prompt, lines, 0), repl_loop(prompt, history))
   | Nothing -> finish_loop(prompt)
 
-export fn repl_loop(prompt: Maybe String) -> Unit !{IO} =
-  match read_submission(prompt) with
-  | Just line -> continue_loop(handle_submission(line), prompt)
+export fn repl_loop(prompt: Maybe String, history: Vec String) -> Unit !{IO} =
+  match read_submission(prompt, history) with
+  | Just line -> continue_loop(handle_submission(line), prompt, push_history(history, line))
   | Nothing -> finish_loop(prompt)
 
 export fn main() -> Unit !{IO} =
   then_io(
     repl_reset_session(),
     match env_get("SPROUT_REPL_INTERACTIVE") with
-    | Just _ -> then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> ")))
-    | Nothing -> repl_loop(Nothing)
+    | Just _ -> then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> "), vec_empty()))
+    | Nothing -> repl_loop(Nothing, vec_empty())
   )

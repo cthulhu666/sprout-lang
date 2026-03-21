@@ -1219,6 +1219,15 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(_instances)
 
+    def builtin_repl_complete(args: list[object]) -> object:
+        line_buffer = args[0]
+        if not isinstance(line_buffer, str):
+            raise RuntimeError("repl_complete expects String")
+        from .repl import hosted_repl_session
+
+        prefix, matches = hosted_repl_session().completion_candidates(line_buffer)
+        return TupleValue(items=(prefix, _repl_vec_string(matches)))
+
     def builtin_repl_reset_session(args: list[object]) -> object:
         from .repl import reset_hosted_repl_session
 
@@ -1484,6 +1493,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("repl_eval_expr", BuiltinFunction(name="repl_eval_expr", arity=1, fn=builtin_repl_eval_expr))
     env.set("repl_type_of", BuiltinFunction(name="repl_type_of", arity=1, fn=builtin_repl_type_of))
     env.set("repl_instances", BuiltinFunction(name="repl_instances", arity=1, fn=builtin_repl_instances))
+    env.set("repl_complete", BuiltinFunction(name="repl_complete", arity=1, fn=builtin_repl_complete))
     env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))
     env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))

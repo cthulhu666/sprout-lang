@@ -313,6 +313,15 @@ class CliTests(unittest.TestCase):
         self.assertIn("string", alias_matches)
         self.assertIn("from_string", name_matches)
 
+    def test_repl_completion_candidates_return_suffix_prefix(self) -> None:
+        from sprout.repl import ReplSession
+
+        session = ReplSession(declarations=["let answer = 42"])
+        prefix, matches = session.completion_candidates(":t ans")
+
+        self.assertEqual(prefix, "ans")
+        self.assertIn("answer", matches)
+
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
         fn main() -> Unit !{IO} =

@@ -115,6 +115,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "repl_eval_expr": FnSig(name="repl_eval_expr", params=[I8_PTR], ret=I64),
     "repl_type_of": FnSig(name="repl_type_of", params=[I8_PTR], ret=I64),
     "repl_instances": FnSig(name="repl_instances", params=[I8_PTR], ret=I64),
+    "repl_complete": FnSig(name="repl_complete", params=[I8_PTR], ret=I64),
     "repl_reset_session": FnSig(name="repl_reset_session", params=[], ret=I64),
     "sprout_set_argv": FnSig(name="sprout_set_argv", params=[I32, I8_PTR], ret=I64),
     "sprout_register_ctor": FnSig(name="sprout_register_ctor", params=[I64, I8_PTR, I64], ret=I64),

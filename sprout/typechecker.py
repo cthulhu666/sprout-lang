@@ -1470,6 +1470,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             TApp(TApp(result_type, STRING), TTuple((STRING, TApp(TConst("Vec"), STRING)))),
             effects=IO_EFFECT,
         ),
+        "repl_complete": builtin_scheme(
+            [STRING],
+            TTuple((STRING, TApp(TConst("Vec"), STRING))),
+            effects=IO_EFFECT,
+        ),
         "repl_reset_session": builtin_scheme([], UNIT, effects=IO_EFFECT),
         "term_write": builtin_scheme([STRING], UNIT, effects=IO_EFFECT),
     }
