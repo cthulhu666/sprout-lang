@@ -3,6 +3,10 @@
 This document outlines a pragmatic path from the current hosted Python REPL to
 a future Sprout-native REPL binary.
 
+For the longer-term v1 direction where the REPL session engine itself becomes
+Sprout-owned rather than host-backed, see
+[repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
+
 It is an implementation/tooling roadmap, not a normative language spec.
 
 ## Problem Statement
@@ -58,7 +62,8 @@ Current experimental runtime progress:
 2. `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
    `repl_type_of(...)`, `repl_instances(...)`, `repl_complete(...)`, and
    `repl_reset_session()` expose the hosted REPL session through an
-   experimental interpreter-backed service bridge.
+   experimental interpreter-backed service bridge. This remains a temporary
+   v0 implementation hook, not the desired v1 self-hosting boundary.
 3. `stdlib/repl.sprout` now owns the Sprout-hosted REPL frontend, with
    `examples/repl_hosted.sprout` kept as a thin wrapper/example entrypoint.
    Interactive-mode detection, line editing, history traversal, and
@@ -199,4 +204,6 @@ The next practical steps are:
 2. extract the current Python REPL into a clearer session-engine boundary,
 3. audit runtime hooks needed for a Sprout-hosted interactive app,
 4. prototype a minimal line-based REPL application in Sprout once those hooks
-   exist.
+   exist,
+5. use the v1 self-hosting draft to replace the opaque `repl_*` bridge with a
+   lower-level compiler/session capability layer.

@@ -21,6 +21,7 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 - [Effect System v1 Draft](./docs/effect-system-v1-draft.md)
 - [Int Ranges v1 Draft](./docs/int-ranges-v1-draft.md)
 - [Native REPL Roadmap](./docs/native-repl-roadmap.md)
+- [REPL Self-Hosting v1 Draft](./docs/repl-self-hosting-v1-draft.md)
 - [Sequencing Sugar v1 Draft](./docs/sequencing-sugar-v1-draft.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 - [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)
@@ -40,6 +41,9 @@ Normative status:
   concrete for now.
 - `docs/effect-system-v1-draft.md` is now a forward-looking draft for the next
   effect milestone beyond the implemented v0 baseline.
+- `docs/repl-self-hosting-v1-draft.md` is a forward-looking implementation
+  draft for replacing the temporary host-backed REPL session bridge with a
+  Sprout-owned session engine in v1.
 
 ## Repository Layout
 
@@ -134,7 +138,11 @@ Experimental host-REPL builtins:
 - `repl_complete(line_buffer: String) -> (String, Vec String) !{IO}`
 - `repl_reset_session() -> Unit !{IO}`
 
-These are implementation hooks for the Sprout-hosted REPL frontend. They are currently interpreter-backed; native compiled programs currently report a runtime error if they call them.
+These are implementation hooks for the Sprout-hosted REPL frontend. They are
+currently interpreter-backed; native compiled programs currently report a
+runtime error if they call them. They are a temporary v0 bridge rather than
+the intended v1 self-hosting boundary; see
+[docs/repl-self-hosting-v1-draft.md](./docs/repl-self-hosting-v1-draft.md).
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 
