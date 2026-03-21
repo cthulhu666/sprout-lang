@@ -225,29 +225,27 @@ class CliTests(unittest.TestCase):
         self.assertIn("does not export value 'Monoid'", run.stdout)
 
     def test_repl_session_tracks_imports_and_declarations(self) -> None:
-        from sprout.repl import ReplSession, lookup_type, parse_submission, run_submission
+        from sprout.repl import ReplSession
 
         session = ReplSession()
         session.add_import("import stdlib.http")
         session.add_declaration("let answer = 41")
-        _, types = session.parse_and_check(["let temp = answer + 1"])
 
         self.assertEqual(session.imports, ["import stdlib.http"])
         self.assertEqual(session.declarations, ["let answer = 41"])
         self.assertEqual(session.infer_type("answer + 1"), "Int")
         self.assertEqual(session.infer_type("http.http_ok(\"x\")"), "String")
-        self.assertEqual(lookup_type(types, "temp"), "Int")
         self.assertIn("http", session.completion_matches("htt", "htt"))
         self.assertIn("answer", session.completion_matches("ans", "ans"))
-        self.assertEqual(parse_submission(""), parse_submission("   "))
-        self.assertEqual(parse_submission("import stdlib.http").kind, "import")
-        self.assertEqual(parse_submission("let z = 1").kind, "declaration")
-        self.assertEqual(parse_submission(":type z").kind, "type")
-        self.assertEqual(parse_submission(":instances Int").kind, "instances")
-        self.assertEqual(parse_submission("module app.main").kind, "module")
-        self.assertEqual(parse_submission("z + 1").kind, "expression")
-        self.assertEqual(run_submission(session, parse_submission("let x = 1")).lines, ("ok",))
-        self.assertEqual(run_submission(session, parse_submission(":type answer")).lines, ("Int",))
+        self.assertEqual(session.submit(""), session.submit("   "))
+        self.assertEqual(session.submit("import stdlib.string").lines, ("ok",))
+        self.assertEqual(session.submit("let x = 1").lines, ("ok",))
+        self.assertEqual(session.submit(":type answer").lines, ("Int",))
+        self.assertEqual(
+            session.submit(":help").lines,
+            ("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines",),
+        )
+        self.assertTrue(session.submit(":quit").should_exit)
 
     def test_repl_imports_and_prelude_append_work_together(self) -> None:
         run = subprocess.run(
@@ -293,10 +291,10 @@ class CliTests(unittest.TestCase):
                     os.environ["SPROUT_REPL_HISTORY"] = old_value
 
     def test_repl_declared_names_include_declared_symbols(self) -> None:
-        from sprout.repl import declared_names
+        from sprout.repl import ReplSession
 
-        names = declared_names(
-            [
+        session = ReplSession(
+            declarations=[
                 "let answer = 42",
                 "fn double(x: Int) -> Int = x + x",
                 "type MaybeInt = | Some Int | None",
@@ -304,6 +302,7 @@ class CliTests(unittest.TestCase):
                 "instance Renderable MaybeInt { fn render(x: MaybeInt) -> Int = 0 }",
             ]
         )
+        names = set(session.completion_matches("", ""))
 
         self.assertIn("answer", names)
         self.assertIn("double", names)
@@ -314,48 +313,37 @@ class CliTests(unittest.TestCase):
         self.assertIn("render", names)
 
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
-        from sprout.repl import completion_matches
+        from sprout.repl import ReplSession
 
-        self.assertEqual(completion_matches(":t", ":t", [], []), [":t", ":type"])
-        matches = completion_matches("sp", "sp", [], [])
+        session = ReplSession()
+        self.assertEqual(session.completion_matches(":t", ":t"), [":t", ":type"])
+        matches = session.completion_matches("sp", "sp")
         self.assertIn("split_ints", matches)
 
     def test_repl_completion_matches_declared_names(self) -> None:
-        from sprout.repl import completion_matches
+        from sprout.repl import ReplSession
 
-        matches = completion_matches(
-            "ans",
-            "ans",
-            [],
-            ["let answer = 42", "fn annotate(x: Int) -> Int = x"],
-        )
+        session = ReplSession(declarations=["let answer = 42", "fn annotate(x: Int) -> Int = x"])
+        matches = session.completion_matches("ans", "ans")
 
         self.assertIn("answer", matches)
         self.assertNotIn("annotate", matches)
 
     def test_repl_completion_matches_stdlib_module_names(self) -> None:
-        from sprout.repl import completion_matches
+        from sprout.repl import ReplSession
 
-        matches = completion_matches("htt", "htt", [], [])
+        session = ReplSession()
+        matches = session.completion_matches("htt", "htt")
 
         self.assertIn("http", matches)
         self.assertIn("http_client", matches)
 
     def test_repl_completion_matches_imported_aliases_and_names(self) -> None:
-        from sprout.repl import completion_matches
+        from sprout.repl import ReplSession
 
-        alias_matches = completion_matches(
-            "str",
-            "str",
-            ["import stdlib.string", "import stdlib.bytes (from_string)"],
-            [],
-        )
-        name_matches = completion_matches(
-            "fr",
-            "fr",
-            ["import stdlib.string", "import stdlib.bytes (from_string)"],
-            [],
-        )
+        session = ReplSession(imports=["import stdlib.string", "import stdlib.bytes (from_string)"])
+        alias_matches = session.completion_matches("str", "str")
+        name_matches = session.completion_matches("fr", "fr")
 
         self.assertIn("string", alias_matches)
         self.assertIn("from_string", name_matches)

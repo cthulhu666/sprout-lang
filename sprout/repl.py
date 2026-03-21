@@ -20,17 +20,9 @@ from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_
 __all__ = [
     "cmd_repl",
     "ReplSession",
-    "ReplSubmission",
     "ReplOutcome",
     "repl_history_path",
     "repl_readline_tab_binding",
-    "lookup_type",
-    "parse_submission",
-    "parse_command",
-    "run_submission",
-    "declared_names",
-    "imported_names",
-    "completion_matches",
 ]
 
 _REPL_COMMANDS = (
@@ -114,6 +106,7 @@ _REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
 _REPL_HISTORY_LIMIT = 1000
 _REPL_COMPLETER_DELIMS = " \t\n`~!@#$%^&*()-=+[{]}\\|;,'\"<>/?"
 _REPL_MODULE_NAME = "app.repl"
+_REPL_HELP_TEXT = "Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines"
 
 
 def _repl_compose_source(
@@ -145,7 +138,7 @@ def _repl_parse_and_check(
 
 
 @dataclass
-class _ReplSession:
+class ReplSession:
     imports: list[str] = field(default_factory=list)
     declarations: list[str] = field(default_factory=list)
     repl_counter: int = 0
@@ -251,6 +244,16 @@ class _ReplSession:
         typecheck_program(lowered)
         run_program(lowered)
 
+    def submit(self, source: str) -> ReplOutcome:
+        command = _repl_parse_command(source)
+        if isinstance(command, str):
+            if command == "quit":
+                return ReplOutcome(should_exit=True)
+            if command == "help":
+                return ReplOutcome((_REPL_HELP_TEXT,))
+            raise ValueError(f"Unknown REPL command kind {command!r}")
+        return _repl_run_submission(self, command)
+
 
 @dataclass(frozen=True)
 class _ReplSubmission:
@@ -259,8 +262,9 @@ class _ReplSubmission:
 
 
 @dataclass(frozen=True)
-class _ReplOutcome:
+class ReplOutcome:
     lines: tuple[str, ...] = ()
+    should_exit: bool = False
 
 
 def _repl_is_declaration(source: str) -> bool:
@@ -426,7 +430,7 @@ def _repl_readline_tab_binding(readline_module: object) -> str:
 
 
 def _configure_repl_readline(
-    session: _ReplSession,
+    session: ReplSession,
     history_path: Path | None = None,
 ) -> None:
     try:
@@ -464,53 +468,48 @@ def _configure_repl_readline(
     atexit.register(_write_history)
 
 
-def _repl_run_submission(session: _ReplSession, submission: _ReplSubmission) -> _ReplOutcome:
+def _repl_run_submission(session: ReplSession, submission: _ReplSubmission) -> ReplOutcome:
     match submission.kind:
         case "empty":
-            return _ReplOutcome()
+            return ReplOutcome()
         case "module":
-            return _ReplOutcome(("error: repl manages its module header automatically; use `import ...` directly",))
+            return ReplOutcome(("error: repl manages its module header automatically; use `import ...` directly",))
         case "import":
             session.add_import(submission.value)
-            return _ReplOutcome(("ok",))
+            return ReplOutcome(("ok",))
         case "type":
             if submission.value == "":
-                return _ReplOutcome(("error: :type expects an expression",))
-            return _ReplOutcome((session.infer_type(submission.value),))
+                return ReplOutcome(("error: :type expects an expression",))
+            return ReplOutcome((session.infer_type(submission.value),))
         case "instances":
             if submission.value == "":
-                return _ReplOutcome(("error: :instances expects a type",))
+                return ReplOutcome(("error: :instances expects a type",))
             query_type, matches = session.instances_for_type(submission.value)
             if not matches:
-                return _ReplOutcome((f"No instances for {query_type}",))
-            return _ReplOutcome((f"Instances for {query_type}:", *matches))
+                return ReplOutcome((f"No instances for {query_type}",))
+            return ReplOutcome((f"Instances for {query_type}:", *matches))
         case "declaration":
             session.add_declaration(submission.value)
-            return _ReplOutcome(("ok",))
+            return ReplOutcome(("ok",))
         case "expression":
             session.run_expression(submission.value)
-            return _ReplOutcome()
+            return ReplOutcome()
         case _:
             raise ValueError(f"Unknown REPL submission kind {submission.kind!r}")
 
 
 def cmd_repl() -> int:
-    session = _ReplSession()
+    session = ReplSession()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
 
     def emit(text: str) -> None:
         print(text)
 
-    def process_submission(source: str) -> None:
-        if isinstance((command := _repl_parse_command(source)), str):
-            if command == "quit":
-                raise EOFError
-            if command == "help":
-                emit("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines")
-                return
-            raise ValueError(f"Unknown REPL command kind {command!r}")
-        for line in _repl_run_submission(session, command).lines:
+    def process_submission(source: str) -> bool:
+        outcome = session.submit(source)
+        for line in outcome.lines:
             emit(line)
+        return outcome.should_exit
 
     if interactive:
         _configure_repl_readline(session)
@@ -522,7 +521,8 @@ def cmd_repl() -> int:
                 emit("")
                 break
             try:
-                process_submission(line)
+                if process_submission(line):
+                    break
             except EOFError:
                 break
             except (
@@ -539,7 +539,8 @@ def cmd_repl() -> int:
 
     for raw in sys.stdin:
         try:
-            process_submission(raw.rstrip("\n"))
+            if process_submission(raw.rstrip("\n")):
+                break
         except EOFError:
             break
         except (
@@ -555,15 +556,5 @@ def cmd_repl() -> int:
     return 0
 
 
-ReplSession = _ReplSession
-ReplSubmission = _ReplSubmission
-ReplOutcome = _ReplOutcome
-lookup_type = _repl_lookup_type
-parse_submission = _repl_parse_submission
-parse_command = _repl_parse_command
-run_submission = _repl_run_submission
-declared_names = _repl_declared_names
-imported_names = _repl_imported_names
-completion_matches = _repl_completion_matches
 repl_history_path = _repl_history_path
 repl_readline_tab_binding = _repl_readline_tab_binding
