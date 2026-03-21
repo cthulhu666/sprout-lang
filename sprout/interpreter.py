@@ -1253,6 +1253,32 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         prefix, matches = hosted_repl_session().completion_candidates(line_buffer)
         return TupleValue(items=(prefix, _repl_vec_string(matches)))
 
+    def builtin_repl_complete_in_state(args: list[object]) -> object:
+        line_buffer = args[0]
+        imports = args[1]
+        declarations = args[2]
+        if not isinstance(line_buffer, str):
+            raise RuntimeError("repl_complete_in_state expects String line buffer and Vec String imports/declarations")
+
+        def _to_string_list(value: object, label: str) -> list[str]:
+            if not isinstance(value, ADTValue) or value.constructor != "Vec" or len(value.args) != 1 or not isinstance(value.args[0], VectorValue):
+                raise RuntimeError(f"repl_complete_in_state expects {label} to be Vec String")
+            items: list[str] = []
+            for item in value.args[0].items:
+                if not isinstance(item, str):
+                    raise RuntimeError(f"repl_complete_in_state expects {label} to contain only String values")
+                items.append(item)
+            return items
+
+        from .repl_host import completion_candidates_in_state
+
+        prefix, matches = completion_candidates_in_state(
+            line_buffer,
+            _to_string_list(imports, "imports"),
+            _to_string_list(declarations, "declarations"),
+        )
+        return TupleValue(items=(prefix, _repl_vec_string(matches)))
+
     def builtin_repl_reset_session(args: list[object]) -> object:
         from .repl_host import reset_hosted_repl_session
 
@@ -1522,6 +1548,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("repl_instances", BuiltinFunction(name="repl_instances", arity=1, fn=builtin_repl_instances))
     env.set("repl_instances_in_source", BuiltinFunction(name="repl_instances_in_source", arity=2, fn=builtin_repl_instances_in_source))
     env.set("repl_complete", BuiltinFunction(name="repl_complete", arity=1, fn=builtin_repl_complete))
+    env.set("repl_complete_in_state", BuiltinFunction(name="repl_complete_in_state", arity=3, fn=builtin_repl_complete_in_state))
     env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))
     env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))

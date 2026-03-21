@@ -138,6 +138,7 @@ Experimental host-REPL builtins:
 - `repl_instances(source: String) -> Result String (String, Vec String) !{IO}`
 - `repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}`
 - `repl_complete(line_buffer: String) -> (String, Vec String) !{IO}`
+- `repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}`
 - `repl_reset_session() -> Unit !{IO}`
 
 These are implementation hooks for the Sprout-hosted REPL frontend. They are

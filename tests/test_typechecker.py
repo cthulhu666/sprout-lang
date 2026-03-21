@@ -218,6 +218,7 @@ class TypecheckerTests(unittest.TestCase):
             "repl_instances": "String -> Result String (String, Vec String) !{IO}",
             "repl_instances_in_source": "String -> String -> Result String (String, Vec String) !{IO}",
             "repl_complete": "String -> (String, Vec String) !{IO}",
+            "repl_complete_in_state": "String -> Vec String -> Vec String -> (String, Vec String) !{IO}",
             "repl_reset_session": "Unit !{IO}",
         }
         for name, expected_type in expected.items():
@@ -582,6 +583,7 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("repl_instances", types)
         self.assertIn("repl_instances_in_source", types)
         self.assertIn("repl_complete", types)
+        self.assertIn("repl_complete_in_state", types)
         self.assertIn("repl_reset_session", types)
 
     def test_typecheck_vector_builtins(self) -> None:

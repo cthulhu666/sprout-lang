@@ -1074,6 +1074,13 @@ long long repl_complete(const char* source) {
   tcp_fail("repl_complete: not supported in native backend");
   return 0;
 }
+long long repl_complete_in_state(const char* line_buffer, const char* imports, const char* declarations) {
+  (void)line_buffer;
+  (void)imports;
+  (void)declarations;
+  tcp_fail("repl_complete_in_state: not supported in native backend");
+  return 0;
+}
 long long repl_reset_session(void) {
   tcp_fail("repl_reset_session: not supported in native backend");
   return 0;

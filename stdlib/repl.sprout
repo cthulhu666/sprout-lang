@@ -110,52 +110,52 @@ fn apply_completion(current: String, prefix: String, matches: Vec String) -> Str
   else if vec_length(matches) != 1 then current
   else drop_last_count(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
 
-fn complete_current_line(prompt: String, history: Vec String, current: String) -> Maybe String !{IO} =
-  match repl_complete(current) with
+fn complete_current_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String) -> Maybe String !{IO} =
+  match repl_complete_in_state(current, imports, declarations) with
   | (prefix, matches) ->
-      if prefix == "" then interactive_read_line_loop(prompt, history, current, -1, current)
-      else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, current, -1, current)
+      if prefix == "" then interactive_read_line_loop(prompt, history, imports, declarations, current, -1, current)
+      else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, imports, declarations, current, -1, current)
       else if vec_length(matches) == 1 then
         keep_after(
           redraw_input(prompt, apply_completion(current, prefix, matches)),
-          interactive_read_line_loop(prompt, history, apply_completion(current, prefix, matches), -1, apply_completion(current, prefix, matches))
+          interactive_read_line_loop(prompt, history, imports, declarations, apply_completion(current, prefix, matches), -1, apply_completion(current, prefix, matches))
         )
       else
         keep_after(
           then_io(term_write("\r\n"), render_interactive_match_lines(matches, 0)),
-          keep_after(redraw_input(prompt, current), interactive_read_line_loop(prompt, history, current, -1, current))
+          keep_after(redraw_input(prompt, current), interactive_read_line_loop(prompt, history, imports, declarations, current, -1, current))
         )
 
-fn interactive_read_line_step(prompt: String, history: Vec String, current: String, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
+fn interactive_read_line_step(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
   if key == "" then Nothing
-  else if key == "ctrl-d" then if current == "" then keep_after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, history, current, browse_index, draft)
+  else if key == "ctrl-d" then if current == "" then keep_after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, history, imports, declarations, current, browse_index, draft)
   else if key == "enter" then keep_after(term_write("\r\n"), Just(current))
   else if key == "backspace" then
-    keep_after(redraw_input(prompt, drop_last(current)), interactive_read_line_loop(prompt, history, drop_last(current), -1, drop_last(current)))
+    keep_after(redraw_input(prompt, drop_last(current)), interactive_read_line_loop(prompt, history, imports, declarations, drop_last(current), -1, drop_last(current)))
   else if key == "escape" then
-    interactive_read_line_step(prompt, history, current, browse_index, draft, read_escape_token())
+    interactive_read_line_step(prompt, history, imports, declarations, current, browse_index, draft, read_escape_token())
   else if key == "tab" then
-    complete_current_line(prompt, history, current)
+    complete_current_line(prompt, history, imports, declarations, current)
   else if key == "up" then
     match history_prev(current, history, browse_index, draft) with
     | (next_current, next_index, next_draft) ->
-        keep_after(redraw_input(prompt, next_current), interactive_read_line_loop(prompt, history, next_current, next_index, next_draft))
+        keep_after(redraw_input(prompt, next_current), interactive_read_line_loop(prompt, history, imports, declarations, next_current, next_index, next_draft))
   else if key == "down" then
     match history_next(current, history, browse_index, draft) with
     | (next_current, next_index, next_draft) ->
-        keep_after(redraw_input(prompt, next_current), interactive_read_line_loop(prompt, history, next_current, next_index, next_draft))
+        keep_after(redraw_input(prompt, next_current), interactive_read_line_loop(prompt, history, imports, declarations, next_current, next_index, next_draft))
   else
-    keep_after(redraw_input(prompt, current ++ key), interactive_read_line_loop(prompt, history, current ++ key, -1, current ++ key))
+    keep_after(redraw_input(prompt, current ++ key), interactive_read_line_loop(prompt, history, imports, declarations, current ++ key, -1, current ++ key))
 
-fn interactive_read_line_loop(prompt: String, history: Vec String, current: String, browse_index: Int, draft: String) -> Maybe String !{IO} =
-  interactive_read_line_step(prompt, history, current, browse_index, draft, term_read_key_once())
+fn interactive_read_line_loop(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, browse_index: Int, draft: String) -> Maybe String !{IO} =
+  interactive_read_line_step(prompt, history, imports, declarations, current, browse_index, draft, term_read_key_once())
 
-fn interactive_read_line(prompt: String, history: Vec String) -> Maybe String !{IO} =
-  keep_after(redraw_input(prompt, ""), interactive_read_line_loop(prompt, history, "", -1, ""))
+fn interactive_read_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
+  keep_after(redraw_input(prompt, ""), interactive_read_line_loop(prompt, history, imports, declarations, "", -1, ""))
 
-fn read_submission(prompt: Maybe String, history: Vec String) -> Maybe String !{IO} =
+fn read_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
   match prompt with
-  | Just text -> interactive_read_line(text, history)
+  | Just text -> interactive_read_line(text, history, imports, declarations)
   | Nothing -> term_read_line_once()
 
 fn render_error(message: String) -> Vec String =
@@ -256,7 +256,7 @@ fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec St
   | Exit -> finish_loop(prompt)
 
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
-  match read_submission(prompt, history) with
+  match read_submission(prompt, history, imports, declarations) with
   | Just line -> continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
   | Nothing -> finish_loop(prompt)
 

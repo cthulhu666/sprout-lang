@@ -22,6 +22,7 @@ __all__ = [
     "reset_hosted_repl_session",
     "infer_type_in_source",
     "instances_in_source",
+    "completion_candidates_in_state",
 ]
 
 _REPL_COMMANDS = (
@@ -302,6 +303,14 @@ def instances_in_source(source: str, type_expr_source: str) -> tuple[str, list[s
     tree, _ = _repl_parse_and_check_source(source)
     query_type = _repl_lookup_param_type(lambda tail: _repl_parse_and_check_source(source, tail), type_expr_source)
     return _repl_render_instances(tree, query_type)
+
+
+def completion_candidates_in_state(
+    line_buffer: str,
+    imports: list[str],
+    declarations: list[str],
+) -> tuple[str, list[str]]:
+    return _repl_completion_candidates(line_buffer, imports, declarations)
 
 
 def _repl_lookup_type(types: dict[str, str], name: str) -> str:

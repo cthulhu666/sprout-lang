@@ -74,6 +74,7 @@ repl_type_of_in_source(module_source: String, expr: String) -> Result String Str
 repl_instances(source: String) -> Result String (String, Vec String) !{IO}
 repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}
 repl_complete(line_buffer: String) -> (String, Vec String) !{IO}
+repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}
 repl_reset_session() -> Unit !{IO}
 ```
 
@@ -82,7 +83,9 @@ the host runtime. They are too high-level to support a real Sprout-owned
 session engine. `repl_type_of_in_source(...)` is a first step toward the
 intended v1 direction because it operates on an explicit source snapshot rather
 than implicit host-owned REPL state. `repl_instances_in_source(...)` extends
-that same pattern to `:instances`.
+that same pattern to `:instances`. `repl_complete_in_state(...)` does the same
+for tab completion by taking explicit frontend state instead of reading hidden
+host session state.
 
 ## 6. Proposed v1 Direction
 

@@ -868,7 +868,7 @@ class RuntimeTests(unittest.TestCase):
                     seq(
                       print(render_instances_result(repl_instances_in_source("module app.repl", "List Int"))),
                       seq(
-                      print(render_completion_result(repl_complete("str"))),
+                      print(render_completion_result(repl_complete_in_state("str", Vec(vector_empty()), Vec(vector_empty())))),
                       seq(
                       print(render_type_result(repl_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
                       seq(
