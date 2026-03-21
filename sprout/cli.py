@@ -4,6 +4,7 @@ import argparse
 import atexit
 import json
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import shutil
@@ -2785,6 +2786,58 @@ def _repl_parse_and_check(
         return tree, types
 
 
+@dataclass
+class _ReplSession:
+    imports: list[str] = field(default_factory=list)
+    declarations: list[str] = field(default_factory=list)
+    repl_counter: int = 0
+
+    def add_import(self, source: str) -> None:
+        _repl_parse_and_check(self.imports + [source], self.declarations)
+        self.imports.append(source)
+
+    def add_declaration(self, source: str) -> None:
+        _repl_parse_and_check(self.imports, self.declarations + [source])
+        self.declarations.append(source)
+
+    def infer_type(self, expr: str) -> str:
+        self.repl_counter += 1
+        name = f"__repl_value_{self.repl_counter}"
+        _, types = _repl_parse_and_check(
+            self.imports,
+            self.declarations,
+            [f"let {name} = {expr}"],
+        )
+        return _repl_lookup_type(types, name)
+
+    def instances_for_type(self, type_expr_source: str) -> tuple[str, list[str]]:
+        return _repl_instances_for_type(self.imports, self.declarations, type_expr_source)
+
+    def run_expression(self, source: str) -> None:
+        self.repl_counter += 1
+        name = f"__repl_value_{self.repl_counter}"
+        _, types = _repl_parse_and_check(
+            self.imports,
+            self.declarations,
+            [f"let {name} = {source}"],
+        )
+        inferred_type = _repl_lookup_type(types, name)
+        if inferred_type.endswith(" !{IO}"):
+            if inferred_type != "Unit !{IO}":
+                raise TypeCheckError("repl cannot auto-print effectful non-Unit expressions yet")
+            main_body = name
+        else:
+            main_body = f"print({name})"
+        tree, _ = _repl_parse_and_check(
+            self.imports,
+            self.declarations,
+            [f"let {name} = {source}", f"fn main() -> Unit !{{IO}} = {main_body}"],
+        )
+        lowered = lower_typeclasses(tree)
+        typecheck_program(lowered)
+        run_program(lowered)
+
+
 def _repl_is_declaration(source: str) -> bool:
     stripped = source.strip()
     return stripped.startswith(("fn ", "let ", "type ", "class ", "instance ", "export "))
@@ -3008,16 +3061,13 @@ def _configure_repl_readline(
 
 
 def cmd_repl() -> int:
-    imports: list[str] = []
-    declarations: list[str] = []
-    repl_counter = 0
+    session = _ReplSession()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
 
     def emit(text: str) -> None:
         print(text)
 
     def process_submission(source: str) -> None:
-        nonlocal repl_counter
         stripped = source.strip()
         if stripped == "":
             return
@@ -3030,8 +3080,7 @@ def cmd_repl() -> int:
             emit("error: repl manages its module header automatically; use `import ...` directly")
             return
         if stripped.startswith("import "):
-            _repl_parse_and_check(imports + [source], declarations)
-            imports.append(source)
+            session.add_import(source)
             emit("ok")
             return
         type_expr: str | None = None
@@ -3049,24 +3098,13 @@ def cmd_repl() -> int:
             if expr == "":
                 emit("error: :type expects an expression")
                 return
-            repl_counter += 1
-            name = f"__repl_value_{repl_counter}"
-            _, types = _repl_parse_and_check(
-                imports,
-                declarations,
-                [f"let {name} = {expr}"],
-            )
-            emit(_repl_lookup_type(types, name))
+            emit(session.infer_type(expr))
             return
         if instance_type is not None:
             if instance_type == "":
                 emit("error: :instances expects a type")
                 return
-            query_type, matches = _repl_instances_for_type(
-                imports,
-                declarations,
-                instance_type,
-            )
+            query_type, matches = session.instances_for_type(instance_type)
             if not matches:
                 emit(f"No instances for {query_type}")
                 return
@@ -3075,40 +3113,14 @@ def cmd_repl() -> int:
                 emit(match)
             return
         if _repl_is_declaration(stripped):
-            _repl_parse_and_check(
-                imports,
-                declarations + [source],
-            )
-            declarations.append(source)
+            session.add_declaration(source)
             emit("ok")
             return
 
-        repl_counter += 1
-        name = f"__repl_value_{repl_counter}"
-        _, types = _repl_parse_and_check(
-            imports,
-            declarations,
-            [f"let {name} = {source}"],
-        )
-        inferred_type = _repl_lookup_type(types, name)
-        if inferred_type.endswith(" !{IO}"):
-            if inferred_type != "Unit !{IO}":
-                emit("error: repl cannot auto-print effectful non-Unit expressions yet")
-                return
-            main_body = name
-        else:
-            main_body = f"print({name})"
-        tree, _ = _repl_parse_and_check(
-            imports,
-            declarations,
-            [f"let {name} = {source}", f"fn main() -> Unit !{{IO}} = {main_body}"],
-        )
-        lowered = lower_typeclasses(tree)
-        typecheck_program(lowered)
-        run_program(lowered)
+        session.run_expression(source)
 
     if interactive:
-        _configure_repl_readline(imports, declarations)
+        _configure_repl_readline(session.imports, session.declarations)
         emit("Sprout REPL. Use :help for commands.")
         while True:
             try:
