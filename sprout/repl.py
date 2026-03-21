@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 from dataclasses import dataclass, field
 import io
 import os
@@ -22,8 +21,6 @@ from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_
 __all__ = [
     "cmd_repl",
     "ReplSession",
-    "repl_history_path",
-    "repl_readline_tab_binding",
 ]
 
 _REPL_COMMANDS = (
@@ -104,8 +101,6 @@ _REPL_STDLIB_EXTRA_NAMES = frozenset(
     }
 )
 _REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
-_REPL_HISTORY_LIMIT = 1000
-_REPL_COMPLETER_DELIMS = " \t\n`~!@#$%^&*()-=+[{]}\\|;,'\"<>/?"
 _REPL_MODULE_NAME = "app.repl"
 _REPL_PROMPT = "sprout> "
 _REPL_BANNER = "Sprout REPL. Use :help for commands."
@@ -328,13 +323,6 @@ def _type_expr_matches_query(pattern: ast.TypeExpr, query: ast.TypeExpr) -> bool
     return False
 
 
-def _repl_history_path() -> Path:
-    override = os.environ.get("SPROUT_REPL_HISTORY")
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / ".sprout_repl_history"
-
-
 def _repl_declared_names(declarations: list[str]) -> set[str]:
     names: set[str] = set()
     for source in declarations:
@@ -387,54 +375,8 @@ def _repl_completion_matches(
     return sorted(name for name in names if name.startswith(prefix))
 
 
-def _repl_readline_tab_binding(readline_module: object) -> str:
-    doc = getattr(readline_module, "__doc__", "") or ""
-    if "libedit" in doc.lower():
-        return "bind ^I rl_complete"
-    return "tab: complete"
-
-
-def _configure_repl_readline(
-    session: ReplSession,
-    history_path: Path | None = None,
-) -> None:
-    try:
-        import readline
-    except ImportError:
-        return
-
-    target = history_path if history_path is not None else _repl_history_path()
-    readline.parse_and_bind(_repl_readline_tab_binding(readline))
-    readline.parse_and_bind("set editing-mode emacs")
-    if hasattr(readline, "set_completer_delims"):
-        readline.set_completer_delims(_REPL_COMPLETER_DELIMS)
-    readline.set_history_length(_REPL_HISTORY_LIMIT)
-
-    def _complete(text: str, state: int) -> str | None:
-        matches = session.completion_matches(text, readline.get_line_buffer())
-        if state < len(matches):
-            return matches[state]
-        return None
-
-    readline.set_completer(_complete)
-    if target.exists():
-        try:
-            readline.read_history_file(target)
-        except OSError:
-            pass
-
-    def _write_history() -> None:
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            readline.write_history_file(target)
-        except OSError:
-            pass
-
-    atexit.register(_write_history)
-
-
 def cmd_repl() -> int:
-    session = reset_hosted_repl_session()
+    reset_hosted_repl_session()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
     entry = Path(__file__).resolve().parent.parent / "stdlib" / "repl.sprout"
     bundle = load_module_bundle(entry)
@@ -448,7 +390,6 @@ def cmd_repl() -> int:
     old_mode = os.environ.get(_REPL_INTERACTIVE_ENV)
     try:
         if interactive:
-            _configure_repl_readline(session)
             os.environ[_REPL_INTERACTIVE_ENV] = "1"
         else:
             os.environ.pop(_REPL_INTERACTIVE_ENV, None)
@@ -459,7 +400,3 @@ def cmd_repl() -> int:
         else:
             os.environ[_REPL_INTERACTIVE_ENV] = old_mode
     return 0
-
-
-repl_history_path = _repl_history_path
-repl_readline_tab_binding = _repl_readline_tab_binding

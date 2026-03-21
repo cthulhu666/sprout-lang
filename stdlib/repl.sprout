@@ -1,16 +1,11 @@
 module stdlib.repl
-import stdlib.terminal (term_read_line_once)
+import stdlib.terminal (term_read_key_once, term_read_line_once)
 import stdlib.string as string
 
 fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
 fn term_noop() -> Unit !{IO} =
   term_write("")
-
-fn show_prompt(prompt: Maybe String) -> Unit !{IO} =
-  match prompt with
-  | Just text -> term_write(text)
-  | Nothing -> term_noop()
 
 fn finish_loop(prompt: Maybe String) -> Unit !{IO} =
   match prompt with
@@ -45,6 +40,47 @@ fn trim(raw: String) -> String =
 
 fn drop_prefix(raw: String, prefix: String) -> String =
   string.slice(raw, string.length(prefix), string.length(raw) - string.length(prefix))
+
+fn drop_last(raw: String) -> String =
+  if string.length(raw) == 0 then raw
+  else string.slice(raw, 0, string.length(raw) - 1)
+
+fn redraw_input(prompt: String, current: String) -> Unit !{IO} =
+  term_write("\r\x1b[2K" ++ prompt ++ current)
+
+fn ignore_key(value: String !{IO}) -> Unit !{IO} =
+  term_noop()
+
+fn ignore_escape_sequence_second(second: String) -> Unit !{IO} =
+  if second == "[" then ignore_key(term_read_key_once())
+  else term_noop()
+
+fn ignore_escape_sequence() -> Unit !{IO} =
+  ignore_escape_sequence_second(term_read_key_once())
+
+fn interactive_read_line_step(prompt: String, current: String, key: String) -> Maybe String !{IO} =
+  if key == "" then Nothing
+  else if key == "\x04" then if current == "" then keep_after(print(""), Nothing) else interactive_read_line_loop(prompt, current)
+  else if key == "\n" || key == "\r" then keep_after(print(""), Just(current))
+  else if key == "\x7f" || key == "\b" then
+    keep_after(redraw_input(prompt, drop_last(current)), interactive_read_line_loop(prompt, drop_last(current)))
+  else if key == "\x1b" then
+    keep_after(ignore_escape_sequence(), interactive_read_line_loop(prompt, current))
+  else if key == "\t" then
+    interactive_read_line_loop(prompt, current)
+  else
+    keep_after(redraw_input(prompt, current ++ key), interactive_read_line_loop(prompt, current ++ key))
+
+fn interactive_read_line_loop(prompt: String, current: String) -> Maybe String !{IO} =
+  interactive_read_line_step(prompt, current, term_read_key_once())
+
+fn interactive_read_line(prompt: String) -> Maybe String !{IO} =
+  keep_after(redraw_input(prompt, ""), interactive_read_line_loop(prompt, ""))
+
+fn read_submission(prompt: Maybe String) -> Maybe String !{IO} =
+  match prompt with
+  | Just text -> interactive_read_line(text)
+  | Nothing -> term_read_line_once()
 
 fn render_error(message: String) -> Vec String =
   single_line("error: " ++ message)
@@ -122,12 +158,9 @@ fn continue_loop(result: Maybe (Vec String), prompt: Maybe String) -> Unit !{IO}
   | Nothing -> finish_loop(prompt)
 
 export fn repl_loop(prompt: Maybe String) -> Unit !{IO} =
-  then_io(
-    show_prompt(prompt),
-    match term_read_line_once() with
-    | Just line -> continue_loop(handle_submission(line), prompt)
-    | Nothing -> finish_loop(prompt)
-  )
+  match read_submission(prompt) with
+  | Just line -> continue_loop(handle_submission(line), prompt)
+  | Nothing -> finish_loop(prompt)
 
 export fn main() -> Unit !{IO} =
   then_io(

@@ -9,8 +9,7 @@ It is an implementation/tooling roadmap, not a normative language spec.
 
 The current REPL is implemented inside the Python CLI. It already supports
 incremental declarations, imports, type queries, instance queries, auto-printing
-of pure expressions, and interactive editing features such as history and tab
-completion.
+of pure expressions, and a Sprout-side interactive input loop.
 
 That is useful today, but it mixes three different concerns:
 
@@ -95,7 +94,7 @@ behavior testable independently of the line editor.
 
 ### 3. Frontend Layer
 
-Treat line reading, history, completion, prompt rendering, and terminal control
+Treat line reading, prompt rendering, history, completion, and terminal control
 as a separate frontend.
 
 That frontend may initially remain host-provided even after the session model is
@@ -150,7 +149,8 @@ Start with a line-based REPL app in Sprout that:
 4. prints results and diagnostics.
 
 Do not block this phase on advanced history, completion, or full-screen
-terminal behavior.
+terminal behavior; basic Sprout-side line editing is enough to move the REPL
+surface out of Python first.
 
 ### Phase 5. Replace the Current Entry Point
 

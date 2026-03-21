@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -256,35 +255,6 @@ class CliTests(unittest.TestCase):
         self.assertIn("foofoo", run.stdout)
         self.assertIn("String", run.stdout)
 
-    def test_repl_history_path_defaults_to_home_file(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = tmp
-            try:
-                from sprout.repl import repl_history_path
-
-                self.assertEqual(repl_history_path(), Path(tmp) / ".sprout_repl_history")
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
-    def test_repl_history_path_honors_environment_override(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            override = str(Path(tmp) / "custom-history")
-            old_value = os.environ.get("SPROUT_REPL_HISTORY")
-            os.environ["SPROUT_REPL_HISTORY"] = override
-            try:
-                from sprout.repl import repl_history_path
-
-                self.assertEqual(repl_history_path(), Path(override))
-            finally:
-                if old_value is None:
-                    os.environ.pop("SPROUT_REPL_HISTORY", None)
-                else:
-                    os.environ["SPROUT_REPL_HISTORY"] = old_value
-
     def test_repl_declared_names_include_declared_symbols(self) -> None:
         from sprout.repl import ReplSession
 
@@ -342,22 +312,6 @@ class CliTests(unittest.TestCase):
 
         self.assertIn("string", alias_matches)
         self.assertIn("from_string", name_matches)
-
-    def test_repl_readline_tab_binding_uses_libedit_form_when_needed(self) -> None:
-        from sprout.repl import repl_readline_tab_binding
-
-        class FakeReadline:
-            __doc__ = "Importing this module enables command line editing using libedit readline."
-
-        self.assertEqual(repl_readline_tab_binding(FakeReadline), "bind ^I rl_complete")
-
-    def test_repl_readline_tab_binding_uses_gnu_readline_form_otherwise(self) -> None:
-        from sprout.repl import repl_readline_tab_binding
-
-        class FakeReadline:
-            __doc__ = "GNU readline support"
-
-        self.assertEqual(repl_readline_tab_binding(FakeReadline), "tab: complete")
 
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
