@@ -2901,6 +2901,11 @@ class _ReplSubmission:
     value: str = ""
 
 
+@dataclass(frozen=True)
+class _ReplOutcome:
+    lines: tuple[str, ...] = ()
+
+
 def _repl_is_declaration(source: str) -> bool:
     stripped = source.strip()
     return stripped.startswith(("fn ", "let ", "type ", "class ", "instance ", "export "))
@@ -3093,36 +3098,32 @@ def _configure_repl_readline(
     atexit.register(_write_history)
 
 
-def _repl_run_submission(session: _ReplSession, submission: _ReplSubmission, emit: Callable[[str], None]) -> None:
+def _repl_run_submission(session: _ReplSession, submission: _ReplSubmission) -> _ReplOutcome:
     match submission.kind:
         case "empty":
-            return
+            return _ReplOutcome()
         case "module":
-            emit("error: repl manages its module header automatically; use `import ...` directly")
+            return _ReplOutcome(("error: repl manages its module header automatically; use `import ...` directly",))
         case "import":
             session.add_import(submission.value)
-            emit("ok")
+            return _ReplOutcome(("ok",))
         case "type":
             if submission.value == "":
-                emit("error: :type expects an expression")
-                return
-            emit(session.infer_type(submission.value))
+                return _ReplOutcome(("error: :type expects an expression",))
+            return _ReplOutcome((session.infer_type(submission.value),))
         case "instances":
             if submission.value == "":
-                emit("error: :instances expects a type")
-                return
+                return _ReplOutcome(("error: :instances expects a type",))
             query_type, matches = session.instances_for_type(submission.value)
             if not matches:
-                emit(f"No instances for {query_type}")
-                return
-            emit(f"Instances for {query_type}:")
-            for match in matches:
-                emit(match)
+                return _ReplOutcome((f"No instances for {query_type}",))
+            return _ReplOutcome((f"Instances for {query_type}:", *matches))
         case "declaration":
             session.add_declaration(submission.value)
-            emit("ok")
+            return _ReplOutcome(("ok",))
         case "expression":
             session.run_expression(submission.value)
+            return _ReplOutcome()
         case _:
             raise ValueError(f"Unknown REPL submission kind {submission.kind!r}")
 
@@ -3141,7 +3142,8 @@ def cmd_repl() -> int:
         if stripped == ":help":
             emit("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines")
             return
-        _repl_run_submission(session, _repl_parse_submission(source), emit)
+        for line in _repl_run_submission(session, _repl_parse_submission(source)).lines:
+            emit(line)
 
     if interactive:
         _configure_repl_readline(session)
