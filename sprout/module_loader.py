@@ -153,6 +153,7 @@ class ModuleBundle:
 @dataclass
 class ModuleSymbols:
     value_locals: dict[str, str]
+    method_locals: set[str]
     type_locals: dict[str, str]
     class_locals: dict[str, str]
     exported_values: dict[str, str]
@@ -561,6 +562,7 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
     out: dict[Path, ModuleSymbols] = {
         path: ModuleSymbols(
             value_locals={},
+            method_locals=set(),
             type_locals={},
             class_locals={},
             exported_values={},
@@ -604,6 +606,7 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
         elif isinstance(decl, ast.ClassDecl):
             canonical = _qualify_name(module_name, decl.name)
             symbols.class_locals[decl.name] = canonical
+            symbols.method_locals.update(method.name for method in decl.methods)
             if exported:
                 symbols.exported_classes[decl.name] = canonical
     for path, module_info in bundle.modules.items():
@@ -629,11 +632,12 @@ def _imports_for_module(
     module_info: ModuleInfo,
     bundle: ModuleBundle,
     module_symbols: dict[Path, ModuleSymbols],
-) -> tuple[dict[str, Path], dict[str, str], dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, Path], dict[str, str], dict[str, str], dict[str, str], set[str]]:
     aliases: dict[str, Path] = {}
     unqualified_values: dict[str, str] = {}
     unqualified_types: dict[str, str] = {}
     unqualified_classes: dict[str, str] = {}
+    method_names: set[str] = set()
     for imp in module_info.header.imports:
         imp_path = _resolve_module(imp.module, module_info.path)
         imp_symbols = module_symbols[imp_path]
@@ -641,6 +645,7 @@ def _imports_for_module(
         if namespace_alias is not None:
             aliases[namespace_alias] = imp_path
         if imp.imported_names is None:
+            method_names |= imp_symbols.method_locals
             continue
         for name in imp.imported_names:
             if name in imp_symbols.exported_values:
@@ -651,7 +656,9 @@ def _imports_for_module(
                     unqualified_values[ctor_name] = ctor_target
             if name in imp_symbols.exported_classes:
                 unqualified_classes[name] = imp_symbols.exported_classes[name]
-    return aliases, unqualified_values, unqualified_types, unqualified_classes
+            if name in imp_symbols.method_locals:
+                method_names.add(name)
+    return aliases, unqualified_values, unqualified_types, unqualified_classes, method_names
 
 
 def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
@@ -773,7 +780,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if module_info is None:
             return name
         symbols = module_symbols[module_info.path]
-        aliases, unqualified_values, _, _ = _imports_for_module(module_info, bundle, module_symbols)
+        aliases, unqualified_values, _, _, imported_methods = _imports_for_module(module_info, bundle, module_symbols)
 
         if "." in name:
             alias, symbol = name.split(".", 1)
@@ -804,6 +811,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             return name
         if name in symbols.value_locals:
             return symbols.value_locals[name]
+        if name in symbols.method_locals or name in imported_methods:
+            return name
         if name in unqualified_values:
             return unqualified_values[name]
         providers = declared_value_by_name.get(name, set())
@@ -835,7 +844,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if module_info is None:
             return name
         symbols = module_symbols[module_info.path]
-        aliases, _, unqualified_types, unqualified_classes = _imports_for_module(module_info, bundle, module_symbols)
+        aliases, _, unqualified_types, unqualified_classes, _ = _imports_for_module(module_info, bundle, module_symbols)
 
         if "." in name:
             alias, symbol = name.split(".", 1)

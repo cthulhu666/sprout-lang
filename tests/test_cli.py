@@ -143,37 +143,39 @@ class CliTests(unittest.TestCase):
         self.assertIn(":instances TYPE", run.stdout)
         self.assertIn(":i TYPE", run.stdout)
 
-    def test_repl_instances_supports_qualified_types_with_stdlib(self) -> None:
+    def test_repl_instances_supports_qualified_types_after_import(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            [sys.executable, "-m", "sprout.cli", "repl"],
             check=False,
             capture_output=True,
             text=True,
-            input=":instances collections.Vec Int\n:quit\n",
+            input="import stdlib.collections\n:instances collections.Vec Int\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
         self.assertIn("Instances for Vec Int:", run.stdout)
         self.assertIn("Foldable Vec", run.stdout)
         self.assertIn("Functor Vec", run.stdout)
         self.assertIn("Semigroup (Vec a)", run.stdout)
 
-    def test_repl_with_stdlib_flag_loads_all_stdlib_modules(self) -> None:
+    def test_repl_imports_make_stdlib_modules_available(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            [sys.executable, "-m", "sprout.cli", "repl"],
             check=False,
             capture_output=True,
             text=True,
-            input=":type split_ints(\"1 2 3\")\n:type http.http_ok(\"x\")\n:quit\n",
+            input="import stdlib.http\n:type split_ints(\"1 2 3\")\n:type http.http_ok(\"x\")\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
         self.assertIn("List Int", run.stdout)
         self.assertIn("String", run.stdout)
 
-    def test_repl_with_stdlib_resolves_foldable_to_vec_for_list_literal(self) -> None:
+    def test_repl_resolves_foldable_to_vec_for_list_literal(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            [sys.executable, "-m", "sprout.cli", "repl"],
             check=False,
             capture_output=True,
             text=True,
@@ -186,7 +188,7 @@ class CliTests(unittest.TestCase):
 
     def test_repl_reports_friendly_argument_type_mismatch(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            [sys.executable, "-m", "sprout.cli", "repl"],
             check=False,
             capture_output=True,
             text=True,
@@ -208,18 +210,33 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("Cons(1, Cons(2, Cons(3, Nil)))", run.stdout)
 
-    def test_repl_with_stdlib_invalid_qualified_lookup_reports_error(self) -> None:
+    def test_repl_invalid_qualified_lookup_reports_error(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--with-stdlib"],
+            [sys.executable, "-m", "sprout.cli", "repl"],
             check=False,
             capture_output=True,
             text=True,
-            input=":t collections.Monoid\n:quit\n",
+            input="import stdlib.collections\n:t collections.Monoid\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
         self.assertIn("error:", run.stdout)
         self.assertIn("does not export value 'Monoid'", run.stdout)
+
+    def test_repl_imports_and_prelude_append_work_together(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input='import stdlib.string\n"foo" ++ "foo"\n:type string.concat("a", "b")\n:quit\n',
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("foofoo", run.stdout)
+        self.assertIn("String", run.stdout)
 
     def test_repl_history_path_defaults_to_home_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -274,8 +291,8 @@ class CliTests(unittest.TestCase):
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
         from sprout.cli import _repl_completion_matches
 
-        self.assertEqual(_repl_completion_matches(":t", ":t", [], with_stdlib=False), [":t", ":type"])
-        matches = _repl_completion_matches("sp", "sp", [], with_stdlib=False)
+        self.assertEqual(_repl_completion_matches(":t", ":t", [], []), [":t", ":type"])
+        matches = _repl_completion_matches("sp", "sp", [], [])
         self.assertIn("split_ints", matches)
 
     def test_repl_completion_matches_declared_names(self) -> None:
@@ -284,22 +301,39 @@ class CliTests(unittest.TestCase):
         matches = _repl_completion_matches(
             "ans",
             "ans",
+            [],
             ["let answer = 42", "fn annotate(x: Int) -> Int = x"],
-            with_stdlib=False,
         )
 
         self.assertIn("answer", matches)
         self.assertNotIn("annotate", matches)
 
-    def test_repl_completion_matches_stdlib_module_names_with_flag(self) -> None:
+    def test_repl_completion_matches_stdlib_module_names(self) -> None:
         from sprout.cli import _repl_completion_matches
 
-        without_stdlib = _repl_completion_matches("htt", "htt", [], with_stdlib=False)
-        with_stdlib = _repl_completion_matches("htt", "htt", [], with_stdlib=True)
+        matches = _repl_completion_matches("htt", "htt", [], [])
 
-        self.assertNotIn("http", without_stdlib)
-        self.assertIn("http", with_stdlib)
-        self.assertIn("http_client", with_stdlib)
+        self.assertIn("http", matches)
+        self.assertIn("http_client", matches)
+
+    def test_repl_completion_matches_imported_aliases_and_names(self) -> None:
+        from sprout.cli import _repl_completion_matches
+
+        alias_matches = _repl_completion_matches(
+            "str",
+            "str",
+            ["import stdlib.string", "import stdlib.bytes (from_string)"],
+            [],
+        )
+        name_matches = _repl_completion_matches(
+            "fr",
+            "fr",
+            ["import stdlib.string", "import stdlib.bytes (from_string)"],
+            [],
+        )
+
+        self.assertIn("string", alias_matches)
+        self.assertIn("from_string", name_matches)
 
     def test_repl_readline_tab_binding_uses_libedit_form_when_needed(self) -> None:
         from sprout.cli import _repl_readline_tab_binding

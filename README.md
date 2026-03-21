@@ -77,7 +77,7 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Start REPL: `mise exec -- python -m sprout.cli repl` (loads prelude by default; interactive mode supports arrow-key editing, tab completion, and persistent history via `~/.sprout_repl_history`)
+- Start REPL: `mise exec -- python -m sprout.cli repl` (loads the foundational prelude by default; interactive mode supports arrow-key editing, tab completion, persistent history via `~/.sprout_repl_history`, and ordinary `import ...` lines inside the session)
 - Run tests: `mise exec -- just test`
 - Run integration-style IO tests: `mise exec -- just test-integration`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
@@ -568,9 +568,9 @@ Commands:
 - Native binary (requires `clang`): `python3 -m sprout.cli compile input.sprout --native -o out_bin`
 - REPL: `python3 -m sprout.cli repl`
   - commands: `:type EXPR`, `:t EXPR`, `:instances TYPE`, `:i TYPE`, `:help`, `:quit`
-  - the prelude is loaded by default, so list literals, dict literals, `split_ints(...)`, `foldable_to_vec(...)`, and `++` work without extra flags
+  - the foundational prelude is loaded by default, so list literals, dict literals, `split_ints(...)`, `foldable_to_vec(...)`, and `++` work immediately
   - `:instances TYPE` lists matching unary typeclass instances for a type, including constructor-head matches such as `List Int` reporting `Functor List`
-  - add `--with-stdlib` to preload the rest of the modules under `stdlib/`
+  - use ordinary imports inside the session to access stdlib modules, for example `import stdlib.http` or `import stdlib.string`
   - imported modules use their final path segment (`http.http_ok(...)`, `math.gcd(...)`)
 - Formatter/linter baseline:
   - format in place: `python3 -m sprout.cli fmt your_file.sprout`

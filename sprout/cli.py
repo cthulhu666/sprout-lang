@@ -104,6 +104,7 @@ _REPL_STDLIB_EXTRA_NAMES = frozenset(
 )
 _REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
 _REPL_COMPLETER_DELIMS = " \t\n`~!@#$%^&*()-=+[{]}\\|;,'\"<>/?"
+_REPL_MODULE_NAME = "app.repl"
 
 
 def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
@@ -2757,46 +2758,22 @@ long long tcp_echo_serve(long long port, long long max_connections) {
 
 
 def _repl_compose_source(
+    imports: list[str],
     declarations: list[str],
     tail: list[str] | None = None,
-    *,
-    with_stdlib: bool,
 ) -> str:
-    chunks = declarations + (tail or [])
-    user_source = "\n\n".join(chunk for chunk in chunks if chunk.strip())
-    if with_stdlib:
-        return user_source
-    return with_prelude(user_source)
+    chunks = [f"module {_REPL_MODULE_NAME}"]
+    chunks.extend(imp for imp in imports if imp.strip())
+    chunks.extend(chunk for chunk in declarations + (tail or []) if chunk.strip())
+    return "\n\n".join(chunks)
 
 
 def _repl_parse_and_check(
+    imports: list[str],
     declarations: list[str],
     tail: list[str] | None = None,
-    *,
-    with_stdlib: bool,
 ) -> tuple[object, dict[str, str]]:
-    source = _repl_compose_source(declarations, tail, with_stdlib=with_stdlib)
-    if not with_stdlib:
-        tree = parse(source)
-        validate_public_surface(tree, None)
-        types = typecheck_program(tree)
-        return tree, types
-
-    imports = "\n".join(
-        [
-            "module stdlib.repl",
-            "import stdlib.collections (Maybe, List, Vec, Dict, Semigroup, Functor, Foldable, list_map, list_fold, list_append, vec_empty, vec_prepend, vec_append, vec_length, vec_get, vec_get_or, vec_set, vec_map, vec_fold, vec_slice, vec_reverse, vec_sum, vec_sum_by, foldable_to_vec, dict_empty, dict_get, dict_set, dict_remove, dict_keys, dict_values)",
-            "import stdlib.collections",
-            "import stdlib.http",
-            "import stdlib.http_client",
-            "import stdlib.net",
-            "import stdlib.bytes",
-            "import stdlib.math",
-            "import stdlib.string",
-            "import stdlib.terminal",
-        ]
-    )
-    source = f"{imports}\n\n{source}"
+    source = _repl_compose_source(imports, declarations, tail)
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = Path(tmpdir) / "repl_session.sprout"
         temp_path.write_text(source, encoding="utf-8")
@@ -2875,16 +2852,15 @@ def _type_expr_matches_query(pattern: ast.TypeExpr, query: ast.TypeExpr) -> bool
 
 
 def _repl_lookup_param_type(
+    imports: list[str],
     declarations: list[str],
     type_expr_source: str,
-    *,
-    with_stdlib: bool,
 ) -> ast.TypeExpr:
     probe_name = "__repl_instances_probe"
     tree, _ = _repl_parse_and_check(
+        imports,
         declarations,
         [f"fn {probe_name}(__value: {type_expr_source}) -> Int = 0"],
-        with_stdlib=with_stdlib,
     )
     for decl in tree.declarations:
         if isinstance(decl, ast.FnDecl) and (decl.name == probe_name or decl.name.endswith(f".{probe_name}")):
@@ -2896,13 +2872,12 @@ def _repl_lookup_param_type(
 
 
 def _repl_instances_for_type(
+    imports: list[str],
     declarations: list[str],
     type_expr_source: str,
-    *,
-    with_stdlib: bool,
 ) -> tuple[str, list[str]]:
-    tree, _ = _repl_parse_and_check(declarations, with_stdlib=with_stdlib)
-    query_type = _repl_lookup_param_type(declarations, type_expr_source, with_stdlib=with_stdlib)
+    tree, _ = _repl_parse_and_check(imports, declarations)
+    query_type = _repl_lookup_param_type(imports, declarations, type_expr_source)
     matches: list[str] = []
     for decl in tree.declarations:
         if not isinstance(decl, ast.InstanceDecl):
@@ -2944,20 +2919,39 @@ def _repl_declared_names(declarations: list[str]) -> set[str]:
     return names
 
 
+def _repl_imported_names(imports: list[str]) -> set[str]:
+    names: set[str] = set()
+    for source in imports:
+        for line in source.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("import "):
+                continue
+            body = stripped[len("import ") :]
+            if " as " in body:
+                module_name, alias = body.split(" as ", 1)
+                names.add(alias.strip())
+                body = module_name.strip()
+            if "(" in body and ")" in body:
+                selected = body.split("(", 1)[1].rsplit(")", 1)[0]
+                names.update(name.strip() for name in selected.split(",") if name.strip())
+            else:
+                names.add(body.rsplit(".", 1)[-1].strip())
+    return names
+
+
 def _repl_completion_matches(
     text: str,
     line_buffer: str,
+    imports: list[str],
     declarations: list[str],
-    *,
-    with_stdlib: bool,
 ) -> list[str]:
     token_match = _REPL_TOKEN_RE.search(line_buffer)
     prefix = token_match.group(0) if token_match is not None else text
     names = set(_REPL_COMMANDS)
     names.update(_REPL_PRELUDE_NAMES)
+    names.update(_REPL_STDLIB_EXTRA_NAMES)
     names.update(_repl_declared_names(declarations))
-    if with_stdlib:
-        names.update(_REPL_STDLIB_EXTRA_NAMES)
+    names.update(_repl_imported_names(imports))
     return sorted(name for name in names if name.startswith(prefix))
 
 
@@ -2969,9 +2963,8 @@ def _repl_readline_tab_binding(readline_module: object) -> str:
 
 
 def _configure_repl_readline(
+    imports: list[str],
     declarations: list[str],
-    *,
-    with_stdlib: bool,
     history_path: Path | None = None,
 ) -> None:
     try:
@@ -2990,8 +2983,8 @@ def _configure_repl_readline(
         matches = _repl_completion_matches(
             text,
             readline.get_line_buffer(),
+            imports,
             declarations,
-            with_stdlib=with_stdlib,
         )
         if state < len(matches):
             return matches[state]
@@ -3014,7 +3007,8 @@ def _configure_repl_readline(
     atexit.register(_write_history)
 
 
-def cmd_repl(with_stdlib: bool = False) -> int:
+def cmd_repl() -> int:
+    imports: list[str] = []
     declarations: list[str] = []
     repl_counter = 0
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
@@ -3030,10 +3024,15 @@ def cmd_repl(with_stdlib: bool = False) -> int:
         if stripped in {":quit", ":q", ":exit"}:
             raise EOFError
         if stripped == ":help":
-            emit("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help")
+            emit("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines")
             return
-        if stripped.startswith("module ") or stripped.startswith("import "):
-            emit("error: repl does not support module/import headers")
+        if stripped.startswith("module "):
+            emit("error: repl manages its module header automatically; use `import ...` directly")
+            return
+        if stripped.startswith("import "):
+            _repl_parse_and_check(imports + [source], declarations)
+            imports.append(source)
+            emit("ok")
             return
         type_expr: str | None = None
         instance_type: str | None = None
@@ -3053,9 +3052,9 @@ def cmd_repl(with_stdlib: bool = False) -> int:
             repl_counter += 1
             name = f"__repl_value_{repl_counter}"
             _, types = _repl_parse_and_check(
+                imports,
                 declarations,
                 [f"let {name} = {expr}"],
-                with_stdlib=with_stdlib,
             )
             emit(_repl_lookup_type(types, name))
             return
@@ -3064,9 +3063,9 @@ def cmd_repl(with_stdlib: bool = False) -> int:
                 emit("error: :instances expects a type")
                 return
             query_type, matches = _repl_instances_for_type(
+                imports,
                 declarations,
                 instance_type,
-                with_stdlib=with_stdlib,
             )
             if not matches:
                 emit(f"No instances for {query_type}")
@@ -3077,8 +3076,8 @@ def cmd_repl(with_stdlib: bool = False) -> int:
             return
         if _repl_is_declaration(stripped):
             _repl_parse_and_check(
+                imports,
                 declarations + [source],
-                with_stdlib=with_stdlib,
             )
             declarations.append(source)
             emit("ok")
@@ -3087,9 +3086,9 @@ def cmd_repl(with_stdlib: bool = False) -> int:
         repl_counter += 1
         name = f"__repl_value_{repl_counter}"
         _, types = _repl_parse_and_check(
+            imports,
             declarations,
             [f"let {name} = {source}"],
-            with_stdlib=with_stdlib,
         )
         inferred_type = _repl_lookup_type(types, name)
         if inferred_type.endswith(" !{IO}"):
@@ -3100,16 +3099,16 @@ def cmd_repl(with_stdlib: bool = False) -> int:
         else:
             main_body = f"print({name})"
         tree, _ = _repl_parse_and_check(
+            imports,
             declarations,
             [f"let {name} = {source}", f"fn main() -> Unit !{{IO}} = {main_body}"],
-            with_stdlib=with_stdlib,
         )
         lowered = lower_typeclasses(tree)
         typecheck_program(lowered)
         run_program(lowered)
 
     if interactive:
-        _configure_repl_readline(declarations, with_stdlib=with_stdlib)
+        _configure_repl_readline(imports, declarations)
         emit("Sprout REPL. Use :help for commands.")
         while True:
             try:
@@ -3193,8 +3192,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit native binary with clang (default writes LLVM .ll text)",
     )
-    p_repl = sub.add_parser("repl", help="start a simple interactive Sprout REPL")
-    p_repl.add_argument("--with-stdlib", action="store_true", help="load all stdlib modules into the REPL")
+    sub.add_parser("repl", help="start a simple interactive Sprout REPL")
 
     return parser
 
@@ -3232,7 +3230,7 @@ def main(argv: list[str] | None = None) -> int:
                 native=args.native,
             )
         if args.command == "repl":
-            return cmd_repl(with_stdlib=args.with_stdlib)
+            return cmd_repl()
     except (
         ParseError,
         TokenizeError,
