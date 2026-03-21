@@ -764,6 +764,32 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "j")
 
+    def test_terminal_read_line_builtin(self) -> None:
+        src = """
+        type Maybe a =
+          | Just a
+          | Nothing
+
+        fn render(v: Maybe String) -> String =
+          match v with
+          | Just text -> text
+          | Nothing -> "eof"
+
+        fn main() -> Unit !{IO} =
+          print(render(term_read_line()))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        with patch("sys.stdin", io.StringIO("hello\n")):
+            run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "hello")
+
+        out = io.StringIO()
+        with patch("sys.stdin", io.StringIO("")):
+            run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "eof")
+
     def test_vector_builtins(self) -> None:
         src = """
         type Maybe a =

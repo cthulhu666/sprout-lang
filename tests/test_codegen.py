@@ -1246,6 +1246,48 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_term_read_line_builtin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+
+                fn render(v: Maybe String) -> String =
+                  match v with
+                  | Just text -> text
+                  | Nothing -> "eof"
+
+                fn main() -> Unit !{IO} =
+                  print(render(term_read_line()))
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="native line\n")
+            self.assertEqual(run.stdout.strip(), "native line")
+            self.assertEqual(run.returncode, 0)
+
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="")
+            self.assertEqual(run.stdout.strip(), "eof")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_bytes_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

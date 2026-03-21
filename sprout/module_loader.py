@@ -728,6 +728,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "term_hide_cursor",
         "term_show_cursor",
         "term_read_key",
+        "term_read_line",
         "term_write",
     }
     builtin_types = {"Int", "Bool", "String", "Bytes", "Builder", "Unit", "List", "Vector", "Map"}

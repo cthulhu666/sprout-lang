@@ -13,3 +13,6 @@ export fn term_render_line(row: Int, text: String) -> Unit !{IO} =
 
 export fn term_read_key_once() -> String !{IO} =
   term_read_key()
+
+export fn term_read_line_once() -> Maybe String !{IO} =
+  term_read_line()

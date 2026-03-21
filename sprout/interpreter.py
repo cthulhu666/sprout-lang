@@ -1097,6 +1097,16 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     def builtin_term_read_key(args: list[object]) -> object:
         return os.environ.get("SPROUT_TERM_KEY", "q")
 
+    def builtin_term_read_line(args: list[object]) -> object:
+        line = sys.stdin.readline()
+        if line == "":
+            return ADTValue(constructor="Nothing", args=())
+        if line.endswith("\n"):
+            line = line[:-1]
+        if line.endswith("\r"):
+            line = line[:-1]
+        return ADTValue(constructor="Just", args=(line,))
+
     def builtin_term_write(args: list[object]) -> object:
         text = args[0]
         if not isinstance(text, str):
@@ -1347,6 +1357,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("term_hide_cursor", BuiltinFunction(name="term_hide_cursor", arity=0, fn=builtin_term_hide_cursor))
     env.set("term_show_cursor", BuiltinFunction(name="term_show_cursor", arity=0, fn=builtin_term_show_cursor))
     env.set("term_read_key", BuiltinFunction(name="term_read_key", arity=0, fn=builtin_term_read_key))
+    env.set("term_read_line", BuiltinFunction(name="term_read_line", arity=0, fn=builtin_term_read_line))
     env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))
     env.set("tcp_accept", BuiltinFunction(name="tcp_accept", arity=1, fn=builtin_tcp_accept))

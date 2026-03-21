@@ -947,6 +947,21 @@ const char* read_file(const char* path) {
   out[len] = '\\0';
   return out;
 }
+long long term_read_line(void) {
+  char* line = NULL;
+  size_t cap = 0;
+  ssize_t len = getline(&line, &cap, stdin);
+  if (len < 0) {
+    free(line);
+    if (feof(stdin)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    tcp_fail("term_read_line: read error");
+  }
+  while (len > 0 && (line[len - 1] == '\\n' || line[len - 1] == '\\r')) {
+    len -= 1;
+    line[len] = '\\0';
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)line);
+}
 long long read_int_lines(const char* path) {
   if (path == NULL) tcp_fail("read_int_lines: null path");
   FILE* f = fopen(path, "r");

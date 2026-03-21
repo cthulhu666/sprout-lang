@@ -121,6 +121,7 @@ Runtime builtins (host-implemented):
 - `term_hide_cursor() -> Unit !{IO}`
 - `term_show_cursor() -> Unit !{IO}`
 - `term_read_key() -> String !{IO}` (currently from `SPROUT_TERM_KEY` env var, default `"q"`)
+- `term_read_line() -> Maybe String !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF)
 - `term_write(text: String) -> Unit !{IO}`
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
@@ -445,6 +446,7 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_reset_screen() -> Unit !{IO}`
 - `term_render_line(row, text) -> Unit !{IO}`
 - `term_read_key_once() -> String !{IO}`
+- `term_read_line_once() -> Maybe String !{IO}`
 
 Collections module (in `stdlib/collections.sprout`):
 

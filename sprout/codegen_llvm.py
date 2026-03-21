@@ -103,6 +103,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "tcp_echo_serve": FnSig(name="tcp_echo_serve", params=[I64, I64], ret=I64),
     "http_request": FnSig(name="http_request", params=[I8_PTR, I8_PTR, I8_PTR, I8_PTR, I64], ret=I64),
     "json_stringify": FnSig(name="json_stringify", params=[I64], ret=I8_PTR),
+    "term_read_line": FnSig(name="term_read_line", params=[], ret=I64),
     "sprout_set_argv": FnSig(name="sprout_set_argv", params=[I32, I8_PTR], ret=I64),
     "sprout_register_ctor": FnSig(name="sprout_register_ctor", params=[I64, I8_PTR, I64], ret=I64),
     "sprout_nothing": FnSig(name="sprout_nothing", params=[I64], ret=I64),
