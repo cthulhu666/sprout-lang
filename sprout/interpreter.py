@@ -481,6 +481,8 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
 
 def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[str] | None = None) -> None:
     out = stdout
+    runtime_in = sys.stdin
+    runtime_out = sys.stdout if out is None else out
     program_argv = [] if argv is None else argv
     env = Env()
     echo_backend = _build_echo_backend()
@@ -524,7 +526,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(raw_path, str):
             raise RuntimeError("read_file expects String path")
         if raw_path == "-":
-            return sys.stdin.read()
+            return runtime_in.read()
         return Path(raw_path).read_text(encoding="utf-8")
 
     def builtin_read_int_lines(args: list[object]) -> object:
@@ -1073,10 +1075,13 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
     def _term_emit(text: str) -> None:
         if out is None:
-            sys.stdout.write(text)
-            sys.stdout.flush()
+            runtime_out.write(text)
+            runtime_out.flush()
         else:
             out.write(text)
+
+    def _term_is_interactive() -> bool:
+        return getattr(runtime_in, "isatty", lambda: False)() and getattr(runtime_out, "isatty", lambda: False)()
 
     def builtin_term_clear(args: list[object]) -> object:
         _term_emit("\x1b[2J\x1b[H")
@@ -1116,34 +1121,27 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                 return "tab"
             return ch
 
-        interactive_term = getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()
+        interactive_term = _term_is_interactive()
         if interactive_term:
             try:
                 import termios
                 import tty
 
-                fd = sys.stdin.fileno()
+                fd = runtime_in.fileno()
                 old_settings = termios.tcgetattr(fd)
                 try:
                     tty.setraw(fd)
-                    ch = sys.stdin.read(1)
+                    ch = runtime_in.read(1)
                 finally:
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                 return _normalize_key(ch)
             except (ImportError, OSError, AttributeError):
                 pass
-        ch = sys.stdin.read(1)
+        ch = runtime_in.read(1)
         return _normalize_key(ch)
 
     def builtin_term_read_line(args: list[object]) -> object:
-        interactive_term = getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()
-        if interactive_term:
-            try:
-                line = input("")
-            except EOFError:
-                return ADTValue(constructor="Nothing", args=())
-            return ADTValue(constructor="Just", args=(line,))
-        line = sys.stdin.readline()
+        line = runtime_in.readline()
         if line == "":
             return ADTValue(constructor="Nothing", args=())
         if line.endswith("\n"):
@@ -1153,7 +1151,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         return ADTValue(constructor="Just", args=(line,))
 
     def builtin_term_is_interactive(args: list[object]) -> object:
-        return getattr(sys.stdin, "isatty", lambda: False)() and getattr(sys.stdout, "isatty", lambda: False)()
+        return _term_is_interactive()
 
     def _repl_ok(value: object) -> ADTValue:
         return ADTValue(constructor="Ok", args=(value,))
