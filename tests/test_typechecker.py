@@ -213,6 +213,8 @@ class TypecheckerTests(unittest.TestCase):
             "repl_add_import": "String -> Result String Unit !{IO}",
             "repl_add_declaration": "String -> Result String Unit !{IO}",
             "repl_eval_expr": "String -> Result String Vec String !{IO}",
+            "repl_eval_expr_in_source": "String -> String -> Result String Vec String !{IO}",
+            "repl_check_source": "String -> Result String Unit !{IO}",
             "repl_type_of": "String -> Result String String !{IO}",
             "repl_type_of_in_source": "String -> String -> Result String String !{IO}",
             "repl_instances": "String -> Result String (String, Vec String) !{IO}",
@@ -578,6 +580,8 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("repl_add_import", types)
         self.assertIn("repl_add_declaration", types)
         self.assertIn("repl_eval_expr", types)
+        self.assertIn("repl_eval_expr_in_source", types)
+        self.assertIn("repl_check_source", types)
         self.assertIn("repl_type_of", types)
         self.assertIn("repl_type_of_in_source", types)
         self.assertIn("repl_instances", types)

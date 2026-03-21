@@ -1047,6 +1047,17 @@ long long repl_eval_expr(const char* source) {
   tcp_fail("repl_eval_expr: not supported in native backend");
   return 0;
 }
+long long repl_eval_expr_in_source(const char* module_source, const char* expr) {
+  (void)module_source;
+  (void)expr;
+  tcp_fail("repl_eval_expr_in_source: not supported in native backend");
+  return 0;
+}
+long long repl_check_source(const char* module_source) {
+  (void)module_source;
+  tcp_fail("repl_check_source: not supported in native backend");
+  return 0;
+}
 long long repl_type_of(const char* source) {
   (void)source;
   tcp_fail("repl_type_of: not supported in native backend");

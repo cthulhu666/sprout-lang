@@ -217,6 +217,16 @@ fn handle_instances_command(line: String, prefix: String, imports: Vec String, d
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), imports, declarations)
   else Continue(render_instances_result(repl_instances_in_source(session_source(imports, declarations), trim(drop_prefix(line, prefix)))), imports, declarations)
 
+fn handle_import_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  match repl_check_source(session_source(vec_append(line, imports), declarations)) with
+  | Ok _ -> Continue(single_line("ok"), vec_append(line, imports), declarations)
+  | Err message -> Continue(render_error(message), imports, declarations)
+
+fn handle_declaration_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  match repl_check_source(session_source(imports, vec_append(line, declarations))) with
+  | Ok _ -> Continue(single_line("ok"), imports, vec_append(line, declarations))
+  | Err message -> Continue(render_error(message), imports, declarations)
+
 fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
   if line == "" then Continue(vec_empty(), imports, declarations)
   else if line == ":help" then Continue(help_lines(), imports, declarations)
@@ -232,15 +242,11 @@ fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Ve
   else if string.starts_with(line, ":i ") then
     handle_instances_command(line, ":i ", imports, declarations)
   else if string.starts_with(line, "import ") then
-    match repl_add_import(line) with
-    | Ok _ -> Continue(single_line("ok"), vec_append(line, imports), declarations)
-    | Err message -> Continue(render_error(message), imports, declarations)
+    handle_import_submission(line, imports, declarations)
   else if is_declaration(line) then
-    match repl_add_declaration(line) with
-    | Ok _ -> Continue(single_line("ok"), imports, vec_append(line, declarations))
-    | Err message -> Continue(render_error(message), imports, declarations)
+    handle_declaration_submission(line, imports, declarations)
   else
-    Continue(render_expr_result(repl_eval_expr(line)), imports, declarations)
+    Continue(render_expr_result(repl_eval_expr_in_source(session_source(imports, declarations), line)), imports, declarations)
 
 fn handle_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
   handle_trimmed_submission(trim(raw), imports, declarations)

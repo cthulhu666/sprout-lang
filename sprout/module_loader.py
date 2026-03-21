@@ -733,6 +733,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "repl_add_import",
         "repl_add_declaration",
         "repl_eval_expr",
+        "repl_eval_expr_in_source",
+        "repl_check_source",
         "repl_type_of",
         "repl_type_of_in_source",
         "repl_instances",

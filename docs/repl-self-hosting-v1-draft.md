@@ -69,6 +69,8 @@ Today the temporary host bridge exposes:
 repl_add_import(source: String) -> Result String Unit !{IO}
 repl_add_declaration(source: String) -> Result String Unit !{IO}
 repl_eval_expr(source: String) -> Result String (Vec String) !{IO}
+repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}
+repl_check_source(module_source: String) -> Result String Unit !{IO}
 repl_type_of(source: String) -> Result String String !{IO}
 repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}
 repl_instances(source: String) -> Result String (String, Vec String) !{IO}
@@ -85,7 +87,9 @@ intended v1 direction because it operates on an explicit source snapshot rather
 than implicit host-owned REPL state. `repl_instances_in_source(...)` extends
 that same pattern to `:instances`. `repl_complete_in_state(...)` does the same
 for tab completion by taking explicit frontend state instead of reading hidden
-host session state.
+host session state. `repl_check_source(...)` applies the same idea to import
+and declaration acceptance. `repl_eval_expr_in_source(...)` does the same for
+expression execution.
 
 ## 6. Proposed v1 Direction
 

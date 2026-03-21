@@ -20,6 +20,8 @@ __all__ = [
     "ReplSession",
     "hosted_repl_session",
     "reset_hosted_repl_session",
+    "check_source",
+    "eval_expression_lines_in_source",
     "infer_type_in_source",
     "instances_in_source",
     "completion_candidates_in_state",
@@ -297,6 +299,28 @@ def infer_type_in_source(source: str, expr: str) -> str:
     name = "__repl_source_value"
     _, types = _repl_parse_and_check_source(source, [f"let {name} = {expr}"])
     return _repl_lookup_type(types, name)
+
+
+def check_source(source: str) -> None:
+    _repl_parse_and_check_source(source)
+
+
+def eval_expression_lines_in_source(source: str, expr: str) -> tuple[str, ...]:
+    name = "__repl_source_value"
+    _, types = _repl_parse_and_check_source(source, [f"let {name} = {expr}"])
+    inferred_type = _repl_lookup_type(types, name)
+    if inferred_type.endswith(" !{IO}"):
+        if inferred_type != "Unit !{IO}":
+            raise TypeCheckError("repl cannot auto-print effectful non-Unit expressions yet")
+        main_body = name
+    else:
+        main_body = f"print({name})"
+    tree, _ = _repl_parse_and_check_source(source, [f"let {name} = {expr}", f"fn main() -> Unit !{{IO}} = {main_body}"])
+    lowered = lower_typeclasses(tree)
+    typecheck_program(lowered)
+    capture = io.StringIO()
+    run_program(lowered, stdout=capture)
+    return tuple(capture.getvalue().splitlines())
 
 
 def instances_in_source(source: str, type_expr_source: str) -> tuple[str, list[str]]:

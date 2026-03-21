@@ -60,7 +60,8 @@ Current experimental runtime progress:
 
 1. `term_read_line()` now provides line-oriented stdin input.
 2. `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
-   `repl_type_of(...)`, `repl_type_of_in_source(...)`, `repl_instances(...)`,
+   `repl_eval_expr_in_source(...)`, `repl_check_source(...)`, `repl_type_of(...)`,
+   `repl_type_of_in_source(...)`, `repl_instances(...)`,
    `repl_instances_in_source(...)`, `repl_complete(...)`,
    `repl_complete_in_state(...)`, and
    `repl_reset_session()` expose the hosted REPL session through an

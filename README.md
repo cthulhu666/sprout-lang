@@ -133,6 +133,8 @@ Experimental host-REPL builtins:
 - `repl_add_import(source: String) -> Result String Unit !{IO}`
 - `repl_add_declaration(source: String) -> Result String Unit !{IO}`
 - `repl_eval_expr(source: String) -> Result String (Vec String) !{IO}`
+- `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
+- `repl_check_source(module_source: String) -> Result String Unit !{IO}`
 - `repl_type_of(source: String) -> Result String String !{IO}`
 - `repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}`
 - `repl_instances(source: String) -> Result String (String, Vec String) !{IO}`
