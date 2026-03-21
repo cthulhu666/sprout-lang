@@ -224,7 +224,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("does not export value 'Monoid'", run.stdout)
 
     def test_repl_session_tracks_imports_and_declarations(self) -> None:
-        from sprout.repl import ReplSession
+        from sprout.repl_host import ReplSession
 
         session = ReplSession()
         session.add_import("import stdlib.http")
@@ -256,7 +256,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("String", run.stdout)
 
     def test_repl_declared_names_include_declared_symbols(self) -> None:
-        from sprout.repl import ReplSession
+        from sprout.repl_host import ReplSession
 
         session = ReplSession(
             declarations=[
@@ -278,7 +278,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("render", names)
 
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
-        from sprout.repl import ReplSession
+        from sprout.repl_host import ReplSession
 
         session = ReplSession()
         self.assertEqual(session.completion_matches(":t", ":t"), [":t", ":type"])
@@ -286,7 +286,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("split_ints", matches)
 
     def test_repl_completion_matches_declared_names(self) -> None:
-        from sprout.repl import ReplSession
+        from sprout.repl_host import ReplSession
 
         session = ReplSession(declarations=["let answer = 42", "fn annotate(x: Int) -> Int = x"])
         matches = session.completion_matches("ans", "ans")
@@ -295,7 +295,7 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("annotate", matches)
 
     def test_repl_completion_matches_stdlib_module_names(self) -> None:
-        from sprout.repl import ReplSession
+        from sprout.repl_host import ReplSession
 
         session = ReplSession()
         matches = session.completion_matches("htt", "htt")
@@ -304,7 +304,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("http_client", matches)
 
     def test_repl_completion_matches_imported_aliases_and_names(self) -> None:
-        from sprout.repl import ReplSession
+        from sprout.repl_host import ReplSession
 
         session = ReplSession(imports=["import stdlib.string", "import stdlib.bytes (from_string)"])
         alias_matches = session.completion_matches("str", "str")
@@ -314,7 +314,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("from_string", name_matches)
 
     def test_repl_completion_candidates_return_suffix_prefix(self) -> None:
-        from sprout.repl import ReplSession
+        from sprout.repl_host import ReplSession
 
         session = ReplSession(declarations=["let answer = 42"])
         prefix, matches = session.completion_candidates(":t ans")

@@ -1179,7 +1179,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_add_import expects String")
-        from .repl import hosted_repl_session
+        from .repl_host import hosted_repl_session
 
         return _repl_wrap(lambda: hosted_repl_session().add_import(source))
 
@@ -1187,7 +1187,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_add_declaration expects String")
-        from .repl import hosted_repl_session
+        from .repl_host import hosted_repl_session
 
         return _repl_wrap(lambda: hosted_repl_session().add_declaration(source))
 
@@ -1195,7 +1195,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_eval_expr expects String")
-        from .repl import hosted_repl_session
+        from .repl_host import hosted_repl_session
 
         return _repl_wrap(lambda: _repl_vec_string(hosted_repl_session().eval_expression_lines(source)))
 
@@ -1203,7 +1203,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_type_of expects String")
-        from .repl import hosted_repl_session
+        from .repl_host import hosted_repl_session
 
         return _repl_wrap(lambda: hosted_repl_session().infer_type(source))
 
@@ -1211,7 +1211,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_instances expects String")
-        from .repl import hosted_repl_session
+        from .repl_host import hosted_repl_session
 
         def _instances() -> TupleValue:
             query_type, matches = hosted_repl_session().instances_for_type(source)
@@ -1223,13 +1223,13 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         line_buffer = args[0]
         if not isinstance(line_buffer, str):
             raise RuntimeError("repl_complete expects String")
-        from .repl import hosted_repl_session
+        from .repl_host import hosted_repl_session
 
         prefix, matches = hosted_repl_session().completion_candidates(line_buffer)
         return TupleValue(items=(prefix, _repl_vec_string(matches)))
 
     def builtin_repl_reset_session(args: list[object]) -> object:
-        from .repl import reset_hosted_repl_session
+        from .repl_host import reset_hosted_repl_session
 
         reset_hosted_repl_session()
         return None
