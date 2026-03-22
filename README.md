@@ -134,6 +134,7 @@ Experimental host-REPL builtins:
 - `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
 - `repl_check_source(module_source: String) -> Result String Unit !{IO}`
 - `repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}`
+- `repl_diagnostics_in_source(module_source: String) -> Vec String !{IO}`
 - `repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}`
 - `repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}`
 - `repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}`

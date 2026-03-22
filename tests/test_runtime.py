@@ -861,6 +861,9 @@ class RuntimeTests(unittest.TestCase):
           | Err message -> str_concat("error: ", message)
           | Ok lines -> first_or(lines, "<empty>")
 
+        fn render_diagnostics_result(lines: Vec String) -> String =
+          first_or(lines, "<empty>")
+
         fn main() -> Unit !{IO} =
           seq(
             repl_reset_session(),
@@ -879,6 +882,8 @@ class RuntimeTests(unittest.TestCase):
                       seq(
                       print(render_names_result(repl_declared_names_in_source("module app.repl\n\ntype AAA =\n  | AAA\n\ntype Maybe a =\n  | Just a\n  | Nothing\n\nlet local = 41"))),
                       seq(
+                      print(render_diagnostics_result(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing"))),
+                      seq(
                       print(render_expr_result(repl_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
                       seq(
                       print(render_type_result(repl_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
@@ -893,6 +898,7 @@ class RuntimeTests(unittest.TestCase):
                         )
                       )
                       )
+                    )
                     )
                   )
                 )
@@ -915,11 +921,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[4], "str:string")
         self.assertEqual(lines[5], "ok")
         self.assertEqual(lines[6], "AAA")
-        self.assertEqual(lines[7], "42")
-        self.assertEqual(lines[8], "Int")
-        self.assertEqual(lines[9], "ok")
-        self.assertEqual(lines[10], "ab")
-        self.assertTrue(lines[11].startswith("error: "))
+        self.assertTrue(lines[7].startswith("Unknown variable missing"))
+        self.assertEqual(lines[8], "42")
+        self.assertEqual(lines[9], "Int")
+        self.assertEqual(lines[10], "ok")
+        self.assertEqual(lines[11], "ab")
+        self.assertTrue(lines[12].startswith("error: "))
 
     def test_vector_builtins(self) -> None:
         src = """
