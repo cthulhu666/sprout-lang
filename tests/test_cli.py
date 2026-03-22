@@ -302,6 +302,20 @@ class CliTests(unittest.TestCase):
         self.assertIn("Nothing", names)
         self.assertIn("local", names)
 
+    def test_repl_exported_names_in_source_reports_explicit_exports(self) -> None:
+        from sprout.analysis import exported_names_in_source
+
+        names = set(
+            exported_names_in_source(
+                "module app.lib\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nfn hidden() -> Int = 1"
+            )
+        )
+
+        self.assertIn("Box", names)
+        self.assertIn("Wrap", names)
+        self.assertIn("unwrap", names)
+        self.assertNotIn("hidden", names)
+
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
         from sprout.repl_host import ReplSession
 

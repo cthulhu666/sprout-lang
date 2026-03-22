@@ -8,8 +8,10 @@ import tempfile
 from . import ast
 from .interpreter import RuntimeError, run_program
 from .module_loader import (
+    MODULE_COMPAT_TYPES,
     ModuleBundle,
     ModuleLoadError,
+    _module_for_line,
     _source_location_for_bundle_line,
     load_module_bundle,
     resolve_program_names,
@@ -25,6 +27,7 @@ __all__ = [
     "declared_names_in_source",
     "diagnostics_in_source",
     "eval_expression_lines_in_source",
+    "exported_names_in_source",
     "infer_type_in_source",
     "instances_in_source",
 ]
@@ -196,6 +199,31 @@ def check_source(source: str) -> None:
 def declared_names_in_source(source: str) -> list[str]:
     tree, _ = _parse_and_check_source(source)
     return sorted(_declared_names_from_tree(tree))
+
+
+def exported_names_in_source(source: str) -> list[str]:
+    composed = _compose_snapshot_source(source)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
+        temp_path.write_text(composed, encoding="utf-8")
+        bundle = load_module_bundle(temp_path)
+        tree = parse(bundle.source)
+        resolve_program_names(tree, bundle)
+        validate_public_surface(tree, bundle)
+        typecheck_program(tree)
+        module_info = bundle.modules[temp_path]
+        exported = set(module_info.exported)
+        export_ctor_types = set(module_info.exported_type_constructors)
+        module_name = module_info.header.module or ""
+        for decl in tree.declarations:
+            if _module_for_line(bundle, getattr(decl, "line", -1)) != module_info:
+                continue
+            if isinstance(decl, ast.TypeDecl) and decl.name.rsplit(".", 1)[-1] in export_ctor_types:
+                for ctor in decl.constructors:
+                    exported.add(ctor.name.rsplit(".", 1)[-1])
+        for ctors in MODULE_COMPAT_TYPES.get(module_name, {}).values():
+            exported.update(ctors)
+        return sorted(exported)
 
 
 def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:

@@ -70,6 +70,7 @@ Today the temporary host bridge exposes:
 repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}
 repl_check_source(module_source: String) -> Result String Unit !{IO}
 repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}
+repl_exported_names_in_source(module_source: String) -> Result String (Vec String) !{IO}
 repl_diagnostics_in_source(module_source: String) -> Vec (String, Int, Int) !{IO}
 repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}
 repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}
@@ -96,7 +97,8 @@ host session state. `repl_check_source(...)` applies the same idea to import
 and declaration acceptance. `repl_eval_expr_in_source(...)` does the same for
 expression execution. `repl_declared_names_in_source(...)` is the first
 explicit symbol-inventory primitive that is useful beyond the REPL, including
-future language-server and compiler tooling work. `repl_diagnostics_in_source(...)`
+future language-server and compiler tooling work. `repl_exported_names_in_source(...)`
+extends that inventory path to module export surfaces. `repl_diagnostics_in_source(...)`
 is the first shared diagnostics primitive; it currently returns either an empty
 vector or a single `(message, line, column)` diagnostic from the checked
 snapshot pipeline. Diagnostics that do not yet expose machine-readable source

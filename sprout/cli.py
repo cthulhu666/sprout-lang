@@ -1063,6 +1063,11 @@ long long repl_declared_names_in_source(const char* module_source) {
   tcp_fail("repl_declared_names_in_source: not supported in native backend");
   return 0;
 }
+long long repl_exported_names_in_source(const char* module_source) {
+  (void)module_source;
+  tcp_fail("repl_exported_names_in_source: not supported in native backend");
+  return 0;
+}
 long long repl_diagnostics_in_source(const char* module_source) {
   (void)module_source;
   tcp_fail("repl_diagnostics_in_source: not supported in native backend");
