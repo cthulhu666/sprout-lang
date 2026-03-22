@@ -90,8 +90,9 @@ Current experimental runtime progress:
    first explicit bridge for snapshot-oriented `check_source` and
    `type_of_in_source` queries.
 7. Native compiled programs now use that bridge for `repl_check_source(...)`,
-   `analysis_check_source(...)`, `repl_type_of_in_source(...)`, and
-   `analysis_type_of_in_source(...)`. The remaining snapshot hooks are still
+   `analysis_check_source(...)`, `repl_type_of_in_source(...)`,
+   `analysis_type_of_in_source(...)`, `repl_instances_in_source(...)`, and
+   `analysis_instances_in_source(...)`. The remaining snapshot hooks are still
    unsupported in native binaries.
 
 ## Target Architecture

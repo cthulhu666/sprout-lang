@@ -1116,12 +1116,13 @@ static int sprout_json_field_is_true(const char* text, const char* key) {
   const char* pos = sprout_json_after_key(text, key);
   return pos != NULL && strncmp(pos, "true", 4) == 0;
 }
-static int sprout_json_field_is_null(const char* text, const char* key) {
-  const char* pos = sprout_json_after_key(text, key);
-  return pos != NULL && strncmp(pos, "null", 4) == 0;
+static const char* sprout_json_skip_ws(const char* pos) {
+  if (pos == NULL) return NULL;
+  while (*pos == ' ' || *pos == '\\n' || *pos == '\\r' || *pos == '\\t') pos++;
+  return pos;
 }
-static char* sprout_json_extract_string(const char* text, const char* key) {
-  const char* pos = sprout_json_after_key(text, key);
+static char* sprout_json_parse_string(const char** pos_ptr) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
   if (pos == NULL || *pos != '"') return NULL;
   pos++;
   size_t cap = strlen(pos) + 1;
@@ -1130,6 +1131,7 @@ static char* sprout_json_extract_string(const char* text, const char* key) {
   while (*pos != '\\0') {
     if (*pos == '"') {
       out[idx] = '\\0';
+      *pos_ptr = pos + 1;
       return out;
     }
     if (*pos == '\\\\') {
@@ -1162,6 +1164,37 @@ static char* sprout_json_extract_string(const char* text, const char* key) {
   }
   free(out);
   return NULL;
+}
+static VectorVal* sprout_json_extract_string_array(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  pos = sprout_json_skip_ws(pos);
+  if (pos == NULL || *pos != '[') return NULL;
+  pos++;
+  VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  out->len = 0;
+  out->cap = 0;
+  out->data = NULL;
+  pos = sprout_json_skip_ws(pos);
+  if (*pos == ']') return out;
+  while (*pos != '\\0') {
+    char* item = sprout_json_parse_string(&pos);
+    if (item == NULL) return out;
+    if (out->len == out->cap) {
+      long long new_cap = out->cap == 0 ? 4 : (out->cap * 2);
+      out->data = sprout_realloc_vector_data(out->data, (size_t)new_cap, "analysis service: out of memory");
+      out->cap = new_cap;
+    }
+    out->data[out->len++] = (long long)(uintptr_t)item;
+    pos = sprout_json_skip_ws(pos);
+    if (*pos == ']') return out;
+    if (*pos != ',') return out;
+    pos++;
+  }
+  return out;
+}
+static char* sprout_json_extract_string(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  return pos == NULL ? NULL : sprout_json_parse_string(&pos);
 }
 static char* sprout_read_text_file(const char* path) {
   FILE* f = fopen(path, "rb");
@@ -1313,6 +1346,53 @@ static long long sprout_analysis_type_result(const char* op, const char* module_
   if (error != NULL) free(error);
   return out;
 }
+static long long sprout_analysis_instances_result(const char* op, const char* module_source, const char* query) {
+  char* escaped_source = sprout_json_escape(module_source);
+  char* escaped_query = sprout_json_escape(query);
+  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(escaped_query) + 68;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\",\\\"query\\\":\\\"%s\\\"}\\n",
+    op,
+    escaped_source,
+    escaped_query
+  );
+  free(escaped_source);
+  free(escaped_query);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    char* query_type = sprout_json_extract_string(response, "query_type");
+    VectorVal* matches = sprout_json_extract_string_array(response, "matches");
+    free(response);
+    if (query_type == NULL || matches == NULL) return sprout_err_string_result("analysis service: invalid response");
+    long long rooted_matches = (long long)(uintptr_t)matches;
+    SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
+    long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
+    SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
+    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+    uintptr_t* words = (uintptr_t*)tuple;
+    words[0] = (uintptr_t)query_type;
+    words[1] = (uintptr_t)matches_vec;
+    SPROUT_GC_POP_LOCALS(2);
+    long long pair = (long long)(uintptr_t)tuple;
+    return sprout_make1(find_ctor_tag_by_name("Ok"), pair);
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  if (error != NULL) free(error);
+  return out;
+}
 long long repl_add_import(const char* source) {
   (void)source;
   tcp_fail("repl_add_import: not supported in native backend");
@@ -1402,16 +1482,10 @@ long long repl_instances(const char* source) {
   return 0;
 }
 long long repl_instances_in_source(const char* module_source, const char* type_expr_source) {
-  (void)module_source;
-  (void)type_expr_source;
-  tcp_fail("repl_instances_in_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_instances_result("instances_in_source", module_source, type_expr_source);
 }
 long long analysis_instances_in_source(const char* module_source, const char* type_expr_source) {
-  (void)module_source;
-  (void)type_expr_source;
-  tcp_fail("analysis_instances_in_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_instances_result("instances_in_source", module_source, type_expr_source);
 }
 long long repl_complete(const char* source) {
   (void)source;

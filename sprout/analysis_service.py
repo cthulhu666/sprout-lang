@@ -4,7 +4,7 @@ import json
 import sys
 from typing import TextIO
 
-from .analysis import check_source, infer_type_in_source
+from .analysis import check_source, infer_type_in_source, instances_in_source
 from .interpreter import RuntimeError
 from .module_loader import ModuleLoadError
 from .parser import ParseError
@@ -79,4 +79,14 @@ def cmd_analysis_service(
         except _AnalysisError as exc:
             return _request_error(stdout, str(exc))
         return _write_response(stdout, {"ok": True, "value": inferred})
+    if op == "instances_in_source":
+        try:
+            module_source = _require_string(request, "module_source")
+            query = _require_string(request, "query")
+            query_type, matches = instances_in_source(module_source, query)
+        except ValueError as exc:
+            return _request_error(stdout, str(exc))
+        except _AnalysisError as exc:
+            return _request_error(stdout, str(exc))
+        return _write_response(stdout, {"ok": True, "value": {"matches": matches, "query_type": query_type}})
     return _request_error(stdout, f"unknown analysis service op `{op}`")

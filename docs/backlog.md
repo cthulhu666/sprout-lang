@@ -7,7 +7,7 @@ This file tracks open design, implementation, and tooling follow-up work.
 1. Push the current Sprout-hosted REPL toward a native-capable bridge.
    Design docs: [native-repl-roadmap.md](./native-repl-roadmap.md), [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
    Near-term scope: keep the current Sprout frontend stable, move host-backed session services behind an explicit native-callable bridge, and start enabling the first native-supported REPL service slices without inventing more Python REPL policy.
-   Completed groundwork: hidden `sprout analysis-service` bridge plus native-backed `repl_check_source(...)` and `repl_type_of_in_source(...)` through that host-service path.
+   Completed groundwork: hidden `sprout analysis-service` bridge plus native-backed `repl_check_source(...)`, `repl_type_of_in_source(...)`, and `repl_instances_in_source(...)` through that host-service path.
    Deferred scope: the self-hosted session-engine work in `repl-self-hosting-v1-draft.md` is no longer the active milestone; treat it as a post-native-REPL direction.
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
 3. Add stronger server-side runtime models (multi-reactor as next target).
