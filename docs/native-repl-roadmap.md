@@ -63,7 +63,8 @@ Current experimental runtime progress:
    `repl_declared_names_in_source(...)`, `repl_diagnostics_in_source(...)`,
    `repl_type_of_in_source(...)`, `repl_instances_in_source(...)`,
    `repl_complete_in_state(...)`, and `repl_reset_session()` now form the
-   active hosted bridge used by `stdlib/repl.sprout`.
+   active hosted bridge used by `stdlib/repl.sprout`. Snapshot analysis for
+   that bridge now lives in `sprout.analysis` rather than the REPL host module.
 3. Legacy compatibility hooks still exist in the host runtime:
    `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
    `repl_type_of(...)`, `repl_instances(...)`, and `repl_complete(...)`.

@@ -288,7 +288,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("render", names)
 
     def test_repl_declared_names_in_source_reports_declared_symbols(self) -> None:
-        from sprout.repl_host import declared_names_in_source
+        from sprout.analysis import declared_names_in_source
 
         names = set(
             declared_names_in_source(

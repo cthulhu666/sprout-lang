@@ -1218,7 +1218,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         expr = args[1]
         if not isinstance(module_source, str) or not isinstance(expr, str):
             raise RuntimeError("repl_eval_expr_in_source expects String module source and String expression")
-        from .repl_host import eval_expression_lines_in_source
+        from .analysis import eval_expression_lines_in_source
 
         return _repl_wrap(lambda: _repl_vec_string(eval_expression_lines_in_source(module_source, expr)))
 
@@ -1226,7 +1226,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_check_source expects String module source")
-        from .repl_host import check_source
+        from .analysis import check_source
 
         return _repl_wrap(lambda: check_source(source))
 
@@ -1234,7 +1234,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_declared_names_in_source expects String module source")
-        from .repl_host import declared_names_in_source
+        from .analysis import declared_names_in_source
 
         return _repl_wrap(lambda: _repl_vec_string(declared_names_in_source(source)))
 
@@ -1242,7 +1242,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_diagnostics_in_source expects String module source")
-        from .repl_host import diagnostics_in_source
+        from .analysis import diagnostics_in_source
 
         return _repl_vec_diagnostic(diagnostics_in_source(source))
 
@@ -1259,7 +1259,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         expr = args[1]
         if not isinstance(module_source, str) or not isinstance(expr, str):
             raise RuntimeError("repl_type_of_in_source expects String module source and String expression")
-        from .repl_host import infer_type_in_source
+        from .analysis import infer_type_in_source
 
         return _repl_wrap(lambda: infer_type_in_source(module_source, expr))
 
@@ -1280,7 +1280,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         type_expr_source = args[1]
         if not isinstance(module_source, str) or not isinstance(type_expr_source, str):
             raise RuntimeError("repl_instances_in_source expects String module source and String type")
-        from .repl_host import instances_in_source
+        from .analysis import instances_in_source
 
         def _instances() -> TupleValue:
             query_type, matches = instances_in_source(module_source, type_expr_source)

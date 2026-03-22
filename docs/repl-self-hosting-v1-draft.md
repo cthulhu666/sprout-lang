@@ -19,8 +19,9 @@ Sprout now has a REPL frontend that is mostly written in Sprout:
 But the actual session engine still lives in host code:
 
 - `sprout/repl_host.py` owns session state,
-- parsing, name resolution, typechecking, evaluation, instance lookup, and
-  completion data are still host-implemented,
+- `sprout.analysis.py` now owns snapshot-oriented parsing, name resolution,
+  typechecking, evaluation, instance lookup, symbol inventory, and diagnostics,
+- completion data and session mutation are still host-implemented,
 - the frontend reaches those services through the experimental `repl_*`
   builtins.
 
@@ -100,6 +101,10 @@ is the first shared diagnostics primitive; it currently returns either an empty
 vector or a single `(message, line, column)` diagnostic from the checked
 snapshot pipeline. Diagnostics that do not yet expose machine-readable source
 locations use `0` for `line` and `column`.
+
+The current host implementation of those snapshot-oriented services now lives
+in `sprout.analysis.py`; `sprout.repl_host.py` remains the stateful REPL
+session shim.
 
 At this point the active `stdlib/repl.sprout` frontend path no longer uses the
 legacy compatibility hooks. They remain only as transitional runtime surface

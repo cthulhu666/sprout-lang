@@ -128,9 +128,10 @@ Runtime builtins (host-implemented):
 - `term_read_line() -> Maybe String !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF)
 - `term_write(text: String) -> Unit !{IO}`
 
-Experimental host-REPL builtins:
+Experimental snapshot analysis hooks:
 
-- Active snapshot/state hooks used by the current Sprout REPL frontend:
+- Active snapshot/state hooks used by the current Sprout REPL frontend.
+  The host implementation now routes snapshot analysis through `sprout.analysis`:
 - `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
 - `repl_check_source(module_source: String) -> Result String Unit !{IO}`
 - `repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}`
