@@ -1263,81 +1263,103 @@ static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_han
   out[cursor] = '\\0';
   return out;
 }
-static char* sprout_read_text_file(const char* path) {
-  FILE* f = fopen(path, "rb");
-  if (f == NULL) return NULL;
-  if (fseek(f, 0, SEEK_END) != 0) {
-    fclose(f);
-    return NULL;
+static FILE* sprout_analysis_service_in = NULL;
+static FILE* sprout_analysis_service_out = NULL;
+static pid_t sprout_analysis_service_pid = -1;
+static int sprout_analysis_service_atexit_registered = 0;
+static void sprout_close_analysis_service(void) {
+  if (sprout_analysis_service_in != NULL) {
+    fclose(sprout_analysis_service_in);
+    sprout_analysis_service_in = NULL;
   }
-  long size = ftell(f);
-  if (size < 0) {
-    fclose(f);
-    return NULL;
+  if (sprout_analysis_service_out != NULL) {
+    fclose(sprout_analysis_service_out);
+    sprout_analysis_service_out = NULL;
   }
-  rewind(f);
-  char* out = alloc_cstr((size_t)size, "analysis service: out of memory");
-  size_t got = fread(out, 1, (size_t)size, f);
-  fclose(f);
-  if (got != (size_t)size) {
-    free(out);
-    return NULL;
+  if (sprout_analysis_service_pid > 0) {
+    int status = 0;
+    waitpid(sprout_analysis_service_pid, &status, 0);
+    sprout_analysis_service_pid = -1;
   }
-  out[size] = '\\0';
-  return out;
 }
-static int sprout_run_analysis_service(const char* request_json, char** response_out, char** error_out) {
+static int sprout_ensure_analysis_service(char** error_out) {
+  if (sprout_analysis_service_in != NULL && sprout_analysis_service_out != NULL && sprout_analysis_service_pid > 0) {
+    return 1;
+  }
   const char* cmd = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
   if (cmd == NULL || *cmd == '\\0') cmd = "python3 -m sprout.cli analysis-service";
-  char in_template[] = "/tmp/sprout-analysis-in-XXXXXX";
-  char out_template[] = "/tmp/sprout-analysis-out-XXXXXX";
-  int in_fd = mkstemp(in_template);
-  if (in_fd < 0) {
-    *error_out = dup_cstr("analysis service: unable to allocate request file");
+  int request_pipe[2] = {-1, -1};
+  int response_pipe[2] = {-1, -1};
+  if (pipe(request_pipe) != 0 || pipe(response_pipe) != 0) {
+    if (request_pipe[0] >= 0) close(request_pipe[0]);
+    if (request_pipe[1] >= 0) close(request_pipe[1]);
+    if (response_pipe[0] >= 0) close(response_pipe[0]);
+    if (response_pipe[1] >= 0) close(response_pipe[1]);
+    *error_out = dup_cstr("analysis service: unable to create pipes");
     return 0;
   }
-  int out_fd = mkstemp(out_template);
-  if (out_fd < 0) {
-    close(in_fd);
-    unlink(in_template);
-    *error_out = dup_cstr("analysis service: unable to allocate response file");
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(request_pipe[0]);
+    close(request_pipe[1]);
+    close(response_pipe[0]);
+    close(response_pipe[1]);
+    *error_out = dup_cstr("analysis service: unable to fork");
     return 0;
   }
-  FILE* in_file = fdopen(in_fd, "w");
-  if (in_file == NULL) {
-    close(in_fd);
-    close(out_fd);
-    unlink(in_template);
-    unlink(out_template);
-    *error_out = dup_cstr("analysis service: unable to open request file");
+  if (pid == 0) {
+    dup2(request_pipe[0], STDIN_FILENO);
+    dup2(response_pipe[1], STDOUT_FILENO);
+    close(request_pipe[0]);
+    close(request_pipe[1]);
+    close(response_pipe[0]);
+    close(response_pipe[1]);
+    execl("/bin/sh", "sh", "-lc", cmd, (char*)NULL);
+    _exit(127);
+  }
+  close(request_pipe[0]);
+  close(response_pipe[1]);
+  FILE* in_file = fdopen(request_pipe[1], "w");
+  FILE* out_file = fdopen(response_pipe[0], "r");
+  if (in_file == NULL || out_file == NULL) {
+    if (in_file != NULL) fclose(in_file);
+    else close(request_pipe[1]);
+    if (out_file != NULL) fclose(out_file);
+    else close(response_pipe[0]);
+    close(request_pipe[0]);
+    close(response_pipe[1]);
+    waitpid(pid, NULL, 0);
+    *error_out = dup_cstr("analysis service: unable to open pipes");
     return 0;
   }
-  fputs(request_json, in_file);
-  fclose(in_file);
-  close(out_fd);
-  size_t command_len = strlen(cmd) + strlen(in_template) + strlen(out_template) + 16;
-  char* shell_command = alloc_cstr(command_len, "analysis service: out of memory");
-  snprintf(shell_command, command_len + 1, "%s < \\\"%s\\\" > \\\"%s\\\"", cmd, in_template, out_template);
-  int status = system(shell_command);
-  free(shell_command);
-  char* response = sprout_read_text_file(out_template);
-  unlink(in_template);
-  unlink(out_template);
-  if (status != 0) {
-    if (response != NULL) {
-      char* service_error = sprout_json_extract_string(response, "error");
-      free(response);
-      if (service_error != NULL) {
-        *error_out = service_error;
-        return 0;
-      }
-    }
-    *error_out = dup_cstr("analysis service: command failed");
+  setvbuf(in_file, NULL, _IOLBF, 0);
+  sprout_analysis_service_in = in_file;
+  sprout_analysis_service_out = out_file;
+  sprout_analysis_service_pid = pid;
+  if (!sprout_analysis_service_atexit_registered) {
+    atexit(sprout_close_analysis_service);
+    sprout_analysis_service_atexit_registered = 1;
+  }
+  return 1;
+}
+static int sprout_run_analysis_service(const char* request_json, char** response_out, char** error_out) {
+  if (!sprout_ensure_analysis_service(error_out)) return 0;
+  if (fputs(request_json, sprout_analysis_service_in) == EOF || fflush(sprout_analysis_service_in) != 0) {
+    sprout_close_analysis_service();
+    *error_out = dup_cstr("analysis service: request failed");
     return 0;
   }
-  if (response == NULL) {
+  char* response = NULL;
+  size_t response_cap = 0;
+  ssize_t response_len = getline(&response, &response_cap, sprout_analysis_service_out);
+  if (response_len < 0) {
+    if (response != NULL) free(response);
+    sprout_close_analysis_service();
     *error_out = dup_cstr("analysis service: empty response");
     return 0;
+  }
+  if (response_len > 0 && response[response_len - 1] == '\\n') {
+    response[response_len - 1] = '\\0';
   }
   *response_out = response;
   return 1;

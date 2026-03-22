@@ -102,7 +102,9 @@ Current experimental runtime progress:
    `sprout.cli repl --native`, while still depending on the Python
    `analysis-service` subprocess underneath. The launcher now also reuses a
    cached compiled REPL binary between launches instead of recompiling on
-   every run.
+   every run, and native programs now reuse one long-lived
+   `analysis-service` subprocess across multiple snapshot queries in the same
+   process.
 
 ## Target Architecture
 

@@ -183,10 +183,11 @@ errors in native binaries. End-to-end native execution of the current Sprout
 REPL frontend is now verified by compiling and running
 `examples/repl_hosted.sprout` with that bridge in place, and the user-facing
 `repl --native` launcher now exposes that path experimentally while still using
-the Python `analysis-service` bridge underneath, and it reuses a cached
-compiled REPL binary between launches. Native programs can override the
-service command via `SPROUT_ANALYSIS_SERVICE_CMD`, and tests can override the
-launcher cache directory via `SPROUT_NATIVE_REPL_CACHE_DIR`.
+the Python `analysis-service` bridge underneath, and it reuses both a cached
+compiled REPL binary between launches and one long-lived analysis-service
+subprocess per native program run. Native programs can override the service
+command via `SPROUT_ANALYSIS_SERVICE_CMD`, and tests can override the launcher
+cache directory via `SPROUT_NATIVE_REPL_CACHE_DIR`.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 

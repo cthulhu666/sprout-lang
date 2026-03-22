@@ -6,9 +6,12 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from io import StringIO
 from pathlib import Path
 import sys
 import unittest
+
+from sprout.analysis_service import cmd_analysis_service
 
 
 class CliTests(unittest.TestCase):
@@ -127,6 +130,29 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             json.loads(run.stdout),
             {"error": "unknown analysis service op `not-real`", "ok": False},
+        )
+
+    def test_analysis_service_processes_multiple_line_delimited_requests(self) -> None:
+        stdin = StringIO(
+            "\n".join(
+                [
+                    json.dumps({"op": "check_source", "module_source": "module app.repl\n\nlet local = 41"}),
+                    json.dumps({"op": "type_of_in_source", "module_source": "module app.repl\n\nlet local = 41", "expr": "local"}),
+                ]
+            )
+            + "\n"
+        )
+        stdout = StringIO()
+
+        status = cmd_analysis_service(stdin=stdin, stdout=stdout)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            [json.loads(line) for line in stdout.getvalue().splitlines()],
+            [
+                {"ok": True, "value": None},
+                {"ok": True, "value": "Int"},
+            ],
         )
 
     def test_fmt_rewrites_file_in_place(self) -> None:

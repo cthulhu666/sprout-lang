@@ -61,16 +61,7 @@ def _require_string_list(payload: object, field: str) -> list[str]:
     return value
 
 
-def cmd_analysis_service(
-    stdin: TextIO | None = None,
-    stdout: TextIO | None = None,
-) -> int:
-    stdin = sys.stdin if stdin is None else stdin
-    stdout = sys.stdout if stdout is None else stdout
-    try:
-        request = json.load(stdin)
-    except json.JSONDecodeError as exc:
-        return _request_error(stdout, f"invalid request json: {exc.msg}")
+def _dispatch_request(stdout: TextIO, request: object) -> int:
     if not isinstance(request, dict):
         return _request_error(stdout, "analysis service request must be a JSON object")
     op = request.get("op")
@@ -127,3 +118,31 @@ def cmd_analysis_service(
             return _request_error(stdout, str(exc))
         return _write_response(stdout, {"ok": True, "value": {"matches": matches, "prefix": prefix}})
     return _request_error(stdout, f"unknown analysis service op `{op}`")
+
+
+def cmd_analysis_service(
+    stdin: TextIO | None = None,
+    stdout: TextIO | None = None,
+) -> int:
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    status = 0
+    saw_input = False
+    for raw_line in stdin:
+        line = raw_line.strip()
+        if not line:
+            continue
+        saw_input = True
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError as exc:
+            status = _request_error(stdout, f"invalid request json: {exc.msg}")
+            continue
+        status = _dispatch_request(stdout, request) or status
+    if saw_input:
+        return status
+    try:
+        request = json.load(stdin)
+    except json.JSONDecodeError as exc:
+        return _request_error(stdout, f"invalid request json: {exc.msg}")
+    return _dispatch_request(stdout, request)

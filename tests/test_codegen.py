@@ -1607,6 +1607,51 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.stdout.strip(), "ok")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_bridge_reuses_one_analysis_service_process_per_run(self) -> None:
+        src = """
+        module main
+
+        fn main() -> Unit !{IO} =
+          match repl_check_source("module app.repl") with
+          | Err message -> print(message)
+          | Ok _ ->
+              match repl_check_source("module app.repl\n\nlet local = 41") with
+              | Err message -> print(message)
+              | Ok _ -> print("ok")
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            log_path = tmp_path / "service.log"
+            script_path = tmp_path / "service.py"
+            script_path.write_text(
+                f"""
+import json
+import sys
+
+with open({str(log_path)!r}, "a", encoding="utf-8") as log:
+    log.write("started\\n")
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    request = json.loads(line)
+    if request.get("op") != "check_source":
+        print(json.dumps({{"ok": False, "error": "unexpected op"}}), flush=True)
+        continue
+    print(json.dumps({{"ok": True, "value": None}}), flush=True)
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            with compiled_native_binary(self, src) as bin_path:
+                env = dict(os.environ)
+                env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_path))}"
+                run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "ok")
+            self.assertEqual(log_path.read_text(encoding="utf-8").splitlines(), ["started"])
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_check_source_builtin_surfaces_service_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
