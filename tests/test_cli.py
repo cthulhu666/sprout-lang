@@ -336,6 +336,7 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("repl_instances(", source)
         self.assertNotIn("repl_complete(", source)
         self.assertNotIn("repl_complete_in_state(", source)
+        self.assertNotIn("repl_reset_session(", source)
 
     @unittest.skipUnless(hasattr(os, "openpty") and shutil.which("clang"), "pty/native prerequisites unavailable")
     def test_repl_native_interactive_tab_completion_is_case_insensitive_for_imported_namespaces(self) -> None:

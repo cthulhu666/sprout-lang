@@ -188,7 +188,9 @@ bridge below the REPL frontend, and native compiled programs now use that bridge
 `repl_eval_expr_in_source(...)`, plus `repl_complete_in_state(...)` and
 `analysis_symbol_locations_in_source(...)`. The active Sprout REPL frontend no
 longer depends on that bridge for `Tab` completion; completion now runs locally
-in `stdlib/repl.sprout` from the current session text state. The rest
+in `stdlib/repl.sprout` from the current session text state, and startup no
+longer calls `repl_reset_session()` either, so that hook is now
+compatibility-only rather than part of the active frontend path. The rest
 of the REPL/analysis snapshot hooks still report unsupported-backend runtime
 errors in native binaries. End-to-end native execution of the current Sprout
 REPL frontend is now verified by compiling and running

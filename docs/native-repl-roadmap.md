@@ -131,6 +131,9 @@ Current experimental runtime progress:
     interactive completion no longer depends on the Python analysis-service
     subprocess. Local completion is now ASCII case-insensitive and can resolve
     imported namespace members such as `json.string` after `import stdlib.json`.
+13. The active frontend startup path no longer calls `repl_reset_session()`;
+    that hook is now compatibility-only and no longer part of the current
+    Sprout-hosted REPL loop.
 
 ## Target Architecture
 

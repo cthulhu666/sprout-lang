@@ -536,9 +536,6 @@ export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec Stri
   | Nothing -> finish_loop(prompt)
 
 export fn main() -> Unit !{IO} =
-  then_io(
-    repl_reset_session(),
-    if term_is_interactive_once()
-    then then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> "), vec_empty(), vec_empty(), vec_empty()))
-    else repl_loop(Nothing, vec_empty(), vec_empty(), vec_empty())
-  )
+  if term_is_interactive_once()
+  then then_io(term_write("Sprout REPL. Use :help for commands.\r\n"), repl_loop(Just("sprout> "), vec_empty(), vec_empty(), vec_empty()))
+  else repl_loop(Nothing, vec_empty(), vec_empty(), vec_empty())
