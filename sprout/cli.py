@@ -136,7 +136,12 @@ def cmd_compile(
     validate_public_surface(tree, bundle)
     lowered = lower_typeclasses(tree)
     typecheck_program(lowered)
-    llvm_ir = compile_to_llvm(lowered)
+    entry_main_name = "main"
+    if bundle is not None:
+        entry_info = bundle.modules[path.resolve()]
+        if entry_info.header.module is not None:
+            entry_main_name = f"{entry_info.header.module}.main"
+    llvm_ir = compile_to_llvm(lowered, entry_main_name=entry_main_name)
 
     if not native:
         out.write_text(llvm_ir, encoding="utf-8")
@@ -1642,7 +1647,6 @@ long long repl_complete_in_state(const char* line_buffer, const void* imports_ha
   return sprout_analysis_completion_result(line_buffer, imports_handle, declarations_handle);
 }
 long long repl_reset_session(void) {
-  tcp_fail("repl_reset_session: not supported in native backend");
   return 0;
 }
 long long read_int_lines(const char* path) {

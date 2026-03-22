@@ -892,7 +892,7 @@ def _infer_expr_type(
     raise CodegenError("Cannot infer top-level let type for expression")
 
 
-def compile_to_llvm(program: ast.Program) -> str:
+def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> str:
     type_decls = [d for d in program.declarations if isinstance(d, ast.TypeDecl)]
     all_fn_decls = [d for d in program.declarations if isinstance(d, ast.FnDecl)]
     let_decls = [d for d in program.declarations if isinstance(d, ast.LetDecl)]
@@ -971,9 +971,7 @@ def compile_to_llvm(program: ast.Program) -> str:
     for let_decl in runtime_lets:
         globals_info[let_decl.name].callable_sig = _expr_callable_sig(let_decl.value, sigs, globals_info, adt_names)
 
-    reachable_fn_names = {
-        fn.name for fn in all_fn_decls if fn.name == "main" or fn.name.endswith(".main")
-    }
+    reachable_fn_names = {fn.name for fn in all_fn_decls if fn.name == entry_main_name}
     for let_decl in runtime_lets:
         reachable_fn_names.update(_collect_called_functions(let_decl.value))
     worklist = list(reachable_fn_names)
@@ -1015,7 +1013,7 @@ def compile_to_llvm(program: ast.Program) -> str:
         ctor_reg_meta[ctor.name] = (aliases, len(ctor.arg_types), ctor.tag)
 
     for fn in fn_decls:
-        if fn.name == "main" or fn.name.endswith(".main"):
+        if fn.name == entry_main_name:
             continue
         wrapper_name = f"__sprout_fn_closure_{len(emitter.lifted_defs)}"
         emitter.lifted_defs.extend(_emit_named_function_wrapper(wrapper_name, fn.name, sigs[fn.name]))
@@ -1031,7 +1029,7 @@ def compile_to_llvm(program: ast.Program) -> str:
         emitter.emit("")
 
     for fn in fn_decls:
-        _emit_fn(fn, sigs, ctor_sigs, ctor_reg_meta, globals_info, adt_names, runtime_lets, emitter)
+        _emit_fn(fn, sigs, ctor_sigs, ctor_reg_meta, globals_info, adt_names, runtime_lets, emitter, entry_main_name)
         emitter.emit("")
 
     module_lines = [emitter.lines[0], emitter.lines[1], ""]
@@ -1180,6 +1178,7 @@ def _emit_fn(
     adt_names: set[str],
     runtime_lets: list[ast.LetDecl],
     emitter: Emitter,
+    entry_main_name: str,
 ) -> None:
     sig = sigs[fn.name]
     params = []
@@ -1195,7 +1194,7 @@ def _emit_fn(
             tuple_items=_tuple_item_types_from_type_expr(p.type_expr, adt_names),
         )
 
-    is_entry_main = fn.name == "main" or fn.name.endswith(".main")
+    is_entry_main = fn.name == entry_main_name
     emitted_name = "main" if is_entry_main else fn.name
     if is_entry_main:
         emitted_params = ["i32 %argc", "ptr %argv"]

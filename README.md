@@ -84,7 +84,7 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Start REPL: `mise exec -- python -m sprout.cli repl` (launches the Sprout-hosted frontend in [stdlib/repl.sprout](./stdlib/repl.sprout); [examples/repl_hosted.sprout](./examples/repl_hosted.sprout) remains a thin wrapper; loads the foundational prelude by default; interactive mode detection, line editing, `Tab` completion, and `Up`/`Down` history now live in Sprout code, and ordinary `import ...` lines work inside the session)
+- Start REPL: `mise exec -- python -m sprout.cli repl` (the user-facing command is still Python-launched, but it runs the Sprout-hosted frontend in [stdlib/repl.sprout](./stdlib/repl.sprout); [examples/repl_hosted.sprout](./examples/repl_hosted.sprout) remains a thin wrapper; loads the foundational prelude by default; interactive mode detection, line editing, `Tab` completion, and `Up`/`Down` history now live in Sprout code, and ordinary `import ...` lines work inside the session)
 - Run tests: `mise exec -- just test`
 - Run integration-style IO tests: `mise exec -- just test-integration`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
@@ -179,8 +179,11 @@ bridge below the REPL frontend, and native compiled programs now use that bridge
 `repl_instances_in_source(...)`, `analysis_instances_in_source(...)`, and
 `repl_eval_expr_in_source(...)`, plus `repl_complete_in_state(...)`. The rest
 of the REPL/analysis snapshot hooks still report unsupported-backend runtime
-errors in native binaries. Native programs can override the service command via
-`SPROUT_ANALYSIS_SERVICE_CMD`.
+errors in native binaries. End-to-end native execution of the current Sprout
+REPL frontend is now verified by compiling and running
+`examples/repl_hosted.sprout` with that bridge in place, but the user-facing
+`repl` command still uses the Python launcher. Native programs can override the
+service command via `SPROUT_ANALYSIS_SERVICE_CMD`.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 

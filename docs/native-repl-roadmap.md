@@ -82,10 +82,9 @@ Current experimental runtime progress:
    Interactive-mode detection, line editing, history traversal, and
    completion behavior now live in Sprout code rather than Python readline
    policy.
-4. Native compiled programs do not support that session bridge yet.
-5. The next native-focused step is to move those services behind one explicit
-   host-service boundary that compiled clients can target without depending on
-   Python REPL internals.
+4. The user-facing `sprout.cli repl` command is still Python-launched.
+5. The current native-focused milestone is making the active frontend services
+   callable from compiled clients without depending on Python REPL internals.
 6. An experimental `sprout analysis-service` entrypoint now exists as the
    first explicit bridge for snapshot-oriented `check_source` and
    `type_of_in_source` queries, plus explicit-state completion.
@@ -95,6 +94,10 @@ Current experimental runtime progress:
    `analysis_instances_in_source(...)`, plus `repl_eval_expr_in_source(...)`
    and `repl_complete_in_state(...)`. The remaining snapshot hooks are still
    unsupported in native binaries.
+8. End-to-end native execution of the current Sprout REPL frontend is now
+   covered in tests by compiling and running a thin `stdlib.repl` wrapper
+   program against that bridge, even though the product launcher is still
+   Python-owned.
 
 ## Target Architecture
 

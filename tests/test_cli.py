@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -139,6 +142,40 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0, msg=run.stderr)
             self.assertEqual(path.read_text(encoding="utf-8"), "fn main() -> Int = 1\n")
             self.assertIn("formatted", run.stdout)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_hosted_frontend_runs_end_to_end_non_interactively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "repl_bin"
+            compile_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    "examples/repl_hosted.sprout",
+                    "--native",
+                    "-o",
+                    str(out),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
+            env = dict(os.environ)
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.cli analysis-service"
+            run_proc = subprocess.run(
+                [str(out)],
+                check=False,
+                capture_output=True,
+                text=True,
+                input='let x = 41\nx + 1\n:t x\n:quit\n',
+                env=env,
+            )
+            self.assertEqual(run_proc.returncode, 0, msg=run_proc.stderr)
+            self.assertEqual(run_proc.stderr, "")
+            self.assertEqual(run_proc.stdout.strip().splitlines(), ["ok", "42", "Int"])
 
     def test_fmt_check_fails_when_file_needs_formatting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
