@@ -615,21 +615,16 @@ class CliTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_reports_bad_analysis_service_command_clearly(self) -> None:
-        env = dict(os.environ)
-        env["SPROUT_ANALYSIS_SERVICE_CMD"] = "sprout-missing-analysis-service-command"
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="41 + 1\n:quit\n",
-            env=env,
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("analysis service: command failed to start", run.stdout)
-        self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", run.stdout)
-        self.assertNotIn("sprout> ", run.stdout)
+        stdout = StringIO()
+        with patch.dict(os.environ, {"SPROUT_ANALYSIS_SERVICE_CMD": "sprout-missing-analysis-service-command"}, clear=False):
+            with redirect_stdout(stdout):
+                status = sprout_cli.main(["repl", "--native"])
+        self.assertEqual(status, 1)
+        text = stdout.getvalue()
+        self.assertIn("error: native REPL startup failed while validating analysis service command", text)
+        self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", text)
+        self.assertIn("python -m sprout.cli repl", text)
+        self.assertNotIn("sprout> ", text)
 
     def test_repl_default_loads_prelude(self) -> None:
         run = subprocess.run(
