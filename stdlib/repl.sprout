@@ -10,6 +10,7 @@ type ReadResult =
   | Submission String
   | EndInput
   | ReadError String
+  | ReadNotice String
 
 fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
@@ -444,6 +445,7 @@ fn read_block_submission(prompt: Maybe String, history: Vec String, imports: Vec
   match read_input_line(block_prompt(prompt), history, imports, declarations) with
   | Just line ->
       if trim(line) == ":}" then Submission(acc)
+      else if trim(line) == ":cancel" || trim(line) == ":abort" then ReadNotice("cancelled block")
       else read_block_submission(prompt, history, imports, declarations, append_submission_line(acc, line))
   | Nothing -> ReadError("unterminated `:{` block; expected `:}` before end of input")
 
@@ -482,7 +484,7 @@ fn render_instances_result(result: Result String (String, Vec String)) -> Vec St
           else single_line("Instances for " ++ query_type ++ ":") ++ matches
 
 fn help_lines() -> Vec String =
-  single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, :{ ... :}, plus ordinary import lines")
+  single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, :{ ... :}, and :cancel inside block mode, plus ordinary import lines")
 
 fn is_declaration(raw: String) -> Bool =
   string.starts_with(raw, "fn ")
@@ -560,6 +562,7 @@ fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec St
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
   match read_submission(prompt, history, imports, declarations) with
   | Submission line -> continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
+  | ReadNotice message -> then_io(render_lines(prompt, single_line(message), 0), repl_loop(prompt, history, imports, declarations))
   | ReadError message -> then_io(render_lines(prompt, render_error(message), 0), repl_loop(prompt, history, imports, declarations))
   | EndInput -> finish_loop(prompt)
 

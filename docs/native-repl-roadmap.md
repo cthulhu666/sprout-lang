@@ -137,6 +137,9 @@ Current experimental runtime progress:
 14. The active frontend now supports explicit multiline entry with `:{` / `:}`
     and submits the accumulated block through the existing declaration/import/
     expression path in both interpreter and native launcher modes.
+15. Block mode now also supports `:cancel` (and `:abort`) to discard the
+    buffered block and return to the main prompt without mutating session
+    state.
 
 ## Target Architecture
 
