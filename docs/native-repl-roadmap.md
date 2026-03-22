@@ -59,15 +59,15 @@ between “plain REPL” and “REPL with preloaded stdlib mode”.
 Current experimental runtime progress:
 
 1. `term_read_line()` now provides line-oriented stdin input.
-2. `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
-   `repl_eval_expr_in_source(...)`, `repl_check_source(...)`, `repl_type_of(...)`,
-   `repl_type_of_in_source(...)`, `repl_instances(...)`,
-   `repl_instances_in_source(...)`, `repl_complete(...)`,
-   `repl_complete_in_state(...)`, and
-   `repl_reset_session()` expose the hosted REPL session through an
-   experimental interpreter-backed service bridge. This remains a temporary
-   v0 implementation hook, not the desired v1 self-hosting boundary.
-3. `stdlib/repl.sprout` now owns the Sprout-hosted REPL frontend, with
+2. `repl_eval_expr_in_source(...)`, `repl_check_source(...)`,
+   `repl_type_of_in_source(...)`, `repl_instances_in_source(...)`,
+   `repl_complete_in_state(...)`, and `repl_reset_session()` now form the
+   active hosted bridge used by `stdlib/repl.sprout`.
+3. Legacy compatibility hooks still exist in the host runtime:
+   `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
+   `repl_type_of(...)`, `repl_instances(...)`, and `repl_complete(...)`.
+   They are no longer on the active Sprout REPL frontend path.
+4. `stdlib/repl.sprout` now owns the Sprout-hosted REPL frontend, with
    `examples/repl_hosted.sprout` kept as a thin wrapper/example entrypoint.
    Interactive-mode detection, line editing, history traversal, and
    completion behavior now live in Sprout code rather than Python readline

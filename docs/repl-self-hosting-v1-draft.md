@@ -66,18 +66,20 @@ themselves to be rewritten in Sprout first.
 Today the temporary host bridge exposes:
 
 ```sprout
+repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}
+repl_check_source(module_source: String) -> Result String Unit !{IO}
+repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}
+repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}
+repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}
+repl_reset_session() -> Unit !{IO}
+
+// legacy compatibility hooks
 repl_add_import(source: String) -> Result String Unit !{IO}
 repl_add_declaration(source: String) -> Result String Unit !{IO}
 repl_eval_expr(source: String) -> Result String (Vec String) !{IO}
-repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}
-repl_check_source(module_source: String) -> Result String Unit !{IO}
 repl_type_of(source: String) -> Result String String !{IO}
-repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}
 repl_instances(source: String) -> Result String (String, Vec String) !{IO}
-repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}
 repl_complete(line_buffer: String) -> (String, Vec String) !{IO}
-repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}
-repl_reset_session() -> Unit !{IO}
 ```
 
 Those hooks are useful for bootstrapping, but they encode full REPL policy in
@@ -90,6 +92,10 @@ for tab completion by taking explicit frontend state instead of reading hidden
 host session state. `repl_check_source(...)` applies the same idea to import
 and declaration acceptance. `repl_eval_expr_in_source(...)` does the same for
 expression execution.
+
+At this point the active `stdlib/repl.sprout` frontend path no longer uses the
+legacy compatibility hooks. They remain only as transitional runtime surface
+and compatibility coverage.
 
 ## 6. Proposed v1 Direction
 

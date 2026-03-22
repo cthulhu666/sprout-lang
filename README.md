@@ -130,18 +130,22 @@ Runtime builtins (host-implemented):
 
 Experimental host-REPL builtins:
 
+- Active snapshot/state hooks used by the current Sprout REPL frontend:
+- `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
+- `repl_check_source(module_source: String) -> Result String Unit !{IO}`
+- `repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}`
+- `repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}`
+- `repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}`
+- `repl_reset_session() -> Unit !{IO}`
+
+- Legacy compatibility hooks still present in the host runtime, but no longer used
+  by `stdlib/repl.sprout`:
 - `repl_add_import(source: String) -> Result String Unit !{IO}`
 - `repl_add_declaration(source: String) -> Result String Unit !{IO}`
 - `repl_eval_expr(source: String) -> Result String (Vec String) !{IO}`
-- `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
-- `repl_check_source(module_source: String) -> Result String Unit !{IO}`
 - `repl_type_of(source: String) -> Result String String !{IO}`
-- `repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}`
 - `repl_instances(source: String) -> Result String (String, Vec String) !{IO}`
-- `repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}`
 - `repl_complete(line_buffer: String) -> (String, Vec String) !{IO}`
-- `repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}`
-- `repl_reset_session() -> Unit !{IO}`
 
 These are implementation hooks for the Sprout-hosted REPL frontend. They are
 currently interpreter-backed; native compiled programs currently report a

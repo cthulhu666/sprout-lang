@@ -65,6 +65,16 @@ class CliTests(unittest.TestCase):
         self.assertIn("42", run.stdout)
         self.assertIn("Int", run.stdout)
 
+    def test_stdlib_repl_frontend_avoids_legacy_host_hooks(self) -> None:
+        source = Path("stdlib/repl.sprout").read_text(encoding="utf-8")
+
+        self.assertNotIn("repl_add_import(", source)
+        self.assertNotIn("repl_add_declaration(", source)
+        self.assertNotIn("repl_eval_expr(", source)
+        self.assertNotIn("repl_type_of(", source)
+        self.assertNotIn("repl_instances(", source)
+        self.assertNotIn("repl_complete(", source)
+
     def test_repl_default_loads_prelude(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],
