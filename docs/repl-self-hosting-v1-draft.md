@@ -71,6 +71,7 @@ repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (
 repl_check_source(module_source: String) -> Result String Unit !{IO}
 repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}
 repl_exported_names_in_source(module_source: String) -> Result String (Vec String) !{IO}
+repl_symbol_inventory_in_source(module_source: String) -> Result String (Vec String, Vec String, Vec String) !{IO}
 repl_diagnostics_in_source(module_source: String) -> Vec (String, Int, Int) !{IO}
 repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}
 repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}
@@ -103,6 +104,9 @@ is the first shared diagnostics primitive; it currently returns either an empty
 vector or a single `(message, line, column)` diagnostic from the checked
 snapshot pipeline. Diagnostics that do not yet expose machine-readable source
 locations use `0` for `line` and `column`.
+`repl_symbol_inventory_in_source(...)` is the first structured symbol inventory
+query on that path; it currently returns `(declared, imported, exported)` leaf-name
+buckets for a checked snapshot.
 
 The current host implementation of those snapshot-oriented services now lives
 in `sprout.analysis.py`; `sprout.repl_host.py` remains the stateful REPL

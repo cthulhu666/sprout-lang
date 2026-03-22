@@ -1246,6 +1246,24 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(lambda: _repl_vec_string(exported_names_in_source(source)))
 
+    def builtin_repl_symbol_inventory_in_source(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("repl_symbol_inventory_in_source expects String module source")
+        from .analysis import symbol_inventory_in_source
+
+        def _inventory() -> TupleValue:
+            declared, imported, exported = symbol_inventory_in_source(source)
+            return TupleValue(
+                items=(
+                    _repl_vec_string(declared),
+                    _repl_vec_string(imported),
+                    _repl_vec_string(exported),
+                )
+            )
+
+        return _repl_wrap(_inventory)
+
     def builtin_repl_diagnostics_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
@@ -1599,6 +1617,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("repl_check_source", BuiltinFunction(name="repl_check_source", arity=1, fn=builtin_repl_check_source))
     env.set("repl_declared_names_in_source", BuiltinFunction(name="repl_declared_names_in_source", arity=1, fn=builtin_repl_declared_names_in_source))
     env.set("repl_exported_names_in_source", BuiltinFunction(name="repl_exported_names_in_source", arity=1, fn=builtin_repl_exported_names_in_source))
+    env.set("repl_symbol_inventory_in_source", BuiltinFunction(name="repl_symbol_inventory_in_source", arity=1, fn=builtin_repl_symbol_inventory_in_source))
     env.set("repl_diagnostics_in_source", BuiltinFunction(name="repl_diagnostics_in_source", arity=1, fn=builtin_repl_diagnostics_in_source))
     env.set("repl_type_of", BuiltinFunction(name="repl_type_of", arity=1, fn=builtin_repl_type_of))
     env.set("repl_type_of_in_source", BuiltinFunction(name="repl_type_of_in_source", arity=2, fn=builtin_repl_type_of_in_source))

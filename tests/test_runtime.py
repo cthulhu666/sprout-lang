@@ -861,6 +861,21 @@ class RuntimeTests(unittest.TestCase):
           | Err message -> str_concat("error: ", message)
           | Ok lines -> first_or(lines, "<empty>")
 
+        fn render_inventory_result(result: Result String (Vec String, Vec String, Vec String)) -> String =
+          match result with
+          | Err message -> str_concat("error: ", message)
+          | Ok (declared, imported, exported) ->
+              str_concat(
+                first_or(declared, "<empty>"),
+                str_concat(
+                  "|",
+                  str_concat(
+                    first_or(imported, "<empty>"),
+                    str_concat("|", first_or(exported, "<empty>"))
+                  )
+                )
+              )
+
         fn render_diagnostics_result(lines: Vec (String, Int, Int)) -> (String, Int, Int) =
           match lines with
           | Vec raw ->
@@ -890,6 +905,8 @@ class RuntimeTests(unittest.TestCase):
                       seq(
                       print(render_names_result(repl_exported_names_in_source("module app.lib\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn keep(x: Int) -> Int = x\n\nfn hidden() -> Int = 0"))),
                       seq(
+                      print(render_inventory_result(repl_symbol_inventory_in_source("module app.lib\n\nimport stdlib.string\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn keep(x: Int) -> Int = x\n\nlet local = 0"))),
+                      seq(
                       print(render_diagnostics_result(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing"))),
                       seq(
                       print(render_expr_result(repl_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
@@ -914,6 +931,7 @@ class RuntimeTests(unittest.TestCase):
                 )
                 )
                 )
+                )
               )
             )
           )
@@ -931,12 +949,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[5], "ok")
         self.assertEqual(lines[6], "AAA")
         self.assertEqual(lines[7], "Box")
-        self.assertEqual(lines[8], "(Unknown variable missing, 3, 14)")
-        self.assertEqual(lines[9], "42")
-        self.assertEqual(lines[10], "Int")
-        self.assertEqual(lines[11], "ok")
-        self.assertEqual(lines[12], "ab")
-        self.assertTrue(lines[13].startswith("error: "))
+        self.assertEqual(lines[8], "Box|from_string|Box")
+        self.assertEqual(lines[9], "(Unknown variable missing, 3, 14)")
+        self.assertEqual(lines[10], "42")
+        self.assertEqual(lines[11], "Int")
+        self.assertEqual(lines[12], "ok")
+        self.assertEqual(lines[13], "ab")
+        self.assertTrue(lines[14].startswith("error: "))
 
     def test_vector_builtins(self) -> None:
         src = """

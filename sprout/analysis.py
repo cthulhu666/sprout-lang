@@ -11,7 +11,10 @@ from .module_loader import (
     MODULE_COMPAT_TYPES,
     ModuleBundle,
     ModuleLoadError,
+    _build_module_symbols,
     _module_for_line,
+    _namespace_alias_for_import,
+    _resolve_module,
     _source_location_for_bundle_line,
     load_module_bundle,
     resolve_program_names,
@@ -30,6 +33,7 @@ __all__ = [
     "exported_names_in_source",
     "infer_type_in_source",
     "instances_in_source",
+    "symbol_inventory_in_source",
 ]
 
 
@@ -224,6 +228,34 @@ def exported_names_in_source(source: str) -> list[str]:
         for ctors in MODULE_COMPAT_TYPES.get(module_name, {}).values():
             exported.update(ctors)
         return sorted(exported)
+
+
+def symbol_inventory_in_source(source: str) -> tuple[list[str], list[str], list[str]]:
+    composed = _compose_snapshot_source(source)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
+        temp_path.write_text(composed, encoding="utf-8")
+        bundle = load_module_bundle(temp_path)
+        tree = parse(bundle.source)
+        resolve_program_names(tree, bundle)
+        validate_public_surface(tree, bundle)
+        typecheck_program(tree)
+        module_info = bundle.modules[temp_path]
+        declared = sorted(_declared_names_from_tree(tree))
+        module_symbols = _build_module_symbols(tree, bundle)
+        imported: set[str] = set()
+        for imp in module_info.header.imports:
+            namespace_alias = _namespace_alias_for_import(imp)
+            if namespace_alias is not None:
+                imported.add(namespace_alias)
+            if imp.imported_names is not None:
+                imported.update(imp.imported_names)
+                imp_path = _resolve_module(imp.module, temp_path)
+                imp_symbols = module_symbols[imp_path]
+                for name in imp.imported_names:
+                    imported.update(imp_symbols.exported_type_constructors.get(name, {}))
+        exported = exported_names_in_source(source)
+        return declared, sorted(imported), exported
 
 
 def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:

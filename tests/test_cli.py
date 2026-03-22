@@ -316,6 +316,24 @@ class CliTests(unittest.TestCase):
         self.assertIn("unwrap", names)
         self.assertNotIn("hidden", names)
 
+    def test_repl_symbol_inventory_in_source_reports_declared_imported_and_exported_names(self) -> None:
+        from sprout.analysis import symbol_inventory_in_source
+
+        declared, imported, exported = symbol_inventory_in_source(
+            "module app.lib\n\nimport stdlib.string\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nlet local = 1"
+        )
+
+        self.assertIn("Box", declared)
+        self.assertIn("Wrap", declared)
+        self.assertIn("unwrap", declared)
+        self.assertIn("local", declared)
+        self.assertIn("string", imported)
+        self.assertIn("from_string", imported)
+        self.assertIn("Box", exported)
+        self.assertIn("Wrap", exported)
+        self.assertIn("unwrap", exported)
+        self.assertNotIn("local", exported)
+
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
         from sprout.repl_host import ReplSession
 
