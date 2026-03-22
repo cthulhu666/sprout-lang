@@ -105,7 +105,8 @@ Current experimental runtime progress:
    `analysis_symbol_locations_in_source(...)`,
    `repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
    `repl_instances_in_source(...)`, and `analysis_instances_in_source(...)`,
-   plus `repl_eval_expr_in_source(...)` and `repl_complete_in_state(...)`.
+   plus `repl_eval_expr_in_source(...)` and compatibility-only
+   `repl_complete_in_state(...)`.
    The remaining snapshot hooks are still unsupported in native binaries.
 8. End-to-end native execution of the current Sprout REPL frontend is now
    covered in tests by compiling and running `examples/repl_hosted.sprout`
@@ -124,6 +125,11 @@ Current experimental runtime progress:
 11. The active `complete_in_state` path now belongs with the shared
     analysis/service helpers rather than the stateful REPL-host shim, which
     keeps one more native-REPL dependency out of `sprout.repl_host`.
+12. The Sprout REPL frontend itself no longer uses `repl_complete_in_state(...)`
+    for `Tab` completion; that behavior now runs locally in
+    `stdlib/repl.sprout` from the current imports/declarations text state, so
+    interactive completion no longer depends on the Python analysis-service
+    subprocess.
 
 ## Target Architecture
 

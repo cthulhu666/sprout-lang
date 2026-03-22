@@ -314,6 +314,7 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("repl_type_of(", source)
         self.assertNotIn("repl_instances(", source)
         self.assertNotIn("repl_complete(", source)
+        self.assertNotIn("repl_complete_in_state(", source)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_reuses_cached_binary(self) -> None:

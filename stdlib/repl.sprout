@@ -122,13 +122,181 @@ fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit !{IO}
   | Just line -> then_io(term_write(line ++ "\r\n"), render_interactive_match_lines(matches, index + 1))
   | Nothing -> term_noop()
 
+fn contains_char(chars: String, target: String, index: Int) -> Bool =
+  if index >= string.length(chars) then false
+  else if string.slice(chars, index, 1) == target then true
+  else contains_char(chars, target, index + 1)
+
+fn is_completion_start_char(value: String) -> Bool =
+  contains_char("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_:", value, 0)
+
+fn is_completion_rest_char(value: String) -> Bool =
+  contains_char("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:", value, 0)
+
+fn completion_prefix_from(line_buffer: String, index: Int) -> String =
+  if index < 0 then ""
+  else if is_completion_rest_char(char_at(line_buffer, index)) then completion_prefix_from(line_buffer, index - 1) ++ char_at(line_buffer, index)
+  else ""
+
+fn completion_prefix(line_buffer: String) -> String =
+  if string.length(line_buffer) == 0 then ""
+  else
+    match completion_prefix_from(line_buffer, string.length(line_buffer) - 1) with
+    | "" -> ""
+    | raw ->
+        if is_completion_start_char(char_at(raw, 0)) then raw else ""
+
+fn append_unique_name(names: Vec String, value: String) -> Vec String =
+  if value == "" then names
+  else if contains_name(names, value, 0) then names
+  else vec_append(value, names)
+
+fn contains_name(names: Vec String, value: String, index: Int) -> Bool =
+  match vec_get(index, names) with
+  | Just item -> if item == value then true else contains_name(names, value, index + 1)
+  | Nothing -> false
+
+fn filter_names_by_prefix(prefix: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
+  match vec_get(index, names) with
+  | Just item ->
+      if string.starts_with(item, prefix) then filter_names_by_prefix(prefix, names, index + 1, vec_append(item, acc))
+      else filter_names_by_prefix(prefix, names, index + 1, acc)
+  | Nothing -> acc
+
+fn append_space_names(acc: Vec String, raw: String) -> Vec String =
+  if raw == "" then acc
+  else if string.find(raw, " ") == -1 then append_unique_name(acc, trim(raw))
+  else
+    append_space_names(
+      append_unique_name(acc, trim(string.slice(raw, 0, string.find(raw, " ")))),
+      trim(string.slice(raw, string.find(raw, " ") + 1, string.length(raw) - string.find(raw, " ") - 1))
+    )
+
+fn base_completion_names() -> Vec String =
+  append_space_names(
+    vec_empty(),
+    ":help :quit :q :exit :type :t :instances :i "
+    ++ "Bool Cons Dict Err False Foldable Functor Int IO Just List Maybe Nil Nothing Ok Result Semigroup String True Unit Vec "
+    ++ "filter fmap fold foldable_to_vec list_append list_fold list_map map print split_ints "
+    ++ "vec_append vec_empty vec_fold vec_get vec_get_or vec_length vec_map vec_prepend vec_reverse vec_set vec_slice vec_sum vec_sum_by "
+    ++ "bytes collections crypto dict_empty dict_get dict_keys dict_remove dict_set dict_values http http_client math net string terminal"
+  )
+
+fn skip_spaces_from(raw: String, index: Int) -> Int =
+  if index >= string.length(raw) then index
+  else if char_at(raw, index) == " " || char_at(raw, index) == "\t" then skip_spaces_from(raw, index + 1)
+  else index
+
+fn skip_to_space_or_delim(raw: String, index: Int) -> Int =
+  if index >= string.length(raw) then index
+  else if char_at(raw, index) == " " || char_at(raw, index) == "\t" || char_at(raw, index) == "(" || char_at(raw, index) == ":" || char_at(raw, index) == "=" || char_at(raw, index) == "|" then index
+  else skip_to_space_or_delim(raw, index + 1)
+
+fn take_name_from(raw: String, index: Int) -> String =
+  if index >= string.length(raw) then ""
+  else string.slice(raw, index, skip_to_space_or_delim(raw, index) - index)
+
+fn module_leaf_name(raw: String) -> String =
+  module_leaf_name_from(raw, 0, 0)
+
+fn module_leaf_name_from(raw: String, index: Int, start: Int) -> String =
+  if index >= string.length(raw) then string.slice(raw, start, string.length(raw) - start)
+  else if char_at(raw, index) == "." then module_leaf_name_from(raw, index + 1, index + 1)
+  else module_leaf_name_from(raw, index + 1, start)
+
+fn take_before(raw: String, needle: String) -> String =
+  if string.find(raw, needle) == -1 then raw
+  else string.slice(raw, 0, string.find(raw, needle))
+
+fn take_after(raw: String, needle: String) -> String =
+  if string.find(raw, needle) == -1 then ""
+  else
+    string.slice(
+      raw,
+      string.find(raw, needle) + string.length(needle),
+      string.length(raw) - string.find(raw, needle) - string.length(needle)
+    )
+
+fn take_between(raw: String, left: String, right: String) -> String =
+  if string.find(raw, left) == -1 then ""
+  else if string.find(string.slice(raw, string.find(raw, left) + string.length(left), string.length(raw) - string.find(raw, left) - string.length(left)), right) == -1 then ""
+  else
+    string.slice(
+      raw,
+      string.find(raw, left) + string.length(left),
+      string.find(string.slice(raw, string.find(raw, left) + string.length(left), string.length(raw) - string.find(raw, left) - string.length(left)), right)
+    )
+
+fn append_csv_names(acc: Vec String, raw: String) -> Vec String =
+  if string.find(raw, ",") == -1 then append_unique_name(acc, trim(raw))
+  else
+    append_csv_names(
+      append_unique_name(acc, trim(string.slice(raw, 0, string.find(raw, ",")))),
+      string.slice(raw, string.find(raw, ",") + 1, string.length(raw) - string.find(raw, ",") - 1)
+    )
+
+fn append_import_names(names: Vec String, line: String) -> Vec String =
+  if string.find(line, " as ") == -1 then
+    if string.find(line, "(") == -1 then append_unique_name(names, module_leaf_name(trim(line)))
+    else append_csv_names(append_unique_name(names, module_leaf_name(trim(take_before(line, "(")))), take_between(line, "(", ")"))
+  else if string.find(line, "(") == -1 then
+    append_unique_name(
+      append_unique_name(names, trim(string.slice(line, string.find(line, " as ") + 4, string.length(line) - string.find(line, " as ") - 4))),
+      module_leaf_name(trim(string.slice(line, 0, string.find(line, " as "))))
+    )
+  else
+    append_csv_names(
+      append_unique_name(
+        append_unique_name(names, trim(string.slice(line, string.find(line, " as ") + 4, string.length(line) - string.find(line, " as ") - 4))),
+        module_leaf_name(trim(take_before(string.slice(line, 0, string.find(line, " as ")), "(")))
+      ),
+      take_between(line, "(", ")")
+    )
+
+fn gather_import_names(imports: Vec String, index: Int, acc: Vec String) -> Vec String =
+  match vec_get(index, imports) with
+  | Just line ->
+      if string.starts_with(trim(line), "import ") then gather_import_names(imports, index + 1, append_import_names(acc, trim(drop_prefix(trim(line), "import "))))
+      else gather_import_names(imports, index + 1, acc)
+  | Nothing -> acc
+
+fn append_declaration_names(names: Vec String, line: String) -> Vec String =
+  if string.starts_with(line, "let ") then append_unique_name(names, take_name_from(line, 4))
+  else if string.starts_with(line, "fn ") then append_unique_name(names, take_name_from(line, 3))
+  else if string.starts_with(line, "type ") then append_unique_name(names, take_name_from(line, 5))
+  else if string.starts_with(line, "class ") then append_unique_name(names, take_name_from(line, 6))
+  else if string.starts_with(line, "export ") then append_declaration_names(names, trim(drop_prefix(line, "export ")))
+  else names
+
+fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec String) -> Vec String =
+  match vec_get(index, declarations) with
+  | Just line -> gather_declaration_names(declarations, index + 1, append_declaration_names(acc, trim(line)))
+  | Nothing -> acc
+
+fn completion_candidates_local(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) =
+  match completion_prefix(line_buffer) with
+  | prefix ->
+      (
+        prefix,
+        filter_names_by_prefix(
+          prefix,
+          gather_declaration_names(
+            declarations,
+            0,
+            gather_import_names(imports, 0, base_completion_names())
+          ),
+          0,
+          vec_empty()
+        )
+      )
+
 fn apply_completion(current: String, prefix: String, matches: Vec String) -> String =
   if prefix == "" then current
   else if vec_length(matches) != 1 then current
   else drop_last_count(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
 
 fn complete_current_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int) -> Maybe String !{IO} =
-  match repl_complete_in_state(current, imports, declarations) with
+  match completion_candidates_local(current, imports, declarations) with
   | (prefix, matches) ->
       if prefix == "" then interactive_read_line_loop(prompt, history, imports, declarations, current, string.length(current), -1, current)
       else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, -1, current)

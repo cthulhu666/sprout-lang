@@ -175,7 +175,7 @@ analysis-service subprocess boundary is now
 `declared_names_in_source` / `exported_names_in_source` /
 `symbol_inventory_in_source` / `diagnostics_in_source` /
 `type_of_in_source` / `instances_in_source` / `eval_expr_in_source` queries,
-plus explicit-state `complete_in_state`, as the first explicit host-service
+plus compatibility-only explicit-state `complete_in_state`, as the first explicit host-service
 bridge below the REPL frontend, and native compiled programs now use that bridge for
 `repl_check_source(...)`, `analysis_check_source(...)`,
 `repl_declared_names_in_source(...)`, `analysis_declared_names_in_source(...)`,
@@ -186,7 +186,9 @@ bridge below the REPL frontend, and native compiled programs now use that bridge
 `repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
 `repl_instances_in_source(...)`, `analysis_instances_in_source(...)`, and
 `repl_eval_expr_in_source(...)`, plus `repl_complete_in_state(...)` and
-`analysis_symbol_locations_in_source(...)`. The rest
+`analysis_symbol_locations_in_source(...)`. The active Sprout REPL frontend no
+longer depends on that bridge for `Tab` completion; completion now runs locally
+in `stdlib/repl.sprout` from the current session text state. The rest
 of the REPL/analysis snapshot hooks still report unsupported-backend runtime
 errors in native binaries. End-to-end native execution of the current Sprout
 REPL frontend is now verified by compiling and running
