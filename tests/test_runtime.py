@@ -861,8 +861,14 @@ class RuntimeTests(unittest.TestCase):
           | Err message -> str_concat("error: ", message)
           | Ok lines -> first_or(lines, "<empty>")
 
-        fn render_diagnostics_result(lines: Vec String) -> String =
-          first_or(lines, "<empty>")
+        fn render_diagnostics_result(lines: Vec (String, Int, Int)) -> (String, Int, Int) =
+          match lines with
+          | Vec raw ->
+              if vector_length(raw) == 0 then ("<empty>", 0, 0)
+              else
+                match vector_get(raw, 0) with
+                | Just entry -> entry
+                | Nothing -> ("<empty>", 0, 0)
 
         fn main() -> Unit !{IO} =
           seq(
@@ -921,7 +927,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[4], "str:string")
         self.assertEqual(lines[5], "ok")
         self.assertEqual(lines[6], "AAA")
-        self.assertTrue(lines[7].startswith("Unknown variable missing"))
+        self.assertEqual(lines[7], "(Unknown variable missing, 3, 14)")
         self.assertEqual(lines[8], "42")
         self.assertEqual(lines[9], "Int")
         self.assertEqual(lines[10], "ok")

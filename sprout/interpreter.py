@@ -1162,6 +1162,19 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     def _repl_vec_string(items: tuple[str, ...] | list[str]) -> ADTValue:
         return ADTValue(constructor="Vec", args=(VectorValue(items=tuple(items)),))
 
+    def _repl_vec_diagnostic(items: tuple[tuple[str, int, int], ...] | list[tuple[str, int, int]]) -> ADTValue:
+        return ADTValue(
+            constructor="Vec",
+            args=(
+                VectorValue(
+                    items=tuple(
+                        TupleValue(items=(message, line, column))
+                        for message, line, column in items
+                    )
+                ),
+            ),
+        )
+
     def _repl_wrap(action: Callable[[], object]) -> ADTValue:
         try:
             return _repl_ok(action())
@@ -1231,7 +1244,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("repl_diagnostics_in_source expects String module source")
         from .repl_host import diagnostics_in_source
 
-        return _repl_vec_string(diagnostics_in_source(source))
+        return _repl_vec_diagnostic(diagnostics_in_source(source))
 
     def builtin_repl_type_of(args: list[object]) -> object:
         source = args[0]

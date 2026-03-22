@@ -1478,7 +1478,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         ),
         "repl_diagnostics_in_source": builtin_scheme(
             [STRING],
-            TApp(TConst("Vec"), STRING),
+            TApp(TConst("Vec"), TTuple((STRING, INT, INT))),
             effects=IO_EFFECT,
         ),
         "repl_type_of": builtin_scheme(

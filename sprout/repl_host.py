@@ -9,7 +9,13 @@ from typing import Callable, TextIO
 
 from . import ast
 from .interpreter import RuntimeError, run_program
-from .module_loader import ModuleLoadError, load_module_bundle, resolve_program_names
+from .module_loader import (
+    ModuleBundle,
+    ModuleLoadError,
+    _source_location_for_bundle_line,
+    load_module_bundle,
+    resolve_program_names,
+)
 from .parser import ParseError, parse
 from .surface_checks import SurfaceCheckError, validate_public_surface
 from .tokenizer import TokenizeError
@@ -312,20 +318,52 @@ def declared_names_in_source(source: str) -> list[str]:
     return sorted(_declared_names_from_tree(tree))
 
 
-def diagnostics_in_source(source: str) -> list[str]:
-    try:
-        _repl_parse_and_check_source(source)
-    except (
-        ParseError,
-        TokenizeError,
-        TypeCheckError,
-        RuntimeError,
-        ModuleLoadError,
-        SurfaceCheckError,
-        TypeclassLoweringError,
-    ) as exc:
-        return [str(exc)]
-    return []
+def _diagnostic_entry(exc: Exception, bundle: ModuleBundle | None = None) -> tuple[str, int, int]:
+    message = str(exc)
+    line = 0
+    column = 0
+    context_match = re.search(r"--> [^:\n]+:(\d+):(\d+)", message)
+    inline_match = re.search(r" at (\d+):(\d+)(?:\b|,)", message)
+    if context_match is not None:
+        line = int(context_match.group(1))
+        column = int(context_match.group(2))
+        message = message.splitlines()[0]
+    elif inline_match is not None:
+        line = int(inline_match.group(1))
+        column = int(inline_match.group(2))
+        first_line = message.splitlines()[0]
+        message = re.sub(r" at \d+:\d+", "", first_line, count=1)
+    else:
+        message = message.splitlines()[0]
+    if bundle is not None and line > 0:
+        location = _source_location_for_bundle_line(bundle, line, column)
+        if location is not None:
+            _, line, column = location
+    return (message, line, column)
+
+
+def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:
+    chunks = [source.strip()]
+    composed = "\n\n".join(chunk for chunk in chunks if chunk)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = Path(tmpdir) / "repl_session.sprout"
+        temp_path.write_text(composed, encoding="utf-8")
+        bundle = load_module_bundle(temp_path)
+        try:
+            tree = parse(bundle.source)
+            resolve_program_names(tree, bundle)
+            validate_public_surface(tree, bundle)
+            typecheck_program(tree)
+        except (
+            ParseError,
+            TokenizeError,
+            TypeCheckError,
+            ModuleLoadError,
+            SurfaceCheckError,
+            TypeclassLoweringError,
+        ) as exc:
+            return [_diagnostic_entry(exc, bundle)]
+        return []
 
 
 def eval_expression_lines_in_source(source: str, expr: str) -> tuple[str, ...]:
