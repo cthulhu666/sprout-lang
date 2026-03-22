@@ -160,6 +160,7 @@ def cmd_compile(
 #include <netdb.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -293,6 +294,8 @@ static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
 static CtorMeta* find_ctor(long long tag);
+static char* alloc_cstr(size_t len, const char* ctx);
+static char* dup_slice(const char* start, size_t len);
 static char* dup_cstr(const char* s);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
@@ -1041,6 +1044,275 @@ long long term_write(const char* text) {
   fflush(stdout);
   return 0;
 }
+static char* sprout_json_escape(const char* text) {
+  if (text == NULL) tcp_fail("analysis service: null json text");
+  size_t extra = 0;
+  for (const unsigned char* p = (const unsigned char*)text; *p != '\\0'; ++p) {
+    switch (*p) {
+      case '\\\\':
+      case '"':
+      case '\\n':
+      case '\\r':
+      case '\\t':
+        extra += 1;
+        break;
+      default:
+        break;
+    }
+  }
+  size_t len = strlen(text);
+  char* out = alloc_cstr(len + extra, "analysis service: out of memory");
+  size_t idx = 0;
+  for (const unsigned char* p = (const unsigned char*)text; *p != '\\0'; ++p) {
+    switch (*p) {
+      case '\\\\':
+        out[idx++] = '\\\\';
+        out[idx++] = '\\\\';
+        break;
+      case '"':
+        out[idx++] = '\\\\';
+        out[idx++] = '"';
+        break;
+      case '\\n':
+        out[idx++] = '\\\\';
+        out[idx++] = 'n';
+        break;
+      case '\\r':
+        out[idx++] = '\\\\';
+        out[idx++] = 'r';
+        break;
+      case '\\t':
+        out[idx++] = '\\\\';
+        out[idx++] = 't';
+        break;
+      default:
+        out[idx++] = (char)*p;
+        break;
+    }
+  }
+  out[idx] = '\\0';
+  return out;
+}
+static const char* sprout_json_after_key(const char* text, const char* key) {
+  if (text == NULL || key == NULL) return NULL;
+  size_t key_len = strlen(key);
+  size_t pattern_len = key_len + 2;
+  char* pattern = alloc_cstr(pattern_len, "analysis service: out of memory");
+  pattern[0] = '"';
+  memcpy(pattern + 1, key, key_len);
+  pattern[key_len + 1] = '"';
+  pattern[key_len + 2] = '\\0';
+  const char* pos = strstr(text, pattern);
+  free(pattern);
+  if (pos == NULL) return NULL;
+  pos += pattern_len;
+  while (*pos == ' ' || *pos == '\\n' || *pos == '\\r' || *pos == '\\t') pos++;
+  if (*pos != ':') return NULL;
+  pos++;
+  while (*pos == ' ' || *pos == '\\n' || *pos == '\\r' || *pos == '\\t') pos++;
+  return pos;
+}
+static int sprout_json_field_is_true(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  return pos != NULL && strncmp(pos, "true", 4) == 0;
+}
+static int sprout_json_field_is_null(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  return pos != NULL && strncmp(pos, "null", 4) == 0;
+}
+static char* sprout_json_extract_string(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  if (pos == NULL || *pos != '"') return NULL;
+  pos++;
+  size_t cap = strlen(pos) + 1;
+  char* out = alloc_cstr(cap, "analysis service: out of memory");
+  size_t idx = 0;
+  while (*pos != '\\0') {
+    if (*pos == '"') {
+      out[idx] = '\\0';
+      return out;
+    }
+    if (*pos == '\\\\') {
+      pos++;
+      if (*pos == '\\0') break;
+      switch (*pos) {
+        case '\\\\':
+        case '"':
+        case '/':
+          out[idx++] = *pos;
+          break;
+        case 'n':
+          out[idx++] = '\\n';
+          break;
+        case 'r':
+          out[idx++] = '\\r';
+          break;
+        case 't':
+          out[idx++] = '\\t';
+          break;
+        default:
+          out[idx++] = *pos;
+          break;
+      }
+      pos++;
+      continue;
+    }
+    out[idx++] = *pos;
+    pos++;
+  }
+  free(out);
+  return NULL;
+}
+static char* sprout_read_text_file(const char* path) {
+  FILE* f = fopen(path, "rb");
+  if (f == NULL) return NULL;
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  long size = ftell(f);
+  if (size < 0) {
+    fclose(f);
+    return NULL;
+  }
+  rewind(f);
+  char* out = alloc_cstr((size_t)size, "analysis service: out of memory");
+  size_t got = fread(out, 1, (size_t)size, f);
+  fclose(f);
+  if (got != (size_t)size) {
+    free(out);
+    return NULL;
+  }
+  out[size] = '\\0';
+  return out;
+}
+static int sprout_run_analysis_service(const char* request_json, char** response_out, char** error_out) {
+  const char* cmd = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
+  if (cmd == NULL || *cmd == '\\0') cmd = "python3 -m sprout.cli analysis-service";
+  char in_template[] = "/tmp/sprout-analysis-in-XXXXXX";
+  char out_template[] = "/tmp/sprout-analysis-out-XXXXXX";
+  int in_fd = mkstemp(in_template);
+  if (in_fd < 0) {
+    *error_out = dup_cstr("analysis service: unable to allocate request file");
+    return 0;
+  }
+  int out_fd = mkstemp(out_template);
+  if (out_fd < 0) {
+    close(in_fd);
+    unlink(in_template);
+    *error_out = dup_cstr("analysis service: unable to allocate response file");
+    return 0;
+  }
+  FILE* in_file = fdopen(in_fd, "w");
+  if (in_file == NULL) {
+    close(in_fd);
+    close(out_fd);
+    unlink(in_template);
+    unlink(out_template);
+    *error_out = dup_cstr("analysis service: unable to open request file");
+    return 0;
+  }
+  fputs(request_json, in_file);
+  fclose(in_file);
+  close(out_fd);
+  size_t command_len = strlen(cmd) + strlen(in_template) + strlen(out_template) + 16;
+  char* shell_command = alloc_cstr(command_len, "analysis service: out of memory");
+  snprintf(shell_command, command_len + 1, "%s < \\\"%s\\\" > \\\"%s\\\"", cmd, in_template, out_template);
+  int status = system(shell_command);
+  free(shell_command);
+  char* response = sprout_read_text_file(out_template);
+  unlink(in_template);
+  unlink(out_template);
+  if (status != 0) {
+    if (response != NULL) {
+      char* service_error = sprout_json_extract_string(response, "error");
+      free(response);
+      if (service_error != NULL) {
+        *error_out = service_error;
+        return 0;
+      }
+    }
+    *error_out = dup_cstr("analysis service: command failed");
+    return 0;
+  }
+  if (response == NULL) {
+    *error_out = dup_cstr("analysis service: empty response");
+    return 0;
+  }
+  *response_out = response;
+  return 1;
+}
+static long long sprout_err_string_result(const char* message) {
+  return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)dup_cstr(message));
+}
+static long long sprout_analysis_check_source_result(const char* op, const char* module_source) {
+  char* escaped_source = sprout_json_escape(module_source);
+  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
+    op,
+    escaped_source
+  );
+  free(escaped_source);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    free(response);
+    return sprout_make1(find_ctor_tag_by_name("Ok"), 0);
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  if (error != NULL) free(error);
+  return out;
+}
+static long long sprout_analysis_type_result(const char* op, const char* module_source, const char* expr) {
+  char* escaped_source = sprout_json_escape(module_source);
+  char* escaped_expr = sprout_json_escape(expr);
+  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(escaped_expr) + 64;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\",\\\"expr\\\":\\\"%s\\\"}\\n",
+    op,
+    escaped_source,
+    escaped_expr
+  );
+  free(escaped_source);
+  free(escaped_expr);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    char* value = sprout_json_extract_string(response, "value");
+    free(response);
+    if (value == NULL) return sprout_err_string_result("analysis service: invalid response");
+    long long out = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)value);
+    return out;
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  if (error != NULL) free(error);
+  return out;
+}
 long long repl_add_import(const char* source) {
   (void)source;
   tcp_fail("repl_add_import: not supported in native backend");
@@ -1063,14 +1335,10 @@ long long repl_eval_expr_in_source(const char* module_source, const char* expr) 
   return 0;
 }
 long long repl_check_source(const char* module_source) {
-  (void)module_source;
-  tcp_fail("repl_check_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_check_source_result("check_source", module_source);
 }
 long long analysis_check_source(const char* module_source) {
-  (void)module_source;
-  tcp_fail("analysis_check_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_check_source_result("check_source", module_source);
 }
 long long repl_declared_names_in_source(const char* module_source) {
   (void)module_source;
@@ -1123,16 +1391,10 @@ long long repl_type_of(const char* source) {
   return 0;
 }
 long long repl_type_of_in_source(const char* module_source, const char* expr) {
-  (void)module_source;
-  (void)expr;
-  tcp_fail("repl_type_of_in_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_type_result("type_of_in_source", module_source, expr);
 }
 long long analysis_type_of_in_source(const char* module_source, const char* expr) {
-  (void)module_source;
-  (void)expr;
-  tcp_fail("analysis_type_of_in_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_type_result("type_of_in_source", module_source, expr);
 }
 long long repl_instances(const char* source) {
   (void)source;
@@ -1333,9 +1595,15 @@ static void buf_append_cstr(ByteBuf* buf, const char* text) {
   buf_append_bytes(buf, text, strlen(text));
 }
 
-static char* dup_slice(const char* start, size_t len) {
+static char* alloc_cstr(size_t len, const char* ctx) {
   char* out = (char*)malloc(len + 1);
-  if (out == NULL) tcp_fail("http_request: out of memory");
+  if (out == NULL) tcp_fail(ctx);
+  out[0] = '\\0';
+  return out;
+}
+
+static char* dup_slice(const char* start, size_t len) {
+  char* out = alloc_cstr(len, "http_request: out of memory");
   memcpy(out, start, len);
   out[len] = '\\0';
   return out;

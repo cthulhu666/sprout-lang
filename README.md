@@ -168,12 +168,16 @@ Experimental snapshot analysis hooks:
 - `repl_complete(line_buffer: String) -> (String, Vec String) !{IO}`
 
 These are implementation hooks for the Sprout-hosted REPL frontend. They are
-currently interpreter-backed; native compiled programs currently report a
-runtime error if they call them. The current near-term priority is making that
+still mostly interpreter-backed. The current near-term priority is making that
 bridge native-capable rather than making it self-hosted. An experimental
 `sprout analysis-service` entrypoint now exists for snapshot `check_source` and
 `type_of_in_source` queries as the first explicit host-service bridge below the
-REPL frontend.
+REPL frontend, and native compiled programs now use that bridge for
+`repl_check_source(...)`, `analysis_check_source(...)`,
+`repl_type_of_in_source(...)`, and `analysis_type_of_in_source(...)`. The rest
+of the REPL/analysis snapshot hooks still report unsupported-backend runtime
+errors in native binaries. Native programs can override the service command via
+`SPROUT_ANALYSIS_SERVICE_CMD`.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import unittest
 import shutil
 import subprocess
@@ -17,6 +18,11 @@ from tests.integration_support import compiled_native_binary, running_tcp_fixtur
 
 
 class CodegenTests(unittest.TestCase):
+    def _native_analysis_service_env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.cli analysis-service"
+        return env
+
     def test_compile_recursive_if_program_to_llvm(self) -> None:
         src = """
         fn fact(n: Int) -> Int =
@@ -1464,7 +1470,7 @@ class CodegenTests(unittest.TestCase):
             self.assertIn("runtime error: builtin `repl_complete_in_state`: not supported in native backend", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_type_of_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_type_of_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1474,7 +1480,7 @@ class CodegenTests(unittest.TestCase):
                 module main
                 fn main() -> Unit !{IO} =
                   match repl_type_of_in_source("module app.repl", "1") with
-                  | Ok _ -> print("ok")
+                  | Ok inferred -> print(inferred)
                   | Err message -> print(message)
                 """,
                 encoding="utf-8",
@@ -1492,13 +1498,19 @@ class CodegenTests(unittest.TestCase):
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_type_of_in_source`: not supported in native backend", run.stderr)
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "Int")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_check_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_type_of_in_source_builtin_surfaces_service_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1507,7 +1519,7 @@ class CodegenTests(unittest.TestCase):
                 """
                 module main
                 fn main() -> Unit !{IO} =
-                  match repl_check_source("module app.repl") with
+                  match repl_type_of_in_source("module app.repl", "missing") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -1526,10 +1538,96 @@ class CodegenTests(unittest.TestCase):
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_check_source`: not supported in native backend", run.stderr)
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertIn("Unknown variable missing", run.stdout)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_check_source_builtin_runs_via_analysis_service(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                fn main() -> Unit !{IO} =
+                  match repl_check_source("module app.repl\n\nlet local = 41") with
+                  | Ok _ -> print("ok")
+                  | Err message -> print(message)
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "ok")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_check_source_builtin_surfaces_service_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                fn main() -> Unit !{IO} =
+                  match repl_check_source("module app.repl\n\nlet broken = missing") with
+                  | Ok _ -> print("ok")
+                  | Err message -> print(message)
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertIn("Unknown variable missing", run.stdout)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_declared_names_in_source_builtin_reports_unsupported_backend(self) -> None:
