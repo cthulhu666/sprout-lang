@@ -9,6 +9,8 @@ Status:
 - It does not change the normative language contract.
 - Any language-server support shipped from this plan should be labeled
   experimental until the feature set and protocol surface stabilize.
+- This work is currently deferred behind native REPL bridge work and should be
+  treated as a v2+ direction rather than an active near-term milestone.
 
 ## 1. Problem Statement
 

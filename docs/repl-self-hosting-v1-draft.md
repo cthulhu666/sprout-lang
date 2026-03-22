@@ -7,6 +7,10 @@ It is not part of normative v0. Its purpose is to define the first credible
 path from the current host-backed REPL session bridge to a REPL whose session
 semantics are implemented in Sprout code.
 
+Status note: this is no longer the active near-term milestone. Native REPL
+bridge work comes first; this document now describes a later follow-on
+direction after the hosted native-capable path is working.
+
 ## 1. Problem Statement
 
 Sprout now has a REPL frontend that is mostly written in Sprout:

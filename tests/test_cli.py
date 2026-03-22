@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -8,6 +9,56 @@ import unittest
 
 
 class CliTests(unittest.TestCase):
+    def test_analysis_service_check_source_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(
+                {
+                    "op": "check_source",
+                    "module_source": "module app.repl\n\nlet local = 41",
+                }
+            ),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
+
+    def test_analysis_service_type_of_in_source_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(
+                {
+                    "op": "type_of_in_source",
+                    "module_source": "module app.repl\n\nlet local = 41",
+                    "expr": "local + 1",
+                }
+            ),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": "Int"})
+
+    def test_analysis_service_reports_unknown_operation(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps({"op": "not-real"}),
+        )
+        self.assertEqual(run.returncode, 1, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(
+            json.loads(run.stdout),
+            {"error": "unknown analysis service op `not-real`", "ok": False},
+        )
+
     def test_fmt_rewrites_file_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "fmt_test.sprout"

@@ -3,9 +3,13 @@
 This document outlines a pragmatic path from the current hosted Python REPL to
 a future Sprout-native REPL binary.
 
-For the longer-term v1 direction where the REPL session engine itself becomes
-Sprout-owned rather than host-backed, see
+For the longer-term self-hosting direction where the REPL session engine itself
+becomes Sprout-owned rather than host-backed, see
 [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
+
+Current priority note: that self-hosting track is no longer the active
+near-term milestone. The active goal is a native-capable REPL path that keeps
+the current Sprout frontend and narrows the remaining host bridge below it.
 
 It is an implementation/tooling roadmap, not a normative language spec.
 
@@ -79,6 +83,12 @@ Current experimental runtime progress:
    completion behavior now live in Sprout code rather than Python readline
    policy.
 4. Native compiled programs do not support that session bridge yet.
+5. The next native-focused step is to move those services behind one explicit
+   host-service boundary that compiled clients can target without depending on
+   Python REPL internals.
+6. An experimental `sprout analysis-service` entrypoint now exists as the
+   first explicit bridge for snapshot-oriented `check_source` and
+   `type_of_in_source` queries.
 
 ## Target Architecture
 
@@ -142,7 +152,24 @@ session engine. Success looks like:
 2. clearer distinction between session state and host UI,
 3. easier reuse from non-interactive tests and future tools.
 
-### Phase 3. Identify Missing Runtime Hooks
+### Phase 3. Introduce an Explicit Host-Service Bridge
+
+Before native compiled REPL clients can use the current session and analysis
+services, those services need a transport boundary that is separate from the
+Python REPL frontend.
+
+Success looks like:
+
+1. snapshot-oriented analysis/session operations are reachable through one
+   dedicated host-service entrypoint,
+2. the bridge protocol is explicit and testable,
+3. future native support can target that bridge instead of importing Python
+   REPL modules or depending on CLI-specific control flow.
+
+This phase does not make the REPL self-hosted. It only makes the remaining host
+bridge cleaner and more native-friendly.
+
+### Phase 4. Identify Missing Runtime Hooks
 
 A Sprout-native REPL will need a minimal set of hosted capabilities. Likely
 requirements:
@@ -156,7 +183,7 @@ requirements:
 The key question is which of these belong as stable runtime builtins and which
 should remain thin host integration points.
 
-### Phase 4. Build a Minimal Sprout REPL App
+### Phase 5. Build a Minimal Sprout REPL App
 
 Start with a line-based REPL app in Sprout that:
 
@@ -169,7 +196,7 @@ Do not block this phase on advanced history, completion, or full-screen
 terminal behavior; basic Sprout-side line editing is enough to move the REPL
 surface out of Python first.
 
-### Phase 5. Replace the Current Entry Point
+### Phase 6. Replace the Current Entry Point
 
 Once the Sprout implementation is feature-complete enough, the Python CLI `repl`
 entry point can become a launcher for the Sprout-native REPL binary.
@@ -214,5 +241,6 @@ The next practical steps are:
 3. audit runtime hooks needed for a Sprout-hosted interactive app,
 4. prototype a minimal line-based REPL application in Sprout once those hooks
    exist,
-5. use the v1 self-hosting draft to replace the opaque `repl_*` bridge with a
+5. return to the self-hosting draft only after the native-capable hosted path
+   is working; that later phase can then replace the temporary bridge with a
    lower-level compiler/session capability layer.

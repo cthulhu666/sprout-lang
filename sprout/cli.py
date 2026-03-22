@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 
+from .analysis_service import cmd_analysis_service
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .formatter import format_source, lint_source
@@ -2935,6 +2936,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit native binary with clang (default writes LLVM .ll text)",
     )
+    sub.add_parser("analysis-service", help=argparse.SUPPRESS)
     sub.add_parser("repl", help="start a simple interactive Sprout REPL")
 
     return parser
@@ -2972,6 +2974,8 @@ def main(argv: list[str] | None = None) -> int:
                 with_http_stdlib=args.with_http_stdlib,
                 native=args.native,
             )
+        if args.command == "analysis-service":
+            return cmd_analysis_service()
         if args.command == "repl":
             return cmd_repl()
     except (

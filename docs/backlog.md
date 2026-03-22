@@ -4,22 +4,22 @@ This file tracks open design, implementation, and tooling follow-up work.
 
 ## Current Priorities
 
-1. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
-2. Add stronger server-side runtime models (multi-reactor as next target).
+1. Push the current Sprout-hosted REPL toward a native-capable bridge.
+   Design docs: [native-repl-roadmap.md](./native-repl-roadmap.md), [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
+   Near-term scope: keep the current Sprout frontend stable, move host-backed session services behind an explicit native-callable bridge, and start enabling the first native-supported REPL service slices without inventing more Python REPL policy.
+   Deferred scope: the self-hosted session-engine work in `repl-self-hosting-v1-draft.md` is no longer the active milestone; treat it as a post-native-REPL direction.
+2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
+3. Add stronger server-side runtime models (multi-reactor as next target).
    Recent groundwork landed: native TCP handle-slot reuse and an experimental `stdlib.http_server` helper layer for structured request parsing/rendering.
    Remaining follow-up: incremental bytes-oriented HTTP reads, keep-alive/chunked support, and stronger concurrent runtime models.
-3. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
-4. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
-5. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
-6. Continue native memory-management v1.
+4. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
+5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
+6. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
+7. Continue native memory-management v1.
    Design doc: [native-memory-management-v1-draft.md](./native-memory-management-v1-draft.md).
    Completed groundwork: allocation visibility, centralized managed allocation for Sprout values, heap metadata hooks, and an initial non-moving stop-the-world mark-sweep collector with default threshold-triggered in-process collection in the native profile.
    Remaining v1 scope: close the remaining path-specific live-value gaps outside the current shadow-root coverage, tune the current default threshold (`1024` managed nodes) with more measurements, and keep expanding reclamation-focused validation.
    V2 direction: pause/throughput improvements only after v1 is measured, likely via incremental or generational follow-up work if justified.
-7. Normalize the REPL around a future native implementation.
-   Design docs: [native-repl-roadmap.md](./native-repl-roadmap.md), [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
-   Near-term scope: keep one REPL session model, extract session logic from CLI policy, identify missing runtime hooks, and stage a minimal Sprout-hosted REPL app before attempting full terminal polish.
-   V1 direction: replace the temporary `repl_*` host bridge with lower-level compiler/session capabilities so the REPL session engine itself can move into Sprout code.
 
 ## V1 Roadmap Candidates
 

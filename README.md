@@ -41,9 +41,11 @@ Normative status:
   concrete for now.
 - `docs/effect-system-v1-draft.md` is now a forward-looking draft for the next
   effect milestone beyond the implemented v0 baseline.
-- `docs/repl-self-hosting-v1-draft.md` is a forward-looking implementation
-  draft for replacing the temporary host-backed REPL session bridge with a
-  Sprout-owned session engine in v1.
+- Native REPL work is the current tooling priority.
+- `docs/repl-self-hosting-v1-draft.md` and the language-server/compiler
+  analysis work are now deferred until after the native REPL bridge is in
+  better shape; treat them as longer-term design drafts rather than active
+  near-term milestones.
 
 ## Repository Layout
 
@@ -167,9 +169,11 @@ Experimental snapshot analysis hooks:
 
 These are implementation hooks for the Sprout-hosted REPL frontend. They are
 currently interpreter-backed; native compiled programs currently report a
-runtime error if they call them. They are a temporary v0 bridge rather than
-the intended v1 self-hosting boundary; see
-[docs/repl-self-hosting-v1-draft.md](./docs/repl-self-hosting-v1-draft.md).
+runtime error if they call them. The current near-term priority is making that
+bridge native-capable rather than making it self-hosted. An experimental
+`sprout analysis-service` entrypoint now exists for snapshot `check_source` and
+`type_of_in_source` queries as the first explicit host-service bridge below the
+REPL frontend.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 
