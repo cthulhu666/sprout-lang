@@ -1740,6 +1740,81 @@ static long long sprout_analysis_diagnostics_result(const char* op, const char* 
   sprout_builtin_fail_detail(op, error != NULL ? error : "analysis service: invalid response");
   return 0;
 }
+static long long sprout_analysis_symbol_locations_result(const char* op, const char* module_source) {
+  char* escaped_source = sprout_json_escape(module_source);
+  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
+    op,
+    escaped_source
+  );
+  free(escaped_source);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    VectorVal* categories = sprout_json_extract_string_array(response, "categories");
+    VectorVal* names = sprout_json_extract_string_array(response, "names");
+    long long line_count = 0;
+    long long column_count = 0;
+    long long* lines = sprout_json_extract_int_array(response, "lines", &line_count);
+    long long* columns = sprout_json_extract_int_array(response, "columns", &column_count);
+    free(response);
+    if (
+      categories == NULL ||
+      names == NULL ||
+      categories->len != names->len ||
+      line_count != categories->len ||
+      column_count != categories->len ||
+      (categories->len > 0 && (lines == NULL || columns == NULL))
+    ) {
+      if (lines != NULL) free(lines);
+      if (columns != NULL) free(columns);
+      return sprout_err_string_result("analysis service: invalid response");
+    }
+    VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+    long long rooted_categories = (long long)(uintptr_t)categories;
+    long long rooted_names = (long long)(uintptr_t)names;
+    long long rooted_out = (long long)(uintptr_t)out;
+    SPROUT_GC_PUSH_I64_LOCAL(rooted_categories);
+    SPROUT_GC_PUSH_I64_LOCAL(rooted_names);
+    SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
+    out->len = categories->len;
+    out->cap = categories->len;
+    out->data = categories->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)categories->len, "analysis service: out of memory");
+    for (long long i = 0; i < categories->len; i++) {
+      void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 4));
+      uintptr_t* words = (uintptr_t*)tuple;
+      words[0] = (uintptr_t)categories->data[i];
+      words[1] = (uintptr_t)names->data[i];
+      words[2] = (uintptr_t)lines[i];
+      words[3] = (uintptr_t)columns[i];
+      out->data[i] = (long long)(uintptr_t)tuple;
+    }
+    if (lines != NULL) free(lines);
+    if (columns != NULL) free(columns);
+    long long rooted_vec_raw = (long long)(uintptr_t)out;
+    long long out_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_vec_raw);
+    SPROUT_GC_PUSH_I64_LOCAL(out_vec);
+    long long result = sprout_make1(find_ctor_tag_by_name("Ok"), out_vec);
+    SPROUT_GC_POP_LOCALS(4);
+    return result;
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  if (error != NULL) free(error);
+  return out;
+}
 static long long sprout_analysis_completion_result(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
   char* escaped_line_buffer = sprout_json_escape(line_buffer);
   char* imports_json = sprout_json_encode_string_array_from_vec_handle(imports_handle, "repl_complete_in_state", "imports");
@@ -1828,9 +1903,7 @@ long long analysis_symbol_inventory_in_source(const char* module_source) {
   return sprout_analysis_inventory_result("symbol_inventory_in_source", module_source);
 }
 long long analysis_symbol_locations_in_source(const char* module_source) {
-  (void)module_source;
-  tcp_fail("analysis_symbol_locations_in_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_symbol_locations_result("symbol_locations_in_source", module_source);
 }
 long long repl_diagnostics_in_source(const char* module_source) {
   return sprout_analysis_diagnostics_result("diagnostics_in_source", module_source);

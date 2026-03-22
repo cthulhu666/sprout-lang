@@ -1930,7 +1930,7 @@ for line in sys.stdin:
             self.assertEqual(run.stdout.strip(), "ok")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_analysis_symbol_locations_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_analysis_symbol_locations_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1938,10 +1938,10 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
-                fn main() -> Unit !{IO} =
-                  match analysis_symbol_locations_in_source("module app.lib") with
-                  | Ok _ -> print("ok")
-                  | Err message -> print(message)
+                fn main() -> Int !{IO} =
+                  match analysis_symbol_locations_in_source("module app.lib\n\nlet apple = 1\ntype Fruit =\n  | Banana") with
+                  | Ok locations -> print_int(vec_length(locations))
+                  | Err _ -> print_int(0)
                 """,
                 encoding="utf-8",
             )
@@ -1958,10 +1958,10 @@ for line in sys.stdin:
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `analysis_symbol_locations_in_source`: not supported in native backend", run.stderr)
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
+            self.assertEqual(run.returncode, 3)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "3")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_diagnostics_in_source_builtin_runs_via_analysis_service(self) -> None:

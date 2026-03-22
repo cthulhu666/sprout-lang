@@ -100,6 +100,7 @@ Current experimental runtime progress:
    `repl_symbol_inventory_in_source(...)`,
    `analysis_symbol_inventory_in_source(...)`,
    `repl_diagnostics_in_source(...)`, `analysis_diagnostics_in_source(...)`,
+   `analysis_symbol_locations_in_source(...)`,
    `repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
    `repl_instances_in_source(...)`, and `analysis_instances_in_source(...)`,
    plus `repl_eval_expr_in_source(...)` and `repl_complete_in_state(...)`.

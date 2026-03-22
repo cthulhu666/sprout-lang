@@ -184,7 +184,8 @@ bridge below the REPL frontend, and native compiled programs now use that bridge
 `repl_diagnostics_in_source(...)`, `analysis_diagnostics_in_source(...)`,
 `repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
 `repl_instances_in_source(...)`, `analysis_instances_in_source(...)`, and
-`repl_eval_expr_in_source(...)`, plus `repl_complete_in_state(...)`. The rest
+`repl_eval_expr_in_source(...)`, plus `repl_complete_in_state(...)` and
+`analysis_symbol_locations_in_source(...)`. The rest
 of the REPL/analysis snapshot hooks still report unsupported-backend runtime
 errors in native binaries. End-to-end native execution of the current Sprout
 REPL frontend is now verified by compiling and running

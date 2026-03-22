@@ -12,6 +12,7 @@ from .analysis import (
     exported_names_in_source,
     infer_type_in_source,
     instances_in_source,
+    symbol_locations_in_source,
     symbol_inventory_in_source,
 )
 from .interpreter import RuntimeError
@@ -134,6 +135,26 @@ def _dispatch_request(stdout: TextIO, request: object) -> int:
                     "messages": [message for message, _, _ in diagnostics],
                     "lines": [line for _, line, _ in diagnostics],
                     "columns": [column for _, _, column in diagnostics],
+                },
+            },
+        )
+    if op == "symbol_locations_in_source":
+        try:
+            module_source = _require_string(request, "module_source")
+            locations = symbol_locations_in_source(module_source)
+        except ValueError as exc:
+            return _request_error(stdout, str(exc))
+        except _AnalysisError as exc:
+            return _request_error(stdout, str(exc))
+        return _write_response(
+            stdout,
+            {
+                "ok": True,
+                "value": {
+                    "categories": [category for category, _, _, _ in locations],
+                    "names": [name for _, name, _, _ in locations],
+                    "lines": [line for _, _, line, _ in locations],
+                    "columns": [column for _, _, _, column in locations],
                 },
             },
         )
