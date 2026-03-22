@@ -543,6 +543,22 @@ class CliTests(unittest.TestCase):
             self.assertEqual(sorted(cache_dir.glob("repl-*")), [binary])
             self.assertEqual(binary.stat().st_mtime_ns, first_mtime)
 
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_works_without_analysis_service_env_override(self) -> None:
+        env = dict(os.environ)
+        env.pop("SPROUT_ANALYSIS_SERVICE_CMD", None)
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="41 + 1\n:quit\n",
+            env=env,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("42", run.stdout)
+
     def test_repl_default_loads_prelude(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],

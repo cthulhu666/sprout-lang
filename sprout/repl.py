@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -92,9 +91,7 @@ def _ensure_native_repl_binary() -> Path:
 def cmd_repl(*, native: bool = False) -> int:
     if native:
         out = _ensure_native_repl_binary()
-        env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_service")
-        run = subprocess.run([str(out)], check=False, env=env)
+        run = subprocess.run([str(out)], check=False)
         return run.returncode
 
     reset_hosted_repl_session()

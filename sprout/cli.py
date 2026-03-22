@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -154,6 +155,7 @@ def cmd_compile(
     with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False, encoding="utf-8") as tmp:
         tmp.write(llvm_ir)
         ll_path = Path(tmp.name)
+    default_analysis_service_cmd = f"{shlex.quote(sys.executable)} -m sprout.analysis_service"
     runtime_c = """#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -1344,7 +1346,7 @@ static int sprout_ensure_analysis_service(char** error_out) {
     return 1;
   }
   const char* cmd = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
-  if (cmd == NULL || *cmd == '\\0') cmd = "python3 -m sprout.analysis_service";
+  if (cmd == NULL || *cmd == '\\0') cmd = "__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__";
   int request_pipe[2] = {-1, -1};
   int response_pipe[2] = {-1, -1};
   if (pipe(request_pipe) != 0 || pipe(response_pipe) != 0) {
@@ -3663,7 +3665,7 @@ long long tcp_echo_serve(long long port, long long max_connections) {
   tcp_close_listener(listener);
   return 0;
 }
-"""
+""".replace('"__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__"', json.dumps(default_analysis_service_cmd))
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
         tmp_c.write(runtime_c)
         c_path = Path(tmp_c.name)

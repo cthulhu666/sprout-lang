@@ -115,7 +115,10 @@ Current experimental runtime progress:
    `sprout.cli repl --native`, while still depending on the Python
    `analysis-service` subprocess underneath. The launcher now also reuses a
    cached compiled REPL binary between launches instead of recompiling on
-   every run, and native programs now reuse one long-lived
+   every run, and the cached native REPL binary now carries its own default
+   `analysis-service` command based on the Python used at compile time instead
+   of relying on the launcher to inject `SPROUT_ANALYSIS_SERVICE_CMD`. Native
+   programs now also reuse one long-lived
    `analysis-service` subprocess across multiple snapshot queries in the same
    process, with one automatic restart for replay-safe snapshot queries if the
    child exits mid-run.
