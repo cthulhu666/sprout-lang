@@ -9,11 +9,14 @@ import shutil
 import subprocess
 import tempfile
 import time
+from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
+from sprout import cli as sprout_cli
 from sprout.analysis_service import cmd_analysis_service
 
 
@@ -591,6 +594,24 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
         self.assertIn("42", run.stdout)
+
+    def test_repl_native_launcher_reports_cache_build_failure_clearly(self) -> None:
+        failure = subprocess.CalledProcessError(
+            1,
+            ["python", "-m", "sprout.cli", "compile"],
+            stderr="clang not found; install clang or compile with --emit-llvm only",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"SPROUT_NATIVE_REPL_CACHE_DIR": tmp}, clear=False):
+                with patch("sprout.repl.subprocess.run", side_effect=failure):
+                    stdout = StringIO()
+                    with redirect_stdout(stdout):
+                        status = sprout_cli.main(["repl", "--native"])
+        self.assertEqual(status, 1)
+        text = stdout.getvalue()
+        self.assertIn("error: native REPL startup failed while building cached binary", text)
+        self.assertIn("clang not found", text)
+        self.assertIn("python -m sprout.cli repl", text)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_reports_bad_analysis_service_command_clearly(self) -> None:

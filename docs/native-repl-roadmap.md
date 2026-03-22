@@ -121,7 +121,9 @@ Current experimental runtime progress:
    programs now also reuse one long-lived
    `analysis-service` subprocess across multiple snapshot queries in the same
    process, with one automatic restart for replay-safe snapshot queries if the
-   child exits mid-run. Invalid analysis-service commands now surface an
+   child exits mid-run. Native REPL cache-build failures now surface the
+   underlying native compile error with an interpreter-REPL fallback hint.
+   Invalid analysis-service commands now surface an
    explicit `SPROUT_ANALYSIS_SERVICE_CMD` hint instead of only a generic empty
    response error.
 10. Verification should increasingly target the dedicated module entrypoint

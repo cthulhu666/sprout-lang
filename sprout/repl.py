@@ -7,6 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from .codegen_llvm import CodegenError
 from .interpreter import run_program
 from .module_loader import load_module_bundle, resolve_program_names
 from .parser import parse
@@ -61,6 +62,19 @@ def _native_repl_binary_path() -> Path:
     return _native_repl_cache_dir() / f"repl-{_native_repl_cache_key()}"
 
 
+def _summarize_native_repl_build_error(exc: subprocess.CalledProcessError) -> str:
+    stderr = (exc.stderr or "").strip()
+    stdout = (exc.stdout or "").strip()
+    detail = stderr if stderr else stdout
+    if not detail:
+        detail = str(exc)
+    first_line = detail.splitlines()[0]
+    return (
+        f"native REPL startup failed while building cached binary {_native_repl_binary_path()}: {first_line}. "
+        "Use `python -m sprout.cli repl` for the interpreter-backed REPL."
+    )
+
+
 def _ensure_native_repl_binary() -> Path:
     out = _native_repl_binary_path()
     if out.exists():
@@ -69,21 +83,24 @@ def _ensure_native_repl_binary() -> Path:
     entry = _native_repl_entry()
     with tempfile.TemporaryDirectory(dir=out.parent) as tmp:
         tmp_out = Path(tmp) / "sprout-repl"
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "sprout.cli",
-                "compile",
-                str(entry),
-                "--native",
-                "-o",
-                str(tmp_out),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(entry),
+                    "--native",
+                    "-o",
+                    str(tmp_out),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise CodegenError(_summarize_native_repl_build_error(exc)) from exc
         os.replace(tmp_out, out)
     return out
 
