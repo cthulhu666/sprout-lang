@@ -156,11 +156,22 @@ fn contains_name(names: Vec String, value: String, index: Int) -> Bool =
   | Just item -> if item == value then true else contains_name(names, value, index + 1)
   | Nothing -> false
 
-fn filter_names_by_prefix(prefix: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
+fn lower_char(value: String) -> String =
+  if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", value) == -1 then value
+  else string.slice("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", value), 1)
+
+fn lower_ascii_from(raw: String, index: Int, acc: String) -> String =
+  if index >= string.length(raw) then acc
+  else lower_ascii_from(raw, index + 1, acc ++ lower_char(char_at(raw, index)))
+
+fn lower_ascii(raw: String) -> String =
+  lower_ascii_from(raw, 0, "")
+
+fn filter_names_by_prefix(prefix: String, lowered_prefix: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
   match vec_get(index, names) with
   | Just item ->
-      if string.starts_with(item, prefix) then filter_names_by_prefix(prefix, names, index + 1, vec_append(item, acc))
-      else filter_names_by_prefix(prefix, names, index + 1, acc)
+      if string.starts_with(lower_ascii(item), lowered_prefix) then filter_names_by_prefix(prefix, lowered_prefix, names, index + 1, vec_append(item, acc))
+      else filter_names_by_prefix(prefix, lowered_prefix, names, index + 1, acc)
   | Nothing -> acc
 
 fn append_space_names(acc: Vec String, raw: String) -> Vec String =
@@ -260,6 +271,65 @@ fn gather_import_names(imports: Vec String, index: Int, acc: Vec String) -> Vec 
       else gather_import_names(imports, index + 1, acc)
   | Nothing -> acc
 
+fn replace_char(raw: String, from: String, to: String, index: Int, acc: String) -> String =
+  if index >= string.length(raw) then acc
+  else if char_at(raw, index) == from then replace_char(raw, from, to, index + 1, acc ++ to)
+  else replace_char(raw, from, to, index + 1, acc ++ char_at(raw, index))
+
+fn module_path(module_name: String) -> String =
+  replace_char(module_name, ".", "/", 0, "") ++ ".sprout"
+
+fn append_exported_names(names: Vec String, line: String) -> Vec String =
+  append_declaration_names(names, trim(line))
+
+fn gather_exported_names(lines: Vec String, index: Int, acc: Vec String) -> Vec String =
+  match vec_get(index, lines) with
+  | Just line ->
+      if string.starts_with(trim(line), "export ") then gather_exported_names(lines, index + 1, append_exported_names(acc, trim(line)))
+      else gather_exported_names(lines, index + 1, acc)
+  | Nothing -> acc
+
+fn qualify_names(namespace: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
+  match vec_get(index, names) with
+  | Just name -> qualify_names(namespace, names, index + 1, vec_append(namespace ++ "." ++ name, acc))
+  | Nothing -> acc
+
+fn import_target_module(line: String) -> String =
+  if string.find(line, " as ") == -1 then
+    if string.find(line, "(") == -1 then trim(line)
+    else trim(take_before(line, "("))
+  else
+    if string.find(trim(take_before(line, " as ")), "(") == -1 then trim(take_before(line, " as "))
+    else trim(take_before(trim(take_before(line, " as ")), "("))
+
+fn imported_namespace_ref_for_namespace(namespace: String, line: String) -> Maybe String =
+  if trim(take_after(line, " as ")) != "" && lower_ascii(trim(take_after(line, " as "))) == lower_ascii(namespace) then
+    Just(trim(take_after(line, " as ")) ++ "|" ++ import_target_module(line))
+  else if lower_ascii(module_leaf_name(import_target_module(line))) == lower_ascii(namespace) then
+    Just(module_leaf_name(import_target_module(line)) ++ "|" ++ import_target_module(line))
+  else Nothing
+
+fn find_imported_namespace_ref(namespace: String, imports: Vec String, index: Int) -> Maybe String =
+  match vec_get(index, imports) with
+  | Just line ->
+      if string.starts_with(trim(line), "import ") then
+        match imported_namespace_ref_for_namespace(namespace, trim(drop_prefix(trim(line), "import "))) with
+        | Just namespace_ref -> Just(namespace_ref)
+        | Nothing -> find_imported_namespace_ref(namespace, imports, index + 1)
+      else find_imported_namespace_ref(namespace, imports, index + 1)
+  | Nothing -> Nothing
+
+fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec String !{IO} =
+  match find_imported_namespace_ref(take_before(prefix, "."), imports, 0) with
+  | Just namespace_ref ->
+      qualify_names(
+        take_before(namespace_ref, "|"),
+        gather_exported_names(string.string_lines(read_file(module_path(take_after(namespace_ref, "|")))), 0, vec_empty()),
+        0,
+        vec_empty()
+      )
+  | Nothing -> vec_empty()
+
 fn append_declaration_names(names: Vec String, line: String) -> Vec String =
   if string.starts_with(line, "let ") then append_unique_name(names, take_name_from(line, 4))
   else if string.starts_with(line, "fn ") then append_unique_name(names, take_name_from(line, 3))
@@ -273,18 +343,21 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
   | Just line -> gather_declaration_names(declarations, index + 1, append_declaration_names(acc, trim(line)))
   | Nothing -> acc
 
-fn completion_candidates_local(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) =
+fn completion_candidates_local(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
       (
         prefix,
         filter_names_by_prefix(
           prefix,
-          gather_declaration_names(
-            declarations,
-            0,
-            gather_import_names(imports, 0, base_completion_names())
-          ),
+          lower_ascii(prefix),
+          if string.find(prefix, ".") == -1 then
+            gather_declaration_names(
+              declarations,
+              0,
+              gather_import_names(imports, 0, base_completion_names())
+            )
+          else dotted_completion_candidates(prefix, imports),
           0,
           vec_empty()
         )

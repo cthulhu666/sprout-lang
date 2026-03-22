@@ -129,7 +129,8 @@ Current experimental runtime progress:
     for `Tab` completion; that behavior now runs locally in
     `stdlib/repl.sprout` from the current imports/declarations text state, so
     interactive completion no longer depends on the Python analysis-service
-    subprocess.
+    subprocess. Local completion is now ASCII case-insensitive and can resolve
+    imported namespace members such as `json.string` after `import stdlib.json`.
 
 ## Target Architecture
 

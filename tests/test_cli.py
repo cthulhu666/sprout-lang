@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import pty
+import select
 import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from io import StringIO
 from pathlib import Path
 import sys
@@ -15,6 +18,24 @@ from sprout.analysis_service import cmd_analysis_service
 
 
 class CliTests(unittest.TestCase):
+    def _read_pty_until(self, fd: int, buffer: str, needle: str, timeout: float = 5.0) -> str:
+        deadline = time.monotonic() + timeout
+        while needle not in buffer and time.monotonic() < deadline:
+            ready, _, _ = select.select([fd], [], [], 0.1)
+            if fd not in ready:
+                continue
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                break
+            buffer += chunk.decode("utf-8", errors="replace").replace("\r", "")
+        self.assertIn(needle, buffer)
+        return buffer
+
+    def _write_pty_slowly(self, fd: int, data: bytes) -> None:
+        for byte in data:
+            os.write(fd, bytes([byte]))
+            time.sleep(0.03)
+
     def test_analysis_completion_candidates_in_state_matches_imports_and_declarations(self) -> None:
         from sprout.analysis import completion_candidates_in_state
 
@@ -315,6 +336,38 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("repl_instances(", source)
         self.assertNotIn("repl_complete(", source)
         self.assertNotIn("repl_complete_in_state(", source)
+
+    @unittest.skipUnless(hasattr(os, "openpty") and shutil.which("clang"), "pty/native prerequisites unavailable")
+    def test_repl_native_interactive_tab_completion_is_case_insensitive_for_imported_namespaces(self) -> None:
+        master_fd, slave_fd = pty.openpty()
+        env = dict(os.environ)
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_service")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+            env=env,
+        )
+        os.close(slave_fd)
+        try:
+            buffer = self._read_pty_until(master_fd, "", "sprout> ", timeout=10.0)
+            self._write_pty_slowly(master_fd, b"import stdlib.json\n")
+            buffer = self._read_pty_until(master_fd, buffer, "ok\nsprout> ", timeout=10.0)
+            self._write_pty_slowly(master_fd, b":t JSON.St\t\n")
+            buffer = self._read_pty_until(master_fd, buffer, "json.string", timeout=10.0)
+            buffer = self._read_pty_until(master_fd, buffer, "String -> stdlib.json.Json", timeout=10.0)
+            buffer = self._read_pty_until(master_fd, buffer, "sprout> ")
+            self._write_pty_slowly(master_fd, b":quit\n")
+            proc.wait(timeout=5)
+            self.assertEqual(proc.returncode, 0)
+            self.assertNotIn("error:", buffer)
+        finally:
+            os.close(master_fd)
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_reuses_cached_binary(self) -> None:
