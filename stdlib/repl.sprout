@@ -504,6 +504,34 @@ fn append_source_blocks(acc: String, blocks: Vec String, index: Int) -> String =
   | Just block -> append_source_blocks(append_source_block(acc, block), blocks, index + 1)
   | Nothing -> acc
 
+fn block_line_is_continuation(line: String) -> Bool =
+  if line == "" then false
+  else
+    char_at(line, 0) == " "
+      || char_at(line, 0) == "\t"
+      || char_at(line, 0) == "|"
+      || trim(line) == "}"
+      || trim(line) == "else"
+
+fn finalize_block_chunk(chunks: Vec String, current: String) -> Vec String =
+  if trim(current) == "" then chunks else vec_append(current, chunks)
+
+fn block_chunks_from_lines(lines: Vec String, index: Int, chunks: Vec String, current: String) -> Vec String =
+  match vec_get(index, lines) with
+  | Just line ->
+      if trim(line) == "" then
+        if current == "" then block_chunks_from_lines(lines, index + 1, chunks, current)
+        else block_chunks_from_lines(lines, index + 1, chunks, append_submission_line(current, line))
+      else if current == "" then block_chunks_from_lines(lines, index + 1, chunks, line)
+      else if block_line_is_continuation(line) then
+        block_chunks_from_lines(lines, index + 1, chunks, append_submission_line(current, line))
+      else
+        block_chunks_from_lines(lines, index + 1, finalize_block_chunk(chunks, current), line)
+  | Nothing -> finalize_block_chunk(chunks, current)
+
+fn block_chunks(raw: String) -> Vec String =
+  block_chunks_from_lines(string.string_lines(raw), 0, vec_empty(), "")
+
 fn session_source(imports: Vec String, declarations: Vec String) -> String =
   append_source_blocks(append_source_blocks("module app.repl", imports, 0), declarations, 0)
 
@@ -549,6 +577,20 @@ fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Ve
 fn handle_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
   handle_trimmed_submission(trim(raw), imports, declarations)
 
+fn continue_block_execution(result: SubmissionResult, chunks: Vec String, index: Int, outputs: Vec String) -> SubmissionResult !{IO} =
+  match result with
+  | Continue lines next_imports next_declarations ->
+      execute_block_chunks(chunks, index + 1, outputs ++ lines, next_imports, next_declarations)
+  | Exit -> Exit
+
+fn execute_block_chunks(chunks: Vec String, index: Int, outputs: Vec String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  match vec_get(index, chunks) with
+  | Just chunk -> continue_block_execution(handle_submission(chunk, imports, declarations), chunks, index, outputs)
+  | Nothing -> Continue(outputs, imports, declarations)
+
+fn handle_block_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+  execute_block_chunks(block_chunks(raw), 0, vec_empty(), imports, declarations)
+
 fn push_history(history: Vec String, raw: String) -> Vec String =
   if trim(raw) == "" then history
   else vec_append(raw, history)
@@ -561,7 +603,11 @@ fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec St
 
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
   match read_submission(prompt, history, imports, declarations) with
-  | Submission line -> continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
+  | Submission line ->
+      if string.find(line, "\n") == -1 then
+        continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
+      else
+        continue_loop(handle_block_submission(line, imports, declarations), prompt, push_history(history, line))
   | ReadNotice message -> then_io(render_lines(prompt, single_line(message), 0), repl_loop(prompt, history, imports, declarations))
   | ReadError message -> then_io(render_lines(prompt, render_error(message), 0), repl_loop(prompt, history, imports, declarations))
   | EndInput -> finish_loop(prompt)

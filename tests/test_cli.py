@@ -339,6 +339,32 @@ class CliTests(unittest.TestCase):
         self.assertIn("ok", run.stdout)
         self.assertIn("42", run.stdout)
 
+    def test_repl_block_mode_runs_mixed_submissions_sequentially(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":{\nlet x = 5\nlet y = 10\nx * y\n:}\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("50", run.stdout)
+
+    def test_repl_block_mode_supports_multiline_class_declaration(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":{\nclass Answer a {\n  fn answer(x: a) -> Int\n}\ninstance Answer Int {\n  fn answer(x: Int) -> Int = x\n}\nanswer(42)\n:}\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("42", run.stdout)
+
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_block_mode_supports_multiline_function_declaration(self) -> None:
         run = subprocess.run(
@@ -347,6 +373,34 @@ class CliTests(unittest.TestCase):
             capture_output=True,
             text=True,
             input=":{\nfn add(x: Int, y: Int) -> Int =\n  x + y\n:}\nadd(40, 2)\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("42", run.stdout)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_block_mode_runs_mixed_submissions_sequentially(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":{\nlet x = 5\nlet y = 10\nx * y\n:}\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("50", run.stdout)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_block_mode_supports_multiline_class_declaration(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":{\nclass Answer a {\n  fn answer(x: a) -> Int\n}\ninstance Answer Int {\n  fn answer(x: Int) -> Int = x\n}\nanswer(42)\n:}\n:quit\n",
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")

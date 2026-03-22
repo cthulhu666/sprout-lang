@@ -135,8 +135,9 @@ Current experimental runtime progress:
     that hook is now compatibility-only and no longer part of the current
     Sprout-hosted REPL loop.
 14. The active frontend now supports explicit multiline entry with `:{` / `:}`
-    and submits the accumulated block through the existing declaration/import/
-    expression path in both interpreter and native launcher modes.
+    and executes the accumulated block as sequential REPL submissions in both
+    interpreter and native launcher modes, while still preserving multiline
+    declarations inside the block.
 15. Block mode now also supports `:cancel` (and `:abort`) to discard the
     buffered block and return to the main prompt without mutating session
     state.
