@@ -15,6 +15,18 @@ from sprout.analysis_service import cmd_analysis_service
 
 
 class CliTests(unittest.TestCase):
+    def test_analysis_completion_candidates_in_state_matches_imports_and_declarations(self) -> None:
+        from sprout.analysis import completion_candidates_in_state
+
+        prefix, matches = completion_candidates_in_state(
+            "fr",
+            ["import stdlib.bytes (from_string)"],
+            ["let answer = 41"],
+        )
+
+        self.assertEqual(prefix, "fr")
+        self.assertEqual(matches, ["from_string"])
+
     def test_analysis_service_cli_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "analysis-service"],

@@ -121,6 +121,9 @@ Current experimental runtime progress:
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
+11. The active `complete_in_state` path now belongs with the shared
+    analysis/service helpers rather than the stateful REPL-host shim, which
+    keeps one more native-REPL dependency out of `sprout.repl_host`.
 
 ## Target Architecture
 

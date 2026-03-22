@@ -1441,7 +1441,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                 items.append(item)
             return items
 
-        from .repl_host import completion_candidates_in_state
+        from .analysis import completion_candidates_in_state
 
         prefix, matches = completion_candidates_in_state(
             line_buffer,

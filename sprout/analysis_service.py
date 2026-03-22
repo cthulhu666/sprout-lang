@@ -6,6 +6,7 @@ from typing import TextIO
 
 from .analysis import (
     check_source,
+    completion_candidates_in_state,
     declared_names_in_source,
     diagnostics_in_source,
     eval_expression_lines_in_source,
@@ -183,8 +184,6 @@ def _dispatch_request(stdout: TextIO, request: object) -> int:
             line_buffer = _require_string(request, "line_buffer")
             imports = _require_string_list(request, "imports")
             declarations = _require_string_list(request, "declarations")
-            from .repl_host import completion_candidates_in_state
-
             prefix, matches = completion_candidates_in_state(line_buffer, imports, declarations)
         except ValueError as exc:
             return _request_error(stdout, str(exc))

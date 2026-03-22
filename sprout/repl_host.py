@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import io
-import re
 from pathlib import Path
 import tempfile
 from typing import Callable, TextIO
@@ -10,6 +9,8 @@ from typing import Callable, TextIO
 from . import ast
 from .analysis import (
     check_source,
+    completion_candidates_in_state as analysis_completion_candidates_in_state,
+    completion_matches_in_state as analysis_completion_matches_in_state,
     declared_names_in_source,
     diagnostics_in_source,
     eval_expression_lines_in_source,
@@ -36,85 +37,6 @@ __all__ = [
     "instances_in_source",
     "completion_candidates_in_state",
 ]
-
-_REPL_COMMANDS = (
-    ":help",
-    ":quit",
-    ":q",
-    ":exit",
-    ":type",
-    ":t",
-    ":instances",
-    ":i",
-)
-_REPL_PRELUDE_NAMES = frozenset(
-    {
-        "Bool",
-        "Cons",
-        "Dict",
-        "Err",
-        "False",
-        "Foldable",
-        "Functor",
-        "Int",
-        "IO",
-        "Just",
-        "List",
-        "Maybe",
-        "Nil",
-        "Nothing",
-        "Ok",
-        "Result",
-        "Semigroup",
-        "String",
-        "True",
-        "Unit",
-        "Vec",
-        "filter",
-        "fmap",
-        "fold",
-        "foldable_to_vec",
-        "list_append",
-        "list_fold",
-        "list_map",
-        "map",
-        "print",
-        "split_ints",
-        "vec_append",
-        "vec_empty",
-        "vec_fold",
-        "vec_get",
-        "vec_get_or",
-        "vec_length",
-        "vec_map",
-        "vec_prepend",
-        "vec_reverse",
-        "vec_set",
-        "vec_slice",
-        "vec_sum",
-        "vec_sum_by",
-    }
-)
-_REPL_STDLIB_EXTRA_NAMES = frozenset(
-    {
-        "bytes",
-        "collections",
-        "crypto",
-        "dict_empty",
-        "dict_get",
-        "dict_keys",
-        "dict_remove",
-        "dict_set",
-        "dict_values",
-        "http",
-        "http_client",
-        "math",
-        "net",
-        "string",
-        "terminal",
-    }
-)
-_REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
 _REPL_MODULE_NAME = "app.repl"
 _HOSTED_SESSION: ReplSession | None = None
 
@@ -266,10 +188,10 @@ class ReplSession:
         return _repl_render_instances(tree, query_type)
 
     def completion_matches(self, text: str, line_buffer: str) -> list[str]:
-        return _repl_completion_matches(text, line_buffer, self.imports, self.declarations)
+        return analysis_completion_matches_in_state(text, line_buffer, self.imports, self.declarations)
 
     def completion_candidates(self, line_buffer: str) -> tuple[str, list[str]]:
-        return _repl_completion_candidates(line_buffer, self.imports, self.declarations)
+        return analysis_completion_candidates_in_state(line_buffer, self.imports, self.declarations)
 
     def run_expression(self, source: str, stdout: TextIO | None = None) -> None:
         name = self._next_temp_name()
@@ -310,7 +232,7 @@ def completion_candidates_in_state(
     imports: list[str],
     declarations: list[str],
 ) -> tuple[str, list[str]]:
-    return _repl_completion_candidates(line_buffer, imports, declarations)
+    return analysis_completion_candidates_in_state(line_buffer, imports, declarations)
 
 
 def _repl_lookup_type(types: dict[str, str], name: str) -> str:
@@ -374,14 +296,6 @@ def _type_expr_matches_query(pattern: ast.TypeExpr, query: ast.TypeExpr) -> bool
     return False
 
 
-def _repl_declared_names(declarations: list[str]) -> set[str]:
-    names: set[str] = set()
-    for source in declarations:
-        tree = parse(source)
-        names.update(_declared_names_from_tree(tree))
-    return names
-
-
 def _declared_names_from_tree(tree: ast.Program) -> set[str]:
     names: set[str] = set()
     for decl in tree.declarations:
@@ -394,57 +308,3 @@ def _declared_names_from_tree(tree: ast.Program) -> set[str]:
         elif isinstance(decl, ast.InstanceDecl):
             names.update(method.name.rsplit(".", 1)[-1] for method in decl.methods)
     return names
-
-
-def _repl_imported_names(imports: list[str]) -> set[str]:
-    names: set[str] = set()
-    for source in imports:
-        for line in source.splitlines():
-            stripped = line.strip()
-            if not stripped.startswith("import "):
-                continue
-            body = stripped[len("import ") :]
-            if " as " in body:
-                module_name, alias = body.split(" as ", 1)
-                names.add(alias.strip())
-                body = module_name.strip()
-            if "(" in body and ")" in body:
-                selected = body.split("(", 1)[1].rsplit(")", 1)[0]
-                names.update(name.strip() for name in selected.split(",") if name.strip())
-            else:
-                names.add(body.rsplit(".", 1)[-1].strip())
-    return names
-
-
-def _repl_completion_matches(
-    text: str,
-    line_buffer: str,
-    imports: list[str],
-    declarations: list[str],
-) -> list[str]:
-    token_match = _REPL_TOKEN_RE.search(line_buffer)
-    prefix = token_match.group(0) if token_match is not None else text
-    return _repl_completion_from_prefix(prefix, imports, declarations)
-
-
-def _repl_completion_candidates(
-    line_buffer: str,
-    imports: list[str],
-    declarations: list[str],
-) -> tuple[str, list[str]]:
-    token_match = _REPL_TOKEN_RE.search(line_buffer)
-    prefix = token_match.group(0) if token_match is not None else ""
-    return prefix, _repl_completion_from_prefix(prefix, imports, declarations)
-
-
-def _repl_completion_from_prefix(
-    prefix: str,
-    imports: list[str],
-    declarations: list[str],
-) -> list[str]:
-    names = set(_REPL_COMMANDS)
-    names.update(_REPL_PRELUDE_NAMES)
-    names.update(_REPL_STDLIB_EXTRA_NAMES)
-    names.update(_repl_declared_names(declarations))
-    names.update(_repl_imported_names(imports))
-    return sorted(name for name in names if name.startswith(prefix))
