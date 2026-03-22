@@ -21,6 +21,7 @@ __all__ = [
     "hosted_repl_session",
     "reset_hosted_repl_session",
     "check_source",
+    "declared_names_in_source",
     "eval_expression_lines_in_source",
     "infer_type_in_source",
     "instances_in_source",
@@ -305,6 +306,11 @@ def check_source(source: str) -> None:
     _repl_parse_and_check_source(source)
 
 
+def declared_names_in_source(source: str) -> list[str]:
+    tree, _ = _repl_parse_and_check_source(source)
+    return sorted(_declared_names_from_tree(tree))
+
+
 def eval_expression_lines_in_source(source: str, expr: str) -> tuple[str, ...]:
     name = "__repl_source_value"
     _, types = _repl_parse_and_check_source(source, [f"let {name} = {expr}"])
@@ -402,15 +408,21 @@ def _repl_declared_names(declarations: list[str]) -> set[str]:
     names: set[str] = set()
     for source in declarations:
         tree = parse(source)
-        for decl in tree.declarations:
-            if isinstance(decl, ast.FnDecl | ast.LetDecl | ast.ClassDecl | ast.TypeDecl):
-                names.add(decl.name)
-            if isinstance(decl, ast.TypeDecl):
-                names.update(ctor.name for ctor in decl.constructors)
-            elif isinstance(decl, ast.ClassDecl):
-                names.update(method.name for method in decl.methods)
-            elif isinstance(decl, ast.InstanceDecl):
-                names.update(method.name for method in decl.methods)
+        names.update(_declared_names_from_tree(tree))
+    return names
+
+
+def _declared_names_from_tree(tree: ast.Program) -> set[str]:
+    names: set[str] = set()
+    for decl in tree.declarations:
+        if isinstance(decl, ast.FnDecl | ast.LetDecl | ast.ClassDecl | ast.TypeDecl):
+            names.add(decl.name.rsplit(".", 1)[-1])
+        if isinstance(decl, ast.TypeDecl):
+            names.update(ctor.name.rsplit(".", 1)[-1] for ctor in decl.constructors)
+        elif isinstance(decl, ast.ClassDecl):
+            names.update(method.name.rsplit(".", 1)[-1] for method in decl.methods)
+        elif isinstance(decl, ast.InstanceDecl):
+            names.update(method.name.rsplit(".", 1)[-1] for method in decl.methods)
     return names
 
 

@@ -60,7 +60,7 @@ Current experimental runtime progress:
 
 1. `term_read_line()` now provides line-oriented stdin input.
 2. `repl_eval_expr_in_source(...)`, `repl_check_source(...)`,
-   `repl_type_of_in_source(...)`, `repl_instances_in_source(...)`,
+   `repl_declared_names_in_source(...)`, `repl_type_of_in_source(...)`, `repl_instances_in_source(...)`,
    `repl_complete_in_state(...)`, and `repl_reset_session()` now form the
    active hosted bridge used by `stdlib/repl.sprout`.
 3. Legacy compatibility hooks still exist in the host runtime:

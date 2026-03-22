@@ -68,6 +68,7 @@ Today the temporary host bridge exposes:
 ```sprout
 repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}
 repl_check_source(module_source: String) -> Result String Unit !{IO}
+repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}
 repl_type_of_in_source(module_source: String, expr: String) -> Result String String !{IO}
 repl_instances_in_source(module_source: String, query: String) -> Result String (String, Vec String) !{IO}
 repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}
@@ -91,7 +92,9 @@ that same pattern to `:instances`. `repl_complete_in_state(...)` does the same
 for tab completion by taking explicit frontend state instead of reading hidden
 host session state. `repl_check_source(...)` applies the same idea to import
 and declaration acceptance. `repl_eval_expr_in_source(...)` does the same for
-expression execution.
+expression execution. `repl_declared_names_in_source(...)` is the first
+explicit symbol-inventory primitive that is useful beyond the REPL, including
+future language-server and compiler tooling work.
 
 At this point the active `stdlib/repl.sprout` frontend path no longer uses the
 legacy compatibility hooks. They remain only as transitional runtime surface

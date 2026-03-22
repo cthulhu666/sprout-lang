@@ -287,6 +287,21 @@ class CliTests(unittest.TestCase):
         self.assertIn("Renderable", names)
         self.assertIn("render", names)
 
+    def test_repl_declared_names_in_source_reports_declared_symbols(self) -> None:
+        from sprout.repl_host import declared_names_in_source
+
+        names = set(
+            declared_names_in_source(
+                "module app.repl\n\ntype AAA =\n  | AAA\n\ntype Maybe a =\n  | Just a\n  | Nothing\n\nlet local = 41"
+            )
+        )
+
+        self.assertIn("AAA", names)
+        self.assertIn("Maybe", names)
+        self.assertIn("Just", names)
+        self.assertIn("Nothing", names)
+        self.assertIn("local", names)
+
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
         from sprout.repl_host import ReplSession
 
