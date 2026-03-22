@@ -147,7 +147,9 @@ Current state:
 
 - `sprout.analysis` now exposes `symbol_locations_in_source(...)` and
   `symbol_metadata_in_source(...)` for top-level declarations and explicit
-  imports in a single checked snapshot
+  imports in a single checked snapshot, including definition-site locations for
+  imported symbols when the provider declaration is available in the checked
+  module bundle
 - `sprout.analysis` also exposes `structured_diagnostics_in_source(...)` with
   severity/stage/location records, while the builtin-facing diagnostics query
   still uses the older tuple bridge

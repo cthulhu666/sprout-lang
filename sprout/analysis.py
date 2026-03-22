@@ -59,6 +59,7 @@ class SymbolMetadata:
     canonical_name: str | None
     origin_module: str | None
     location: SourceLocation
+    definition_location: SourceLocation | None
     introduced_via: Literal["declared", "imported", "namespace"]
     exported: bool
     imported_from_module: str | None = None
@@ -178,6 +179,69 @@ def _mapped_source_location(bundle: ModuleBundle, line: int, column: int = 1) ->
     return SourceLocation(path=path, line=source_line, column=source_column)
 
 
+def _exported_definition_index(
+    tree: ast.Program,
+    bundle: ModuleBundle,
+) -> dict[Path, dict[str, tuple[str, str | None, SourceLocation]]]:
+    module_symbols = _build_module_symbols(tree, bundle)
+    out: dict[Path, dict[str, tuple[str, str | None, SourceLocation]]] = {
+        path: {} for path in bundle.modules
+    }
+    for decl in tree.declarations:
+        line = getattr(decl, "line", None)
+        if line is None:
+            continue
+        owner = _module_for_line(bundle, line)
+        if owner is None:
+            continue
+        module_path = owner.path
+        module_name = owner.header.module
+        local_symbols = module_symbols[module_path]
+        decl_location = _mapped_source_location(bundle, line, getattr(decl, "column", 1))
+        if decl_location is None:
+            continue
+        if isinstance(decl, (ast.FnDecl, ast.LetDecl)):
+            leaf = _leaf_name(decl.name)
+            if leaf in {_leaf_name(name) for name in owner.exported}:
+                out[module_path][leaf] = (
+                    "value",
+                    _canonical_name(local_symbols.value_locals.get(decl.name), module_name),
+                    decl_location,
+                )
+        elif isinstance(decl, ast.TypeDecl):
+            leaf = _leaf_name(decl.name)
+            if leaf in {_leaf_name(name) for name in owner.exported}:
+                out[module_path][leaf] = (
+                    "type",
+                    _canonical_name(local_symbols.type_locals.get(decl.name), module_name),
+                    decl_location,
+                )
+            if leaf in {_leaf_name(name) for name in owner.exported_type_constructors}:
+                for ctor in decl.constructors:
+                    ctor_location = _mapped_source_location(
+                        bundle,
+                        getattr(ctor, "line", line),
+                        getattr(ctor, "column", getattr(decl, "column", 1)),
+                    )
+                    if ctor_location is None:
+                        continue
+                    ctor_leaf = _leaf_name(ctor.name)
+                    out[module_path][ctor_leaf] = (
+                        "constructor",
+                        _canonical_name(local_symbols.value_locals.get(ctor.name), module_name),
+                        ctor_location,
+                    )
+        elif isinstance(decl, ast.ClassDecl):
+            leaf = _leaf_name(decl.name)
+            if leaf in {_leaf_name(name) for name in owner.exported}:
+                out[module_path][leaf] = (
+                    "class",
+                    _canonical_name(local_symbols.class_locals.get(decl.name), module_name),
+                    decl_location,
+                )
+    return out
+
+
 def _module_symbol_metadata(
     tree: ast.Program,
     bundle: ModuleBundle,
@@ -186,6 +250,7 @@ def _module_symbol_metadata(
     module_info = bundle.modules[module_path]
     module_name = module_info.header.module
     module_symbols = _build_module_symbols(tree, bundle)
+    exported_definitions = _exported_definition_index(tree, bundle)
     local_symbols = module_symbols[module_path]
     exported_names = {_leaf_name(name) for name in module_info.exported}
     exported_ctor_types = {_leaf_name(name) for name in module_info.exported_type_constructors}
@@ -210,6 +275,7 @@ def _module_symbol_metadata(
                     canonical_name=_canonical_name(local_symbols.value_locals.get(decl.name), module_name),
                     origin_module=module_name,
                     location=decl_location,
+                    definition_location=decl_location,
                     introduced_via="declared",
                     exported=leaf in exported_names,
                 )
@@ -223,6 +289,7 @@ def _module_symbol_metadata(
                     canonical_name=_canonical_name(local_symbols.type_locals.get(decl.name), module_name),
                     origin_module=module_name,
                     location=decl_location,
+                    definition_location=decl_location,
                     introduced_via="declared",
                     exported=leaf in exported_names,
                 )
@@ -243,6 +310,7 @@ def _module_symbol_metadata(
                         canonical_name=_canonical_name(local_symbols.value_locals.get(ctor.name), module_name),
                         origin_module=module_name,
                         location=ctor_location,
+                        definition_location=ctor_location,
                         introduced_via="declared",
                         exported=leaf in exported_ctor_types,
                     )
@@ -256,6 +324,7 @@ def _module_symbol_metadata(
                     canonical_name=_canonical_name(local_symbols.class_locals.get(decl.name), module_name),
                     origin_module=module_name,
                     location=decl_location,
+                    definition_location=decl_location,
                     introduced_via="declared",
                     exported=leaf in exported_names,
                 )
@@ -281,6 +350,7 @@ def _module_symbol_metadata(
                     canonical_name=None,
                     origin_module=imp.module,
                     location=import_location,
+                    definition_location=None,
                     introduced_via="namespace",
                     exported=False,
                     imported_from_module=imp.module,
@@ -288,37 +358,48 @@ def _module_symbol_metadata(
             )
         if imp.imported_names is None:
             continue
+        provider_definitions = exported_definitions.get(imp_path, {})
         for name in imp.imported_names:
             matched = False
-            if name in imported_values:
+            provider_definition = provider_definitions.get(name)
+            if name in imported_values or (provider_definition is not None and provider_definition[0] == "value"):
                 matched = True
+                canonical_name = _canonical_name(imported_values.get(name), imp.module)
+                if canonical_name is None and provider_definition is not None:
+                    _, canonical_name, _ = provider_definition
                 entries.append(
                     SymbolMetadata(
                         visible_name=name,
                         kind="value",
-                        canonical_name=_canonical_name(imported_values[name], imp.module),
+                        canonical_name=canonical_name,
                         origin_module=imp.module,
                         location=import_location,
+                        definition_location=provider_definition[2] if provider_definition is not None else None,
                         introduced_via="imported",
                         exported=False,
                         imported_from_module=imp.module,
                     )
                 )
-            if name in imported_types:
+            if name in imported_types or (provider_definition is not None and provider_definition[0] == "type"):
                 matched = True
+                canonical_name = _canonical_name(imported_types.get(name), imp.module)
+                if canonical_name is None and provider_definition is not None:
+                    _, canonical_name, _ = provider_definition
                 entries.append(
                     SymbolMetadata(
                         visible_name=name,
                         kind="type",
-                        canonical_name=_canonical_name(imported_types[name], imp.module),
+                        canonical_name=canonical_name,
                         origin_module=imp.module,
                         location=import_location,
+                        definition_location=provider_definition[2] if provider_definition is not None else None,
                         introduced_via="imported",
                         exported=False,
                         imported_from_module=imp.module,
                     )
                 )
                 for ctor_name, ctor_target in imported_type_ctors.get(name, {}).items():
+                    ctor_definition = provider_definitions.get(ctor_name)
                     entries.append(
                         SymbolMetadata(
                             visible_name=ctor_name,
@@ -326,20 +407,25 @@ def _module_symbol_metadata(
                             canonical_name=_canonical_name(ctor_target, imp.module),
                             origin_module=imp.module,
                             location=import_location,
+                            definition_location=ctor_definition[2] if ctor_definition is not None else None,
                             introduced_via="imported",
                             exported=False,
                             imported_from_module=imp.module,
                         )
                     )
-            if name in imported_classes:
+            if name in imported_classes or (provider_definition is not None and provider_definition[0] == "class"):
                 matched = True
+                canonical_name = _canonical_name(imported_classes.get(name), imp.module)
+                if canonical_name is None and provider_definition is not None:
+                    _, canonical_name, _ = provider_definition
                 entries.append(
                     SymbolMetadata(
                         visible_name=name,
                         kind="class",
-                        canonical_name=_canonical_name(imported_classes[name], imp.module),
+                        canonical_name=canonical_name,
                         origin_module=imp.module,
                         location=import_location,
+                        definition_location=provider_definition[2] if provider_definition is not None else None,
                         introduced_via="imported",
                         exported=False,
                         imported_from_module=imp.module,
@@ -353,6 +439,7 @@ def _module_symbol_metadata(
                         canonical_name=None,
                         origin_module=imp.module,
                         location=import_location,
+                        definition_location=provider_definition[2] if provider_definition is not None else None,
                         introduced_via="imported",
                         exported=False,
                         imported_from_module=imp.module,

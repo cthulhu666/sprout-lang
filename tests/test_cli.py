@@ -351,42 +351,59 @@ class CliTests(unittest.TestCase):
         from sprout.analysis import symbol_metadata_in_source
 
         entries = symbol_metadata_in_source(
-            "module app.lib\n\nimport stdlib.string\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nlet local = 1"
+            "module app.lib\n\nimport stdlib.string\nimport stdlib.string (concat)\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nlet local = 1"
         )
 
         by_name = {entry.visible_name: entry for entry in entries}
 
         self.assertEqual(by_name["Box"].kind, "type")
         self.assertEqual(by_name["Box"].canonical_name, "app.lib.Box")
-        self.assertEqual(by_name["Box"].location.line, 6)
+        self.assertEqual(by_name["Box"].location.line, 7)
         self.assertEqual(by_name["Box"].location.column, 1)
         self.assertTrue(by_name["Box"].exported)
 
         self.assertEqual(by_name["Wrap"].kind, "constructor")
         self.assertEqual(by_name["Wrap"].canonical_name, "app.lib.Wrap")
-        self.assertEqual(by_name["Wrap"].location.line, 7)
+        self.assertEqual(by_name["Wrap"].location.line, 8)
         self.assertEqual(by_name["Wrap"].location.column, 5)
         self.assertTrue(by_name["Wrap"].exported)
 
         self.assertEqual(by_name["unwrap"].kind, "value")
         self.assertEqual(by_name["unwrap"].canonical_name, "app.lib.unwrap")
-        self.assertEqual(by_name["unwrap"].location.line, 9)
+        self.assertEqual(by_name["unwrap"].location.line, 10)
         self.assertEqual(by_name["unwrap"].location.column, 1)
         self.assertTrue(by_name["unwrap"].exported)
 
         self.assertEqual(by_name["local"].kind, "value")
         self.assertEqual(by_name["local"].canonical_name, "app.lib.local")
-        self.assertEqual(by_name["local"].location.line, 13)
+        self.assertEqual(by_name["local"].location.line, 14)
         self.assertEqual(by_name["local"].location.column, 1)
         self.assertFalse(by_name["local"].exported)
+        self.assertEqual(by_name["local"].definition_location, by_name["local"].location)
 
         self.assertEqual(by_name["string"].kind, "module_alias")
         self.assertEqual(by_name["string"].introduced_via, "namespace")
         self.assertEqual(by_name["string"].imported_from_module, "stdlib.string")
+        self.assertIsNone(by_name["string"].definition_location)
+
+        self.assertEqual(by_name["concat"].kind, "value")
+        self.assertEqual(by_name["concat"].canonical_name, "stdlib.string.concat")
+        self.assertEqual(by_name["concat"].introduced_via, "imported")
+        self.assertEqual(by_name["concat"].imported_from_module, "stdlib.string")
+        self.assertIsNotNone(by_name["concat"].definition_location)
+        assert by_name["concat"].definition_location is not None
+        self.assertEqual(by_name["concat"].definition_location.path.name, "string.sprout")
+        self.assertEqual(by_name["concat"].definition_location.line, 7)
+        self.assertEqual(by_name["concat"].definition_location.column, 1)
 
         self.assertEqual(by_name["from_string"].kind, "value")
         self.assertEqual(by_name["from_string"].introduced_via, "imported")
         self.assertEqual(by_name["from_string"].imported_from_module, "stdlib.bytes")
+        self.assertIsNotNone(by_name["from_string"].definition_location)
+        assert by_name["from_string"].definition_location is not None
+        self.assertEqual(by_name["from_string"].definition_location.path.name, "bytes.sprout")
+        self.assertEqual(by_name["from_string"].definition_location.line, 24)
+        self.assertEqual(by_name["from_string"].definition_location.column, 1)
 
     def test_structured_diagnostics_in_source_reports_stage_and_location(self) -> None:
         from sprout.analysis import structured_diagnostics_in_source
