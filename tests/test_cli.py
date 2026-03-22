@@ -15,7 +15,7 @@ from sprout.analysis_service import cmd_analysis_service
 
 
 class CliTests(unittest.TestCase):
-    def test_analysis_service_check_source_returns_structured_success(self) -> None:
+    def test_analysis_service_cli_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "analysis-service"],
             check=False,
@@ -51,7 +51,7 @@ class CliTests(unittest.TestCase):
 
     def test_analysis_service_type_of_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            [sys.executable, "-m", "sprout.analysis_service"],
             check=False,
             capture_output=True,
             text=True,
@@ -69,7 +69,7 @@ class CliTests(unittest.TestCase):
 
     def test_analysis_service_instances_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            [sys.executable, "-m", "sprout.analysis_service"],
             check=False,
             capture_output=True,
             text=True,
@@ -96,7 +96,7 @@ class CliTests(unittest.TestCase):
 
     def test_analysis_service_eval_expr_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            [sys.executable, "-m", "sprout.analysis_service"],
             check=False,
             capture_output=True,
             text=True,
@@ -114,7 +114,7 @@ class CliTests(unittest.TestCase):
 
     def test_analysis_service_complete_in_state_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            [sys.executable, "-m", "sprout.analysis_service"],
             check=False,
             capture_output=True,
             text=True,
@@ -135,6 +135,21 @@ class CliTests(unittest.TestCase):
         )
 
     def test_analysis_service_reports_unknown_operation(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.analysis_service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps({"op": "not-real"}),
+        )
+        self.assertEqual(run.returncode, 1, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(
+            json.loads(run.stdout),
+            {"error": "unknown analysis service op `not-real`", "ok": False},
+        )
+
+    def test_analysis_service_cli_wrapper_reports_unknown_operation(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "analysis-service"],
             check=False,
