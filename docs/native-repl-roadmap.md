@@ -125,7 +125,8 @@ Current experimental runtime progress:
    underlying native compile error with an interpreter-REPL fallback hint.
    Invalid analysis-service commands now surface an
    explicit `SPROUT_ANALYSIS_SERVICE_CMD` hint instead of only a generic empty
-   response error.
+   response error, and the Sprout frontend now validates that dependency before
+   it shows the first prompt.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

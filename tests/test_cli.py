@@ -629,6 +629,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("analysis service: command failed to start", run.stdout)
         self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", run.stdout)
+        self.assertNotIn("sprout> ", run.stdout)
 
     def test_repl_default_loads_prelude(self) -> None:
         run = subprocess.run(
