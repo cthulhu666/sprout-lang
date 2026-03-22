@@ -388,6 +388,31 @@ class CliTests(unittest.TestCase):
         self.assertEqual(by_name["from_string"].introduced_via, "imported")
         self.assertEqual(by_name["from_string"].imported_from_module, "stdlib.bytes")
 
+    def test_structured_diagnostics_in_source_reports_stage_and_location(self) -> None:
+        from sprout.analysis import structured_diagnostics_in_source
+
+        type_diagnostics = structured_diagnostics_in_source(
+            "module app.repl\n\nlet broken = missing"
+        )
+        self.assertEqual(len(type_diagnostics), 1)
+        type_diag = type_diagnostics[0]
+        self.assertEqual(type_diag.severity, "error")
+        self.assertEqual(type_diag.stage, "typecheck")
+        self.assertEqual(type_diag.message, "Unknown variable missing")
+        self.assertIsNotNone(type_diag.location)
+        assert type_diag.location is not None
+        self.assertEqual(type_diag.location.line, 3)
+        self.assertEqual(type_diag.location.column, 14)
+
+        parse_diagnostics = structured_diagnostics_in_source(
+            "module app.repl\n\nlet broken ="
+        )
+        self.assertEqual(len(parse_diagnostics), 1)
+        parse_diag = parse_diagnostics[0]
+        self.assertEqual(parse_diag.severity, "error")
+        self.assertEqual(parse_diag.stage, "parse")
+        self.assertIsNotNone(parse_diag.location)
+
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
         from sprout.repl_host import ReplSession
 

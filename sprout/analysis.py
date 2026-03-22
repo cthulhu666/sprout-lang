@@ -30,6 +30,7 @@ from .typechecker import InferState, TypeCheckError, parse_type_expr, typecheck_
 __all__ = [
     "check_source",
     "declared_names_in_source",
+    "Diagnostic",
     "diagnostics_in_source",
     "eval_expression_lines_in_source",
     "exported_names_in_source",
@@ -37,6 +38,7 @@ __all__ = [
     "instances_in_source",
     "SourceLocation",
     "SymbolMetadata",
+    "structured_diagnostics_in_source",
     "symbol_metadata_in_source",
     "symbol_locations_in_source",
     "symbol_inventory_in_source",
@@ -60,6 +62,14 @@ class SymbolMetadata:
     introduced_via: Literal["declared", "imported", "namespace"]
     exported: bool
     imported_from_module: str | None = None
+
+
+@dataclass(frozen=True)
+class Diagnostic:
+    severity: Literal["error"]
+    stage: Literal["tokenize", "parse", "module", "surface", "typecheck", "lowering"]
+    message: str
+    location: SourceLocation | None = None
 
 
 def _compose_snapshot_source(source: str, tail: list[str] | None = None) -> str:
@@ -443,8 +453,9 @@ def _render_instances(tree: ast.Program, query_type: ast.TypeExpr) -> tuple[str,
     return _type_expr_to_string(query_type), matches
 
 
-def _diagnostic_entry(exc: Exception, bundle: ModuleBundle | None = None) -> tuple[str, int, int]:
+def _diagnostic_details(exc: Exception, bundle: ModuleBundle | None = None) -> tuple[str, Path | None, int, int]:
     message = str(exc)
+    path: Path | None = None
     line = 0
     column = 0
     context_match = re.search(r"--> [^:\n]+:(\d+):(\d+)", message)
@@ -463,8 +474,32 @@ def _diagnostic_entry(exc: Exception, bundle: ModuleBundle | None = None) -> tup
     if bundle is not None and line > 0:
         location = _source_location_for_bundle_line(bundle, line, column)
         if location is not None:
-            _, line, column = location
-    return (message, line, column)
+            path, line, column = location
+    return (message, path, line, column)
+
+
+def _diagnostic_stage(
+    exc: Exception,
+) -> Literal["tokenize", "parse", "module", "surface", "typecheck", "lowering"]:
+    if isinstance(exc, TokenizeError):
+        return "tokenize"
+    if isinstance(exc, ParseError):
+        return "parse"
+    if isinstance(exc, ModuleLoadError):
+        return "module"
+    if isinstance(exc, SurfaceCheckError):
+        return "surface"
+    if isinstance(exc, TypeclassLoweringError):
+        return "lowering"
+    return "typecheck"
+
+
+def _diagnostic_entry(exc: Exception, bundle: ModuleBundle | None = None) -> Diagnostic:
+    message, path, line, column = _diagnostic_details(exc, bundle)
+    location = None
+    if line > 0:
+        location = SourceLocation(path=path or Path("<unknown>"), line=line, column=column)
+    return Diagnostic(severity="error", stage=_diagnostic_stage(exc), message=message, location=location)
 
 
 def infer_type_in_source(source: str, expr: str) -> str:
@@ -561,7 +596,7 @@ def symbol_metadata_in_source(source: str) -> list[SymbolMetadata]:
         return _module_symbol_metadata(tree, bundle, temp_path)
 
 
-def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:
+def structured_diagnostics_in_source(source: str) -> list[Diagnostic]:
     composed = _compose_snapshot_source(source)
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = Path(tmpdir) / "repl_session.sprout"
@@ -582,6 +617,17 @@ def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:
         ) as exc:
             return [_diagnostic_entry(exc, bundle)]
         return []
+
+
+def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:
+    diagnostics = structured_diagnostics_in_source(source)
+    out: list[tuple[str, int, int]] = []
+    for diagnostic in diagnostics:
+        if diagnostic.location is None:
+            out.append((diagnostic.message, 0, 0))
+        else:
+            out.append((diagnostic.message, diagnostic.location.line, diagnostic.location.column))
+    return out
 
 
 def eval_expression_lines_in_source(source: str, expr: str) -> tuple[str, ...]:

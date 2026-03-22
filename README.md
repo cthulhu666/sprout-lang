@@ -150,7 +150,9 @@ Experimental snapshot analysis hooks:
   `analysis_type_of_in_source`, `analysis_instances_in_source`.
 - Python-side analysis helpers in `sprout.analysis` now also expose
   `symbol_metadata_in_source(...)` for structured top-level/import symbol
-  metadata without widening the builtin/runtime ABI.
+  metadata without widening the builtin/runtime ABI. They also expose
+  `structured_diagnostics_in_source(...)` for severity/stage/location-aware
+  diagnostics records while the builtin bridge keeps the older tuple shape.
 
 - Legacy compatibility hooks still present in the host runtime, but no longer used
   by `stdlib/repl.sprout`:
