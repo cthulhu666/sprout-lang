@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import pty
 import re
 import shlex
 import unittest
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 import sys
 
@@ -1282,6 +1284,42 @@ class CodegenTests(unittest.TestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="j")
             self.assertEqual(run.stdout.strip(), "j")
             self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(hasattr(os, "openpty") and shutil.which("clang"), "pty/native prerequisites unavailable")
+    def test_native_term_read_key_builtin_normalizes_up_arrow(self) -> None:
+        src = """
+        module main
+
+        fn main() -> Unit !{IO} =
+          print(term_read_key())
+        """
+        with compiled_native_binary(self, src) as bin_path:
+            master_fd, slave_fd = pty.openpty()
+            proc = subprocess.Popen(
+                [str(bin_path)],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
+            )
+            os.close(slave_fd)
+            try:
+                os.write(master_fd, b"\x1b[A")
+                output = b""
+                deadline = time.time() + 5.0
+                while time.time() < deadline and b"up" not in output:
+                    chunk = os.read(master_fd, 1024)
+                    if not chunk:
+                        break
+                    output += chunk
+                proc.wait(timeout=5)
+                self.assertEqual(proc.returncode, 0)
+                self.assertIn("up", output.decode("utf-8", errors="replace"))
+            finally:
+                os.close(master_fd)
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
 
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="\x01")
             self.assertEqual(run.stdout.strip(), "ctrl-a")

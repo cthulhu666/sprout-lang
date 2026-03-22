@@ -1008,9 +1008,13 @@ const char* term_read_key(void) {
   static const char* token_ctrl_e = "ctrl-e";
   static const char* token_ctrl_f = "ctrl-f";
   static const char* token_backspace = "backspace";
+  static const char* token_down = "down";
   static const char* token_escape = "escape";
   static const char* token_enter = "enter";
+  static const char* token_left = "left";
+  static const char* token_right = "right";
   static const char* token_tab = "tab";
+  static const char* token_up = "up";
   buf[0] = '\\0';
   buf[1] = '\\0';
   int ch = EOF;
@@ -1030,8 +1034,30 @@ const char* term_read_key(void) {
       } else {
         char byte = '\\0';
         ssize_t count = read(STDIN_FILENO, &byte, 1);
+        if (count > 0) {
+          ch = (unsigned char)byte;
+          if (ch == 27) {
+            struct termios raw_more = raw;
+            raw_more.c_cc[VMIN] = 0;
+            raw_more.c_cc[VTIME] = 1;
+            if (tcsetattr(STDIN_FILENO, TCSANOW, &raw_more) == 0) {
+              char next = '\\0';
+              char third = '\\0';
+              ssize_t next_count = read(STDIN_FILENO, &next, 1);
+              if (next_count > 0 && next == '[') {
+                ssize_t third_count = read(STDIN_FILENO, &third, 1);
+                if (third_count > 0) {
+                  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+                  if (third == 'A') return token_up;
+                  if (third == 'B') return token_down;
+                  if (third == 'C') return token_right;
+                  if (third == 'D') return token_left;
+                }
+              }
+            }
+          }
+        }
         tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-        if (count > 0) ch = (unsigned char)byte;
       }
     }
   }
