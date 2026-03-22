@@ -92,7 +92,8 @@ Current experimental runtime progress:
 7. Native compiled programs now use that bridge for `repl_check_source(...)`,
    `analysis_check_source(...)`, `repl_type_of_in_source(...)`,
    `analysis_type_of_in_source(...)`, `repl_instances_in_source(...)`, and
-   `analysis_instances_in_source(...)`. The remaining snapshot hooks are still
+   `analysis_instances_in_source(...)`, plus `repl_eval_expr_in_source(...)`.
+   The remaining snapshot hooks are still
    unsupported in native binaries.
 
 ## Target Architecture

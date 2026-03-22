@@ -1393,6 +1393,48 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
   if (error != NULL) free(error);
   return out;
 }
+static long long sprout_analysis_vec_string_result(const char* op, const char* module_source, const char* expr) {
+  char* escaped_source = sprout_json_escape(module_source);
+  char* escaped_expr = sprout_json_escape(expr);
+  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(escaped_expr) + 68;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\",\\\"expr\\\":\\\"%s\\\"}\\n",
+    op,
+    escaped_source,
+    escaped_expr
+  );
+  free(escaped_source);
+  free(escaped_expr);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    VectorVal* lines = sprout_json_extract_string_array(response, "value");
+    free(response);
+    if (lines == NULL) return sprout_err_string_result("analysis service: invalid response");
+    long long rooted_lines = (long long)(uintptr_t)lines;
+    SPROUT_GC_PUSH_I64_LOCAL(rooted_lines);
+    long long lines_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_lines);
+    SPROUT_GC_PUSH_I64_LOCAL(lines_vec);
+    long long out = sprout_make1(find_ctor_tag_by_name("Ok"), lines_vec);
+    SPROUT_GC_POP_LOCALS(2);
+    return out;
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  if (error != NULL) free(error);
+  return out;
+}
 long long repl_add_import(const char* source) {
   (void)source;
   tcp_fail("repl_add_import: not supported in native backend");
@@ -1409,10 +1451,7 @@ long long repl_eval_expr(const char* source) {
   return 0;
 }
 long long repl_eval_expr_in_source(const char* module_source, const char* expr) {
-  (void)module_source;
-  (void)expr;
-  tcp_fail("repl_eval_expr_in_source: not supported in native backend");
-  return 0;
+  return sprout_analysis_vec_string_result("eval_expr_in_source", module_source, expr);
 }
 long long repl_check_source(const char* module_source) {
   return sprout_analysis_check_source_result("check_source", module_source);

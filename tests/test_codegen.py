@@ -1832,7 +1832,54 @@ class CodegenTests(unittest.TestCase):
             self.assertIn("runtime error: builtin `repl_diagnostics_in_source`: not supported in native backend", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_eval_expr_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_eval_expr_in_source_builtin_runs_via_analysis_service(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                fn first_or(lines: Vec String, fallback: String) -> String =
+                  match lines with
+                  | Vec raw ->
+                      match vec_get(0, Vec(raw)) with
+                      | Just first -> first
+                      | Nothing -> fallback
+
+                fn main() -> Unit !{IO} =
+                  match repl_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1") with
+                  | Ok lines -> print(first_or(lines, "<empty>"))
+                  | Err message -> print(message)
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "42")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_eval_expr_in_source_builtin_surfaces_service_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1841,7 +1888,7 @@ class CodegenTests(unittest.TestCase):
                 """
                 module main
                 fn main() -> Unit !{IO} =
-                  match repl_eval_expr_in_source("module app.repl", "1 + 1") with
+                  match repl_eval_expr_in_source("module app.repl", "print(1)") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -1860,10 +1907,16 @@ class CodegenTests(unittest.TestCase):
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_eval_expr_in_source`: not supported in native backend", run.stderr)
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertIn("Top-level let bindings must not perform effects", run.stdout)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_instances_in_source_builtin_runs_via_analysis_service(self) -> None:

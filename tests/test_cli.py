@@ -71,6 +71,24 @@ class CliTests(unittest.TestCase):
             },
         )
 
+    def test_analysis_service_eval_expr_in_source_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(
+                {
+                    "op": "eval_expr_in_source",
+                    "module_source": "module app.repl\n\nlet local = 41",
+                    "expr": "local + 1",
+                }
+            ),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": ["42"]})
+
     def test_analysis_service_reports_unknown_operation(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "analysis-service"],
