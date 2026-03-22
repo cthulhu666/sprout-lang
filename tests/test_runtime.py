@@ -907,6 +907,12 @@ class RuntimeTests(unittest.TestCase):
                       seq(
                       print(render_inventory_result(repl_symbol_inventory_in_source("module app.lib\n\nimport stdlib.string\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn keep(x: Int) -> Int = x\n\nlet local = 0"))),
                       seq(
+                      print(render_names_result(analysis_declared_names_in_source("module app.repl\n\nlet AAA_local = 1\n\nfn shown() -> Int = AAA_local"))),
+                      seq(
+                      print(render_inventory_result(analysis_symbol_inventory_in_source("module app.lib\n\nimport stdlib.string\n\nlet AAA_decl = 0\n\nexport fn keep(x: Int) -> Int = x"))),
+                      seq(
+                      print(render_type_result(analysis_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
+                      seq(
                       print(render_diagnostics_result(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing"))),
                       seq(
                       print(render_expr_result(repl_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
@@ -932,6 +938,9 @@ class RuntimeTests(unittest.TestCase):
                 )
                 )
                 )
+                )
+                )
+                )
               )
             )
           )
@@ -950,12 +959,15 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[6], "AAA")
         self.assertEqual(lines[7], "Box")
         self.assertEqual(lines[8], "Box|from_string|Box")
-        self.assertEqual(lines[9], "(Unknown variable missing, 3, 14)")
-        self.assertEqual(lines[10], "42")
+        self.assertEqual(lines[9], "AAA_local")
+        self.assertEqual(lines[10], "AAA_decl|string|keep")
         self.assertEqual(lines[11], "Int")
-        self.assertEqual(lines[12], "ok")
-        self.assertEqual(lines[13], "ab")
-        self.assertTrue(lines[14].startswith("error: "))
+        self.assertEqual(lines[12], "(Unknown variable missing, 3, 14)")
+        self.assertEqual(lines[13], "42")
+        self.assertEqual(lines[14], "Int")
+        self.assertEqual(lines[15], "ok")
+        self.assertEqual(lines[16], "ab")
+        self.assertTrue(lines[17].startswith("error: "))
 
     def test_vector_builtins(self) -> None:
         src = """

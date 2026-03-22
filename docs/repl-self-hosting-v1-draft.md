@@ -112,6 +112,11 @@ The current host implementation of those snapshot-oriented services now lives
 in `sprout.analysis.py`; `sprout.repl_host.py` remains the stateful REPL
 session shim.
 
+Historical `repl_*` builtin names remain as compatibility surface, but the
+same shared snapshot-analysis subset is now also available under neutral
+`analysis_*` aliases. New tooling should prefer the neutral names where
+possible.
+
 At this point the active `stdlib/repl.sprout` frontend path no longer uses the
 legacy compatibility hooks. They remain only as transitional runtime surface
 and compatibility coverage.

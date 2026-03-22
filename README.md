@@ -143,6 +143,12 @@ Experimental snapshot analysis hooks:
 - `repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}`
 - `repl_reset_session() -> Unit !{IO}`
 
+- Neutral compatibility aliases now exist for the shared analysis subset:
+  `analysis_check_source`, `analysis_declared_names_in_source`,
+  `analysis_exported_names_in_source`, `analysis_symbol_inventory_in_source`,
+  `analysis_diagnostics_in_source`, `analysis_type_of_in_source`,
+  `analysis_instances_in_source`.
+
 - Legacy compatibility hooks still present in the host runtime, but no longer used
   by `stdlib/repl.sprout`:
 - `repl_add_import(source: String) -> Result String Unit !{IO}`

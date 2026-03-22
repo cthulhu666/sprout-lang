@@ -70,6 +70,8 @@ Current experimental runtime progress:
    `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
    `repl_type_of(...)`, `repl_instances(...)`, and `repl_complete(...)`.
    They are no longer on the active Sprout REPL frontend path.
+   Neutral `analysis_*` aliases now also exist for the snapshot-analysis
+   subset so future tooling does not need to depend on REPL-specific names.
 4. `stdlib/repl.sprout` now owns the Sprout-hosted REPL frontend, with
    `examples/repl_hosted.sprout` kept as a thin wrapper/example entrypoint.
    Interactive-mode detection, line editing, history traversal, and

@@ -1230,6 +1230,14 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(lambda: check_source(source))
 
+    def builtin_analysis_check_source(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("analysis_check_source expects String module source")
+        from .analysis import check_source
+
+        return _repl_wrap(lambda: check_source(source))
+
     def builtin_repl_declared_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
@@ -1238,10 +1246,26 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(lambda: _repl_vec_string(declared_names_in_source(source)))
 
+    def builtin_analysis_declared_names_in_source(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("analysis_declared_names_in_source expects String module source")
+        from .analysis import declared_names_in_source
+
+        return _repl_wrap(lambda: _repl_vec_string(declared_names_in_source(source)))
+
     def builtin_repl_exported_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_exported_names_in_source expects String module source")
+        from .analysis import exported_names_in_source
+
+        return _repl_wrap(lambda: _repl_vec_string(exported_names_in_source(source)))
+
+    def builtin_analysis_exported_names_in_source(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("analysis_exported_names_in_source expects String module source")
         from .analysis import exported_names_in_source
 
         return _repl_wrap(lambda: _repl_vec_string(exported_names_in_source(source)))
@@ -1264,10 +1288,36 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(_inventory)
 
+    def builtin_analysis_symbol_inventory_in_source(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("analysis_symbol_inventory_in_source expects String module source")
+        from .analysis import symbol_inventory_in_source
+
+        def _inventory() -> TupleValue:
+            declared, imported, exported = symbol_inventory_in_source(source)
+            return TupleValue(
+                items=(
+                    _repl_vec_string(declared),
+                    _repl_vec_string(imported),
+                    _repl_vec_string(exported),
+                )
+            )
+
+        return _repl_wrap(_inventory)
+
     def builtin_repl_diagnostics_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_diagnostics_in_source expects String module source")
+        from .analysis import diagnostics_in_source
+
+        return _repl_vec_diagnostic(diagnostics_in_source(source))
+
+    def builtin_analysis_diagnostics_in_source(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("analysis_diagnostics_in_source expects String module source")
         from .analysis import diagnostics_in_source
 
         return _repl_vec_diagnostic(diagnostics_in_source(source))
@@ -1289,6 +1339,15 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(lambda: infer_type_in_source(module_source, expr))
 
+    def builtin_analysis_type_of_in_source(args: list[object]) -> object:
+        module_source = args[0]
+        expr = args[1]
+        if not isinstance(module_source, str) or not isinstance(expr, str):
+            raise RuntimeError("analysis_type_of_in_source expects String module source and String expression")
+        from .analysis import infer_type_in_source
+
+        return _repl_wrap(lambda: infer_type_in_source(module_source, expr))
+
     def builtin_repl_instances(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
@@ -1306,6 +1365,19 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         type_expr_source = args[1]
         if not isinstance(module_source, str) or not isinstance(type_expr_source, str):
             raise RuntimeError("repl_instances_in_source expects String module source and String type")
+        from .analysis import instances_in_source
+
+        def _instances() -> TupleValue:
+            query_type, matches = instances_in_source(module_source, type_expr_source)
+            return TupleValue(items=(query_type, _repl_vec_string(matches)))
+
+        return _repl_wrap(_instances)
+
+    def builtin_analysis_instances_in_source(args: list[object]) -> object:
+        module_source = args[0]
+        type_expr_source = args[1]
+        if not isinstance(module_source, str) or not isinstance(type_expr_source, str):
+            raise RuntimeError("analysis_instances_in_source expects String module source and String type")
         from .analysis import instances_in_source
 
         def _instances() -> TupleValue:
@@ -1615,14 +1687,21 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("repl_eval_expr", BuiltinFunction(name="repl_eval_expr", arity=1, fn=builtin_repl_eval_expr))
     env.set("repl_eval_expr_in_source", BuiltinFunction(name="repl_eval_expr_in_source", arity=2, fn=builtin_repl_eval_expr_in_source))
     env.set("repl_check_source", BuiltinFunction(name="repl_check_source", arity=1, fn=builtin_repl_check_source))
+    env.set("analysis_check_source", BuiltinFunction(name="analysis_check_source", arity=1, fn=builtin_analysis_check_source))
     env.set("repl_declared_names_in_source", BuiltinFunction(name="repl_declared_names_in_source", arity=1, fn=builtin_repl_declared_names_in_source))
+    env.set("analysis_declared_names_in_source", BuiltinFunction(name="analysis_declared_names_in_source", arity=1, fn=builtin_analysis_declared_names_in_source))
     env.set("repl_exported_names_in_source", BuiltinFunction(name="repl_exported_names_in_source", arity=1, fn=builtin_repl_exported_names_in_source))
+    env.set("analysis_exported_names_in_source", BuiltinFunction(name="analysis_exported_names_in_source", arity=1, fn=builtin_analysis_exported_names_in_source))
     env.set("repl_symbol_inventory_in_source", BuiltinFunction(name="repl_symbol_inventory_in_source", arity=1, fn=builtin_repl_symbol_inventory_in_source))
+    env.set("analysis_symbol_inventory_in_source", BuiltinFunction(name="analysis_symbol_inventory_in_source", arity=1, fn=builtin_analysis_symbol_inventory_in_source))
     env.set("repl_diagnostics_in_source", BuiltinFunction(name="repl_diagnostics_in_source", arity=1, fn=builtin_repl_diagnostics_in_source))
+    env.set("analysis_diagnostics_in_source", BuiltinFunction(name="analysis_diagnostics_in_source", arity=1, fn=builtin_analysis_diagnostics_in_source))
     env.set("repl_type_of", BuiltinFunction(name="repl_type_of", arity=1, fn=builtin_repl_type_of))
     env.set("repl_type_of_in_source", BuiltinFunction(name="repl_type_of_in_source", arity=2, fn=builtin_repl_type_of_in_source))
+    env.set("analysis_type_of_in_source", BuiltinFunction(name="analysis_type_of_in_source", arity=2, fn=builtin_analysis_type_of_in_source))
     env.set("repl_instances", BuiltinFunction(name="repl_instances", arity=1, fn=builtin_repl_instances))
     env.set("repl_instances_in_source", BuiltinFunction(name="repl_instances_in_source", arity=2, fn=builtin_repl_instances_in_source))
+    env.set("analysis_instances_in_source", BuiltinFunction(name="analysis_instances_in_source", arity=2, fn=builtin_analysis_instances_in_source))
     env.set("repl_complete", BuiltinFunction(name="repl_complete", arity=1, fn=builtin_repl_complete))
     env.set("repl_complete_in_state", BuiltinFunction(name="repl_complete_in_state", arity=3, fn=builtin_repl_complete_in_state))
     env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))

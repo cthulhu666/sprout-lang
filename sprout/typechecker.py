@@ -1471,12 +1471,27 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             TApp(TApp(result_type, STRING), UNIT),
             effects=IO_EFFECT,
         ),
+        "analysis_check_source": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), UNIT),
+            effects=IO_EFFECT,
+        ),
         "repl_declared_names_in_source": builtin_scheme(
             [STRING],
             TApp(TApp(result_type, STRING), TApp(TConst("Vec"), STRING)),
             effects=IO_EFFECT,
         ),
+        "analysis_declared_names_in_source": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), TApp(TConst("Vec"), STRING)),
+            effects=IO_EFFECT,
+        ),
         "repl_exported_names_in_source": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), TApp(TConst("Vec"), STRING)),
+            effects=IO_EFFECT,
+        ),
+        "analysis_exported_names_in_source": builtin_scheme(
             [STRING],
             TApp(TApp(result_type, STRING), TApp(TConst("Vec"), STRING)),
             effects=IO_EFFECT,
@@ -1495,7 +1510,26 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             ),
             effects=IO_EFFECT,
         ),
+        "analysis_symbol_inventory_in_source": builtin_scheme(
+            [STRING],
+            TApp(
+                TApp(result_type, STRING),
+                TTuple(
+                    (
+                        TApp(TConst("Vec"), STRING),
+                        TApp(TConst("Vec"), STRING),
+                        TApp(TConst("Vec"), STRING),
+                    )
+                ),
+            ),
+            effects=IO_EFFECT,
+        ),
         "repl_diagnostics_in_source": builtin_scheme(
+            [STRING],
+            TApp(TConst("Vec"), TTuple((STRING, INT, INT))),
+            effects=IO_EFFECT,
+        ),
+        "analysis_diagnostics_in_source": builtin_scheme(
             [STRING],
             TApp(TConst("Vec"), TTuple((STRING, INT, INT))),
             effects=IO_EFFECT,
@@ -1510,12 +1544,22 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             TApp(TApp(result_type, STRING), STRING),
             effects=IO_EFFECT,
         ),
+        "analysis_type_of_in_source": builtin_scheme(
+            [STRING, STRING],
+            TApp(TApp(result_type, STRING), STRING),
+            effects=IO_EFFECT,
+        ),
         "repl_instances": builtin_scheme(
             [STRING],
             TApp(TApp(result_type, STRING), TTuple((STRING, TApp(TConst("Vec"), STRING)))),
             effects=IO_EFFECT,
         ),
         "repl_instances_in_source": builtin_scheme(
+            [STRING, STRING],
+            TApp(TApp(result_type, STRING), TTuple((STRING, TApp(TConst("Vec"), STRING)))),
+            effects=IO_EFFECT,
+        ),
+        "analysis_instances_in_source": builtin_scheme(
             [STRING, STRING],
             TApp(TApp(result_type, STRING), TTuple((STRING, TApp(TConst("Vec"), STRING)))),
             effects=IO_EFFECT,
