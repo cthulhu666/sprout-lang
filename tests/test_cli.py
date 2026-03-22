@@ -89,6 +89,28 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), {"ok": True, "value": ["42"]})
 
+    def test_analysis_service_complete_in_state_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "analysis-service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(
+                {
+                    "op": "complete_in_state",
+                    "line_buffer": "fr",
+                    "imports": ["import stdlib.bytes (from_string)"],
+                    "declarations": ["let answer = 41"],
+                }
+            ),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(
+            json.loads(run.stdout),
+            {"ok": True, "value": {"matches": ["from_string"], "prefix": "fr"}},
+        )
+
     def test_analysis_service_reports_unknown_operation(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "analysis-service"],

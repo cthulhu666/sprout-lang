@@ -52,6 +52,15 @@ def _require_string(payload: object, field: str) -> str:
     return value
 
 
+def _require_string_list(payload: object, field: str) -> list[str]:
+    if not isinstance(payload, dict):
+        raise ValueError("analysis service request must be a JSON object")
+    value = payload.get(field)
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"analysis service field `{field}` must be a list of strings")
+    return value
+
+
 def cmd_analysis_service(
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
@@ -104,4 +113,17 @@ def cmd_analysis_service(
         except _AnalysisError as exc:
             return _request_error(stdout, str(exc))
         return _write_response(stdout, {"ok": True, "value": lines})
+    if op == "complete_in_state":
+        try:
+            line_buffer = _require_string(request, "line_buffer")
+            imports = _require_string_list(request, "imports")
+            declarations = _require_string_list(request, "declarations")
+            from .repl_host import completion_candidates_in_state
+
+            prefix, matches = completion_candidates_in_state(line_buffer, imports, declarations)
+        except ValueError as exc:
+            return _request_error(stdout, str(exc))
+        except _AnalysisError as exc:
+            return _request_error(stdout, str(exc))
+        return _write_response(stdout, {"ok": True, "value": {"matches": matches, "prefix": prefix}})
     return _request_error(stdout, f"unknown analysis service op `{op}`")

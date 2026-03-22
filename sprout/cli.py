@@ -293,6 +293,8 @@ static long long g_gc_threshold = 1024;
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
+long long sprout_tag(long long h);
+long long sprout_field(long long h, long long idx);
 static CtorMeta* find_ctor(long long tag);
 static char* alloc_cstr(size_t len, const char* ctx);
 static char* dup_slice(const char* start, size_t len);
@@ -1196,6 +1198,66 @@ static char* sprout_json_extract_string(const char* text, const char* key) {
   const char* pos = sprout_json_after_key(text, key);
   return pos == NULL ? NULL : sprout_json_parse_string(&pos);
 }
+static void sprout_builtin_fail_detail(const char* builtin_name, const char* detail) {
+  size_t len = strlen(builtin_name) + strlen(detail) + 2;
+  char* msg = alloc_cstr(len, "analysis service: out of memory");
+  snprintf(msg, len + 1, "%s: %s", builtin_name, detail);
+  tcp_fail(msg);
+}
+static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_handle_ptr, const char* builtin_name, const char* label) {
+  long long vec_handle = (long long)(uintptr_t)vec_handle_ptr;
+  ManagedNode* vec_node = find_managed_ptr((void*)(uintptr_t)vec_handle);
+  if (vec_node == NULL || vec_node->kind != SPROUT_HEAP_OBJ) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
+    sprout_builtin_fail_detail(builtin_name, detail);
+  }
+  if (sprout_tag(vec_handle) != find_ctor_tag_by_name("Vec")) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
+    sprout_builtin_fail_detail(builtin_name, detail);
+  }
+  long long raw_handle = sprout_field(vec_handle, 0);
+  ManagedNode* raw_node = find_managed_ptr((void*)(uintptr_t)raw_handle);
+  if (raw_node == NULL || raw_node->kind != SPROUT_HEAP_VECTOR) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
+    sprout_builtin_fail_detail(builtin_name, detail);
+  }
+  VectorVal* raw = (VectorVal*)(uintptr_t)raw_handle;
+  size_t count = raw->len < 0 ? 0 : (size_t)raw->len;
+  char** escaped_items = count == 0 ? NULL : (char**)malloc(sizeof(char*) * count);
+  if (count != 0 && escaped_items == NULL) tcp_fail("analysis service: out of memory");
+  size_t total_len = 2;
+  for (size_t i = 0; i < count; i++) {
+    const char* item = (const char*)(uintptr_t)raw->data[i];
+    if (item == NULL) {
+      if (escaped_items != NULL) free(escaped_items);
+      char detail[128];
+      snprintf(detail, sizeof(detail), "expects %s to contain only String values", label);
+      sprout_builtin_fail_detail(builtin_name, detail);
+    }
+    escaped_items[i] = sprout_json_escape(item);
+    total_len += strlen(escaped_items[i]) + 2;
+    if (i + 1 < count) total_len += 1;
+  }
+  char* out = alloc_cstr(total_len, "analysis service: out of memory");
+  size_t cursor = 0;
+  out[cursor++] = '[';
+  for (size_t i = 0; i < count; i++) {
+    size_t item_len = strlen(escaped_items[i]);
+    out[cursor++] = '"';
+    memcpy(out + cursor, escaped_items[i], item_len);
+    cursor += item_len;
+    out[cursor++] = '"';
+    if (i + 1 < count) out[cursor++] = ',';
+    free(escaped_items[i]);
+  }
+  if (escaped_items != NULL) free(escaped_items);
+  out[cursor++] = ']';
+  out[cursor] = '\\0';
+  return out;
+}
 static char* sprout_read_text_file(const char* path) {
   FILE* f = fopen(path, "rb");
   if (f == NULL) return NULL;
@@ -1435,6 +1497,51 @@ static long long sprout_analysis_vec_string_result(const char* op, const char* m
   if (error != NULL) free(error);
   return out;
 }
+static long long sprout_analysis_completion_result(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
+  char* escaped_line_buffer = sprout_json_escape(line_buffer);
+  char* imports_json = sprout_json_encode_string_array_from_vec_handle(imports_handle, "repl_complete_in_state", "imports");
+  char* declarations_json = sprout_json_encode_string_array_from_vec_handle(declarations_handle, "repl_complete_in_state", "declarations");
+  size_t request_len = strlen(escaped_line_buffer) + strlen(imports_json) + strlen(declarations_json) + 88;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"complete_in_state\\\",\\\"line_buffer\\\":\\\"%s\\\",\\\"imports\\\":%s,\\\"declarations\\\":%s}\\n",
+    escaped_line_buffer,
+    imports_json,
+    declarations_json
+  );
+  free(escaped_line_buffer);
+  free(imports_json);
+  free(declarations_json);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, &response, &error)) {
+    free(request);
+    sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "analysis service: request failed");
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    char* prefix = sprout_json_extract_string(response, "prefix");
+    VectorVal* matches = sprout_json_extract_string_array(response, "matches");
+    free(response);
+    if (prefix == NULL || matches == NULL) sprout_builtin_fail_detail("repl_complete_in_state", "analysis service: invalid response");
+    long long rooted_matches = (long long)(uintptr_t)matches;
+    SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
+    long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
+    SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
+    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+    uintptr_t* words = (uintptr_t*)tuple;
+    words[0] = (uintptr_t)prefix;
+    words[1] = (uintptr_t)matches_vec;
+    SPROUT_GC_POP_LOCALS(2);
+    return (long long)(uintptr_t)tuple;
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "analysis service: invalid response");
+  return 0;
+}
 long long repl_add_import(const char* source) {
   (void)source;
   tcp_fail("repl_add_import: not supported in native backend");
@@ -1531,12 +1638,8 @@ long long repl_complete(const char* source) {
   tcp_fail("repl_complete: not supported in native backend");
   return 0;
 }
-long long repl_complete_in_state(const char* line_buffer, const char* imports, const char* declarations) {
-  (void)line_buffer;
-  (void)imports;
-  (void)declarations;
-  tcp_fail("repl_complete_in_state: not supported in native backend");
-  return 0;
+long long repl_complete_in_state(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
+  return sprout_analysis_completion_result(line_buffer, imports_handle, declarations_handle);
 }
 long long repl_reset_session(void) {
   tcp_fail("repl_reset_session: not supported in native backend");

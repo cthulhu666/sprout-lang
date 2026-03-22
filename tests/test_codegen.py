@@ -1436,7 +1436,7 @@ class CodegenTests(unittest.TestCase):
             self.assertIn("runtime error: builtin `repl_complete`: not supported in native backend", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_complete_in_state_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_complete_in_state_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1444,10 +1444,21 @@ class CodegenTests(unittest.TestCase):
             spr_path.write_text(
                 """
                 module main
-                import stdlib.collections (vec_empty)
+                import stdlib.collections (vec_empty, vec_append)
+
+                fn first_or(lines: Vec String, fallback: String) -> String =
+                  match lines with
+                  | Vec raw ->
+                      match vec_get(0, Vec(raw)) with
+                      | Just first -> first
+                      | Nothing -> fallback
+
+                fn singleton(x: String) -> Vec String =
+                  vec_append(x, vec_empty())
+
                 fn main() -> Unit !{IO} =
-                  match repl_complete_in_state("str", vec_empty(), vec_empty()) with
-                  | (prefix, _) -> print(prefix)
+                  match repl_complete_in_state("fr", singleton("import stdlib.bytes (from_string)"), singleton("let answer = 41")) with
+                  | (prefix, matches) -> print(prefix ++ ":" ++ first_or(matches, "<empty>"))
                 """,
                 encoding="utf-8",
             )
@@ -1464,10 +1475,16 @@ class CodegenTests(unittest.TestCase):
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_complete_in_state`: not supported in native backend", run.stderr)
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "fr:from_string")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_type_of_in_source_builtin_runs_via_analysis_service(self) -> None:

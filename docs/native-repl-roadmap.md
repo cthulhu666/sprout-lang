@@ -88,12 +88,12 @@ Current experimental runtime progress:
    Python REPL internals.
 6. An experimental `sprout analysis-service` entrypoint now exists as the
    first explicit bridge for snapshot-oriented `check_source` and
-   `type_of_in_source` queries.
+   `type_of_in_source` queries, plus explicit-state completion.
 7. Native compiled programs now use that bridge for `repl_check_source(...)`,
    `analysis_check_source(...)`, `repl_type_of_in_source(...)`,
    `analysis_type_of_in_source(...)`, `repl_instances_in_source(...)`, and
-   `analysis_instances_in_source(...)`, plus `repl_eval_expr_in_source(...)`.
-   The remaining snapshot hooks are still
+   `analysis_instances_in_source(...)`, plus `repl_eval_expr_in_source(...)`
+   and `repl_complete_in_state(...)`. The remaining snapshot hooks are still
    unsupported in native binaries.
 
 ## Target Architecture
