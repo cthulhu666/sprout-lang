@@ -6,6 +6,11 @@ type SubmissionResult =
   | Continue (Vec String) (Vec String) (Vec String)
   | Exit
 
+type ReadResult =
+  | Submission String
+  | EndInput
+  | ReadError String
+
 fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
 
 fn term_noop() -> Unit !{IO} =
@@ -422,10 +427,32 @@ fn interactive_read_line_loop(prompt: String, history: Vec String, imports: Vec 
 fn interactive_read_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
   keep_after(redraw_input(prompt, "", 0), interactive_read_line_loop(prompt, history, imports, declarations, "", 0, -1, ""))
 
-fn read_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
+fn read_input_line(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
   match prompt with
   | Just text -> interactive_read_line(text, history, imports, declarations)
   | Nothing -> term_read_line_once()
+
+fn append_submission_line(acc: String, line: String) -> String =
+  if acc == "" then line else acc ++ "\n" ++ line
+
+fn block_prompt(prompt: Maybe String) -> Maybe String =
+  match prompt with
+  | Just _ -> Just("| ")
+  | Nothing -> Nothing
+
+fn read_block_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String, acc: String) -> ReadResult !{IO} =
+  match read_input_line(block_prompt(prompt), history, imports, declarations) with
+  | Just line ->
+      if trim(line) == ":}" then Submission(acc)
+      else read_block_submission(prompt, history, imports, declarations, append_submission_line(acc, line))
+  | Nothing -> ReadError("unterminated `:{` block; expected `:}` before end of input")
+
+fn read_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> ReadResult !{IO} =
+  match read_input_line(prompt, history, imports, declarations) with
+  | Just line ->
+      if trim(line) == ":{" then read_block_submission(prompt, history, imports, declarations, "")
+      else Submission(line)
+  | Nothing -> EndInput
 
 fn render_error(message: String) -> Vec String =
   single_line("error: " ++ message)
@@ -455,7 +482,7 @@ fn render_instances_result(result: Result String (String, Vec String)) -> Vec St
           else single_line("Instances for " ++ query_type ++ ":") ++ matches
 
 fn help_lines() -> Vec String =
-  single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, plus ordinary import lines")
+  single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, :{ ... :}, plus ordinary import lines")
 
 fn is_declaration(raw: String) -> Bool =
   string.starts_with(raw, "fn ")
@@ -532,8 +559,9 @@ fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec St
 
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
   match read_submission(prompt, history, imports, declarations) with
-  | Just line -> continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
-  | Nothing -> finish_loop(prompt)
+  | Submission line -> continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
+  | ReadError message -> then_io(render_lines(prompt, render_error(message), 0), repl_loop(prompt, history, imports, declarations))
+  | EndInput -> finish_loop(prompt)
 
 export fn main() -> Unit !{IO} =
   if term_is_interactive_once()

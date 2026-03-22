@@ -134,6 +134,9 @@ Current experimental runtime progress:
 13. The active frontend startup path no longer calls `repl_reset_session()`;
     that hook is now compatibility-only and no longer part of the current
     Sprout-hosted REPL loop.
+14. The active frontend now supports explicit multiline entry with `:{` / `:}`
+    and submits the accumulated block through the existing declaration/import/
+    expression path in both interpreter and native launcher modes.
 
 ## Target Architecture
 

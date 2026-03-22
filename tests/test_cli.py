@@ -326,6 +326,33 @@ class CliTests(unittest.TestCase):
         self.assertIn("42", run.stdout)
         self.assertIn("Int", run.stdout)
 
+    def test_repl_block_mode_supports_multiline_function_declaration(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":{\nfn add(x: Int, y: Int) -> Int =\n  x + y\n:}\nadd(40, 2)\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("42", run.stdout)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_block_mode_supports_multiline_function_declaration(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":{\nfn add(x: Int, y: Int) -> Int =\n  x + y\n:}\nadd(40, 2)\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("42", run.stdout)
+
     def test_stdlib_repl_frontend_avoids_legacy_host_hooks(self) -> None:
         source = Path("stdlib/repl.sprout").read_text(encoding="utf-8")
 
