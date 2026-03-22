@@ -171,10 +171,17 @@ These are implementation hooks for the Sprout-hosted REPL frontend. They are
 still mostly interpreter-backed. The current near-term priority is making that
 bridge native-capable rather than making it self-hosted. An experimental
 `sprout analysis-service` entrypoint now exists for snapshot `check_source` and
+`declared_names_in_source` / `exported_names_in_source` /
+`symbol_inventory_in_source` / `diagnostics_in_source` /
 `type_of_in_source` / `instances_in_source` / `eval_expr_in_source` queries,
 plus explicit-state `complete_in_state`, as the first explicit host-service
 bridge below the REPL frontend, and native compiled programs now use that bridge for
 `repl_check_source(...)`, `analysis_check_source(...)`,
+`repl_declared_names_in_source(...)`, `analysis_declared_names_in_source(...)`,
+`repl_exported_names_in_source(...)`, `analysis_exported_names_in_source(...)`,
+`repl_symbol_inventory_in_source(...)`,
+`analysis_symbol_inventory_in_source(...)`,
+`repl_diagnostics_in_source(...)`, `analysis_diagnostics_in_source(...)`,
 `repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
 `repl_instances_in_source(...)`, `analysis_instances_in_source(...)`, and
 `repl_eval_expr_in_source(...)`, plus `repl_complete_in_state(...)`. The rest

@@ -6,9 +6,13 @@ from typing import TextIO
 
 from .analysis import (
     check_source,
+    declared_names_in_source,
+    diagnostics_in_source,
     eval_expression_lines_in_source,
+    exported_names_in_source,
     infer_type_in_source,
     instances_in_source,
+    symbol_inventory_in_source,
 )
 from .interpreter import RuntimeError
 from .module_loader import ModuleLoadError
@@ -84,6 +88,55 @@ def _dispatch_request(stdout: TextIO, request: object) -> int:
         except _AnalysisError as exc:
             return _request_error(stdout, str(exc))
         return _write_response(stdout, {"ok": True, "value": inferred})
+    if op == "declared_names_in_source":
+        try:
+            module_source = _require_string(request, "module_source")
+            declared = declared_names_in_source(module_source)
+        except ValueError as exc:
+            return _request_error(stdout, str(exc))
+        except _AnalysisError as exc:
+            return _request_error(stdout, str(exc))
+        return _write_response(stdout, {"ok": True, "value": declared})
+    if op == "exported_names_in_source":
+        try:
+            module_source = _require_string(request, "module_source")
+            exported = exported_names_in_source(module_source)
+        except ValueError as exc:
+            return _request_error(stdout, str(exc))
+        except _AnalysisError as exc:
+            return _request_error(stdout, str(exc))
+        return _write_response(stdout, {"ok": True, "value": exported})
+    if op == "symbol_inventory_in_source":
+        try:
+            module_source = _require_string(request, "module_source")
+            declared, imported, exported = symbol_inventory_in_source(module_source)
+        except ValueError as exc:
+            return _request_error(stdout, str(exc))
+        except _AnalysisError as exc:
+            return _request_error(stdout, str(exc))
+        return _write_response(
+            stdout,
+            {"ok": True, "value": {"declared": declared, "imported": imported, "exported": exported}},
+        )
+    if op == "diagnostics_in_source":
+        try:
+            module_source = _require_string(request, "module_source")
+            diagnostics = diagnostics_in_source(module_source)
+        except ValueError as exc:
+            return _request_error(stdout, str(exc))
+        except _AnalysisError as exc:
+            return _request_error(stdout, str(exc))
+        return _write_response(
+            stdout,
+            {
+                "ok": True,
+                "value": {
+                    "messages": [message for message, _, _ in diagnostics],
+                    "lines": [line for _, line, _ in diagnostics],
+                    "columns": [column for _, _, column in diagnostics],
+                },
+            },
+        )
     if op == "instances_in_source":
         try:
             module_source = _require_string(request, "module_source")

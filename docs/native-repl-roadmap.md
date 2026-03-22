@@ -87,14 +87,23 @@ Current experimental runtime progress:
 5. The current native-focused milestone is making the active frontend services
    callable from compiled clients without depending on Python REPL internals.
 6. An experimental `sprout analysis-service` entrypoint now exists as the
-   first explicit bridge for snapshot-oriented `check_source` and
-   `type_of_in_source` queries, plus explicit-state completion.
+   first explicit bridge for snapshot-oriented `check_source`,
+   `declared_names_in_source`, `exported_names_in_source`,
+   `symbol_inventory_in_source`, `diagnostics_in_source`,
+   `type_of_in_source`, `instances_in_source`, and `eval_expr_in_source`
+   queries, plus explicit-state completion.
 7. Native compiled programs now use that bridge for `repl_check_source(...)`,
-   `analysis_check_source(...)`, `repl_type_of_in_source(...)`,
-   `analysis_type_of_in_source(...)`, `repl_instances_in_source(...)`, and
-   `analysis_instances_in_source(...)`, plus `repl_eval_expr_in_source(...)`
-   and `repl_complete_in_state(...)`. The remaining snapshot hooks are still
-   unsupported in native binaries.
+   `analysis_check_source(...)`, `repl_declared_names_in_source(...)`,
+   `analysis_declared_names_in_source(...)`,
+   `repl_exported_names_in_source(...)`,
+   `analysis_exported_names_in_source(...)`,
+   `repl_symbol_inventory_in_source(...)`,
+   `analysis_symbol_inventory_in_source(...)`,
+   `repl_diagnostics_in_source(...)`, `analysis_diagnostics_in_source(...)`,
+   `repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
+   `repl_instances_in_source(...)`, and `analysis_instances_in_source(...)`,
+   plus `repl_eval_expr_in_source(...)` and `repl_complete_in_state(...)`.
+   The remaining snapshot hooks are still unsupported in native binaries.
 8. End-to-end native execution of the current Sprout REPL frontend is now
    covered in tests by compiling and running `examples/repl_hosted.sprout`
    against that bridge.

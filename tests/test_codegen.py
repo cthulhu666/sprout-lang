@@ -1787,7 +1787,7 @@ for line in sys.stdin:
             self.assertIn("Unknown variable missing", run.stdout)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_declared_names_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_declared_names_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1795,9 +1795,16 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                fn contains(target: String, lines: Vec String) -> Bool =
+                  match lines with
+                  | Vec raw ->
+                      match vec_get(0, Vec(raw)) with
+                      | Just first -> if first == target then true else contains(target, vec_slice(1, vec_length(Vec(raw)) - 1, Vec(raw)))
+                      | Nothing -> false
+
                 fn main() -> Unit !{IO} =
-                  match repl_declared_names_in_source("module app.repl") with
-                  | Ok _ -> print("ok")
+                  match repl_declared_names_in_source("module app.repl\n\nlet zebra = 1\nlet apple = 2") with
+                  | Ok names -> print(if contains("apple", names) then "ok" else "missing")
                   | Err message -> print(message)
                 """,
                 encoding="utf-8",
@@ -1815,13 +1822,13 @@ for line in sys.stdin:
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_declared_names_in_source`: not supported in native backend", run.stderr)
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "ok")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_exported_names_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_exported_names_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1830,7 +1837,7 @@ for line in sys.stdin:
                 """
                 module main
                 fn main() -> Unit !{IO} =
-                  match repl_exported_names_in_source("module app.lib") with
+                  match repl_exported_names_in_source("module app.lib\n\nlet banana = 1") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -1849,13 +1856,13 @@ for line in sys.stdin:
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_exported_names_in_source`: not supported in native backend", run.stderr)
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "ok")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_symbol_inventory_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_symbol_inventory_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1864,7 +1871,7 @@ for line in sys.stdin:
                 """
                 module main
                 fn main() -> Unit !{IO} =
-                  match repl_symbol_inventory_in_source("module app.lib") with
+                  match repl_symbol_inventory_in_source("module app.lib\nimport stdlib.bytes (from_string)\nlet apple = from_string(\\\"x\\\")") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -1883,13 +1890,13 @@ for line in sys.stdin:
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_symbol_inventory_in_source`: not supported in native backend", run.stderr)
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "ok")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_analysis_symbol_inventory_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_analysis_symbol_inventory_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1898,7 +1905,7 @@ for line in sys.stdin:
                 """
                 module main
                 fn main() -> Unit !{IO} =
-                  match analysis_symbol_inventory_in_source("module app.lib") with
+                  match analysis_symbol_inventory_in_source("module app.lib\nimport stdlib.bytes (from_string)\nlet apple = from_string(\\\"x\\\")") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -1917,10 +1924,10 @@ for line in sys.stdin:
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `analysis_symbol_inventory_in_source`: not supported in native backend", run.stderr)
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "ok")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_analysis_symbol_locations_in_source_builtin_reports_unsupported_backend(self) -> None:
@@ -1957,7 +1964,7 @@ for line in sys.stdin:
             self.assertIn("runtime error: builtin `analysis_symbol_locations_in_source`: not supported in native backend", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_diagnostics_in_source_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_diagnostics_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -1965,8 +1972,8 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
-                fn main() -> Unit !{IO} =
-                  print(vec_length(repl_diagnostics_in_source("module app.repl")))
+                fn main() -> Int !{IO} =
+                  print_int(vec_length(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing")))
                 """,
                 encoding="utf-8",
             )
@@ -1983,10 +1990,10 @@ for line in sys.stdin:
                 ],
                 check=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
             self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_diagnostics_in_source`: not supported in native backend", run.stderr)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "1")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_eval_expr_in_source_builtin_runs_via_analysis_service(self) -> None:
