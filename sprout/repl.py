@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 from .interpreter import run_program
@@ -15,7 +20,31 @@ __all__ = [
 ]
 
 
-def cmd_repl() -> int:
+def cmd_repl(*, native: bool = False) -> int:
+    if native:
+        entry = Path(__file__).resolve().parent.parent / "examples" / "repl_hosted.sprout"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "sprout-repl"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(entry),
+                    "--native",
+                    "-o",
+                    str(out),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            env = dict(os.environ)
+            env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.cli analysis-service")
+            run = subprocess.run([str(out)], check=False, env=env)
+            return run.returncode
+
     reset_hosted_repl_session()
     entry = Path(__file__).resolve().parent.parent / "stdlib" / "repl.sprout"
     bundle = load_module_bundle(entry)

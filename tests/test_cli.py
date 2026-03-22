@@ -220,6 +220,21 @@ class CliTests(unittest.TestCase):
         self.assertIn("42", run.stdout)
         self.assertIn("Int", run.stdout)
 
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_supports_declarations_expressions_and_type_queries(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="let x = 41\nx + 1\n:t x\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("ok", run.stdout)
+        self.assertIn("42", run.stdout)
+        self.assertIn("Int", run.stdout)
+
     def test_stdlib_repl_frontend_avoids_legacy_host_hooks(self) -> None:
         source = Path("stdlib/repl.sprout").read_text(encoding="utf-8")
 

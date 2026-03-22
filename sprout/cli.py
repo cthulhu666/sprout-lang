@@ -3425,7 +3425,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit native binary with clang (default writes LLVM .ll text)",
     )
     sub.add_parser("analysis-service", help=argparse.SUPPRESS)
-    sub.add_parser("repl", help="start a simple interactive Sprout REPL")
+    p_repl = sub.add_parser("repl", help="start a simple interactive Sprout REPL")
+    p_repl.add_argument(
+        "--native",
+        action="store_true",
+        help="experimentally launch the Sprout REPL frontend as a native binary via the analysis-service bridge",
+    )
 
     return parser
 
@@ -3465,7 +3470,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "analysis-service":
             return cmd_analysis_service()
         if args.command == "repl":
-            return cmd_repl()
+            return cmd_repl(native=args.native)
     except (
         ParseError,
         TokenizeError,
