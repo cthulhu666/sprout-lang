@@ -1344,7 +1344,7 @@ static int sprout_ensure_analysis_service(char** error_out) {
     return 1;
   }
   const char* cmd = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
-  if (cmd == NULL || *cmd == '\\0') cmd = "python3 -m sprout.cli analysis-service";
+  if (cmd == NULL || *cmd == '\\0') cmd = "python3 -m sprout.analysis_service";
   int request_pipe[2] = {-1, -1};
   int response_pipe[2] = {-1, -1};
   if (pipe(request_pipe) != 0 || pipe(response_pipe) != 0) {

@@ -220,3 +220,7 @@ def cmd_analysis_service(
     except json.JSONDecodeError as exc:
         return _request_error(stdout, f"invalid request json: {exc.msg}")
     return _dispatch_request(stdout, request)
+
+
+if __name__ == "__main__":
+    raise SystemExit(cmd_analysis_service())

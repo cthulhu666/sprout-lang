@@ -86,12 +86,13 @@ Current experimental runtime progress:
    default, but now also exposes an experimental `--native` launcher path.
 5. The current native-focused milestone is making the active frontend services
    callable from compiled clients without depending on Python REPL internals.
-6. An experimental `sprout analysis-service` entrypoint now exists as the
+6. An experimental `python -m sprout.analysis_service` entrypoint now exists as the
    first explicit bridge for snapshot-oriented `check_source`,
    `declared_names_in_source`, `exported_names_in_source`,
    `symbol_inventory_in_source`, `diagnostics_in_source`,
    `type_of_in_source`, `instances_in_source`, and `eval_expr_in_source`
-   queries, plus explicit-state completion.
+   queries, plus explicit-state completion. The hidden
+   `sprout.cli analysis-service` command remains as a compatibility wrapper.
 7. Native compiled programs now use that bridge for `repl_check_source(...)`,
    `analysis_check_source(...)`, `repl_declared_names_in_source(...)`,
    `analysis_declared_names_in_source(...)`,

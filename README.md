@@ -170,7 +170,8 @@ Experimental snapshot analysis hooks:
 These are implementation hooks for the Sprout-hosted REPL frontend. They are
 still mostly interpreter-backed. The current near-term priority is making that
 bridge native-capable rather than making it self-hosted. An experimental
-`sprout analysis-service` entrypoint now exists for snapshot `check_source` and
+`python -m sprout.analysis_service` now exists as the default analysis-service
+entrypoint for snapshot `check_source` and
 `declared_names_in_source` / `exported_names_in_source` /
 `symbol_inventory_in_source` / `diagnostics_in_source` /
 `type_of_in_source` / `instances_in_source` / `eval_expr_in_source` queries,
@@ -194,7 +195,9 @@ REPL frontend is now verified by compiling and running
 the Python `analysis-service` bridge underneath, and it reuses both a cached
 compiled REPL binary between launches and one long-lived analysis-service
 subprocess per native program run, with one automatic restart for replay-safe
-snapshot queries if that child dies mid-session. Native programs can override
+snapshot queries if that child dies mid-session. The hidden
+`sprout.cli analysis-service` command remains as a compatibility wrapper.
+Native programs can override
 the service command via
 `SPROUT_ANALYSIS_SERVICE_CMD`, and tests can override the launcher cache
 directory via `SPROUT_NATIVE_REPL_CACHE_DIR`.

@@ -93,7 +93,7 @@ def cmd_repl(*, native: bool = False) -> int:
     if native:
         out = _ensure_native_repl_binary()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.cli analysis-service")
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_service")
         run = subprocess.run([str(out)], check=False, env=env)
         return run.returncode
 

@@ -32,6 +32,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
 
+    def test_analysis_service_module_check_source_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.analysis_service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(
+                {
+                    "op": "check_source",
+                    "module_source": "module app.repl\n\nlet local = 41",
+                }
+            ),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
+
     def test_analysis_service_type_of_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "analysis-service"],
@@ -190,7 +207,7 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
             env = dict(os.environ)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.cli analysis-service"
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_service"
             run_proc = subprocess.run(
                 [str(out)],
                 check=False,
@@ -277,7 +294,7 @@ class CliTests(unittest.TestCase):
             cache_dir = Path(tmp) / "cache"
             env = dict(os.environ)
             env["SPROUT_NATIVE_REPL_CACHE_DIR"] = str(cache_dir)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.cli analysis-service"
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_service"
 
             first = subprocess.run(
                 [sys.executable, "-m", "sprout.cli", "repl", "--native"],
