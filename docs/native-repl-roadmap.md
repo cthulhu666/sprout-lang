@@ -104,7 +104,8 @@ Current experimental runtime progress:
    cached compiled REPL binary between launches instead of recompiling on
    every run, and native programs now reuse one long-lived
    `analysis-service` subprocess across multiple snapshot queries in the same
-   process.
+   process, with one automatic restart for replay-safe snapshot queries if the
+   child exits mid-run.
 
 ## Target Architecture
 

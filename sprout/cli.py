@@ -166,6 +166,7 @@ def cmd_compile(
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -1267,6 +1268,7 @@ static FILE* sprout_analysis_service_in = NULL;
 static FILE* sprout_analysis_service_out = NULL;
 static pid_t sprout_analysis_service_pid = -1;
 static int sprout_analysis_service_atexit_registered = 0;
+static int sprout_analysis_service_sigpipe_ignored = 0;
 static void sprout_close_analysis_service(void) {
   if (sprout_analysis_service_in != NULL) {
     fclose(sprout_analysis_service_in);
@@ -1282,7 +1284,22 @@ static void sprout_close_analysis_service(void) {
     sprout_analysis_service_pid = -1;
   }
 }
+static int sprout_analysis_service_is_stale(void) {
+  if (sprout_analysis_service_pid <= 0) return 0;
+  int status = 0;
+  pid_t waited = waitpid(sprout_analysis_service_pid, &status, WNOHANG);
+  if (waited == 0) return 0;
+  if (waited == sprout_analysis_service_pid) return 1;
+  return 0;
+}
 static int sprout_ensure_analysis_service(char** error_out) {
+  if (!sprout_analysis_service_sigpipe_ignored) {
+    signal(SIGPIPE, SIG_IGN);
+    sprout_analysis_service_sigpipe_ignored = 1;
+  }
+  if (sprout_analysis_service_is_stale()) {
+    sprout_close_analysis_service();
+  }
   if (sprout_analysis_service_in != NULL && sprout_analysis_service_out != NULL && sprout_analysis_service_pid > 0) {
     return 1;
   }
@@ -1342,27 +1359,34 @@ static int sprout_ensure_analysis_service(char** error_out) {
   }
   return 1;
 }
-static int sprout_run_analysis_service(const char* request_json, char** response_out, char** error_out) {
-  if (!sprout_ensure_analysis_service(error_out)) return 0;
-  if (fputs(request_json, sprout_analysis_service_in) == EOF || fflush(sprout_analysis_service_in) != 0) {
-    sprout_close_analysis_service();
-    *error_out = dup_cstr("analysis service: request failed");
-    return 0;
+static int sprout_run_analysis_service(const char* request_json, int retry_once, char** response_out, char** error_out) {
+  int max_attempts = retry_once ? 2 : 1;
+  for (int attempt = 0; attempt < max_attempts; attempt++) {
+    if (!sprout_ensure_analysis_service(error_out)) return 0;
+    if (fputs(request_json, sprout_analysis_service_in) == EOF || fflush(sprout_analysis_service_in) != 0) {
+      sprout_close_analysis_service();
+      if (attempt + 1 < max_attempts) continue;
+      *error_out = dup_cstr("analysis service: request failed");
+      return 0;
+    }
+    char* response = NULL;
+    size_t response_cap = 0;
+    ssize_t response_len = getline(&response, &response_cap, sprout_analysis_service_out);
+    if (response_len < 0) {
+      if (response != NULL) free(response);
+      sprout_close_analysis_service();
+      if (attempt + 1 < max_attempts) continue;
+      *error_out = dup_cstr("analysis service: empty response");
+      return 0;
+    }
+    if (response_len > 0 && response[response_len - 1] == '\\n') {
+      response[response_len - 1] = '\\0';
+    }
+    *response_out = response;
+    return 1;
   }
-  char* response = NULL;
-  size_t response_cap = 0;
-  ssize_t response_len = getline(&response, &response_cap, sprout_analysis_service_out);
-  if (response_len < 0) {
-    if (response != NULL) free(response);
-    sprout_close_analysis_service();
-    *error_out = dup_cstr("analysis service: empty response");
-    return 0;
-  }
-  if (response_len > 0 && response[response_len - 1] == '\\n') {
-    response[response_len - 1] = '\\0';
-  }
-  *response_out = response;
-  return 1;
+  *error_out = dup_cstr("analysis service: request failed");
+  return 0;
 }
 static long long sprout_err_string_result(const char* message) {
   return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)dup_cstr(message));
@@ -1381,7 +1405,7 @@ static long long sprout_analysis_check_source_result(const char* op, const char*
   free(escaped_source);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, &response, &error)) {
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
     free(request);
     long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
     if (error != NULL) free(error);
@@ -1415,7 +1439,7 @@ static long long sprout_analysis_type_result(const char* op, const char* module_
   free(escaped_expr);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, &response, &error)) {
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
     free(request);
     long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
     if (error != NULL) free(error);
@@ -1452,7 +1476,7 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
   free(escaped_query);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, &response, &error)) {
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
     free(request);
     long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
     if (error != NULL) free(error);
@@ -1499,7 +1523,7 @@ static long long sprout_analysis_vec_string_result(const char* op, const char* m
   free(escaped_expr);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, &response, &error)) {
+  if (!sprout_run_analysis_service(request, 0, &response, &error)) {
     free(request);
     long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
     if (error != NULL) free(error);
@@ -1543,7 +1567,7 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
   free(declarations_json);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, &response, &error)) {
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
     free(request);
     sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "analysis service: request failed");
   }
