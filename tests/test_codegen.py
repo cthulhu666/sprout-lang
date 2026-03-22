@@ -1277,6 +1277,14 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(run.stdout.strip(), "j")
             self.assertEqual(run.returncode, 0)
 
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="\x01")
+            self.assertEqual(run.stdout.strip(), "ctrl-a")
+            self.assertEqual(run.returncode, 0)
+
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="\x05")
+            self.assertEqual(run.stdout.strip(), "ctrl-e")
+            self.assertEqual(run.returncode, 0)
+
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, input="\x04")
             self.assertEqual(run.stdout.strip(), "ctrl-d")
             self.assertEqual(run.returncode, 0)

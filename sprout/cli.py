@@ -988,7 +988,11 @@ long long term_show_cursor(void) {
 }
 const char* term_read_key(void) {
   static char buf[2] = {0, 0};
+  static const char* token_ctrl_a = "ctrl-a";
+  static const char* token_ctrl_b = "ctrl-b";
   static const char* token_ctrl_d = "ctrl-d";
+  static const char* token_ctrl_e = "ctrl-e";
+  static const char* token_ctrl_f = "ctrl-f";
   static const char* token_backspace = "backspace";
   static const char* token_escape = "escape";
   static const char* token_enter = "enter";
@@ -1018,7 +1022,11 @@ const char* term_read_key(void) {
     }
   }
   if (ch == EOF) return buf;
+  if (ch == 1) return token_ctrl_a;
+  if (ch == 2) return token_ctrl_b;
   if (ch == 4) return token_ctrl_d;
+  if (ch == 5) return token_ctrl_e;
+  if (ch == 6) return token_ctrl_f;
   if (ch == 8 || ch == 127) return token_backspace;
   if (ch == 27) return token_escape;
   if (ch == '\\n' || ch == '\\r') return token_enter;

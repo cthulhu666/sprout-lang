@@ -1109,8 +1109,16 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         def _normalize_key(ch: str) -> str:
             if ch == "":
                 return ""
+            if ch == "\x01":
+                return "ctrl-a"
+            if ch == "\x02":
+                return "ctrl-b"
             if ch == "\x04":
                 return "ctrl-d"
+            if ch == "\x05":
+                return "ctrl-e"
+            if ch == "\x06":
+                return "ctrl-f"
             if ch in {"\x7f", "\b"}:
                 return "backspace"
             if ch == "\x1b":

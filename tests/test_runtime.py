@@ -765,6 +765,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(out.getvalue().strip(), "j")
 
         out = io.StringIO()
+        with patch("sys.stdin", io.StringIO("\x01")):
+            run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "ctrl-a")
+
+        out = io.StringIO()
+        with patch("sys.stdin", io.StringIO("\x05")):
+            run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "ctrl-e")
+
+        out = io.StringIO()
         with patch("sys.stdin", io.StringIO("\x04")):
             run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "ctrl-d")
