@@ -84,7 +84,7 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Start REPL: `mise exec -- python -m sprout.cli repl` (default interpreter-launched path) or `mise exec -- python -m sprout.cli repl --native` (experimental native launcher backed by `analysis-service`; both run the Sprout-hosted frontend in [stdlib/repl.sprout](./stdlib/repl.sprout); [examples/repl_hosted.sprout](./examples/repl_hosted.sprout) remains a thin wrapper; loads the foundational prelude by default; interactive mode detection, line editing, `Tab` completion, and `Up`/`Down` history now live in Sprout code, and ordinary `import ...` lines work inside the session)
+- Start REPL: `mise exec -- python -m sprout.cli repl` (default interpreter-launched path) or `mise exec -- python -m sprout.cli repl --native` (experimental native launcher backed by `analysis-service`; both run the Sprout-hosted frontend in [stdlib/repl.sprout](./stdlib/repl.sprout); [examples/repl_hosted.sprout](./examples/repl_hosted.sprout) remains a thin wrapper; the native launcher now reuses a cached compiled REPL binary between launches; loads the foundational prelude by default; interactive mode detection, line editing, `Tab` completion, and `Up`/`Down` history now live in Sprout code, and ordinary `import ...` lines work inside the session)
 - Run tests: `mise exec -- just test`
 - Run integration-style IO tests: `mise exec -- just test-integration`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
@@ -183,8 +183,10 @@ errors in native binaries. End-to-end native execution of the current Sprout
 REPL frontend is now verified by compiling and running
 `examples/repl_hosted.sprout` with that bridge in place, and the user-facing
 `repl --native` launcher now exposes that path experimentally while still using
-the Python `analysis-service` bridge underneath. Native programs can override
-the service command via `SPROUT_ANALYSIS_SERVICE_CMD`.
+the Python `analysis-service` bridge underneath, and it reuses a cached
+compiled REPL binary between launches. Native programs can override the
+service command via `SPROUT_ANALYSIS_SERVICE_CMD`, and tests can override the
+launcher cache directory via `SPROUT_NATIVE_REPL_CACHE_DIR`.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 

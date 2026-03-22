@@ -100,7 +100,9 @@ Current experimental runtime progress:
    against that bridge.
 9. The product surface now exposes that path experimentally via
    `sprout.cli repl --native`, while still depending on the Python
-   `analysis-service` subprocess underneath.
+   `analysis-service` subprocess underneath. The launcher now also reuses a
+   cached compiled REPL binary between launches instead of recompiling on
+   every run.
 
 ## Target Architecture
 

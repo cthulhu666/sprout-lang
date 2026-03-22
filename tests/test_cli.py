@@ -245,6 +245,40 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("repl_instances(", source)
         self.assertNotIn("repl_complete(", source)
 
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_reuses_cached_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            env = dict(os.environ)
+            env["SPROUT_NATIVE_REPL_CACHE_DIR"] = str(cache_dir)
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.cli analysis-service"
+
+            first = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+                check=False,
+                capture_output=True,
+                text=True,
+                input=":quit\n",
+                env=env,
+            )
+            self.assertEqual(first.returncode, 0, msg=first.stderr)
+            cached = sorted(cache_dir.glob("repl-*"))
+            self.assertEqual(len(cached), 1)
+            binary = cached[0]
+            first_mtime = binary.stat().st_mtime_ns
+
+            second = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+                check=False,
+                capture_output=True,
+                text=True,
+                input=":quit\n",
+                env=env,
+            )
+            self.assertEqual(second.returncode, 0, msg=second.stderr)
+            self.assertEqual(sorted(cache_dir.glob("repl-*")), [binary])
+            self.assertEqual(binary.stat().st_mtime_ns, first_mtime)
+
     def test_repl_default_loads_prelude(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],
