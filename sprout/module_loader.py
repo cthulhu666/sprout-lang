@@ -742,6 +742,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         "analysis_exported_names_in_source",
         "repl_symbol_inventory_in_source",
         "analysis_symbol_inventory_in_source",
+        "analysis_symbol_locations_in_source",
         "repl_diagnostics_in_source",
         "analysis_diagnostics_in_source",
         "repl_type_of",

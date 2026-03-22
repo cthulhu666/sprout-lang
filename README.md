@@ -146,8 +146,8 @@ Experimental snapshot analysis hooks:
 - Neutral compatibility aliases now exist for the shared analysis subset:
   `analysis_check_source`, `analysis_declared_names_in_source`,
   `analysis_exported_names_in_source`, `analysis_symbol_inventory_in_source`,
-  `analysis_diagnostics_in_source`, `analysis_type_of_in_source`,
-  `analysis_instances_in_source`.
+  `analysis_symbol_locations_in_source`, `analysis_diagnostics_in_source`,
+  `analysis_type_of_in_source`, `analysis_instances_in_source`.
 
 - Legacy compatibility hooks still present in the host runtime, but no longer used
   by `stdlib/repl.sprout`:

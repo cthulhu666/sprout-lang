@@ -123,6 +123,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "analysis_exported_names_in_source": FnSig(name="analysis_exported_names_in_source", params=[I8_PTR], ret=I64),
     "repl_symbol_inventory_in_source": FnSig(name="repl_symbol_inventory_in_source", params=[I8_PTR], ret=I64),
     "analysis_symbol_inventory_in_source": FnSig(name="analysis_symbol_inventory_in_source", params=[I8_PTR], ret=I64),
+    "analysis_symbol_locations_in_source": FnSig(name="analysis_symbol_locations_in_source", params=[I8_PTR], ret=I64),
     "repl_diagnostics_in_source": FnSig(name="repl_diagnostics_in_source", params=[I8_PTR], ret=I64),
     "analysis_diagnostics_in_source": FnSig(name="analysis_diagnostics_in_source", params=[I8_PTR], ret=I64),
     "repl_type_of": FnSig(name="repl_type_of", params=[I8_PTR], ret=I64),

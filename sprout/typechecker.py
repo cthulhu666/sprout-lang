@@ -1524,6 +1524,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             ),
             effects=IO_EFFECT,
         ),
+        "analysis_symbol_locations_in_source": builtin_scheme(
+            [STRING],
+            TApp(TApp(result_type, STRING), TApp(TConst("Vec"), TTuple((STRING, STRING, INT, INT)))),
+            effects=IO_EFFECT,
+        ),
         "repl_diagnostics_in_source": builtin_scheme(
             [STRING],
             TApp(TConst("Vec"), TTuple((STRING, INT, INT))),

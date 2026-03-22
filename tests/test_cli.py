@@ -334,6 +334,19 @@ class CliTests(unittest.TestCase):
         self.assertIn("unwrap", exported)
         self.assertNotIn("local", exported)
 
+    def test_analysis_symbol_locations_in_source_reports_top_level_locations(self) -> None:
+        from sprout.analysis import symbol_locations_in_source
+
+        locations = symbol_locations_in_source(
+            "module app.lib\n\nlet alpha = 1\n\nfn beta(x: Int) -> Int = x\n\nclass Render a {\n  fn render(value: a) -> String\n}\n\ntype Box =\n  | Wrap String"
+        )
+
+        self.assertIn(("value", "alpha", 3, 1), locations)
+        self.assertIn(("value", "beta", 5, 1), locations)
+        self.assertIn(("class", "Render", 7, 1), locations)
+        self.assertIn(("type", "Box", 11, 1), locations)
+        self.assertIn(("constructor", "Wrap", 12, 5), locations)
+
     def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
         from sprout.repl_host import ReplSession
 

@@ -222,6 +222,7 @@ class TypecheckerTests(unittest.TestCase):
             "analysis_exported_names_in_source": "String -> Result String Vec String !{IO}",
             "repl_symbol_inventory_in_source": "String -> Result String (Vec String, Vec String, Vec String) !{IO}",
             "analysis_symbol_inventory_in_source": "String -> Result String (Vec String, Vec String, Vec String) !{IO}",
+            "analysis_symbol_locations_in_source": "String -> Result String Vec (String, String, Int, Int) !{IO}",
             "repl_diagnostics_in_source": "String -> Vec (String, Int, Int) !{IO}",
             "analysis_diagnostics_in_source": "String -> Vec (String, Int, Int) !{IO}",
             "repl_type_of": "String -> Result String String !{IO}",
@@ -602,6 +603,7 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("analysis_exported_names_in_source", types)
         self.assertIn("repl_symbol_inventory_in_source", types)
         self.assertIn("analysis_symbol_inventory_in_source", types)
+        self.assertIn("analysis_symbol_locations_in_source", types)
         self.assertIn("repl_type_of", types)
         self.assertIn("repl_type_of_in_source", types)
         self.assertIn("analysis_type_of_in_source", types)

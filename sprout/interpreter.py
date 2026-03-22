@@ -1306,6 +1306,27 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
 
         return _repl_wrap(_inventory)
 
+    def builtin_analysis_symbol_locations_in_source(args: list[object]) -> object:
+        source = args[0]
+        if not isinstance(source, str):
+            raise RuntimeError("analysis_symbol_locations_in_source expects String module source")
+        from .analysis import symbol_locations_in_source
+
+        def _locations() -> ADTValue:
+            return ADTValue(
+                constructor="Vec",
+                args=(
+                    VectorValue(
+                        tuple(
+                            TupleValue(items=(category, name, line, column))
+                            for category, name, line, column in symbol_locations_in_source(source)
+                        )
+                    ),
+                ),
+            )
+
+        return _repl_wrap(_locations)
+
     def builtin_repl_diagnostics_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
@@ -1694,6 +1715,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("analysis_exported_names_in_source", BuiltinFunction(name="analysis_exported_names_in_source", arity=1, fn=builtin_analysis_exported_names_in_source))
     env.set("repl_symbol_inventory_in_source", BuiltinFunction(name="repl_symbol_inventory_in_source", arity=1, fn=builtin_repl_symbol_inventory_in_source))
     env.set("analysis_symbol_inventory_in_source", BuiltinFunction(name="analysis_symbol_inventory_in_source", arity=1, fn=builtin_analysis_symbol_inventory_in_source))
+    env.set("analysis_symbol_locations_in_source", BuiltinFunction(name="analysis_symbol_locations_in_source", arity=1, fn=builtin_analysis_symbol_locations_in_source))
     env.set("repl_diagnostics_in_source", BuiltinFunction(name="repl_diagnostics_in_source", arity=1, fn=builtin_repl_diagnostics_in_source))
     env.set("analysis_diagnostics_in_source", BuiltinFunction(name="analysis_diagnostics_in_source", arity=1, fn=builtin_analysis_diagnostics_in_source))
     env.set("repl_type_of", BuiltinFunction(name="repl_type_of", arity=1, fn=builtin_repl_type_of))

@@ -33,6 +33,7 @@ __all__ = [
     "exported_names_in_source",
     "infer_type_in_source",
     "instances_in_source",
+    "symbol_locations_in_source",
     "symbol_inventory_in_source",
 ]
 
@@ -82,6 +83,48 @@ def _declared_names_from_tree(tree: ast.Program) -> set[str]:
             for method in decl.methods:
                 names.add(method.name.rsplit(".", 1)[-1])
     return names
+
+
+def _leaf_name(name: str) -> str:
+    return name.rsplit(".", 1)[-1]
+
+
+def _module_declared_symbol_locations(
+    tree: ast.Program,
+    bundle: ModuleBundle,
+    module_path: Path,
+) -> list[tuple[str, str, int, int]]:
+    entries: list[tuple[str, str, int, int]] = []
+    for decl in tree.declarations:
+        line = getattr(decl, "line", None)
+        if line is None:
+            continue
+        module_info = _module_for_line(bundle, line)
+        if module_info is None or module_info.path != module_path:
+            continue
+        if isinstance(decl, (ast.FnDecl, ast.LetDecl)):
+            location = _source_location_for_bundle_line(bundle, line, getattr(decl, "column", 1))
+            if location is not None:
+                _, source_line, source_column = location
+                entries.append(("value", _leaf_name(decl.name), source_line, source_column))
+        elif isinstance(decl, ast.TypeDecl):
+            type_location = _source_location_for_bundle_line(bundle, line, getattr(decl, "column", 1))
+            if type_location is not None:
+                _, source_line, source_column = type_location
+                entries.append(("type", _leaf_name(decl.name), source_line, source_column))
+            for ctor in decl.constructors:
+                ctor_line = getattr(ctor, "line", line)
+                ctor_column = getattr(ctor, "column", getattr(decl, "column", 1))
+                ctor_location = _source_location_for_bundle_line(bundle, ctor_line, ctor_column)
+                if ctor_location is not None:
+                    _, source_line, source_column = ctor_location
+                    entries.append(("constructor", _leaf_name(ctor.name), source_line, source_column))
+        elif isinstance(decl, ast.ClassDecl):
+            location = _source_location_for_bundle_line(bundle, line, getattr(decl, "column", 1))
+            if location is not None:
+                _, source_line, source_column = location
+                entries.append(("class", _leaf_name(decl.name), source_line, source_column))
+    return sorted(entries, key=lambda entry: (entry[2], entry[3], entry[0], entry[1]))
 
 
 def _lookup_param_type(source: str, type_expr_source: str) -> ast.TypeExpr:
@@ -256,6 +299,19 @@ def symbol_inventory_in_source(source: str) -> tuple[list[str], list[str], list[
                     imported.update(imp_symbols.exported_type_constructors.get(name, {}))
         exported = exported_names_in_source(source)
         return declared, sorted(imported), exported
+
+
+def symbol_locations_in_source(source: str) -> list[tuple[str, str, int, int]]:
+    composed = _compose_snapshot_source(source)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
+        temp_path.write_text(composed, encoding="utf-8")
+        bundle = load_module_bundle(temp_path)
+        tree = parse(bundle.source)
+        resolve_program_names(tree, bundle)
+        validate_public_surface(tree, bundle)
+        typecheck_program(tree)
+        return _module_declared_symbol_locations(tree, bundle, temp_path)
 
 
 def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:

@@ -1093,6 +1093,11 @@ long long analysis_symbol_inventory_in_source(const char* module_source) {
   tcp_fail("analysis_symbol_inventory_in_source: not supported in native backend");
   return 0;
 }
+long long analysis_symbol_locations_in_source(const char* module_source) {
+  (void)module_source;
+  tcp_fail("analysis_symbol_locations_in_source: not supported in native backend");
+  return 0;
+}
 long long repl_diagnostics_in_source(const char* module_source) {
   (void)module_source;
   tcp_fail("repl_diagnostics_in_source: not supported in native backend");

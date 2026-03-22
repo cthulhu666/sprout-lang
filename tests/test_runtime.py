@@ -876,6 +876,18 @@ class RuntimeTests(unittest.TestCase):
                 )
               )
 
+        fn render_location_result(result: Result String (Vec (String, String, Int, Int))) -> (String, String, Int, Int) =
+          match result with
+          | Err message -> ("error", message, 0, 0)
+          | Ok entries ->
+              match entries with
+              | Vec raw ->
+                  if vector_length(raw) == 0 then ("<empty>", "", 0, 0)
+                  else
+                    match vector_get(raw, 0) with
+                    | Just entry -> entry
+                    | Nothing -> ("<empty>", "", 0, 0)
+
         fn render_diagnostics_result(lines: Vec (String, Int, Int)) -> (String, Int, Int) =
           match lines with
           | Vec raw ->
@@ -911,6 +923,8 @@ class RuntimeTests(unittest.TestCase):
                       seq(
                       print(render_inventory_result(analysis_symbol_inventory_in_source("module app.lib\n\nimport stdlib.string\n\nlet AAA_decl = 0\n\nexport fn keep(x: Int) -> Int = x"))),
                       seq(
+                      print(render_location_result(analysis_symbol_locations_in_source("module app.lib\n\nlet AAA_decl = 0\n\nfn keep(x: Int) -> Int = x"))),
+                      seq(
                       print(render_type_result(analysis_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
                       seq(
                       print(render_diagnostics_result(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing"))),
@@ -925,13 +939,14 @@ class RuntimeTests(unittest.TestCase):
                         seq(
                           print(render_type_result(repl_type_of("missing_name"))),
                           repl_reset_session()
-                        )
-                        )
-                      )
-                      )
+                    )
+                    )
                     )
                     )
                   )
+                )
+                )
+                )
                 )
                 )
                 )
@@ -961,13 +976,14 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[8], "Box|from_string|Box")
         self.assertEqual(lines[9], "AAA_local")
         self.assertEqual(lines[10], "AAA_decl|string|keep")
-        self.assertEqual(lines[11], "Int")
-        self.assertEqual(lines[12], "(Unknown variable missing, 3, 14)")
-        self.assertEqual(lines[13], "42")
-        self.assertEqual(lines[14], "Int")
-        self.assertEqual(lines[15], "ok")
-        self.assertEqual(lines[16], "ab")
-        self.assertTrue(lines[17].startswith("error: "))
+        self.assertEqual(lines[11], "(value, AAA_decl, 3, 1)")
+        self.assertEqual(lines[12], "Int")
+        self.assertEqual(lines[13], "(Unknown variable missing, 3, 14)")
+        self.assertEqual(lines[14], "42")
+        self.assertEqual(lines[15], "Int")
+        self.assertEqual(lines[16], "ok")
+        self.assertEqual(lines[17], "ab")
+        self.assertTrue(lines[18].startswith("error: "))
 
     def test_vector_builtins(self) -> None:
         src = """
