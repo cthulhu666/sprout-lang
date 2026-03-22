@@ -143,6 +143,14 @@ should stop being string-only.
 
 ### 5.3 Build Symbol and Definition Metadata
 
+Current state:
+
+- `sprout.analysis` now exposes `symbol_locations_in_source(...)` and
+  `symbol_metadata_in_source(...)` for top-level declarations and explicit
+  imports in a single checked snapshot
+- that is enough for early symbol indexing experiments, but not yet for locals,
+  full definition links, or range-accurate editor features
+
 Needed semantic information includes:
 
 - local bindings

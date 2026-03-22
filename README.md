@@ -148,6 +148,9 @@ Experimental snapshot analysis hooks:
   `analysis_exported_names_in_source`, `analysis_symbol_inventory_in_source`,
   `analysis_symbol_locations_in_source`, `analysis_diagnostics_in_source`,
   `analysis_type_of_in_source`, `analysis_instances_in_source`.
+- Python-side analysis helpers in `sprout.analysis` now also expose
+  `symbol_metadata_in_source(...)` for structured top-level/import symbol
+  metadata without widening the builtin/runtime ABI.
 
 - Legacy compatibility hooks still present in the host runtime, but no longer used
   by `stdlib/repl.sprout`:
