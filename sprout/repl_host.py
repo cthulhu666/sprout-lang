@@ -35,7 +35,6 @@ __all__ = [
     "eval_expression_lines_in_source",
     "infer_type_in_source",
     "instances_in_source",
-    "completion_candidates_in_state",
 ]
 _REPL_MODULE_NAME = "app.repl"
 _HOSTED_SESSION: ReplSession | None = None
@@ -225,16 +224,6 @@ def reset_hosted_repl_session() -> ReplSession:
     global _HOSTED_SESSION
     _HOSTED_SESSION = ReplSession()
     return _HOSTED_SESSION
-
-
-def completion_candidates_in_state(
-    line_buffer: str,
-    imports: list[str],
-    declarations: list[str],
-) -> tuple[str, list[str]]:
-    return analysis_completion_candidates_in_state(line_buffer, imports, declarations)
-
-
 def _repl_lookup_type(types: dict[str, str], name: str) -> str:
     direct = types.get(name)
     if direct is not None:
