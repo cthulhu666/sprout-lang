@@ -478,6 +478,37 @@ class CliTests(unittest.TestCase):
                 proc.kill()
                 proc.wait(timeout=5)
 
+    @unittest.skipUnless(hasattr(os, "openpty") and shutil.which("clang"), "pty/native prerequisites unavailable")
+    def test_repl_native_interactive_block_mode_uses_distinct_prompt(self) -> None:
+        master_fd, slave_fd = pty.openpty()
+        env = dict(os.environ)
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_service")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+            env=env,
+        )
+        os.close(slave_fd)
+        try:
+            buffer = self._read_pty_until(master_fd, "", "sprout> ", timeout=10.0)
+            self._write_pty_slowly(master_fd, b":{\n")
+            buffer = self._read_pty_until(master_fd, buffer, "block| ", timeout=10.0)
+            self._write_pty_slowly(master_fd, b":cancel\n")
+            buffer = self._read_pty_until(master_fd, buffer, "cancelled block", timeout=10.0)
+            buffer = self._read_pty_until(master_fd, buffer, "sprout> ", timeout=10.0)
+            self._write_pty_slowly(master_fd, b":quit\n")
+            proc.wait(timeout=5)
+            self.assertEqual(proc.returncode, 0)
+            self.assertNotIn("error:", buffer)
+        finally:
+            os.close(master_fd)
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_reuses_cached_binary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

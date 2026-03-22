@@ -438,7 +438,7 @@ fn append_submission_line(acc: String, line: String) -> String =
 
 fn block_prompt(prompt: Maybe String) -> Maybe String =
   match prompt with
-  | Just _ -> Just("| ")
+  | Just _ -> Just("block| ")
   | Nothing -> Nothing
 
 fn read_block_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String, acc: String) -> ReadResult !{IO} =

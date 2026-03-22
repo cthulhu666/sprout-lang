@@ -137,7 +137,8 @@ Current experimental runtime progress:
 14. The active frontend now supports explicit multiline entry with `:{` / `:}`
     and executes the accumulated block as sequential REPL submissions in both
     interpreter and native launcher modes, while still preserving multiline
-    declarations inside the block.
+    declarations inside the block and using a distinct `block| ` continuation
+    prompt during interactive entry.
 15. Block mode now also supports `:cancel` (and `:abort`) to discard the
     buffered block and return to the main prompt without mutating session
     state.
