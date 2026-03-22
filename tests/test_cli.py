@@ -559,6 +559,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("42", run.stdout)
 
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_reports_bad_analysis_service_command_clearly(self) -> None:
+        env = dict(os.environ)
+        env["SPROUT_ANALYSIS_SERVICE_CMD"] = "sprout-missing-analysis-service-command"
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="41 + 1\n:quit\n",
+            env=env,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("analysis service: command failed to start", run.stdout)
+        self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", run.stdout)
+
     def test_repl_default_loads_prelude(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.cli", "repl"],

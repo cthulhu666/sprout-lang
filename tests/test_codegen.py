@@ -1747,6 +1747,25 @@ for line in sys.stdin:
             self.assertEqual(log_path.read_text(encoding="utf-8").splitlines(), ["started"])
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_check_source_builtin_reports_bad_service_command_clearly(self) -> None:
+        src = """
+        module main
+
+        fn main() -> Unit !{IO} =
+          match repl_check_source("module app.repl\n\nlet broken = missing") with
+          | Ok _ -> print("ok")
+          | Err message -> print(message)
+        """
+        with compiled_native_binary(self, src) as bin_path:
+            env = dict(os.environ)
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = "sprout-missing-analysis-service-command"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("analysis service: command failed to start", run.stdout)
+        self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", run.stdout)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_check_source_builtin_surfaces_service_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

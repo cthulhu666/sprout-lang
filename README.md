@@ -202,7 +202,9 @@ subprocess per native program run, with one automatic restart for replay-safe
 snapshot queries if that child dies mid-session. The hidden
 `sprout.cli analysis-service` command remains only as a compatibility wrapper.
 Native programs can override the service command via
-`SPROUT_ANALYSIS_SERVICE_CMD`, and tests can override the launcher cache
+`SPROUT_ANALYSIS_SERVICE_CMD`; if that command is invalid, native REPL and
+native snapshot-query failures now point back to that env var explicitly.
+Tests can override the launcher cache
 directory via `SPROUT_NATIVE_REPL_CACHE_DIR`.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.

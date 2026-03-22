@@ -1311,6 +1311,17 @@ static FILE* sprout_analysis_service_out = NULL;
 static pid_t sprout_analysis_service_pid = -1;
 static int sprout_analysis_service_atexit_registered = 0;
 static int sprout_analysis_service_sigpipe_ignored = 0;
+static int sprout_analysis_service_last_status = 0;
+static int sprout_analysis_service_last_status_valid = 0;
+static void sprout_record_analysis_service_status(int status) {
+  sprout_analysis_service_last_status = status;
+  sprout_analysis_service_last_status_valid = 1;
+}
+static int sprout_analysis_service_command_not_found(void) {
+  return sprout_analysis_service_last_status_valid
+    && WIFEXITED(sprout_analysis_service_last_status)
+    && WEXITSTATUS(sprout_analysis_service_last_status) == 127;
+}
 static void sprout_close_analysis_service(void) {
   if (sprout_analysis_service_in != NULL) {
     fclose(sprout_analysis_service_in);
@@ -1322,7 +1333,9 @@ static void sprout_close_analysis_service(void) {
   }
   if (sprout_analysis_service_pid > 0) {
     int status = 0;
-    waitpid(sprout_analysis_service_pid, &status, 0);
+    if (waitpid(sprout_analysis_service_pid, &status, 0) == sprout_analysis_service_pid) {
+      sprout_record_analysis_service_status(status);
+    }
     sprout_analysis_service_pid = -1;
   }
 }
@@ -1331,7 +1344,11 @@ static int sprout_analysis_service_is_stale(void) {
   int status = 0;
   pid_t waited = waitpid(sprout_analysis_service_pid, &status, WNOHANG);
   if (waited == 0) return 0;
-  if (waited == sprout_analysis_service_pid) return 1;
+  if (waited == sprout_analysis_service_pid) {
+    sprout_record_analysis_service_status(status);
+    sprout_analysis_service_pid = -1;
+    return 1;
+  }
   return 0;
 }
 static int sprout_ensure_analysis_service(char** error_out) {
@@ -1345,6 +1362,7 @@ static int sprout_ensure_analysis_service(char** error_out) {
   if (sprout_analysis_service_in != NULL && sprout_analysis_service_out != NULL && sprout_analysis_service_pid > 0) {
     return 1;
   }
+  sprout_analysis_service_last_status_valid = 0;
   const char* cmd = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
   if (cmd == NULL || *cmd == '\\0') cmd = "__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__";
   int request_pipe[2] = {-1, -1};
@@ -1369,6 +1387,7 @@ static int sprout_ensure_analysis_service(char** error_out) {
   if (pid == 0) {
     dup2(request_pipe[0], STDIN_FILENO);
     dup2(response_pipe[1], STDOUT_FILENO);
+    freopen("/dev/null", "w", stderr);
     close(request_pipe[0]);
     close(request_pipe[1]);
     close(response_pipe[0]);
@@ -1418,7 +1437,8 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
       if (response != NULL) free(response);
       sprout_close_analysis_service();
       if (attempt + 1 < max_attempts) continue;
-      *error_out = dup_cstr("analysis service: empty response");
+      if (sprout_analysis_service_command_not_found()) *error_out = dup_cstr("analysis service: command failed to start; check SPROUT_ANALYSIS_SERVICE_CMD");
+      else *error_out = dup_cstr("analysis service: empty response");
       return 0;
     }
     if (response_len > 0 && response[response_len - 1] == '\\n') {

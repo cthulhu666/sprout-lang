@@ -121,7 +121,9 @@ Current experimental runtime progress:
    programs now also reuse one long-lived
    `analysis-service` subprocess across multiple snapshot queries in the same
    process, with one automatic restart for replay-safe snapshot queries if the
-   child exits mid-run.
+   child exits mid-run. Invalid analysis-service commands now surface an
+   explicit `SPROUT_ANALYSIS_SERVICE_CMD` hint instead of only a generic empty
+   response error.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
