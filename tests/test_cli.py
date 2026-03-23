@@ -17,6 +17,7 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
+from sprout.analysis_adapter import run_analysis_stdio_session
 from sprout.analysis_bridge import (
     analysis_service_env_var_name,
     analysis_service_retry_allowed,
@@ -283,6 +284,29 @@ class CliTests(unittest.TestCase):
         stdout = StringIO()
 
         status = cmd_analysis_stdio(stdin=stdin, stdout=stdout)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            [json.loads(line) for line in stdout.getvalue().splitlines()],
+            [
+                response_ok(None),
+                response_ok("Int"),
+            ],
+        )
+
+    def test_analysis_adapter_processes_multiple_line_delimited_requests(self) -> None:
+        stdin = StringIO(
+            "\n".join(
+                [
+                    json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
+                    json.dumps(request_type_of_in_source("module app.repl\n\nlet local = 41", "local")),
+                ]
+            )
+            + "\n"
+        )
+        stdout = StringIO()
+
+        status = run_analysis_stdio_session(stdin=stdin, stdout=stdout)
 
         self.assertEqual(status, 0)
         self.assertEqual(

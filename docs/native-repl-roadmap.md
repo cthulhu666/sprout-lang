@@ -155,6 +155,8 @@ Current experimental runtime progress:
    diagnostics and symbol-locations now use shared structured-vector decoders
    as well. The native bridge helper block is also rendered centrally now, so
    `sprout.cli` no longer assembles request/response helper fragments itself.
+   The Python stdio adapter is also down to a thin entrypoint over a neutral
+   adapter/session runner.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
