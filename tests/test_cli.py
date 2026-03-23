@@ -17,6 +17,7 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
+from sprout.analysis_dispatch import dispatch_request
 from sprout.analysis_service import cmd_analysis_service
 
 
@@ -221,6 +222,25 @@ class CliTests(unittest.TestCase):
                 {"ok": True, "value": None},
                 {"ok": True, "value": "Int"},
             ],
+        )
+
+    def test_analysis_dispatch_reports_structured_unknown_operation(self) -> None:
+        self.assertEqual(
+            dispatch_request({"op": "not-real"}),
+            {"error": "unknown analysis service op `not-real`", "ok": False},
+        )
+
+    def test_analysis_dispatch_complete_in_state_returns_structured_success(self) -> None:
+        self.assertEqual(
+            dispatch_request(
+                {
+                    "op": "complete_in_state",
+                    "line_buffer": "fr",
+                    "imports": ["import stdlib.bytes (from_string)"],
+                    "declarations": ["let answer = 41"],
+                }
+            ),
+            {"ok": True, "value": {"matches": ["from_string"], "prefix": "fr"}},
         )
 
     def test_fmt_rewrites_file_in_place(self) -> None:

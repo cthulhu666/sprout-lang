@@ -4,38 +4,9 @@ import json
 import sys
 from typing import TextIO
 
-from .analysis import (
-    check_source,
-    completion_candidates_in_state,
-    declared_names_in_source,
-    diagnostics_in_source,
-    eval_expression_lines_in_source,
-    exported_names_in_source,
-    infer_type_in_source,
-    instances_in_source,
-    symbol_locations_in_source,
-    symbol_inventory_in_source,
-)
-from .interpreter import RuntimeError
-from .module_loader import ModuleLoadError
-from .parser import ParseError
-from .surface_checks import SurfaceCheckError
-from .tokenizer import TokenizeError
-from .typeclass_lowering import TypeclassLoweringError
-from .typechecker import TypeCheckError
+from .analysis_dispatch import dispatch_request
 
 __all__ = ["cmd_analysis_service"]
-
-
-_AnalysisError = (
-    ParseError,
-    TokenizeError,
-    TypeCheckError,
-    RuntimeError,
-    ModuleLoadError,
-    SurfaceCheckError,
-    TypeclassLoweringError,
-)
 
 
 def _write_response(stdout: TextIO, payload: object) -> int:
@@ -45,152 +16,8 @@ def _write_response(stdout: TextIO, payload: object) -> int:
     return 0
 
 
-def _request_error(stdout: TextIO, message: str) -> int:
-    return _write_response(stdout, {"error": message, "ok": False}) or 1
-
-
-def _require_string(payload: object, field: str) -> str:
-    if not isinstance(payload, dict):
-        raise ValueError("analysis service request must be a JSON object")
-    value = payload.get(field)
-    if not isinstance(value, str):
-        raise ValueError(f"analysis service field `{field}` must be a string")
-    return value
-
-
-def _require_string_list(payload: object, field: str) -> list[str]:
-    if not isinstance(payload, dict):
-        raise ValueError("analysis service request must be a JSON object")
-    value = payload.get(field)
-    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-        raise ValueError(f"analysis service field `{field}` must be a list of strings")
-    return value
-
-
-def _dispatch_request(stdout: TextIO, request: object) -> int:
-    if not isinstance(request, dict):
-        return _request_error(stdout, "analysis service request must be a JSON object")
-    op = request.get("op")
-    if op == "check_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            check_source(module_source)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(stdout, {"ok": True, "value": None})
-    if op == "type_of_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            expr = _require_string(request, "expr")
-            inferred = infer_type_in_source(module_source, expr)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(stdout, {"ok": True, "value": inferred})
-    if op == "declared_names_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            declared = declared_names_in_source(module_source)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(stdout, {"ok": True, "value": declared})
-    if op == "exported_names_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            exported = exported_names_in_source(module_source)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(stdout, {"ok": True, "value": exported})
-    if op == "symbol_inventory_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            declared, imported, exported = symbol_inventory_in_source(module_source)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(
-            stdout,
-            {"ok": True, "value": {"declared": declared, "imported": imported, "exported": exported}},
-        )
-    if op == "diagnostics_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            diagnostics = diagnostics_in_source(module_source)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(
-            stdout,
-            {
-                "ok": True,
-                "value": {
-                    "messages": [message for message, _, _ in diagnostics],
-                    "lines": [line for _, line, _ in diagnostics],
-                    "columns": [column for _, _, column in diagnostics],
-                },
-            },
-        )
-    if op == "symbol_locations_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            locations = symbol_locations_in_source(module_source)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(
-            stdout,
-            {
-                "ok": True,
-                "value": {
-                    "categories": [category for category, _, _, _ in locations],
-                    "names": [name for _, name, _, _ in locations],
-                    "lines": [line for _, _, line, _ in locations],
-                    "columns": [column for _, _, _, column in locations],
-                },
-            },
-        )
-    if op == "instances_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            query = _require_string(request, "query")
-            query_type, matches = instances_in_source(module_source, query)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(stdout, {"ok": True, "value": {"matches": matches, "query_type": query_type}})
-    if op == "eval_expr_in_source":
-        try:
-            module_source = _require_string(request, "module_source")
-            expr = _require_string(request, "expr")
-            lines = list(eval_expression_lines_in_source(module_source, expr))
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(stdout, {"ok": True, "value": lines})
-    if op == "complete_in_state":
-        try:
-            line_buffer = _require_string(request, "line_buffer")
-            imports = _require_string_list(request, "imports")
-            declarations = _require_string_list(request, "declarations")
-            prefix, matches = completion_candidates_in_state(line_buffer, imports, declarations)
-        except ValueError as exc:
-            return _request_error(stdout, str(exc))
-        except _AnalysisError as exc:
-            return _request_error(stdout, str(exc))
-        return _write_response(stdout, {"ok": True, "value": {"matches": matches, "prefix": prefix}})
-    return _request_error(stdout, f"unknown analysis service op `{op}`")
+def _response_status(payload: object) -> int:
+    return 0 if isinstance(payload, dict) and payload.get("ok") is True else 1
 
 
 def cmd_analysis_service(
@@ -209,16 +36,24 @@ def cmd_analysis_service(
         try:
             request = json.loads(line)
         except json.JSONDecodeError as exc:
-            status = _request_error(stdout, f"invalid request json: {exc.msg}")
+            response = {"error": f"invalid request json: {exc.msg}", "ok": False}
+            _write_response(stdout, response)
+            status = _response_status(response) or status
             continue
-        status = _dispatch_request(stdout, request) or status
+        response = dispatch_request(request)
+        _write_response(stdout, response)
+        status = status or _response_status(response)
     if saw_input:
         return status
     try:
         request = json.load(stdin)
     except json.JSONDecodeError as exc:
-        return _request_error(stdout, f"invalid request json: {exc.msg}")
-    return _dispatch_request(stdout, request)
+        response = {"error": f"invalid request json: {exc.msg}", "ok": False}
+        _write_response(stdout, response)
+        return _response_status(response)
+    response = dispatch_request(request)
+    _write_response(stdout, response)
+    return _response_status(response)
 
 
 if __name__ == "__main__":
