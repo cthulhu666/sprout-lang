@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from .analysis import completion_candidates_in_state
 from .analysis_backend import AnalysisBackend
+from .analysis_completion_backend import python_completion_complete_in_state
 from .analysis_execution_backend import (
     python_execution_check_source,
     python_execution_eval_expr_in_source,
@@ -89,7 +89,7 @@ def python_backend_complete_in_state(
     imports: list[str],
     declarations: list[str],
 ) -> tuple[str, list[str]]:
-    return completion_candidates_in_state(line_buffer, imports, declarations)
+    return python_completion_complete_in_state(line_buffer, imports, declarations)
 
 
 DEFAULT_ANALYSIS_BACKEND: AnalysisBackend = _FunctionAnalysisBackend(

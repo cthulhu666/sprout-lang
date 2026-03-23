@@ -22,7 +22,7 @@ from sprout.analysis_adapter import (
     run_analysis_adapter_session,
     run_analysis_stdio_session,
 )
-from sprout.analysis import infer_type_in_source, symbol_inventory_in_source
+from sprout.analysis import completion_candidates_in_state, infer_type_in_source, symbol_inventory_in_source
 from sprout.analysis_backend import AnalysisBackend
 from sprout.analysis_backend_python import (
     DEFAULT_ANALYSIS_BACKEND,
@@ -496,6 +496,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             DEFAULT_ANALYSIS_BACKEND.symbol_inventory_in_source(source),
             symbol_inventory_in_source(source),
+        )
+
+    def test_analysis_backend_completion_matches_analysis_surface(self) -> None:
+        self.assertEqual(
+            DEFAULT_ANALYSIS_BACKEND.complete_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+            completion_candidates_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
         )
 
     def test_analysis_contract_check_source_request_uses_canonical_op_name(self) -> None:

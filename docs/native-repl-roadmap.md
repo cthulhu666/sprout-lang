@@ -171,8 +171,8 @@ Current experimental runtime progress:
    snapshot symbol/query operations living separately from execution-oriented
    backend operations. The execution-oriented `check`, `type`, `instances`,
    and `eval` paths now also live in their own backend module, leaving the
-   default Python backend module as a composition layer plus the remaining
-   local-state completion path.
+   local-state completion path. That completion path now also lives in its own
+   backend module, so `sprout.analysis_backend_python` is now composition-only.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
