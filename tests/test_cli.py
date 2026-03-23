@@ -17,7 +17,7 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
-from sprout.analysis_adapter import run_analysis_stdio_session
+from sprout.analysis_adapter import run_analysis_adapter_session, run_analysis_stdio_session
 from sprout.analysis_bridge import (
     analysis_service_env_var_name,
     analysis_service_retry_allowed,
@@ -315,6 +315,18 @@ class CliTests(unittest.TestCase):
                 response_ok(None),
                 response_ok("Int"),
             ],
+        )
+
+    def test_analysis_adapter_stdio_alias_matches_neutral_runner(self) -> None:
+        stdin = StringIO(json.dumps(request_check_source("module app.repl\n\nlet local = 41")) + "\n")
+        stdout = StringIO()
+
+        status = run_analysis_adapter_session(stdin=stdin, stdout=stdout)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            [json.loads(line) for line in stdout.getvalue().splitlines()],
+            [response_ok(None)],
         )
 
     def test_analysis_protocol_reports_invalid_line_delimited_json(self) -> None:
