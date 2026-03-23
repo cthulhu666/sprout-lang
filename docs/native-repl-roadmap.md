@@ -158,7 +158,9 @@ Current experimental runtime progress:
    The Python stdio and compatibility-service entrypoints are also down to thin
    shims over a neutral adapter/session runner, and the adapter-facing
    dispatcher now depends on a narrow backend facade instead of importing the
-   broader `sprout.analysis` module directly.
+   broader `sprout.analysis` module directly. The dispatcher also accepts an
+   injected backend now, so the request/response protocol is no longer tied to
+   one concrete Python implementation object.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

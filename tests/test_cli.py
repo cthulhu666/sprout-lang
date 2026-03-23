@@ -386,6 +386,43 @@ class CliTests(unittest.TestCase):
             response_ok({KEY_MATCHES: ["from_string"], KEY_PREFIX: "fr"}),
         )
 
+    def test_analysis_dispatch_accepts_injected_backend(self) -> None:
+        class FakeBackend:
+            def check_source(self, module_source: str) -> None:
+                raise AssertionError("unexpected")
+
+            def type_of_in_source(self, module_source: str, expr: str) -> str:
+                return "Fake"
+
+            def declared_names_in_source(self, module_source: str) -> list[str]:
+                raise AssertionError("unexpected")
+
+            def exported_names_in_source(self, module_source: str) -> list[str]:
+                raise AssertionError("unexpected")
+
+            def symbol_inventory_in_source(self, module_source: str) -> tuple[list[str], list[str], list[str]]:
+                raise AssertionError("unexpected")
+
+            def diagnostics_in_source(self, module_source: str) -> list[tuple[str, int, int]]:
+                raise AssertionError("unexpected")
+
+            def symbol_locations_in_source(self, module_source: str) -> list[tuple[str, str, int, int]]:
+                raise AssertionError("unexpected")
+
+            def instances_in_source(self, module_source: str, query: str) -> tuple[str, list[str]]:
+                raise AssertionError("unexpected")
+
+            def eval_expr_in_source(self, module_source: str, expr: str) -> tuple[str, ...]:
+                raise AssertionError("unexpected")
+
+            def complete_in_state(self, line_buffer: str, imports: list[str], declarations: list[str]) -> tuple[str, list[str]]:
+                raise AssertionError("unexpected")
+
+        self.assertEqual(
+            dispatch_request(request_type_of_in_source("module app.repl\n\nlet local = 41", "local"), backend=FakeBackend()),
+            response_ok("Fake"),
+        )
+
     def test_analysis_backend_type_query_matches_analysis_surface(self) -> None:
         self.assertEqual(
             backend_type_of_in_source("module app.repl\n\nlet local = 41", "local"),
