@@ -146,6 +146,8 @@ Current experimental runtime progress:
    instead of living inline inside `sprout.cli`, and the repeated
    `module_source` request builders above that seam now use shared bridge
    helper functions rather than open-coded `snprintf` blocks in each wrapper.
+   The simplest shared response shapes now do the same for native-side
+   `Err`, `Ok String`, and `Ok (Vec String)` result construction.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

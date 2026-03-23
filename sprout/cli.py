@@ -12,6 +12,7 @@ import tempfile
 from .analysis_bridge import default_analysis_service_cmd
 from .analysis_bridge_runtime import (
     render_analysis_bridge_request_helpers_c,
+    render_analysis_bridge_response_helpers_c,
     render_analysis_bridge_runtime_c,
 )
 from .analysis_contract import (
@@ -1355,6 +1356,7 @@ static long long sprout_err_string_result(const char* message) {
   return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)dup_cstr(message));
 }
 __SPROUT_ANALYSIS_BRIDGE_REQUEST_HELPERS__
+__SPROUT_ANALYSIS_BRIDGE_RESPONSE_HELPERS__
 static long long sprout_analysis_check_source_result(const char* op, const char* module_source) {
   char* request = sprout_analysis_request_source_only(op, module_source);
   char* response = NULL;
@@ -1370,11 +1372,7 @@ static long long sprout_analysis_check_source_result(const char* op, const char*
     free(response);
     return sprout_make1(find_ctor_tag_by_name("Ok"), 0);
   }
-  error = sprout_json_extract_string(response, "error");
-  free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  if (error != NULL) free(error);
-  return out;
+  return sprout_analysis_error_from_response(response);
 }
 static long long sprout_analysis_type_result(const char* op, const char* module_source, const char* expr) {
   char* request = sprout_analysis_request_source_field(op, module_source, "expr", expr);
@@ -1388,17 +1386,9 @@ static long long sprout_analysis_type_result(const char* op, const char* module_
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
-    char* value = sprout_json_extract_string(response, "value");
-    free(response);
-    if (value == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-    long long out = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)value);
-    return out;
+    return sprout_analysis_ok_string_result_from_response(response, "value");
   }
-  error = sprout_json_extract_string(response, "error");
-  free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  if (error != NULL) free(error);
-  return out;
+  return sprout_analysis_error_from_response(response);
 }
 static long long sprout_analysis_instances_result(const char* op, const char* module_source, const char* query) {
   char* request = sprout_analysis_request_source_field(op, module_source, "query", query);
@@ -1428,11 +1418,7 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
     long long pair = (long long)(uintptr_t)tuple;
     return sprout_make1(find_ctor_tag_by_name("Ok"), pair);
   }
-  error = sprout_json_extract_string(response, "error");
-  free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  if (error != NULL) free(error);
-  return out;
+  return sprout_analysis_error_from_response(response);
 }
 static long long sprout_analysis_vec_string_result(const char* op, const char* module_source, const char* expr) {
   char* request = sprout_analysis_request_source_field(op, module_source, "expr", expr);
@@ -1446,22 +1432,9 @@ static long long sprout_analysis_vec_string_result(const char* op, const char* m
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
-    VectorVal* lines = sprout_json_extract_string_array(response, "value");
-    free(response);
-    if (lines == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-    long long rooted_lines = (long long)(uintptr_t)lines;
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_lines);
-    long long lines_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_lines);
-    SPROUT_GC_PUSH_I64_LOCAL(lines_vec);
-    long long out = sprout_make1(find_ctor_tag_by_name("Ok"), lines_vec);
-    SPROUT_GC_POP_LOCALS(2);
-    return out;
+    return sprout_analysis_ok_vec_string_result_from_response(response, "value");
   }
-  error = sprout_json_extract_string(response, "error");
-  free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  if (error != NULL) free(error);
-  return out;
+  return sprout_analysis_error_from_response(response);
 }
 static long long sprout_analysis_string_array_result(const char* op, const char* module_source) {
   char* request = sprout_analysis_request_source_only(op, module_source);
@@ -1475,22 +1448,9 @@ static long long sprout_analysis_string_array_result(const char* op, const char*
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
-    VectorVal* items = sprout_json_extract_string_array(response, "value");
-    free(response);
-    if (items == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-    long long rooted_items = (long long)(uintptr_t)items;
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
-    long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
-    SPROUT_GC_PUSH_I64_LOCAL(items_vec);
-    long long out = sprout_make1(find_ctor_tag_by_name("Ok"), items_vec);
-    SPROUT_GC_POP_LOCALS(2);
-    return out;
+    return sprout_analysis_ok_vec_string_result_from_response(response, "value");
   }
-  error = sprout_json_extract_string(response, "error");
-  free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  if (error != NULL) free(error);
-  return out;
+  return sprout_analysis_error_from_response(response);
 }
 static long long sprout_analysis_inventory_result(const char* op, const char* module_source) {
   char* request = sprout_analysis_request_source_only(op, module_source);
@@ -1531,11 +1491,7 @@ static long long sprout_analysis_inventory_result(const char* op, const char* mo
     SPROUT_GC_POP_LOCALS(6);
     return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)tuple);
   }
-  error = sprout_json_extract_string(response, "error");
-  free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  if (error != NULL) free(error);
-  return out;
+  return sprout_analysis_error_from_response(response);
 }
 static long long sprout_analysis_diagnostics_result(const char* op, const char* module_source) {
   char* request = sprout_analysis_request_source_only(op, module_source);
@@ -1644,11 +1600,7 @@ static long long sprout_analysis_symbol_locations_result(const char* op, const c
     SPROUT_GC_POP_LOCALS(4);
     return result;
   }
-  error = sprout_json_extract_string(response, "error");
-  free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  if (error != NULL) free(error);
-  return out;
+  return sprout_analysis_error_from_response(response);
 }
 static long long sprout_analysis_completion_result(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
   char* escaped_line_buffer = sprout_json_escape(line_buffer);
@@ -3504,6 +3456,9 @@ long long tcp_echo_serve(long long port, long long max_connections) {
 ).replace(
     "__SPROUT_ANALYSIS_BRIDGE_REQUEST_HELPERS__",
     render_analysis_bridge_request_helpers_c(),
+).replace(
+    "__SPROUT_ANALYSIS_BRIDGE_RESPONSE_HELPERS__",
+    render_analysis_bridge_response_helpers_c(),
 ).replace(
     "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", OP_CHECK_SOURCE
 ).replace(

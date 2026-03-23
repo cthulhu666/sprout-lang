@@ -23,6 +23,7 @@ from .analysis_contract import (
 
 __all__ = [
     "render_analysis_bridge_request_helpers_c",
+    "render_analysis_bridge_response_helpers_c",
     "render_analysis_bridge_runtime_c",
 ]
 
@@ -273,5 +274,41 @@ static char* sprout_analysis_request_source_field(
   free(escaped_source);
   free(escaped_value);
   return request;
+}
+"""
+
+
+def render_analysis_bridge_response_helpers_c() -> str:
+    return """
+static long long sprout_analysis_error_from_response(char* response) {
+  char* error = sprout_json_extract_string(response, "error");
+  free(response);
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  if (error != NULL) free(error);
+  return out;
+}
+
+static long long sprout_analysis_ok_string_result_from_response(char* response, const char* value_key) {
+  char* value = sprout_json_extract_string(response, value_key);
+  free(response);
+  if (value == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)value);
+}
+
+static long long sprout_analysis_ok_vec_string_result(VectorVal* items) {
+  if (items == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  long long rooted_items = (long long)(uintptr_t)items;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
+  long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
+  SPROUT_GC_PUSH_I64_LOCAL(items_vec);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), items_vec);
+  SPROUT_GC_POP_LOCALS(2);
+  return out;
+}
+
+static long long sprout_analysis_ok_vec_string_result_from_response(char* response, const char* value_key) {
+  VectorVal* items = sprout_json_extract_string_array(response, value_key);
+  free(response);
+  return sprout_analysis_ok_vec_string_result(items);
 }
 """
