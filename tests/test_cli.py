@@ -614,17 +614,38 @@ class CliTests(unittest.TestCase):
         self.assertIn("python -m sprout.cli repl", text)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_repl_native_launcher_reports_bad_analysis_service_command_clearly(self) -> None:
-        stdout = StringIO()
-        with patch.dict(os.environ, {"SPROUT_ANALYSIS_SERVICE_CMD": "sprout-missing-analysis-service-command"}, clear=False):
-            with redirect_stdout(stdout):
-                status = sprout_cli.main(["repl", "--native"])
-        self.assertEqual(status, 1)
-        text = stdout.getvalue()
-        self.assertIn("error: native REPL startup failed while validating analysis service command", text)
-        self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", text)
-        self.assertIn("python -m sprout.cli repl", text)
-        self.assertNotIn("sprout> ", text)
+    def test_repl_native_launcher_starts_without_analysis_service_for_quit_only(self) -> None:
+        env = dict(os.environ)
+        env["SPROUT_ANALYSIS_SERVICE_CMD"] = "sprout-missing-analysis-service-command"
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":quit\n",
+            env=env,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(run.stdout, "")
+        self.assertNotIn("analysis service:", run.stdout)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_repl_native_launcher_reports_bad_analysis_service_on_first_query(self) -> None:
+        env = dict(os.environ)
+        env["SPROUT_ANALYSIS_SERVICE_CMD"] = "sprout-missing-analysis-service-command"
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=":type 1\n:quit\n",
+            env=env,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn("analysis service: command failed to start", run.stdout)
+        self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", run.stdout)
 
     def test_repl_default_loads_prelude(self) -> None:
         run = subprocess.run(

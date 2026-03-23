@@ -605,11 +605,8 @@ fn run_repl(prompt: Maybe String) -> Unit !{IO} =
   repl_loop(prompt, vec_empty(), vec_empty(), vec_empty())
 
 fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
-  match repl_check_source(session_source(vec_empty(), vec_empty())) with
-  | Ok _ ->
-      if banner == "" then run_repl(prompt)
-      else then_io(term_write(banner), run_repl(prompt))
-  | Err message -> render_lines(Nothing, render_error(message), 0)
+  if banner == "" then run_repl(prompt)
+  else then_io(term_write(banner), run_repl(prompt))
 
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
   match read_submission(prompt, history, imports, declarations) with
