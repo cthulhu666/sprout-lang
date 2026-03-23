@@ -21,6 +21,7 @@ from .analysis_snapshot_backend import (
 
 __all__ = [
     "DEFAULT_ANALYSIS_BACKEND",
+    "default_analysis_backend",
     "python_backend_check_source",
     "python_backend_complete_in_state",
     "python_backend_declared_names_in_source",
@@ -104,3 +105,7 @@ DEFAULT_ANALYSIS_BACKEND: AnalysisBackend = _FunctionAnalysisBackend(
     eval_expr_in_source=python_backend_eval_expr_in_source,
     complete_in_state=python_backend_complete_in_state,
 )
+
+
+def default_analysis_backend() -> AnalysisBackend:
+    return DEFAULT_ANALYSIS_BACKEND

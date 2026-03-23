@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .analysis_backend import AnalysisBackend
-from .analysis_backend_python import DEFAULT_ANALYSIS_BACKEND
+from .analysis_backend_python import default_analysis_backend
 from .analysis_contract import (
     KEY_CATEGORIES,
     KEY_COLUMNS,
@@ -77,8 +77,9 @@ def _require_string_list(payload: object, field: str) -> list[str]:
 
 def dispatch_request(
     request: object,
-    backend: AnalysisBackend = DEFAULT_ANALYSIS_BACKEND,
+    backend: AnalysisBackend | None = None,
 ) -> dict[str, object]:
+    backend = default_analysis_backend() if backend is None else backend
     if not isinstance(request, dict):
         return _error("analysis service request must be a JSON object")
     op = request.get("op")

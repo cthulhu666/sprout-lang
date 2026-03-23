@@ -175,7 +175,10 @@ Current experimental runtime progress:
    backend module, so `sprout.analysis_backend_python` is now composition-only.
    The adapter/dispatcher seam is also now exercised in tests against a second
    concrete backend implementation (`StubAnalysisBackend`) so the bridge is no
-   longer only validated against the default Python analysis backend.
+   longer only validated against the default Python analysis backend. The
+   default production backend is now resolved through one helper rather than
+   being imported as a concrete constant throughout the adapter/dispatch path,
+   which keeps test-only backends separate from the canonical runtime choice.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
