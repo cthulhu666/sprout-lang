@@ -23,6 +23,7 @@ from sprout.analysis_bridge import (
     analysis_service_start_error,
     default_analysis_service_cmd,
 )
+from sprout.analysis_bridge_runtime import render_analysis_bridge_helpers_c
 from sprout.analysis_bridge_runtime import render_analysis_bridge_runtime_c
 from sprout.analysis_bridge_runtime import render_analysis_bridge_request_helpers_c
 from sprout.analysis_bridge_runtime import render_analysis_bridge_response_helpers_c
@@ -92,6 +93,12 @@ class CliTests(unittest.TestCase):
         self.assertIn(analysis_service_env_var_name(), runtime)
         self.assertNotIn("__SPROUT_ANALYSIS_SERVICE_", runtime)
         self.assertNotIn("__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__", runtime)
+
+    def test_analysis_bridge_helpers_renderer_resolves_service_placeholders(self) -> None:
+        helpers = render_analysis_bridge_helpers_c()
+        self.assertIn("sprout_analysis_request_source_only", helpers)
+        self.assertIn("sprout_analysis_error_from_response", helpers)
+        self.assertNotIn("__SPROUT_ANALYSIS_SERVICE_", helpers)
 
     def test_analysis_bridge_request_helpers_render_shared_source_builders(self) -> None:
         helpers = render_analysis_bridge_request_helpers_c()

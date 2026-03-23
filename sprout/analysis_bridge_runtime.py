@@ -22,10 +22,21 @@ from .analysis_contract import (
 )
 
 __all__ = [
+    "render_analysis_bridge_helpers_c",
     "render_analysis_bridge_request_helpers_c",
     "render_analysis_bridge_response_helpers_c",
     "render_analysis_bridge_runtime_c",
 ]
+
+
+def render_analysis_bridge_helpers_c() -> str:
+    return (
+        render_analysis_bridge_request_helpers_c()
+        + render_analysis_bridge_response_helpers_c()
+    ).replace(
+        "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__",
+        analysis_service_invalid_response_error(),
+    )
 
 
 def render_analysis_bridge_runtime_c(embedded_analysis_service_cmd: str) -> str:
@@ -201,9 +212,6 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
         ).replace(
             '"__SPROUT_ANALYSIS_SERVICE_START_FAILED__"',
             json.dumps(analysis_service_start_error()),
-        ).replace(
-            "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__",
-            analysis_service_invalid_response_error(),
         ).replace(
             "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__",
             OP_CHECK_SOURCE,

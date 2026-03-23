@@ -11,8 +11,7 @@ import tempfile
 
 from .analysis_bridge import default_analysis_service_cmd
 from .analysis_bridge_runtime import (
-    render_analysis_bridge_request_helpers_c,
-    render_analysis_bridge_response_helpers_c,
+    render_analysis_bridge_helpers_c,
     render_analysis_bridge_runtime_c,
 )
 from .analysis_contract import (
@@ -3349,10 +3348,10 @@ long long tcp_echo_serve(long long port, long long max_connections) {
     render_analysis_bridge_runtime_c(embedded_analysis_service_cmd),
 ).replace(
     "__SPROUT_ANALYSIS_BRIDGE_REQUEST_HELPERS__",
-    render_analysis_bridge_request_helpers_c(),
+    render_analysis_bridge_helpers_c(),
 ).replace(
     "__SPROUT_ANALYSIS_BRIDGE_RESPONSE_HELPERS__",
-    render_analysis_bridge_response_helpers_c(),
+    "",
 ).replace(
     "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", OP_CHECK_SOURCE
 ).replace(

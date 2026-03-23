@@ -153,7 +153,8 @@ Current experimental runtime progress:
    active REPL completion and symbol-inventory paths now do the same for their
    `(prefix, matches)` and `(declared, imported, exported)` tuple decoders, and
    diagnostics and symbol-locations now use shared structured-vector decoders
-   as well.
+   as well. The native bridge helper block is also rendered centrally now, so
+   `sprout.cli` no longer assembles request/response helper fragments itself.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
