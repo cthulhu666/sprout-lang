@@ -217,6 +217,27 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(program.declarations[1], ast.FnDecl)
         self.assertIsInstance(program.declarations[2], ast.LetDecl)
 
+    def test_parse_record_decl_literal_and_get(self) -> None:
+        src = """
+        type User = { name: String, age: Int }
+
+        fn name_of(user: User) -> String =
+          get user name
+
+        let ada = User { name = "Ada", age = 36 }
+        """
+        program = parse(src)
+        self.assertIsInstance(program.declarations[0], ast.RecordDecl)
+        record_decl = program.declarations[0]
+        self.assertEqual([field.name for field in record_decl.fields], ["name", "age"])
+        fn_decl = program.declarations[1]
+        self.assertIsInstance(fn_decl.body, ast.GetFieldExpr)
+        self.assertEqual(fn_decl.body.field_name, "name")
+        let_decl = program.declarations[2]
+        self.assertIsInstance(let_decl.value, ast.RecordExpr)
+        self.assertEqual(let_decl.value.type_name, "User")
+        self.assertEqual([field.name for field in let_decl.value.fields], ["name", "age"])
+
     def test_parse_list_literal_desugars_to_cons_chain(self) -> None:
         src = "fn xs() -> List Int = [1, 2, 3]"
         program = parse(src)

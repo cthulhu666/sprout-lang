@@ -53,6 +53,43 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertEqual(types["fact"], "Int -> Int")
 
+    def test_typecheck_record_literal_and_get(self) -> None:
+        src = """
+        type User = { name: String, age: Int }
+
+        fn age_of(user: User) -> Int =
+          get user age
+
+        fn main() -> Unit !{IO} =
+          print(age_of(User { name = "Ada", age = 36 }))
+        """
+        types = typecheck_program(parse(src))
+        self.assertEqual(types["age_of"], "User -> Int")
+
+    def test_typecheck_record_literal_requires_all_fields(self) -> None:
+        src = """
+        type User = { name: String, age: Int }
+
+        fn main() -> Unit !{IO} =
+          print(User { name = "Ada" })
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Missing record field(s): age", str(ctx.exception))
+
+    def test_typecheck_get_rejects_unknown_field(self) -> None:
+        src = """
+        type User = { name: String, age: Int }
+
+        let user = User { name = "Ada", age = 36 }
+
+        fn main() -> Unit !{IO} =
+          print(get user email)
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Record User has no field email", str(ctx.exception))
+
     def test_type_error_top_level_let_cannot_be_io(self) -> None:
         src = """
         let boot = print("boot")

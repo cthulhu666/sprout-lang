@@ -17,9 +17,22 @@ class TypeDecl:
 
 
 @dataclass
+class RecordDecl:
+    name: str
+    type_params: list[str]
+    fields: list["RecordFieldDecl"]
+
+
+@dataclass
 class TypeConstructor:
     name: str
     args: list["TypeExpr"]
+
+
+@dataclass
+class RecordFieldDecl:
+    name: str
+    type_expr: "TypeExpr"
 
 
 @dataclass
@@ -151,6 +164,24 @@ class StringExpr(Expr):
 @dataclass
 class TupleExpr(Expr):
     items: list[Expr]
+
+
+@dataclass
+class RecordExpr(Expr):
+    type_name: str
+    fields: list["RecordFieldValue"]
+
+
+@dataclass
+class RecordFieldValue:
+    name: str
+    value: Expr
+
+
+@dataclass
+class GetFieldExpr(Expr):
+    record: Expr
+    field_name: str
 
 
 class Pattern:

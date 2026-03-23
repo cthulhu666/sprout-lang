@@ -81,6 +81,17 @@ class Parser:
         while self.check("IDENT"):
             params.append(self.advance().value)
         self.expect("SYMBOL", "=")
+        if self.check("SYMBOL", "{"):
+            self.advance()
+            fields: list[ast.RecordFieldDecl] = []
+            if not self.check("SYMBOL", "}"):
+                fields.append(self.parse_record_field_decl())
+                while self.match("SYMBOL", ","):
+                    if self.check("SYMBOL", "}"):
+                        break
+                    fields.append(self.parse_record_field_decl())
+            self.expect("SYMBOL", "}")
+            return self.mark(ast.RecordDecl(name=name, type_params=params, fields=fields), start)
 
         constructors = []
         if self.match("SYMBOL", "|"):
@@ -241,6 +252,11 @@ class Parser:
         self.expect("SYMBOL", "=")
         value = self.parse_expr()
         return self.mark(ast.LetDecl(name=name, value=value), start)
+
+    def parse_record_field_decl(self) -> ast.RecordFieldDecl:
+        start = self.expect("IDENT", label="record field name")
+        self.expect("SYMBOL", ":")
+        return self.mark(ast.RecordFieldDecl(name=start.value, type_expr=self.parse_type_expr()), start)
 
     def parse_expr(self):
         if self.check("KEYWORD", "if"):
@@ -420,6 +436,15 @@ class Parser:
         return expr
 
     def parse_primary(self):
+        if (
+            self.check("IDENT")
+            and self.current().value == "get"
+            and not (self.i + 1 < len(self.tokens) and self.tokens[self.i + 1].kind == "SYMBOL" and self.tokens[self.i + 1].value == "(")
+        ):
+            start = self.advance()
+            record = self.parse_primary()
+            field = self.expect("IDENT", label="field name").value
+            return self.mark(ast.GetFieldExpr(record=record, field_name=field), start)
         if self.match("SYMBOL", "\\"):
             start = self.tokens[self.i - 1]
             params: list[ast.Param] = []
@@ -490,6 +515,17 @@ class Parser:
             return self.mark(ast.BoolExpr(value=False), tok)
         if self.check("IDENT"):
             tok = self.advance()
+            if self.check("SYMBOL", "{"):
+                self.advance()
+                fields: list[ast.RecordFieldValue] = []
+                if not self.check("SYMBOL", "}"):
+                    fields.append(self.parse_record_field_value())
+                    while self.match("SYMBOL", ","):
+                        if self.check("SYMBOL", "}"):
+                            break
+                        fields.append(self.parse_record_field_value())
+                self.expect("SYMBOL", "}")
+                return self.mark(ast.RecordExpr(type_name=tok.value, fields=fields), tok)
             return self.mark(ast.VarExpr(name=tok.value), tok)
         if self.match("SYMBOL", "("):
             open_tok = self.tokens[self.i - 1]
@@ -588,6 +624,11 @@ class Parser:
             raise ParseError(f"Expected dict key at {t.line}:{t.column}, got {t.kind} {t.value!r}")
         self.expect("SYMBOL", ":")
         return key, self.parse_expr()
+
+    def parse_record_field_value(self) -> ast.RecordFieldValue:
+        start = self.expect("IDENT", label="record field name")
+        self.expect("SYMBOL", "=")
+        return self.mark(ast.RecordFieldValue(name=start.value, value=self.parse_expr()), start)
 
     def parse_lambda_shorthand_param(self) -> ast.Param:
         tok = self.expect("IDENT", label="parameter name")

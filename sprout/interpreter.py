@@ -78,6 +78,12 @@ class TupleValue:
     items: tuple[object, ...]
 
 
+@dataclass(frozen=True)
+class RecordValue:
+    type_name: str
+    fields: dict[str, object]
+
+
 @dataclass
 class ConstructorValue:
     name: str
@@ -229,6 +235,9 @@ def format_value(value: object) -> str:
         return "Builder(" + ", ".join(repr(chunk) for chunk in value.chunks) + ")"
     if isinstance(value, TupleValue):
         return "(" + ", ".join(format_value(item) for item in value.items) + ")"
+    if isinstance(value, RecordValue):
+        rendered = ", ".join(f"{name} = {format_value(item)}" for name, item in value.fields.items())
+        return f"{value.type_name} " + "{" + rendered + "}"
     if value is None:
         return "()"
     return str(value)
@@ -250,6 +259,18 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
         return expr.value
     if isinstance(expr, ast.TupleExpr):
         return TupleValue(items=tuple(eval_expr(item, env) for item in expr.items))
+    if isinstance(expr, ast.RecordExpr):
+        return RecordValue(
+            type_name=expr.type_name,
+            fields={field.name: eval_expr(field.value, env) for field in expr.fields},
+        )
+    if isinstance(expr, ast.GetFieldExpr):
+        record = eval_expr(expr.record, env)
+        if not isinstance(record, RecordValue):
+            raise rt_error("get expects a record value", expr.record)
+        if expr.field_name not in record.fields:
+            raise rt_error(f"Record {record.type_name} has no field {expr.field_name}", expr)
+        return record.fields[expr.field_name]
     if isinstance(expr, ast.VarExpr):
         try:
             return env.get(expr.name)

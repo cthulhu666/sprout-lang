@@ -33,6 +33,11 @@ Normative status:
   are implementation features or experimental extensions.
 - In particular, the current module system and typeclass support are implemented
   in the prototype, but are not yet part of normative v0.
+- The current implementation also includes an experimental first records slice:
+  nominal record declarations such as `type User = { name: String }`, typed
+  record literals such as `User { name = "Ada" }`, and field projection via the
+  contextual special form `get user name`. Records are not part of normative v0
+  yet, and record updates remain deferred.
 - The current implementation uses explicit function effects in the v0 core:
   pure functions omit an annotation, effectful functions use `!{IO}`, and
   higher-order helpers may use restricted singleton effect variables such as

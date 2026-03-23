@@ -603,6 +603,11 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
                     symbols.exported_values[ctor.name] = ctor_canonical
             if export_ctors:
                 symbols.exported_type_constructors[decl.name] = ctor_exports
+        elif isinstance(decl, ast.RecordDecl):
+            canonical = _qualify_name(module_name, decl.name)
+            symbols.type_locals[decl.name] = canonical
+            if exported:
+                symbols.exported_types[decl.name] = canonical
         elif isinstance(decl, ast.ClassDecl):
             canonical = _qualify_name(module_name, decl.name)
             symbols.class_locals[decl.name] = canonical
@@ -790,6 +795,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             decl.name = symbols.type_locals[decl.name]
             for ctor in decl.constructors:
                 ctor.name = symbols.value_locals[ctor.name]
+        elif isinstance(decl, ast.RecordDecl):
+            decl.name = symbols.type_locals[decl.name]
         elif isinstance(decl, ast.ClassDecl):
             decl.name = symbols.class_locals[decl.name]
 
@@ -967,6 +974,14 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             if e.name not in current_scope:
                 e.name = resolve_value_name(e.name, e)
             return
+        if isinstance(e, ast.RecordExpr):
+            e.type_name = resolve_type_name(e.type_name, e)
+            for field in e.fields:
+                walk_expr(field.value, e, current_scope)
+            return
+        if isinstance(e, ast.GetFieldExpr):
+            walk_expr(e.record, e, current_scope)
+            return
         if isinstance(e, ast.UnaryExpr):
             walk_expr(e.operand, e, current_scope)
             return
@@ -1006,6 +1021,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             for ctor in decl.constructors:
                 for arg in ctor.args:
                     walk_type(arg, decl)
+        elif isinstance(decl, ast.RecordDecl):
+            for field in decl.fields:
+                walk_type(field.type_expr, decl)
         elif isinstance(decl, ast.ClassDecl):
             for method in decl.methods:
                 for param in method.params:

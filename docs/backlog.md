@@ -40,4 +40,6 @@ This file tracks open design, implementation, and tooling follow-up work.
    First milestone constraints: keep the helper surface small, bytes-oriented, and protocol-agnostic rather than embedding database-specific client APIs.
 5. Add records in v1.
    Initial scope: immutable record values with explicit field names, field access, and straightforward construction/update rules that preserve Sprout's strict evaluation model.
+   Completed groundwork: experimental nominal record declarations, typed record literals, and read-only field projection via `get record field`.
+   Remaining follow-up: record update syntax, a dedicated records draft/spec, and a final field-access surface decision if the language later wants something more ergonomic than the current contextual `get` form.
    First milestone constraints: no row polymorphism, no structural subtyping, no implicit field punning, and no attempt to fold records into the current ADT surface without a dedicated spec.

@@ -127,6 +127,7 @@ class MethodTypeInfo:
 class TypeDeclInfo:
     params: list[str]
     constructors: dict[str, Type]
+    fields: dict[str, Type] = field(default_factory=dict)
 
 
 @dataclass
@@ -743,6 +744,13 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
             for item in expr.items:
                 visit_expr(item)
             return
+        if isinstance(expr, ast.RecordExpr):
+            for field in expr.fields:
+                visit_expr(field.value)
+            return
+        if isinstance(expr, ast.GetFieldExpr):
+            visit_expr(expr.record)
+            return
         if isinstance(expr, ast.MatchExpr):
             visit_expr(expr.scrutinee)
             for branch in expr.branches:
@@ -930,6 +938,64 @@ def infer_expr(
         for _, item_effect in item_results:
             effects = merge_effects(state, effects, item_effect)
         return _mark_expr_type(expr, TTuple(tuple(item_types))), effects
+    if isinstance(expr, ast.RecordExpr):
+        info = type_decls.get(expr.type_name)
+        if info is None or not info.fields:
+            raise tc_error(f"Unknown record type {expr.type_name}", expr)
+        field_replacements = {param: state.fresh() for param in info.params}
+
+        def instantiate_record_field(field_t: Type) -> Type:
+            return substitute_type_vars(field_t, {f"{expr.type_name}.{name}": repl for name, repl in field_replacements.items()})
+
+        expected_field_names = set(info.fields)
+        provided_field_names = {field.name for field in expr.fields}
+        missing = sorted(expected_field_names - provided_field_names)
+        extra = sorted(provided_field_names - expected_field_names)
+        if missing:
+            raise tc_error(f"Missing record field(s): {', '.join(missing)}", expr)
+        if extra:
+            raise tc_error(f"Unknown record field(s): {', '.join(extra)}", expr)
+        effects = PURE_EFFECT
+        for field in expr.fields:
+            value_t, value_effects = infer_expr(field.value, env, state, type_decls, global_methods)
+            unify_at(state, value_t, instantiate_record_field(info.fields[field.name]), field.value)
+            effects = merge_effects(state, effects, value_effects)
+        record_t: Type = TConst(expr.type_name)
+        for param in info.params:
+            record_t = TApp(record_t, field_replacements[param])
+        return _mark_expr_type(expr, record_t), effects
+    if isinstance(expr, ast.GetFieldExpr):
+        record_t, record_effects = infer_expr(expr.record, env, state, type_decls, global_methods)
+        resolved_record_t = apply(state.subst, record_t, state.effect_subst)
+        record_name: str | None = None
+        record_args: list[Type] = []
+        if isinstance(resolved_record_t, TConst):
+            record_name = resolved_record_t.name
+        elif isinstance(resolved_record_t, TApp):
+            cursor: Type = resolved_record_t
+            args_reversed: list[Type] = []
+            while isinstance(cursor, TApp):
+                args_reversed.append(cursor.arg)
+                cursor = cursor.base
+            base = cursor
+            record_args = list(reversed(args_reversed))
+            while isinstance(base, TApp):
+                base = base.base
+            if isinstance(base, TConst):
+                record_name = base.name
+        if record_name is None:
+            raise tc_error(f"get expects a record value, got {type_to_string(resolved_record_t)}", expr.record)
+        info = type_decls.get(record_name)
+        if info is None or not info.fields:
+            raise tc_error(f"get expects a record value, got {type_to_string(resolved_record_t)}", expr.record)
+        field_t = info.fields.get(expr.field_name)
+        if field_t is None:
+            raise tc_error(f"Record {record_name} has no field {expr.field_name}", expr)
+        field_subst = {
+            f"{record_name}.{param}": arg_t
+            for param, arg_t in zip(info.params, record_args)
+        }
+        return _mark_expr_type(expr, substitute_type_vars(field_t, field_subst)), record_effects
     if isinstance(expr, ast.VarExpr):
         scheme = env.get(expr.name)
         if scheme is not None:
@@ -1261,25 +1327,35 @@ def _constructor_pattern_covers_all(pattern: ast.Pattern) -> bool:
 def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
     out: dict[str, TypeDeclInfo] = {}
     for decl in program.declarations:
-        if not isinstance(decl, ast.TypeDecl):
+        if isinstance(decl, ast.TypeDecl):
+            if decl.name in out:
+                raise TypeCheckError(f"Duplicate type declaration: {decl.name}")
+
+            local_vars = {name: TVar(f"{decl.name}.{name}") for name in decl.type_params}
+            data_t: Type = TConst(decl.name)
+            for param in decl.type_params:
+                data_t = TApp(data_t, local_vars[param])
+
+            ctors: dict[str, Type] = {}
+            for ctor in decl.constructors:
+                ctor_t = data_t
+                args = [parse_type_expr(arg, local_vars) for arg in ctor.args]
+                for arg in reversed(args):
+                    ctor_t = TFunc(arg, ctor_t)
+                ctors[ctor.name] = ctor_t
+
+            out[decl.name] = TypeDeclInfo(params=decl.type_params, constructors=ctors)
             continue
-        if decl.name in out:
-            raise TypeCheckError(f"Duplicate type declaration: {decl.name}")
-
-        local_vars = {name: TVar(f"{decl.name}.{name}") for name in decl.type_params}
-        data_t: Type = TConst(decl.name)
-        for param in decl.type_params:
-            data_t = TApp(data_t, local_vars[param])
-
-        ctors: dict[str, Type] = {}
-        for ctor in decl.constructors:
-            ctor_t = data_t
-            args = [parse_type_expr(arg, local_vars) for arg in ctor.args]
-            for arg in reversed(args):
-                ctor_t = TFunc(arg, ctor_t)
-            ctors[ctor.name] = ctor_t
-
-        out[decl.name] = TypeDeclInfo(params=decl.type_params, constructors=ctors)
+        if isinstance(decl, ast.RecordDecl):
+            if decl.name in out:
+                raise TypeCheckError(f"Duplicate type declaration: {decl.name}")
+            local_vars = {name: TVar(f"{decl.name}.{name}") for name in decl.type_params}
+            fields: dict[str, Type] = {}
+            for field_decl in decl.fields:
+                if field_decl.name in fields:
+                    raise tc_error(f"Duplicate record field {field_decl.name}", field_decl)
+                fields[field_decl.name] = parse_type_expr(field_decl.type_expr, local_vars)
+            out[decl.name] = TypeDeclInfo(params=decl.type_params, constructors={}, fields=fields)
     return out
 
 

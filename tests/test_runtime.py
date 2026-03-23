@@ -50,6 +50,22 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "7")
 
+    def test_run_record_literal_and_get(self) -> None:
+        src = """
+        type User = { name: String, age: Int }
+
+        let user = User { name = "Ada", age = 36 }
+
+        fn main() -> Unit !{IO} =
+          print(get user name)
+        """
+        program = parse(src)
+        typecheck_program(program)
+
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Ada")
+
     def test_top_level_let_evaluates_in_order(self) -> None:
         src = """
         let a = 1
