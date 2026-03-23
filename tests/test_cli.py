@@ -22,6 +22,7 @@ from sprout.analysis_adapter import (
     run_analysis_adapter_session,
     run_analysis_stdio_session,
 )
+from sprout.analysis_backend import AnalysisBackend
 from sprout.analysis_backend_python import python_backend_type_of_in_source
 from sprout.analysis_bridge import (
     analysis_service_env_var_name,
@@ -175,6 +176,49 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), response_ok(None))
+
+    def test_analysis_adapter_session_accepts_injected_backend(self) -> None:
+        class FakeBackend(AnalysisBackend):
+            def check_source(self, module_source: str) -> None:
+                raise AssertionError("unexpected check_source call")
+
+            def type_of_in_source(self, module_source: str, expr: str) -> str:
+                self.seen = (module_source, expr)
+                return "Fake"
+
+            def declared_names_in_source(self, module_source: str) -> list[str]:
+                raise AssertionError("unexpected declared_names_in_source call")
+
+            def exported_names_in_source(self, module_source: str) -> list[str]:
+                raise AssertionError("unexpected exported_names_in_source call")
+
+            def symbol_inventory_in_source(self, module_source: str) -> tuple[list[str], list[str], list[str]]:
+                raise AssertionError("unexpected symbol_inventory_in_source call")
+
+            def diagnostics_in_source(self, module_source: str) -> list[tuple[str, int, int]]:
+                raise AssertionError("unexpected diagnostics_in_source call")
+
+            def symbol_locations_in_source(self, module_source: str) -> list[tuple[str, str, int, int]]:
+                raise AssertionError("unexpected symbol_locations_in_source call")
+
+            def instances_in_source(self, module_source: str, query: str) -> tuple[str, list[str]]:
+                raise AssertionError("unexpected instances_in_source call")
+
+            def eval_expr_in_source(self, module_source: str, expr: str) -> tuple[str, ...]:
+                raise AssertionError("unexpected eval_expr_in_source call")
+
+            def complete_in_state(self, line_buffer: str, imports: list[str], declarations: list[str]) -> tuple[str, list[str]]:
+                raise AssertionError("unexpected complete_in_state call")
+
+        fake_backend = FakeBackend()
+        stdin = StringIO(json.dumps(request_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1")))
+        stdout = StringIO()
+
+        exit_code = run_analysis_adapter_session(stdin=stdin, stdout=stdout, backend=fake_backend)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), response_ok("Fake"))
+        self.assertEqual(fake_backend.seen, ("module app.repl\n\nlet local = 41", "local + 1"))
 
     def test_analysis_stdio_type_of_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
