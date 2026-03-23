@@ -150,8 +150,8 @@ Current experimental runtime progress:
    `Err`, `Ok String`, and `Ok (Vec String)` result construction. The
    `instances` bridge path now also uses a shared `(String, Vec String)` tuple
    decoder instead of open-coded response shaping in `sprout.cli`, and the
-   active REPL completion path now does the same for its `(prefix, matches)`
-   tuple decoder.
+   active REPL completion and symbol-inventory paths now do the same for their
+   `(prefix, matches)` and `(declared, imported, exported)` tuple decoders.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

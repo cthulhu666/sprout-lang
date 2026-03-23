@@ -361,4 +361,46 @@ static long long sprout_analysis_completion_tuple_or_fail(
   SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)tuple;
 }
+
+static long long sprout_analysis_ok_inventory_result(
+  VectorVal* declared,
+  VectorVal* imported,
+  VectorVal* exported
+) {
+  if (declared == NULL || imported == NULL || exported == NULL) {
+    return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  }
+  long long rooted_declared = (long long)(uintptr_t)declared;
+  long long rooted_imported = (long long)(uintptr_t)imported;
+  long long rooted_exported = (long long)(uintptr_t)exported;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_declared);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_imported);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_exported);
+  long long declared_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_declared);
+  long long imported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_imported);
+  long long exported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_exported);
+  SPROUT_GC_PUSH_I64_LOCAL(declared_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(imported_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(exported_vec);
+  void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
+  uintptr_t* words = (uintptr_t*)tuple;
+  words[0] = (uintptr_t)declared_vec;
+  words[1] = (uintptr_t)imported_vec;
+  words[2] = (uintptr_t)exported_vec;
+  SPROUT_GC_POP_LOCALS(6);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)tuple);
+}
+
+static long long sprout_analysis_ok_inventory_from_response(
+  char* response,
+  const char* declared_key,
+  const char* imported_key,
+  const char* exported_key
+) {
+  VectorVal* declared = sprout_json_extract_string_array(response, declared_key);
+  VectorVal* imported = sprout_json_extract_string_array(response, imported_key);
+  VectorVal* exported = sprout_json_extract_string_array(response, exported_key);
+  free(response);
+  return sprout_analysis_ok_inventory_result(declared, imported, exported);
+}
 """

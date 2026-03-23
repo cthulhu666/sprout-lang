@@ -1450,32 +1450,12 @@ static long long sprout_analysis_inventory_result(const char* op, const char* mo
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
-    VectorVal* declared = sprout_json_extract_string_array(response, "declared");
-    VectorVal* imported = sprout_json_extract_string_array(response, "imported");
-    VectorVal* exported = sprout_json_extract_string_array(response, "exported");
-    free(response);
-    if (declared == NULL || imported == NULL || exported == NULL) {
-      return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-    }
-    long long rooted_declared = (long long)(uintptr_t)declared;
-    long long rooted_imported = (long long)(uintptr_t)imported;
-    long long rooted_exported = (long long)(uintptr_t)exported;
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_declared);
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_imported);
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_exported);
-    long long declared_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_declared);
-    long long imported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_imported);
-    long long exported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_exported);
-    SPROUT_GC_PUSH_I64_LOCAL(declared_vec);
-    SPROUT_GC_PUSH_I64_LOCAL(imported_vec);
-    SPROUT_GC_PUSH_I64_LOCAL(exported_vec);
-    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
-    uintptr_t* words = (uintptr_t*)tuple;
-    words[0] = (uintptr_t)declared_vec;
-    words[1] = (uintptr_t)imported_vec;
-    words[2] = (uintptr_t)exported_vec;
-    SPROUT_GC_POP_LOCALS(6);
-    return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)tuple);
+    return sprout_analysis_ok_inventory_from_response(
+      response,
+      "declared",
+      "imported",
+      "exported"
+    );
   }
   return sprout_analysis_error_from_response(response);
 }
