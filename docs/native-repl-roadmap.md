@@ -129,8 +129,9 @@ Current experimental runtime progress:
    native frontend can start and quit without a live `analysis-service`, and
    the subprocess is now only contacted on the first snapshot-backed action.
    The Python module is also reduced to the transport adapter over a reusable
-   dispatcher seam, so the next replacement step can target service execution
-   without reworking the request/response protocol again.
+   dispatcher seam plus a shared JSON-line protocol/session loop, so the next
+   replacement step can target service execution without reworking the
+   request/response protocol again.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

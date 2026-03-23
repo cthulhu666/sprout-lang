@@ -205,7 +205,8 @@ REPL frontend is now verified by compiling and running
 `repl --native` launcher now exposes that path experimentally while still using
 the Python `analysis-service` bridge underneath. That module is now only the
 JSON/stdin/stdout adapter over the reusable dispatcher in
-[sprout/analysis_dispatch.py](./sprout/analysis_dispatch.py), which is the
+[sprout/analysis_dispatch.py](./sprout/analysis_dispatch.py) and protocol loop
+in [sprout/analysis_protocol.py](./sprout/analysis_protocol.py), which is the
 intended replacement seam for a future non-Python native service. The launcher
 reuses both a cached
 compiled REPL binary between launches and one long-lived analysis-service

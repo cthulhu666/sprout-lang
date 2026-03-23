@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 from sprout import cli as sprout_cli
 from sprout.analysis_dispatch import dispatch_request
+from sprout.analysis_protocol import run_json_service_session
 from sprout.analysis_service import cmd_analysis_service
 
 
@@ -222,6 +223,22 @@ class CliTests(unittest.TestCase):
                 {"ok": True, "value": None},
                 {"ok": True, "value": "Int"},
             ],
+        )
+
+    def test_analysis_protocol_reports_invalid_line_delimited_json(self) -> None:
+        stdin = StringIO("{not json}\n")
+        stdout = StringIO()
+
+        status = run_json_service_session(
+            stdin=stdin,
+            stdout=stdout,
+            dispatch=dispatch_request,
+        )
+
+        self.assertEqual(status, 1)
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"error": "invalid request json: Expecting property name enclosed in double quotes", "ok": False},
         )
 
     def test_analysis_dispatch_reports_structured_unknown_operation(self) -> None:
