@@ -1402,21 +1402,7 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
-    char* query_type = sprout_json_extract_string(response, "query_type");
-    VectorVal* matches = sprout_json_extract_string_array(response, "matches");
-    free(response);
-    if (query_type == NULL || matches == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-    long long rooted_matches = (long long)(uintptr_t)matches;
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
-    long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
-    SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
-    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
-    uintptr_t* words = (uintptr_t*)tuple;
-    words[0] = (uintptr_t)query_type;
-    words[1] = (uintptr_t)matches_vec;
-    SPROUT_GC_POP_LOCALS(2);
-    long long pair = (long long)(uintptr_t)tuple;
-    return sprout_make1(find_ctor_tag_by_name("Ok"), pair);
+    return sprout_analysis_ok_string_vec_pair_from_response(response, "query_type", "matches");
   }
   return sprout_analysis_error_from_response(response);
 }

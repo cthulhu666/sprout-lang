@@ -311,4 +311,30 @@ static long long sprout_analysis_ok_vec_string_result_from_response(char* respon
   free(response);
   return sprout_analysis_ok_vec_string_result(items);
 }
+
+static long long sprout_analysis_ok_string_vec_pair_result(char* label, VectorVal* items) {
+  if (label == NULL || items == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  long long rooted_items = (long long)(uintptr_t)items;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
+  long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
+  SPROUT_GC_PUSH_I64_LOCAL(items_vec);
+  void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+  uintptr_t* words = (uintptr_t*)tuple;
+  words[0] = (uintptr_t)label;
+  words[1] = (uintptr_t)items_vec;
+  SPROUT_GC_POP_LOCALS(2);
+  long long pair = (long long)(uintptr_t)tuple;
+  return sprout_make1(find_ctor_tag_by_name("Ok"), pair);
+}
+
+static long long sprout_analysis_ok_string_vec_pair_from_response(
+  char* response,
+  const char* string_key,
+  const char* array_key
+) {
+  char* label = sprout_json_extract_string(response, string_key);
+  VectorVal* items = sprout_json_extract_string_array(response, array_key);
+  free(response);
+  return sprout_analysis_ok_string_vec_pair_result(label, items);
+}
 """
