@@ -18,6 +18,14 @@ from unittest.mock import patch
 
 from sprout import cli as sprout_cli
 from sprout.analysis_bridge import default_analysis_service_cmd
+from sprout.analysis_contract import (
+    OP_CHECK_SOURCE,
+    request_check_source,
+    request_complete_in_state,
+    request_eval_expr_in_source,
+    request_instances_in_source,
+    request_type_of_in_source,
+)
 from sprout.analysis_dispatch import dispatch_request
 from sprout.analysis_protocol import run_json_service_session
 from sprout.analysis_stdio import cmd_analysis_stdio
@@ -61,12 +69,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input=json.dumps(
-                {
-                    "op": "check_source",
-                    "module_source": "module app.repl\n\nlet local = 41",
-                }
-            ),
+            input=json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -78,12 +81,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input=json.dumps(
-                {
-                    "op": "check_source",
-                    "module_source": "module app.repl\n\nlet local = 41",
-                }
-            ),
+            input=json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -95,12 +93,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input=json.dumps(
-                {
-                    "op": "check_source",
-                    "module_source": "module app.repl\n\nlet local = 41",
-                }
-            ),
+            input=json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -112,13 +105,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input=json.dumps(
-                {
-                    "op": "type_of_in_source",
-                    "module_source": "module app.repl\n\nlet local = 41",
-                    "expr": "local + 1",
-                }
-            ),
+            input=json.dumps(request_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1")),
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -130,13 +117,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input=json.dumps(
-                {
-                    "op": "instances_in_source",
-                    "module_source": "module app.repl",
-                    "query": "List Int",
-                }
-            ),
+            input=json.dumps(request_instances_in_source("module app.repl", "List Int")),
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -157,13 +138,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input=json.dumps(
-                {
-                    "op": "eval_expr_in_source",
-                    "module_source": "module app.repl\n\nlet local = 41",
-                    "expr": "local + 1",
-                }
-            ),
+            input=json.dumps(request_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1")),
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -175,14 +150,7 @@ class CliTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
-            input=json.dumps(
-                {
-                    "op": "complete_in_state",
-                    "line_buffer": "fr",
-                    "imports": ["import stdlib.bytes (from_string)"],
-                    "declarations": ["let answer = 41"],
-                }
-            ),
+            input=json.dumps(request_complete_in_state("fr", ["import stdlib.bytes (from_string)"], ["let answer = 41"])),
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
@@ -225,8 +193,8 @@ class CliTests(unittest.TestCase):
         stdin = StringIO(
             "\n".join(
                 [
-                    json.dumps({"op": "check_source", "module_source": "module app.repl\n\nlet local = 41"}),
-                    json.dumps({"op": "type_of_in_source", "module_source": "module app.repl\n\nlet local = 41", "expr": "local"}),
+                    json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
+                    json.dumps(request_type_of_in_source("module app.repl\n\nlet local = 41", "local")),
                 ]
             )
             + "\n"
@@ -248,8 +216,8 @@ class CliTests(unittest.TestCase):
         stdin = StringIO(
             "\n".join(
                 [
-                    json.dumps({"op": "check_source", "module_source": "module app.repl\n\nlet local = 41"}),
-                    json.dumps({"op": "type_of_in_source", "module_source": "module app.repl\n\nlet local = 41", "expr": "local"}),
+                    json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
+                    json.dumps(request_type_of_in_source("module app.repl\n\nlet local = 41", "local")),
                 ]
             )
             + "\n"
@@ -291,15 +259,14 @@ class CliTests(unittest.TestCase):
 
     def test_analysis_dispatch_complete_in_state_returns_structured_success(self) -> None:
         self.assertEqual(
-            dispatch_request(
-                {
-                    "op": "complete_in_state",
-                    "line_buffer": "fr",
-                    "imports": ["import stdlib.bytes (from_string)"],
-                    "declarations": ["let answer = 41"],
-                }
-            ),
+            dispatch_request(request_complete_in_state("fr", ["import stdlib.bytes (from_string)"], ["let answer = 41"])),
             {"ok": True, "value": {"matches": ["from_string"], "prefix": "fr"}},
+        )
+
+    def test_analysis_contract_check_source_request_uses_canonical_op_name(self) -> None:
+        self.assertEqual(
+            request_check_source("module app.repl"),
+            {"op": OP_CHECK_SOURCE, "module_source": "module app.repl"},
         )
 
     def test_fmt_rewrites_file_in_place(self) -> None:

@@ -10,6 +10,18 @@ import sys
 import tempfile
 
 from .analysis_bridge import default_analysis_service_cmd
+from .analysis_contract import (
+    OP_CHECK_SOURCE,
+    OP_COMPLETE_IN_STATE,
+    OP_DECLARED_NAMES_IN_SOURCE,
+    OP_DIAGNOSTICS_IN_SOURCE,
+    OP_EVAL_EXPR_IN_SOURCE,
+    OP_EXPORTED_NAMES_IN_SOURCE,
+    OP_INSTANCES_IN_SOURCE,
+    OP_SYMBOL_INVENTORY_IN_SOURCE,
+    OP_SYMBOL_LOCATIONS_IN_SOURCE,
+    OP_TYPE_OF_IN_SOURCE,
+)
 from .analysis_service import cmd_analysis_service
 from .analysis_stdio import cmd_analysis_stdio
 from .ast import to_dict
@@ -1874,7 +1886,7 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
   snprintf(
     request,
     request_len + 1,
-    "{\\\"op\\\":\\\"complete_in_state\\\",\\\"line_buffer\\\":\\\"%s\\\",\\\"imports\\\":%s,\\\"declarations\\\":%s}\\n",
+    "{\\\"op\\\":\\\"__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__\\\",\\\"line_buffer\\\":\\\"%s\\\",\\\"imports\\\":%s,\\\"declarations\\\":%s}\\n",
     escaped_line_buffer,
     imports_json,
     declarations_json
@@ -1926,40 +1938,40 @@ long long repl_eval_expr(const char* source) {
   return 0;
 }
 long long repl_eval_expr_in_source(const char* module_source, const char* expr) {
-  return sprout_analysis_vec_string_result("eval_expr_in_source", module_source, expr);
+  return sprout_analysis_vec_string_result("__SPROUT_ANALYSIS_OP_EVAL_EXPR_IN_SOURCE__", module_source, expr);
 }
 long long repl_check_source(const char* module_source) {
-  return sprout_analysis_check_source_result("check_source", module_source);
+  return sprout_analysis_check_source_result("__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", module_source);
 }
 long long analysis_check_source(const char* module_source) {
-  return sprout_analysis_check_source_result("check_source", module_source);
+  return sprout_analysis_check_source_result("__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", module_source);
 }
 long long repl_declared_names_in_source(const char* module_source) {
-  return sprout_analysis_string_array_result("declared_names_in_source", module_source);
+  return sprout_analysis_string_array_result("__SPROUT_ANALYSIS_OP_DECLARED_NAMES_IN_SOURCE__", module_source);
 }
 long long analysis_declared_names_in_source(const char* module_source) {
-  return sprout_analysis_string_array_result("declared_names_in_source", module_source);
+  return sprout_analysis_string_array_result("__SPROUT_ANALYSIS_OP_DECLARED_NAMES_IN_SOURCE__", module_source);
 }
 long long repl_exported_names_in_source(const char* module_source) {
-  return sprout_analysis_string_array_result("exported_names_in_source", module_source);
+  return sprout_analysis_string_array_result("__SPROUT_ANALYSIS_OP_EXPORTED_NAMES_IN_SOURCE__", module_source);
 }
 long long analysis_exported_names_in_source(const char* module_source) {
-  return sprout_analysis_string_array_result("exported_names_in_source", module_source);
+  return sprout_analysis_string_array_result("__SPROUT_ANALYSIS_OP_EXPORTED_NAMES_IN_SOURCE__", module_source);
 }
 long long repl_symbol_inventory_in_source(const char* module_source) {
-  return sprout_analysis_inventory_result("symbol_inventory_in_source", module_source);
+  return sprout_analysis_inventory_result("__SPROUT_ANALYSIS_OP_SYMBOL_INVENTORY_IN_SOURCE__", module_source);
 }
 long long analysis_symbol_inventory_in_source(const char* module_source) {
-  return sprout_analysis_inventory_result("symbol_inventory_in_source", module_source);
+  return sprout_analysis_inventory_result("__SPROUT_ANALYSIS_OP_SYMBOL_INVENTORY_IN_SOURCE__", module_source);
 }
 long long analysis_symbol_locations_in_source(const char* module_source) {
-  return sprout_analysis_symbol_locations_result("symbol_locations_in_source", module_source);
+  return sprout_analysis_symbol_locations_result("__SPROUT_ANALYSIS_OP_SYMBOL_LOCATIONS_IN_SOURCE__", module_source);
 }
 long long repl_diagnostics_in_source(const char* module_source) {
-  return sprout_analysis_diagnostics_result("diagnostics_in_source", module_source);
+  return sprout_analysis_diagnostics_result("__SPROUT_ANALYSIS_OP_DIAGNOSTICS_IN_SOURCE__", module_source);
 }
 long long analysis_diagnostics_in_source(const char* module_source) {
-  return sprout_analysis_diagnostics_result("diagnostics_in_source", module_source);
+  return sprout_analysis_diagnostics_result("__SPROUT_ANALYSIS_OP_DIAGNOSTICS_IN_SOURCE__", module_source);
 }
 long long repl_type_of(const char* source) {
   (void)source;
@@ -1967,10 +1979,10 @@ long long repl_type_of(const char* source) {
   return 0;
 }
 long long repl_type_of_in_source(const char* module_source, const char* expr) {
-  return sprout_analysis_type_result("type_of_in_source", module_source, expr);
+  return sprout_analysis_type_result("__SPROUT_ANALYSIS_OP_TYPE_OF_IN_SOURCE__", module_source, expr);
 }
 long long analysis_type_of_in_source(const char* module_source, const char* expr) {
-  return sprout_analysis_type_result("type_of_in_source", module_source, expr);
+  return sprout_analysis_type_result("__SPROUT_ANALYSIS_OP_TYPE_OF_IN_SOURCE__", module_source, expr);
 }
 long long repl_instances(const char* source) {
   (void)source;
@@ -1978,10 +1990,10 @@ long long repl_instances(const char* source) {
   return 0;
 }
 long long repl_instances_in_source(const char* module_source, const char* type_expr_source) {
-  return sprout_analysis_instances_result("instances_in_source", module_source, type_expr_source);
+  return sprout_analysis_instances_result("__SPROUT_ANALYSIS_OP_INSTANCES_IN_SOURCE__", module_source, type_expr_source);
 }
 long long analysis_instances_in_source(const char* module_source, const char* type_expr_source) {
-  return sprout_analysis_instances_result("instances_in_source", module_source, type_expr_source);
+  return sprout_analysis_instances_result("__SPROUT_ANALYSIS_OP_INSTANCES_IN_SOURCE__", module_source, type_expr_source);
 }
 long long repl_complete(const char* source) {
   (void)source;
@@ -3713,7 +3725,28 @@ long long tcp_echo_serve(long long port, long long max_connections) {
   tcp_close_listener(listener);
   return 0;
 }
-""".replace('"__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__"', json.dumps(embedded_analysis_service_cmd))
+""".replace('"__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__"', json.dumps(embedded_analysis_service_cmd)
+).replace(
+    "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", OP_CHECK_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_TYPE_OF_IN_SOURCE__", OP_TYPE_OF_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_DECLARED_NAMES_IN_SOURCE__", OP_DECLARED_NAMES_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_EXPORTED_NAMES_IN_SOURCE__", OP_EXPORTED_NAMES_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_SYMBOL_INVENTORY_IN_SOURCE__", OP_SYMBOL_INVENTORY_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_DIAGNOSTICS_IN_SOURCE__", OP_DIAGNOSTICS_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_SYMBOL_LOCATIONS_IN_SOURCE__", OP_SYMBOL_LOCATIONS_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_INSTANCES_IN_SOURCE__", OP_INSTANCES_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_EVAL_EXPR_IN_SOURCE__", OP_EVAL_EXPR_IN_SOURCE
+).replace(
+    "__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__", OP_COMPLETE_IN_STATE
+)
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
         tmp_c.write(runtime_c)
         c_path = Path(tmp_c.name)

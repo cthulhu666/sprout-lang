@@ -12,6 +12,18 @@ from .analysis import (
     symbol_locations_in_source,
     symbol_inventory_in_source,
 )
+from .analysis_contract import (
+    OP_CHECK_SOURCE,
+    OP_COMPLETE_IN_STATE,
+    OP_DECLARED_NAMES_IN_SOURCE,
+    OP_DIAGNOSTICS_IN_SOURCE,
+    OP_EVAL_EXPR_IN_SOURCE,
+    OP_EXPORTED_NAMES_IN_SOURCE,
+    OP_INSTANCES_IN_SOURCE,
+    OP_SYMBOL_INVENTORY_IN_SOURCE,
+    OP_SYMBOL_LOCATIONS_IN_SOURCE,
+    OP_TYPE_OF_IN_SOURCE,
+)
 from .interpreter import RuntimeError
 from .module_loader import ModuleLoadError
 from .parser import ParseError
@@ -65,21 +77,21 @@ def dispatch_request(request: object) -> dict[str, object]:
         return _error("analysis service request must be a JSON object")
     op = request.get("op")
     try:
-        if op == "check_source":
+        if op == OP_CHECK_SOURCE:
             check_source(_require_string(request, "module_source"))
             return _ok(None)
-        if op == "type_of_in_source":
+        if op == OP_TYPE_OF_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             expr = _require_string(request, "expr")
             return _ok(infer_type_in_source(module_source, expr))
-        if op == "declared_names_in_source":
+        if op == OP_DECLARED_NAMES_IN_SOURCE:
             return _ok(declared_names_in_source(_require_string(request, "module_source")))
-        if op == "exported_names_in_source":
+        if op == OP_EXPORTED_NAMES_IN_SOURCE:
             return _ok(exported_names_in_source(_require_string(request, "module_source")))
-        if op == "symbol_inventory_in_source":
+        if op == OP_SYMBOL_INVENTORY_IN_SOURCE:
             declared, imported, exported = symbol_inventory_in_source(_require_string(request, "module_source"))
             return _ok({"declared": declared, "imported": imported, "exported": exported})
-        if op == "diagnostics_in_source":
+        if op == OP_DIAGNOSTICS_IN_SOURCE:
             diagnostics = diagnostics_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
@@ -88,7 +100,7 @@ def dispatch_request(request: object) -> dict[str, object]:
                     "columns": [column for _, _, column in diagnostics],
                 }
             )
-        if op == "symbol_locations_in_source":
+        if op == OP_SYMBOL_LOCATIONS_IN_SOURCE:
             locations = symbol_locations_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
@@ -98,16 +110,16 @@ def dispatch_request(request: object) -> dict[str, object]:
                     "columns": [column for _, _, _, column in locations],
                 }
             )
-        if op == "instances_in_source":
+        if op == OP_INSTANCES_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             query = _require_string(request, "query")
             query_type, matches = instances_in_source(module_source, query)
             return _ok({"matches": matches, "query_type": query_type})
-        if op == "eval_expr_in_source":
+        if op == OP_EVAL_EXPR_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             expr = _require_string(request, "expr")
             return _ok(list(eval_expression_lines_in_source(module_source, expr)))
-        if op == "complete_in_state":
+        if op == OP_COMPLETE_IN_STATE:
             line_buffer = _require_string(request, "line_buffer")
             imports = _require_string_list(request, "imports")
             declarations = _require_string_list(request, "declarations")
