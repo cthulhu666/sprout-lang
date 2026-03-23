@@ -151,7 +151,8 @@ Current experimental runtime progress:
    `instances` bridge path now also uses a shared `(String, Vec String)` tuple
    decoder instead of open-coded response shaping in `sprout.cli`, and the
    active REPL completion and symbol-inventory paths now do the same for their
-   `(prefix, matches)` and `(declared, imported, exported)` tuple decoders.
+   `(prefix, matches)` and `(declared, imported, exported)` tuple decoders, and
+   diagnostics now uses a shared `Vec (String, Int, Int)` decoder as well.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

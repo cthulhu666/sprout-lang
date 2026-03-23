@@ -1469,38 +1469,13 @@ static long long sprout_analysis_diagnostics_result(const char* op, const char* 
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
-    VectorVal* messages = sprout_json_extract_string_array(response, "messages");
-    long long line_count = 0;
-    long long column_count = 0;
-    long long* lines = sprout_json_extract_int_array(response, "lines", &line_count);
-    long long* columns = sprout_json_extract_int_array(response, "columns", &column_count);
-    free(response);
-    if (messages == NULL || line_count != messages->len || column_count != messages->len || (messages->len > 0 && (lines == NULL || columns == NULL))) {
-      if (lines != NULL) free(lines);
-      if (columns != NULL) free(columns);
-      sprout_builtin_fail_detail(op, "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-    }
-    VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
-    long long rooted_messages = (long long)(uintptr_t)messages;
-    long long rooted_out = (long long)(uintptr_t)out;
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_messages);
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
-    out->len = messages->len;
-    out->cap = messages->len;
-    out->data = messages->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)messages->len, "analysis service: out of memory");
-    for (long long i = 0; i < messages->len; i++) {
-      void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
-      uintptr_t* words = (uintptr_t*)tuple;
-      words[0] = (uintptr_t)messages->data[i];
-      words[1] = (uintptr_t)lines[i];
-      words[2] = (uintptr_t)columns[i];
-      out->data[i] = (long long)(uintptr_t)tuple;
-    }
-    if (lines != NULL) free(lines);
-    if (columns != NULL) free(columns);
-    long long out_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_out);
-    SPROUT_GC_POP_LOCALS(2);
-    return out_vec;
+    return sprout_analysis_diagnostics_vec_or_fail(
+      op,
+      response,
+      "messages",
+      "lines",
+      "columns"
+    );
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
