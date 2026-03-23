@@ -19,6 +19,7 @@ from unittest.mock import patch
 from sprout import cli as sprout_cli
 from sprout.analysis_dispatch import dispatch_request
 from sprout.analysis_protocol import run_json_service_session
+from sprout.analysis_stdio import cmd_analysis_stdio
 from sprout.analysis_service import cmd_analysis_service
 
 
@@ -70,7 +71,24 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
 
-    def test_analysis_service_module_check_source_returns_structured_success(self) -> None:
+    def test_analysis_stdio_module_check_source_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.analysis_stdio"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(
+                {
+                    "op": "check_source",
+                    "module_source": "module app.repl\n\nlet local = 41",
+                }
+            ),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
+
+    def test_analysis_service_module_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.analysis_service"],
             check=False,
@@ -87,9 +105,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
 
-    def test_analysis_service_type_of_in_source_returns_structured_success(self) -> None:
+    def test_analysis_stdio_type_of_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.analysis_service"],
+            [sys.executable, "-m", "sprout.analysis_stdio"],
             check=False,
             capture_output=True,
             text=True,
@@ -105,9 +123,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), {"ok": True, "value": "Int"})
 
-    def test_analysis_service_instances_in_source_returns_structured_success(self) -> None:
+    def test_analysis_stdio_instances_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.analysis_service"],
+            [sys.executable, "-m", "sprout.analysis_stdio"],
             check=False,
             capture_output=True,
             text=True,
@@ -132,9 +150,9 @@ class CliTests(unittest.TestCase):
             },
         )
 
-    def test_analysis_service_eval_expr_in_source_returns_structured_success(self) -> None:
+    def test_analysis_stdio_eval_expr_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.analysis_service"],
+            [sys.executable, "-m", "sprout.analysis_stdio"],
             check=False,
             capture_output=True,
             text=True,
@@ -150,9 +168,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), {"ok": True, "value": ["42"]})
 
-    def test_analysis_service_complete_in_state_returns_structured_success(self) -> None:
+    def test_analysis_stdio_complete_in_state_returns_structured_success(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.analysis_service"],
+            [sys.executable, "-m", "sprout.analysis_stdio"],
             check=False,
             capture_output=True,
             text=True,
@@ -172,9 +190,9 @@ class CliTests(unittest.TestCase):
             {"ok": True, "value": {"matches": ["from_string"], "prefix": "fr"}},
         )
 
-    def test_analysis_service_reports_unknown_operation(self) -> None:
+    def test_analysis_stdio_reports_unknown_operation(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.analysis_service"],
+            [sys.executable, "-m", "sprout.analysis_stdio"],
             check=False,
             capture_output=True,
             text=True,
@@ -215,6 +233,29 @@ class CliTests(unittest.TestCase):
         stdout = StringIO()
 
         status = cmd_analysis_service(stdin=stdin, stdout=stdout)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            [json.loads(line) for line in stdout.getvalue().splitlines()],
+            [
+                {"ok": True, "value": None},
+                {"ok": True, "value": "Int"},
+            ],
+        )
+
+    def test_analysis_stdio_processes_multiple_line_delimited_requests(self) -> None:
+        stdin = StringIO(
+            "\n".join(
+                [
+                    json.dumps({"op": "check_source", "module_source": "module app.repl\n\nlet local = 41"}),
+                    json.dumps({"op": "type_of_in_source", "module_source": "module app.repl\n\nlet local = 41", "expr": "local"}),
+                ]
+            )
+            + "\n"
+        )
+        stdout = StringIO()
+
+        status = cmd_analysis_stdio(stdin=stdin, stdout=stdout)
 
         self.assertEqual(status, 0)
         self.assertEqual(
@@ -295,7 +336,7 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
             env = dict(os.environ)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_service"
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio"
             run_proc = subprocess.run(
                 [str(out)],
                 check=False,
@@ -490,7 +531,7 @@ class CliTests(unittest.TestCase):
     def test_repl_native_interactive_tab_completion_is_case_insensitive_for_imported_namespaces(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_service")
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio")
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -522,7 +563,7 @@ class CliTests(unittest.TestCase):
     def test_repl_native_interactive_block_mode_uses_distinct_prompt(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_service")
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio")
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -553,7 +594,7 @@ class CliTests(unittest.TestCase):
     def test_repl_native_interactive_up_arrow_recalls_history(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_service")
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio")
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -588,7 +629,7 @@ class CliTests(unittest.TestCase):
             cache_dir = Path(tmp) / "cache"
             env = dict(os.environ)
             env["SPROUT_NATIVE_REPL_CACHE_DIR"] = str(cache_dir)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_service"
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio"
 
             first = subprocess.run(
                 [sys.executable, "-m", "sprout.cli", "repl", "--native"],

@@ -10,6 +10,7 @@ import sys
 import tempfile
 
 from .analysis_service import cmd_analysis_service
+from .analysis_stdio import cmd_analysis_stdio
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .formatter import format_source, lint_source
@@ -155,7 +156,7 @@ def cmd_compile(
     with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False, encoding="utf-8") as tmp:
         tmp.write(llvm_ir)
         ll_path = Path(tmp.name)
-    default_analysis_service_cmd = f"{shlex.quote(sys.executable)} -m sprout.analysis_service"
+    default_analysis_service_cmd = f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio"
     runtime_c = """#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -3768,6 +3769,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="emit native binary with clang (default writes LLVM .ll text)",
     )
     sub.add_parser("analysis-service", help=argparse.SUPPRESS)
+    sub.add_parser("analysis-stdio", help=argparse.SUPPRESS)
     p_repl = sub.add_parser("repl", help="start a simple interactive Sprout REPL")
     p_repl.add_argument(
         "--native",
@@ -3812,6 +3814,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "analysis-service":
             return cmd_analysis_service()
+        if args.command == "analysis-stdio":
+            return cmd_analysis_stdio()
         if args.command == "repl":
             return cmd_repl(native=args.native)
     except (

@@ -87,13 +87,14 @@ Current experimental runtime progress:
 5. The current native-focused milestone is making the active frontend services
    callable from compiled clients without depending on Python REPL internals.
 6. The canonical native-REPL subprocess boundary is now
-   `python -m sprout.analysis_service` as the
+   `python -m sprout.analysis_stdio` as the
    first explicit bridge for snapshot-oriented `check_source`,
    `declared_names_in_source`, `exported_names_in_source`,
    `symbol_inventory_in_source`, `diagnostics_in_source`,
    `type_of_in_source`, `instances_in_source`, and `eval_expr_in_source`
    queries, plus explicit-state completion. The hidden
-   `sprout.cli analysis-service` command remains only as a compatibility wrapper.
+   `sprout.analysis_service` and `sprout.cli analysis-service` remain only as
+   compatibility wrappers.
 7. Native compiled programs now use that bridge for `repl_check_source(...)`,
    `analysis_check_source(...)`, `repl_declared_names_in_source(...)`,
    `analysis_declared_names_in_source(...)`,

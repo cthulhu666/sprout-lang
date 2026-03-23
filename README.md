@@ -178,7 +178,7 @@ These are implementation hooks for the Sprout-hosted REPL frontend. They are
 still mostly interpreter-backed. The current near-term priority is making that
 bridge native-capable rather than making it self-hosted. The canonical
 analysis-service subprocess boundary is now
-`python -m sprout.analysis_service` for snapshot `check_source` and
+`python -m sprout.analysis_stdio` for snapshot `check_source` and
 `declared_names_in_source` / `exported_names_in_source` /
 `symbol_inventory_in_source` / `diagnostics_in_source` /
 `type_of_in_source` / `instances_in_source` / `eval_expr_in_source` queries,
@@ -203,7 +203,8 @@ errors in native binaries. End-to-end native execution of the current Sprout
 REPL frontend is now verified by compiling and running
 `examples/repl_hosted.sprout` with that bridge in place, and the user-facing
 `repl --native` launcher now exposes that path experimentally while still using
-the Python `analysis-service` bridge underneath. That module is now only the
+the Python `analysis-service` bridge underneath. The canonical stdio adapter is
+[sprout/analysis_stdio.py](./sprout/analysis_stdio.py), and that module is now only the
 JSON/stdin/stdout adapter over the reusable dispatcher in
 [sprout/analysis_dispatch.py](./sprout/analysis_dispatch.py) and protocol loop
 in [sprout/analysis_protocol.py](./sprout/analysis_protocol.py), which is the
@@ -212,7 +213,8 @@ reuses both a cached
 compiled REPL binary between launches and one long-lived analysis-service
 subprocess per native program run, with one automatic restart for replay-safe
 snapshot queries if that child dies mid-session. The hidden
-`sprout.cli analysis-service` command remains only as a compatibility wrapper.
+`sprout.analysis_service` and `sprout.cli analysis-service` remain only as
+compatibility wrappers.
 Native programs can override the service command via
 `SPROUT_ANALYSIS_SERVICE_CMD`; if that command is invalid, native REPL and
 native snapshot-query failures now point back to that env var explicitly.
