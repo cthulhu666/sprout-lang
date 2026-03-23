@@ -22,6 +22,7 @@ from sprout.analysis_adapter import (
     run_analysis_adapter_session,
     run_analysis_stdio_session,
 )
+from sprout.analysis_backend import backend_type_of_in_source
 from sprout.analysis_bridge import (
     analysis_service_env_var_name,
     analysis_service_retry_allowed,
@@ -383,6 +384,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             dispatch_request(request_complete_in_state("fr", ["import stdlib.bytes (from_string)"], ["let answer = 41"])),
             response_ok({KEY_MATCHES: ["from_string"], KEY_PREFIX: "fr"}),
+        )
+
+    def test_analysis_backend_type_query_matches_analysis_surface(self) -> None:
+        self.assertEqual(
+            backend_type_of_in_source("module app.repl\n\nlet local = 41", "local"),
+            "Int",
         )
 
     def test_analysis_contract_check_source_request_uses_canonical_op_name(self) -> None:

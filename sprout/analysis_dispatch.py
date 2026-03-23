@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from .analysis import (
-    check_source,
-    completion_candidates_in_state,
-    declared_names_in_source,
-    diagnostics_in_source,
-    eval_expression_lines_in_source,
-    exported_names_in_source,
-    infer_type_in_source,
-    instances_in_source,
-    symbol_locations_in_source,
-    symbol_inventory_in_source,
+from .analysis_backend import (
+    backend_check_source,
+    backend_complete_in_state,
+    backend_declared_names_in_source,
+    backend_diagnostics_in_source,
+    backend_eval_expr_in_source,
+    backend_exported_names_in_source,
+    backend_instances_in_source,
+    backend_symbol_inventory_in_source,
+    backend_symbol_locations_in_source,
+    backend_type_of_in_source,
 )
 from .analysis_contract import (
     KEY_CATEGORIES,
@@ -91,21 +91,21 @@ def dispatch_request(request: object) -> dict[str, object]:
     op = request.get("op")
     try:
         if op == OP_CHECK_SOURCE:
-            check_source(_require_string(request, "module_source"))
+            backend_check_source(_require_string(request, "module_source"))
             return _ok(None)
         if op == OP_TYPE_OF_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             expr = _require_string(request, "expr")
-            return _ok(infer_type_in_source(module_source, expr))
+            return _ok(backend_type_of_in_source(module_source, expr))
         if op == OP_DECLARED_NAMES_IN_SOURCE:
-            return _ok(declared_names_in_source(_require_string(request, "module_source")))
+            return _ok(backend_declared_names_in_source(_require_string(request, "module_source")))
         if op == OP_EXPORTED_NAMES_IN_SOURCE:
-            return _ok(exported_names_in_source(_require_string(request, "module_source")))
+            return _ok(backend_exported_names_in_source(_require_string(request, "module_source")))
         if op == OP_SYMBOL_INVENTORY_IN_SOURCE:
-            declared, imported, exported = symbol_inventory_in_source(_require_string(request, "module_source"))
+            declared, imported, exported = backend_symbol_inventory_in_source(_require_string(request, "module_source"))
             return _ok({KEY_DECLARED: declared, KEY_IMPORTED: imported, KEY_EXPORTED: exported})
         if op == OP_DIAGNOSTICS_IN_SOURCE:
-            diagnostics = diagnostics_in_source(_require_string(request, "module_source"))
+            diagnostics = backend_diagnostics_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
                     KEY_MESSAGES: [message for message, _, _ in diagnostics],
@@ -114,7 +114,7 @@ def dispatch_request(request: object) -> dict[str, object]:
                 }
             )
         if op == OP_SYMBOL_LOCATIONS_IN_SOURCE:
-            locations = symbol_locations_in_source(_require_string(request, "module_source"))
+            locations = backend_symbol_locations_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
                     KEY_CATEGORIES: [category for category, _, _, _ in locations],
@@ -126,17 +126,17 @@ def dispatch_request(request: object) -> dict[str, object]:
         if op == OP_INSTANCES_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             query = _require_string(request, "query")
-            query_type, matches = instances_in_source(module_source, query)
+            query_type, matches = backend_instances_in_source(module_source, query)
             return _ok({KEY_MATCHES: matches, KEY_QUERY_TYPE: query_type})
         if op == OP_EVAL_EXPR_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             expr = _require_string(request, "expr")
-            return _ok(list(eval_expression_lines_in_source(module_source, expr)))
+            return _ok(list(backend_eval_expr_in_source(module_source, expr)))
         if op == OP_COMPLETE_IN_STATE:
             line_buffer = _require_string(request, "line_buffer")
             imports = _require_string_list(request, "imports")
             declarations = _require_string_list(request, "declarations")
-            prefix, matches = completion_candidates_in_state(line_buffer, imports, declarations)
+            prefix, matches = backend_complete_in_state(line_buffer, imports, declarations)
             return _ok({KEY_MATCHES: matches, KEY_PREFIX: prefix})
     except ValueError as exc:
         return _error(str(exc))

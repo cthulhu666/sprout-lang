@@ -156,7 +156,9 @@ Current experimental runtime progress:
    as well. The native bridge helper block is also rendered centrally now, so
    `sprout.cli` no longer assembles request/response helper fragments itself.
    The Python stdio and compatibility-service entrypoints are also down to thin
-   shims over a neutral adapter/session runner.
+   shims over a neutral adapter/session runner, and the adapter-facing
+   dispatcher now depends on a narrow backend facade instead of importing the
+   broader `sprout.analysis` module directly.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
