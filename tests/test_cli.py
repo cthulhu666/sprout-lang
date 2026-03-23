@@ -22,7 +22,7 @@ from sprout.analysis_adapter import (
     run_analysis_adapter_session,
     run_analysis_stdio_session,
 )
-from sprout.analysis import symbol_inventory_in_source
+from sprout.analysis import infer_type_in_source, symbol_inventory_in_source
 from sprout.analysis_backend import AnalysisBackend
 from sprout.analysis_backend_python import (
     DEFAULT_ANALYSIS_BACKEND,
@@ -475,6 +475,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             python_backend_type_of_in_source("module app.repl\n\nlet local = 41", "local"),
             "Int",
+        )
+
+    def test_analysis_backend_default_type_query_matches_analysis_surface(self) -> None:
+        self.assertEqual(
+            DEFAULT_ANALYSIS_BACKEND.type_of_in_source("module app.repl\n\nlet local = 41", "local"),
+            infer_type_in_source("module app.repl\n\nlet local = 41", "local"),
         )
 
     def test_analysis_backend_symbol_inventory_matches_analysis_surface(self) -> None:

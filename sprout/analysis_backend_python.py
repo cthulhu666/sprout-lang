@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from .analysis import (
-    check_source,
-    completion_candidates_in_state,
-    eval_expression_lines_in_source,
-    infer_type_in_source,
-    instances_in_source,
-)
+from .analysis import completion_candidates_in_state
 from .analysis_backend import AnalysisBackend
+from .analysis_execution_backend import (
+    python_execution_check_source,
+    python_execution_eval_expr_in_source,
+    python_execution_instances_in_source,
+    python_execution_type_of_in_source,
+)
 from .analysis_snapshot_backend import (
     python_snapshot_declared_names_in_source,
     python_snapshot_diagnostics_in_source,
@@ -49,11 +49,11 @@ class _FunctionAnalysisBackend:
 
 
 def python_backend_check_source(module_source: str) -> None:
-    check_source(module_source)
+    python_execution_check_source(module_source)
 
 
 def python_backend_type_of_in_source(module_source: str, expr: str) -> str:
-    return infer_type_in_source(module_source, expr)
+    return python_execution_type_of_in_source(module_source, expr)
 
 
 def python_backend_declared_names_in_source(module_source: str) -> list[str]:
@@ -77,11 +77,11 @@ def python_backend_symbol_locations_in_source(module_source: str) -> list[tuple[
 
 
 def python_backend_instances_in_source(module_source: str, query: str) -> tuple[str, list[str]]:
-    return instances_in_source(module_source, query)
+    return python_execution_instances_in_source(module_source, query)
 
 
 def python_backend_eval_expr_in_source(module_source: str, expr: str) -> tuple[str, ...]:
-    return eval_expression_lines_in_source(module_source, expr)
+    return python_execution_eval_expr_in_source(module_source, expr)
 
 
 def python_backend_complete_in_state(
