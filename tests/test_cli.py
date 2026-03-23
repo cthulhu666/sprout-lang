@@ -17,6 +17,7 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
+from sprout.analysis_bridge import default_analysis_service_cmd
 from sprout.analysis_dispatch import dispatch_request
 from sprout.analysis_protocol import run_json_service_session
 from sprout.analysis_stdio import cmd_analysis_stdio
@@ -336,7 +337,7 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
             env = dict(os.environ)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio"
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
             run_proc = subprocess.run(
                 [str(out)],
                 check=False,
@@ -531,7 +532,7 @@ class CliTests(unittest.TestCase):
     def test_repl_native_interactive_tab_completion_is_case_insensitive_for_imported_namespaces(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio")
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", default_analysis_service_cmd())
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -563,7 +564,7 @@ class CliTests(unittest.TestCase):
     def test_repl_native_interactive_block_mode_uses_distinct_prompt(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio")
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", default_analysis_service_cmd())
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -594,7 +595,7 @@ class CliTests(unittest.TestCase):
     def test_repl_native_interactive_up_arrow_recalls_history(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio")
+        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", default_analysis_service_cmd())
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -629,7 +630,7 @@ class CliTests(unittest.TestCase):
             cache_dir = Path(tmp) / "cache"
             env = dict(os.environ)
             env["SPROUT_NATIVE_REPL_CACHE_DIR"] = str(cache_dir)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio"
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
 
             first = subprocess.run(
                 [sys.executable, "-m", "sprout.cli", "repl", "--native"],

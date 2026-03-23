@@ -14,6 +14,7 @@ import sys
 
 from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
 from sprout import cli as sprout_cli
+from sprout.analysis_bridge import default_analysis_service_cmd
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude
 from tests.integration_support import compiled_native_binary, running_tcp_fixture
@@ -22,7 +23,7 @@ from tests.integration_support import compiled_native_binary, running_tcp_fixtur
 class CodegenTests(unittest.TestCase):
     def _native_analysis_service_env(self) -> dict[str, str]:
         env = dict(os.environ)
-        env["SPROUT_ANALYSIS_SERVICE_CMD"] = f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio"
+        env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
         return env
 
     def test_compile_recursive_if_program_to_llvm(self) -> None:

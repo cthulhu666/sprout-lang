@@ -48,9 +48,9 @@ Normative status:
   effect milestone beyond the implemented v0 baseline.
 - Native REPL work is the current tooling priority.
 - `docs/repl-self-hosting-v1-draft.md` and the language-server/compiler
-  analysis work are now deferred until after the native REPL bridge is in
-  better shape; treat them as longer-term design drafts rather than active
-  near-term milestones.
+  milestones are currently deferred as product work, but the native REPL bridge
+  is being shaped as reusable language-service infrastructure for those later
+  directions rather than as REPL-only glue.
 
 ## Repository Layout
 
@@ -208,7 +208,9 @@ the Python `analysis-service` bridge underneath. The canonical stdio adapter is
 JSON/stdin/stdout adapter over the reusable dispatcher in
 [sprout/analysis_dispatch.py](./sprout/analysis_dispatch.py) and protocol loop
 in [sprout/analysis_protocol.py](./sprout/analysis_protocol.py), which is the
-intended replacement seam for a future non-Python native service. The launcher
+intended replacement seam for a future non-Python native service. That bridge
+is being treated as reusable language-service infrastructure for later
+self-hosted compiler and language-server work, not as REPL-only plumbing. The launcher
 reuses both a cached
 compiled REPL binary between launches and one long-lived analysis-service
 subprocess per native program run, with one automatic restart for replay-safe

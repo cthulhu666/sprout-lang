@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 
+from .analysis_bridge import default_analysis_service_cmd
 from .analysis_service import cmd_analysis_service
 from .analysis_stdio import cmd_analysis_stdio
 from .ast import to_dict
@@ -156,7 +157,7 @@ def cmd_compile(
     with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False, encoding="utf-8") as tmp:
         tmp.write(llvm_ir)
         ll_path = Path(tmp.name)
-    default_analysis_service_cmd = f"{shlex.quote(sys.executable)} -m sprout.analysis_stdio"
+    embedded_analysis_service_cmd = default_analysis_service_cmd()
     runtime_c = """#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -3712,7 +3713,7 @@ long long tcp_echo_serve(long long port, long long max_connections) {
   tcp_close_listener(listener);
   return 0;
 }
-""".replace('"__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__"', json.dumps(default_analysis_service_cmd))
+""".replace('"__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__"', json.dumps(embedded_analysis_service_cmd))
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
         tmp_c.write(runtime_c)
         c_path = Path(tmp_c.name)

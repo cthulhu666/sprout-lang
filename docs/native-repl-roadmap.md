@@ -10,6 +10,9 @@ becomes Sprout-owned rather than host-backed, see
 Current priority note: that self-hosting track is no longer the active
 near-term milestone. The active goal is a native-capable REPL path that keeps
 the current Sprout frontend and narrows the remaining host bridge below it.
+That bridge should not be treated as REPL-only glue; it should be shaped as a
+reusable language-service boundary that later compiler and language-server work
+can also target.
 
 It is an implementation/tooling roadmap, not a normative language spec.
 
@@ -38,6 +41,9 @@ binary, those boundaries need to be made explicit first.
 4. Separate terminal UI concerns from session/typecheck/evaluation concerns.
 5. Identify the minimum runtime and stdlib hooks a Sprout-native REPL would
    need.
+6. Keep the host bridge reusable enough that later self-hosted compiler and
+   language-server work can consume the same service boundary instead of
+   rebuilding parallel infrastructure.
 
 ## Non-Goals
 
