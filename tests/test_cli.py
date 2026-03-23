@@ -23,6 +23,7 @@ from sprout.analysis_bridge import (
     analysis_service_start_error,
     default_analysis_service_cmd,
 )
+from sprout.analysis_bridge_runtime import render_analysis_bridge_runtime_c
 from sprout.analysis_contract import (
     KEY_MATCHES,
     KEY_PREFIX,
@@ -82,6 +83,13 @@ class CliTests(unittest.TestCase):
         self.assertTrue(analysis_service_retry_allowed(OP_CHECK_SOURCE))
         self.assertTrue(analysis_service_retry_allowed(OP_COMPLETE_IN_STATE))
         self.assertFalse(analysis_service_retry_allowed(OP_EVAL_EXPR_IN_SOURCE))
+
+    def test_analysis_bridge_runtime_renders_without_policy_placeholders(self) -> None:
+        runtime = render_analysis_bridge_runtime_c("python -m sprout.analysis_stdio")
+        self.assertIn("sprout_run_analysis_service", runtime)
+        self.assertIn(analysis_service_env_var_name(), runtime)
+        self.assertNotIn("__SPROUT_ANALYSIS_SERVICE_", runtime)
+        self.assertNotIn("__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__", runtime)
 
     def test_analysis_service_cli_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
