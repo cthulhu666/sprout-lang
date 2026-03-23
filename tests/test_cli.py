@@ -17,7 +17,11 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
-from sprout.analysis_adapter import run_analysis_adapter_session, run_analysis_stdio_session
+from sprout.analysis_adapter import (
+    cmd_analysis_adapter,
+    run_analysis_adapter_session,
+    run_analysis_stdio_session,
+)
 from sprout.analysis_bridge import (
     analysis_service_env_var_name,
     analysis_service_retry_allowed,
@@ -90,7 +94,7 @@ class CliTests(unittest.TestCase):
         self.assertFalse(analysis_service_retry_allowed(OP_EVAL_EXPR_IN_SOURCE))
 
     def test_analysis_bridge_runtime_renders_without_policy_placeholders(self) -> None:
-        runtime = render_analysis_bridge_runtime_c("python -m sprout.analysis_stdio")
+        runtime = render_analysis_bridge_runtime_c("python -m sprout.analysis_adapter")
         self.assertIn("sprout_run_analysis_service", runtime)
         self.assertIn(analysis_service_env_var_name(), runtime)
         self.assertNotIn("__SPROUT_ANALYSIS_SERVICE_", runtime)
@@ -150,6 +154,18 @@ class CliTests(unittest.TestCase):
     def test_analysis_service_module_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.analysis_service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(json.loads(run.stdout), response_ok(None))
+
+    def test_analysis_adapter_module_check_source_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.analysis_adapter"],
             check=False,
             capture_output=True,
             text=True,
@@ -322,6 +338,18 @@ class CliTests(unittest.TestCase):
         stdout = StringIO()
 
         status = run_analysis_adapter_session(stdin=stdin, stdout=stdout)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            [json.loads(line) for line in stdout.getvalue().splitlines()],
+            [response_ok(None)],
+        )
+
+    def test_analysis_adapter_command_uses_neutral_runner(self) -> None:
+        stdin = StringIO(json.dumps(request_check_source("module app.repl\n\nlet local = 41")) + "\n")
+        stdout = StringIO()
+
+        status = cmd_analysis_adapter(stdin=stdin, stdout=stdout)
 
         self.assertEqual(status, 0)
         self.assertEqual(

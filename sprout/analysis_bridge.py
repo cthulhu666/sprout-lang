@@ -55,7 +55,7 @@ __all__ = [
 
 def default_analysis_service_cmd(python_executable: str | None = None) -> str:
     executable = sys.executable if python_executable is None else python_executable
-    return f"{shlex.quote(executable)} -m sprout.analysis_stdio"
+    return f"{shlex.quote(executable)} -m sprout.analysis_adapter"
 
 
 def analysis_service_env_var_name() -> str:
