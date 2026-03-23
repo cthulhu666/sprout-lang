@@ -108,6 +108,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("sprout_analysis_completion_tuple_or_fail", helpers)
         self.assertIn("sprout_analysis_ok_inventory_from_response", helpers)
         self.assertIn("sprout_analysis_diagnostics_vec_or_fail", helpers)
+        self.assertIn("sprout_analysis_ok_symbol_locations_from_response", helpers)
 
     def test_analysis_service_cli_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(

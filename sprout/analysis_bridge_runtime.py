@@ -449,4 +449,59 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
   SPROUT_GC_POP_LOCALS(2);
   return out_vec;
 }
+
+static long long sprout_analysis_ok_symbol_locations_from_response(
+  char* response,
+  const char* categories_key,
+  const char* names_key,
+  const char* lines_key,
+  const char* columns_key
+) {
+  VectorVal* categories = sprout_json_extract_string_array(response, categories_key);
+  VectorVal* names = sprout_json_extract_string_array(response, names_key);
+  long long line_count = 0;
+  long long column_count = 0;
+  long long* lines = sprout_json_extract_int_array(response, lines_key, &line_count);
+  long long* columns = sprout_json_extract_int_array(response, columns_key, &column_count);
+  free(response);
+  if (
+    categories == NULL ||
+    names == NULL ||
+    categories->len != names->len ||
+    line_count != categories->len ||
+    column_count != categories->len ||
+    (categories->len > 0 && (lines == NULL || columns == NULL))
+  ) {
+    if (lines != NULL) free(lines);
+    if (columns != NULL) free(columns);
+    return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  }
+  VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  long long rooted_categories = (long long)(uintptr_t)categories;
+  long long rooted_names = (long long)(uintptr_t)names;
+  long long rooted_out = (long long)(uintptr_t)out;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_categories);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_names);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
+  out->len = categories->len;
+  out->cap = categories->len;
+  out->data = categories->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)categories->len, "analysis service: out of memory");
+  for (long long i = 0; i < categories->len; i++) {
+    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 4));
+    uintptr_t* words = (uintptr_t*)tuple;
+    words[0] = (uintptr_t)categories->data[i];
+    words[1] = (uintptr_t)names->data[i];
+    words[2] = (uintptr_t)lines[i];
+    words[3] = (uintptr_t)columns[i];
+    out->data[i] = (long long)(uintptr_t)tuple;
+  }
+  if (lines != NULL) free(lines);
+  if (columns != NULL) free(columns);
+  long long rooted_vec_raw = (long long)(uintptr_t)out;
+  long long out_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_vec_raw);
+  SPROUT_GC_PUSH_I64_LOCAL(out_vec);
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), out_vec);
+  SPROUT_GC_POP_LOCALS(4);
+  return result;
+}
 """
