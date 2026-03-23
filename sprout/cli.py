@@ -1613,20 +1613,12 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
-    char* prefix = sprout_json_extract_string(response, "prefix");
-    VectorVal* matches = sprout_json_extract_string_array(response, "matches");
-    free(response);
-    if (prefix == NULL || matches == NULL) sprout_builtin_fail_detail("repl_complete_in_state", "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-    long long rooted_matches = (long long)(uintptr_t)matches;
-    SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
-    long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
-    SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
-    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
-    uintptr_t* words = (uintptr_t*)tuple;
-    words[0] = (uintptr_t)prefix;
-    words[1] = (uintptr_t)matches_vec;
-    SPROUT_GC_POP_LOCALS(2);
-    return (long long)(uintptr_t)tuple;
+    return sprout_analysis_completion_tuple_or_fail(
+      "repl_complete_in_state",
+      response,
+      "prefix",
+      "matches"
+    );
   }
   error = sprout_json_extract_string(response, "error");
   free(response);

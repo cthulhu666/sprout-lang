@@ -337,4 +337,28 @@ static long long sprout_analysis_ok_string_vec_pair_from_response(
   free(response);
   return sprout_analysis_ok_string_vec_pair_result(label, items);
 }
+
+static long long sprout_analysis_completion_tuple_or_fail(
+  const char* builtin_name,
+  char* response,
+  const char* string_key,
+  const char* array_key
+) {
+  char* prefix = sprout_json_extract_string(response, string_key);
+  VectorVal* matches = sprout_json_extract_string_array(response, array_key);
+  free(response);
+  if (prefix == NULL || matches == NULL) {
+    sprout_builtin_fail_detail(builtin_name, "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  }
+  long long rooted_matches = (long long)(uintptr_t)matches;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
+  long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
+  SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
+  void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+  uintptr_t* words = (uintptr_t*)tuple;
+  words[0] = (uintptr_t)prefix;
+  words[1] = (uintptr_t)matches_vec;
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)tuple;
+}
 """
