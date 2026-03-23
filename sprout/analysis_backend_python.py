@@ -6,16 +6,18 @@ from typing import Callable
 from .analysis import (
     check_source,
     completion_candidates_in_state,
-    declared_names_in_source,
-    diagnostics_in_source,
     eval_expression_lines_in_source,
-    exported_names_in_source,
     infer_type_in_source,
     instances_in_source,
-    symbol_locations_in_source,
-    symbol_inventory_in_source,
 )
 from .analysis_backend import AnalysisBackend
+from .analysis_snapshot_backend import (
+    python_snapshot_declared_names_in_source,
+    python_snapshot_diagnostics_in_source,
+    python_snapshot_exported_names_in_source,
+    python_snapshot_symbol_inventory_in_source,
+    python_snapshot_symbol_locations_in_source,
+)
 
 __all__ = [
     "DEFAULT_ANALYSIS_BACKEND",
@@ -55,23 +57,23 @@ def python_backend_type_of_in_source(module_source: str, expr: str) -> str:
 
 
 def python_backend_declared_names_in_source(module_source: str) -> list[str]:
-    return declared_names_in_source(module_source)
+    return python_snapshot_declared_names_in_source(module_source)
 
 
 def python_backend_exported_names_in_source(module_source: str) -> list[str]:
-    return exported_names_in_source(module_source)
+    return python_snapshot_exported_names_in_source(module_source)
 
 
 def python_backend_symbol_inventory_in_source(module_source: str) -> tuple[list[str], list[str], list[str]]:
-    return symbol_inventory_in_source(module_source)
+    return python_snapshot_symbol_inventory_in_source(module_source)
 
 
 def python_backend_diagnostics_in_source(module_source: str) -> list[tuple[str, int, int]]:
-    return diagnostics_in_source(module_source)
+    return python_snapshot_diagnostics_in_source(module_source)
 
 
 def python_backend_symbol_locations_in_source(module_source: str) -> list[tuple[str, str, int, int]]:
-    return symbol_locations_in_source(module_source)
+    return python_snapshot_symbol_locations_in_source(module_source)
 
 
 def python_backend_instances_in_source(module_source: str, query: str) -> tuple[str, list[str]]:

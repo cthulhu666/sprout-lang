@@ -22,8 +22,12 @@ from sprout.analysis_adapter import (
     run_analysis_adapter_session,
     run_analysis_stdio_session,
 )
+from sprout.analysis import symbol_inventory_in_source
 from sprout.analysis_backend import AnalysisBackend
-from sprout.analysis_backend_python import python_backend_type_of_in_source
+from sprout.analysis_backend_python import (
+    DEFAULT_ANALYSIS_BACKEND,
+    python_backend_type_of_in_source,
+)
 from sprout.analysis_bridge import (
     analysis_service_env_var_name,
     analysis_service_retry_allowed,
@@ -471,6 +475,21 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             python_backend_type_of_in_source("module app.repl\n\nlet local = 41", "local"),
             "Int",
+        )
+
+    def test_analysis_backend_symbol_inventory_matches_analysis_surface(self) -> None:
+        source = "\n".join(
+            [
+                "module app.repl",
+                "",
+                "import stdlib.string as string",
+                "export let local = string.concat(\"a\", \"b\")",
+            ]
+        )
+
+        self.assertEqual(
+            DEFAULT_ANALYSIS_BACKEND.symbol_inventory_in_source(source),
+            symbol_inventory_in_source(source),
         )
 
     def test_analysis_contract_check_source_request_uses_canonical_op_name(self) -> None:

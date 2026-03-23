@@ -166,7 +166,10 @@ Current experimental runtime progress:
    one concrete Python implementation object. The neutral adapter/session
    runner now accepts an injected backend as well, while `python -m
    sprout.analysis_adapter` still defaults to the current Python-backed
-   implementation.
+   implementation. The default Python backend is now also starting to split
+   into smaller implementation bundles below that seam, with the read-only
+   snapshot symbol/query operations living separately from execution-oriented
+   backend operations.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
