@@ -13,6 +13,17 @@ from .analysis import (
     symbol_inventory_in_source,
 )
 from .analysis_contract import (
+    KEY_CATEGORIES,
+    KEY_COLUMNS,
+    KEY_DECLARED,
+    KEY_EXPORTED,
+    KEY_IMPORTED,
+    KEY_LINES,
+    KEY_MATCHES,
+    KEY_MESSAGES,
+    KEY_NAMES,
+    KEY_PREFIX,
+    KEY_QUERY_TYPE,
     OP_CHECK_SOURCE,
     OP_COMPLETE_IN_STATE,
     OP_DECLARED_NAMES_IN_SOURCE,
@@ -23,6 +34,8 @@ from .analysis_contract import (
     OP_SYMBOL_INVENTORY_IN_SOURCE,
     OP_SYMBOL_LOCATIONS_IN_SOURCE,
     OP_TYPE_OF_IN_SOURCE,
+    response_error,
+    response_ok,
 )
 from .interpreter import RuntimeError
 from .module_loader import ModuleLoadError
@@ -47,11 +60,11 @@ _AnalysisError = (
 
 
 def _error(message: str) -> dict[str, object]:
-    return {"error": message, "ok": False}
+    return response_error(message)
 
 
 def _ok(value: object) -> dict[str, object]:
-    return {"ok": True, "value": value}
+    return response_ok(value)
 
 
 def _require_string(payload: object, field: str) -> str:
@@ -90,31 +103,31 @@ def dispatch_request(request: object) -> dict[str, object]:
             return _ok(exported_names_in_source(_require_string(request, "module_source")))
         if op == OP_SYMBOL_INVENTORY_IN_SOURCE:
             declared, imported, exported = symbol_inventory_in_source(_require_string(request, "module_source"))
-            return _ok({"declared": declared, "imported": imported, "exported": exported})
+            return _ok({KEY_DECLARED: declared, KEY_IMPORTED: imported, KEY_EXPORTED: exported})
         if op == OP_DIAGNOSTICS_IN_SOURCE:
             diagnostics = diagnostics_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
-                    "messages": [message for message, _, _ in diagnostics],
-                    "lines": [line for _, line, _ in diagnostics],
-                    "columns": [column for _, _, column in diagnostics],
+                    KEY_MESSAGES: [message for message, _, _ in diagnostics],
+                    KEY_LINES: [line for _, line, _ in diagnostics],
+                    KEY_COLUMNS: [column for _, _, column in diagnostics],
                 }
             )
         if op == OP_SYMBOL_LOCATIONS_IN_SOURCE:
             locations = symbol_locations_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
-                    "categories": [category for category, _, _, _ in locations],
-                    "names": [name for _, name, _, _ in locations],
-                    "lines": [line for _, _, line, _ in locations],
-                    "columns": [column for _, _, _, column in locations],
+                    KEY_CATEGORIES: [category for category, _, _, _ in locations],
+                    KEY_NAMES: [name for _, name, _, _ in locations],
+                    KEY_LINES: [line for _, _, line, _ in locations],
+                    KEY_COLUMNS: [column for _, _, _, column in locations],
                 }
             )
         if op == OP_INSTANCES_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             query = _require_string(request, "query")
             query_type, matches = instances_in_source(module_source, query)
-            return _ok({"matches": matches, "query_type": query_type})
+            return _ok({KEY_MATCHES: matches, KEY_QUERY_TYPE: query_type})
         if op == OP_EVAL_EXPR_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             expr = _require_string(request, "expr")
@@ -124,7 +137,7 @@ def dispatch_request(request: object) -> dict[str, object]:
             imports = _require_string_list(request, "imports")
             declarations = _require_string_list(request, "declarations")
             prefix, matches = completion_candidates_in_state(line_buffer, imports, declarations)
-            return _ok({"matches": matches, "prefix": prefix})
+            return _ok({KEY_MATCHES: matches, KEY_PREFIX: prefix})
     except ValueError as exc:
         return _error(str(exc))
     except _AnalysisError as exc:

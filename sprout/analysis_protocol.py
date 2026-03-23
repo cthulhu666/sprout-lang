@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Callable, TextIO
 
+from .analysis_contract import KEY_OK, response_error
+
 __all__ = [
     "error_response",
     "response_status",
@@ -11,7 +13,7 @@ __all__ = [
 
 
 def error_response(message: str) -> dict[str, object]:
-    return {"error": message, "ok": False}
+    return response_error(message)
 
 
 def _write_response(stdout: TextIO, payload: object) -> int:
@@ -22,7 +24,7 @@ def _write_response(stdout: TextIO, payload: object) -> int:
 
 
 def response_status(payload: object) -> int:
-    return 0 if isinstance(payload, dict) and payload.get("ok") is True else 1
+    return 0 if isinstance(payload, dict) and payload.get(KEY_OK) is True else 1
 
 
 def run_json_service_session(

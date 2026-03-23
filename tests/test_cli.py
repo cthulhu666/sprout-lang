@@ -19,7 +19,11 @@ from unittest.mock import patch
 from sprout import cli as sprout_cli
 from sprout.analysis_bridge import default_analysis_service_cmd
 from sprout.analysis_contract import (
+    KEY_MATCHES,
+    KEY_PREFIX,
     OP_CHECK_SOURCE,
+    response_error,
+    response_ok,
     request_check_source,
     request_complete_in_state,
     request_eval_expr_in_source,
@@ -73,7 +77,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
+        self.assertEqual(json.loads(run.stdout), response_ok(None))
 
     def test_analysis_stdio_module_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
@@ -85,7 +89,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
+        self.assertEqual(json.loads(run.stdout), response_ok(None))
 
     def test_analysis_service_module_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
@@ -97,7 +101,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": None})
+        self.assertEqual(json.loads(run.stdout), response_ok(None))
 
     def test_analysis_stdio_type_of_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
@@ -109,7 +113,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": "Int"})
+        self.assertEqual(json.loads(run.stdout), response_ok("Int"))
 
     def test_analysis_stdio_instances_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
@@ -123,13 +127,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(
             json.loads(run.stdout),
-            {
-                "ok": True,
-                "value": {
+            response_ok(
+                {
                     "matches": ["Foldable List", "Functor List", "Semigroup (List a)"],
                     "query_type": "List Int",
-                },
-            },
+                }
+            ),
         )
 
     def test_analysis_stdio_eval_expr_in_source_returns_structured_success(self) -> None:
@@ -142,7 +145,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertEqual(json.loads(run.stdout), {"ok": True, "value": ["42"]})
+        self.assertEqual(json.loads(run.stdout), response_ok(["42"]))
 
     def test_analysis_stdio_complete_in_state_returns_structured_success(self) -> None:
         run = subprocess.run(
@@ -156,7 +159,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(
             json.loads(run.stdout),
-            {"ok": True, "value": {"matches": ["from_string"], "prefix": "fr"}},
+            response_ok({KEY_MATCHES: ["from_string"], KEY_PREFIX: "fr"}),
         )
 
     def test_analysis_stdio_reports_unknown_operation(self) -> None:
@@ -171,7 +174,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(
             json.loads(run.stdout),
-            {"error": "unknown analysis service op `not-real`", "ok": False},
+            response_error("unknown analysis service op `not-real`"),
         )
 
     def test_analysis_service_cli_wrapper_reports_unknown_operation(self) -> None:
@@ -186,7 +189,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertEqual(
             json.loads(run.stdout),
-            {"error": "unknown analysis service op `not-real`", "ok": False},
+            response_error("unknown analysis service op `not-real`"),
         )
 
     def test_analysis_service_processes_multiple_line_delimited_requests(self) -> None:
@@ -207,8 +210,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             [json.loads(line) for line in stdout.getvalue().splitlines()],
             [
-                {"ok": True, "value": None},
-                {"ok": True, "value": "Int"},
+                response_ok(None),
+                response_ok("Int"),
             ],
         )
 
@@ -230,8 +233,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             [json.loads(line) for line in stdout.getvalue().splitlines()],
             [
-                {"ok": True, "value": None},
-                {"ok": True, "value": "Int"},
+                response_ok(None),
+                response_ok("Int"),
             ],
         )
 
@@ -248,19 +251,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(
             json.loads(stdout.getvalue()),
-            {"error": "invalid request json: Expecting property name enclosed in double quotes", "ok": False},
+            response_error("invalid request json: Expecting property name enclosed in double quotes"),
         )
 
     def test_analysis_dispatch_reports_structured_unknown_operation(self) -> None:
         self.assertEqual(
             dispatch_request({"op": "not-real"}),
-            {"error": "unknown analysis service op `not-real`", "ok": False},
+            response_error("unknown analysis service op `not-real`"),
         )
 
     def test_analysis_dispatch_complete_in_state_returns_structured_success(self) -> None:
         self.assertEqual(
             dispatch_request(request_complete_in_state("fr", ["import stdlib.bytes (from_string)"], ["let answer = 41"])),
-            {"ok": True, "value": {"matches": ["from_string"], "prefix": "fr"}},
+            response_ok({KEY_MATCHES: ["from_string"], KEY_PREFIX: "fr"}),
         )
 
     def test_analysis_contract_check_source_request_uses_canonical_op_name(self) -> None:
