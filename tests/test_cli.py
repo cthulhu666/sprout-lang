@@ -23,6 +23,7 @@ from sprout.analysis_bridge import (
     analysis_service_start_error,
     default_analysis_service_cmd,
 )
+from sprout.analysis_cli import cmd_analysis_cli
 from sprout.analysis_bridge_runtime import render_analysis_bridge_helpers_c
 from sprout.analysis_bridge_runtime import render_analysis_bridge_runtime_c
 from sprout.analysis_bridge_runtime import render_analysis_bridge_request_helpers_c
@@ -128,6 +129,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
         self.assertEqual(json.loads(run.stdout), response_ok(None))
+
+    def test_analysis_cli_dispatch_rejects_unknown_command(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unknown analysis cli command"):
+            cmd_analysis_cli("not-real")
 
     def test_analysis_stdio_module_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(

@@ -10,6 +10,7 @@ import sys
 import tempfile
 
 from .analysis_bridge import default_analysis_service_cmd
+from .analysis_cli import cmd_analysis_cli
 from .analysis_bridge_runtime import (
     render_analysis_bridge_helpers_c,
     render_analysis_bridge_runtime_c,
@@ -26,8 +27,6 @@ from .analysis_contract import (
     OP_SYMBOL_LOCATIONS_IN_SOURCE,
     OP_TYPE_OF_IN_SOURCE,
 )
-from .analysis_service import cmd_analysis_service
-from .analysis_stdio import cmd_analysis_stdio
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .formatter import format_source, lint_source
@@ -3473,9 +3472,9 @@ def main(argv: list[str] | None = None) -> int:
                 native=args.native,
             )
         if args.command == "analysis-service":
-            return cmd_analysis_service()
+            return cmd_analysis_cli(args.command)
         if args.command == "analysis-stdio":
-            return cmd_analysis_stdio()
+            return cmd_analysis_cli(args.command)
         if args.command == "repl":
             return cmd_repl(native=args.native)
     except (
