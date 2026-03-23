@@ -22,7 +22,7 @@ from sprout.analysis_adapter import (
     run_analysis_adapter_session,
     run_analysis_stdio_session,
 )
-from sprout.analysis_backend import backend_type_of_in_source
+from sprout.analysis_backend_python import python_backend_type_of_in_source
 from sprout.analysis_bridge import (
     analysis_service_env_var_name,
     analysis_service_retry_allowed,
@@ -425,7 +425,7 @@ class CliTests(unittest.TestCase):
 
     def test_analysis_backend_type_query_matches_analysis_surface(self) -> None:
         self.assertEqual(
-            backend_type_of_in_source("module app.repl\n\nlet local = 41", "local"),
+            python_backend_type_of_in_source("module app.repl\n\nlet local = 41", "local"),
             "Int",
         )
 

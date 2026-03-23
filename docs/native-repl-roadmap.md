@@ -138,7 +138,10 @@ Current experimental runtime progress:
    The Python module is also reduced to the transport adapter over a reusable
    dispatcher seam plus a shared JSON-line protocol/session loop, so the next
    replacement step can target service execution without reworking the
-   request/response protocol again. Bridge command resolution, startup/error
+   request/response protocol again. The dispatcher now targets a backend
+   contract in `sprout.analysis_backend`, and the current Python-backed
+   implementation lives below that seam in `sprout.analysis_backend_python`.
+   Bridge command resolution, startup/error
    messages, and replay-safe retry policy are now centralized in shared
    analysis-bridge contract helpers instead of being spread across the native
    launcher, tests, and embedded runtime template. The persistent-child stdio

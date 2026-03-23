@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from .analysis_backend import (
-    DEFAULT_ANALYSIS_BACKEND,
-    AnalysisBackend,
-)
+from .analysis_backend import AnalysisBackend
+from .analysis_backend_python import DEFAULT_ANALYSIS_BACKEND
 from .analysis_contract import (
     KEY_CATEGORIES,
     KEY_COLUMNS,
