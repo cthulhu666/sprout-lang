@@ -10,7 +10,10 @@ import sys
 import tempfile
 
 from .analysis_bridge import default_analysis_service_cmd
-from .analysis_bridge_runtime import render_analysis_bridge_runtime_c
+from .analysis_bridge_runtime import (
+    render_analysis_bridge_request_helpers_c,
+    render_analysis_bridge_runtime_c,
+)
 from .analysis_contract import (
     OP_CHECK_SOURCE,
     OP_COMPLETE_IN_STATE,
@@ -1351,18 +1354,9 @@ __SPROUT_ANALYSIS_BRIDGE_RUNTIME__
 static long long sprout_err_string_result(const char* message) {
   return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)dup_cstr(message));
 }
+__SPROUT_ANALYSIS_BRIDGE_REQUEST_HELPERS__
 static long long sprout_analysis_check_source_result(const char* op, const char* module_source) {
-  char* escaped_source = sprout_json_escape(module_source);
-  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source
-  );
-  free(escaped_source);
+  char* request = sprout_analysis_request_source_only(op, module_source);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -1383,20 +1377,7 @@ static long long sprout_analysis_check_source_result(const char* op, const char*
   return out;
 }
 static long long sprout_analysis_type_result(const char* op, const char* module_source, const char* expr) {
-  char* escaped_source = sprout_json_escape(module_source);
-  char* escaped_expr = sprout_json_escape(expr);
-  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(escaped_expr) + 64;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\",\\\"expr\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source,
-    escaped_expr
-  );
-  free(escaped_source);
-  free(escaped_expr);
+  char* request = sprout_analysis_request_source_field(op, module_source, "expr", expr);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -1420,20 +1401,7 @@ static long long sprout_analysis_type_result(const char* op, const char* module_
   return out;
 }
 static long long sprout_analysis_instances_result(const char* op, const char* module_source, const char* query) {
-  char* escaped_source = sprout_json_escape(module_source);
-  char* escaped_query = sprout_json_escape(query);
-  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(escaped_query) + 68;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\",\\\"query\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source,
-    escaped_query
-  );
-  free(escaped_source);
-  free(escaped_query);
+  char* request = sprout_analysis_request_source_field(op, module_source, "query", query);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -1467,20 +1435,7 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
   return out;
 }
 static long long sprout_analysis_vec_string_result(const char* op, const char* module_source, const char* expr) {
-  char* escaped_source = sprout_json_escape(module_source);
-  char* escaped_expr = sprout_json_escape(expr);
-  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(escaped_expr) + 68;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\",\\\"expr\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source,
-    escaped_expr
-  );
-  free(escaped_source);
-  free(escaped_expr);
+  char* request = sprout_analysis_request_source_field(op, module_source, "expr", expr);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -1509,17 +1464,7 @@ static long long sprout_analysis_vec_string_result(const char* op, const char* m
   return out;
 }
 static long long sprout_analysis_string_array_result(const char* op, const char* module_source) {
-  char* escaped_source = sprout_json_escape(module_source);
-  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source
-  );
-  free(escaped_source);
+  char* request = sprout_analysis_request_source_only(op, module_source);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -1548,17 +1493,7 @@ static long long sprout_analysis_string_array_result(const char* op, const char*
   return out;
 }
 static long long sprout_analysis_inventory_result(const char* op, const char* module_source) {
-  char* escaped_source = sprout_json_escape(module_source);
-  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source
-  );
-  free(escaped_source);
+  char* request = sprout_analysis_request_source_only(op, module_source);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -1603,17 +1538,7 @@ static long long sprout_analysis_inventory_result(const char* op, const char* mo
   return out;
 }
 static long long sprout_analysis_diagnostics_result(const char* op, const char* module_source) {
-  char* escaped_source = sprout_json_escape(module_source);
-  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source
-  );
-  free(escaped_source);
+  char* request = sprout_analysis_request_source_only(op, module_source);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -1661,17 +1586,7 @@ static long long sprout_analysis_diagnostics_result(const char* op, const char* 
   return 0;
 }
 static long long sprout_analysis_symbol_locations_result(const char* op, const char* module_source) {
-  char* escaped_source = sprout_json_escape(module_source);
-  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
-  char* request = alloc_cstr(request_len, "analysis service: out of memory");
-  snprintf(
-    request,
-    request_len + 1,
-    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
-    op,
-    escaped_source
-  );
-  free(escaped_source);
+  char* request = sprout_analysis_request_source_only(op, module_source);
   char* response = NULL;
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
@@ -3586,6 +3501,9 @@ long long tcp_echo_serve(long long port, long long max_connections) {
 """.replace(
     "__SPROUT_ANALYSIS_BRIDGE_RUNTIME__",
     render_analysis_bridge_runtime_c(embedded_analysis_service_cmd),
+).replace(
+    "__SPROUT_ANALYSIS_BRIDGE_REQUEST_HELPERS__",
+    render_analysis_bridge_request_helpers_c(),
 ).replace(
     "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", OP_CHECK_SOURCE
 ).replace(

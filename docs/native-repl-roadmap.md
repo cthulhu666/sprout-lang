@@ -143,7 +143,9 @@ Current experimental runtime progress:
    analysis-bridge contract helpers instead of being spread across the native
    launcher, tests, and embedded runtime template. The persistent-child stdio
    lifecycle block is now also rendered from a dedicated bridge-runtime helper
-   instead of living inline inside `sprout.cli`.
+   instead of living inline inside `sprout.cli`, and the repeated
+   `module_source` request builders above that seam now use shared bridge
+   helper functions rather than open-coded `snprintf` blocks in each wrapper.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

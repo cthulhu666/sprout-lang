@@ -24,6 +24,7 @@ from sprout.analysis_bridge import (
     default_analysis_service_cmd,
 )
 from sprout.analysis_bridge_runtime import render_analysis_bridge_runtime_c
+from sprout.analysis_bridge_runtime import render_analysis_bridge_request_helpers_c
 from sprout.analysis_contract import (
     KEY_MATCHES,
     KEY_PREFIX,
@@ -90,6 +91,12 @@ class CliTests(unittest.TestCase):
         self.assertIn(analysis_service_env_var_name(), runtime)
         self.assertNotIn("__SPROUT_ANALYSIS_SERVICE_", runtime)
         self.assertNotIn("__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__", runtime)
+
+    def test_analysis_bridge_request_helpers_render_shared_source_builders(self) -> None:
+        helpers = render_analysis_bridge_request_helpers_c()
+        self.assertIn("sprout_analysis_request_source_only", helpers)
+        self.assertIn("sprout_analysis_request_source_field", helpers)
+        self.assertIn('"analysis service: out of memory"', helpers)
 
     def test_analysis_service_cli_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(

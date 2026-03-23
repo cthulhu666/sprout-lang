@@ -21,7 +21,10 @@ from .analysis_contract import (
     OP_TYPE_OF_IN_SOURCE,
 )
 
-__all__ = ["render_analysis_bridge_runtime_c"]
+__all__ = [
+    "render_analysis_bridge_request_helpers_c",
+    "render_analysis_bridge_runtime_c",
+]
 
 
 def render_analysis_bridge_runtime_c(embedded_analysis_service_cmd: str) -> str:
@@ -229,3 +232,46 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
             OP_COMPLETE_IN_STATE,
         )
     )
+
+
+def render_analysis_bridge_request_helpers_c() -> str:
+    return """
+static char* sprout_analysis_request_source_only(const char* op, const char* module_source) {
+  char* escaped_source = sprout_json_escape(module_source);
+  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\"}\\n",
+    op,
+    escaped_source
+  );
+  free(escaped_source);
+  return request;
+}
+
+static char* sprout_analysis_request_source_field(
+  const char* op,
+  const char* module_source,
+  const char* field_name,
+  const char* field_value
+) {
+  char* escaped_source = sprout_json_escape(module_source);
+  char* escaped_value = sprout_json_escape(field_value);
+  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(field_name) + strlen(escaped_value) + 64;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\\\"op\\\":\\\"%s\\\",\\\"module_source\\\":\\\"%s\\\",\\\"%s\\\":\\\"%s\\\"}\\n",
+    op,
+    escaped_source,
+    field_name,
+    escaped_value
+  );
+  free(escaped_source);
+  free(escaped_value);
+  return request;
+}
+"""
