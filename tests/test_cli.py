@@ -24,6 +24,7 @@ from sprout.analysis_adapter import (
 )
 from sprout.analysis import completion_candidates_in_state, infer_type_in_source, symbol_inventory_in_source
 from sprout.analysis_backend import AnalysisBackend
+from sprout.analysis_backend_stub import StubAnalysisBackend
 from sprout.analysis_backend_python import (
     DEFAULT_ANALYSIS_BACKEND,
     python_backend_type_of_in_source,
@@ -223,6 +224,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(stdout.getvalue()), response_ok("Fake"))
         self.assertEqual(fake_backend.seen, ("module app.repl\n\nlet local = 41", "local + 1"))
+
+    def test_analysis_adapter_session_supports_stub_backend_inventory_result(self) -> None:
+        stub_backend = StubAnalysisBackend(
+            symbol_inventory_result=(["local"], ["string"], ["local"]),
+        )
+        stdin = StringIO(json.dumps({"op": "symbol_inventory_in_source", "module_source": "module app.repl"}))
+        stdout = StringIO()
+
+        exit_code = run_analysis_adapter_session(stdin=stdin, stdout=stdout, backend=stub_backend)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            response_ok({"declared": ["local"], "imported": ["string"], "exported": ["local"]}),
+        )
+        self.assertEqual(stub_backend.seen_calls, [("symbol_inventory_in_source", "module app.repl")])
 
     def test_analysis_stdio_type_of_in_source_returns_structured_success(self) -> None:
         run = subprocess.run(
