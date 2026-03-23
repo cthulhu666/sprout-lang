@@ -9,7 +9,15 @@ import subprocess
 import sys
 import tempfile
 
-from .analysis_bridge import default_analysis_service_cmd
+from .analysis_bridge import (
+    analysis_service_empty_response_error,
+    analysis_service_env_var_name,
+    analysis_service_invalid_response_error,
+    analysis_service_request_failed_error,
+    analysis_service_retry_allowed,
+    analysis_service_start_error,
+    default_analysis_service_cmd,
+)
 from .analysis_contract import (
     OP_CHECK_SOURCE,
     OP_COMPLETE_IN_STATE,
@@ -1391,6 +1399,17 @@ static int sprout_analysis_service_is_stale(void) {
   }
   return 0;
 }
+static int sprout_analysis_service_retry_allowed(const char* op) {
+  return strcmp(op, "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_TYPE_OF_IN_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_DECLARED_NAMES_IN_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_EXPORTED_NAMES_IN_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_SYMBOL_INVENTORY_IN_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_DIAGNOSTICS_IN_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_SYMBOL_LOCATIONS_IN_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_INSTANCES_IN_SOURCE__") == 0
+    || strcmp(op, "__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__") == 0;
+}
 static int sprout_ensure_analysis_service(char** error_out) {
   if (!sprout_analysis_service_sigpipe_ignored) {
     signal(SIGPIPE, SIG_IGN);
@@ -1403,7 +1422,7 @@ static int sprout_ensure_analysis_service(char** error_out) {
     return 1;
   }
   sprout_analysis_service_last_status_valid = 0;
-  const char* cmd = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
+  const char* cmd = getenv("__SPROUT_ANALYSIS_SERVICE_ENV_VAR__");
   if (cmd == NULL || *cmd == '\\0') cmd = "__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__";
   int request_pipe[2] = {-1, -1};
   int response_pipe[2] = {-1, -1};
@@ -1467,7 +1486,7 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
     if (fputs(request_json, sprout_analysis_service_in) == EOF || fflush(sprout_analysis_service_in) != 0) {
       sprout_close_analysis_service();
       if (attempt + 1 < max_attempts) continue;
-      *error_out = dup_cstr("analysis service: request failed");
+      *error_out = dup_cstr("__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
       return 0;
     }
     char* response = NULL;
@@ -1477,8 +1496,8 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
       if (response != NULL) free(response);
       sprout_close_analysis_service();
       if (attempt + 1 < max_attempts) continue;
-      if (sprout_analysis_service_command_not_found()) *error_out = dup_cstr("analysis service: command failed to start; check SPROUT_ANALYSIS_SERVICE_CMD");
-      else *error_out = dup_cstr("analysis service: empty response");
+      if (sprout_analysis_service_command_not_found()) *error_out = dup_cstr("__SPROUT_ANALYSIS_SERVICE_START_FAILED__");
+      else *error_out = dup_cstr("__SPROUT_ANALYSIS_SERVICE_EMPTY_RESPONSE__");
       return 0;
     }
     if (response_len > 0 && response[response_len - 1] == '\\n') {
@@ -1487,7 +1506,7 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
     *response_out = response;
     return 1;
   }
-  *error_out = dup_cstr("analysis service: request failed");
+  *error_out = dup_cstr("__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
   return 0;
 }
 static long long sprout_err_string_result(const char* message) {
@@ -1507,9 +1526,9 @@ static long long sprout_analysis_check_source_result(const char* op, const char*
   free(escaped_source);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
     if (error != NULL) free(error);
     return out;
   }
@@ -1520,7 +1539,7 @@ static long long sprout_analysis_check_source_result(const char* op, const char*
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   if (error != NULL) free(error);
   return out;
 }
@@ -1541,9 +1560,9 @@ static long long sprout_analysis_type_result(const char* op, const char* module_
   free(escaped_expr);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
     if (error != NULL) free(error);
     return out;
   }
@@ -1551,13 +1570,13 @@ static long long sprout_analysis_type_result(const char* op, const char* module_
   if (sprout_json_field_is_true(response, "ok")) {
     char* value = sprout_json_extract_string(response, "value");
     free(response);
-    if (value == NULL) return sprout_err_string_result("analysis service: invalid response");
+    if (value == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     long long out = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)value);
     return out;
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   if (error != NULL) free(error);
   return out;
 }
@@ -1578,9 +1597,9 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
   free(escaped_query);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
     if (error != NULL) free(error);
     return out;
   }
@@ -1589,7 +1608,7 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
     char* query_type = sprout_json_extract_string(response, "query_type");
     VectorVal* matches = sprout_json_extract_string_array(response, "matches");
     free(response);
-    if (query_type == NULL || matches == NULL) return sprout_err_string_result("analysis service: invalid response");
+    if (query_type == NULL || matches == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     long long rooted_matches = (long long)(uintptr_t)matches;
     SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
     long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
@@ -1604,7 +1623,7 @@ static long long sprout_analysis_instances_result(const char* op, const char* mo
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   if (error != NULL) free(error);
   return out;
 }
@@ -1625,9 +1644,9 @@ static long long sprout_analysis_vec_string_result(const char* op, const char* m
   free(escaped_expr);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 0, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
     if (error != NULL) free(error);
     return out;
   }
@@ -1635,7 +1654,7 @@ static long long sprout_analysis_vec_string_result(const char* op, const char* m
   if (sprout_json_field_is_true(response, "ok")) {
     VectorVal* lines = sprout_json_extract_string_array(response, "value");
     free(response);
-    if (lines == NULL) return sprout_err_string_result("analysis service: invalid response");
+    if (lines == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     long long rooted_lines = (long long)(uintptr_t)lines;
     SPROUT_GC_PUSH_I64_LOCAL(rooted_lines);
     long long lines_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_lines);
@@ -1646,7 +1665,7 @@ static long long sprout_analysis_vec_string_result(const char* op, const char* m
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   if (error != NULL) free(error);
   return out;
 }
@@ -1664,9 +1683,9 @@ static long long sprout_analysis_string_array_result(const char* op, const char*
   free(escaped_source);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
     if (error != NULL) free(error);
     return out;
   }
@@ -1674,7 +1693,7 @@ static long long sprout_analysis_string_array_result(const char* op, const char*
   if (sprout_json_field_is_true(response, "ok")) {
     VectorVal* items = sprout_json_extract_string_array(response, "value");
     free(response);
-    if (items == NULL) return sprout_err_string_result("analysis service: invalid response");
+    if (items == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     long long rooted_items = (long long)(uintptr_t)items;
     SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
     long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
@@ -1685,7 +1704,7 @@ static long long sprout_analysis_string_array_result(const char* op, const char*
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   if (error != NULL) free(error);
   return out;
 }
@@ -1703,9 +1722,9 @@ static long long sprout_analysis_inventory_result(const char* op, const char* mo
   free(escaped_source);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
     if (error != NULL) free(error);
     return out;
   }
@@ -1716,7 +1735,7 @@ static long long sprout_analysis_inventory_result(const char* op, const char* mo
     VectorVal* exported = sprout_json_extract_string_array(response, "exported");
     free(response);
     if (declared == NULL || imported == NULL || exported == NULL) {
-      return sprout_err_string_result("analysis service: invalid response");
+      return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     }
     long long rooted_declared = (long long)(uintptr_t)declared;
     long long rooted_imported = (long long)(uintptr_t)imported;
@@ -1740,7 +1759,7 @@ static long long sprout_analysis_inventory_result(const char* op, const char* mo
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   if (error != NULL) free(error);
   return out;
 }
@@ -1758,9 +1777,9 @@ static long long sprout_analysis_diagnostics_result(const char* op, const char* 
   free(escaped_source);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    sprout_builtin_fail_detail(op, error != NULL ? error : "analysis service: request failed");
+    sprout_builtin_fail_detail(op, error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
@@ -1773,7 +1792,7 @@ static long long sprout_analysis_diagnostics_result(const char* op, const char* 
     if (messages == NULL || line_count != messages->len || column_count != messages->len || (messages->len > 0 && (lines == NULL || columns == NULL))) {
       if (lines != NULL) free(lines);
       if (columns != NULL) free(columns);
-      sprout_builtin_fail_detail(op, "analysis service: invalid response");
+      sprout_builtin_fail_detail(op, "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     }
     VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
     long long rooted_messages = (long long)(uintptr_t)messages;
@@ -1799,7 +1818,7 @@ static long long sprout_analysis_diagnostics_result(const char* op, const char* 
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  sprout_builtin_fail_detail(op, error != NULL ? error : "analysis service: invalid response");
+  sprout_builtin_fail_detail(op, error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   return 0;
 }
 static long long sprout_analysis_symbol_locations_result(const char* op, const char* module_source) {
@@ -1816,9 +1835,9 @@ static long long sprout_analysis_symbol_locations_result(const char* op, const c
   free(escaped_source);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
     free(request);
-    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: request failed");
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
     if (error != NULL) free(error);
     return out;
   }
@@ -1841,7 +1860,7 @@ static long long sprout_analysis_symbol_locations_result(const char* op, const c
     ) {
       if (lines != NULL) free(lines);
       if (columns != NULL) free(columns);
-      return sprout_err_string_result("analysis service: invalid response");
+      return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     }
     VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
     long long rooted_categories = (long long)(uintptr_t)categories;
@@ -1873,7 +1892,7 @@ static long long sprout_analysis_symbol_locations_result(const char* op, const c
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   if (error != NULL) free(error);
   return out;
 }
@@ -1896,16 +1915,16 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
   free(declarations_json);
   char* response = NULL;
   char* error = NULL;
-  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed("__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__"), &response, &error)) {
     free(request);
-    sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "analysis service: request failed");
+    sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
     char* prefix = sprout_json_extract_string(response, "prefix");
     VectorVal* matches = sprout_json_extract_string_array(response, "matches");
     free(response);
-    if (prefix == NULL || matches == NULL) sprout_builtin_fail_detail("repl_complete_in_state", "analysis service: invalid response");
+    if (prefix == NULL || matches == NULL) sprout_builtin_fail_detail("repl_complete_in_state", "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
     long long rooted_matches = (long long)(uintptr_t)matches;
     SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
     long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
@@ -1919,7 +1938,7 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "analysis service: invalid response");
+  sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   return 0;
 }
 long long repl_add_import(const char* source) {
@@ -3726,6 +3745,16 @@ long long tcp_echo_serve(long long port, long long max_connections) {
   return 0;
 }
 """.replace('"__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__"', json.dumps(embedded_analysis_service_cmd)
+).replace(
+    '"__SPROUT_ANALYSIS_SERVICE_ENV_VAR__"', json.dumps(analysis_service_env_var_name())
+).replace(
+    '"__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__"', json.dumps(analysis_service_request_failed_error())
+).replace(
+    '"__SPROUT_ANALYSIS_SERVICE_EMPTY_RESPONSE__"', json.dumps(analysis_service_empty_response_error())
+).replace(
+    '"__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__"', json.dumps(analysis_service_invalid_response_error())
+).replace(
+    '"__SPROUT_ANALYSIS_SERVICE_START_FAILED__"', json.dumps(analysis_service_start_error())
 ).replace(
     "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", OP_CHECK_SOURCE
 ).replace(

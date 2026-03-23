@@ -17,11 +17,18 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
-from sprout.analysis_bridge import default_analysis_service_cmd
+from sprout.analysis_bridge import (
+    analysis_service_env_var_name,
+    analysis_service_retry_allowed,
+    analysis_service_start_error,
+    default_analysis_service_cmd,
+)
 from sprout.analysis_contract import (
     KEY_MATCHES,
     KEY_PREFIX,
     OP_CHECK_SOURCE,
+    OP_COMPLETE_IN_STATE,
+    OP_EVAL_EXPR_IN_SOURCE,
     response_error,
     response_ok,
     request_check_source,
@@ -66,6 +73,15 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(prefix, "fr")
         self.assertEqual(matches, ["from_string"])
+
+    def test_analysis_bridge_centralizes_service_env_and_start_error(self) -> None:
+        self.assertEqual(analysis_service_env_var_name(), "SPROUT_ANALYSIS_SERVICE_CMD")
+        self.assertIn(analysis_service_env_var_name(), analysis_service_start_error())
+
+    def test_analysis_bridge_retry_policy_tracks_replay_safe_operations(self) -> None:
+        self.assertTrue(analysis_service_retry_allowed(OP_CHECK_SOURCE))
+        self.assertTrue(analysis_service_retry_allowed(OP_COMPLETE_IN_STATE))
+        self.assertFalse(analysis_service_retry_allowed(OP_EVAL_EXPR_IN_SOURCE))
 
     def test_analysis_service_cli_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
