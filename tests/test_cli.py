@@ -24,6 +24,7 @@ from sprout.analysis_adapter import (
 )
 from sprout.analysis import completion_candidates_in_state, infer_type_in_source, symbol_inventory_in_source
 from sprout.analysis_backend import AnalysisBackend
+from sprout.analysis_completion_backend import python_completion_complete_in_state
 from sprout.analysis_backend_stub import StubAnalysisBackend
 from sprout.analysis_backend_python import (
     default_analysis_backend,
@@ -518,6 +519,20 @@ class CliTests(unittest.TestCase):
     def test_analysis_backend_completion_matches_analysis_surface(self) -> None:
         self.assertEqual(
             default_analysis_backend().complete_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+            completion_candidates_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+        )
+
+    def test_analysis_completion_backend_matches_analysis_surface(self) -> None:
+        self.assertEqual(
+            python_completion_complete_in_state(
                 "fr",
                 ["import stdlib.bytes (from_string)"],
                 ["let answer = 41"],
