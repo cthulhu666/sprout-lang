@@ -108,6 +108,63 @@ fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) 
 fn vec_fold(f: b -> a -> b, init: b, vec: Vec a) -> b =
   vec_fold_indexed(f, init, vec, 0, vec_length(vec))
 
+fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: Vec a) -> Vec a =
+  if index >= total then acc
+  else
+    match vec_get(index, vec) with
+    | Nothing -> acc
+    | Just value ->
+        if pred(value) then vec_filter_indexed(pred, vec, index + 1, total, vec_append(value, acc))
+        else vec_filter_indexed(pred, vec, index + 1, total, acc)
+
+fn vec_filter(pred: a -> Bool, vec: Vec a) -> Vec a =
+  vec_filter_indexed(pred, vec, 0, vec_length(vec), vec_empty())
+
+fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, acc: Vec b) -> Vec b =
+  if index >= total then acc
+  else
+    match vec_get(index, vec) with
+    | Nothing -> acc
+    | Just value ->
+        match f(value) with
+        | Nothing -> vec_filter_map_indexed(f, vec, index + 1, total, acc)
+        | Just mapped -> vec_filter_map_indexed(f, vec, index + 1, total, vec_append(mapped, acc))
+
+fn vec_filter_map(f: a -> Maybe b, vec: Vec a) -> Vec b =
+  vec_filter_map_indexed(f, vec, 0, vec_length(vec), vec_empty())
+
+fn vec_any_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
+  if index >= total then false
+  else
+    match vec_get(index, vec) with
+    | Nothing -> false
+    | Just value -> if pred(value) then true else vec_any_indexed(pred, vec, index + 1, total)
+
+fn vec_any(pred: a -> Bool, vec: Vec a) -> Bool =
+  vec_any_indexed(pred, vec, 0, vec_length(vec))
+
+fn vec_all_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
+  if index >= total then true
+  else
+    match vec_get(index, vec) with
+    | Nothing -> true
+    | Just value -> if pred(value) then vec_all_indexed(pred, vec, index + 1, total) else false
+
+fn vec_all(pred: a -> Bool, vec: Vec a) -> Bool =
+  vec_all_indexed(pred, vec, 0, vec_length(vec))
+
+fn vec_count_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: Int) -> Int =
+  if index >= total then acc
+  else
+    match vec_get(index, vec) with
+    | Nothing -> acc
+    | Just value ->
+        if pred(value) then vec_count_indexed(pred, vec, index + 1, total, acc + 1)
+        else vec_count_indexed(pred, vec, index + 1, total, acc)
+
+fn vec_count(pred: a -> Bool, vec: Vec a) -> Int =
+  vec_count_indexed(pred, vec, 0, vec_length(vec), 0)
+
 fn vec_slice_from(start: Int, count: Int, vec: Vec a, index: Int, total: Int, acc: Vec a) -> Vec a =
   if index >= total then acc
   else if index < start then
