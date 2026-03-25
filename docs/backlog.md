@@ -22,7 +22,7 @@ This file tracks open design, implementation, and tooling follow-up work.
 3. Add stronger server-side runtime models (multi-reactor as next target).
    Recent groundwork landed: native TCP handle-slot reuse and an experimental `stdlib.http_server` helper layer for structured request parsing/rendering.
    Remaining follow-up: incremental bytes-oriented HTTP reads, keep-alive/chunked support, and stronger concurrent runtime models.
-4. Expand stdlib text/data helpers (`string_lines`, `string_digits`, vector utility combinators).
+4. Keep expanding stdlib text/data helpers beyond the current baseline (`trim*`, `contains`, `ends_with`, `string_lines`, `string_digits`, vector utility combinators).
 5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
 6. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
 7. Continue native memory-management v1.

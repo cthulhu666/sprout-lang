@@ -19,6 +19,13 @@ export fn find(raw: String, needle: String) -> Int =
 export fn starts_with(raw: String, prefix: String) -> Bool =
   str_starts_with(raw, prefix)
 
+export fn contains(raw: String, needle: String) -> Bool =
+  find(raw, needle) >= 0
+
+export fn ends_with(raw: String, suffix: String) -> Bool =
+  if length(suffix) > length(raw) then false
+  else slice(raw, length(raw) - length(suffix), length(suffix)) == suffix
+
 fn char_at(raw: String, index: Int) -> String =
   slice(raw, index, 1)
 
@@ -27,6 +34,28 @@ fn is_newline(ch: String) -> Bool =
 
 fn is_carriage_return(ch: String) -> Bool =
   find("\r", ch) == 0
+
+fn is_space(ch: String) -> Bool =
+  find(" ", ch) == 0
+
+fn is_tab(ch: String) -> Bool =
+  find("\t", ch) == 0
+
+fn is_ascii_whitespace(ch: String) -> Bool =
+  is_space(ch) || is_tab(ch) || is_newline(ch) || is_carriage_return(ch)
+
+export fn trim_left(raw: String) -> String =
+  if length(raw) == 0 then raw
+  else if is_ascii_whitespace(char_at(raw, 0)) then trim_left(slice(raw, 1, length(raw) - 1))
+  else raw
+
+export fn trim_right(raw: String) -> String =
+  if length(raw) == 0 then raw
+  else if is_ascii_whitespace(char_at(raw, length(raw) - 1)) then trim_right(slice(raw, 0, length(raw) - 1))
+  else raw
+
+export fn trim(raw: String) -> String =
+  trim_left(trim_right(raw))
 
 fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)

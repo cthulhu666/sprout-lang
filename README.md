@@ -572,6 +572,11 @@ String module (in `stdlib/string.sprout`):
 - `slice(raw: String, start: Int, count: Int) -> String`
 - `find(raw: String, needle: String) -> Int`
 - `starts_with(raw: String, prefix: String) -> Bool`
+- `contains(raw: String, needle: String) -> Bool`
+- `ends_with(raw: String, suffix: String) -> Bool`
+- `trim_left(raw: String) -> String`
+- `trim_right(raw: String) -> String`
+- `trim(raw: String) -> String`
 - `string_lines(raw: String) -> Vec String`
 - `string_digits(raw: String) -> Vec Int`
 

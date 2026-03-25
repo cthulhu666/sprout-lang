@@ -1158,6 +1158,36 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "bcd")
 
+    def test_import_stdlib_string_text_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.string (concat, trim, contains, ends_with)
+
+                fn suffix_status() -> String =
+                  if ends_with("sprout-lang", "lang") then "ok" else "bad-end"
+
+                fn contains_status() -> String =
+                  if contains("sprout-lang", "out") then suffix_status() else "bad-contains"
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    concat(trim(" \\t sprout\\n"), concat("|", contains_status()))
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "sprout|ok")
+
     def test_import_stdlib_repl_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
