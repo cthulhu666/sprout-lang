@@ -1,6 +1,7 @@
 module stdlib.http_server
 
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line)
+import stdlib.string as string
 
 export type HttpRequest =
   | HttpRequest String String HttpRequestMeta
@@ -15,68 +16,45 @@ export type HttpServerError(..) =
   | HttpInvalidRequest String
   | HttpServerUnsupportedStatus Int
 
-fn str_drop(raw: String, count: Int) -> String =
-  if count >= str_len(raw) then ""
-  else str_slice(raw, count, str_len(raw) - count)
-
-fn str_take(raw: String, count: Int) -> String =
-  if count <= 0 then ""
-  else if count >= str_len(raw) then raw
-  else str_slice(raw, 0, count)
-
 fn find_headers_end(raw: String) -> Int =
-  str_find(raw, "\r\n\r\n")
+  string.find(raw, "\r\n\r\n")
 
 fn find_line_end(raw: String) -> Int =
-  str_find(raw, "\r\n")
+  string.find(raw, "\r\n")
 
 fn char_at(raw: String, index: Int) -> String =
-  str_slice(raw, index, 1)
+  string.slice(raw, index, 1)
 
 fn lower_char(ch: String) -> String =
-  if str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) < 0 then ch
-  else str_slice("abcdefghijklmnopqrstuvwxyz", str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch), 1)
+  if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) < 0 then ch
+  else string.slice("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch), 1)
 
 fn lower_ascii_from(raw: String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc
-  else lower_ascii_from(raw, index + 1, total, str_concat(acc, lower_char(char_at(raw, index))))
+  else lower_ascii_from(raw, index + 1, total, string.concat(acc, lower_char(char_at(raw, index))))
 
 fn lower_ascii(raw: String) -> String =
-  lower_ascii_from(raw, 0, str_len(raw), "")
-
-fn trim_left(raw: String) -> String =
-  if str_len(raw) == 0 then raw
-  else if char_at(raw, 0) == " " then trim_left(str_drop(raw, 1))
-  else if char_at(raw, 0) == "\t" then trim_left(str_drop(raw, 1))
-  else raw
-
-fn trim_right(raw: String) -> String =
-  if str_len(raw) == 0 then raw
-  else if char_at(raw, str_len(raw) - 1) == " " then trim_right(str_take(raw, str_len(raw) - 1))
-  else if char_at(raw, str_len(raw) - 1) == "\t" then trim_right(str_take(raw, str_len(raw) - 1))
-  else raw
-
-fn trim(raw: String) -> String =
-  trim_right(trim_left(raw))
+  lower_ascii_from(raw, 0, string.length(raw), "")
 
 fn split_lines_from(raw: String, index: Int, total: Int, acc: Vec String, current: String) -> Vec String =
   if index >= total then vec_append(current, acc)
   else if char_at(raw, index) == "\r" then split_lines_from(raw, index + 1, total, acc, current)
   else if char_at(raw, index) == "\n" then split_lines_from(raw, index + 1, total, vec_append(current, acc), "")
-  else split_lines_from(raw, index + 1, total, acc, str_concat(current, char_at(raw, index)))
+  else split_lines_from(raw, index + 1, total, acc, string.concat(current, char_at(raw, index)))
 
 fn split_lines(raw: String) -> Vec String =
-  split_lines_from(raw, 0, str_len(raw), vec_empty(), "")
+  split_lines_from(raw, 0, string.length(raw), vec_empty(), "")
+
+fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
+  match pair with
+  | (name, value) ->
+      if string.is_empty(name) then Nothing
+      else Just((lower_ascii(string.trim(name)), string.trim(value)))
 
 fn parse_header_line(raw: String) -> Maybe (String, String) =
-  if str_find(raw, ":") < 1 then Nothing
-  else
-    Just(
-      (
-        lower_ascii(trim(str_take(raw, str_find(raw, ":")))),
-        trim(str_drop(raw, str_find(raw, ":") + 1))
-      )
-    )
+  match string.split_once(raw, ":") with
+  | Nothing -> Nothing
+  | Just pair -> parse_header_pair(pair)
 
 fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict String) -> Result HttpServerError (Dict String) =
   if index >= total then Ok(headers)
@@ -84,7 +62,7 @@ fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict S
     match vec_get(index, lines) with
     | Nothing -> Ok(headers)
     | Just line ->
-        if str_len(line) == 0 then parse_header_lines(lines, index + 1, total, headers)
+        if string.is_empty(line) then parse_header_lines(lines, index + 1, total, headers)
         else
           match parse_header_line(line) with
           | Nothing -> Err(HttpInvalidRequest("invalid header line"))
@@ -97,15 +75,15 @@ fn parse_headers(raw: String) -> Result HttpServerError (Dict String) =
 
 fn all_digits(raw: String, index: Int, total: Int) -> Bool =
   if index >= total then true
-  else if str_find("0123456789", char_at(raw, index)) < 0 then false
+  else if string.find("0123456789", char_at(raw, index)) < 0 then false
   else all_digits(raw, index + 1, total)
 
 fn parse_content_length(headers: Dict String) -> Result HttpServerError Int =
   match dict_get("content-length", headers) with
   | Nothing -> Ok(0)
   | Just raw ->
-      if str_len(raw) == 0 then Err(HttpInvalidRequest("empty Content-Length"))
-      else if all_digits(raw, 0, str_len(raw)) then Ok(parse_int(raw))
+      if string.is_empty(raw) then Err(HttpInvalidRequest("empty Content-Length"))
+      else if all_digits(raw, 0, string.length(raw)) then Ok(parse_int(raw))
       else Err(HttpInvalidRequest("invalid Content-Length"))
 
 fn request_body_start(raw: String) -> Int =
@@ -115,10 +93,10 @@ fn parse_request_prefix(raw: String) -> Result HttpServerError (RequestLine, Dic
   if find_headers_end(raw) < 0 then Err(HttpInvalidRequest("missing header terminator"))
   else if find_line_end(raw) < 0 then Err(HttpInvalidRequest("missing request line terminator"))
   else
-    match parse_request_line(str_take(raw, find_line_end(raw))) with
+    match parse_request_line(string.take(raw, find_line_end(raw))) with
     | Nothing -> Err(HttpInvalidRequest("invalid request line"))
     | Just req ->
-        match parse_headers(str_slice(raw, find_line_end(raw) + 2, find_headers_end(raw) - (find_line_end(raw) + 2))) with
+        match parse_headers(string.slice(raw, find_line_end(raw) + 2, find_headers_end(raw) - (find_line_end(raw) + 2))) with
         | Err err -> Err(err)
         | Ok headers ->
             match parse_content_length(headers) with
@@ -140,10 +118,10 @@ export fn parse(raw: String) -> Result HttpServerError HttpRequest =
           err_or_request(req, headers, content_length, raw)
 
 fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, raw: String) -> Result HttpServerError HttpRequest =
-  if str_len(str_drop(raw, request_body_start(raw))) < content_length then
+  if string.length(string.drop(raw, request_body_start(raw))) < content_length then
     Err(HttpInvalidRequest("request body shorter than Content-Length"))
   else
-    Ok(build_request(req, headers, str_take(str_drop(raw, request_body_start(raw)), content_length)))
+    Ok(build_request(req, headers, string.take(string.drop(raw, request_body_start(raw)), content_length)))
 
 fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} =
   b
@@ -153,16 +131,16 @@ fn read_until_headers(conn: Int, acc: String) -> Result HttpServerError String !
   else
     match tcp_read(conn) with
     | chunk ->
-        if str_len(chunk) == 0 then Err(HttpInvalidRequest("unexpected end of stream"))
-        else read_until_headers(conn, str_concat(acc, chunk))
+        if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+        else read_until_headers(conn, string.concat(acc, chunk))
 
 fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> Result HttpServerError String !{IO} =
   if remaining <= 0 then Ok(acc)
   else
     match tcp_read(conn) with
     | chunk ->
-        if str_len(chunk) == 0 then Err(HttpInvalidRequest("unexpected end of stream"))
-        else read_remaining_body(conn, str_concat(acc, chunk), remaining - str_len(chunk))
+        if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+        else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk))
 
 fn read_request(conn: Int) -> Result HttpServerError HttpRequest !{IO} =
   match read_until_headers(conn, "") with
@@ -173,9 +151,9 @@ fn read_request(conn: Int) -> Result HttpServerError HttpRequest !{IO} =
       | Ok triple ->
           match triple with
           | (_req, _headers, content_length) ->
-              if str_len(str_drop(raw, request_body_start(raw))) >= content_length then parse(raw)
+              if string.length(string.drop(raw, request_body_start(raw))) >= content_length then parse(raw)
               else
-                match read_remaining_body(conn, raw, content_length - str_len(str_drop(raw, request_body_start(raw)))) with
+                match read_remaining_body(conn, raw, content_length - string.length(string.drop(raw, request_body_start(raw)))) with
                 | Err err -> Err(err)
                 | Ok full -> parse(full)
 
@@ -193,19 +171,19 @@ fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: I
               headers,
               index + 1,
               total,
-              str_concat(acc, str_concat(key, str_concat(": ", str_concat(value, "\r\n"))))
+              string.concat(acc, string.concat(key, string.concat(": ", string.concat(value, "\r\n"))))
             )
 
 fn render_extra_headers(headers: Dict String) -> String =
   headers_to_lines(dict_keys(headers), headers, 0, vec_length(dict_keys(headers)), "")
 
 fn inject_headers(base: String, extra: String) -> String =
-  if str_len(extra) == 0 then base
-  else if str_find(base, "\r\n\r\n") < 0 then base
+  if string.is_empty(extra) then base
+  else if string.find(base, "\r\n\r\n") < 0 then base
   else
-    str_concat(
-      str_take(base, str_find(base, "\r\n\r\n") + 2),
-      str_concat(extra, str_drop(base, str_find(base, "\r\n\r\n")))
+    string.concat(
+      string.take(base, string.find(base, "\r\n\r\n") + 2),
+      string.concat(extra, string.drop(base, string.find(base, "\r\n\r\n")))
     )
 
 export fn response(status: Int, body: String) -> HttpServerResponse =

@@ -13,6 +13,16 @@ export fn length(raw: String) -> Int =
 export fn slice(raw: String, start: Int, count: Int) -> String =
   str_slice(raw, start, count)
 
+export fn take(raw: String, count: Int) -> String =
+  if count <= 0 then ""
+  else if count >= length(raw) then raw
+  else slice(raw, 0, count)
+
+export fn drop(raw: String, count: Int) -> String =
+  if count <= 0 then raw
+  else if count >= length(raw) then ""
+  else slice(raw, count, length(raw) - count)
+
 export fn find(raw: String, needle: String) -> Int =
   str_find(raw, needle)
 
@@ -56,6 +66,22 @@ export fn trim_right(raw: String) -> String =
 
 export fn trim(raw: String) -> String =
   trim_left(trim_right(raw))
+
+export fn is_empty(raw: String) -> Bool =
+  length(raw) == 0
+
+export fn strip_prefix(raw: String, prefix: String) -> Maybe String =
+  if starts_with(raw, prefix) then Just(drop(raw, length(prefix)))
+  else Nothing
+
+export fn strip_suffix(raw: String, suffix: String) -> Maybe String =
+  if ends_with(raw, suffix) then Just(take(raw, length(raw) - length(suffix)))
+  else Nothing
+
+export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
+  if is_empty(sep) then Nothing
+  else if find(raw, sep) < 0 then Nothing
+  else Just((take(raw, find(raw, sep)), drop(raw, find(raw, sep) + length(sep))))
 
 fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)

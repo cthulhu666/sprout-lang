@@ -1188,6 +1188,73 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "sprout|ok")
 
+    def test_import_stdlib_string_split_and_strip_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe)
+                import stdlib.string (concat, drop, is_empty, split_once, strip_prefix, strip_suffix, take)
+
+                fn prefix_score() -> String =
+                  match strip_prefix("sprout-lang", "sprout-") with
+                  | Just rest -> rest
+                  | Nothing -> "missing-prefix"
+
+                fn suffix_score() -> String =
+                  match strip_suffix("sprout-lang", "-lang") with
+                  | Just rest -> rest
+                  | Nothing -> "missing-suffix"
+
+                fn split_score() -> String =
+                  match split_once("alpha=beta", "=") with
+                  | Just (left, right) -> concat(left, concat("|", right))
+                  | Nothing -> "missing-split"
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    concat(
+                      take("sprout", 3),
+                      concat(
+                        "|",
+                        concat(
+                          drop("sprout", 3),
+                          concat(
+                            "|",
+                            concat(
+                              prefix_score(),
+                              concat(
+                                "|",
+                                concat(
+                                  suffix_score(),
+                                  concat(
+                                    "|",
+                                    concat(
+                                      split_score(),
+                                      concat("|", if is_empty("") then "empty" else "not-empty")
+                                    )
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "spr|out|lang|sprout|alpha|beta|empty")
+
     def test_import_stdlib_repl_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

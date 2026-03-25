@@ -3,7 +3,7 @@ import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_
 import stdlib.string as string
 
 type SubmissionResult =
-  | Continue (Vec String) (Vec String) (Vec String)
+  | Continue (Vec String)(Vec String)(Vec String)
   | Exit
 
 type ReadResult =
@@ -12,22 +12,22 @@ type ReadResult =
   | ReadError String
   | ReadNotice String
 
-fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+fn then_io(a: Unit! {IO}, b: Unit! {IO}) -> Unit! {IO} = b
 
-fn term_noop() -> Unit !{IO} =
+fn term_noop() -> Unit! {IO} =
   term_write("")
 
-fn write_line(prompt: Maybe String, text: String) -> Unit !{IO} =
+fn write_line(prompt: Maybe String, text: String) -> Unit! {IO} =
   match prompt with
   | Just _ -> term_write(text ++ "\r\n")
   | Nothing -> print(text)
 
-fn finish_loop(prompt: Maybe String) -> Unit !{IO} =
+fn finish_loop(prompt: Maybe String) -> Unit! {IO} =
   match prompt with
   | Just _ -> term_write("\r\n")
   | Nothing -> term_noop()
 
-fn render_lines(prompt: Maybe String, lines: Vec String, index: Int) -> Unit !{IO} =
+fn render_lines(prompt: Maybe String, lines: Vec String, index: Int) -> Unit! {IO} =
   match vec_get(index, lines) with
   | Just line -> then_io(write_line(prompt, line), render_lines(prompt, lines, index + 1))
   | Nothing -> term_noop()
@@ -38,42 +38,26 @@ fn single_line(text: String) -> Vec String =
 fn char_at(raw: String, index: Int) -> String =
   string.slice(raw, index, 1)
 
-fn trim_left(raw: String) -> String =
-  if string.length(raw) == 0 then raw
-  else if char_at(raw, 0) == " " then trim_left(string.slice(raw, 1, string.length(raw) - 1))
-  else if char_at(raw, 0) == "\t" then trim_left(string.slice(raw, 1, string.length(raw) - 1))
-  else raw
-
-fn trim_right(raw: String) -> String =
-  if string.length(raw) == 0 then raw
-  else if char_at(raw, string.length(raw) - 1) == " " then trim_right(string.slice(raw, 0, string.length(raw) - 1))
-  else if char_at(raw, string.length(raw) - 1) == "\t" then trim_right(string.slice(raw, 0, string.length(raw) - 1))
-  else raw
-
 fn trim(raw: String) -> String =
-  trim_right(trim_left(raw))
+  string.trim(raw)
 
 fn drop_prefix(raw: String, prefix: String) -> String =
-  string.slice(raw, string.length(prefix), string.length(raw) - string.length(prefix))
+  match string.strip_prefix(raw, prefix) with
+  | Just rest -> rest
+  | Nothing -> raw
 
 fn drop_last(raw: String) -> String =
-  if string.length(raw) == 0 then raw
-  else string.slice(raw, 0, string.length(raw) - 1)
+  string.take(raw, string.length(raw) - 1)
 
 fn drop_last_count(raw: String, count: Int) -> String =
   if count <= 0 then raw
-  else if count >= string.length(raw) then ""
-  else string.slice(raw, 0, string.length(raw) - count)
+  else string.take(raw, string.length(raw) - count)
 
 fn slice_left(raw: String, count: Int) -> String =
-  if count <= 0 then ""
-  else if count >= string.length(raw) then raw
-  else string.slice(raw, 0, count)
+  string.take(raw, count)
 
 fn slice_right(raw: String, start: Int) -> String =
-  if start <= 0 then raw
-  else if start >= string.length(raw) then ""
-  else string.slice(raw, start, string.length(raw) - start)
+  string.drop(raw, start)
 
 fn insert_at(raw: String, index: Int, text: String) -> String =
   slice_left(raw, index) ++ text ++ slice_right(raw, index)
@@ -82,28 +66,28 @@ fn delete_before(raw: String, index: Int) -> String =
   if index <= 0 then raw
   else slice_left(raw, index - 1) ++ slice_right(raw, index)
 
-fn redraw_input(prompt: String, current: String, cursor: Int) -> Unit !{IO} =
+fn redraw_input(prompt: String, current: String, cursor: Int) -> Unit! {IO} =
   keep_after(
     term_write("\r" ++ prompt ++ current ++ " "),
     term_write("\r" ++ prompt ++ slice_left(current, cursor))
   )
 
-fn ignore_key(value: String !{IO}) -> Unit !{IO} =
+fn ignore_key(value: String! {IO}) -> Unit! {IO} =
   term_noop()
 
 fn escape_token(second: String, third: String) -> String =
-  if second != "[" then "escape"
+  if second != "["then "escape"
   else if third == "A" then "up"
   else if third == "B" then "down"
   else if third == "C" then "right"
   else if third == "D" then "left"
   else "escape"
 
-fn read_escape_token_second(second: String) -> String !{IO} =
-  if second == "[" then escape_token(second, term_read_key_once())
+fn read_escape_token_second(second: String) -> String! {IO} =
+  if second == "["then escape_token(second, term_read_key_once())
   else second
 
-fn read_escape_token() -> String !{IO} =
+fn read_escape_token() -> String! {IO} =
   read_escape_token_second(term_read_key_once())
 
 fn history_value(index: Int, fallback: String, history: Vec String) -> String =
@@ -123,7 +107,7 @@ fn history_next(current: String, history: Vec String, browse_index: Int, draft: 
   else if browse_index + 1 >= vec_length(history) then (draft, -1, draft)
   else (history_value(browse_index + 1, current, history), browse_index + 1, draft)
 
-fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit !{IO} =
+fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit! {IO} =
   match vec_get(index, matches) with
   | Just line -> then_io(term_write(line ++ "\r\n"), render_interactive_match_lines(matches, index + 1))
   | Nothing -> term_noop()
@@ -180,14 +164,16 @@ fn filter_names_by_prefix(prefix: String, lowered_prefix: String, names: Vec Str
       else filter_names_by_prefix(prefix, lowered_prefix, names, index + 1, acc)
   | Nothing -> acc
 
+fn append_space_name_pair(acc: Vec String, pair: (String, String)) -> Vec String =
+  match pair with
+  | (head, tail) -> append_space_names(append_unique_name(acc, trim(head)), trim(tail))
+
 fn append_space_names(acc: Vec String, raw: String) -> Vec String =
   if raw == "" then acc
-  else if string.find(raw, " ") == -1 then append_unique_name(acc, trim(raw))
   else
-    append_space_names(
-      append_unique_name(acc, trim(string.slice(raw, 0, string.find(raw, " ")))),
-      trim(string.slice(raw, string.find(raw, " ") + 1, string.length(raw) - string.find(raw, " ") - 1))
-    )
+    match string.split_once(raw, " ") with
+    | Nothing -> append_unique_name(acc, trim(raw))
+    | Just pair -> append_space_name_pair(acc, pair)
 
 fn base_completion_names() -> Vec String =
   append_space_names(
@@ -206,7 +192,7 @@ fn skip_spaces_from(raw: String, index: Int) -> Int =
 
 fn skip_to_space_or_delim(raw: String, index: Int) -> Int =
   if index >= string.length(raw) then index
-  else if char_at(raw, index) == " " || char_at(raw, index) == "\t" || char_at(raw, index) == "(" || char_at(raw, index) == ":" || char_at(raw, index) == "=" || char_at(raw, index) == "|" then index
+  else if char_at(raw, index) == " " || char_at(raw, index) == "\t" || char_at(raw, index) == "("|| char_at(raw, index) ==":" || char_at(raw, index) == "=" || char_at(raw, index) == "|" then index
   else skip_to_space_or_delim(raw, index + 1)
 
 fn take_name_from(raw: String, index: Int) -> String =
@@ -221,36 +207,42 @@ fn module_leaf_name_from(raw: String, index: Int, start: Int) -> String =
   else if char_at(raw, index) == "." then module_leaf_name_from(raw, index + 1, index + 1)
   else module_leaf_name_from(raw, index + 1, start)
 
+fn first_from_pair(pair: (String, String)) -> String =
+  match pair with
+  | (before, _) -> before
+
 fn take_before(raw: String, needle: String) -> String =
-  if string.find(raw, needle) == -1 then raw
-  else string.slice(raw, 0, string.find(raw, needle))
+  match string.split_once(raw, needle) with
+  | Just pair -> first_from_pair(pair)
+  | Nothing -> raw
+
+fn second_from_pair(pair: (String, String)) -> String =
+  match pair with
+  | (_, after) -> after
 
 fn take_after(raw: String, needle: String) -> String =
-  if string.find(raw, needle) == -1 then ""
-  else
-    string.slice(
-      raw,
-      string.find(raw, needle) + string.length(needle),
-      string.length(raw) - string.find(raw, needle) - string.length(needle)
-    )
+  match string.split_once(raw, needle) with
+  | Just pair -> second_from_pair(pair)
+  | Nothing -> ""
+
+fn between_from_split(after_left: String, right: String) -> String =
+  match string.split_once(after_left, right) with
+  | Just pair -> first_from_pair(pair)
+  | Nothing -> ""
 
 fn take_between(raw: String, left: String, right: String) -> String =
-  if string.find(raw, left) == -1 then ""
-  else if string.find(string.slice(raw, string.find(raw, left) + string.length(left), string.length(raw) - string.find(raw, left) - string.length(left)), right) == -1 then ""
-  else
-    string.slice(
-      raw,
-      string.find(raw, left) + string.length(left),
-      string.find(string.slice(raw, string.find(raw, left) + string.length(left), string.length(raw) - string.find(raw, left) - string.length(left)), right)
-    )
+  match string.split_once(raw, left) with
+  | Nothing -> ""
+  | Just pair -> between_from_split(second_from_pair(pair), right)
+
+fn append_csv_name_pair(acc: Vec String, pair: (String, String)) -> Vec String =
+  match pair with
+  | (head, tail) -> append_csv_names(append_unique_name(acc, trim(head)), tail)
 
 fn append_csv_names(acc: Vec String, raw: String) -> Vec String =
-  if string.find(raw, ",") == -1 then append_unique_name(acc, trim(raw))
-  else
-    append_csv_names(
-      append_unique_name(acc, trim(string.slice(raw, 0, string.find(raw, ",")))),
-      string.slice(raw, string.find(raw, ",") + 1, string.length(raw) - string.find(raw, ",") - 1)
-    )
+  match string.split_once(raw, "," ) with
+  | Nothing -> append_unique_name(acc, trim(raw))
+  | Just pair -> append_csv_name_pair(acc, pair)
 
 fn append_import_names(names: Vec String, line: String) -> Vec String =
   if string.find(line, " as ") == -1 then
@@ -258,13 +250,13 @@ fn append_import_names(names: Vec String, line: String) -> Vec String =
     else append_csv_names(append_unique_name(names, module_leaf_name(trim(take_before(line, "(")))), take_between(line, "(", ")"))
   else if string.find(line, "(") == -1 then
     append_unique_name(
-      append_unique_name(names, trim(string.slice(line, string.find(line, " as ") + 4, string.length(line) - string.find(line, " as ") - 4))),
+      append_unique_name(names, trim(take_after(line, " as "))),
       module_leaf_name(trim(string.slice(line, 0, string.find(line, " as "))))
     )
   else
     append_csv_names(
       append_unique_name(
-        append_unique_name(names, trim(string.slice(line, string.find(line, " as ") + 4, string.length(line) - string.find(line, " as ") - 4))),
+        append_unique_name(names, trim(take_after(line, " as "))),
         module_leaf_name(trim(take_before(string.slice(line, 0, string.find(line, " as ")), "(")))
       ),
       take_between(line, "(", ")")
@@ -325,7 +317,7 @@ fn find_imported_namespace_ref(namespace: String, imports: Vec String, index: In
       else find_imported_namespace_ref(namespace, imports, index + 1)
   | Nothing -> Nothing
 
-fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec String !{IO} =
+fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec String! {IO} =
   match find_imported_namespace_ref(take_before(prefix, "."), imports, 0) with
   | Just namespace_ref ->
       qualify_names(
@@ -349,7 +341,7 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
   | Just line -> gather_declaration_names(declarations, index + 1, append_declaration_names(acc, trim(line)))
   | Nothing -> acc
 
-fn completion_candidates_local(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO} =
+fn completion_candidates_local(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String)! {IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
       (
@@ -374,7 +366,7 @@ fn apply_completion(current: String, prefix: String, matches: Vec String) -> Str
   else if vec_length(matches) != 1 then current
   else drop_last_count(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
 
-fn complete_current_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int) -> Maybe String !{IO} =
+fn complete_current_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int) -> Maybe String! {IO} =
   match completion_candidates_local(current, imports, declarations) with
   | (prefix, matches) ->
       if prefix == "" then interactive_read_line_loop(prompt, history, imports, declarations, current, string.length(current), -1, current)
@@ -390,7 +382,7 @@ fn complete_current_line(prompt: String, history: Vec String, imports: Vec Strin
           keep_after(redraw_input(prompt, current, cursor), interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, -1, current))
         )
 
-fn interactive_read_line_step(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
+fn interactive_read_line_step(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String! {IO} =
   if key == "" then Nothing
   else if key == "ctrl-d" then if current == "" then keep_after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, browse_index, draft)
   else if key == "enter" then keep_after(term_write("\r\n"), Just(current))
@@ -422,13 +414,13 @@ fn interactive_read_line_step(prompt: String, history: Vec String, imports: Vec 
   else
     keep_after(redraw_input(prompt, insert_at(current, cursor, key), cursor + string.length(key)), interactive_read_line_loop(prompt, history, imports, declarations, insert_at(current, cursor, key), cursor + string.length(key), -1, insert_at(current, cursor, key)))
 
-fn interactive_read_line_loop(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+fn interactive_read_line_loop(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String! {IO} =
   interactive_read_line_step(prompt, history, imports, declarations, current, cursor, browse_index, draft, term_read_key_once())
 
-fn interactive_read_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
+fn interactive_read_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String! {IO} =
   keep_after(redraw_input(prompt, "", 0), interactive_read_line_loop(prompt, history, imports, declarations, "", 0, -1, ""))
 
-fn read_input_line(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
+fn read_input_line(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String! {IO} =
   match prompt with
   | Just text -> interactive_read_line(text, history, imports, declarations)
   | Nothing -> term_read_line_once()
@@ -441,7 +433,7 @@ fn block_prompt(prompt: Maybe String) -> Maybe String =
   | Just _ -> Just("block| ")
   | Nothing -> Nothing
 
-fn read_block_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String, acc: String) -> ReadResult !{IO} =
+fn read_block_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String, acc: String) -> ReadResult! {IO} =
   match read_input_line(block_prompt(prompt), history, imports, declarations) with
   | Just line ->
       if trim(line) == ":}" then Submission(acc)
@@ -449,7 +441,7 @@ fn read_block_submission(prompt: Maybe String, history: Vec String, imports: Vec
       else read_block_submission(prompt, history, imports, declarations, append_submission_line(acc, line))
   | Nothing -> ReadError("unterminated `:{` block; expected `:}` before end of input")
 
-fn read_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> ReadResult !{IO} =
+fn read_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> ReadResult! {IO} =
   match read_input_line(prompt, history, imports, declarations) with
   | Just line ->
       if trim(line) == ":{" then read_block_submission(prompt, history, imports, declarations, "")
@@ -481,7 +473,7 @@ fn render_instances_result(result: Result String (String, Vec String)) -> Vec St
       match pair with
       | (query_type, matches) ->
           if vec_length(matches) == 0 then single_line("No instances for " ++ query_type)
-          else single_line("Instances for " ++ query_type ++ ":") ++ matches
+          else single_line("Instances for " ++ query_type ++":" ) ++ matches
 
 fn help_lines() -> Vec String =
   single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, :{ ... :}, and :cancel inside block mode, plus ordinary import lines")
@@ -510,7 +502,7 @@ fn block_line_is_continuation(line: String) -> Bool =
     char_at(line, 0) == " "
       || char_at(line, 0) == "\t"
       || char_at(line, 0) == "|"
-      || trim(line) == "}"
+      || trim(line) =="}"
       || trim(line) == "else"
 
 fn finalize_block_chunk(chunks: Vec String, current: String) -> Vec String =
@@ -535,25 +527,25 @@ fn block_chunks(raw: String) -> Vec String =
 fn session_source(imports: Vec String, declarations: Vec String) -> String =
   append_source_blocks(append_source_blocks("module app.repl", imports, 0), declarations, 0)
 
-fn handle_type_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn handle_type_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":type expects an expression"), imports, declarations)
   else Continue(render_type_result(repl_type_of_in_source(session_source(imports, declarations), trim(drop_prefix(line, prefix)))), imports, declarations)
 
-fn handle_instances_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn handle_instances_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), imports, declarations)
   else Continue(render_instances_result(repl_instances_in_source(session_source(imports, declarations), trim(drop_prefix(line, prefix)))), imports, declarations)
 
-fn handle_import_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn handle_import_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   match repl_check_source(session_source(vec_append(line, imports), declarations)) with
   | Ok _ -> Continue(single_line("ok"), vec_append(line, imports), declarations)
   | Err message -> Continue(render_error(message), imports, declarations)
 
-fn handle_declaration_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn handle_declaration_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   match repl_check_source(session_source(imports, vec_append(line, declarations))) with
   | Ok _ -> Continue(single_line("ok"), imports, vec_append(line, declarations))
   | Err message -> Continue(render_error(message), imports, declarations)
 
-fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   if line == "" then Continue(vec_empty(), imports, declarations)
   else if line == ":help" then Continue(help_lines(), imports, declarations)
   else if line == ":quit" || line == ":q" || line == ":exit" then Exit
@@ -574,41 +566,41 @@ fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Ve
   else
     Continue(render_expr_result(repl_eval_expr_in_source(session_source(imports, declarations), line)), imports, declarations)
 
-fn handle_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn handle_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   handle_trimmed_submission(trim(raw), imports, declarations)
 
-fn continue_block_execution(result: SubmissionResult, chunks: Vec String, index: Int, outputs: Vec String) -> SubmissionResult !{IO} =
+fn continue_block_execution(result: SubmissionResult, chunks: Vec String, index: Int, outputs: Vec String) -> SubmissionResult! {IO} =
   match result with
   | Continue lines next_imports next_declarations ->
       execute_block_chunks(chunks, index + 1, outputs ++ lines, next_imports, next_declarations)
   | Exit -> Exit
 
-fn execute_block_chunks(chunks: Vec String, index: Int, outputs: Vec String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn execute_block_chunks(chunks: Vec String, index: Int, outputs: Vec String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   match vec_get(index, chunks) with
   | Just chunk -> continue_block_execution(handle_submission(chunk, imports, declarations), chunks, index, outputs)
   | Nothing -> Continue(outputs, imports, declarations)
 
-fn handle_block_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn handle_block_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult! {IO} =
   execute_block_chunks(block_chunks(raw), 0, vec_empty(), imports, declarations)
 
 fn push_history(history: Vec String, raw: String) -> Vec String =
   if trim(raw) == "" then history
   else vec_append(raw, history)
 
-fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec String) -> Unit !{IO} =
+fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec String) -> Unit! {IO} =
   match result with
   | Continue lines next_imports next_declarations ->
       then_io(render_lines(prompt, lines, 0), repl_loop(prompt, history, next_imports, next_declarations))
   | Exit -> finish_loop(prompt)
 
-fn run_repl(prompt: Maybe String) -> Unit !{IO} =
+fn run_repl(prompt: Maybe String) -> Unit! {IO} =
   repl_loop(prompt, vec_empty(), vec_empty(), vec_empty())
 
-fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
+fn start_repl(prompt: Maybe String, banner: String) -> Unit! {IO} =
   if banner == "" then run_repl(prompt)
   else then_io(term_write(banner), run_repl(prompt))
 
-export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
+export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit! {IO} =
   match read_submission(prompt, history, imports, declarations) with
   | Submission line ->
       if string.find(line, "\n") == -1 then
@@ -619,7 +611,7 @@ export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec Stri
   | ReadError message -> then_io(render_lines(prompt, render_error(message), 0), repl_loop(prompt, history, imports, declarations))
   | EndInput -> finish_loop(prompt)
 
-export fn main() -> Unit !{IO} =
+export fn main() -> Unit! {IO} =
   if term_is_interactive_once()
   then start_repl(Just("sprout> "), "Sprout REPL. Use :help for commands.\r\n")
   else start_repl(Nothing, "")

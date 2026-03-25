@@ -570,6 +570,8 @@ String module (in `stdlib/string.sprout`):
 - `concat(left: String, right: String) -> String`
 - `length(raw: String) -> Int`
 - `slice(raw: String, start: Int, count: Int) -> String`
+- `take(raw: String, count: Int) -> String`
+- `drop(raw: String, count: Int) -> String`
 - `find(raw: String, needle: String) -> Int`
 - `starts_with(raw: String, prefix: String) -> Bool`
 - `contains(raw: String, needle: String) -> Bool`
@@ -577,6 +579,10 @@ String module (in `stdlib/string.sprout`):
 - `trim_left(raw: String) -> String`
 - `trim_right(raw: String) -> String`
 - `trim(raw: String) -> String`
+- `is_empty(raw: String) -> Bool`
+- `strip_prefix(raw: String, prefix: String) -> Maybe String`
+- `strip_suffix(raw: String, suffix: String) -> Maybe String`
+- `split_once(raw: String, sep: String) -> Maybe (String, String)`
 - `string_lines(raw: String) -> Vec String`
 - `string_digits(raw: String) -> Vec Int`
 
