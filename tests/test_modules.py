@@ -1040,6 +1040,52 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "66")
 
+    def test_import_stdlib_collections_vec_filter_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Maybe, Vec, vec_all, vec_any, vec_append, vec_count, vec_empty, vec_filter, vec_filter_map, vec_get_or)
+
+                fn sample() -> Vec Int =
+                  vec_append(4, vec_append(3, vec_append(2, vec_append(1, vec_empty()))))
+
+                fn is_even(value: Int) -> Bool =
+                  (value / 2) * 2 == value
+
+                fn to_even_label(value: Int) -> Maybe String =
+                  if is_even(value) then Just("even") else Nothing
+
+                fn filter_map_score(xs: Vec Int) -> Int =
+                  if vec_get_or(0, "", vec_filter_map(to_even_label, xs)) == "even" then 1 else 0
+
+                fn any_score(xs: Vec Int) -> Int =
+                  if vec_any(is_even, xs) then 1 else 0
+
+                fn all_score(xs: Vec Int) -> Int =
+                  if vec_all(is_even, xs) then 10 else 0
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    vec_count(is_even, sample())
+                    + vec_get_or(0, -1, vec_filter(is_even, sample()))
+                    + filter_map_score(sample())
+                    + any_score(sample())
+                    + all_score(sample())
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "6")
+
     def test_import_stdlib_collections_functor_and_foldable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

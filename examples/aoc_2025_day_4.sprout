@@ -1,5 +1,5 @@
 module examples.aoc_2025_day_4
-import stdlib.collections (Vec, vec_append, vec_empty, vec_get_or, vec_length)
+import stdlib.collections (Vec, vec_append, vec_empty, vec_filter, vec_get_or, vec_length)
 import stdlib.string (concat, length, slice, string_lines)
 
 # Advent of Code 2025 Day 4: Printing Department
@@ -108,27 +108,13 @@ fn remove_accessible_layers(grid: Vec String, removed_total: Int) -> Int =
       if removed_now == 0 then removed_total
       else remove_accessible_layers(next_grid, removed_total + removed_now)
 
-fn append_if_non_empty(acc: Vec String, line: String) -> Vec String =
-  if length(line) == 0 then acc
-  else vec_append(line, acc)
-
-fn collect_non_empty_lines(lines: Vec String, index: Int, total: Int, acc: Vec String) -> Vec String =
-  if index >= total then acc
-  else
-    collect_non_empty_lines(
-      lines,
-      index + 1,
-      total,
-      append_if_non_empty(acc, vec_get_or(index, "", lines))
-    )
+fn is_non_empty_line(line: String) -> Bool =
+  length(line) != 0
 
 fn parse_grid(raw: String) -> Vec String =
   raw
   |> string_lines
-  |> collect_non_empty_lines_all
-
-fn collect_non_empty_lines_all(lines: Vec String) -> Vec String =
-  collect_non_empty_lines(lines, 0, vec_length(lines), vec_empty())
+  |> vec_filter(is_non_empty_line)
 
 fn solve_grid(grid: Vec String) -> Answers =
   Answers(count_accessible_now(grid), remove_accessible_layers(grid, 0))
