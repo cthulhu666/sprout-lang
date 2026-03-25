@@ -123,9 +123,6 @@ fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, r
   else
     Ok(build_request(req, headers, string.take(string.drop(raw, request_body_start(raw)), content_length)))
 
-fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} =
-  b
-
 fn read_until_headers(conn: Int, acc: String) -> Result HttpServerError String !{IO} =
   if find_headers_end(acc) >= 0 then Ok(acc)
   else
@@ -238,7 +235,7 @@ export fn render(resp: HttpServerResponse) -> Result HttpServerError String =
           | HttpUnsupportedStatus code -> Err(HttpServerUnsupportedStatus(code))
 
 fn write_and_close(conn: Int, payload: String) -> Unit !{IO} =
-  then_io(tcp_write(conn, payload), tcp_close(conn))
+  after(tcp_write(conn, payload), tcp_close(conn))
 
 fn handle_connection(conn: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
   match read_request(conn) with
@@ -256,7 +253,7 @@ fn render_response_or_fallback(resp: HttpServerResponse) -> String =
 
 fn serve_loop(listener: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
   if remaining == 0 then tcp_close_listener(listener)
-  else then_io(handle_connection(tcp_accept(listener), handler), serve_loop(listener, remaining - 1, handler))
+  else after(handle_connection(tcp_accept(listener), handler), serve_loop(listener, remaining - 1, handler))
 
 export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
   serve_loop(tcp_listen(port), max_connections, handler)

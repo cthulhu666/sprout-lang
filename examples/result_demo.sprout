@@ -2,8 +2,6 @@ module examples.result_demo
 
 # Compares a manual result flow with the preferred piped style.
 
-fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
-
 fn inc(x: Int) -> Int = x + 1
 
 fn double_if_large(x: Int) -> Result String Int =
@@ -51,4 +49,4 @@ fn piped_error_demo() -> Unit !{IO} =
   print_result(piped_result_flow(Ok(3)), 7)
 
 fn main() -> Unit !{IO} =
-  then_io(manual_ok_demo(), then_io(piped_ok_demo(), piped_error_demo()))
+  after(manual_ok_demo(), after(piped_ok_demo(), piped_error_demo()))

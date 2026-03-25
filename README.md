@@ -324,6 +324,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - prelude instances are currently provided for `String`, `List a`, `Vec a`, and `Dict v`
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
+  - `after(effect, value)` sequences `effect` and returns `value`
   - forward pipe operator: `value |> f` rewrites to `f(value)`, and
     `value |> g(a, b)` rewrites to `g(a, b, value)`
   - function composition operators:
@@ -339,6 +340,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `result_pipe_error(f, r)` aliases `result_map_error` in pipeline style
   - `when_ok(f, r)` runs `f` for `Ok` and preserves `r`
   - `when_error(f, r)` runs `f` for `Err` and preserves `r`
+
+The current `after(effect, value)` helper in `stdlib/prelude.sprout` is a pragmatic sequencing convenience for `IO`. A more principled abstraction is likely needed later, probably in the direction of Haskell-style sequencing/typeclass machinery rather than a growing pile of ad hoc aliases.
 
 Current call semantics note: ordinary function values support under-application.
 Sprout uses nested arrow types for multi-parameter functions, so `f(x)` returns

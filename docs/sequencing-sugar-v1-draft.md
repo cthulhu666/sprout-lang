@@ -204,6 +204,12 @@ In terms of scope:
 This document recommends `let?` first because it solves the real readability
 problem while preserving room to grow toward block-based sequencing later.
 
+The current `after(effect, value)` helper in `stdlib/prelude.sprout` is a
+temporary IO sequencing convenience, not the final abstraction. Longer term,
+Sprout likely wants something closer to Haskell's generic sequencing machinery
+so the same idea can be shared across multiple effectful or container-like
+contexts instead of living as one-off aliases.
+
 ## 7. Core Syntax
 
 Draft syntax:

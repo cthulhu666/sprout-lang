@@ -175,10 +175,9 @@ class RuntimeTests(unittest.TestCase):
 
     def test_pipe_operator_preserves_left_to_right_evaluation_order(self) -> None:
         src = """
-        fn then_io(a: Unit !{IO}, b: Int) -> Int !{IO} = b
         fn add(x: Int, y: Int) -> Int = x + y
         fn mark(label: String, value: Int) -> Int !{IO} =
-          then_io(print(label), value)
+          after(print(label), value)
 
         fn main() -> Unit !{IO} =
           print(

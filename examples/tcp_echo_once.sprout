@@ -1,7 +1,8 @@
 # One-shot TCP echo server (interpreter runtime builtins).
 # Run and connect once to localhost:8081.
 
-fn then_io(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+fn then_io(effect: Unit !{IO}, value: a) -> a !{IO} =
+  value
 
 fn handle_conn(conn: Int) -> Unit !{IO} =
   then_io(tcp_write(conn, tcp_read(conn)), tcp_close(conn))
