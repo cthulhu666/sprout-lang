@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from .analysis_backend import AnalysisBackend
+from .analysis_backend import AnalysisBackend, AnalysisCompletionBackend, AnalysisExecutionBackend, AnalysisSnapshotBackend
 from .analysis_completion_backend import python_completion_complete_in_state
 from .analysis_execution_backend import (
     python_execution_check_source,
@@ -36,14 +36,14 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class _FunctionAnalysisBackend:
-    check_source: Callable[[str], None]
-    type_of_in_source: Callable[[str, str], str]
+class _FunctionAnalysisBackend(AnalysisBackend):
     declared_names_in_source: Callable[[str], list[str]]
     exported_names_in_source: Callable[[str], list[str]]
     symbol_inventory_in_source: Callable[[str], tuple[list[str], list[str], list[str]]]
     diagnostics_in_source: Callable[[str], list[tuple[str, int, int]]]
     symbol_locations_in_source: Callable[[str], list[tuple[str, str, int, int]]]
+    check_source: Callable[[str], None]
+    type_of_in_source: Callable[[str, str], str]
     instances_in_source: Callable[[str, str], tuple[str, list[str]]]
     eval_expr_in_source: Callable[[str, str], tuple[str, ...]]
     complete_in_state: Callable[[str, list[str], list[str]], tuple[str, list[str]]]
@@ -108,4 +108,16 @@ DEFAULT_ANALYSIS_BACKEND: AnalysisBackend = _FunctionAnalysisBackend(
 
 
 def default_analysis_backend() -> AnalysisBackend:
+    return DEFAULT_ANALYSIS_BACKEND
+
+
+def default_snapshot_backend() -> AnalysisSnapshotBackend:
+    return DEFAULT_ANALYSIS_BACKEND
+
+
+def default_execution_backend() -> AnalysisExecutionBackend:
+    return DEFAULT_ANALYSIS_BACKEND
+
+
+def default_completion_backend() -> AnalysisCompletionBackend:
     return DEFAULT_ANALYSIS_BACKEND
