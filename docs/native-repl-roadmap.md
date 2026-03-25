@@ -184,7 +184,10 @@ Current experimental runtime progress:
    each have their own protocol, with `AnalysisBackend` composing them. The
    completion capability is now the first backend bundle whose implementation
    no longer routes through the monolithic `sprout.analysis` module; that
-   module now re-exports the completion helpers for compatibility.
+   module now re-exports the completion helpers for compatibility. The simpler
+   snapshot-query operations (`declared`, `exported`, and `symbol_inventory`)
+   now do the same through `sprout.analysis_snapshot_backend`, while
+   diagnostics and symbol-location queries still live in `sprout.analysis`.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

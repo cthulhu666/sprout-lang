@@ -12,6 +12,11 @@ from .analysis_completion_backend import (
     completion_candidates_in_state,
     completion_matches_in_state,
 )
+from .analysis_snapshot_backend import (
+    python_snapshot_declared_names_in_source,
+    python_snapshot_exported_names_in_source,
+    python_snapshot_symbol_inventory_in_source,
+)
 from .interpreter import RuntimeError, run_program
 from .module_loader import (
     MODULE_COMPAT_TYPES,
@@ -606,61 +611,15 @@ def check_source(source: str) -> None:
 
 
 def declared_names_in_source(source: str) -> list[str]:
-    tree, _ = _parse_and_check_source(source)
-    return sorted(_declared_names_from_tree(tree))
+    return python_snapshot_declared_names_in_source(source)
 
 
 def exported_names_in_source(source: str) -> list[str]:
-    composed = _compose_snapshot_source(source)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
-        temp_path.write_text(composed, encoding="utf-8")
-        bundle = load_module_bundle(temp_path)
-        tree = parse(bundle.source)
-        resolve_program_names(tree, bundle)
-        validate_public_surface(tree, bundle)
-        typecheck_program(tree)
-        module_info = bundle.modules[temp_path]
-        exported = set(module_info.exported)
-        export_ctor_types = set(module_info.exported_type_constructors)
-        module_name = module_info.header.module or ""
-        for decl in tree.declarations:
-            if _module_for_line(bundle, getattr(decl, "line", -1)) != module_info:
-                continue
-            if isinstance(decl, ast.TypeDecl) and decl.name.rsplit(".", 1)[-1] in export_ctor_types:
-                for ctor in decl.constructors:
-                    exported.add(ctor.name.rsplit(".", 1)[-1])
-        for ctors in MODULE_COMPAT_TYPES.get(module_name, {}).values():
-            exported.update(ctors)
-        return sorted(exported)
+    return python_snapshot_exported_names_in_source(source)
 
 
 def symbol_inventory_in_source(source: str) -> tuple[list[str], list[str], list[str]]:
-    composed = _compose_snapshot_source(source)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
-        temp_path.write_text(composed, encoding="utf-8")
-        bundle = load_module_bundle(temp_path)
-        tree = parse(bundle.source)
-        resolve_program_names(tree, bundle)
-        validate_public_surface(tree, bundle)
-        typecheck_program(tree)
-        module_info = bundle.modules[temp_path]
-        declared = sorted(_declared_names_from_tree(tree))
-        module_symbols = _build_module_symbols(tree, bundle)
-        imported: set[str] = set()
-        for imp in module_info.header.imports:
-            namespace_alias = _namespace_alias_for_import(imp)
-            if namespace_alias is not None:
-                imported.add(namespace_alias)
-            if imp.imported_names is not None:
-                imported.update(imp.imported_names)
-                imp_path = _resolve_module(imp.module, temp_path)
-                imp_symbols = module_symbols[imp_path]
-                for name in imp.imported_names:
-                    imported.update(imp_symbols.exported_type_constructors.get(name, {}))
-        exported = exported_names_in_source(source)
-        return declared, sorted(imported), exported
+    return python_snapshot_symbol_inventory_in_source(source)
 
 
 def symbol_locations_in_source(source: str) -> list[tuple[str, str, int, int]]:

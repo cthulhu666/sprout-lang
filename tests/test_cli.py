@@ -25,6 +25,7 @@ from sprout.analysis_adapter import (
 from sprout.analysis import completion_candidates_in_state, infer_type_in_source, symbol_inventory_in_source
 from sprout.analysis_backend import AnalysisBackend
 from sprout.analysis_completion_backend import python_completion_complete_in_state
+from sprout.analysis_snapshot_backend import python_snapshot_symbol_inventory_in_source
 from sprout.analysis_backend_stub import StubAnalysisBackend
 from sprout.analysis_backend_python import (
     default_analysis_backend,
@@ -513,6 +514,21 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(
             default_analysis_backend().symbol_inventory_in_source(source),
+            symbol_inventory_in_source(source),
+        )
+
+    def test_analysis_snapshot_backend_symbol_inventory_matches_analysis_surface(self) -> None:
+        source = "\n".join(
+            [
+                "module app.repl",
+                "",
+                "import stdlib.string as string",
+                "export let local = string.concat(\"a\", \"b\")",
+            ]
+        )
+
+        self.assertEqual(
+            python_snapshot_symbol_inventory_in_source(source),
             symbol_inventory_in_source(source),
         )
 
