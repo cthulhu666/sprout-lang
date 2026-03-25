@@ -25,7 +25,10 @@ from sprout.analysis_adapter import (
 from sprout.analysis import completion_candidates_in_state, infer_type_in_source, symbol_inventory_in_source
 from sprout.analysis_backend import AnalysisBackend
 from sprout.analysis_completion_backend import python_completion_complete_in_state
-from sprout.analysis_snapshot_backend import python_snapshot_symbol_inventory_in_source
+from sprout.analysis_snapshot_backend import (
+    python_snapshot_symbol_inventory_in_source,
+    python_snapshot_symbol_locations_in_source,
+)
 from sprout.analysis_backend_stub import StubAnalysisBackend
 from sprout.analysis_backend_python import (
     default_analysis_backend,
@@ -530,6 +533,31 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             python_snapshot_symbol_inventory_in_source(source),
             symbol_inventory_in_source(source),
+        )
+
+    def test_analysis_snapshot_backend_symbol_locations_match_analysis_surface(self) -> None:
+        from sprout.analysis import symbol_locations_in_source
+
+        source = "\n".join(
+            [
+                "module app.lib",
+                "",
+                "let alpha = 1",
+                "",
+                "fn beta(x: Int) -> Int = x",
+                "",
+                "class Render a {",
+                "  fn render(value: a) -> String",
+                "}",
+                "",
+                "type Box =",
+                "  | Wrap String",
+            ]
+        )
+
+        self.assertEqual(
+            python_snapshot_symbol_locations_in_source(source),
+            symbol_locations_in_source(source),
         )
 
     def test_analysis_backend_completion_matches_analysis_surface(self) -> None:

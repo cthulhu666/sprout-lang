@@ -16,6 +16,28 @@ can also target.
 
 It is an implementation/tooling roadmap, not a normative language spec.
 
+## Pause Milestone
+
+The intended pause point before switching focus back to core language features
+is:
+
+1. `sprout.cli repl --native` is stable enough for day-to-day interactive use.
+2. The remaining Python dependency is isolated behind the adapter/backend seam
+   rather than spread across launcher, frontend, and REPL-host code.
+3. The active REPL frontend path no longer depends on legacy mutable-session
+   compatibility hooks.
+4. The unfinished work is clearly framed as backend replacement work, not REPL
+   product-surface instability.
+
+The remaining work to reach that pause point is deliberately smaller than full
+Python elimination:
+
+1. finish moving the remaining snapshot-query implementations out of
+   `sprout.analysis`,
+2. decide which backend bundle should be replaced first after the pause, and
+3. keep the native REPL docs/tests aligned with that narrower backend-focused
+   status.
+
 ## Problem Statement
 
 The current REPL is implemented inside the Python CLI. It already supports
@@ -185,9 +207,9 @@ Current experimental runtime progress:
    completion capability is now the first backend bundle whose implementation
    no longer routes through the monolithic `sprout.analysis` module; that
    module now re-exports the completion helpers for compatibility. The simpler
-   snapshot-query operations (`declared`, `exported`, and `symbol_inventory`)
-   now do the same through `sprout.analysis_snapshot_backend`, while
-   diagnostics and symbol-location queries still live in `sprout.analysis`.
+   snapshot-query operations (`declared`, `exported`, `symbol_inventory`, and
+   symbol locations) now do the same through `sprout.analysis_snapshot_backend`,
+   while diagnostics still live in `sprout.analysis`.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

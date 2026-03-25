@@ -14,6 +14,7 @@ from .analysis_completion_backend import (
 )
 from .analysis_snapshot_backend import (
     python_snapshot_declared_names_in_source,
+    python_snapshot_symbol_locations_in_source,
     python_snapshot_exported_names_in_source,
     python_snapshot_symbol_inventory_in_source,
 )
@@ -142,44 +143,6 @@ def _canonical_name(name: str | None, module_name: str | None) -> str | None:
     if name.startswith(repeated):
         return name[len(module_name) + 1 :]
     return name
-
-
-def _module_declared_symbol_locations(
-    tree: ast.Program,
-    bundle: ModuleBundle,
-    module_path: Path,
-) -> list[tuple[str, str, int, int]]:
-    entries: list[tuple[str, str, int, int]] = []
-    for decl in tree.declarations:
-        line = getattr(decl, "line", None)
-        if line is None:
-            continue
-        module_info = _module_for_line(bundle, line)
-        if module_info is None or module_info.path != module_path:
-            continue
-        if isinstance(decl, (ast.FnDecl, ast.LetDecl)):
-            location = _source_location_for_bundle_line(bundle, line, getattr(decl, "column", 1))
-            if location is not None:
-                _, source_line, source_column = location
-                entries.append(("value", _leaf_name(decl.name), source_line, source_column))
-        elif isinstance(decl, ast.TypeDecl):
-            type_location = _source_location_for_bundle_line(bundle, line, getattr(decl, "column", 1))
-            if type_location is not None:
-                _, source_line, source_column = type_location
-                entries.append(("type", _leaf_name(decl.name), source_line, source_column))
-            for ctor in decl.constructors:
-                ctor_line = getattr(ctor, "line", line)
-                ctor_column = getattr(ctor, "column", getattr(decl, "column", 1))
-                ctor_location = _source_location_for_bundle_line(bundle, ctor_line, ctor_column)
-                if ctor_location is not None:
-                    _, source_line, source_column = ctor_location
-                    entries.append(("constructor", _leaf_name(ctor.name), source_line, source_column))
-        elif isinstance(decl, ast.ClassDecl):
-            location = _source_location_for_bundle_line(bundle, line, getattr(decl, "column", 1))
-            if location is not None:
-                _, source_line, source_column = location
-                entries.append(("class", _leaf_name(decl.name), source_line, source_column))
-    return sorted(entries, key=lambda entry: (entry[2], entry[3], entry[0], entry[1]))
 
 
 def _mapped_source_location(bundle: ModuleBundle, line: int, column: int = 1) -> SourceLocation | None:
@@ -623,16 +586,7 @@ def symbol_inventory_in_source(source: str) -> tuple[list[str], list[str], list[
 
 
 def symbol_locations_in_source(source: str) -> list[tuple[str, str, int, int]]:
-    composed = _compose_snapshot_source(source)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
-        temp_path.write_text(composed, encoding="utf-8")
-        bundle = load_module_bundle(temp_path)
-        tree = parse(bundle.source)
-        resolve_program_names(tree, bundle)
-        validate_public_surface(tree, bundle)
-        typecheck_program(tree)
-        return _module_declared_symbol_locations(tree, bundle, temp_path)
+    return python_snapshot_symbol_locations_in_source(source)
 
 
 def symbol_metadata_in_source(source: str) -> list[SymbolMetadata]:
