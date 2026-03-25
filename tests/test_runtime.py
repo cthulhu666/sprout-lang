@@ -1331,6 +1331,41 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "66")
 
+    def test_stdlib_vec_filter_helpers(self) -> None:
+        src = """
+        fn sample() -> Vec Int =
+          vec_append(4, vec_append(3, vec_append(2, vec_append(1, vec_empty()))))
+
+        fn is_even(x: Int) -> Bool =
+          x / 2 * 2 == x
+
+        fn to_even_label(x: Int) -> Maybe String =
+          if is_even(x) then Just("even") else Nothing
+
+        fn mapped_score(xs: Vec Int) -> Int =
+          if vec_get_or(0, "", vec_filter_map(to_even_label, xs)) == "even" then 1 else 0
+
+        fn any_score(xs: Vec Int) -> Int =
+          if vec_any(is_even, xs) then 1 else 0
+
+        fn all_score(xs: Vec Int) -> Int =
+          if vec_all(is_even, xs) then 1 else 0
+
+        fn main() -> Unit !{IO} =
+          print(
+            vec_count(is_even, sample())
+            + vec_get_or(0, -1, vec_filter(is_even, sample()))
+            + mapped_score(sample())
+            + any_score(sample())
+            + all_score(sample())
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "6")
+
     def test_stdlib_math_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

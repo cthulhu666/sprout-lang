@@ -302,6 +302,11 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `vec_set(index, value, vec)`
   - `vec_map(f, vec)`
   - `vec_fold(f, init, vec)`
+  - `vec_filter(pred, vec)`
+  - `vec_filter_map(f, vec)`
+  - `vec_any(pred, vec)`
+  - `vec_all(pred, vec)`
+  - `vec_count(pred, vec)`
   - `vec_slice(start, count, vec)`
   - `vec_reverse(vec)`
   - `vec_sum(vec)`
