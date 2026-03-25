@@ -148,6 +148,10 @@ def _needs_space(
 ) -> bool:
     if prev is None:
         return False
+    if curr.value == "!" and prev.value not in {"(", "[", "{", ",", "|", "!"}:
+        return True
+    if prev.value == "!":
+        return curr.value != "{"
     if curr.value == ":":
         return False
     if prev.value == ":":

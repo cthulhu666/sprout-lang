@@ -78,6 +78,20 @@ class FormatterTests(unittest.TestCase):
             "  | Err e -> Err(e)\n",
         )
 
+    def test_format_source_preserves_effect_annotation_spacing(self) -> None:
+        src = "fn main()->Unit!{IO}=print(\"ok\")\n"
+        self.assertEqual(
+            format_source(src),
+            'fn main() -> Unit !{IO} = print("ok")\n',
+        )
+
+    def test_format_source_preserves_effect_polymorphic_spacing(self) -> None:
+        src = "fn apply_twice(f:Int->Int!{e},x:Int)->Int!{e}=f(f(x))\n"
+        self.assertEqual(
+            format_source(src),
+            "fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(f(x))\n",
+        )
+
     def test_lint_source_reports_baseline_style_issues(self) -> None:
         issues = lint_source("fn main()->Int=1\t  ")
         self.assertEqual(
