@@ -23,6 +23,7 @@ This file tracks open design, implementation, and tooling follow-up work.
    Recent groundwork landed: native TCP handle-slot reuse and an experimental `stdlib.http_server` helper layer for structured request parsing/rendering.
    Remaining follow-up: incremental bytes-oriented HTTP reads, keep-alive/chunked support, and stronger concurrent runtime models.
 4. Keep expanding stdlib text/data helpers beyond the current baseline (`trim*`, `contains`, `ends_with`, `string_lines`, `string_digits`, vector utility combinators).
+   Remaining follow-up: define the Unicode text model explicitly enough to support a future `Char` type and consistent string indexing/length/slice semantics.
 5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
 6. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
 7. Continue native memory-management v1.
@@ -51,3 +52,6 @@ This file tracks open design, implementation, and tooling follow-up work.
    Completed groundwork: experimental nominal record declarations, typed record literals, and read-only field projection via `get record field`.
    Remaining follow-up: record update syntax, a dedicated records draft/spec, and a final field-access surface decision if the language later wants something more ergonomic than the current contextual `get` form.
    First milestone constraints: no row polymorphism, no structural subtyping, no implicit field punning, and no attempt to fold records into the current ADT surface without a dedicated spec.
+6. Add a Unicode `Char` type and define string text semantics in v1.
+   Initial scope: distinct `Char` values and literals, `String` text defined in terms of Unicode code points, and a small helper surface such as `char_at`, `char_at_or`, `string_from_char`, and `string_chars`.
+   First milestone constraints: code-point indexing/length/slice semantics only, no grapheme-cluster-aware APIs yet, and no promise of full Unicode normalization or one-to-many case mapping in the initial slice.
