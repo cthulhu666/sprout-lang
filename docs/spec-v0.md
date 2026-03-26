@@ -27,7 +27,7 @@ Out of scope for v0:
 ## 2. Lexical Structure
 
 - Identifiers: `[a-zA-Z_][a-zA-Z0-9_]*`
-- Keywords: `fn`, `let`, `type`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
+- Keywords: `fn`, `let`, `where`, `type`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
 - Literals: integer, boolean, string
 - Comments: line comments start with `#` and continue to end of line
 
@@ -99,6 +99,24 @@ Int` has type `Int -> Int -> Int`.
 
 Omitted effect annotations mean the function is pure. In v0, the only built-in
 effect label is `IO`.
+
+Functions may also end with a local `where` block:
+
+```sprout
+fn score(n: Int) -> Int =
+  x + y
+where
+  x = n + 1
+  y = x * 2
+```
+
+Local `where` bindings in v0 follow these rules:
+
+- They are allowed only on `fn` declarations.
+- They are value bindings only; local type annotations are not part of v0.
+- Multiple bindings are allowed and are evaluated in source order.
+- Each binding may use function parameters and earlier local bindings.
+- Self-reference, mutual recursion, and forward reference are not part of v0.
 
 ### 5.2 Let binding
 
@@ -199,15 +217,16 @@ type Maybe a =
    function value that captures those arguments.
    If the call supplies more than the remaining parameters, it is an error.
 2. Lambda expression: evaluating a lambda produces a closure that captures the current lexical environment.
-3. `let`: evaluate RHS immediately, then bind.
-4. Binary operators: evaluate left operand, then right operand.
-5. Short-circuiting:
+3. Function-local `where` bindings evaluate in source order after function parameters are bound, with each binding extending the environment for later bindings and the final body.
+4. `let`: evaluate RHS immediately, then bind.
+5. Binary operators: evaluate left operand, then right operand.
+6. Short-circuiting:
 - `a && b`: evaluate `b` only if `a` is `true`.
 - `a || b`: evaluate `b` only if `a` is `false`.
-6. `if`: evaluate condition, then exactly one branch.
-7. `match`: evaluate scrutinee once, then patterns in order, evaluate first matching branch.
-8. Constructors and tuples evaluate fields left-to-right before construction.
-9. Top-level declarations evaluate in source order.
+7. `if`: evaluate condition, then exactly one branch.
+8. `match`: evaluate scrutinee once, then patterns in order, evaluate first matching branch.
+9. Constructors and tuples evaluate fields left-to-right before construction.
+10. Top-level declarations evaluate in source order.
 
 Effect note for v0:
 
@@ -236,6 +255,8 @@ Effect note for v0:
 11. A pure function body may not call `!{IO}` functions unless it is allowed by
     the surrounding singleton effect variable instantiation.
 12. Tuple expressions and tuple patterns use structural, exact-arity typing.
+13. In a function-local `where` block, each binding is checked in order using the
+    function parameters and earlier local bindings; later bindings are not in scope.
 
 ## 8. Standard Library Math Module
 

@@ -92,6 +92,13 @@ class FormatterTests(unittest.TestCase):
             "fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(f(x))\n",
         )
 
+    def test_format_source_preserves_local_where_blocks(self) -> None:
+        src = "fn score(n:Int)->Int=\n  x+y\nwhere\n  x=n+1\n  y=x*2\n"
+        self.assertEqual(
+            format_source(src),
+            "fn score(n: Int) -> Int =\n  x + y\nwhere\n  x = n + 1\n  y = x * 2\n",
+        )
+
     def test_lint_source_reports_baseline_style_issues(self) -> None:
         issues = lint_source("fn main()->Int=1\t  ")
         self.assertEqual(

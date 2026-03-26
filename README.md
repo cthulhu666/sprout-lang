@@ -31,6 +31,7 @@ Normative status:
 - `docs/spec-v0.md` defines the stable Sprout core for v0.
 - Features described elsewhere in this README but not specified in `docs/spec-v0.md`
   are implementation features or experimental extensions.
+- Function-local `where` blocks on `fn` declarations are part of the normative v0 core.
 - In particular, the current module system and typeclass support are implemented
   in the prototype, but are not yet part of normative v0.
 - The current implementation also includes an experimental first records slice:
@@ -346,6 +347,22 @@ The current `after(effect, value)` helper in `stdlib/prelude.sprout` is a pragma
 Current call semantics note: ordinary function values support under-application.
 Sprout uses nested arrow types for multi-parameter functions, so `f(x)` returns
 another function value when `f` still has remaining parameters.
+
+Function-local bindings are available through `where` on `fn` declarations:
+
+```sprout
+fn score(n: Int) -> Int =
+  x + y
+where
+  x = n + 1
+  y = x * 2
+```
+
+This `where` form is intentionally small in v0:
+
+- it applies only to `fn` declarations
+- bindings are value bindings only, with no local type annotations
+- bindings are non-recursive and may use only function parameters and earlier local bindings
 
 Math module (in `stdlib/math.sprout`):
 

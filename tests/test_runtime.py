@@ -1517,6 +1517,53 @@ class RuntimeTests(unittest.TestCase):
             run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "27")
 
+    def test_runtime_function_local_where_bindings(self) -> None:
+        src = """
+        fn score(n: Int) -> Int =
+          x + y
+        where
+          x = n + 1
+          y = x * 2
+
+        fn main() -> Unit !{IO} =
+          print(score(5))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "18")
+
+    def test_runtime_typeclass_constraint_inside_local_where_body(self) -> None:
+        src = """
+        type List a =
+          | Cons a (List a)
+          | Nil
+
+        class Semigroup t {
+          fn append(x: t, y: t) -> t
+        }
+
+        instance Semigroup String {
+          fn append(x: String, y: String) -> String = str_concat(x, y)
+        }
+
+        fn add_suffix(prefix: String, suffix: String) -> String where Semigroup String =
+          append(base, suffix)
+        where
+          base = prefix
+
+        fn main() -> Unit !{IO} =
+          print(add_suffix("sprout", "-lang"))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "sprout-lang")
+
     def test_stdlib_semigroup_instances(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -55,6 +55,48 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(fn_decl.params[0].type_expr)
         self.assertIsNone(fn_decl.return_type)
 
+    def test_parse_fn_local_where_desugars_to_nested_lambda_calls(self) -> None:
+        src = """
+        fn score(n: Int) -> Int =
+          x + y
+        where
+          x = n + 1
+          y = x * 2
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.LambdaExpr)
+        self.assertEqual(fn_decl.body.callee.params[0].name, "x")
+        self.assertIsInstance(fn_decl.body.callee.body, ast.CallExpr)
+        inner = fn_decl.body.callee.body
+        self.assertIsInstance(inner.callee, ast.LambdaExpr)
+        self.assertEqual(inner.callee.params[0].name, "y")
+
+    def test_parse_fn_allows_constraints_and_local_where(self) -> None:
+        src = """
+        fn map_id(xs: List Int) -> List Int where Functor List =
+          value
+        where
+          value = fmap(id, xs)
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertEqual(len(fn_decl.constraints), 1)
+        self.assertEqual(fn_decl.constraints[0].class_name, "Functor")
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+
+    def test_parse_fn_rejects_duplicate_local_where_bindings(self) -> None:
+        src = """
+        fn bad(n: Int) -> Int =
+          x
+        where
+          x = n
+          x = n + 1
+        """
+        with self.assertRaises(ParseError):
+            parse(src)
+
     def test_parse_lambda_expression_with_annotations(self) -> None:
         src = r"""
         fn main() -> Int = \(x: Int, y: Int) -> x + y

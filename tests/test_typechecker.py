@@ -704,6 +704,40 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
 
+    def test_typecheck_function_local_where_bindings(self) -> None:
+        src = """
+        fn score(n: Int) -> Int =
+          x + y
+        where
+          x = n + 1
+          y = x * 2
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("score", types)
+
+    def test_type_error_local_where_rejects_forward_reference(self) -> None:
+        src = """
+        fn bad(n: Int) -> Int =
+          x
+        where
+          x = y + 1
+          y = n
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unknown variable y", str(ctx.exception))
+
+    def test_type_error_local_where_rejects_self_reference(self) -> None:
+        src = """
+        fn bad(n: Int) -> Int =
+          x
+        where
+          x = x + n
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unknown variable x", str(ctx.exception))
+
     def test_typecheck_parametric_semigroup_instance(self) -> None:
         src = """
         type List a =

@@ -138,6 +138,8 @@ class Parser:
 
         self.expect("SYMBOL", "=")
         body = self.parse_expr()
+        if self.match("KEYWORD", "where"):
+            body = self._desugar_local_where(body, self.parse_local_where_bindings())
         return self.mark(
             ast.FnDecl(
                 name=name,
@@ -149,6 +151,31 @@ class Parser:
             ),
             start,
         )
+
+    def parse_local_where_bindings(self) -> list[tuple[Token, ast.Expr]]:
+        bindings: list[tuple[Token, ast.Expr]] = []
+        seen: set[str] = set()
+        if not self._starts_local_where_binding():
+            t = self.current()
+            raise ParseError(f"Expected at least one local binding after where at {t.line}:{t.column}")
+        while self._starts_local_where_binding():
+            name_token = self.expect("IDENT", label="local binding name")
+            if name_token.value in seen:
+                raise ParseError(
+                    f"Duplicate local binding {name_token.value!r} at {name_token.line}:{name_token.column}"
+                )
+            seen.add(name_token.value)
+            self.expect("SYMBOL", "=")
+            bindings.append((name_token, self.parse_expr()))
+        return bindings
+
+    def _desugar_local_where(self, body: ast.Expr, bindings: list[tuple[Token, ast.Expr]]) -> ast.Expr:
+        out = body
+        for name_token, value in reversed(bindings):
+            param = self.mark(ast.Param(name=name_token.value, type_expr=None), name_token)
+            lam = self.mark(ast.LambdaExpr(params=[param], body=out), name_token)
+            out = self.mark(ast.CallExpr(callee=lam, args=[value]), name_token)
+        return out
 
     def parse_class_decl(self) -> ast.ClassDecl:
         start = self.expect("KEYWORD", "class")
@@ -705,6 +732,14 @@ class Parser:
         if self.check("KEYWORD") and self.current().value in {"true", "false"}:
             return True
         return False
+
+    def _starts_local_where_binding(self) -> bool:
+        return (
+            self.check("IDENT")
+            and self.i + 1 < len(self.tokens)
+            and self.tokens[self.i + 1].kind == "SYMBOL"
+            and self.tokens[self.i + 1].value == "="
+        )
 
     def _is_constructor_name(self, name: str) -> bool:
         leaf = name.rsplit(".", 1)[-1]

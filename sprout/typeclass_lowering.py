@@ -257,6 +257,22 @@ def _rewrite_expr_with_specialization(
 ) -> ast.Expr:
     if isinstance(expr, (ast.IntExpr, ast.BoolExpr, ast.StringExpr, ast.VarExpr)):
         return expr
+    if isinstance(expr, ast.LambdaExpr):
+        return _clone_with_loc(
+            ast.LambdaExpr(
+                params=expr.params,
+                body=_rewrite_expr_with_specialization(
+                    expr.body,
+                    scope | {param.name for param in expr.params},
+                    hidden_count_by_fn,
+                    fn_decls_by_name,
+                    specializations,
+                    generated_wrappers,
+                    taken_names,
+                ),
+            ),
+            expr,
+        )
     if isinstance(expr, ast.UnaryExpr):
         return _clone_with_loc(
             ast.UnaryExpr(
@@ -460,6 +476,25 @@ def _rewrite_expr(
 
     if isinstance(expr, ast.IntExpr) or isinstance(expr, ast.BoolExpr) or isinstance(expr, ast.StringExpr):
         return expr
+
+    if isinstance(expr, ast.LambdaExpr):
+        return _clone_with_loc(
+            ast.LambdaExpr(
+                params=expr.params,
+                body=_rewrite_expr(
+                    expr.body,
+                    scope | {param.name for param in expr.params},
+                    method_aliases,
+                    current_constraints,
+                    current_binding_by_constraint,
+                    fn_decls,
+                    fn_constraints,
+                    class_method_order,
+                    instance_constraints,
+                ),
+            ),
+            expr,
+        )
 
     if isinstance(expr, ast.UnaryExpr):
         return _clone_with_loc(ast.UnaryExpr(op=expr.op, operand=_rewrite_expr(
