@@ -362,6 +362,7 @@ This `where` form is intentionally small in v0:
 
 - it applies only to `fn` declarations
 - bindings are value bindings only, with no local type annotations
+- bindings may use either a single name or tuple destructuring with names / `_`
 - bindings are non-recursive and may use only function parameters and earlier local bindings
 
 Math module (in `stdlib/math.sprout`):

@@ -152,30 +152,62 @@ class Parser:
             start,
         )
 
-    def parse_local_where_bindings(self) -> list[tuple[Token, ast.Expr]]:
-        bindings: list[tuple[Token, ast.Expr]] = []
+    def parse_local_where_bindings(self) -> list[tuple[ast.Pattern, Token, ast.Expr]]:
+        bindings: list[tuple[ast.Pattern, Token, ast.Expr]] = []
         seen: set[str] = set()
         if not self._starts_local_where_binding():
             t = self.current()
             raise ParseError(f"Expected at least one local binding after where at {t.line}:{t.column}")
         while self._starts_local_where_binding():
-            name_token = self.expect("IDENT", label="local binding name")
-            if name_token.value in seen:
-                raise ParseError(
-                    f"Duplicate local binding {name_token.value!r} at {name_token.line}:{name_token.column}"
-                )
-            seen.add(name_token.value)
+            start = self.current()
+            pattern = self.parse_pattern()
+            bound_names = self._local_where_pattern_names(pattern)
+            for name in bound_names:
+                if name in seen:
+                    raise ParseError(f"Duplicate local binding {name!r} at {start.line}:{start.column}")
+                seen.add(name)
             self.expect("SYMBOL", "=")
-            bindings.append((name_token, self.parse_expr()))
+            bindings.append((pattern, start, self.parse_expr()))
         return bindings
 
-    def _desugar_local_where(self, body: ast.Expr, bindings: list[tuple[Token, ast.Expr]]) -> ast.Expr:
+    def _desugar_local_where(self, body: ast.Expr, bindings: list[tuple[ast.Pattern, Token, ast.Expr]]) -> ast.Expr:
         out = body
-        for name_token, value in reversed(bindings):
-            param = self.mark(ast.Param(name=name_token.value, type_expr=None), name_token)
-            lam = self.mark(ast.LambdaExpr(params=[param], body=out), name_token)
-            out = self.mark(ast.CallExpr(callee=lam, args=[value]), name_token)
+        for pattern, start, value in reversed(bindings):
+            if isinstance(pattern, ast.VarPattern):
+                param = self.mark(ast.Param(name=pattern.name, type_expr=None), start)
+                lam = self.mark(ast.LambdaExpr(params=[param], body=out), start)
+                out = self.mark(ast.CallExpr(callee=lam, args=[value]), start)
+            else:
+                tmp_name = self._fresh_local_where_tmp_name(out, value)
+                tmp_param = self.mark(ast.Param(name=tmp_name, type_expr=None), start)
+                tmp_expr = self.mark(ast.VarExpr(name=tmp_name), start)
+                branch = self.mark(ast.MatchBranch(pattern=pattern, value=out), start)
+                match_expr = self.mark(ast.MatchExpr(scrutinee=tmp_expr, branches=[branch]), start)
+                lam = self.mark(ast.LambdaExpr(params=[tmp_param], body=match_expr), start)
+                out = self.mark(ast.CallExpr(callee=lam, args=[value]), start)
         return out
+
+    def _local_where_pattern_names(self, pattern: ast.Pattern) -> list[str]:
+        if isinstance(pattern, ast.VarPattern):
+            return [pattern.name]
+        if isinstance(pattern, ast.WildcardPattern):
+            return []
+        if isinstance(pattern, ast.TuplePattern):
+            names: list[str] = []
+            for item in pattern.items:
+                names.extend(self._local_where_pattern_names(item))
+            return names
+        raise ParseError(
+            f"Local where bindings support only names, `_`, and tuple patterns at {pattern.line}:{pattern.column}"
+        )
+
+    def _fresh_local_where_tmp_name(self, left: ast.Expr, right: ast.Expr) -> str:
+        used = self._expr_names(left) | self._expr_names(right)
+        while True:
+            name = f"__sprout_where_{self.pipe_tmp_counter}"
+            self.pipe_tmp_counter += 1
+            if name not in used:
+                return name
 
     def parse_class_decl(self) -> ast.ClassDecl:
         start = self.expect("KEYWORD", "class")
@@ -734,12 +766,31 @@ class Parser:
         return False
 
     def _starts_local_where_binding(self) -> bool:
-        return (
-            self.check("IDENT")
-            and self.i + 1 < len(self.tokens)
-            and self.tokens[self.i + 1].kind == "SYMBOL"
-            and self.tokens[self.i + 1].value == "="
-        )
+        if self.check("IDENT"):
+            return (
+                self.i + 1 < len(self.tokens)
+                and self.tokens[self.i + 1].kind == "SYMBOL"
+                and self.tokens[self.i + 1].value == "="
+            )
+        if not self.check("SYMBOL", "("):
+            return False
+        depth = 0
+        idx = self.i
+        while idx < len(self.tokens):
+            token = self.tokens[idx]
+            if token.kind == "SYMBOL" and token.value == "(":
+                depth += 1
+            elif token.kind == "SYMBOL" and token.value == ")":
+                depth -= 1
+                if depth == 0:
+                    next_idx = idx + 1
+                    return (
+                        next_idx < len(self.tokens)
+                        and self.tokens[next_idx].kind == "SYMBOL"
+                        and self.tokens[next_idx].value == "="
+                    )
+            idx += 1
+        return False
 
     def _is_constructor_name(self, name: str) -> bool:
         leaf = name.rsplit(".", 1)[-1]

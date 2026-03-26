@@ -1534,6 +1534,25 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "18")
 
+    def test_runtime_function_local_where_tuple_destructuring(self) -> None:
+        src = """
+        fn pair(n: Int) -> (Int, Int) =
+          (n + 1, n * 2)
+
+        fn score(n: Int) -> Int =
+          left + right
+        where
+          (left, right) = pair(n)
+
+        fn main() -> Unit !{IO} =
+          print(score(5))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "16")
+
     def test_runtime_typeclass_constraint_inside_local_where_body(self) -> None:
         src = """
         type List a =

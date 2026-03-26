@@ -72,6 +72,26 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("define i64 @score(i64 %n)", ir)
         self.assertIn("__sprout_lambda_", ir)
 
+    def test_compile_function_with_local_where_tuple_destructuring_to_llvm(self) -> None:
+        src = """
+        fn pair(n: Int) -> (Int, Int) =
+          (n + 1, n * 2)
+
+        fn score(n: Int) -> Int =
+          left + right
+        where
+          (left, right) = pair(n)
+
+        fn main() -> Int =
+          score(5)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define i64 @score(i64 %n)", ir)
+        self.assertIn("__sprout_lambda_", ir)
+        self.assertIn("match_branch", ir)
+
     def test_compile_supports_top_level_const_let(self) -> None:
         src = """
         let base = 40

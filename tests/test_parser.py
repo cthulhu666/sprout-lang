@@ -86,6 +86,21 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(fn_decl.constraints[0].class_name, "Functor")
         self.assertIsInstance(fn_decl.body, ast.CallExpr)
 
+    def test_parse_fn_local_where_tuple_destructures_via_match(self) -> None:
+        src = """
+        fn score(pair: (Int, Int)) -> Int =
+          x + y
+        where
+          (x, y) = pair
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.CallExpr)
+        self.assertIsInstance(fn_decl.body.callee, ast.LambdaExpr)
+        self.assertIsInstance(fn_decl.body.callee.body, ast.MatchExpr)
+        branch = fn_decl.body.callee.body.branches[0]
+        self.assertIsInstance(branch.pattern, ast.TuplePattern)
+
     def test_parse_fn_rejects_duplicate_local_where_bindings(self) -> None:
         src = """
         fn bad(n: Int) -> Int =
@@ -93,6 +108,16 @@ class ParserTests(unittest.TestCase):
         where
           x = n
           x = n + 1
+        """
+        with self.assertRaises(ParseError):
+            parse(src)
+
+    def test_parse_fn_rejects_constructor_pattern_in_local_where(self) -> None:
+        src = """
+        fn bad(pair: Maybe Int) -> Int =
+          x
+        where
+          Just x = pair
         """
         with self.assertRaises(ParseError):
             parse(src)

@@ -114,6 +114,7 @@ Local `where` bindings in v0 follow these rules:
 
 - They are allowed only on `fn` declarations.
 - They are value bindings only; local type annotations are not part of v0.
+- Binding patterns may be either a single name or a tuple pattern built from names, `_`, and nested tuples.
 - Multiple bindings are allowed and are evaluated in source order.
 - Each binding may use function parameters and earlier local bindings.
 - Self-reference, mutual recursion, and forward reference are not part of v0.
@@ -257,6 +258,8 @@ Effect note for v0:
 12. Tuple expressions and tuple patterns use structural, exact-arity typing.
 13. In a function-local `where` block, each binding is checked in order using the
     function parameters and earlier local bindings; later bindings are not in scope.
+14. Function-local `where` bindings may destructure tuples, but constructor, literal,
+    and general pattern bindings are not part of v0.
 
 ## 8. Standard Library Math Module
 

@@ -715,6 +715,16 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertIn("score", types)
 
+    def test_typecheck_function_local_where_tuple_destructuring(self) -> None:
+        src = """
+        fn score(pair: (Int, Int)) -> Int =
+          x + y
+        where
+          (x, y) = pair
+        """
+        types = typecheck_program(parse(src))
+        self.assertIn("score", types)
+
     def test_type_error_local_where_rejects_forward_reference(self) -> None:
         src = """
         fn bad(n: Int) -> Int =
