@@ -1,6 +1,6 @@
 module examples.aoc_2025_day_4
 import stdlib.collections (Vec, vec_append, vec_empty, vec_filter, vec_get_or, vec_length)
-import stdlib.string (concat, length, slice, string_lines)
+import stdlib.string (char_at_or, concat, length, string_lines)
 
 # Advent of Code 2025 Day 4: Printing Department
 # part1 counts currently accessible rolls.
@@ -15,11 +15,6 @@ fn bool_to_int(value: Bool) -> Int =
 
 fn line_at(grid: Vec String, row: Int) -> String =
   vec_get_or(row, "", grid)
-
-fn char_at_or(line: String, col: Int, fallback: String) -> String =
-  if col < 0 then fallback
-  else if col >= length(line) then fallback
-  else slice(line, col, 1)
 
 fn cell_at(grid: Vec String, row: Int, col: Int) -> String =
   if row < 0 then "."

@@ -1211,7 +1211,7 @@ class ModuleLoaderTests(unittest.TestCase):
             main.write_text(
                 """
                 module main
-                import stdlib.string (concat, trim, contains, ends_with)
+                import stdlib.string (char_at_or, concat, trim, contains, ends_with)
 
                 fn suffix_status() -> String =
                   if ends_with("sprout-lang", "lang") then "ok" else "bad-end"
@@ -1221,7 +1221,7 @@ class ModuleLoaderTests(unittest.TestCase):
 
                 fn main() -> Unit !{IO} =
                   print(
-                    concat(trim(" \\t sprout\\n"), concat("|", contains_status()))
+                    concat(trim(" \\t sprout\\n"), concat("|", concat(char_at_or("abc", 1, "?"), concat("|", contains_status()))))
                   )
                 """,
                 encoding="utf-8",
@@ -1232,7 +1232,7 @@ class ModuleLoaderTests(unittest.TestCase):
             typecheck_program(program)
             out = io.StringIO()
             run_program(program, stdout=out)
-            self.assertEqual(out.getvalue().strip(), "sprout|ok")
+            self.assertEqual(out.getvalue().strip(), "sprout|b|ok")
 
     def test_import_stdlib_string_split_and_strip_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

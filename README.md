@@ -602,6 +602,7 @@ String module (in `stdlib/string.sprout`):
 - `starts_with(raw: String, prefix: String) -> Bool`
 - `contains(raw: String, needle: String) -> Bool`
 - `ends_with(raw: String, suffix: String) -> Bool`
+- `char_at_or(raw: String, index: Int, fallback: String) -> String`
 - `trim_left(raw: String) -> String`
 - `trim_right(raw: String) -> String`
 - `trim(raw: String) -> String`

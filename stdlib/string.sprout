@@ -39,6 +39,11 @@ export fn ends_with(raw: String, suffix: String) -> Bool =
 fn char_at(raw: String, index: Int) -> String =
   slice(raw, index, 1)
 
+export fn char_at_or(raw: String, index: Int, fallback: String) -> String =
+  if index < 0 then fallback
+  else if index >= length(raw) then fallback
+  else char_at(raw, index)
+
 fn is_newline(ch: String) -> Bool =
   find("\n", ch) == 0
 
