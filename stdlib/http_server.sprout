@@ -118,10 +118,12 @@ fn build_request(req: RequestLine, headers: Dict String, body: String) -> HttpRe
 export fn parse(raw: String) -> Result HttpServerError HttpRequest =
   match parse_request_prefix(raw) with
   | Err err -> Err(err)
-  | Ok triple ->
-      match triple with
-      | (req, headers, content_length) ->
-          err_or_request(req, headers, content_length, raw)
+  | Ok prefix -> parse_from_prefix(raw, prefix)
+
+fn parse_from_prefix(raw: String, prefix: (RequestLine, Dict String, Int)) -> Result HttpServerError HttpRequest =
+  err_or_request(req, headers, content_length, raw)
+where
+  (req, headers, content_length) = prefix
 
 fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, raw: String) -> Result HttpServerError HttpRequest =
   if string.length(string.drop(raw, request_body_start(raw))) < content_length then
@@ -148,17 +150,22 @@ fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> Result HttpSer
 fn read_request(conn: Int) -> Result HttpServerError HttpRequest !{IO} =
   match read_until_headers(conn, "") with
   | Err err -> Err(err)
-  | Ok raw ->
-      match parse_request_prefix(raw) with
-      | Err err -> Err(err)
-      | Ok triple ->
-          match triple with
-          | (_req, _headers, content_length) ->
-              if string.length(string.drop(raw, request_body_start(raw))) >= content_length then parse(raw)
-              else
-                match read_remaining_body(conn, raw, content_length - string.length(string.drop(raw, request_body_start(raw)))) with
-                | Err err -> Err(err)
-                | Ok full -> parse(full)
+  | Ok raw -> read_request_from_prefix(conn, raw)
+
+fn read_request_from_prefix(conn: Int, raw: String) -> Result HttpServerError HttpRequest !{IO} =
+  match parse_request_prefix(raw) with
+  | Err err -> Err(err)
+  | Ok prefix -> continue_read_request(conn, raw, prefix)
+
+fn continue_read_request(conn: Int, raw: String, prefix: (RequestLine, Dict String, Int)) -> Result HttpServerError HttpRequest !{IO} =
+  if string.length(body) >= content_length then parse(raw)
+  else
+    match read_remaining_body(conn, raw, content_length - string.length(body)) with
+    | Err err -> Err(err)
+    | Ok full -> parse(full)
+where
+  (_req, _headers, content_length) = prefix
+  body = string.drop(raw, request_body_start(raw))
 
 fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc
