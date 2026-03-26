@@ -10,7 +10,7 @@ test-all:
   python3 -m unittest discover -s tests -v
 
 test-parallel:
-  tests="$(rg --files tests -g 'test_*.py' | sort | sed 's#/#.#g; s#\\.py$##')"; \
+  tests="$(rg --files tests -g 'test_*.py' | sort | sed 's#/#.#g; s#\.py$##')"; \
   if [ -z "$tests" ]; then \
     echo "No test files found" >&2; \
     exit 1; \
