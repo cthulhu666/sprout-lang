@@ -29,7 +29,9 @@ fn char_at_or(line: String, col: Int, fallback: String) -> String =
 
 fn cell_at(grid: Vec String, row: Int, col: Int) -> String =
   if row < 0 then "."
-  else char_at_or(line_at(grid, row), col, ".")
+  else char_at_or(line, col, ".")
+where
+  line = line_at(grid, row)
 
 fn is_roll(grid: Vec String, row: Int, col: Int) -> Bool =
   cell_at(grid, row, col) == "@"
@@ -53,7 +55,9 @@ fn count_accessible_in_row(grid: Vec String, row: Int, col: Int, width: Int) -> 
 
 fn count_accessible_rows(grid: Vec String, row: Int, height: Int) -> Int =
   if row >= height then 0
-  else count_accessible_in_row(grid, row, 0, length(line_at(grid, row))) + count_accessible_rows(grid, row + 1, height)
+  else count_accessible_in_row(grid, row, 0, width) + count_accessible_rows(grid, row + 1, height)
+where
+  width = length(line_at(grid, row))
 
 fn count_accessible_now(grid: Vec String) -> Int =
   count_accessible_rows(grid, 0, vec_length(grid))
@@ -89,7 +93,7 @@ fn remove_accessible_rows(
 ) -> GridRemoval =
   if row >= height then GridRemoval(acc, removed)
   else
-    match remove_accessible_from_row(grid, row, 0, length(line_at(grid, row)), "", 0) with
+    match remove_accessible_from_row(grid, row, 0, width, "", 0) with
     | RowRemoval next_row row_removed ->
         remove_accessible_rows(
           grid,
@@ -98,15 +102,19 @@ fn remove_accessible_rows(
           vec_append(next_row, acc),
           removed + row_removed
         )
+where
+  width = length(line_at(grid, row))
 
 fn remove_accessible_once(grid: Vec String) -> GridRemoval =
   remove_accessible_rows(grid, 0, vec_length(grid), vec_empty(), 0)
 
 fn remove_accessible_layers(grid: Vec String, removed_total: Int) -> Int =
-  match remove_accessible_once(grid) with
+  match removal with
   | GridRemoval next_grid removed_now ->
       if removed_now == 0 then removed_total
       else remove_accessible_layers(next_grid, removed_total + removed_now)
+where
+  removal = remove_accessible_once(grid)
 
 fn is_non_empty_line(line: String) -> Bool =
   length(line) != 0
@@ -117,7 +125,10 @@ fn parse_grid(raw: String) -> Vec String =
   |> vec_filter(is_non_empty_line)
 
 fn solve_grid(grid: Vec String) -> Answers =
-  Answers(count_accessible_now(grid), remove_accessible_layers(grid, 0))
+  Answers(part1, part2)
+where
+  part1 = count_accessible_now(grid)
+  part2 = remove_accessible_layers(grid, 0)
 
 export fn solve_stdin() -> Answers !{IO} =
   read_file("-")

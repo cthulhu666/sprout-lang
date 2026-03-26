@@ -71,7 +71,9 @@ fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict S
               | (name, value) -> parse_header_lines(lines, index + 1, total, dict_set(name, value, headers))
 
 fn parse_headers(raw: String) -> Result HttpServerError (Dict String) =
-  parse_header_lines(split_lines(raw), 0, vec_length(split_lines(raw)), dict_empty())
+  parse_header_lines(lines, 0, vec_length(lines), dict_empty())
+where
+  lines = split_lines(raw)
 
 fn all_digits(raw: String, index: Int, total: Int) -> Bool =
   if index >= total then true
@@ -90,18 +92,22 @@ fn request_body_start(raw: String) -> Int =
   find_headers_end(raw) + 4
 
 fn parse_request_prefix(raw: String) -> Result HttpServerError (RequestLine, Dict String, Int) =
-  if find_headers_end(raw) < 0 then Err(HttpInvalidRequest("missing header terminator"))
-  else if find_line_end(raw) < 0 then Err(HttpInvalidRequest("missing request line terminator"))
+  if headers_end < 0 then Err(HttpInvalidRequest("missing header terminator"))
+  else if line_end < 0 then Err(HttpInvalidRequest("missing request line terminator"))
   else
-    match parse_request_line(string.take(raw, find_line_end(raw))) with
+    match parse_request_line(string.take(raw, line_end)) with
     | Nothing -> Err(HttpInvalidRequest("invalid request line"))
     | Just req ->
-        match parse_headers(string.slice(raw, find_line_end(raw) + 2, find_headers_end(raw) - (find_line_end(raw) + 2))) with
+        match parse_headers(header_block) with
         | Err err -> Err(err)
         | Ok headers ->
             match parse_content_length(headers) with
             | Err err -> Err(err)
             | Ok content_length -> Ok((req, headers, content_length))
+where
+  headers_end = find_headers_end(raw)
+  line_end = find_line_end(raw)
+  header_block = string.slice(raw, line_end + 2, headers_end - (line_end + 2))
 
 fn build_request(req: RequestLine, headers: Dict String, body: String) -> HttpRequest =
   match req with
@@ -172,7 +178,9 @@ fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: I
             )
 
 fn render_extra_headers(headers: Dict String) -> String =
-  headers_to_lines(dict_keys(headers), headers, 0, vec_length(dict_keys(headers)), "")
+  headers_to_lines(keys, headers, 0, vec_length(keys), "")
+where
+  keys = dict_keys(headers)
 
 fn inject_headers(base: String, extra: String) -> String =
   if string.is_empty(extra) then base
@@ -197,7 +205,9 @@ export fn not_found(body: String) -> HttpServerResponse =
 
 export fn with_header(name: String, value: String, resp: HttpServerResponse) -> HttpServerResponse =
   match resp with
-  | HttpServerResponse status headers body -> HttpServerResponse(status, dict_set(lower_ascii(name), value, headers), body)
+  | HttpServerResponse status headers body -> HttpServerResponse(status, dict_set(header_name, value, headers), body)
+where
+  header_name = lower_ascii(name)
 
 export fn request_method(req: HttpRequest) -> String =
   match req with

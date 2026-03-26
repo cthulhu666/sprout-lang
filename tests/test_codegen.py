@@ -55,6 +55,23 @@ class CodegenTests(unittest.TestCase):
         ir = compile_to_llvm(program)
         self.assertIn("define i64 @inc(i64 %x)", ir)
 
+    def test_compile_function_with_local_where_to_llvm(self) -> None:
+        src = """
+        fn score(n: Int) -> Int =
+          x + y
+        where
+          x = n + 1
+          y = x * 2
+
+        fn main() -> Int =
+          score(5)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define i64 @score(i64 %n)", ir)
+        self.assertIn("__sprout_lambda_", ir)
+
     def test_compile_supports_top_level_const_let(self) -> None:
         src = """
         let base = 40

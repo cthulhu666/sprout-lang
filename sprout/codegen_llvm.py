@@ -1335,7 +1335,24 @@ def _emit_expr(
     if isinstance(expr, ast.LambdaExpr):
         info = getattr(expr, "_lambda_info", None)
         if info is None:
-            raise CodegenError("Missing lambda lowering metadata in backend")
+            free_vars: list[str] = []
+            _collect_free_vars(
+                expr.body,
+                {param.name for param in expr.params},
+                free_vars,
+                set(),
+            )
+            captures = [name for name in free_vars if name in locals_]
+            info = LambdaInfo(
+                expr=expr,
+                name=f"__sprout_lambda_{emitter.next_lambda}",
+                captures=captures,
+                call_sig=_call_sig_from_lambda_expr(expr, sigs, globals_info, adt_names),
+            )
+            emitter.next_lambda += 1
+            setattr(expr, "_lambda_info", info)
+            _emit_lambda_helper(info, globals_info, sigs, ctor_sigs, adt_names, emitter)
+            emitter.lifted_defs.append("")
         captures = []
         for name in info.captures:
             value = locals_.get(name)
