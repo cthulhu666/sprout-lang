@@ -752,6 +752,63 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "8")
 
+    def test_stdlib_scram_helpers(self) -> None:
+        src = """
+        module main
+        import stdlib.scram as scram
+        import stdlib.string as string
+
+        fn server_first_raw() -> String =
+          "r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096"
+
+        fn client_first_bare_raw() -> String =
+          scram.client_first_bare("user", "fyko+d2lbbFgONRv9qkxdawL")
+
+        fn show_final() -> String =
+          match scram.parse_server_first(server_first_raw()) with
+          | Err err -> scram.error_message(err)
+          | Ok server ->
+              match scram.client_final_message("pencil", client_first_bare_raw(), server, scram.no_channel_binding()) with
+              | Err err -> scram.error_message(err)
+              | Ok final -> final
+
+        fn show_verify() -> String =
+          match scram.parse_server_first(server_first_raw()) with
+          | Err err -> scram.error_message(err)
+          | Ok server ->
+              match scram.verify_server_final(
+                "pencil",
+                client_first_bare_raw(),
+                server,
+                scram.no_channel_binding(),
+                "v=XKW6VuW1FANROQabnJBz1KaeCnQL/HZByQtX/iU+o30="
+              ) with
+              | Err err -> scram.error_message(err)
+              | Ok value -> if value then "true" else "false"
+
+        fn main() -> Unit !{IO} =
+          print(string.concat(show_final(), string.concat("\n", show_verify())))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join(
+                    [
+                        "c=biws,r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,p=qQRLRHGPDGjB+7iVAE7NNi5xEoHKHuLCHPNQ8BTmvds=",
+                        "true",
+                    ]
+                ),
+            )
+
     def test_terminal_builtins_emit_ansi(self) -> None:
         src = """
         fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b

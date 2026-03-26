@@ -1,0 +1,222 @@
+module stdlib.scram
+
+import stdlib.bytes as bytes
+import stdlib.crypto as crypto
+import stdlib.string as string
+
+export type ScramError(..) =
+  | ScramInvalidMessage String
+  | ScramInvalidIterationCount String
+  | ScramInvalidNonce String
+  | ScramBase64Error String
+  | ScramBytesError String
+
+export type ScramServerFirst(..) =
+  | ScramServerFirst String String String Int
+
+export fn error_message(err: ScramError) -> String =
+  match err with
+  | ScramInvalidMessage msg -> msg
+  | ScramInvalidIterationCount msg -> msg
+  | ScramInvalidNonce msg -> msg
+  | ScramBase64Error msg -> msg
+  | ScramBytesError msg -> msg
+
+export fn no_channel_binding() -> String =
+  "biws"
+
+export fn random_nonce(count: Int) -> Result crypto.CryptoError String !{IO} =
+  match crypto.random_bytes(count) with
+  | Err err -> Err(err)
+  | Ok value -> Ok(crypto.base64_encode(value))
+
+fn char_at(raw: String, index: Int) -> String =
+  string.slice(raw, index, 1)
+
+fn escape_username_from(raw: String, index: Int, total: Int, acc: String) -> String =
+  if index >= total then acc
+  else if char_at(raw, index) == "," then escape_username_from(raw, index + 1, total, string.concat(acc, "=2C"))
+  else if char_at(raw, index) == "=" then escape_username_from(raw, index + 1, total, string.concat(acc, "=3D"))
+  else escape_username_from(raw, index + 1, total, string.concat(acc, char_at(raw, index)))
+
+fn escape_username(raw: String) -> String =
+  escape_username_from(raw, 0, string.length(raw), "")
+
+export fn client_first_bare(username: String, nonce: String) -> String =
+  string.concat("n=", string.concat(escape_username(username), string.concat(",r=", nonce)))
+
+export fn client_first_message(username: String, nonce: String) -> String =
+  string.concat("n,,", client_first_bare(username, nonce))
+
+fn field_value(field: String, key: String) -> Maybe String =
+  match string.split_once(field, "=") with
+  | Nothing -> Nothing
+  | Just pair ->
+      match pair with
+      | (name, value) ->
+          if name == key then Just(value)
+          else Nothing
+
+fn attr_value(raw: String, key: String) -> Maybe String =
+  match string.split_once(raw, ",") with
+  | Nothing -> field_value(raw, key)
+  | Just pair ->
+      match pair with
+      | (field, rest) ->
+          match field_value(field, key) with
+          | Just value -> Just(value)
+          | Nothing -> attr_value(rest, key)
+
+fn digits_only(raw: String, index: Int, total: Int) -> Bool =
+  if index >= total then true
+  else if string.contains("0123456789", char_at(raw, index)) then digits_only(raw, index + 1, total)
+  else false
+
+fn parse_positive_int(raw: String) -> Result ScramError Int =
+  if string.is_empty(raw) then Err(ScramInvalidIterationCount("SCRAM iteration count cannot be empty"))
+  else if digits_only(raw, 0, string.length(raw)) then Ok(parse_int(raw))
+  else Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
+
+export fn parse_server_first(raw: String) -> Result ScramError ScramServerFirst =
+  match attr_value(raw, "r") with
+  | Nothing -> Err(ScramInvalidMessage("SCRAM server-first message missing nonce"))
+  | Just nonce ->
+      match attr_value(raw, "s") with
+      | Nothing -> Err(ScramInvalidMessage("SCRAM server-first message missing salt"))
+      | Just salt_b64 ->
+          match attr_value(raw, "i") with
+          | Nothing -> Err(ScramInvalidMessage("SCRAM server-first message missing iteration count"))
+          | Just iterations_raw ->
+              match parse_positive_int(iterations_raw) with
+              | Err err -> Err(err)
+              | Ok iterations -> Ok(ScramServerFirst(raw, nonce, salt_b64, iterations))
+
+fn server_nonce(server: ScramServerFirst) -> String =
+  match server with
+  | ScramServerFirst _ nonce _ _ -> nonce
+
+fn server_salt(server: ScramServerFirst) -> String =
+  match server with
+  | ScramServerFirst _ _ salt_b64 _ -> salt_b64
+
+fn server_iterations(server: ScramServerFirst) -> Int =
+  match server with
+  | ScramServerFirst _ _ _ iterations -> iterations
+
+fn server_first_message(server: ScramServerFirst) -> String =
+  match server with
+  | ScramServerFirst raw _ _ _ -> raw
+
+export fn client_final_without_proof(channel_binding: String, server: ScramServerFirst) -> String =
+  string.concat("c=", string.concat(channel_binding, string.concat(",r=", server_nonce(server))))
+
+fn client_nonce_from_bare(raw: String) -> Maybe String =
+  attr_value(raw, "r")
+
+fn base64_error_message(err: crypto.Base64Error) -> String =
+  "SCRAM invalid base64 input"
+
+fn bytes_error_message(err: crypto.BytesOpError) -> String =
+  "SCRAM xor length mismatch"
+
+fn hi_loop(password: Bytes, previous: Bytes, remaining: Int, acc: Bytes) -> Result ScramError Bytes =
+  if remaining <= 0 then Ok(acc)
+  else hi_step(password, previous, remaining, acc)
+
+fn hi_step(password: Bytes, previous: Bytes, remaining: Int, acc: Bytes) -> Result ScramError Bytes =
+  match crypto.bytes_xor(acc, current) with
+  | Err err -> Err(ScramBytesError(bytes_error_message(err)))
+  | Ok combined -> hi_loop(password, current, remaining - 1, combined)
+where
+  current = crypto.hmac_sha256(password, previous)
+
+fn hi(password: Bytes, salt: Bytes, iterations: Int) -> Result ScramError Bytes =
+  if iterations <= 0 then Err(ScramInvalidIterationCount("SCRAM iteration count must be positive"))
+  else hi_loop(password, first, iterations - 1, first)
+where
+  first = crypto.hmac_sha256(password, bytes.append(salt, bytes.u32_be(1)))
+
+fn salted_password(password: String, server: ScramServerFirst) -> Result ScramError Bytes =
+  match crypto.base64_decode(server_salt(server)) with
+  | Err err -> Err(ScramBase64Error(base64_error_message(err)))
+  | Ok salt -> hi(bytes.from_string(password), salt, server_iterations(server))
+
+fn auth_message(client_first_bare_raw: String, server: ScramServerFirst, client_final_without_proof_raw: String) -> Bytes =
+  bytes.from_string(
+    string.concat(
+      client_first_bare_raw,
+      string.concat(",", string.concat(server_first_message(server), string.concat(",", client_final_without_proof_raw)))
+    )
+  )
+
+fn client_proof_with_inputs(salted: Bytes, auth: Bytes) -> Result ScramError String =
+  match crypto.bytes_xor(client_key, client_signature) with
+  | Err err -> Err(ScramBytesError(bytes_error_message(err)))
+  | Ok proof -> Ok(crypto.base64_encode(proof))
+where
+  client_key = crypto.hmac_sha256(salted, bytes.from_string("Client Key"))
+  stored_key = crypto.sha256(client_key)
+  client_signature = crypto.hmac_sha256(stored_key, auth)
+
+fn server_signature_with_inputs(salted: Bytes, auth: Bytes) -> String =
+  crypto.base64_encode(crypto.hmac_sha256(server_key, auth))
+where
+  server_key = crypto.hmac_sha256(salted, bytes.from_string("Server Key"))
+
+fn signatures_unchecked(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError (String, String, String) =
+  match salted_password(password, server) with
+  | Err err -> Err(err)
+  | Ok salted ->
+      match client_proof_with_inputs(salted, auth) with
+      | Err err -> Err(err)
+      | Ok proof_b64 -> Ok((client_final_without_proof_raw, proof_b64, server_signature_with_inputs(salted, auth)))
+where
+  client_final_without_proof_raw = client_final_without_proof(channel_binding, server)
+  auth = auth_message(client_first_bare_raw, server, client_final_without_proof_raw)
+
+fn signatures(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError (String, String, String) =
+  match client_nonce_from_bare(client_first_bare_raw) with
+  | Nothing -> Err(ScramInvalidNonce("SCRAM client-first-bare message missing nonce"))
+  | Just client_nonce ->
+      if string.starts_with(server_nonce(server), client_nonce) then
+        signatures_unchecked(password, client_first_bare_raw, server, channel_binding)
+      else
+        Err(ScramInvalidNonce("SCRAM server nonce does not extend client nonce"))
+
+export fn client_proof(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError String =
+  match signatures(password, client_first_bare_raw, server, channel_binding) with
+  | Err err -> Err(err)
+  | Ok triple ->
+      match triple with
+      | (_, proof_b64, _) -> Ok(proof_b64)
+
+export fn client_final_message(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError String =
+  match signatures(password, client_first_bare_raw, server, channel_binding) with
+  | Err err -> Err(err)
+  | Ok triple ->
+      match triple with
+      | (client_final_without_proof_raw, proof_b64, _) ->
+          Ok(string.concat(client_final_without_proof_raw, string.concat(",p=", proof_b64)))
+
+export fn server_signature(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError String =
+  match signatures(password, client_first_bare_raw, server, channel_binding) with
+  | Err err -> Err(err)
+  | Ok triple ->
+      match triple with
+      | (_, _, signature_b64) -> Ok(signature_b64)
+
+fn server_final_verifier(raw: String) -> Result ScramError String =
+  match attr_value(raw, "e") with
+  | Just err_msg -> Err(ScramInvalidMessage(string.concat("SCRAM server-final error: ", err_msg)))
+  | Nothing ->
+      match attr_value(raw, "v") with
+      | Just verifier -> Ok(verifier)
+      | Nothing -> Err(ScramInvalidMessage("SCRAM server-final message missing verifier"))
+
+export fn verify_server_final(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String, raw: String) -> Result ScramError Bool =
+  match server_final_verifier(raw) with
+  | Err err -> Err(err)
+  | Ok verifier ->
+      match server_signature(password, client_first_bare_raw, server, channel_binding) with
+      | Err err -> Err(err)
+      | Ok expected -> Ok(verifier == expected)

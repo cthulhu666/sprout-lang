@@ -566,6 +566,22 @@ Crypto helpers (in `stdlib/crypto.sprout`):
 - `bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes`
 - `random_bytes(count: Int) -> Result CryptoError Bytes` (effectful; reads runtime entropy)
 
+SCRAM helpers (in `stdlib/scram.sprout`):
+
+- `no_channel_binding() -> String`
+- `random_nonce(count: Int) -> Result CryptoError String`
+- `client_first_bare(username, nonce) -> String`
+- `client_first_message(username, nonce) -> String`
+- `parse_server_first(raw) -> Result ScramError ScramServerFirst`
+- `client_final_without_proof(channel_binding, server) -> String`
+- `client_proof(password, client_first_bare_raw, server, channel_binding) -> Result ScramError String`
+- `client_final_message(password, client_first_bare_raw, server, channel_binding) -> Result ScramError String`
+- `server_signature(password, client_first_bare_raw, server, channel_binding) -> Result ScramError String`
+- `verify_server_final(password, client_first_bare_raw, server, channel_binding, raw) -> Result ScramError Bool`
+- `error_message(err) -> String`
+
+The first slice is intentionally generic and SCRAM-SHA-256-focused; PostgreSQL wire-message flow remains library code layered on top.
+
 Terminal convenience module (in `stdlib/terminal.sprout`):
 
 - `term_home() -> Unit !{IO}`
