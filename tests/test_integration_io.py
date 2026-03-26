@@ -282,6 +282,28 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with compiled_native_binary(self, source, with_http_stdlib=with_http_stdlib) as bin_path:
             return subprocess.run([str(bin_path), *argv], check=False, capture_output=True, text=True)
 
+    def test_compiled_native_binary_caches_identical_sources(self) -> None:
+        source = """
+        fn main() -> Unit !{IO} =
+          print("cache-probe-7f6f")
+        """
+
+        def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            cmd = args[0]
+            self.assertIsInstance(cmd, list)
+            out_path = Path(cmd[cmd.index("-o") + 1])
+            out_path.write_text("fake native binary", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("integration_support.subprocess.run", side_effect=fake_run) as mocked_run:
+            with compiled_native_binary(self, source) as first:
+                self.assertTrue(first.exists())
+            with compiled_native_binary(self, source) as second:
+                self.assertEqual(first, second)
+            with compiled_native_binary(self, source, with_http_stdlib=True) as third:
+                self.assertNotEqual(first, third)
+        self.assertEqual(mocked_run.call_count, 2)
+
     def test_native_tcp_echo_once(self) -> None:
         port = find_free_port(self)
         src = f"""
