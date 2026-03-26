@@ -9,12 +9,6 @@ import stdlib.string (concat, length, slice, string_lines)
 export type Answers(..) =
   | Answers Int Int
 
-type RowRemoval =
-  | RowRemoval String Int
-
-type GridRemoval =
-  | GridRemoval (Vec String) Int
-
 fn bool_to_int(value: Bool) -> Int =
   if value then 1
   else 0
@@ -69,8 +63,8 @@ fn remove_accessible_from_row(
   width: Int,
   acc: String,
   removed: Int
-) -> RowRemoval =
-  if col >= width then RowRemoval(acc, removed)
+) -> (String, Int) =
+  if col >= width then (acc, removed)
   else
     if is_accessible(grid, row, col) then
       remove_accessible_from_row(grid, row, col + 1, width, concat(acc, "."), removed + 1)
@@ -80,9 +74,11 @@ fn remove_accessible_from_row(
         row,
         col + 1,
         width,
-        concat(acc, char_at_or(line_at(grid, row), col, ".")),
+        concat(acc, char_at_or(line, col, ".")),
         removed
       )
+where
+  line = line_at(grid, row)
 
 fn remove_accessible_rows(
   grid: Vec String,
@@ -90,11 +86,11 @@ fn remove_accessible_rows(
   height: Int,
   acc: Vec String,
   removed: Int
-) -> GridRemoval =
-  if row >= height then GridRemoval(acc, removed)
+) -> (Vec String, Int) =
+  if row >= height then (acc, removed)
   else
     match remove_accessible_from_row(grid, row, 0, width, "", 0) with
-    | RowRemoval next_row row_removed ->
+    | (next_row, row_removed) ->
         remove_accessible_rows(
           grid,
           row + 1,
@@ -105,16 +101,14 @@ fn remove_accessible_rows(
 where
   width = length(line_at(grid, row))
 
-fn remove_accessible_once(grid: Vec String) -> GridRemoval =
+fn remove_accessible_once(grid: Vec String) -> (Vec String, Int) =
   remove_accessible_rows(grid, 0, vec_length(grid), vec_empty(), 0)
 
 fn remove_accessible_layers(grid: Vec String, removed_total: Int) -> Int =
-  match removal with
-  | GridRemoval next_grid removed_now ->
-      if removed_now == 0 then removed_total
-      else remove_accessible_layers(next_grid, removed_total + removed_now)
+  if removed_now == 0 then removed_total
+  else remove_accessible_layers(next_grid, removed_total + removed_now)
 where
-  removal = remove_accessible_once(grid)
+  (next_grid, removed_now) = remove_accessible_once(grid)
 
 fn is_non_empty_line(line: String) -> Bool =
   length(line) != 0
