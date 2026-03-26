@@ -6,6 +6,17 @@ default:
 test:
   python3 -m unittest discover -s tests -v
 
+test-all:
+  python3 -m unittest discover -s tests -v
+
+test-parallel:
+  tests="$(rg --files tests -g 'test_*.py' | sort | sed 's#/#.#g; s#\\.py$##')"; \
+  if [ -z "$tests" ]; then \
+    echo "No test files found" >&2; \
+    exit 1; \
+  fi; \
+  printf '%s\n' "$tests" | xargs -P "${SPROUT_TEST_JOBS:-4}" -I {} python3 -m unittest {} -v
+
 test-integration:
   python3 -m unittest discover -s tests -p 'test_integration_io.py' -v
 
