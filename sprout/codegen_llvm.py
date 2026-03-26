@@ -813,8 +813,8 @@ def _emit_lambda_helper(
     adt_names: set[str],
     emitter: Emitter,
 ) -> None:
-    helper = Emitter()
-    helper.fn_wrappers = dict(emitter.fn_wrappers)
+    helper = _clone_emitter(emitter)
+    helper.lines = []
     params = ["ptr %env"] + [f"{typ.text} %a{i}" for i, typ in enumerate(info.call_sig.params)]
     helper.emit(f"define {info.call_sig.ret.text} @{info.name}({', '.join(params)}) {{")
     helper.label("entry")

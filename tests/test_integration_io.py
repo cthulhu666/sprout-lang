@@ -509,12 +509,14 @@ class NativeIoIntegrationTests(unittest.TestCase):
     def test_native_tcp_accept_reuses_closed_connection_slots(self) -> None:
         port = find_free_port(self)
         src = f"""
+        fn seq(a: Unit !{{IO}}, b: Unit !{{IO}}) -> Unit !{{IO}} = b
+
         fn handle(conn: Int) -> Unit !{{IO}} =
           tcp_close(conn)
 
         fn serve(listener: Int, remaining: Int) -> Unit !{{IO}} =
           if remaining == 0 then tcp_close_listener(listener)
-          else after(handle(tcp_accept(listener)), serve(listener, remaining - 1))
+          else seq(handle(tcp_accept(listener)), serve(listener, remaining - 1))
 
         fn main() -> Unit !{{IO}} =
           serve(tcp_listen({port}), 2100)
