@@ -25,8 +25,14 @@ This file tracks open design, implementation, and tooling follow-up work.
 4. Keep expanding stdlib text/data helpers beyond the current baseline (`trim*`, `contains`, `ends_with`, `string_lines`, `string_digits`, vector utility combinators).
    Remaining follow-up: define the Unicode text model explicitly enough to support a future `Char` type and consistent string indexing/length/slice semantics.
 5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
-6. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
-7. Continue native memory-management v1.
+6. Keep improving local test throughput beyond the current per-file parallel runner.
+   Completed groundwork: `just test-parallel` now provides a materially faster local loop than serial `just test`.
+   Remaining follow-up:
+   - migrate the repeated native compile/run scaffolding in `tests/test_codegen.py` onto the shared cached helper path so more native tests benefit from compile caching
+   - measure whether `tests/test_cli.py` native REPL coverage is now dominated by process startup/analysis-service handshake overhead rather than compilation, and only then decide whether more fixture sharing is worth the complexity
+   - keep `just test`/`just test-all` as the authoritative full-suite entrypoints unless the project deliberately changes that contract later
+7. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
+8. Continue native memory-management v1.
    Design doc: [native-memory-management-v1-draft.md](./native-memory-management-v1-draft.md).
    Completed groundwork: allocation visibility, centralized managed allocation for Sprout values, heap metadata hooks, and an initial non-moving stop-the-world mark-sweep collector with default threshold-triggered in-process collection in the native profile.
    Remaining v1 scope: close the remaining path-specific live-value gaps outside the current shadow-root coverage, tune the current default threshold (`1024` managed nodes) with more measurements, and keep expanding reclamation-focused validation.
