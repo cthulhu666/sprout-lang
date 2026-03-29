@@ -1203,6 +1203,31 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "b")
 
+    def test_import_stdlib_string_lines_handles_crlf_and_trailing_newline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (vec_get_or)
+                import stdlib.string (string_lines)
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    vec_get_or(1, "missing", string_lines("alpha\\r\\nbeta\\r\\n"))
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "beta")
+
     def test_import_stdlib_string_digits_helper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

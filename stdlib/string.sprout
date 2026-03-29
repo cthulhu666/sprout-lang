@@ -91,26 +91,32 @@ export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
 fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)
 
-fn lines_loop(raw: String, index: Int, total: Int, acc: Vec String, current: String) -> Vec String =
+fn line_count_until(raw: String, line_start: Int, newline_index: Int) -> Int =
+  if newline_index > line_start && is_carriage_return(char_at(raw, newline_index - 1)) then
+    newline_index - line_start - 1
+  else
+    newline_index - line_start
+
+fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec String) -> Vec String =
   if index >= total then
-    if length(current) == 0 then acc
-    else append_line(acc, current)
+    if line_start >= total then acc
+    else append_line(acc, slice(raw, line_start, total - line_start))
   else
     if is_newline(char_at(raw, index)) then
-      lines_loop(raw, index + 1, total, append_line(acc, current), "")
-    else if is_carriage_return(char_at(raw, index)) then
-      lines_loop(raw, index + 1, total, acc, current)
-    else
       lines_loop(
         raw,
         index + 1,
+        index + 1,
         total,
-        acc,
-        concat(current, char_at(raw, index))
+        append_line(acc, slice(raw, line_start, line_count_until(raw, line_start, index)))
       )
+    else if is_carriage_return(char_at(raw, index)) then
+      lines_loop(raw, index + 1, line_start, total, acc)
+    else
+      lines_loop(raw, index + 1, line_start, total, acc)
 
 export fn string_lines(raw: String) -> Vec String =
-  lines_loop(raw, 0, length(raw), vec_empty(), "")
+  lines_loop(raw, 0, 0, length(raw), vec_empty())
 
 fn digit_value(ch: String) -> Int =
   find("0123456789", ch)
