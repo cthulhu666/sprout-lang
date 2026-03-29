@@ -599,7 +599,7 @@ SCRAM helpers (in `stdlib/scram.sprout`):
 - `verify_server_final(password, client_first_bare_raw, server, channel_binding, raw) -> Result ScramError Bool`
 - `error_message(err) -> String`
 
-The first slice is intentionally generic and SCRAM-SHA-256-focused; PostgreSQL wire-message flow remains library code layered on top.
+The first slice is intentionally generic and SCRAM-SHA-256-focused; protocol-specific auth and wire-message flow should live in external libraries layered on top.
 
 Terminal convenience module (in `stdlib/terminal.sprout`):
 

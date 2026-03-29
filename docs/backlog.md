@@ -55,9 +55,9 @@ This file tracks open design, implementation, and tooling follow-up work.
    Design doc: [native-adt-lowering-v1.md](./native-adt-lowering-v1.md).
    Initial completed slice: native `Nothing` singleton plus immediate-match optimization for direct constructor-producing scrutinees.
    Planned follow-up: broader constructor forwarding, whole-scrutinee binding support, and specialized representations for tiny ADTs.
-4. Build the first PostgreSQL auth/wire helper slice on top of `stdlib.scram`, `stdlib.net`, and `stdlib.bytes`.
-   Initial scope: startup packet building, SCRAM auth orchestration, and the first simple-query round trip.
-   First milestone constraints: SCRAM-SHA-256 only, no pool/transaction surface yet, and no ORM-style row decoding layer.
+4. Harden the language/runtime prerequisites for external protocol client libraries built on top of `stdlib.scram`, `stdlib.net`, and `stdlib.bytes`.
+   Initial scope: keep the byte-building/parsing, TCP, crypto, and generic SCRAM surfaces stable enough for a separate repository to implement protocol-specific auth and wire flows.
+   First milestone constraints: no protocol-specific client implementation in this repository, keep host-side builtins minimal, and prefer generic helpers that external libraries can compose.
 5. Add records in v1.
    Initial scope: immutable record values with explicit field names, field access, and straightforward construction/update rules that preserve Sprout's strict evaluation model.
    Completed groundwork: experimental nominal record declarations, typed record literals, and read-only field projection via `get record field`.
