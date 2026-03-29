@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from tests.codegen_test_support import *
+from sprout.stdlib import with_prelude
 
 
 class CodegenLlvmTests(CodegenTestCase):
@@ -110,6 +111,18 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertIn("declare i64 @print_int(i64)", ir)
         self.assertIn("call i64 @print_int(i64 42)", ir)
         self.assertIn("declare i64 @print_str(ptr)", ir)
+
+    def test_compile_int_range_helpers_to_llvm(self) -> None:
+        src = """
+        fn main() -> Int !{IO} =
+          print_int(range_count(1..3))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare i64 @int_range(i64, i64)", ir)
+        self.assertIn("declare i64 @int_range_start(i64)", ir)
+        self.assertIn("declare i64 @int_range_end(i64)", ir)
 
     def test_compile_main_io_unit_with_print_string(self) -> None:
         src = """

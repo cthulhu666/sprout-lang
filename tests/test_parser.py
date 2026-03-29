@@ -187,6 +187,15 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.body.right, ast.BinaryExpr)
         self.assertEqual(fn_decl.body.body.right.op, "*")
 
+    def test_parse_int_range_precedence(self) -> None:
+        src = "fn main() -> IntRange = 1..n + 1"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.IntRangeExpr)
+        self.assertIsInstance(fn_decl.body.start, ast.IntExpr)
+        self.assertIsInstance(fn_decl.body.end, ast.BinaryExpr)
+        self.assertEqual(fn_decl.body.end.op, "+")
+
     def test_parse_error_missing_else(self) -> None:
         src = "fn bad(x: Int) -> Int = if x > 0 then 1"
         with self.assertRaises(ParseError):

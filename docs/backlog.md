@@ -43,9 +43,9 @@ This file tracks open design, implementation, and tooling follow-up work.
 1. Add list comprehensions for `List` values in v1.
    Initial scope: `[expr for x in xs]` and `[expr for x in xs if pred]`.
    First milestone constraints: single generator, optional guard, list-only, no pattern generators, and no nested or multi-generator comprehensions.
-2. Add inclusive integer ranges in v1.
-   Initial scope: a dedicated `IntRange` type, `a..b` inclusive syntax, ascending and descending unit-step semantics, and a small helper surface such as `range_contains`, `range_count`, and `range_fold`.
-   First milestone constraints: integer-only, inclusive-only, no custom step syntax, no open-ended ranges, no range patterns, and no immediate redesign of existing slice APIs.
+2. Continue the experimental integer-ranges slice toward a final v1 contract.
+   Current implemented scope: a dedicated `IntRange` type, `a..b` inclusive syntax, ascending and descending unit-step semantics, and helper surface including `range`, `range_start`, `range_end`, `range_contains`, `range_count`, `range_to_list`, `range_to_vec`, and `range_fold`.
+   Remaining follow-up: finalize the normative v1 contract, keep diagnostics sharp, and decide whether later range extensions such as patterns or half-open forms should exist at all.
 3. Expand native ADT lowering in v1.
    Design doc: [native-adt-lowering-v1.md](./native-adt-lowering-v1.md).
    Initial completed slice: native `Nothing` singleton plus immediate-match optimization for direct constructor-producing scrutinees.

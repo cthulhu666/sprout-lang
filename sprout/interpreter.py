@@ -74,6 +74,12 @@ class BuilderValue:
 
 
 @dataclass(frozen=True)
+class IntRangeValue:
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
 class TupleValue:
     items: tuple[object, ...]
 
@@ -233,6 +239,8 @@ def format_value(value: object) -> str:
         return "Bytes[" + ", ".join(str(item) for item in value.items) + "]"
     if isinstance(value, BuilderValue):
         return "Builder(" + ", ".join(repr(chunk) for chunk in value.chunks) + ")"
+    if isinstance(value, IntRangeValue):
+        return f"{value.start}..{value.end}"
     if isinstance(value, TupleValue):
         return "(" + ", ".join(format_value(item) for item in value.items) + ")"
     if isinstance(value, RecordValue):
@@ -257,6 +265,12 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
         return expr.value
     if isinstance(expr, ast.StringExpr):
         return expr.value
+    if isinstance(expr, ast.IntRangeExpr):
+        start = eval_expr(expr.start, env)
+        end = eval_expr(expr.end, env)
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise rt_error("'..' expects Int operands", expr)
+        return IntRangeValue(start=start, end=end)
     if isinstance(expr, ast.TupleExpr):
         return TupleValue(items=tuple(eval_expr(item, env) for item in expr.items))
     if isinstance(expr, ast.RecordExpr):
@@ -599,6 +613,25 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("split_words expects String")
         tokens = raw.replace(",", " ").split()
         return py_to_adt_list(tokens)
+
+    def builtin_int_range(args: list[object]) -> object:
+        start = args[0]
+        end = args[1]
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise RuntimeError("int_range expects Int start and Int end")
+        return IntRangeValue(start=start, end=end)
+
+    def builtin_int_range_start(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, IntRangeValue):
+            raise RuntimeError("int_range_start expects IntRange")
+        return value.start
+
+    def builtin_int_range_end(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, IntRangeValue):
+            raise RuntimeError("int_range_end expects IntRange")
+        return value.end
 
     def builtin_str_concat(args: list[object]) -> object:
         left = args[0]
@@ -1642,6 +1675,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("argv_get", BuiltinFunction(name="argv_get", arity=1, fn=builtin_argv_get))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
+    env.set("int_range", BuiltinFunction(name="int_range", arity=2, fn=builtin_int_range))
+    env.set("int_range_start", BuiltinFunction(name="int_range_start", arity=1, fn=builtin_int_range_start))
+    env.set("int_range_end", BuiltinFunction(name="int_range_end", arity=1, fn=builtin_int_range_end))
     env.set("str_concat", BuiltinFunction(name="str_concat", arity=2, fn=builtin_str_concat))
     env.set("str_len", BuiltinFunction(name="str_len", arity=1, fn=builtin_str_len))
     env.set("str_slice", BuiltinFunction(name="str_slice", arity=3, fn=builtin_str_slice))

@@ -6,6 +6,17 @@ It is not part of normative v0. Its purpose is to define a compact, typed range
 surface for integer intervals and integer-sequence workflows after the v0 core
 is stabilized.
 
+Current implementation status:
+
+- The initial slice in this draft is now implemented experimentally in the
+  prototype.
+- `IntRange` remains outside normative v0.
+- The implemented slice includes inclusive `a..b` syntax, ascending and
+  descending unit-step semantics, distinct `IntRange` values, and the helper
+  surface described below.
+- Remaining work is mainly contract and diagnostics polish rather than basic
+  parser, typechecker, interpreter, or native-backend support.
+
 ## 1. Problem Statement
 
 Sprout v0 has `Int`, `List`, `Vec`, and several APIs that work with integer

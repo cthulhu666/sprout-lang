@@ -19,6 +19,44 @@ type Vec a =
 type Dict v =
   | Dict (Map v)
 
+fn range(lo: Int, hi: Int) -> IntRange =
+  int_range(lo, hi)
+
+fn range_start(value: IntRange) -> Int =
+  int_range_start(value)
+
+fn range_end(value: IntRange) -> Int =
+  int_range_end(value)
+
+fn range_step(value: IntRange) -> Int =
+  if range_start(value) <= range_end(value) then 1 else -1
+
+fn range_contains(value: IntRange, target: Int) -> Bool =
+  if range_step(value) > 0 then
+    target >= range_start(value) && target <= range_end(value)
+  else
+    target <= range_start(value) && target >= range_end(value)
+
+fn range_count(value: IntRange) -> Int =
+  if range_step(value) > 0 then
+    (range_end(value) - range_start(value)) + 1
+  else
+    (range_start(value) - range_end(value)) + 1
+
+fn range_to_list_go(current: Int, end_value: Int, step: Int) -> List Int =
+  if current == end_value then Cons(current, Nil)
+  else Cons(current, range_to_list_go(current + step, end_value, step))
+
+fn range_to_list(value: IntRange) -> List Int =
+  range_to_list_go(range_start(value), range_end(value), range_step(value))
+
+fn range_fold_go(current: Int, end_value: Int, step: Int, acc: a, f: a -> Int -> a) -> a =
+  if current == end_value then f(acc, current)
+  else range_fold_go(current + step, end_value, step, f(acc, current), f)
+
+fn range_fold(value: IntRange, init: a, f: a -> Int -> a) -> a =
+  range_fold_go(range_start(value), range_end(value), range_step(value), init, f)
+
 fn map(f: a -> b, xs: List a) -> List b =
   match xs with
   | Nil -> Nil
@@ -70,6 +108,12 @@ fn vec_prepend(value: a, vec: Vec a) -> Vec a =
 fn vec_append(value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_append(raw, value))
+
+fn range_vec_step(acc: Vec Int, item: Int) -> Vec Int =
+  vec_append(item, acc)
+
+fn range_to_vec(value: IntRange) -> Vec Int =
+  range_fold(value, vec_empty(), range_vec_step)
 
 fn vec_length(vec: Vec a) -> Int =
   match vec with

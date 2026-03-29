@@ -7,6 +7,45 @@ from tests.codegen_test_support import *
 
 class CodegenNativeRuntimeTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_int_range_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+
+                fn add(acc: Int, x: Int) -> Int = acc + x
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    range_count(4..2)
+                    + range_fold(2..4, 0, add)
+                    + (if (1..3) == range(1, 3) then 100 else 0)
+                  )
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "--with-stdlib",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "112")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_bytes_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

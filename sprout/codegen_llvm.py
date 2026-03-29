@@ -52,6 +52,9 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "argv_get": FnSig(name="argv_get", params=[I64], ret=I64),
     "read_int_lines": FnSig(name="read_int_lines", params=[I8_PTR], ret=I64),
     "parse_int": FnSig(name="parse_int", params=[I8_PTR], ret=I64),
+    "int_range": FnSig(name="int_range", params=[I64, I64], ret=I64),
+    "int_range_start": FnSig(name="int_range_start", params=[I64], ret=I64),
+    "int_range_end": FnSig(name="int_range_end", params=[I64], ret=I64),
     "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
     "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
     "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
@@ -283,6 +286,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
         if node.name == "Bytes":
             return I64
         if node.name == "Builder":
+            return I64
+        if node.name == "IntRange":
             return I64
         if node.name == "Unit":
             return I64
@@ -617,6 +622,10 @@ def _collect_free_vars(expr: ast.Expr, bound: set[str], out: list[str], seen: se
         _collect_free_vars(expr.left, bound, out, seen)
         _collect_free_vars(expr.right, bound, out, seen)
         return
+    if isinstance(expr, ast.IntRangeExpr):
+        _collect_free_vars(expr.start, bound, out, seen)
+        _collect_free_vars(expr.end, bound, out, seen)
+        return
     if isinstance(expr, ast.UnaryExpr):
         _collect_free_vars(expr.operand, bound, out, seen)
         return
@@ -681,6 +690,10 @@ def _gather_lambda_infos(
     if isinstance(expr, ast.BinaryExpr):
         _gather_lambda_infos(expr.left, available_locals, sigs, globals_info, adt_names, infos, emitter)
         _gather_lambda_infos(expr.right, available_locals, sigs, globals_info, adt_names, infos, emitter)
+        return
+    if isinstance(expr, ast.IntRangeExpr):
+        _gather_lambda_infos(expr.start, available_locals, sigs, globals_info, adt_names, infos, emitter)
+        _gather_lambda_infos(expr.end, available_locals, sigs, globals_info, adt_names, infos, emitter)
         return
     if isinstance(expr, ast.UnaryExpr):
         _gather_lambda_infos(expr.operand, available_locals, sigs, globals_info, adt_names, infos, emitter)
@@ -868,6 +881,8 @@ def _infer_expr_type(
         if expr.op in {"+", "-", "*", "/"}:
             return I64
         return I1
+    if isinstance(expr, ast.IntRangeExpr):
+        return I64
     if isinstance(expr, ast.IfExpr):
         return _infer_expr_type(expr.then_branch, globals_info, sigs, ctor_sigs)
     if isinstance(expr, ast.CallExpr):
@@ -1078,6 +1093,10 @@ def _collect_called_functions(expr: ast.Expr) -> set[str]:
         if isinstance(node, ast.BinaryExpr):
             visit(node.left)
             visit(node.right)
+            return
+        if isinstance(node, ast.IntRangeExpr):
+            visit(node.start)
+            visit(node.end)
             return
         if isinstance(node, ast.UnaryExpr):
             visit(node.operand)
@@ -1370,6 +1389,14 @@ def _emit_expr(
             emitter.emit(f"  {tmp} = sub i64 0, {operand.ir}")
             return Value(I64, tmp)
         raise CodegenError(f"Unsupported unary op in backend: {expr.op}")
+    if isinstance(expr, ast.IntRangeExpr):
+        start = _emit_expr(expr.start, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        end = _emit_expr(expr.end, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        if start.typ != I64 or end.typ != I64:
+            raise CodegenError("'..' backend supports Int only")
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = call i64 @int_range(i64 {start.ir}, i64 {end.ir})")
+        return Value(I64, tmp)
     if isinstance(expr, ast.BinaryExpr):
         return _emit_binary(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if isinstance(expr, ast.IfExpr):
@@ -1408,6 +1435,36 @@ def _emit_binary(
     if expr.op in {"<", "<=", ">", ">=", "==", "!="}:
         if left.typ != right.typ:
             raise CodegenError("Comparison operands must have same type")
+        left_inferred = getattr(expr.left, "inferred_type", None)
+        right_inferred = getattr(expr.right, "inferred_type", None)
+        if (
+            left.typ == I64
+            and isinstance(left_inferred, ast.TypeName)
+            and left_inferred.name == "IntRange"
+            and isinstance(right_inferred, ast.TypeName)
+            and right_inferred.name == "IntRange"
+        ):
+            if expr.op not in {"==", "!="}:
+                raise CodegenError("IntRange comparison only supports == and !=")
+            left_start = emitter.tmp()
+            left_end = emitter.tmp()
+            right_start = emitter.tmp()
+            right_end = emitter.tmp()
+            same_start = emitter.tmp()
+            same_end = emitter.tmp()
+            out = emitter.tmp()
+            emitter.emit(f"  {left_start} = call i64 @int_range_start(i64 {left.ir})")
+            emitter.emit(f"  {left_end} = call i64 @int_range_end(i64 {left.ir})")
+            emitter.emit(f"  {right_start} = call i64 @int_range_start(i64 {right.ir})")
+            emitter.emit(f"  {right_end} = call i64 @int_range_end(i64 {right.ir})")
+            emitter.emit(f"  {same_start} = icmp eq i64 {left_start}, {right_start}")
+            emitter.emit(f"  {same_end} = icmp eq i64 {left_end}, {right_end}")
+            emitter.emit(f"  {out} = and i1 {same_start}, {same_end}")
+            if expr.op == "==":
+                return Value(I1, out)
+            not_tmp = emitter.tmp()
+            emitter.emit(f"  {not_tmp} = xor i1 {out}, true")
+            return Value(I1, not_tmp)
         if left.typ == I8_PTR and expr.op not in {"==", "!="}:
             raise CodegenError("String comparison only supports == and !=")
         if left.typ == I8_PTR:

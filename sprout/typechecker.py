@@ -150,6 +150,7 @@ INT = TConst("Int")
 BOOL = TConst("Bool")
 STRING = TConst("String")
 UNIT = TConst("Unit")
+INT_RANGE = TConst("IntRange")
 PURE_EFFECT = EClosed()
 IO_EFFECT = EClosed(frozenset({"IO"}))
 
@@ -931,6 +932,12 @@ def infer_expr(
         return _mark_expr_type(expr, BOOL), PURE_EFFECT
     if isinstance(expr, ast.StringExpr):
         return _mark_expr_type(expr, STRING), PURE_EFFECT
+    if isinstance(expr, ast.IntRangeExpr):
+        start_t, start_effects = infer_expr(expr.start, env, state, type_decls, global_methods)
+        end_t, end_effects = infer_expr(expr.end, env, state, type_decls, global_methods)
+        unify_at(state, start_t, INT, expr.start)
+        unify_at(state, end_t, INT, expr.end)
+        return _mark_expr_type(expr, INT_RANGE), merge_effects(state, start_effects, end_effects)
     if isinstance(expr, ast.TupleExpr):
         item_results = [infer_expr(item, env, state, type_decls, global_methods) for item in expr.items]
         item_types = [typ for typ, _ in item_results]
@@ -1414,6 +1421,9 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
         ),
+        "int_range": Scheme(vars=(), type=TFunc(INT, TFunc(INT, INT_RANGE))),
+        "int_range_start": Scheme(vars=(), type=TFunc(INT_RANGE, INT)),
+        "int_range_end": Scheme(vars=(), type=TFunc(INT_RANGE, INT)),
         "str_concat": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, STRING))),
         "str_len": Scheme(vars=(), type=TFunc(STRING, INT)),
         "str_slice": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(INT, STRING)))),

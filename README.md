@@ -39,6 +39,11 @@ Normative status:
   record literals such as `User { name = "Ada" }`, and field projection via the
   contextual special form `get user name`. Records are not part of normative v0
   yet, and record updates remain deferred.
+- The current implementation also includes an experimental `IntRange` slice:
+  inclusive `a..b` syntax, distinct `IntRange` values, ascending and
+  descending unit-step semantics, and prelude helpers such as `range`,
+  `range_contains`, `range_count`, `range_to_list`, `range_to_vec`, and
+  `range_fold`. Integer ranges are not part of normative v0 yet.
 - The current implementation uses explicit function effects in the v0 core:
   pure functions omit an annotation, effectful functions use `!{IO}`, and
   higher-order helpers may use restricted singleton effect variables such as
@@ -120,6 +125,9 @@ Runtime builtins (host-implemented):
 - `read_int_lines(path: String) -> Vector Int !{IO}`
 - `env_get(name: String) -> Maybe String !{IO}`
 - `argv_get(index: Int) -> Maybe String !{IO}` (`0` is the first user-supplied program argument)
+- `int_range(lo: Int, hi: Int) -> IntRange`
+- `int_range_start(r: IntRange) -> Int`
+- `int_range_end(r: IntRange) -> Int`
 - `tcp_listen(port: Int) -> Int !{IO}`
 - `tcp_accept(listener: Int) -> Int !{IO}`
 - `tcp_read(conn: Int) -> String !{IO}`

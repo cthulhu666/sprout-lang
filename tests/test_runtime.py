@@ -94,6 +94,23 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "10")
 
+    def test_stdlib_int_range_helpers(self) -> None:
+        src = """
+        fn add(acc: Int, x: Int) -> Int = acc + x
+
+        fn main() -> Unit !{IO} =
+          print(
+            range_count(5..3)
+            + range_fold(1..4, 0, add)
+            + (if range_contains(5..3, 4) then 100 else 0)
+          )
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "113")
+
     def test_stdlib_result_helpers(self) -> None:
         src = """
         fn plus1(x: Int) -> Int = x + 1

@@ -404,6 +404,10 @@ class Parser:
                 walk(node.left)
                 walk(node.right)
                 return
+            if isinstance(node, ast.IntRangeExpr):
+                walk(node.start)
+                walk(node.end)
+                return
             if isinstance(node, ast.UnaryExpr):
                 walk(node.operand)
                 return
@@ -429,10 +433,17 @@ class Parser:
         return expr
 
     def parse_equality(self):
-        expr = self.parse_comparison()
+        expr = self.parse_range()
         while self.check("SYMBOL") and self.current().value in {"==", "!="}:
             tok = self.advance()
-            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_comparison()), tok)
+            expr = self.mark(ast.BinaryExpr(op=tok.value, left=expr, right=self.parse_range()), tok)
+        return expr
+
+    def parse_range(self):
+        expr = self.parse_comparison()
+        while self.match("SYMBOL", ".."):
+            tok = self.tokens[self.i - 1]
+            expr = self.mark(ast.IntRangeExpr(start=expr, end=self.parse_comparison()), tok)
         return expr
 
     def parse_comparison(self):

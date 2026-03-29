@@ -122,6 +122,27 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("result_pipe_error", types)
         self.assertIn("when_ok", types)
         self.assertIn("when_error", types)
+        self.assertIn("range", types)
+        self.assertIn("range_fold", types)
+
+    def test_typecheck_int_range_expression_and_helpers(self) -> None:
+        src = """
+        fn sum_to(n: Int) -> Int =
+          range_fold(1..n, 0, add)
+
+        fn add(acc: Int, x: Int) -> Int = acc + x
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["sum_to"], "Int -> Int")
+
+    def test_typecheck_rejects_non_int_range_bounds(self) -> None:
+        src = """
+        fn bad() -> IntRange =
+          "a".."z"
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(with_prelude(src)))
+        self.assertIn("Type mismatch", str(ctx.exception))
 
     def test_typecheck_stdlib_bytes_builder_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -240,6 +261,9 @@ class TypecheckerTests(unittest.TestCase):
             "read_int_lines": "String -> Vector Int !{IO}",
             "env_get": "String -> Maybe String !{IO}",
             "argv_get": "Int -> Maybe String !{IO}",
+            "int_range": "Int -> Int -> IntRange",
+            "int_range_start": "IntRange -> Int",
+            "int_range_end": "IntRange -> Int",
             "tcp_connect": "String -> Int -> Result stdlib.net.TcpError Int !{IO}",
             "tcp_read_exact": "Int -> Int -> Result stdlib.net.TcpError Bytes !{IO}",
             "http_request": "String -> String -> String -> String -> Int -> Result stdlib.http.HttpError stdlib.http.HttpResponse !{IO}",

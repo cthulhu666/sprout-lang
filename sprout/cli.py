@@ -203,7 +203,8 @@ typedef enum {
   SPROUT_HEAP_MAP = 4,
   SPROUT_HEAP_BYTES = 5,
   SPROUT_HEAP_BUILDER = 6,
-  SPROUT_HEAP_TUPLE = 7
+  SPROUT_HEAP_TUPLE = 7,
+  SPROUT_HEAP_RANGE = 8
 } SproutHeapKind;
 
 typedef struct ManagedNode {
@@ -268,6 +269,11 @@ typedef struct {
 } BuilderVal;
 
 typedef struct {
+  long long start;
+  long long end;
+} IntRangeVal;
+
+typedef struct {
   char* host;
   char* port;
   char* path;
@@ -326,6 +332,7 @@ static char* dup_slice(const char* start, size_t len);
 static char* dup_cstr(const char* s);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
+static IntRangeVal* sprout_alloc_range_val(const char* ctx);
 static void sha256_digest(const unsigned char* data, size_t len, unsigned char out[32]);
 static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]);
 static char* base64_encode_bytes(const unsigned char* data, size_t len);
@@ -634,6 +641,13 @@ static BytesVal** sprout_alloc_builder_chunks(size_t count, const char* ctx) {
   return count == 0 ? NULL : (BytesVal**)sprout_alloc_counted(&g_debug_alloc_builder, count * sizeof(BytesVal*), ctx);
 }
 
+static IntRangeVal* sprout_alloc_range_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
+  IntRangeVal* out = (IntRangeVal*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(IntRangeVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_RANGE, 0);
+  return out;
+}
+
 static int is_obj_handle(long long h) {
   ManagedNode* node = find_managed_ptr((void*)(uintptr_t)h);
   return node != NULL && node->kind == SPROUT_HEAP_OBJ;
@@ -658,6 +672,8 @@ static size_t sprout_heap_child_count(ManagedNode* node) {
       return ((BuilderVal*)node->ptr)->count;
     case SPROUT_HEAP_TUPLE:
       return node->aux_slots;
+    case SPROUT_HEAP_RANGE:
+      return 0;
   }
   return 0;
 }
@@ -689,6 +705,8 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
       memcpy(&word, (char*)node->ptr + (index * sizeof(uintptr_t)), sizeof(uintptr_t));
       return (long long)word;
     }
+    case SPROUT_HEAP_RANGE:
+      break;
   }
   tcp_fail("sprout_heap_child_value: index out of range");
   return 0;
@@ -780,6 +798,9 @@ static void sprout_gc_free_payload(ManagedNode* node) {
     case SPROUT_HEAP_TUPLE:
       free(node->ptr);
       return;
+    case SPROUT_HEAP_RANGE:
+      free(node->ptr);
+      return;
   }
 }
 
@@ -862,7 +883,11 @@ static void print_inline_obj(SproutObj* o) {
 }
 
 static void print_inline_value(long long v) {
-  if (is_obj_handle(v)) {
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)v);
+  if (node != NULL && node->kind == SPROUT_HEAP_RANGE) {
+    IntRangeVal* value = (IntRangeVal*)node->ptr;
+    printf("%lld..%lld", value->start, value->end);
+  } else if (is_obj_handle(v)) {
     print_inline_obj(unbox_ptr(v));
   } else {
     printf("%lld", v);
@@ -900,6 +925,24 @@ long long parse_int(const char* s) {
   long long out = strtoll(s, &end, 10);
   if (end == s || *end != '\\0') tcp_fail("parse_int: invalid integer");
   return out;
+}
+long long int_range(long long start, long long end) {
+  IntRangeVal* out = sprout_alloc_range_val("int_range: out of memory");
+  out->start = start;
+  out->end = end;
+  return (long long)(uintptr_t)out;
+}
+long long int_range_start(long long range_h) {
+  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
+  ManagedNode* node = find_managed_ptr(value);
+  if (value == NULL || node == NULL || node->kind != SPROUT_HEAP_RANGE) tcp_fail("int_range_start: expected IntRange");
+  return value->start;
+}
+long long int_range_end(long long range_h) {
+  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
+  ManagedNode* node = find_managed_ptr(value);
+  if (value == NULL || node == NULL || node->kind != SPROUT_HEAP_RANGE) tcp_fail("int_range_end: expected IntRange");
+  return value->end;
 }
 long long env_get(const char* name) {
   if (name == NULL) tcp_fail("env_get: null name");

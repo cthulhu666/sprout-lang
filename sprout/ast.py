@@ -124,6 +124,12 @@ class BinaryExpr(Expr):
 
 
 @dataclass
+class IntRangeExpr(Expr):
+    start: Expr
+    end: Expr
+
+
+@dataclass
 class UnaryExpr(Expr):
     op: str
     operand: Expr
