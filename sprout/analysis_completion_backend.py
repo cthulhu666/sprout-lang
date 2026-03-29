@@ -5,7 +5,7 @@ import re
 
 from . import ast
 from .parser import parse
-from .stdlib import load_prelude
+from .stdlib import prelude_path
 
 __all__ = [
     "completion_candidates_in_state",
@@ -44,6 +44,8 @@ _REPL_STDLIB_EXTRA_NAMES = frozenset(
     }
 )
 _REPL_TOKEN_RE = re.compile(r"[A-Za-z_:][A-Za-z0-9_:.]*$")
+_EXPORTED_DECL_RE = re.compile(r"^export\s+(?:fn|let|type|class)\s+([A-Za-z_][A-Za-z0-9_.]*)")
+_EXPORTED_CTOR_RE = re.compile(r"^\|\s+([A-Za-z_][A-Za-z0-9_.]*)")
 
 
 def _declared_names_from_tree(tree: ast.Program) -> set[str]:
@@ -61,10 +63,27 @@ def _declared_names_from_tree(tree: ast.Program) -> set[str]:
     return names
 
 
+def _exported_names_from_source(source: str) -> frozenset[str]:
+    names: set[str] = set()
+    in_exported_type = False
+    for line in source.splitlines():
+        stripped = line.strip()
+        decl_match = _EXPORTED_DECL_RE.match(stripped)
+        if decl_match is not None:
+            names.add(decl_match.group(1).rsplit(".", 1)[-1])
+            in_exported_type = stripped.startswith("export type ")
+            continue
+        ctor_match = _EXPORTED_CTOR_RE.match(stripped)
+        if in_exported_type and ctor_match is not None:
+            names.add(ctor_match.group(1).rsplit(".", 1)[-1])
+            continue
+        in_exported_type = False
+    return frozenset(names)
+
+
 @lru_cache(maxsize=1)
 def _prelude_completion_names() -> frozenset[str]:
-    tree = parse(load_prelude())
-    return frozenset(_declared_names_from_tree(tree))
+    return _exported_names_from_source(prelude_path().read_text(encoding="utf-8"))
 
 
 def _declared_names_from_declarations(declarations: list[str]) -> set[str]:

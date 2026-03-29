@@ -1,43 +1,43 @@
 # Sprout Prelude (v0)
 # Foundational helpers implemented in Sprout itself.
 
-type Maybe a =
+export type Maybe a =
   | Just a
   | Nothing
 
-type List a =
+export type List a =
   | Cons a (List a)
   | Nil
 
-type Result e a =
+export type Result e a =
   | Ok a
   | Err e
 
-type Vec a =
+export type Vec a =
   | Vec (Vector a)
 
-type Dict v =
+export type Dict v =
   | Dict (Map v)
 
-fn range(lo: Int, hi: Int) -> IntRange =
+export fn range(lo: Int, hi: Int) -> IntRange =
   int_range(lo, hi)
 
-fn range_start(value: IntRange) -> Int =
+export fn range_start(value: IntRange) -> Int =
   int_range_start(value)
 
-fn range_end(value: IntRange) -> Int =
+export fn range_end(value: IntRange) -> Int =
   int_range_end(value)
 
-fn range_step(value: IntRange) -> Int =
+export fn range_step(value: IntRange) -> Int =
   if range_start(value) <= range_end(value) then 1 else -1
 
-fn range_contains(value: IntRange, target: Int) -> Bool =
+export fn range_contains(value: IntRange, target: Int) -> Bool =
   if range_step(value) > 0 then
     target >= range_start(value) && target <= range_end(value)
   else
     target <= range_start(value) && target >= range_end(value)
 
-fn range_count(value: IntRange) -> Int =
+export fn range_count(value: IntRange) -> Int =
   if range_step(value) > 0 then
     (range_end(value) - range_start(value)) + 1
   else
@@ -47,48 +47,48 @@ fn range_to_list_go(current: Int, end_value: Int, step: Int) -> List Int =
   if current == end_value then Cons(current, Nil)
   else Cons(current, range_to_list_go(current + step, end_value, step))
 
-fn range_to_list(value: IntRange) -> List Int =
+export fn range_to_list(value: IntRange) -> List Int =
   range_to_list_go(range_start(value), range_end(value), range_step(value))
 
 fn range_fold_go(current: Int, end_value: Int, step: Int, acc: a, f: a -> Int -> a) -> a =
   if current == end_value then f(acc, current)
   else range_fold_go(current + step, end_value, step, f(acc, current), f)
 
-fn range_fold(value: IntRange, init: a, f: a -> Int -> a) -> a =
+export fn range_fold(value: IntRange, init: a, f: a -> Int -> a) -> a =
   range_fold_go(range_start(value), range_end(value), range_step(value), init, f)
 
-fn map(f: a -> b, xs: List a) -> List b =
+export fn map(f: a -> b, xs: List a) -> List b =
   match xs with
   | Nil -> Nil
   | Cons x rest -> Cons(f(x), map(f, rest))
 
-fn fold(f: b -> a -> b, init: b, xs: List a) -> b =
+export fn fold(f: b -> a -> b, init: b, xs: List a) -> b =
   match xs with
   | Nil -> init
   | Cons x rest -> fold(f, f(init, x), rest)
 
-fn filter(pred: a -> Bool, xs: List a) -> List a =
+export fn filter(pred: a -> Bool, xs: List a) -> List a =
   match xs with
   | Nil -> Nil
   | Cons x rest ->
       if pred(x) then Cons(x, filter(pred, rest))
       else filter(pred, rest)
 
-fn split_ints(s: String) -> List Int =
+export fn split_ints(s: String) -> List Int =
   map(parse_int, split_words(s))
 
-fn list_map(f: a -> b, xs: List a) -> List b =
+export fn list_map(f: a -> b, xs: List a) -> List b =
   map(f, xs)
 
-fn list_fold(step: b -> a -> b, init: b, xs: List a) -> b =
+export fn list_fold(step: b -> a -> b, init: b, xs: List a) -> b =
   fold(step, init, xs)
 
-fn list_append(left: List a, right: List a) -> List a =
+export fn list_append(left: List a, right: List a) -> List a =
   match left with
   | Nil -> right
   | Cons x rest -> Cons(x, list_append(rest, right))
 
-fn vec_empty() -> Vec a =
+export fn vec_empty() -> Vec a =
   Vec(vector_empty())
 
 fn vec_prepend_into(acc: Vector a, first: a, source: Vector a, index: Int, total: Int) -> Vector a =
@@ -100,35 +100,35 @@ fn vec_prepend_into(acc: Vector a, first: a, source: Vector a, index: Int, total
     | Nothing -> acc
     | Just item -> vec_prepend_into(vector_append(acc, item), first, source, index + 1, total)
 
-fn vec_prepend(value: a, vec: Vec a) -> Vec a =
+export fn vec_prepend(value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw ->
       Vec(vec_prepend_into(vector_empty(), value, raw, 0, vector_length(raw)))
 
-fn vec_append(value: a, vec: Vec a) -> Vec a =
+export fn vec_append(value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_append(raw, value))
 
 fn range_vec_step(acc: Vec Int, item: Int) -> Vec Int =
   vec_append(item, acc)
 
-fn range_to_vec(value: IntRange) -> Vec Int =
+export fn range_to_vec(value: IntRange) -> Vec Int =
   range_fold(value, vec_empty(), range_vec_step)
 
-fn vec_length(vec: Vec a) -> Int =
+export fn vec_length(vec: Vec a) -> Int =
   match vec with
   | Vec raw -> vector_length(raw)
 
-fn vec_get(index: Int, vec: Vec a) -> Maybe a =
+export fn vec_get(index: Int, vec: Vec a) -> Maybe a =
   match vec with
   | Vec raw -> vector_get(raw, index)
 
-fn vec_get_or(index: Int, fallback: a, vec: Vec a) -> a =
+export fn vec_get_or(index: Int, fallback: a, vec: Vec a) -> a =
   match vec_get(index, vec) with
   | Just value -> value
   | Nothing -> fallback
 
-fn vec_set(index: Int, value: a, vec: Vec a) -> Vec a =
+export fn vec_set(index: Int, value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_set(raw, index, value))
 
@@ -139,7 +139,7 @@ fn vec_map_indexed(f: a -> b, vec: Vec a, index: Int, total: Int, acc: Vec b) ->
     | Nothing -> acc
     | Just value -> vec_map_indexed(f, vec, index + 1, total, vec_append(f(value), acc))
 
-fn vec_map(f: a -> b, vec: Vec a) -> Vec b =
+export fn vec_map(f: a -> b, vec: Vec a) -> Vec b =
   vec_map_indexed(f, vec, 0, vec_length(vec), vec_empty())
 
 fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) -> b =
@@ -149,7 +149,7 @@ fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) 
     | Nothing -> acc
     | Just value -> vec_fold_indexed(f, f(acc, value), vec, index + 1, total)
 
-fn vec_fold(f: b -> a -> b, init: b, vec: Vec a) -> b =
+export fn vec_fold(f: b -> a -> b, init: b, vec: Vec a) -> b =
   vec_fold_indexed(f, init, vec, 0, vec_length(vec))
 
 fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: Vec a) -> Vec a =
@@ -161,7 +161,7 @@ fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: 
         if pred(value) then vec_filter_indexed(pred, vec, index + 1, total, vec_append(value, acc))
         else vec_filter_indexed(pred, vec, index + 1, total, acc)
 
-fn vec_filter(pred: a -> Bool, vec: Vec a) -> Vec a =
+export fn vec_filter(pred: a -> Bool, vec: Vec a) -> Vec a =
   vec_filter_indexed(pred, vec, 0, vec_length(vec), vec_empty())
 
 fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, acc: Vec b) -> Vec b =
@@ -174,7 +174,7 @@ fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, a
         | Nothing -> vec_filter_map_indexed(f, vec, index + 1, total, acc)
         | Just mapped -> vec_filter_map_indexed(f, vec, index + 1, total, vec_append(mapped, acc))
 
-fn vec_filter_map(f: a -> Maybe b, vec: Vec a) -> Vec b =
+export fn vec_filter_map(f: a -> Maybe b, vec: Vec a) -> Vec b =
   vec_filter_map_indexed(f, vec, 0, vec_length(vec), vec_empty())
 
 fn vec_any_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
@@ -184,7 +184,7 @@ fn vec_any_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool 
     | Nothing -> false
     | Just value -> if pred(value) then true else vec_any_indexed(pred, vec, index + 1, total)
 
-fn vec_any(pred: a -> Bool, vec: Vec a) -> Bool =
+export fn vec_any(pred: a -> Bool, vec: Vec a) -> Bool =
   vec_any_indexed(pred, vec, 0, vec_length(vec))
 
 fn vec_all_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
@@ -194,7 +194,7 @@ fn vec_all_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool 
     | Nothing -> true
     | Just value -> if pred(value) then vec_all_indexed(pred, vec, index + 1, total) else false
 
-fn vec_all(pred: a -> Bool, vec: Vec a) -> Bool =
+export fn vec_all(pred: a -> Bool, vec: Vec a) -> Bool =
   vec_all_indexed(pred, vec, 0, vec_length(vec))
 
 fn vec_count_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: Int) -> Int =
@@ -206,7 +206,7 @@ fn vec_count_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: I
         if pred(value) then vec_count_indexed(pred, vec, index + 1, total, acc + 1)
         else vec_count_indexed(pred, vec, index + 1, total, acc)
 
-fn vec_count(pred: a -> Bool, vec: Vec a) -> Int =
+export fn vec_count(pred: a -> Bool, vec: Vec a) -> Int =
   vec_count_indexed(pred, vec, 0, vec_length(vec), 0)
 
 fn vec_slice_from(start: Int, count: Int, vec: Vec a, index: Int, total: Int, acc: Vec a) -> Vec a =
@@ -219,7 +219,7 @@ fn vec_slice_from(start: Int, count: Int, vec: Vec a, index: Int, total: Int, ac
     | Nothing -> acc
     | Just value -> vec_slice_from(start, count, vec, index + 1, total, vec_append(value, acc))
 
-fn vec_slice(start: Int, count: Int, vec: Vec a) -> Vec a =
+export fn vec_slice(start: Int, count: Int, vec: Vec a) -> Vec a =
   if count <= 0 then vec_empty()
   else
     vec_slice_from(if start < 0 then 0 else start, count, vec, 0, vec_length(vec), vec_empty())
@@ -231,29 +231,29 @@ fn vec_reverse_from(vec: Vec a, index: Int, acc: Vec a) -> Vec a =
     | Nothing -> acc
     | Just value -> vec_reverse_from(vec, index - 1, vec_append(value, acc))
 
-fn vec_reverse(vec: Vec a) -> Vec a =
+export fn vec_reverse(vec: Vec a) -> Vec a =
   vec_reverse_from(vec, vec_length(vec) - 1, vec_empty())
 
 fn add_ints(left: Int, right: Int) -> Int = left + right
 
-fn vec_sum(vec: Vec Int) -> Int =
+export fn vec_sum(vec: Vec Int) -> Int =
   vec_fold(add_ints, 0, vec)
 
-fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
+export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_sum(vec_map(f, vec))
 
-fn dict_empty() -> Dict v =
+export fn dict_empty() -> Dict v =
   Dict(map_empty())
 
-fn dict_get(key: String, dict: Dict v) -> Maybe v =
+export fn dict_get(key: String, dict: Dict v) -> Maybe v =
   match dict with
   | Dict raw -> map_get(raw, key)
 
-fn dict_set(key: String, value: v, dict: Dict v) -> Dict v =
+export fn dict_set(key: String, value: v, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_set(raw, key, value))
 
-fn dict_remove(key: String, dict: Dict v) -> Dict v =
+export fn dict_remove(key: String, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_remove(raw, key))
 
@@ -264,7 +264,7 @@ fn dict_keys_from(raw: Map v, index: Int, total: Int, acc: Vec String) -> Vec St
     | Nothing -> acc
     | Just key -> dict_keys_from(raw, index + 1, total, vec_append(key, acc))
 
-fn dict_keys(dict: Dict v) -> Vec String =
+export fn dict_keys(dict: Dict v) -> Vec String =
   match dict with
   | Dict raw -> dict_keys_from(raw, 0, map_size(raw), vec_empty())
 
@@ -275,19 +275,19 @@ fn dict_values_from(raw: Map v, index: Int, total: Int, acc: Vec v) -> Vec v =
     | Nothing -> acc
     | Just value -> dict_values_from(raw, index + 1, total, vec_append(value, acc))
 
-fn dict_values(dict: Dict v) -> Vec v =
+export fn dict_values(dict: Dict v) -> Vec v =
   match dict with
   | Dict raw -> dict_values_from(raw, 0, map_size(raw), vec_empty())
 
-class Semigroup t {
+export class Semigroup t {
   fn append(x: t, y: t) -> t
 }
 
-class Functor f {
+export class Functor f {
   fn fmap(f: a -> b, xs: f a) -> f b
 }
 
-class Foldable f {
+export class Foldable f {
   fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
 }
 
@@ -345,50 +345,50 @@ instance Semigroup (Dict v) {
     | Dict raw -> dict_append_entries(x, raw, 0, map_size(raw))
 }
 
-fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
+export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
   fold_values(vec_append_flip, vec_empty(), xs)
 
-fn pipe(f: a -> b, value: a) -> b =
+export fn pipe(f: a -> b, value: a) -> b =
   f(value)
 
-fn result_map(f: a -> b, r: Result e a) -> Result e b =
+export fn result_map(f: a -> b, r: Result e a) -> Result e b =
   match r with
   | Ok x -> Ok(f(x))
   | Err e -> Err(e)
 
-fn result_map_error(f: e -> f_err, r: Result e a) -> Result f_err a =
+export fn result_map_error(f: e -> f_err, r: Result e a) -> Result f_err a =
   match r with
   | Ok x -> Ok(x)
   | Err e -> Err(f(e))
 
-fn result_and_then(f: a -> Result e b, r: Result e a) -> Result e b =
+export fn result_and_then(f: a -> Result e b, r: Result e a) -> Result e b =
   match r with
   | Ok x -> f(x)
   | Err e -> Err(e)
 
-fn result_with_default(fallback: a, r: Result e a) -> a =
+export fn result_with_default(fallback: a, r: Result e a) -> a =
   match r with
   | Ok x -> x
   | Err _ -> fallback
 
-fn result_pipe(f: a -> Result e b, r: Result e a) -> Result e b =
+export fn result_pipe(f: a -> Result e b, r: Result e a) -> Result e b =
   result_and_then(f, r)
 
-fn result_pipe_ok(f: a -> b, r: Result e a) -> Result e b =
+export fn result_pipe_ok(f: a -> b, r: Result e a) -> Result e b =
   result_map(f, r)
 
-fn result_pipe_error(f: e -> f_err, r: Result e a) -> Result f_err a =
+export fn result_pipe_error(f: e -> f_err, r: Result e a) -> Result f_err a =
   result_map_error(f, r)
 
-fn after(effect: Unit !{IO}, value: a) -> a !{IO} =
+export fn after(effect: Unit !{IO}, value: a) -> a !{IO} =
   value
 
-fn when_ok(f: a -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
+export fn when_ok(f: a -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   match r with
   | Ok x -> after(f(x), r)
   | Err e -> Err(e)
 
-fn when_error(f: e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
+export fn when_error(f: e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   match r with
   | Ok x -> Ok(x)
   | Err e -> after(f(e), r)

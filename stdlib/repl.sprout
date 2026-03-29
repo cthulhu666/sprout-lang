@@ -179,22 +179,8 @@ fn repl_command_names() -> Vec String =
 fn stdlib_module_completion_names() -> Vec String =
   append_space_names(vec_empty(), "bytes collections crypto http http_client math net string terminal")
 
-fn append_prelude_constructor_name(names: Vec String, line: String) -> Vec String =
-  if string.starts_with(trim(line), "| ") then append_unique_name(names, take_name_from(trim(line), 2))
-  else names
-
-fn gather_prelude_completion_names(lines: Vec String, index: Int, acc: Vec String) -> Vec String =
-  match vec_get(index, lines) with
-  | Just line ->
-      gather_prelude_completion_names(
-        lines,
-        index + 1,
-        append_prelude_constructor_name(append_declaration_names(acc, trim(line)), trim(line))
-      )
-  | Nothing -> acc
-
 fn prelude_completion_names() -> Vec String !{IO} =
-  gather_prelude_completion_names(string.string_lines(read_file(module_path("stdlib.prelude"))), 0, vec_empty())
+  gather_exported_names(string.string_lines(read_file(module_path("stdlib.prelude"))), 0, false, vec_empty())
 
 fn append_names_from_vec(acc: Vec String, names: Vec String, index: Int) -> Vec String =
   match vec_get(index, names) with
@@ -296,11 +282,16 @@ fn module_path(module_name: String) -> String =
 fn append_exported_names(names: Vec String, line: String) -> Vec String =
   append_declaration_names(names, trim(line))
 
-fn gather_exported_names(lines: Vec String, index: Int, acc: Vec String) -> Vec String =
+fn gather_exported_names(lines: Vec String, index: Int, in_exported_type: Bool, acc: Vec String) -> Vec String =
   match vec_get(index, lines) with
   | Just line ->
-      if string.starts_with(trim(line), "export ") then gather_exported_names(lines, index + 1, append_exported_names(acc, trim(line)))
-      else gather_exported_names(lines, index + 1, acc)
+      if string.starts_with(trim(line), "export type ") then
+        gather_exported_names(lines, index + 1, true, append_exported_names(acc, trim(line)))
+      else if in_exported_type && string.starts_with(trim(line), "| ") then
+        gather_exported_names(lines, index + 1, true, append_unique_name(acc, take_name_from(trim(line), 2)))
+      else if string.starts_with(trim(line), "export ") then
+        gather_exported_names(lines, index + 1, false, append_exported_names(acc, trim(line)))
+      else gather_exported_names(lines, index + 1, false, acc)
   | Nothing -> acc
 
 fn qualify_names(namespace: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
@@ -338,7 +329,7 @@ fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec Stri
   | Just namespace_ref ->
       qualify_names(
         take_before(namespace_ref, "|"),
-        gather_exported_names(string.string_lines(read_file(module_path(take_after(namespace_ref, "|")))), 0, vec_empty()),
+        gather_exported_names(string.string_lines(read_file(module_path(take_after(namespace_ref, "|")))), 0, false, vec_empty()),
         0,
         vec_empty()
       )
