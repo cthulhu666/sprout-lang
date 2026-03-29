@@ -8,6 +8,7 @@ from sprout.interpreter import RuntimeError, run_program
 from sprout.parser import ParseError, parse
 from sprout.stdlib import with_prelude
 from sprout.tokenizer import TokenizeError
+from sprout.typeclass_lowering import lower_typeclasses
 from sprout.typechecker import TypeCheckError, typecheck_program
 
 
@@ -32,8 +33,10 @@ class ConformanceTests(unittest.TestCase):
                 out_file = spr_file.with_suffix(".out")
                 program = parse(_load_for_case(spr_file))
                 typecheck_program(program)
+                lowered = lower_typeclasses(program)
+                typecheck_program(lowered)
                 out = io.StringIO()
-                run_program(program, stdout=out)
+                run_program(lowered, stdout=out)
                 self.assertEqual(out.getvalue(), _read(out_file))
 
     def test_parse_error_cases(self) -> None:
@@ -61,8 +64,10 @@ class ConformanceTests(unittest.TestCase):
                 expected = _read(err_file).strip()
                 program = parse(_load_for_case(spr_file))
                 typecheck_program(program)
+                lowered = lower_typeclasses(program)
+                typecheck_program(lowered)
                 with self.assertRaises(RuntimeError) as ctx:
-                    run_program(program)
+                    run_program(lowered)
                 self.assertIn(expected, str(ctx.exception))
 
 

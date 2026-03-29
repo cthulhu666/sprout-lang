@@ -57,15 +57,15 @@ fn range_fold_go(current: Int, end_value: Int, step: Int, acc: a, f: a -> Int ->
 export fn range_fold(value: IntRange, init: a, f: a -> Int -> a) -> a =
   range_fold_go(range_start(value), range_end(value), range_step(value), init, f)
 
-export fn map(f: a -> b, xs: List a) -> List b =
+fn list_map_go(f: a -> b, xs: List a) -> List b =
   match xs with
   | Nil -> Nil
-  | Cons x rest -> Cons(f(x), map(f, rest))
+  | Cons x rest -> Cons(f(x), list_map_go(f, rest))
 
-export fn fold(f: b -> a -> b, init: b, xs: List a) -> b =
+fn list_fold_go(f: b -> a -> b, init: b, xs: List a) -> b =
   match xs with
   | Nil -> init
-  | Cons x rest -> fold(f, f(init, x), rest)
+  | Cons x rest -> list_fold_go(f, f(init, x), rest)
 
 export fn filter(pred: a -> Bool, xs: List a) -> List a =
   match xs with
@@ -75,13 +75,13 @@ export fn filter(pred: a -> Bool, xs: List a) -> List a =
       else filter(pred, rest)
 
 export fn split_ints(s: String) -> List Int =
-  map(parse_int, split_words(s))
+  list_map_go(parse_int, split_words(s))
 
 export fn list_map(f: a -> b, xs: List a) -> List b =
-  map(f, xs)
+  list_map_go(f, xs)
 
 export fn list_fold(step: b -> a -> b, init: b, xs: List a) -> b =
-  fold(step, init, xs)
+  list_fold_go(step, init, xs)
 
 export fn list_append(left: List a, right: List a) -> List a =
   match left with
@@ -291,6 +291,12 @@ export class Foldable f {
   fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
 }
 
+export fn map(f: a -> b, xs: c a) -> c b where Functor c =
+  fmap(f, xs)
+
+export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
+  fold_values(step, init, xs)
+
 instance Semigroup String {
   fn append(x: String, y: String) -> String =
     str_concat(x, y)
@@ -346,7 +352,7 @@ instance Semigroup (Dict v) {
 }
 
 export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
-  fold_values(vec_append_flip, vec_empty(), xs)
+  fold(vec_append_flip, vec_empty(), xs)
 
 export fn pipe(f: a -> b, value: a) -> b =
   f(value)

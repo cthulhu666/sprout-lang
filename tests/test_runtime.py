@@ -90,8 +90,10 @@ class RuntimeTests(unittest.TestCase):
         """
         program = parse(with_prelude(src))
         typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
         out = io.StringIO()
-        run_program(program, stdout=out)
+        run_program(lowered, stdout=out)
         self.assertEqual(out.getvalue().strip(), "10")
 
     def test_stdlib_int_range_helpers(self) -> None:
@@ -1595,7 +1597,7 @@ class RuntimeTests(unittest.TestCase):
                   vec_append(6, vec_append(5, vec_append(4, vec_empty())))
 
                 fn sum_after_map(xs: c) -> Int where Functor c, Foldable c =
-                  fold_values(add, 0, fmap(add_one, xs))
+                  fold(add, 0, map(add_one, xs))
 
                 fn sum_list(xs: List Int) -> Int where Functor List, Foldable List =
                   sum_after_map(xs)

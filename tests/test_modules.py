@@ -1123,7 +1123,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 fn add(acc: Int, x: Int) -> Int = acc + x
 
                 fn sum_after_map(xs: c) -> Int where Functor c, Foldable c =
-                  fold_values(add, 0, fmap(add_one, xs))
+                  fold(add, 0, map(add_one, xs))
 
                 fn sample_list() -> List Int =
                   Cons(1, Cons(2, Cons(3, Nil)))

@@ -331,6 +331,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `dict_values(dict) -> Vec v`
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
 - `Semigroup t`, `Functor f`, and `Foldable f`
+- `map(f, xs)` is the default `Functor` operation
+- `fold(step, init, xs)` is the default `Foldable` operation
+- `fmap(f, xs)` remains available as an alias for the underlying `Functor` method
 - `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`
 - prelude instances are currently provided for `String`, `List a`, `Vec a`, and `Dict v`
 - `left ++ right` works in the default REPL for strings and lists
@@ -603,7 +606,7 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 Collections module (in `stdlib/collections.sprout`):
 
 - compatibility namespace for the foundational collection/typeclass surface now defined in the prelude
-- existing imports such as `import stdlib.collections (Vec, Dict, Functor, Foldable, vec_append, dict_get)` continue to resolve
+- existing imports such as `import stdlib.collections (Vec, Dict, Functor, Foldable, map, fold, vec_append, dict_get)` continue to resolve
 - prefer the unqualified prelude surface in standalone code and the default REPL
 
 Low-level runtime notes:
