@@ -242,6 +242,18 @@ export fn vec_sum(vec: Vec Int) -> Int =
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_sum(vec_map(f, vec))
 
+#@temporary
+fn vec_sort_by_int_collect(f: a -> Int, vec: Vec a, index: Int, total: Int, acc: List (Int, Int, a)) -> List (Int, Int, a) =
+  if index >= total then acc
+  else
+    match vec_get(index, vec) with
+    | Nothing -> acc
+    | Just value -> vec_sort_by_int_collect(f, vec, index + 1, total, Cons((f(value), index, value), acc))
+
+#@temporary
+export fn vec_sort_by_int(f: a -> Int, vec: Vec a) -> Vec a =
+  Vec(vector_sort_by_int(vec_sort_by_int_collect(f, vec, 0, vec_length(vec), Nil)))
+
 export fn dict_empty() -> Dict v =
   Dict(map_empty())
 

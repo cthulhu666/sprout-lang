@@ -125,6 +125,33 @@ class ModuleLoaderTests(unittest.TestCase):
             warnings = resolve_program_names(program, bundle)
             self.assertEqual(warnings, [])
 
+    def test_module_resolution_warns_on_imported_temporary_compat_value_use(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module app.main
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by_int)
+
+                fn key(x: Int) -> Int = 0 - x
+
+                fn sample() -> Vec Int =
+                  vec_append(3, vec_append(1, vec_append(2, vec_empty())))
+
+                fn main() -> Unit !{IO} =
+                  print(vec_sort_by_int(key, sample()))
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            warnings = resolve_program_names(program, bundle)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("'vec_sort_by_int' is temporary", warnings[0].message)
+            self.assertEqual(warnings[0].path, main.resolve())
+
     def test_load_module_source_detects_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1141,6 +1168,34 @@ class ModuleLoaderTests(unittest.TestCase):
             out = io.StringIO()
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "66")
+
+    def test_import_stdlib_collections_vec_sort_by_int(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by_int)
+
+                fn key(value: IntRange) -> Int =
+                  range_start(value)
+
+                fn sample() -> Vec IntRange =
+                  vec_append(range(3, 4), vec_append(range(1, 2), vec_append(range(1, 3), vec_empty())))
+
+                fn main() -> Unit !{IO} =
+                  print(vec_sort_by_int(key, sample()))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "Vec([1..3, 1..2, 3..4])")
 
     def test_import_stdlib_collections_vec_filter_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

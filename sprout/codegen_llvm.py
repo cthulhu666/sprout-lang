@@ -87,6 +87,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "vector_get": FnSig(name="vector_get", params=[I64, I64], ret=I64),
     "vector_set": FnSig(name="vector_set", params=[I64, I64, I64], ret=I64),
     "vector_append": FnSig(name="vector_append", params=[I64, I64], ret=I64),
+    "vector_sort_by_int": FnSig(name="vector_sort_by_int", params=[I64], ret=I64),
     "map_empty": FnSig(name="map_empty", params=[], ret=I64),
     "map_get": FnSig(name="map_get", params=[I64, I8_PTR], ret=I64),
     "map_set": FnSig(name="map_set", params=[I64, I8_PTR, I64], ret=I64),

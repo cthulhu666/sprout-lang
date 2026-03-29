@@ -144,6 +144,32 @@ class TypecheckerTests(unittest.TestCase):
             typecheck_program(parse(with_prelude(src)))
         self.assertIn("Type mismatch", str(ctx.exception))
 
+    def test_typecheck_stdlib_vec_sort_by_int(self) -> None:
+        src = """
+        fn key(value: IntRange) -> Int = range_start(value)
+
+        fn main() -> Unit !{IO} =
+          print(
+            vec_sort_by_int(
+              key,
+              vec_append(range(3, 4), vec_append(range(1, 2), vec_empty()))
+            )
+          )
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertIn("vec_sort_by_int", types)
+
+    def test_typecheck_vec_sort_by_int_rejects_non_int_key(self) -> None:
+        src = """
+        fn bad_key(value: Int) -> String = "x"
+
+        fn main() -> Unit !{IO} =
+          print(vec_sort_by_int(bad_key, vec_append(1, vec_empty())))
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(with_prelude(src)))
+        self.assertIn("Int", str(ctx.exception))
+
     def test_typecheck_stdlib_bytes_builder_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

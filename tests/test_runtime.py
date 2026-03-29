@@ -113,6 +113,25 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "113")
 
+    def test_stdlib_vec_sort_by_int(self) -> None:
+        src = """
+        fn key(value: IntRange) -> Int = range_start(value)
+
+        fn sample() -> Vec IntRange =
+          vec_append(
+            range(3, 4),
+            vec_append(range(1, 2), vec_append(range(1, 3), vec_empty()))
+          )
+
+        fn main() -> Unit !{IO} =
+          print(vec_sort_by_int(key, sample()))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Vec([1..3, 1..2, 3..4])")
+
     def test_stdlib_result_helpers(self) -> None:
         src = """
         fn plus1(x: Int) -> Int = x + 1

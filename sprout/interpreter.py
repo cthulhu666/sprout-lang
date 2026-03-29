@@ -258,6 +258,30 @@ def py_to_adt_list(items: list[object]) -> ADTValue:
     return cursor
 
 
+def _vector_sort_by_int_from_decorated_list(decorated: object) -> VectorValue:
+    items: list[tuple[int, int, object]] = []
+    cursor = decorated
+    while True:
+        if not isinstance(cursor, ADTValue):
+            raise RuntimeError("vector_sort_by_int expects List")
+        ctor = cursor.constructor.rsplit(".", 1)[-1]
+        if ctor == "Nil":
+            break
+        if ctor != "Cons" or len(cursor.args) != 2:
+            raise RuntimeError("vector_sort_by_int expects List")
+        pair = cursor.args[0]
+        if not isinstance(pair, TupleValue) or len(pair.items) != 3:
+            raise RuntimeError("vector_sort_by_int expects decorated (Int, Int, a) tuples")
+        key, index, value = pair.items
+        if not isinstance(key, int) or not isinstance(index, int):
+            raise RuntimeError("vector_sort_by_int expects decorated (Int, Int, a) tuples")
+        items.append((key, index, value))
+        cursor = cursor.args[1]
+
+    items.sort(key=lambda item: (item[0], item[1]))
+    return VectorValue(items=tuple(value for _, _, value in items))
+
+
 def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> object:
     if isinstance(expr, ast.IntExpr):
         return expr.value
@@ -904,6 +928,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(vec, VectorValue):
             raise RuntimeError("vector_append expects Vector")
         return VectorValue(items=vec.items + (value,))
+
+    def builtin_vector_sort_by_int(args: list[object]) -> object:
+        return _vector_sort_by_int_from_decorated_list(args[0])
 
     def builtin_map_empty(args: list[object]) -> object:
         return MapValue(items={})
@@ -1748,6 +1775,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("vector_get", BuiltinFunction(name="vector_get", arity=2, fn=builtin_vector_get))
     env.set("vector_set", BuiltinFunction(name="vector_set", arity=3, fn=builtin_vector_set))
     env.set("vector_append", BuiltinFunction(name="vector_append", arity=2, fn=builtin_vector_append))
+    env.set("vector_sort_by_int", BuiltinFunction(name="vector_sort_by_int", arity=1, fn=builtin_vector_sort_by_int))
     env.set("map_empty", BuiltinFunction(name="map_empty", arity=0, fn=builtin_map_empty))
     env.set("map_get", BuiltinFunction(name="map_get", arity=2, fn=builtin_map_get))
     env.set("map_set", BuiltinFunction(name="map_set", arity=3, fn=builtin_map_set))

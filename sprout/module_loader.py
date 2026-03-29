@@ -44,6 +44,7 @@ MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
     "vec_reverse": "vec_reverse",
     "vec_sum": "vec_sum",
     "vec_sum_by": "vec_sum_by",
+    "vec_sort_by_int": "vec_sort_by_int",
     "foldable_to_vec": "foldable_to_vec",
     "dict_empty": "dict_empty",
     "dict_get": "dict_get",
@@ -713,6 +714,14 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
         symbols = out[path]
         for name, canonical in (compat_values or {}).items():
             symbols.exported_values.setdefault(name, canonical)
+            target_name = canonical.rsplit(".", 1)[-1]
+            annotations = module_info.annotations.get(target_name, ())
+            if not annotations:
+                for candidate_info in bundle.modules.values():
+                    annotations = candidate_info.annotations.get(target_name, ())
+                    if annotations:
+                        break
+            symbols.value_annotations.setdefault(name, annotations)
         for name, ctors in (compat_types or {}).items():
             symbols.exported_types.setdefault(name, name)
             symbols.exported_type_constructors.setdefault(name, {}).update(ctors)
@@ -801,6 +810,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "vector_get",
         "vector_set",
         "vector_append",
+        "vector_sort_by_int",
         "map_empty",
         "map_get",
         "map_set",

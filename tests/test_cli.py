@@ -120,6 +120,38 @@ class CliTests(unittest.TestCase):
             self.assertIn("'old' is deprecated: use fresh instead", proc.stderr)
             self.assertIn("ok", proc.stdout)
 
+    def test_check_reports_warning_for_imported_temporary_compat_value_use(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module app.main
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by_int)
+
+                fn key(x: Int) -> Int = 0 - x
+
+                fn sample() -> Vec Int =
+                  vec_append(3, vec_append(1, vec_append(2, vec_empty())))
+
+                fn main() -> Unit !{IO} =
+                  print(vec_sort_by_int(key, sample()))
+                """,
+                encoding="utf-8",
+            )
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "check", str(main)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("warning:", proc.stderr)
+            self.assertIn("'vec_sort_by_int' is temporary", proc.stderr)
+            self.assertIn("ok", proc.stdout)
+
     def test_analysis_completion_candidates_in_state_matches_imports_and_declarations(self) -> None:
         from sprout.analysis import completion_candidates_in_state
 

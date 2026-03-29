@@ -1,5 +1,5 @@
 module examples.aoc_2025_day_5
-import stdlib.collections (Vec, vec_append, vec_empty, vec_get)
+import stdlib.collections (Vec, vec_append, vec_empty, vec_get, vec_sort_by_int)
 import stdlib.string (split_once, string_lines, trim)
 
 # Advent of Code 2025 Day 5: Cafeteria
@@ -52,35 +52,11 @@ fn count_fresh_ids(ranges: Vec IntRange, ingredients: Vec Int) -> Int =
 fn overlaps(left: IntRange, right: IntRange) -> Bool =
   range_start(left) <= range_end(right) && range_start(right) <= range_end(left)
 
-fn min_int(left: Int, right: Int) -> Int =
-  if left < right then left else right
-
-fn max_int(left: Int, right: Int) -> Int =
-  if left > right then left else right
-
 fn merge_pair(left: IntRange, right: IntRange) -> IntRange =
   range(
-    min_int(range_start(left), range_start(right)),
-    max_int(range_end(left), range_end(right))
+    if range_start(left) < range_start(right) then range_start(left) else range_start(right),
+    if range_end(left) > range_end(right) then range_end(left) else range_end(right)
   )
-
-fn insert_sorted_range(sorted: Vec IntRange, fresh: IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
-  match vec_get(index, sorted) with
-  | Nothing -> vec_append(fresh, acc)
-  | Just current ->
-      if range_start(fresh) <= range_start(current) then
-        append_remaining_ranges(sorted, index, vec_append(fresh, acc))
-      else insert_sorted_range(sorted, fresh, index + 1, vec_append(current, acc))
-
-fn append_remaining_ranges(ranges: Vec IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
-  match vec_get(index, ranges) with
-  | Nothing -> acc
-  | Just current -> append_remaining_ranges(ranges, index + 1, vec_append(current, acc))
-
-fn sort_ranges(ranges: Vec IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
-  match vec_get(index, ranges) with
-  | Nothing -> acc
-  | Just fresh -> sort_ranges(ranges, index + 1, insert_sorted_range(acc, fresh, 0, vec_empty()))
 
 fn merge_sorted_ranges(sorted: Vec IntRange, index: Int, current: IntRange, seen_current: Bool, acc: Vec IntRange) -> Vec IntRange =
   match vec_get(index, sorted) with
@@ -98,7 +74,7 @@ fn merge_sorted_ranges(sorted: Vec IntRange, index: Int, current: IntRange, seen
 
 
 fn normalized_ranges(ranges: Vec IntRange) -> Vec IntRange =
-  merge_sorted_ranges(sort_ranges(ranges, 0, vec_empty()), 0, range(0, 0), false, vec_empty())
+  merge_sorted_ranges(vec_sort_by_int(range_start, ranges), 0, range(0, 0), false, vec_empty())
 
 fn count_covered_ids_from(merged: Vec IntRange, index: Int, acc: Int) -> Int =
   match vec_get(index, merged) with

@@ -1375,10 +1375,16 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
 
     p_var = TVar("prelude.print.a")
     vector_var = TVar("prelude.vector.a")
+    sort_key_var = TVar("prelude.vector_sort_by_int.a")
     maybe_type = TConst("Maybe")
     result_type = TConst("Result")
     maybe_vector_var = TApp(maybe_type, vector_var)
     vector_t = TApp(TConst("Vector"), vector_var)
+    sort_decorated_t = TApp(
+        TConst("List"),
+        TTuple((INT, INT, sort_key_var)),
+    )
+    sort_result_t = TApp(TConst("Vector"), sort_key_var)
     map_var = TVar("prelude.map.a")
     maybe_map_var = TApp(maybe_type, map_var)
     map_t = TApp(TConst("Map"), map_var)
@@ -1483,6 +1489,10 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "vector_get": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(INT, maybe_vector_var))),
         "vector_set": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(INT, TFunc(vector_var, vector_t)))),
         "vector_append": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(vector_var, vector_t))),
+        "vector_sort_by_int": Scheme(
+            vars=(sort_key_var.name,),
+            type=TFunc(sort_decorated_t, sort_result_t),
+        ),
         "map_empty": Scheme(vars=(map_var.name,), type=map_t),
         "map_get": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, maybe_map_var))),
         "map_set": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(STRING, TFunc(map_var, map_t)))),

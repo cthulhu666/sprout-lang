@@ -460,6 +460,45 @@ class CodegenNativeBasicTests(CodegenTestCase):
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_vec_sort_by_int(self) -> None:
+        src = """
+        fn key(value: IntRange) -> Int =
+          range_start(value)
+
+        fn sample() -> Vec IntRange =
+          vec_append(range(3, 4), vec_append(range(1, 2), vec_append(range(1, 3), vec_empty())))
+
+        fn encode(value: Vec IntRange) -> Int =
+          range_end(vec_get_or(0, range(0, 0), value)) * 10 +
+          range_end(vec_get_or(1, range(0, 0), value))
+
+        fn main() -> Unit !{IO} =
+          print(encode(vec_sort_by_int(key, sample())))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--with-stdlib",
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "32")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_string_equality_uses_content_not_pointer_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

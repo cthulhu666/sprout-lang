@@ -2350,6 +2350,89 @@ long long vector_append(long long vec, long long value) {
   return (long long)(uintptr_t)out;
 }
 
+typedef struct {
+  long long key;
+  long long index;
+  long long value;
+} SortItem;
+
+static int sort_item_cmp(const void* left, const void* right) {
+  const SortItem* a = (const SortItem*)left;
+  const SortItem* b = (const SortItem*)right;
+  if (a->key < b->key) return -1;
+  if (a->key > b->key) return 1;
+  if (a->index < b->index) return -1;
+  if (a->index > b->index) return 1;
+  return 0;
+}
+
+long long vector_sort_by_int(long long decorated_list) {
+  long long rooted_list = decorated_list;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
+
+  size_t len = 0;
+  size_t cap = 0;
+  SortItem* items = NULL;
+  long long cursor = decorated_list;
+  while (1) {
+    ManagedNode* node = find_managed_ptr((void*)(uintptr_t)cursor);
+    if (node == NULL || node->kind != SPROUT_HEAP_OBJ) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: expected List");
+    }
+    SproutObj* obj = (SproutObj*)node->ptr;
+    CtorMeta* meta = find_ctor(obj->tag);
+    if (meta == NULL) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: missing list constructor metadata");
+    }
+    if (strcmp(meta->name, "Nil") == 0) {
+      break;
+    }
+    if (strcmp(meta->name, "Cons") != 0) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: expected List");
+    }
+    ManagedNode* tuple_node = find_managed_ptr((void*)(uintptr_t)obj->f0);
+    if (tuple_node == NULL || tuple_node->kind != SPROUT_HEAP_TUPLE || tuple_node->aux_slots != 3) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: expected decorated (Int, Int, a) tuples");
+    }
+    if (len == cap) {
+      size_t new_cap = cap == 0 ? 16 : cap * 2;
+      SortItem* new_items = (SortItem*)realloc(items, new_cap * sizeof(SortItem));
+      if (new_items == NULL) {
+        free(items);
+        SPROUT_GC_POP_LOCALS(1);
+        tcp_fail("vector_sort_by_int: out of memory");
+      }
+      items = new_items;
+      cap = new_cap;
+    }
+    items[len].key = sprout_heap_child_value(tuple_node, 0);
+    items[len].index = sprout_heap_child_value(tuple_node, 1);
+    items[len].value = sprout_heap_child_value(tuple_node, 2);
+    len++;
+    cursor = obj->f1;
+  }
+
+  qsort(items, len, sizeof(SortItem), sort_item_cmp);
+  VectorVal* out = sprout_alloc_vector_val("vector_sort_by_int: out of memory");
+  out->len = (long long)len;
+  out->cap = (long long)len;
+  out->data = len == 0 ? NULL : sprout_alloc_vector_data(len, "vector_sort_by_int: out of memory");
+  for (size_t i = 0; i < len; i++) {
+    out->data[i] = items[i].value;
+  }
+  free(items);
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
 long long map_empty() {
   MapVal* m = sprout_alloc_map_val("map_empty: out of memory");
   m->len = 0;

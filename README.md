@@ -327,6 +327,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `vec_reverse(vec)`
   - `vec_sum(vec)`
   - `vec_sum_by(f, vec)`
+  - `vec_sort_by_int(key, vec)` temporarily
 - `Dict v` plus foundational helpers:
   - `dict_empty()`
   - `dict_get(key, dict) -> Maybe v`
