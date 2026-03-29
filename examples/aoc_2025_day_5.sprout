@@ -1,0 +1,95 @@
+module examples.aoc_2025_day_5
+import stdlib.collections (Vec, vec_append, vec_empty, vec_get)
+import stdlib.string (split_once, string_lines, trim)
+
+# Advent of Code 2025 Day 5: Cafeteria
+# part1 counts how many available ingredient IDs are fresh.
+# part2 counts how many total ingredient IDs are covered by the fresh ranges.
+
+export type Answers(..) =
+  | Answers Int Int
+
+export type Database(..) =
+  | Database (Vec IntRange) (Vec Int)
+
+fn parse_range(raw: String) -> IntRange =
+  match split_once(raw, "-") with
+  | Nothing -> range(parse_int(trim(raw)), parse_int(trim(raw)))
+  | Just pair ->
+      match pair with
+      | (left, right) -> range(parse_int(trim(left)), parse_int(trim(right)))
+
+fn parse_database(lines: Vec String, index: Int, seen_blank: Bool, ranges: Vec IntRange, ids: Vec Int) -> Database =
+  match vec_get(index, lines) with
+  | Nothing -> Database(ranges, ids)
+  | Just raw ->
+      if trim(raw) == "" then parse_database(lines, index + 1, true, ranges, ids)
+      else if seen_blank then
+        parse_database(lines, index + 1, true, ranges, vec_append(parse_int(trim(raw)), ids))
+      else
+        parse_database(lines, index + 1, false, vec_append(parse_range(trim(raw)), ranges), ids)
+
+fn fresh_in_any_range(ranges: Vec IntRange, ingredient: Int, index: Int) -> Bool =
+  match vec_get(index, ranges) with
+  | Nothing -> false
+  | Just fresh_range ->
+      if range_contains(fresh_range, ingredient) then true
+      else fresh_in_any_range(ranges, ingredient, index + 1)
+
+fn count_fresh_ids_from(ranges: Vec IntRange, ingredients: Vec Int, index: Int, acc: Int) -> Int =
+  match vec_get(index, ingredients) with
+  | Nothing -> acc
+  | Just ingredient ->
+      if fresh_in_any_range(ranges, ingredient, 0) then
+        count_fresh_ids_from(ranges, ingredients, index + 1, acc + 1)
+      else
+        count_fresh_ids_from(ranges, ingredients, index + 1, acc)
+
+fn count_fresh_ids(ranges: Vec IntRange, ingredients: Vec Int) -> Int =
+  count_fresh_ids_from(ranges, ingredients, 0, 0)
+
+fn overlaps(left: IntRange, right: IntRange) -> Bool =
+  range_start(left) <= range_end(right) && range_start(right) <= range_end(left)
+
+fn min_int(left: Int, right: Int) -> Int =
+  if left < right then left else right
+
+fn max_int(left: Int, right: Int) -> Int =
+  if left > right then left else right
+
+fn merge_pair(left: IntRange, right: IntRange) -> IntRange =
+  range(
+    min_int(range_start(left), range_start(right)),
+    max_int(range_end(left), range_end(right))
+  )
+
+fn merge_range_into(merged: Vec IntRange, fresh: IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
+  match vec_get(index, merged) with
+  | Nothing -> vec_append(fresh, acc)
+  | Just current ->
+      if overlaps(current, fresh) then merge_range_into(merged, merge_pair(current, fresh), index + 1, acc)
+      else merge_range_into(merged, fresh, index + 1, vec_append(current, acc))
+
+fn merge_ranges(ranges: Vec IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
+  match vec_get(index, ranges) with
+  | Nothing -> acc
+  | Just fresh -> merge_ranges(ranges, index + 1, merge_range_into(acc, fresh, 0, vec_empty()))
+
+fn count_covered_ids_from(merged: Vec IntRange, index: Int, acc: Int) -> Int =
+  match vec_get(index, merged) with
+  | Nothing -> acc
+  | Just fresh_range ->
+      count_covered_ids_from(merged, index + 1, acc + range_count(fresh_range))
+
+fn count_covered_ids(ranges: Vec IntRange) -> Int =
+  count_covered_ids_from(merge_ranges(ranges, 0, vec_empty()), 0, 0)
+
+fn solve_database(db: Database) -> Answers =
+  match db with
+  | Database ranges ingredients -> Answers(count_fresh_ids(ranges, ingredients), count_covered_ids(ranges))
+
+export fn solve_stdin() -> Answers !{IO} =
+  solve_database(parse_database(string_lines(read_file("-")), 0, false, vec_empty(), vec_empty()))
+
+fn main() -> Unit !{IO} =
+  print(solve_stdin())

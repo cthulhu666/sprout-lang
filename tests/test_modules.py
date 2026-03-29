@@ -909,6 +909,32 @@ class ModuleLoaderTests(unittest.TestCase):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Answers(13, 43)")
 
+    def test_import_examples_aoc_2025_day_5_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import examples.aoc_2025_day_5 (solve_stdin)
+
+                fn main() -> Unit !{IO} =
+                  print(solve_stdin())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            with patch(
+                "sys.stdin",
+                io.StringIO("3-5\n10-14\n16-20\n12-18\n\n1\n5\n8\n11\n17\n32\n"),
+            ):
+                run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "Answers(3, 14)")
+
     def test_import_stdlib_collections_vec_and_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
