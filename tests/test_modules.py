@@ -73,6 +73,58 @@ class ModuleLoaderTests(unittest.TestCase):
                 typecheck_program(program)
             self.assertIn("Top-level let bindings must not perform effects", str(ctx.exception))
 
+    def test_module_resolution_warns_on_imported_deprecated_value_use(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                #@deprecated use fresh instead
+                export fn old(x: Int) -> Int = x + 1
+                export fn fresh(x: Int) -> Int = x + 2
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module app.main
+                import lib (old)
+
+                fn main() -> Unit !{IO} =
+                  print(old(1))
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            warnings = resolve_program_names(program, bundle)
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("'old' is deprecated: use fresh instead", warnings[0].message)
+            self.assertEqual(warnings[0].path, main.resolve())
+
+    def test_module_resolution_does_not_warn_for_same_module_annotated_use(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module app.main
+                #@unstable
+                fn local_helper(x: Int) -> Int = x + 1
+
+                fn main() -> Unit !{IO} =
+                  print(local_helper(1))
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            warnings = resolve_program_names(program, bundle)
+            self.assertEqual(warnings, [])
+
     def test_load_module_source_detects_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -28,28 +28,36 @@ def crypto_path() -> Path:
 def load_prelude() -> str:
     path = prelude_path()
     header = parse_header(path.read_text(encoding="utf-8"), path)
-    _, _, _, body = _extract_decl_and_export_names(header.body)
+    _, _, _, _, body = _extract_decl_and_export_names(
+        header.body, header.body_line_numbers
+    )
     return body
 
 
 def load_http() -> str:
     path = http_path()
     header = parse_header(path.read_text(encoding="utf-8"), path)
-    _, _, _, body = _extract_decl_and_export_names(header.body)
+    _, _, _, _, body = _extract_decl_and_export_names(
+        header.body, header.body_line_numbers
+    )
     return body
 
 
 def load_json() -> str:
     path = json_path()
     header = parse_header(path.read_text(encoding="utf-8"), path)
-    _, _, _, body = _extract_decl_and_export_names(header.body)
+    _, _, _, _, body = _extract_decl_and_export_names(
+        header.body, header.body_line_numbers
+    )
     return body
 
 
 def load_crypto() -> str:
     path = crypto_path()
     header = parse_header(path.read_text(encoding="utf-8"), path)
-    _, _, _, body = _extract_decl_and_export_names(header.body)
+    _, _, _, _, body = _extract_decl_and_export_names(
+        header.body, header.body_line_numbers
+    )
     return body
 
 

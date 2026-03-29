@@ -9,11 +9,18 @@ class Program:
     declarations: list[Any]
 
 
+@dataclass(frozen=True)
+class DeclAnnotation:
+    kind: str
+    message: str | None = None
+
+
 @dataclass
 class TypeDecl:
     name: str
     type_params: list[str]
     constructors: list["TypeConstructor"]
+    annotations: tuple["DeclAnnotation", ...] = ()
 
 
 @dataclass
@@ -21,6 +28,7 @@ class RecordDecl:
     name: str
     type_params: list[str]
     fields: list["RecordFieldDecl"]
+    annotations: tuple["DeclAnnotation", ...] = ()
 
 
 @dataclass
@@ -49,6 +57,7 @@ class FnDecl:
     effects: tuple[str, ...] | None
     constraints: list["TypeConstraint"]
     body: "Expr"
+    annotations: tuple["DeclAnnotation", ...] = ()
 
 
 @dataclass
@@ -61,6 +70,7 @@ class Param:
 class LetDecl:
     name: str
     value: "Expr"
+    annotations: tuple["DeclAnnotation", ...] = ()
 
 
 @dataclass
@@ -68,12 +78,14 @@ class ClassDecl:
     name: str
     type_params: list[str]
     methods: list["ClassMethodSig"] = field(default_factory=list)
+    annotations: tuple["DeclAnnotation", ...] = ()
 
 
 @dataclass
 class InstanceDecl:
     constraint: TypeConstraint
     methods: list["InstanceMethodImpl"] = field(default_factory=list)
+    annotations: tuple["DeclAnnotation", ...] = ()
 
 
 @dataclass

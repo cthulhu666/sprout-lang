@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from . import ast
 from .tokenizer import Token, tokenize
@@ -8,6 +9,43 @@ from .tokenizer import Token, tokenize
 
 class ParseError(ValueError):
     pass
+
+
+_ANNOTATION_RE = re.compile(r"^\s*#@([A-Za-z_][A-Za-z0-9_]*)(?:\s+(.*))?\s*$")
+_DECL_START_RE = re.compile(r"^\s*(?:export\s+)?(?:fn|type|let|class|instance)\b")
+_ANNOTATION_KINDS = {"unstable", "temporary", "wip", "deprecated"}
+
+
+def extract_decl_annotations(source: str) -> dict[int, tuple[ast.DeclAnnotation, ...]]:
+    pending: list[tuple[int, ast.DeclAnnotation]] = []
+    out: dict[int, tuple[ast.DeclAnnotation, ...]] = {}
+    for line_no, line in enumerate(source.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped == "" or (stripped.startswith("#") and not stripped.startswith("#@")):
+            continue
+        match = _ANNOTATION_RE.match(line)
+        if match is not None:
+            kind = match.group(1)
+            message = match.group(2).strip() if match.group(2) is not None else None
+            if kind not in _ANNOTATION_KINDS:
+                raise ParseError(f"Unknown declaration annotation {kind!r} at {line_no}:1")
+            if kind != "deprecated" and message is not None:
+                raise ParseError(f"Only #@deprecated accepts a message at {line_no}:1")
+            pending.append((line_no, ast.DeclAnnotation(kind=kind, message=message)))
+            continue
+        if pending and _DECL_START_RE.match(line):
+            out[line_no] = tuple(annotation for _, annotation in pending)
+            pending = []
+            continue
+        if pending:
+            first_line = pending[0][0]
+            raise ParseError(
+                f"Declaration annotation at {first_line}:1 must be followed by a top-level declaration"
+            )
+    if pending:
+        first_line = pending[0][0]
+        raise ParseError(f"Declaration annotation at {first_line}:1 must be followed by a top-level declaration")
+    return out
 
 
 @dataclass
@@ -809,7 +847,10 @@ class Parser:
 
 
 def parse(source: str) -> ast.Program:
+    annotations_by_line = extract_decl_annotations(source)
     parser = Parser(tokenize(source))
     program = parser.parse_program()
     parser.expect("EOF")
+    for decl in program.declarations:
+        decl.annotations = annotations_by_line.get(getattr(decl, "line", -1), ())
     return program

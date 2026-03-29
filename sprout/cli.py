@@ -31,7 +31,7 @@ from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .formatter import format_source, lint_source
 from .interpreter import RuntimeError, run_program
-from .module_loader import ModuleLoadError, load_module_bundle, resolve_program_names
+from .module_loader import CompilerWarning, ModuleLoadError, load_module_bundle, resolve_program_names
 from .parser import ParseError, parse
 from .repl import cmd_repl
 from .surface_checks import SurfaceCheckError, validate_public_surface
@@ -47,11 +47,19 @@ def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
     return any(path.name == "prelude.sprout" and "stdlib" in path.parts for path in bundle.modules)
 
 
+def _print_warnings(warnings: list[CompilerWarning]) -> None:
+    for warning in warnings:
+        print(
+            f"warning: {warning.path}:{warning.line}:{warning.column}: {warning.message}",
+            file=sys.stderr,
+        )
+
+
 def cmd_parse(path: Path) -> int:
     bundle = load_module_bundle(path)
     source = bundle.source
     tree = parse(source)
-    resolve_program_names(tree, bundle)
+    _print_warnings(resolve_program_names(tree, bundle))
     print(json.dumps(to_dict(tree), indent=2))
     return 0
 
@@ -95,7 +103,7 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
         bundle = None
     tree = parse(source)
     if bundle is not None:
-        resolve_program_names(tree, bundle)
+        _print_warnings(resolve_program_names(tree, bundle))
     validate_public_surface(tree, bundle)
     typed = typecheck_program(tree)
     validate_public_surface(tree, bundle)
@@ -121,7 +129,7 @@ def cmd_run(
         bundle = None
     tree = parse(source)
     if bundle is not None:
-        resolve_program_names(tree, bundle)
+        _print_warnings(resolve_program_names(tree, bundle))
     validate_public_surface(tree, bundle)
     typecheck_program(tree)
     validate_public_surface(tree, bundle)
@@ -148,7 +156,7 @@ def cmd_compile(
         bundle = None
     tree = parse(source)
     if bundle is not None:
-        resolve_program_names(tree, bundle)
+        _print_warnings(resolve_program_names(tree, bundle))
     validate_public_surface(tree, bundle)
     typecheck_program(tree)
     validate_public_surface(tree, bundle)

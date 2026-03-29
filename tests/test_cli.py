@@ -84,6 +84,42 @@ class CliTests(unittest.TestCase):
             os.write(fd, bytes([byte]))
             time.sleep(0.03)
 
+    def test_check_reports_warning_for_imported_deprecated_value_use(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib.sprout").write_text(
+                """
+                module lib
+                #@deprecated use fresh instead
+                export fn old(x: Int) -> Int = x + 1
+                export fn fresh(x: Int) -> Int = x + 2
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module app.main
+                import lib (old)
+
+                fn main() -> Unit !{IO} =
+                  print(old(1))
+                """,
+                encoding="utf-8",
+            )
+
+            proc = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "check", str(main)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("warning:", proc.stderr)
+            self.assertIn("'old' is deprecated: use fresh instead", proc.stderr)
+            self.assertIn("ok", proc.stdout)
+
     def test_analysis_completion_candidates_in_state_matches_imports_and_declarations(self) -> None:
         from sprout.analysis import completion_candidates_in_state
 

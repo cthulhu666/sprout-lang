@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 from . import ast
+from .parser import extract_decl_annotations
 
 
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
@@ -107,6 +108,14 @@ class ModuleLoadError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class CompilerWarning:
+    path: Path
+    line: int
+    column: int
+    message: str
+
+
 def _fmt_names(names: set[str] | list[str] | tuple[str, ...], limit: int = 8) -> str:
     ordered = sorted(set(names))
     if not ordered:
@@ -141,6 +150,7 @@ class ModuleInfo:
     declared: set[str]
     exported: set[str]
     exported_type_constructors: set[str]
+    annotations: dict[str, tuple[ast.DeclAnnotation, ...]]
 
 
 @dataclass(frozen=True)
@@ -168,6 +178,9 @@ class ModuleSymbols:
     exported_types: dict[str, str]
     exported_classes: dict[str, str]
     exported_type_constructors: dict[str, dict[str, str]]
+    value_annotations: dict[str, tuple[ast.DeclAnnotation, ...]]
+    type_annotations: dict[str, tuple[ast.DeclAnnotation, ...]]
+    class_annotations: dict[str, tuple[ast.DeclAnnotation, ...]]
 
 
 def _source_line(path: Path, line_no: int) -> str:
@@ -288,11 +301,22 @@ def parse_header(source: str, path: Path) -> HeaderInfo:
     )
 
 
-def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], set[str], str]:
+def _extract_decl_and_export_names(
+    body: str, body_line_numbers: tuple[int, ...]
+) -> tuple[set[str], set[str], set[str], dict[str, tuple[ast.DeclAnnotation, ...]], str]:
     declared: set[str] = set()
     explicit_exports: set[str] = set()
     exported_type_constructors: set[str] = set()
+    annotations_by_name: dict[str, tuple[ast.DeclAnnotation, ...]] = {}
     out_lines: list[str] = []
+    decl_annotations_by_source_line: dict[int, tuple[ast.DeclAnnotation, ...]] = {}
+    body_source = "\n".join(body.splitlines())
+    if body.endswith("\n"):
+        body_source += "\n"
+    relative_annotations = extract_decl_annotations(body_source)
+    for relative_line, annotations in relative_annotations.items():
+        if 1 <= relative_line <= len(body_line_numbers):
+            decl_annotations_by_source_line[body_line_numbers[relative_line - 1]] = annotations
     for line in body.splitlines():
         m_export_type = EXPORT_TYPE_ALL_CTORS_RE.match(line)
         if m_export_type is not None:
@@ -313,10 +337,22 @@ def _extract_decl_and_export_names(body: str) -> tuple[set[str], set[str], set[s
         if m is not None:
             declared.add(m.group(2))
         out_lines.append(line)
+    for source_line_no, line in zip(body_line_numbers, body.splitlines()):
+        m_export_type = EXPORT_TYPE_ALL_CTORS_RE.match(line)
+        if m_export_type is not None:
+            annotations_by_name[m_export_type.group(2)] = decl_annotations_by_source_line.get(source_line_no, ())
+            continue
+        m_export = EXPORT_DECL_RE.match(line)
+        if m_export is not None:
+            annotations_by_name[m_export.group(2)] = decl_annotations_by_source_line.get(source_line_no, ())
+            continue
+        m = DECL_RE.match(line)
+        if m is not None:
+            annotations_by_name[m.group(2)] = decl_annotations_by_source_line.get(source_line_no, ())
     sanitized = "\n".join(out_lines)
     if body.endswith("\n"):
         sanitized += "\n"
-    return declared, explicit_exports, exported_type_constructors, sanitized
+    return declared, explicit_exports, exported_type_constructors, annotations_by_name, sanitized
 
 
 def _find_decl_line(body: str, body_line_numbers: tuple[int, ...], name: str) -> int:
@@ -382,7 +418,9 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
 
         seen.add(path)
         ordered.append(path)
-        declared, exported, exported_type_constructors, sanitized_body = _extract_decl_and_export_names(header.body)
+        declared, exported, exported_type_constructors, annotations, sanitized_body = _extract_decl_and_export_names(
+            header.body, header.body_line_numbers
+        )
         modules[path] = ModuleInfo(
             path=path,
             header=HeaderInfo(
@@ -394,6 +432,7 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             declared=declared,
             exported=exported,
             exported_type_constructors=exported_type_constructors,
+            annotations=annotations,
         )
 
     def validate_module(path: Path) -> None:
@@ -468,12 +507,15 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             declared=info.declared,
             exported=info.exported | compat_names,
             exported_type_constructors=info.exported_type_constructors | compat_ctor_exports,
+            annotations=info.annotations,
         )
     needs_implicit_prelude = any(info.header.module is not None or info.header.imports for info in modules.values())
     if needs_implicit_prelude:
         prelude_path = _implicit_prelude_path()
         prelude_header = parse_header(prelude_path.read_text(encoding="utf-8"), prelude_path)
-        prelude_declared, _, _, prelude_body = _extract_decl_and_export_names(prelude_header.body)
+        prelude_declared, _, _, prelude_annotations, prelude_body = _extract_decl_and_export_names(
+            prelude_header.body, prelude_header.body_line_numbers
+        )
         modules[prelude_path] = ModuleInfo(
             path=prelude_path,
             header=HeaderInfo(
@@ -485,6 +527,7 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             declared=prelude_declared,
             exported=set(),
             exported_type_constructors=set(),
+            annotations=prelude_annotations,
         )
         ordered = [prelude_path] + ordered
 
@@ -552,6 +595,30 @@ def _node_module_error(bundle: ModuleBundle, node: object, message: str) -> Modu
     return _module_error(message, path, source_line_no, source_column)
 
 
+def _node_warning(bundle: ModuleBundle, node: object, message: str) -> CompilerWarning | None:
+    line = getattr(node, "line", None)
+    column = getattr(node, "column", 1)
+    if line is None:
+        return None
+    location = _source_location_for_bundle_line(bundle, line, column)
+    if location is None:
+        return None
+    path, source_line_no, source_column = location
+    return CompilerWarning(path=path, line=source_line_no, column=source_column, message=message)
+
+
+def _format_decl_annotation_warning(name: str, annotation: ast.DeclAnnotation) -> str:
+    base = {
+        "unstable": f"{name!r} is unstable and may change",
+        "temporary": f"{name!r} is temporary and may be removed",
+        "wip": f"{name!r} is work in progress",
+        "deprecated": f"{name!r} is deprecated",
+    }.get(annotation.kind, f"{name!r} uses declaration annotation {annotation.kind!r}")
+    if annotation.message:
+        return f"{base}: {annotation.message}"
+    return base
+
+
 def _namespace_alias_for_import(imp: ImportSpec) -> str | None:
     if imp.alias is not None:
         return imp.alias
@@ -577,6 +644,9 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
             exported_types={},
             exported_classes={},
             exported_type_constructors={},
+            value_annotations={},
+            type_annotations={},
+            class_annotations={},
         )
         for path in bundle.modules
     }
@@ -594,11 +664,17 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
         if isinstance(decl, ast.FnDecl) or isinstance(decl, ast.LetDecl):
             canonical = _qualify_name(module_name, decl.name)
             symbols.value_locals[decl.name] = canonical
+            symbols.value_annotations[decl.name] = module_info.annotations.get(
+                decl.name, getattr(decl, "annotations", ())
+            )
             if exported:
                 symbols.exported_values[decl.name] = canonical
         elif isinstance(decl, ast.TypeDecl):
             canonical = _qualify_name(module_name, decl.name)
             symbols.type_locals[decl.name] = canonical
+            symbols.type_annotations[decl.name] = module_info.annotations.get(
+                decl.name, getattr(decl, "annotations", ())
+            )
             if exported:
                 symbols.exported_types[decl.name] = canonical
             export_ctors = decl.name in module_info.exported_type_constructors
@@ -614,11 +690,17 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
         elif isinstance(decl, ast.RecordDecl):
             canonical = _qualify_name(module_name, decl.name)
             symbols.type_locals[decl.name] = canonical
+            symbols.type_annotations[decl.name] = module_info.annotations.get(
+                decl.name, getattr(decl, "annotations", ())
+            )
             if exported:
                 symbols.exported_types[decl.name] = canonical
         elif isinstance(decl, ast.ClassDecl):
             canonical = _qualify_name(module_name, decl.name)
             symbols.class_locals[decl.name] = canonical
+            symbols.class_annotations[decl.name] = module_info.annotations.get(
+                decl.name, getattr(decl, "annotations", ())
+            )
             symbols.method_locals.update(method.name for method in decl.methods)
             if exported:
                 symbols.exported_classes[decl.name] = canonical
@@ -645,9 +727,10 @@ def _imports_for_module(
     module_info: ModuleInfo,
     bundle: ModuleBundle,
     module_symbols: dict[Path, ModuleSymbols],
-) -> tuple[dict[str, Path], dict[str, str], dict[str, str], dict[str, str], set[str]]:
+) -> tuple[dict[str, Path], dict[str, str], dict[str, Path], dict[str, str], dict[str, str], set[str]]:
     aliases: dict[str, Path] = {}
     unqualified_values: dict[str, str] = {}
+    unqualified_value_sources: dict[str, Path] = {}
     unqualified_types: dict[str, str] = {}
     unqualified_classes: dict[str, str] = {}
     method_names: set[str] = set()
@@ -663,18 +746,20 @@ def _imports_for_module(
         for name in imp.imported_names:
             if name in imp_symbols.exported_values:
                 unqualified_values[name] = imp_symbols.exported_values[name]
+                unqualified_value_sources[name] = imp_path
             if name in imp_symbols.exported_types:
                 unqualified_types[name] = imp_symbols.exported_types[name]
                 for ctor_name, ctor_target in imp_symbols.exported_type_constructors.get(name, {}).items():
                     unqualified_values[ctor_name] = ctor_target
+                    unqualified_value_sources[ctor_name] = imp_path
             if name in imp_symbols.exported_classes:
                 unqualified_classes[name] = imp_symbols.exported_classes[name]
             if name in imp_symbols.method_locals:
                 method_names.add(name)
-    return aliases, unqualified_values, unqualified_types, unqualified_classes, method_names
+    return aliases, unqualified_values, unqualified_value_sources, unqualified_types, unqualified_classes, method_names
 
 
-def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
+def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[CompilerWarning]:
     builtin_values = {
         "print",
         "print_int",
@@ -809,9 +894,30 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             decl.name = symbols.class_locals[decl.name]
 
     implicit_prelude_path = _implicit_prelude_path()
+    warnings: list[CompilerWarning] = []
+    seen_warnings: set[tuple[Path, int, int, str]] = set()
 
     def _has_implicit_prelude_provider(paths: set[Path]) -> bool:
         return implicit_prelude_path in paths
+
+    def _warn_for_value_use(
+        target_path: Path,
+        symbol: str,
+        node: object | None,
+        current_module_path: Path,
+    ) -> None:
+        if target_path == current_module_path:
+            return
+        annotations = module_symbols[target_path].value_annotations.get(symbol, ())
+        for annotation in annotations:
+            warning = _node_warning(bundle, node, _format_decl_annotation_warning(symbol, annotation))
+            if warning is None:
+                continue
+            key = (warning.path, warning.line, warning.column, warning.message)
+            if key in seen_warnings:
+                continue
+            seen_warnings.add(key)
+            warnings.append(warning)
 
     def resolve_value_name(name: str, node: object | None = None) -> str:
         line = getattr(node, "line", None)
@@ -821,7 +927,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if module_info is None:
             return name
         symbols = module_symbols[module_info.path]
-        aliases, unqualified_values, _, _, imported_methods = _imports_for_module(module_info, bundle, module_symbols)
+        aliases, unqualified_values, unqualified_value_sources, _, _, imported_methods = _imports_for_module(
+            module_info, bundle, module_symbols
+        )
 
         if "." in name:
             alias, symbol = name.split(".", 1)
@@ -835,6 +943,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
             target_symbols = module_symbols[target_path]
             target = target_symbols.exported_values.get(symbol)
             if target is not None:
+                _warn_for_value_use(target_path, symbol, node, module_info.path)
                 return target
             for ctors in target_symbols.exported_type_constructors.values():
                 target = ctors.get(symbol)
@@ -855,6 +964,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if name in symbols.method_locals or name in imported_methods:
             return name
         if name in unqualified_values:
+            source_path = unqualified_value_sources.get(name)
+            if source_path is not None:
+                _warn_for_value_use(source_path, name, node, module_info.path)
             return unqualified_values[name]
         providers = declared_value_by_name.get(name, set())
         if _has_implicit_prelude_provider(providers):
@@ -885,7 +997,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
         if module_info is None:
             return name
         symbols = module_symbols[module_info.path]
-        aliases, _, unqualified_types, unqualified_classes, _ = _imports_for_module(module_info, bundle, module_symbols)
+        aliases, _, _, unqualified_types, unqualified_classes, _ = _imports_for_module(
+            module_info, bundle, module_symbols
+        )
 
         if "." in name:
             alias, symbol = name.split(".", 1)
@@ -1064,3 +1178,4 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> None:
                     walk_type(method.return_type, decl)
                 scope = {p.name for p in method.params}
                 walk_expr(method.body, decl, scope)
+    return warnings

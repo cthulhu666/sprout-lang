@@ -55,6 +55,31 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(fn_decl.params[0].type_expr)
         self.assertIsNone(fn_decl.return_type)
 
+    def test_parse_decl_annotations_attach_to_following_top_level_decl(self) -> None:
+        src = """
+        #@unstable
+        #@deprecated use better_inc instead
+        export fn inc(x: Int) -> Int = x + 1
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertEqual(
+            fn_decl.annotations,
+            (
+                ast.DeclAnnotation(kind="unstable", message=None),
+                ast.DeclAnnotation(kind="deprecated", message="use better_inc instead"),
+            ),
+        )
+
+    def test_parse_decl_annotations_reject_unknown_marker(self) -> None:
+        src = """
+        #@mystery
+        fn inc(x: Int) -> Int = x + 1
+        """
+        with self.assertRaises(ParseError) as ctx:
+            parse(src)
+        self.assertIn("Unknown declaration annotation", str(ctx.exception))
+
     def test_parse_fn_local_where_desugars_to_nested_lambda_calls(self) -> None:
         src = """
         fn score(n: Int) -> Int =

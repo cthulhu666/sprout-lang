@@ -44,6 +44,11 @@ Normative status:
   descending unit-step semantics, and prelude helpers such as `range`,
   `range_contains`, `range_count`, `range_to_list`, `range_to_vec`, and
   `range_fold`. Integer ranges are not part of normative v0 yet.
+- The current implementation also includes an experimental declaration-status
+  annotation slice via top-level comment directives such as `#@unstable`,
+  `#@temporary`, `#@wip`, and `#@deprecated ...`. Imported uses of annotated
+  exported values now emit compiler warnings, but this annotation surface is
+  not part of normative v0 yet.
 - The current implementation uses explicit function effects in the v0 core:
   pure functions omit an annotation, effectful functions use `!{IO}`, and
   higher-order helpers may use restricted singleton effect variables such as
