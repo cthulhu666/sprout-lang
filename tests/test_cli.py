@@ -1383,6 +1383,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(session.completion_matches(":t", ":t"), [":t", ":type"])
         matches = session.completion_matches("sp", "sp")
         self.assertIn("split_ints", matches)
+        range_matches = session.completion_matches("range_", "range_")
+        self.assertIn("range_count", range_matches)
+        self.assertIn("range_fold", range_matches)
 
     def test_repl_completion_matches_declared_names(self) -> None:
         from sprout.repl_host import ReplSession

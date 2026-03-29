@@ -173,15 +173,33 @@ fn append_space_names(acc: Vec String, raw: String) -> Vec String =
     | Nothing -> append_unique_name(acc, trim(raw))
     | Just pair -> append_space_name_pair(acc, pair)
 
-fn base_completion_names() -> Vec String =
-  append_space_names(
-    vec_empty(),
-    ":help :quit :q :exit :type :t :instances :i "
-    ++ "Bool Cons Dict Err False Foldable Functor Int IO Just List Maybe Nil Nothing Ok Result Semigroup String True Unit Vec "
-    ++ "filter fmap fold foldable_to_vec list_append list_fold list_map map print split_ints "
-    ++ "vec_append vec_empty vec_fold vec_get vec_get_or vec_length vec_map vec_prepend vec_reverse vec_set vec_slice vec_sum vec_sum_by "
-    ++ "bytes collections crypto dict_empty dict_get dict_keys dict_remove dict_set dict_values http http_client math net string terminal"
-  )
+fn repl_command_names() -> Vec String =
+  append_space_names(vec_empty(), ":help :quit :q :exit :type :t :instances :i")
+
+fn stdlib_module_completion_names() -> Vec String =
+  append_space_names(vec_empty(), "bytes collections crypto http http_client math net string terminal")
+
+fn append_prelude_constructor_name(names: Vec String, line: String) -> Vec String =
+  if string.starts_with(trim(line), "| ") then append_unique_name(names, take_name_from(trim(line), 2))
+  else names
+
+fn gather_prelude_completion_names(lines: Vec String, index: Int, acc: Vec String) -> Vec String =
+  match vec_get(index, lines) with
+  | Just line ->
+      gather_prelude_completion_names(
+        lines,
+        index + 1,
+        append_prelude_constructor_name(append_declaration_names(acc, trim(line)), trim(line))
+      )
+  | Nothing -> acc
+
+fn prelude_completion_names() -> Vec String !{IO} =
+  gather_prelude_completion_names(string.string_lines(read_file(module_path("stdlib.prelude"))), 0, vec_empty())
+
+fn append_names_from_vec(acc: Vec String, names: Vec String, index: Int) -> Vec String =
+  match vec_get(index, names) with
+  | Just name -> append_names_from_vec(append_unique_name(acc, name), names, index + 1)
+  | Nothing -> acc
 
 fn skip_spaces_from(raw: String, index: Int) -> Int =
   if index >= string.length(raw) then index
@@ -342,22 +360,46 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
 fn completion_candidates_local(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
-      (
-        prefix,
-        filter_names_by_prefix(
-          prefix,
-          lower_ascii(prefix),
-          if string.find(prefix, ".") == -1 then
-            gather_declaration_names(
-              declarations,
-              0,
-              gather_import_names(imports, 0, base_completion_names())
+      if string.find(prefix, ".") == -1 then
+        match prelude_completion_names() with
+        | prelude_names ->
+            (
+              prefix,
+              filter_names_by_prefix(
+                prefix,
+                lower_ascii(prefix),
+                gather_declaration_names(
+                  declarations,
+                  0,
+                  gather_import_names(
+                    imports,
+                    0,
+                    append_names_from_vec(
+                      append_names_from_vec(
+                        append_names_from_vec(vec_empty(), repl_command_names(), 0),
+                        stdlib_module_completion_names(),
+                        0
+                      ),
+                      prelude_names,
+                      0
+                    )
+                  )
+                ),
+                0,
+                vec_empty()
+              )
             )
-          else dotted_completion_candidates(prefix, imports),
-          0,
-          vec_empty()
+      else
+        (
+          prefix,
+          filter_names_by_prefix(
+            prefix,
+            lower_ascii(prefix),
+            dotted_completion_candidates(prefix, imports),
+            0,
+            vec_empty()
+          )
         )
-      )
 
 fn apply_completion(current: String, prefix: String, matches: Vec String) -> String =
   if prefix == "" then current

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 
 from . import ast
 from .parser import parse
+from .stdlib import load_prelude
 
 __all__ = [
     "completion_candidates_in_state",
@@ -21,54 +23,6 @@ _REPL_COMMANDS = (
     ":t",
     ":instances",
     ":i",
-)
-_REPL_PRELUDE_NAMES = frozenset(
-    {
-        "Bool",
-        "Cons",
-        "Dict",
-        "Err",
-        "False",
-        "Foldable",
-        "Functor",
-        "Int",
-        "IO",
-        "Just",
-        "List",
-        "Maybe",
-        "Nil",
-        "Nothing",
-        "Ok",
-        "Result",
-        "Semigroup",
-        "String",
-        "True",
-        "Unit",
-        "Vec",
-        "filter",
-        "fmap",
-        "fold",
-        "foldable_to_vec",
-        "list_append",
-        "list_fold",
-        "list_map",
-        "map",
-        "print",
-        "split_ints",
-        "vec_append",
-        "vec_empty",
-        "vec_fold",
-        "vec_get",
-        "vec_get_or",
-        "vec_length",
-        "vec_map",
-        "vec_prepend",
-        "vec_reverse",
-        "vec_set",
-        "vec_slice",
-        "vec_sum",
-        "vec_sum_by",
-    }
 )
 _REPL_STDLIB_EXTRA_NAMES = frozenset(
     {
@@ -107,6 +61,12 @@ def _declared_names_from_tree(tree: ast.Program) -> set[str]:
     return names
 
 
+@lru_cache(maxsize=1)
+def _prelude_completion_names() -> frozenset[str]:
+    tree = parse(load_prelude())
+    return frozenset(_declared_names_from_tree(tree))
+
+
 def _declared_names_from_declarations(declarations: list[str]) -> set[str]:
     names: set[str] = set()
     for source in declarations:
@@ -137,7 +97,7 @@ def _imported_names_from_imports(imports: list[str]) -> set[str]:
 
 def _completion_from_prefix(prefix: str, imports: list[str], declarations: list[str]) -> list[str]:
     names = set(_REPL_COMMANDS)
-    names.update(_REPL_PRELUDE_NAMES)
+    names.update(_prelude_completion_names())
     names.update(_REPL_STDLIB_EXTRA_NAMES)
     names.update(_declared_names_from_declarations(declarations))
     names.update(_imported_names_from_imports(imports))
