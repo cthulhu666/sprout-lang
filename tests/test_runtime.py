@@ -113,24 +113,33 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "113")
 
-    def test_stdlib_vec_sort_by_int(self) -> None:
+    def test_stdlib_vec_sort_by_uses_ord_instance(self) -> None:
         src = """
-        fn key(value: IntRange) -> Int = range_start(value)
+        type Box =
+          | Box Int
 
-        fn sample() -> Vec IntRange =
-          vec_append(
-            range(3, 4),
-            vec_append(range(1, 2), vec_append(range(1, 3), vec_empty()))
-          )
+        fn key(value: Box) -> Int =
+          match value with
+          | Box n -> 0 - n
+
+        instance Ord Box {
+          fn compare(x: Box, y: Box) -> Int =
+            compare(key(x), key(y))
+        }
+
+        fn sample() -> Vec Box =
+          vec_append(Box(3), vec_append(Box(1), vec_append(Box(2), vec_empty())))
 
         fn main() -> Unit !{IO} =
-          print(vec_sort_by_int(key, sample()))
+          print(vec_sort(sample()))
         """
         program = parse(with_prelude(src))
         typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
         out = io.StringIO()
-        run_program(program, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "Vec([1..3, 1..2, 3..4])")
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Vec([Box(3), Box(2), Box(1)])")
 
     def test_stdlib_result_helpers(self) -> None:
         src = """

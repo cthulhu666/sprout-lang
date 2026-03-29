@@ -4,6 +4,7 @@ import io
 import unittest
 
 from sprout import parse, run_program, typecheck_program
+from sprout.stdlib import with_prelude
 from sprout.typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 
 
@@ -131,6 +132,41 @@ class TypeclassLoweringTests(unittest.TestCase):
         typecheck_program(program)
         lowered = lower_typeclasses(program)
         typecheck_program(lowered)
+
+    def test_lowering_supports_vec_sort_by_with_ord_instance(self) -> None:
+        src = """
+        type Box =
+          | Box Int
+
+        fn key(x: Box) -> Int =
+          match x with
+          | Box n -> 0 - n
+
+        instance Ord Box {
+          fn compare(x: Box, y: Box) -> Int =
+            compare(key(x), key(y))
+        }
+
+        fn main() -> Unit !{IO} =
+          print(vec_sort(vec_append(Box(3), vec_append(Box(1), vec_append(Box(2), vec_empty())))))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Vec([Box(3), Box(2), Box(1)])")
+
+    def test_lowering_errors_for_vec_sort_by_without_ord_instance(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          print(vec_sort_by(\\x -> "x", vec_append(1, vec_empty())))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        with self.assertRaises(TypeclassLoweringError):
+            lower_typeclasses(program)
 
 
 if __name__ == "__main__":

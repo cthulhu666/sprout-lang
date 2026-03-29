@@ -256,16 +256,20 @@ def _walk_expr_has_raw_range_builtin(expr: ast.Expr) -> bool:
 
 def _ensure_allowed(bundle: ModuleBundle, node: object, reason: str) -> None:
     line = getattr(node, "line", None)
-    if line is None:
-        return
+    if not isinstance(line, int):
+        if reason == "Vector/Map type":
+            return
+        raise SurfaceCheckError(f"{reason} is internal")
+
     path = _module_path_for_line(bundle, line)
-    if path is None:
+    if path is not None and _is_stdlib_module(bundle, path):
         return
-    if _is_stdlib_module(bundle, path):
+
+    if path is not None:
+        raise SurfaceCheckError(f"{path}:{line}: {reason} is internal")
+    if reason == "Vector/Map type":
         return
-    raise SurfaceCheckError(
-        f"{reason} is internal; use stdlib.collections (Vec/Dict) API in non-stdlib modules ({path}:{line})"
-    )
+    raise SurfaceCheckError(f"{reason} is internal")
 
 
 def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -> None:

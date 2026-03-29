@@ -242,17 +242,108 @@ export fn vec_sum(vec: Vec Int) -> Int =
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_sum(vec_map(f, vec))
 
-#@temporary
-fn vec_sort_by_int_collect(f: a -> Int, vec: Vec a, index: Int, total: Int, acc: List (Int, Int, a)) -> List (Int, Int, a) =
+export class Ord a {
+  fn compare(x: a, y: a) -> Int
+}
+
+export fn ord_lt(x: a, y: a) -> Bool where Ord a =
+  compare(x, y) < 0
+
+export fn ord_lte(x: a, y: a) -> Bool where Ord a =
+  compare(x, y) <= 0
+
+export fn ord_gt(x: a, y: a) -> Bool where Ord a =
+  compare(x, y) > 0
+
+export fn ord_gte(x: a, y: a) -> Bool where Ord a =
+  compare(x, y) >= 0
+
+fn vec_sort_by_collect(f: a -> k, vec: Vec a, index: Int, total: Int, acc: List (k, Int, a)) -> List (k, Int, a) =
   if index >= total then acc
   else
     match vec_get(index, vec) with
     | Nothing -> acc
-    | Just value -> vec_sort_by_int_collect(f, vec, index + 1, total, Cons((f(value), index, value), acc))
+    | Just value -> vec_sort_by_collect(f, vec, index + 1, total, Cons((f(value), index, value), acc))
 
-#@temporary
-export fn vec_sort_by_int(f: a -> Int, vec: Vec a) -> Vec a =
-  Vec(vector_sort_by_int(vec_sort_by_int_collect(f, vec, 0, vec_length(vec), Nil)))
+fn decorated_key_lt(left: (k, Int, a), right: (k, Int, a)) -> Bool where Ord k =
+  match left with
+  | (left_key, left_index, _) ->
+      match right with
+      | (right_key, right_index, _) ->
+          if ord_lt(left_key, right_key) then true
+          else if ord_gt(left_key, right_key) then false
+          else left_index < right_index
+
+fn list_reverse_go(xs: List a, acc: List a) -> List a =
+  match xs with
+  | Nil -> acc
+  | Cons item rest -> list_reverse_go(rest, Cons(item, acc))
+
+fn list_reverse(xs: List a) -> List a =
+  list_reverse_go(xs, Nil)
+
+fn list_take(xs: List a, count: Int) -> List a =
+  if count <= 0 then Nil
+  else
+    match xs with
+    | Nil -> Nil
+    | Cons item rest -> Cons(item, list_take(rest, count - 1))
+
+fn list_drop(xs: List a, count: Int) -> List a =
+  if count <= 0 then xs
+  else
+    match xs with
+    | Nil -> Nil
+    | Cons _ rest -> list_drop(rest, count - 1)
+
+fn list_length(xs: List a) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons _ rest -> 1 + list_length(rest)
+
+fn decorated_merge_sorted(left: List (k, Int, a), right: List (k, Int, a)) -> List (k, Int, a) where Ord k =
+  match left with
+  | Nil -> right
+  | Cons left_item left_rest ->
+      match right with
+      | Nil -> left
+      | Cons right_item right_rest ->
+          if decorated_key_lt(right_item, left_item) then Cons(right_item, decorated_merge_sorted(left, right_rest))
+          else Cons(left_item, decorated_merge_sorted(left_rest, right))
+
+fn decorated_sort(xs: List (k, Int, a)) -> List (k, Int, a) where Ord k =
+  match xs with
+  | Nil -> Nil
+  | Cons _ Nil -> xs
+  | _ ->
+      decorated_merge_sorted(
+        decorated_sort(list_take(xs, list_length(xs) / 2)),
+        decorated_sort(list_drop(xs, list_length(xs) / 2))
+      )
+
+fn vec_from_list_go(xs: List a, acc: Vec a) -> Vec a =
+  match xs with
+  | Nil -> acc
+  | Cons item rest -> vec_from_list_go(rest, vec_append(item, acc))
+
+fn vec_from_list(xs: List a) -> Vec a =
+  vec_from_list_go(xs, vec_empty())
+
+fn decorated_values_to_vec(xs: List (k, Int, a), acc: Vec a) -> Vec a =
+  match xs with
+  | Nil -> acc
+  | Cons entry rest ->
+      match entry with
+      | (_, _, value) -> decorated_values_to_vec(rest, vec_append(value, acc))
+
+export fn vec_sort_by(f: a -> k, vec: Vec a) -> Vec a where Ord k =
+  decorated_values_to_vec(
+    decorated_sort(list_reverse(vec_sort_by_collect(f, vec, 0, vec_length(vec), Nil))),
+    vec_empty()
+  )
+
+export fn vec_sort(vec: Vec a) -> Vec a where Ord a =
+  vec_sort_by(\value -> value, vec)
 
 export fn dict_empty() -> Dict v =
   Dict(map_empty())
@@ -312,6 +403,20 @@ export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
 instance Semigroup String {
   fn append(x: String, y: String) -> String =
     str_concat(x, y)
+}
+
+instance Ord Int {
+  fn compare(x: Int, y: Int) -> Int =
+    if x < y then -1
+    else if x > y then 1
+    else 0
+}
+
+instance Ord Bool {
+  fn compare(x: Bool, y: Bool) -> Int =
+    if x == y then 0
+    else if x then 1
+    else -1
 }
 
 instance Semigroup (List a) {

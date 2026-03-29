@@ -125,14 +125,14 @@ class ModuleLoaderTests(unittest.TestCase):
             warnings = resolve_program_names(program, bundle)
             self.assertEqual(warnings, [])
 
-    def test_module_resolution_warns_on_imported_temporary_compat_value_use(self) -> None:
+    def test_module_resolution_imports_stdlib_collections_vec_sort_by_without_warning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             main = root / "main.sprout"
             main.write_text(
                 """
                 module app.main
-                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by_int)
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by)
 
                 fn key(x: Int) -> Int = 0 - x
 
@@ -140,7 +140,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   vec_append(3, vec_append(1, vec_append(2, vec_empty())))
 
                 fn main() -> Unit !{IO} =
-                  print(vec_sort_by_int(key, sample()))
+                  print(vec_sort_by(key, sample()))
                 """,
                 encoding="utf-8",
             )
@@ -148,9 +148,7 @@ class ModuleLoaderTests(unittest.TestCase):
             bundle = load_module_bundle(main)
             program = parse(bundle.source)
             warnings = resolve_program_names(program, bundle)
-            self.assertEqual(len(warnings), 1)
-            self.assertIn("'vec_sort_by_int' is temporary", warnings[0].message)
-            self.assertEqual(warnings[0].path, main.resolve())
+            self.assertEqual(warnings, [])
 
     def test_load_module_source_detects_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1006,12 +1004,14 @@ class ModuleLoaderTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
             out = io.StringIO()
             with patch(
                 "sys.stdin",
                 io.StringIO("3-5\n10-14\n16-20\n12-18\n\n1\n5\n8\n11\n17\n32\n"),
             ):
-                run_program(program, stdout=out)
+                run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Answers(3, 14)")
 
     def test_import_stdlib_collections_vec_and_dict(self) -> None:
@@ -1169,14 +1169,14 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "66")
 
-    def test_import_stdlib_collections_vec_sort_by_int(self) -> None:
+    def test_import_stdlib_collections_vec_sort_by(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             main = root / "main.sprout"
             main.write_text(
                 """
                 module main
-                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by_int)
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by)
 
                 fn key(value: IntRange) -> Int =
                   range_start(value)
@@ -1185,7 +1185,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   vec_append(range(3, 4), vec_append(range(1, 2), vec_append(range(1, 3), vec_empty())))
 
                 fn main() -> Unit !{IO} =
-                  print(vec_sort_by_int(key, sample()))
+                  print(vec_sort_by(key, sample()))
                 """,
                 encoding="utf-8",
             )
@@ -1193,8 +1193,10 @@ class ModuleLoaderTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
             out = io.StringIO()
-            run_program(program, stdout=out)
+            run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Vec([1..3, 1..2, 3..4])")
 
     def test_import_stdlib_collections_vec_filter_helpers(self) -> None:

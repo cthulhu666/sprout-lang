@@ -44,7 +44,13 @@ MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
     "vec_reverse": "vec_reverse",
     "vec_sum": "vec_sum",
     "vec_sum_by": "vec_sum_by",
-    "vec_sort_by_int": "vec_sort_by_int",
+    "compare": "compare",
+    "ord_lt": "ord_lt",
+    "ord_lte": "ord_lte",
+    "ord_gt": "ord_gt",
+    "ord_gte": "ord_gte",
+    "vec_sort": "vec_sort",
+    "vec_sort_by": "vec_sort_by",
     "foldable_to_vec": "foldable_to_vec",
     "dict_empty": "dict_empty",
     "dict_get": "dict_get",
@@ -101,7 +107,7 @@ MODULE_COMPAT_TYPES: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 MODULE_COMPAT_CLASSES: dict[str, dict[str, str]] = {
-    "stdlib.collections": {"Semigroup": "Semigroup", "Functor": "Functor", "Foldable": "Foldable"}
+    "stdlib.collections": {"Ord": "Ord", "Semigroup": "Semigroup", "Functor": "Functor", "Foldable": "Foldable"}
 }
 
 

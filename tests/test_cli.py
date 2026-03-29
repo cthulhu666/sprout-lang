@@ -120,14 +120,14 @@ class CliTests(unittest.TestCase):
             self.assertIn("'old' is deprecated: use fresh instead", proc.stderr)
             self.assertIn("ok", proc.stdout)
 
-    def test_check_reports_warning_for_imported_temporary_compat_value_use(self) -> None:
+    def test_check_accepts_imported_vec_sort_by_without_warning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             main = root / "main.sprout"
             main.write_text(
                 """
                 module app.main
-                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by_int)
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort_by)
 
                 fn key(x: Int) -> Int = 0 - x
 
@@ -135,7 +135,7 @@ class CliTests(unittest.TestCase):
                   vec_append(3, vec_append(1, vec_append(2, vec_empty())))
 
                 fn main() -> Unit !{IO} =
-                  print(vec_sort_by_int(key, sample()))
+                  print(vec_sort_by(key, sample()))
                 """,
                 encoding="utf-8",
             )
@@ -148,8 +148,7 @@ class CliTests(unittest.TestCase):
             )
 
             self.assertEqual(proc.returncode, 0)
-            self.assertIn("warning:", proc.stderr)
-            self.assertIn("'vec_sort_by_int' is temporary", proc.stderr)
+            self.assertNotIn("warning:", proc.stderr)
             self.assertIn("ok", proc.stdout)
 
     def test_analysis_completion_candidates_in_state_matches_imports_and_declarations(self) -> None:
@@ -1150,7 +1149,8 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
-        self.assertIn("No instances for Int", run.stdout)
+        self.assertIn("Instances for Int:", run.stdout)
+        self.assertIn("Ord Int", run.stdout)
 
     def test_repl_help_mentions_type_shorthand(self) -> None:
         run = subprocess.run(

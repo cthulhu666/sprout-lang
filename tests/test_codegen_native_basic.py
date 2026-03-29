@@ -460,7 +460,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_vec_sort_by_int(self) -> None:
+    def test_native_vec_sort_by(self) -> None:
         src = """
         fn key(value: IntRange) -> Int =
           range_start(value)
@@ -473,7 +473,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
           range_end(vec_get_or(1, range(0, 0), value))
 
         fn main() -> Unit !{IO} =
-          print(encode(vec_sort_by_int(key, sample())))
+          print(encode(vec_sort_by(key, sample())))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

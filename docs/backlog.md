@@ -67,6 +67,6 @@ This file tracks open design, implementation, and tooling follow-up work.
    Initial scope: distinct `Char` values and literals, `String` text defined in terms of Unicode code points, and a small helper surface such as `char_at`, `char_at_or`, `string_from_char`, and `string_chars`.
    First milestone constraints: code-point indexing/length/slice semantics only, no grapheme-cluster-aware APIs yet, and no promise of full Unicode normalization or one-to-many case mapping in the initial slice.
 7. Add fast `Vec` sorting helpers in v1.
-   Landed initial slice: temporary `vec_sort_by_int(key, vec)` keyed sorting helper.
-   Remaining follow-up: consider more keyed helpers or a generic ordering design only after the broader `Ord`/`Ordering` story is clearer.
-   First milestone constraints: optimize for native/interpreter speed, keep the API `Vec`-focused, and defer generic comparator/typeclass sorting design until the broader ordering story is clearer.
+   Landed initial slice: `Ord`-constrained `vec_sort(vec)` and `vec_sort_by(key, vec)` helpers.
+   Remaining follow-up: decide whether the long-term design wants a richer public ordering story such as `Eq`, an `Ordering` ADT, constrained tuple instances, or custom descending/comparator APIs.
+   First milestone constraints: keep the API `Vec`-focused, keep ordering fully inside the type system, and defer richer ordering surface area until the broader class design is clearer.
