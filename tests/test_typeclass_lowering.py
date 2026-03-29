@@ -171,6 +171,22 @@ class TypeclassLoweringTests(unittest.TestCase):
         with self.assertRaises(TypeclassLoweringError):
             lower_typeclasses(program)
 
+    def test_lowering_supports_show_to_string(self) -> None:
+        src = """
+        fn render(x: a) -> String where Show a =
+          to_string(x)
+
+        fn main() -> Unit !{IO} =
+          print(render(42))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
 
 if __name__ == "__main__":
     unittest.main()

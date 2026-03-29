@@ -44,6 +44,7 @@ MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
     "vec_reverse": "vec_reverse",
     "vec_sum": "vec_sum",
     "vec_sum_by": "vec_sum_by",
+    "to_string": "to_string",
     "compare": "compare",
     "ord_lt": "ord_lt",
     "ord_lte": "ord_lte",
@@ -107,7 +108,7 @@ MODULE_COMPAT_TYPES: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 MODULE_COMPAT_CLASSES: dict[str, dict[str, str]] = {
-    "stdlib.collections": {"Ord": "Ord", "Semigroup": "Semigroup", "Functor": "Functor", "Foldable": "Foldable"}
+    "stdlib.collections": {"Show": "Show", "Ord": "Ord", "Semigroup": "Semigroup", "Functor": "Functor", "Foldable": "Foldable"}
 }
 
 
@@ -787,6 +788,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "env_get",
         "argv_get",
         "parse_int",
+        "int_to_string",
         "split_words",
         "str_concat",
         "str_len",

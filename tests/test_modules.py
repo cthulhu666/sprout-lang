@@ -1226,6 +1226,33 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Vec([alpha, beta, beta])")
 
+    def test_import_stdlib_collections_show_to_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Show, to_string)
+
+                fn render(x: a) -> String where Show a =
+                  to_string(x)
+
+                fn main() -> Unit !{IO} =
+                  print(render(42))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "42")
+
     def test_import_stdlib_collections_vec_filter_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

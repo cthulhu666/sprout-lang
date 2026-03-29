@@ -1430,6 +1430,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "int_range": Scheme(vars=(), type=TFunc(INT, TFunc(INT, INT_RANGE))),
         "int_range_start": Scheme(vars=(), type=TFunc(INT_RANGE, INT)),
         "int_range_end": Scheme(vars=(), type=TFunc(INT_RANGE, INT)),
+        "int_to_string": Scheme(vars=(), type=TFunc(INT, STRING)),
         "str_concat": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, STRING))),
         "str_len": Scheme(vars=(), type=TFunc(STRING, INT)),
         "str_slice": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(INT, STRING)))),

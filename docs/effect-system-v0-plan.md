@@ -183,6 +183,7 @@ For ordinary non-`main` functions, omitted effect annotation should mean pure.
 Pure builtins stay pure:
 
 - `parse_int`
+- `int_to_string`
 - `str_concat`, `str_len`, `str_slice`, `str_find`, `str_starts_with`, `str_compare`
 - byte/vector/map value transforms
 - `json_stringify`

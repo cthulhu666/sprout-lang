@@ -242,6 +242,10 @@ export fn vec_sum(vec: Vec Int) -> Int =
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_sum(vec_map(f, vec))
 
+export class Show a {
+  fn to_string(x: a) -> String
+}
+
 export class Ord a {
   fn compare(x: a, y: a) -> Int
 }
@@ -403,6 +407,21 @@ export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
 instance Semigroup String {
   fn append(x: String, y: String) -> String =
     str_concat(x, y)
+}
+
+instance Show Int {
+  fn to_string(x: Int) -> String =
+    int_to_string(x)
+}
+
+instance Show Bool {
+  fn to_string(x: Bool) -> String =
+    if x then "True" else "False"
+}
+
+instance Show String {
+  fn to_string(x: String) -> String =
+    x
 }
 
 instance Ord Int {

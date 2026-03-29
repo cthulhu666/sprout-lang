@@ -934,6 +934,16 @@ long long parse_int(const char* s) {
   if (end == s || *end != '\\0') tcp_fail("parse_int: invalid integer");
   return out;
 }
+char* int_to_string(long long value) {
+  char buf[32];
+  int written = snprintf(buf, sizeof(buf), "%lld", value);
+  if (written < 0) tcp_fail("int_to_string: formatting failed");
+  size_t size = (size_t)written + 1;
+  char* out = (char*)malloc(size);
+  if (out == NULL) tcp_fail("int_to_string: out of memory");
+  memcpy(out, buf, size);
+  return out;
+}
 long long int_range(long long start, long long end) {
   IntRangeVal* out = sprout_alloc_range_val("int_range: out of memory");
   out->start = start;

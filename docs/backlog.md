@@ -72,3 +72,6 @@ This file tracks open design, implementation, and tooling follow-up work.
    Planned next slices: add constrained instance support first, then use it to define tuple `Ord` instances for composite sort keys such as `(Int, String)`.
    Remaining follow-up: decide whether the long-term design wants a richer public ordering story such as `Eq`, an `Ordering` ADT, constrained tuple instances, or custom descending/comparator APIs.
    First milestone constraints: keep the API `Vec`-focused, keep ordering fully inside the type system, and defer richer ordering surface area until the broader class design is clearer.
+8. Add a minimal `Show` typeclass slice for library-friendly value formatting.
+   Initial scope: `Show.to_string(x) -> String` with `Int`, `Bool`, and `String` instances, backed by a small host primitive for integer formatting.
+   First milestone constraints: no promise that `print` uses `Show`, no interpolation syntax, no collection/ADT deriving, and no debugging-vs-user-display split yet.

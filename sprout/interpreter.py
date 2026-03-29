@@ -698,6 +698,12 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("str_starts_with expects String, String")
         return raw.startswith(prefix)
 
+    def builtin_int_to_string(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise RuntimeError("int_to_string expects Int")
+        return str(value)
+
     def builtin_str_compare(args: list[object]) -> object:
         left = args[0]
         right = args[1]
@@ -1708,6 +1714,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("env_get", BuiltinFunction(name="env_get", arity=1, fn=builtin_env_get))
     env.set("argv_get", BuiltinFunction(name="argv_get", arity=1, fn=builtin_argv_get))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
+    env.set("int_to_string", BuiltinFunction(name="int_to_string", arity=1, fn=builtin_int_to_string))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
     env.set("int_range", BuiltinFunction(name="int_range", arity=2, fn=builtin_int_range))
     env.set("int_range_start", BuiltinFunction(name="int_range_start", arity=1, fn=builtin_int_range_start))

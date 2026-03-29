@@ -175,6 +175,14 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(with_prelude(src)))
         self.assertIn("vec_sort", types)
 
+    def test_typecheck_stdlib_show_to_string(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          print(to_string(-42))
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertIn("main", types)
+
     def test_typecheck_stdlib_bytes_builder_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

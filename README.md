@@ -245,6 +245,7 @@ Native TCP listener and connection handle tables now reuse closed slots, so long
 Pure value transforms and runtime-backed persistent data helpers:
 
 - `parse_int(s: String) -> Int`
+- `int_to_string(value: Int) -> String` (runtime primitive; public formatting should prefer `Show.to_string`)
 - `split_words(s: String) -> List String`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
@@ -338,7 +339,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `dict_keys(dict) -> Vec String`
   - `dict_values(dict) -> Vec v`
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
-- `Semigroup t`, `Functor f`, and `Foldable f`
+- `Show t`, `Ord t`, `Semigroup t`, `Functor f`, and `Foldable f`
+- `to_string(x)` is the default `Show` operation
 - `map(f, xs)` is the default `Functor` operation
 - `fold(step, init, xs)` is the default `Foldable` operation
 - `fmap(f, xs)` remains available as an alias for the underlying `Functor` method

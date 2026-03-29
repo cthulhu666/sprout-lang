@@ -55,6 +55,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "int_range": FnSig(name="int_range", params=[I64, I64], ret=I64),
     "int_range_start": FnSig(name="int_range_start", params=[I64], ret=I64),
     "int_range_end": FnSig(name="int_range_end", params=[I64], ret=I64),
+    "int_to_string": FnSig(name="int_to_string", params=[I64], ret=I8_PTR),
     "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
     "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
     "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
