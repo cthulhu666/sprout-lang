@@ -17,11 +17,19 @@ _ANNOTATION_KINDS = {"unstable", "temporary", "wip", "deprecated"}
 
 
 def extract_decl_annotations(source: str) -> dict[int, tuple[ast.DeclAnnotation, ...]]:
+    lines = source.splitlines()
+    top_level_indent = min(
+        (len(line) - len(line.lstrip()) for line in lines if line.strip() != ""),
+        default=0,
+    )
     pending: list[tuple[int, ast.DeclAnnotation]] = []
     out: dict[int, tuple[ast.DeclAnnotation, ...]] = {}
-    for line_no, line in enumerate(source.splitlines(), start=1):
+    for line_no, line in enumerate(lines, start=1):
         stripped = line.strip()
         if stripped == "" or (stripped.startswith("#") and not stripped.startswith("#@")):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent != top_level_indent:
             continue
         match = _ANNOTATION_RE.match(line)
         if match is not None:

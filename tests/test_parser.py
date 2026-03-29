@@ -80,6 +80,16 @@ class ParserTests(unittest.TestCase):
             parse(src)
         self.assertIn("Unknown declaration annotation", str(ctx.exception))
 
+    def test_parse_ignores_nested_hash_at_comments_inside_function_bodies(self) -> None:
+        src = """
+        fn note(x: Int) -> Int =
+          #@todo keep this comment ordinary
+          x + 1
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertEqual(fn_decl.annotations, ())
+
     def test_parse_fn_local_where_desugars_to_nested_lambda_calls(self) -> None:
         src = """
         fn score(n: Int) -> Int =
