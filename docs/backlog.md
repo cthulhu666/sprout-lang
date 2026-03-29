@@ -19,6 +19,11 @@ This file tracks open design, implementation, and tooling follow-up work.
    - choose the first post-pause backend-replacement target
    Deferred scope: the self-hosted session-engine work in `repl-self-hosting-v1-draft.md` is no longer the active milestone; treat it as a post-native-REPL direction.
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
+   Native-performance follow-up:
+   - make tight Sprout string-processing loops competitive with host builtins so moderate stdin/text workloads do not require dedicated host helpers just to be practical
+   - investigate the remaining native overhead in recursive stdlib string loops such as `string_lines(read_file("-"))`, with focus on tail-recursive loop lowering, call/closure overhead, primitive boxing, and efficient string/vector iteration
+   - add stable native performance benchmarks for `string_lines`, `trim`, and AoC-style stdin parsing so regressions and wins are measurable
+   - target: native `string_lines(read_file("-"))` on the current `day5input`-style workload should complete in low single-digit seconds rather than tens of seconds
 3. Add stronger server-side runtime models (multi-reactor as next target).
    Recent groundwork landed: native TCP handle-slot reuse and an experimental `stdlib.http_server` helper layer for structured request parsing/rendering.
    Remaining follow-up: incremental bytes-oriented HTTP reads, keep-alive/chunked support, and stronger concurrent runtime models.
