@@ -69,5 +69,6 @@ This file tracks open design, implementation, and tooling follow-up work.
 7. Add fast `Vec` sorting helpers in v1.
    Landed initial slice: `Ord`-constrained `vec_sort(vec)` and `vec_sort_by(key, vec)` helpers.
    Current built-in coverage: `Ord Int`, `Ord Bool`, and `Ord String`.
+   Planned next slices: add constrained instance support first, then use it to define tuple `Ord` instances for composite sort keys such as `(Int, String)`.
    Remaining follow-up: decide whether the long-term design wants a richer public ordering story such as `Eq`, an `Ordering` ADT, constrained tuple instances, or custom descending/comparator APIs.
    First milestone constraints: keep the API `Vec`-focused, keep ordering fully inside the type system, and defer richer ordering surface area until the broader class design is clearer.
