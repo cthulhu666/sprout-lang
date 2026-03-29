@@ -385,7 +385,10 @@ def _implicit_prelude_path() -> Path:
 
 def _resolve_module(module_name: str, importer: Path) -> Path:
     rel = _module_path(module_name)
+    toolchain_root = Path(__file__).resolve().parent.parent
     candidates = [importer.parent / rel, Path.cwd() / rel]
+    if module_name.startswith("stdlib."):
+        candidates.append(toolchain_root / rel)
     for candidate in candidates:
         if candidate.exists():
             return candidate.resolve()
