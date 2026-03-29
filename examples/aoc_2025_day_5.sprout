@@ -33,7 +33,8 @@ fn fresh_in_any_range(ranges: Vec IntRange, ingredient: Int, index: Int) -> Bool
   match vec_get(index, ranges) with
   | Nothing -> false
   | Just fresh_range ->
-      if range_contains(fresh_range, ingredient) then true
+      if range_start(fresh_range) > ingredient then false
+      else if range_contains(fresh_range, ingredient) then true
       else fresh_in_any_range(ranges, ingredient, index + 1)
 
 fn count_fresh_ids_from(ranges: Vec IntRange, ingredients: Vec Int, index: Int, acc: Int) -> Int =
@@ -63,17 +64,41 @@ fn merge_pair(left: IntRange, right: IntRange) -> IntRange =
     max_int(range_end(left), range_end(right))
   )
 
-fn merge_range_into(merged: Vec IntRange, fresh: IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
-  match vec_get(index, merged) with
+fn insert_sorted_range(sorted: Vec IntRange, fresh: IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
+  match vec_get(index, sorted) with
   | Nothing -> vec_append(fresh, acc)
   | Just current ->
-      if overlaps(current, fresh) then merge_range_into(merged, merge_pair(current, fresh), index + 1, acc)
-      else merge_range_into(merged, fresh, index + 1, vec_append(current, acc))
+      if range_start(fresh) <= range_start(current) then
+        append_remaining_ranges(sorted, index, vec_append(fresh, acc))
+      else insert_sorted_range(sorted, fresh, index + 1, vec_append(current, acc))
 
-fn merge_ranges(ranges: Vec IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
+fn append_remaining_ranges(ranges: Vec IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
   match vec_get(index, ranges) with
   | Nothing -> acc
-  | Just fresh -> merge_ranges(ranges, index + 1, merge_range_into(acc, fresh, 0, vec_empty()))
+  | Just current -> append_remaining_ranges(ranges, index + 1, vec_append(current, acc))
+
+fn sort_ranges(ranges: Vec IntRange, index: Int, acc: Vec IntRange) -> Vec IntRange =
+  match vec_get(index, ranges) with
+  | Nothing -> acc
+  | Just fresh -> sort_ranges(ranges, index + 1, insert_sorted_range(acc, fresh, 0, vec_empty()))
+
+fn merge_sorted_ranges(sorted: Vec IntRange, index: Int, current: IntRange, seen_current: Bool, acc: Vec IntRange) -> Vec IntRange =
+  match vec_get(index, sorted) with
+  | Nothing ->
+      if seen_current then vec_append(current, acc)
+      else acc
+  | Just fresh ->
+      if seen_current then
+        if overlaps(current, fresh) then
+          merge_sorted_ranges(sorted, index + 1, merge_pair(current, fresh), true, acc)
+        else
+          merge_sorted_ranges(sorted, index + 1, fresh, true, vec_append(current, acc))
+      else
+        merge_sorted_ranges(sorted, index + 1, fresh, true, acc)
+
+
+fn normalized_ranges(ranges: Vec IntRange) -> Vec IntRange =
+  merge_sorted_ranges(sort_ranges(ranges, 0, vec_empty()), 0, range(0, 0), false, vec_empty())
 
 fn count_covered_ids_from(merged: Vec IntRange, index: Int, acc: Int) -> Int =
   match vec_get(index, merged) with
@@ -82,11 +107,16 @@ fn count_covered_ids_from(merged: Vec IntRange, index: Int, acc: Int) -> Int =
       count_covered_ids_from(merged, index + 1, acc + range_count(fresh_range))
 
 fn count_covered_ids(ranges: Vec IntRange) -> Int =
-  count_covered_ids_from(merge_ranges(ranges, 0, vec_empty()), 0, 0)
+  count_covered_ids_from(ranges, 0, 0)
+
+fn solve_ranges(ranges: Vec IntRange, ingredients: Vec Int) -> Answers =
+  Answers(count_fresh_ids(merged_ranges, ingredients), count_covered_ids(merged_ranges))
+where
+  merged_ranges = normalized_ranges(ranges)
 
 fn solve_database(db: Database) -> Answers =
   match db with
-  | Database ranges ingredients -> Answers(count_fresh_ids(ranges, ingredients), count_covered_ids(ranges))
+  | Database ranges ingredients -> solve_ranges(ranges, ingredients)
 
 export fn solve_stdin() -> Answers !{IO} =
   solve_database(parse_database(string_lines(read_file("-")), 0, false, vec_empty(), vec_empty()))
