@@ -1435,6 +1435,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "str_slice": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(INT, STRING)))),
         "str_find": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),
         "str_starts_with": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, BOOL))),
+        "str_compare": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),
         "bytes_empty": Scheme(vars=(), type=TConst("Bytes")),
         "bytes_length": Scheme(vars=(), type=TFunc(TConst("Bytes"), INT)),
         "bytes_get": Scheme(vars=(), type=TFunc(TConst("Bytes"), TFunc(INT, TApp(maybe_type, INT)))),

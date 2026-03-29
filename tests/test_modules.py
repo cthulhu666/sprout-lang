@@ -1199,6 +1199,33 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Vec([1..3, 1..2, 3..4])")
 
+    def test_import_stdlib_collections_vec_sort_strings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_sort)
+
+                fn sample() -> Vec String =
+                  vec_append("beta", vec_append("alpha", vec_append("beta", vec_empty())))
+
+                fn main() -> Unit !{IO} =
+                  print(vec_sort(sample()))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "Vec([alpha, beta, beta])")
+
     def test_import_stdlib_collections_vec_filter_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

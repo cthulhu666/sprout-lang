@@ -36,6 +36,7 @@ RAW_STRING_BUILTINS = {
     "str_slice",
     "str_find",
     "str_starts_with",
+    "str_compare",
 }
 
 RAW_BYTES_BUILTINS = {

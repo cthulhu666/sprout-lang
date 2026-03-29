@@ -251,6 +251,7 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `str_slice(s: String, start: Int, len: Int) -> String`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`
+- `str_compare(left: String, right: String) -> Int` (`-1`, `0`, `1`)
 - `bytes_empty() -> Bytes`
 - `bytes_length(value: Bytes) -> Int`
 - `bytes_get(value: Bytes, index: Int) -> Maybe Int`
@@ -327,7 +328,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `vec_reverse(vec)`
   - `vec_sum(vec)`
   - `vec_sum_by(f, vec)`
-  - `vec_sort(vec)` where `Ord a`
+  - `vec_sort(vec)` where `Ord a` (initial built-in coverage: `Int`, `Bool`, `String`)
   - `vec_sort_by(key, vec)` where `Ord key`
 - `Dict v` plus foundational helpers:
   - `dict_empty()`

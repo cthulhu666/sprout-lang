@@ -419,6 +419,11 @@ instance Ord Bool {
     else -1
 }
 
+instance Ord String {
+  fn compare(x: String, y: String) -> Int =
+    str_compare(x, y)
+}
+
 instance Semigroup (List a) {
   fn append(x: List a, y: List a) -> List a =
     list_append(x, y)

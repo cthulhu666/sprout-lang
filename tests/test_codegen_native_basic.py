@@ -499,6 +499,43 @@ class CodegenNativeBasicTests(CodegenTestCase):
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_vec_sort_strings(self) -> None:
+        src = """
+        fn sorted() -> Vec String =
+          vec_sort(vec_append("beta", vec_append("alpha", vec_empty())))
+
+        fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+
+        fn main() -> Unit !{IO} =
+          seq(
+            print(vec_get_or(0, "", sorted()) == "alpha"),
+            print(vec_get_or(1, "", sorted()) == "beta")
+          )
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--with-stdlib",
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "1\n1")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_string_equality_uses_content_not_pointer_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

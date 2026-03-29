@@ -1813,6 +1813,14 @@ _Bool str_starts_with(const char* s, const char* prefix) {
   return strncmp(s, prefix, prefix_len) == 0;
 }
 
+long long str_compare(const char* left, const char* right) {
+  if (left == NULL || right == NULL) tcp_fail("str_compare: null input");
+  int cmp = strcmp(left, right);
+  if (cmp < 0) return -1;
+  if (cmp > 0) return 1;
+  return 0;
+}
+
 static void buf_init(ByteBuf* buf) {
   buf->data = NULL;
   buf->len = 0;

@@ -793,6 +793,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "str_slice",
         "str_find",
         "str_starts_with",
+        "str_compare",
         "bytes_empty",
         "bytes_length",
         "bytes_get",

@@ -61,6 +61,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "str_eq": FnSig(name="str_eq", params=[I8_PTR, I8_PTR], ret=I1),
     "str_find": FnSig(name="str_find", params=[I8_PTR, I8_PTR], ret=I64),
     "str_starts_with": FnSig(name="str_starts_with", params=[I8_PTR, I8_PTR], ret=I1),
+    "str_compare": FnSig(name="str_compare", params=[I8_PTR, I8_PTR], ret=I64),
     "bytes_empty": FnSig(name="bytes_empty", params=[], ret=I64),
     "bytes_length": FnSig(name="bytes_length", params=[I64], ret=I64),
     "bytes_get": FnSig(name="bytes_get", params=[I64, I64], ret=I64),

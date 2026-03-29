@@ -160,8 +160,11 @@ class TypeclassLoweringTests(unittest.TestCase):
 
     def test_lowering_errors_for_vec_sort_by_without_ord_instance(self) -> None:
         src = """
+        type Box =
+          | Box Int
+
         fn main() -> Unit !{IO} =
-          print(vec_sort_by(\\x -> "x", vec_append(1, vec_empty())))
+          print(vec_sort_by(\\x -> Box(x), vec_append(1, vec_empty())))
         """
         program = parse(with_prelude(src))
         typecheck_program(program)

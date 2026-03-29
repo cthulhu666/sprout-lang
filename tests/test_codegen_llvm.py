@@ -661,6 +661,7 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertIn("declare i1 @str_eq(ptr, ptr)", ir)
         self.assertIn("declare i64 @str_find(ptr, ptr)", ir)
         self.assertIn("declare i1 @str_starts_with(ptr, ptr)", ir)
+        self.assertIn("declare i64 @str_compare(ptr, ptr)", ir)
 
     def test_compile_string_equality_uses_content_compare(self) -> None:
         src = """

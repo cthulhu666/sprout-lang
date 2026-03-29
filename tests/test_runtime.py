@@ -141,6 +141,22 @@ class RuntimeTests(unittest.TestCase):
         run_program(lowered, stdout=out)
         self.assertEqual(out.getvalue().strip(), "Vec([Box(3), Box(2), Box(1)])")
 
+    def test_stdlib_vec_sort_supports_strings(self) -> None:
+        src = """
+        fn sample() -> Vec String =
+          vec_append("beta", vec_append("alpha", vec_append("beta", vec_empty())))
+
+        fn main() -> Unit !{IO} =
+          print(vec_sort(sample()))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Vec([alpha, beta, beta])")
+
     def test_stdlib_result_helpers(self) -> None:
         src = """
         fn plus1(x: Int) -> Int = x + 1
@@ -517,7 +533,10 @@ class RuntimeTests(unittest.TestCase):
               print(str_len("sprout-lang") == 11),
               seq(
                 print(str_find("sprout-lang", "lang") == 7),
-                print(str_starts_with("sprout-lang", "sprout"))
+                seq(
+                  print(str_starts_with("sprout-lang", "sprout")),
+                  print(str_compare("alpha", "beta") < 0)
+                )
               )
             )
           )
@@ -526,7 +545,7 @@ class RuntimeTests(unittest.TestCase):
         typecheck_program(program)
         out = io.StringIO()
         run_program(program, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "sprout-ok\nTrue\nTrue\nTrue")
+        self.assertEqual(out.getvalue().strip(), "sprout-ok\nTrue\nTrue\nTrue\nTrue")
 
     def test_http_stdlib_echo_response(self) -> None:
         src = """

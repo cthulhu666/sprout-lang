@@ -698,6 +698,13 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("str_starts_with expects String, String")
         return raw.startswith(prefix)
 
+    def builtin_str_compare(args: list[object]) -> object:
+        left = args[0]
+        right = args[1]
+        if not isinstance(left, str) or not isinstance(right, str):
+            raise RuntimeError("str_compare expects String, String")
+        return (left > right) - (left < right)
+
     def builtin_bytes_empty(args: list[object]) -> object:
         return BytesValue(items=b"")
 
@@ -1713,6 +1720,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         "str_starts_with",
         BuiltinFunction(name="str_starts_with", arity=2, fn=builtin_str_starts_with),
     )
+    env.set("str_compare", BuiltinFunction(name="str_compare", arity=2, fn=builtin_str_compare))
     env.set("bytes_empty", BuiltinFunction(name="bytes_empty", arity=0, fn=builtin_bytes_empty))
     env.set("bytes_length", BuiltinFunction(name="bytes_length", arity=1, fn=builtin_bytes_length))
     env.set("bytes_get", BuiltinFunction(name="bytes_get", arity=2, fn=builtin_bytes_get))
