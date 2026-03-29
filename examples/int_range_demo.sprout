@@ -1,0 +1,24 @@
+module examples.int_range_demo
+
+# Demonstrates the current experimental IntRange surface with a small
+# warehouse-picking style example.
+
+fn aisle_pick_minutes(aisle: Int) -> Int =
+  if range_contains(1..4, aisle) then 3 else 5
+
+fn route_minutes(route: IntRange) -> Int =
+  range_fold(
+    route,
+    0,
+    \(acc, aisle) -> acc + aisle_pick_minutes(aisle)
+  )
+
+fn return_trip_crosses_loading_bay(route: IntRange) -> Int =
+  if range_contains(route, 4) then 100 else 0
+
+fn main() -> Unit !{IO} =
+  print(
+    range_count(2..6)
+    + route_minutes(2..6)
+    + return_trip_crosses_loading_bay(6..2)
+  )
