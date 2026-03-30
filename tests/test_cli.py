@@ -712,6 +712,41 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run_proc.stderr, "")
             self.assertEqual(run_proc.stdout.strip().splitlines(), ["ok", "42", "Int"])
 
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_hosted_frontend_evaluates_bare_typeclass_method_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "repl_bin"
+            compile_proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    "examples/repl_hosted.sprout",
+                    "--native",
+                    "-o",
+                    str(out),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
+            env = dict(os.environ)
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
+            run_proc = subprocess.run(
+                [str(out)],
+                check=False,
+                capture_output=True,
+                text=True,
+                input="to_string\n:quit\n",
+                env=env,
+            )
+            self.assertEqual(run_proc.returncode, 0, msg=run_proc.stderr)
+            self.assertEqual(run_proc.stderr, "")
+            self.assertNotIn("Unknown variable to_string", run_proc.stdout)
+            self.assertIn("FunctionValue(", run_proc.stdout)
+
     def test_fmt_check_fails_when_file_needs_formatting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "fmt_check_test.sprout"
@@ -1123,6 +1158,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stderr, "")
         self.assertIn("forall a b c. (a -> b) -> c a -> c b", run.stdout)
+
+    def test_repl_evaluates_bare_typeclass_method_values(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "repl"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input="to_string\n:quit\n",
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertNotIn("Unknown variable to_string", run.stdout)
+        self.assertIn("FunctionValue(", run.stdout)
 
     def test_repl_instances_lists_matching_typeclass_instances(self) -> None:
         run = subprocess.run(

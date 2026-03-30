@@ -566,6 +566,13 @@ def _rewrite_expr(
             for arg in expr.args
         ]
 
+        if (
+            isinstance(expr.callee, ast.VarExpr)
+            and expr.callee.name not in scope
+            and expr.callee.name in method_aliases
+        ):
+            return _clone_with_loc(ast.CallExpr(callee=rewritten_callee, args=rewritten_args), expr)
+
         if isinstance(expr.callee, ast.VarExpr) and expr.callee.name not in scope:
             resolved_constraint = getattr(expr, "resolved_constraint", None)
             if isinstance(resolved_constraint, ast.TypeConstraint):
@@ -771,6 +778,36 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
             fn_decls[decl.name] = decl
             fn_constraints[decl.name] = list(decl.constraints)
 
+    generated_class_method_wrappers: list[ast.FnDecl] = []
+    for class_decl in class_decls.values():
+        class_constraint = ast.TypeConstraint(
+            class_name=class_decl.name,
+            args=[ast.TypeName(name) for name in class_decl.type_params],
+        )
+        for method in class_decl.methods:
+            if method.name in existing_top_names:
+                raise TypeclassLoweringError(
+                    f"Generated typeclass wrapper collides with existing name: {method.name}"
+                )
+            existing_top_names.add(method.name)
+            wrapper = _clone_with_loc(
+                ast.FnDecl(
+                    name=method.name,
+                    params=method.params,
+                    return_type=method.return_type,
+                    effects=method.effects,
+                    constraints=[class_constraint],
+                    body=ast.CallExpr(
+                        callee=ast.VarExpr(method.name),
+                        args=[ast.VarExpr(param.name) for param in method.params],
+                    ),
+                ),
+                method,
+            )
+            generated_class_method_wrappers.append(wrapper)
+            fn_decls[wrapper.name] = wrapper
+            fn_constraints[wrapper.name] = list(wrapper.constraints)
+
     # Materialize instance methods as ordinary top-level functions.
     instance_method_table: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
     instance_constraints: list[tuple[ast.TypeConstraint, dict[str, str]]] = []
@@ -908,6 +945,80 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
             continue
 
         decls_for_output.append(decl)
+
+    for wrapper in generated_class_method_wrappers:
+        hidden_params: list[ast.Param] = []
+        method_aliases: dict[str, str] = {}
+        binding_by_constraint: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
+
+        for idx, constraint in enumerate(wrapper.constraints):
+            class_decl = class_decls.get(constraint.class_name)
+            if class_decl is None:
+                continue
+            subs = {
+                name: arg for name, arg in zip(class_decl.type_params, constraint.args)
+            }
+            methods_for_constraint: dict[str, str] = {}
+            for method_sig in class_decl.methods:
+                hidden_name = f"__tc_{constraint.class_name}_{idx}_{method_sig.name}"
+                used = {p.name for p in wrapper.params} | set(method_aliases.values()) | {p.name for p in hidden_params}
+                while hidden_name in used:
+                    hidden_name += "_"
+
+                hidden_param_type = ast.TypeArrow(
+                    left=ast.TypeName("Unit"),
+                    right=ast.TypeName("Unit"),
+                    effects=method_sig.effects,
+                )
+                if method_sig.params:
+                    t = _substitute_type_expr(method_sig.return_type, subs)
+                    for p in reversed(method_sig.params):
+                        t = ast.TypeArrow(
+                            left=_substitute_type_expr(p.type_expr, subs),
+                            right=t,
+                            effects=None if p is not method_sig.params[-1] else method_sig.effects,
+                        )
+                    hidden_param_type = t
+                else:
+                    hidden_param_type = _substitute_type_expr(method_sig.return_type, subs)
+
+                hidden_params.append(
+                    _clone_with_loc(ast.Param(name=hidden_name, type_expr=hidden_param_type), method_sig)
+                )
+                methods_for_constraint[method_sig.name] = hidden_name
+                if method_sig.name in method_aliases and method_aliases[method_sig.name] != hidden_name:
+                    raise TypeclassLoweringError(
+                        f"Ambiguous method {method_sig.name} in constraints for function {wrapper.name}"
+                    )
+                method_aliases[method_sig.name] = hidden_name
+
+            binding_by_constraint[_constraint_key(constraint)] = methods_for_constraint
+
+        rewritten_body = _rewrite_expr(
+            wrapper.body,
+            scope={p.name for p in wrapper.params} | {p.name for p in hidden_params},
+            method_aliases=method_aliases,
+            current_constraints=wrapper.constraints,
+            current_binding_by_constraint=binding_by_constraint,
+            fn_decls=fn_decls,
+            fn_constraints=fn_constraints,
+            class_method_order=class_method_order,
+            instance_constraints=instance_constraints,
+        )
+
+        decls_for_output.append(
+            _clone_with_loc(
+                ast.FnDecl(
+                    name=wrapper.name,
+                    params=wrapper.params + hidden_params,
+                    return_type=wrapper.return_type,
+                    effects=wrapper.effects,
+                    constraints=[],
+                    body=rewritten_body,
+                ),
+                wrapper,
+            )
+        )
 
     # Rewrite generated instance fns too (they can call constrained functions).
     for fn in generated_instance_fns:

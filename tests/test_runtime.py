@@ -157,6 +157,43 @@ class RuntimeTests(unittest.TestCase):
         run_program(lowered, stdout=out)
         self.assertEqual(out.getvalue().strip(), "Vec([alpha, beta, beta])")
 
+    def test_stdlib_show_uses_instance(self) -> None:
+        src = """
+        type Box =
+          | Box Int
+
+        instance Show Box {
+          fn to_string(x: Box) -> String =
+            match x with
+            | Box n -> to_string(n)
+        }
+
+        fn render(x: a) -> String where Show a =
+          to_string(x)
+
+        fn main() -> Unit !{IO} =
+          print(render(Box(42)))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
+    def test_bare_typeclass_method_value_survives_lowering(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          print(to_string)
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertIn("FunctionValue(", out.getvalue().strip())
     def test_stdlib_result_helpers(self) -> None:
         src = """
         fn plus1(x: Int) -> Int = x + 1
