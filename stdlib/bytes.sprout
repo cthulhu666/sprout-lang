@@ -64,26 +64,18 @@ export fn u32_be(value: Int) -> Bytes =
   )
 
 export fn read_u16_be(value: Bytes) -> Maybe Int =
-  match get(value, 0) with
-  | Nothing -> Nothing
-  | Just b0 ->
-      match get(value, 1) with
-      | Nothing -> Nothing
-      | Just b1 -> Just(b0 * 256 + b1)
+  do
+    b0 <- get(value, 0)
+    b1 <- get(value, 1)
+    Just(b0 * 256 + b1)
 
 export fn read_u32_be(value: Bytes) -> Maybe Int =
-  match get(value, 0) with
-  | Nothing -> Nothing
-  | Just b0 ->
-      match get(value, 1) with
-      | Nothing -> Nothing
-      | Just b1 ->
-          match get(value, 2) with
-          | Nothing -> Nothing
-          | Just b2 ->
-              match get(value, 3) with
-              | Nothing -> Nothing
-              | Just b3 -> Just(b0 * 16777216 + b1 * 65536 + b2 * 256 + b3)
+  do
+    b0 <- get(value, 0)
+    b1 <- get(value, 1)
+    b2 <- get(value, 2)
+    b3 <- get(value, 3)
+    Just(b0 * 16777216 + b1 * 65536 + b2 * 256 + b3)
 
 fn c_string_len_from(value: Bytes, index: Int, total: Int) -> Int =
   if index >= total then total

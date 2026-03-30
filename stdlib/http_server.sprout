@@ -56,6 +56,11 @@ fn parse_header_line(raw: String) -> Maybe (String, String) =
   | Nothing -> Nothing
   | Just pair -> parse_header_pair(pair)
 
+fn result_from_maybe(err: e, value: Maybe a) -> Result e a =
+  match value with
+  | Nothing -> Err(err)
+  | Just unwrapped -> Ok(unwrapped)
+
 fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict String) -> Result HttpServerError (Dict String) =
   if index >= total then Ok(headers)
   else
@@ -64,11 +69,10 @@ fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict S
     | Just line ->
         if string.is_empty(line) then parse_header_lines(lines, index + 1, total, headers)
         else
-          match parse_header_line(line) with
-          | Nothing -> Err(HttpInvalidRequest("invalid header line"))
-          | Just pair ->
-              match pair with
-              | (name, value) -> parse_header_lines(lines, index + 1, total, dict_set(name, value, headers))
+          do
+            pair <- result_from_maybe(HttpInvalidRequest("invalid header line"), parse_header_line(line))
+            match pair with
+            | (name, value) -> parse_header_lines(lines, index + 1, total, dict_set(name, value, headers))
 
 fn parse_headers(raw: String) -> Result HttpServerError (Dict String) =
   parse_header_lines(lines, 0, vec_length(lines), dict_empty())
@@ -95,15 +99,11 @@ fn parse_request_prefix(raw: String) -> Result HttpServerError (RequestLine, Dic
   if headers_end < 0 then Err(HttpInvalidRequest("missing header terminator"))
   else if line_end < 0 then Err(HttpInvalidRequest("missing request line terminator"))
   else
-    match parse_request_line(string.take(raw, line_end)) with
-    | Nothing -> Err(HttpInvalidRequest("invalid request line"))
-    | Just req ->
-        match parse_headers(header_block) with
-        | Err err -> Err(err)
-        | Ok headers ->
-            match parse_content_length(headers) with
-            | Err err -> Err(err)
-            | Ok content_length -> Ok((req, headers, content_length))
+    do
+      req <- result_from_maybe(HttpInvalidRequest("invalid request line"), parse_request_line(string.take(raw, line_end)))
+      headers <- parse_headers(header_block)
+      content_length <- parse_content_length(headers)
+      Ok((req, headers, content_length))
 where
   headers_end = find_headers_end(raw)
   line_end = find_line_end(raw)
@@ -116,9 +116,9 @@ fn build_request(req: RequestLine, headers: Dict String, body: String) -> HttpRe
       | RequestPathVersion path version -> HttpRequest(method, path, HttpRequestMeta(version, headers, body))
 
 export fn parse(raw: String) -> Result HttpServerError HttpRequest =
-  match parse_request_prefix(raw) with
-  | Err err -> Err(err)
-  | Ok prefix -> parse_from_prefix(raw, prefix)
+  do
+    prefix <- parse_request_prefix(raw)
+    parse_from_prefix(raw, prefix)
 
 fn parse_from_prefix(raw: String, prefix: (RequestLine, Dict String, Int)) -> Result HttpServerError HttpRequest =
   err_or_request(req, headers, content_length, raw)
@@ -148,21 +148,21 @@ fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> Result HttpSer
         else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk))
 
 fn read_request(conn: Int) -> Result HttpServerError HttpRequest !{IO} =
-  match read_until_headers(conn, "") with
-  | Err err -> Err(err)
-  | Ok raw -> read_request_from_prefix(conn, raw)
+  do
+    raw <- read_until_headers(conn, "")
+    read_request_from_prefix(conn, raw)
 
 fn read_request_from_prefix(conn: Int, raw: String) -> Result HttpServerError HttpRequest !{IO} =
-  match parse_request_prefix(raw) with
-  | Err err -> Err(err)
-  | Ok prefix -> continue_read_request(conn, raw, prefix)
+  do
+    prefix <- parse_request_prefix(raw)
+    continue_read_request(conn, raw, prefix)
 
 fn continue_read_request(conn: Int, raw: String, prefix: (RequestLine, Dict String, Int)) -> Result HttpServerError HttpRequest !{IO} =
   if string.length(body) >= content_length then parse(raw)
   else
-    match read_remaining_body(conn, raw, content_length - string.length(body)) with
-    | Err err -> Err(err)
-    | Ok full -> parse(full)
+    do
+      full <- read_remaining_body(conn, raw, content_length - string.length(body))
+      parse(full)
 where
   (_req, _headers, content_length) = prefix
   body = string.drop(raw, request_body_start(raw))
@@ -245,11 +245,12 @@ export fn request_header(name: String, req: HttpRequest) -> Maybe String =
 export fn render(resp: HttpServerResponse) -> Result HttpServerError String =
   match resp with
   | HttpServerResponse status headers body ->
-      match http_response(status, body) with
-      | Ok raw -> Ok(inject_headers(raw, render_extra_headers(headers)))
-      | Err err ->
+      do
+        raw <- http_response(status, body) |> result_map_error(\err ->
           match err with
-          | HttpUnsupportedStatus code -> Err(HttpServerUnsupportedStatus(code))
+          | HttpUnsupportedStatus code -> HttpServerUnsupportedStatus(code)
+        )
+        Ok(inject_headers(raw, render_extra_headers(headers)))
 
 fn write_and_close(conn: Int, payload: String) -> Unit !{IO} =
   after(tcp_write(conn, payload), tcp_close(conn))

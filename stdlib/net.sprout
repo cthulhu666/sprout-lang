@@ -45,12 +45,13 @@ export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int 
   tcp_write_all(tcp_connection_handle(conn), payload)
 
 export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String !{IO} =
-  match read_exact(conn, count) with
-  | Err err -> Err(err)
-  | Ok payload ->
-      match to_string(payload) with
-      | Ok text -> Ok(text)
-      | Err utf8_err -> Err(TcpReadFailed(utf8_error_message(utf8_err)))
+  do
+    payload <- read_exact(conn, count)
+    text <- result_map_error(
+      \utf8_err -> TcpReadFailed(utf8_error_message(utf8_err)),
+      to_string(payload)
+    )
+    Ok(text)
 
 export fn write_all_utf8(conn: TcpConnection, payload: String) -> Result TcpError Int !{IO} =
   write_all(conn, from_string(payload))
