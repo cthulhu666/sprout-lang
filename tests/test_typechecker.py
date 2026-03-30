@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 from sprout import TypeCheckError, elaborate_program, parse, typecheck_program
-from sprout import ast
+from sprout import ast, core
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude, with_prelude
 
@@ -222,6 +222,7 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body, ast.DoExpr)
 
         elaborate_program(program)
+        self.assertIsInstance(getattr(program, "core_declarations")["pair_sum"], core.MatchExpr)
         self.assertIsInstance(fn_decl.body, ast.MatchExpr)
 
     def test_typecheck_int_range_expression_and_helpers(self) -> None:

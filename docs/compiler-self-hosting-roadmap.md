@@ -201,7 +201,9 @@ Current status:
 1. the first explicit elaboration boundary is now in place for `do` notation,
 2. typechecking resolves `do` families but no longer performs the rewrite
    itself,
-3. runtime and codegen consume an elaborated form with `do` removed.
+3. that elaboration step now emits a narrow core expression form for `do`
+   lowering before adapting back into the existing AST pipeline,
+4. runtime and codegen still consume the adapted AST form with `do` removed.
 
 ### Stage 5: Bootstrap-Capable Self-Hosted Analysis
 

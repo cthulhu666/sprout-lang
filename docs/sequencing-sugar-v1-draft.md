@@ -123,8 +123,9 @@ fn parse_pair(a: String, b: String) -> Result String Int =
 
 The current implementation parses a dedicated `DoExpr`, lets typechecking
 determine which sequencing family each bind step belongs to, then performs a
-dedicated post-typecheck elaboration step that rewrites the block to nested
-`match` expressions.
+dedicated post-typecheck elaboration step that first emits a small explicit
+core expression form and then adapts that form to nested `match` expressions
+for the current interpreter and LLVM backend.
 
 `Maybe` step:
 
@@ -173,6 +174,9 @@ The key forward-compatible choices are:
 4. `do` lowering now lives in an explicit elaboration pass instead of staying
    embedded in the typechecker, which is a better fit for future typed-core
    work and eventual self-hosting.
+5. The current `do` elaborator already emits a narrow core representation
+   before adapting back into the existing AST pipeline, so there is now a real
+   compiler seam to widen later instead of only an implementation comment.
 
 ## 9. Diagnostics
 
