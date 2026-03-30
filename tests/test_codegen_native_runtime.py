@@ -6,6 +6,12 @@ from tests.codegen_test_support import *
 
 
 class CodegenNativeRuntimeTests(CodegenTestCase):
+    def _sprout_obj_alloc_count(self, stderr: str) -> int:
+        match = re.search(r"sprout_obj=(\d+)", stderr)
+        self.assertIsNotNone(match)
+        assert match is not None
+        return int(match.group(1))
+
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_int_range_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -523,6 +529,77 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             assert match is not None
             self.assertGreater(int(match.group(1)), 0)
             self.assertGreater(int(match.group(2)), 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_direct_constructor_match_reduces_sprout_obj_allocations(self) -> None:
+        optimized_src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn unwrap(m: MaybeInt) -> Int =
+          match m with
+          | Just value -> value
+          | Nothing -> 0
+
+        fn main() -> Int !{IO} =
+          match if true then Just(7) else Nothing with
+          | Just value -> print_int(value)
+          | whole -> print_int(unwrap(whole))
+        """
+        control_src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn unwrap(m: MaybeInt) -> Int =
+          match m with
+          | Just value -> value
+          | Nothing -> 0
+
+        fn produce(flag: Bool) -> MaybeInt =
+          if flag then Just(7) else Nothing
+
+        fn main() -> Int !{IO} =
+          match produce(true) with
+          | Just value -> print_int(value)
+          | whole -> print_int(unwrap(whole))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            optimized_path = tmp_path / "optimized.sprout"
+            optimized_bin = tmp_path / "optimized"
+            control_path = tmp_path / "control.sprout"
+            control_bin = tmp_path / "control"
+            optimized_path.write_text(optimized_src, encoding="utf-8")
+            control_path.write_text(control_src, encoding="utf-8")
+
+            for spr_path, bin_path in ((optimized_path, optimized_bin), (control_path, control_bin)):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sprout.cli",
+                        "compile",
+                        str(spr_path),
+                        "--native",
+                        "-o",
+                        str(bin_path),
+                    ],
+                    check=True,
+                )
+
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_ALLOC"] = "1"
+            env["SPROUT_GC_THRESHOLD"] = "off"
+            optimized_run = subprocess.run([str(optimized_bin)], check=False, capture_output=True, text=True, env=env)
+            control_run = subprocess.run([str(control_bin)], check=False, capture_output=True, text=True, env=env)
+
+            self.assertEqual(optimized_run.stdout.strip(), "7")
+            self.assertEqual(control_run.stdout.strip(), "7")
+            self.assertEqual(optimized_run.returncode, 7)
+            self.assertEqual(control_run.returncode, 7)
+            self.assertLess(self._sprout_obj_alloc_count(optimized_run.stderr), self._sprout_obj_alloc_count(control_run.stderr))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_debug_gc_logs_exit_collection(self) -> None:

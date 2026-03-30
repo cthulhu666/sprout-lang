@@ -1686,6 +1686,8 @@ def _supports_direct_ctor_match(
 def _is_direct_ctor_scrutinee(expr: ast.Expr, ctor_sigs: dict[str, CtorSig]) -> bool:
     if _direct_ctor_expr(expr, ctor_sigs) is not None:
         return True
+    if isinstance(expr, ast.MatchExpr):
+        return all(_is_direct_ctor_scrutinee(branch.value, ctor_sigs) for branch in expr.branches)
     return (
         isinstance(expr, ast.IfExpr)
         and _is_direct_ctor_scrutinee(expr.then_branch, ctor_sigs)
@@ -1740,6 +1742,21 @@ def _emit_direct_ctor_match_scrutinee(
         )
         return
 
+    if isinstance(scrutinee, ast.MatchExpr):
+        _emit_direct_ctor_match_from_match_expr(
+            scrutinee,
+            branches,
+            locals_,
+            globals_info,
+            sigs,
+            ctor_sigs,
+            adt_names,
+            emitter,
+            done_label,
+            branch_vals,
+        )
+        return
+
     if not isinstance(scrutinee, ast.IfExpr):
         raise CodegenError("Internal backend error: unsupported direct constructor scrutinee")
 
@@ -1777,6 +1794,59 @@ def _emit_direct_ctor_match_scrutinee(
         done_label,
         branch_vals,
     )
+
+
+def _emit_direct_ctor_match_from_match_expr(
+    scrutinee: ast.MatchExpr,
+    branches: list[ast.MatchBranch],
+    locals_: dict[str, Value],
+    globals_info: dict[str, GlobalInfo],
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+    adt_names: set[str],
+    emitter: Emitter,
+    done_label: str,
+    branch_vals: list[tuple[Value, str]],
+) -> None:
+    inner_scrut = _emit_expr(scrutinee.scrutinee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+    next_label = emitter.block("match_ctor_inner_next")
+    current_fail = next_label
+    first = True
+    for branch in scrutinee.branches:
+        branch_label = emitter.block("match_ctor_inner_branch")
+        fail_label = emitter.block("match_ctor_inner_next")
+
+        if first:
+            first = False
+        else:
+            emitter.label(current_fail)
+
+        if isinstance(branch.pattern, (ast.WildcardPattern, ast.VarPattern)):
+            emitter.emit(f"  br label %{branch_label}")
+        else:
+            cond = _emit_pattern_test(branch.pattern, inner_scrut, ctor_sigs, emitter)
+            emitter.emit(f"  br i1 {cond.ir}, label %{branch_label}, label %{fail_label}")
+
+        emitter.label(branch_label)
+        branch_locals = dict(locals_)
+        rooted = _emit_pattern_bind(branch.pattern, inner_scrut, branch_locals, ctor_sigs, emitter)
+        _emit_direct_ctor_match_scrutinee(
+            branch.value,
+            branches,
+            branch_locals,
+            globals_info,
+            sigs,
+            ctor_sigs,
+            adt_names,
+            emitter,
+            done_label,
+            branch_vals,
+        )
+        _emit_pop_temp_roots(rooted, emitter)
+        current_fail = fail_label
+
+    emitter.label(current_fail)
+    emitter.emit("  unreachable")
 
 
 def _emit_direct_ctor_match_case(

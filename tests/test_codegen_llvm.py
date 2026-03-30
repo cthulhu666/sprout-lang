@@ -223,6 +223,49 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertNotIn("call i64 @sprout_tag", main_ir)
         self.assertNotIn("call i64 @sprout_field", main_ir)
 
+    def test_compile_direct_constructor_match_supports_nested_match_scrutinee(self) -> None:
+        src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn classify(flag: Bool) -> MaybeInt =
+          match flag with
+          | true -> Just(42)
+          | false -> Nothing
+
+        fn main() -> Int !{IO} =
+          match classify(true) with
+          | Just value -> print_int(value)
+          | Nothing -> print_int(0)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        main_ir = ir.split("define i64 @main", 1)[1]
+        self.assertIn("call i64 @classify(i1 1)", main_ir)
+        self.assertIn("call i64 @sprout_tag", main_ir)
+
+    def test_compile_direct_constructor_match_supports_nested_constructor_match_expression(self) -> None:
+        src = """
+        type MaybeInt =
+          | Just Int
+          | Nothing
+
+        fn main() -> Int !{IO} =
+          match (match true with | true -> Just(42) | false -> Nothing) with
+          | Just value -> print_int(value)
+          | Nothing -> print_int(0)
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        main_ir = ir.split("define i64 @main", 1)[1]
+        self.assertNotIn("call i64 @sprout_make1(i64 0, i64 42)", main_ir)
+        self.assertNotIn("call i64 @sprout_tag", main_ir)
+        self.assertNotIn("call i64 @sprout_field", main_ir)
+        self.assertIn("phi i64", main_ir)
+
     def test_compile_print_adt_value(self) -> None:
         src = """
         type Pair =
