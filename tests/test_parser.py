@@ -35,6 +35,34 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body, ast.MatchExpr)
         self.assertEqual(len(fn_decl.body.branches), 2)
 
+    def test_parse_do_expression_with_bind_steps(self) -> None:
+        src = """
+        fn pair(ma: Maybe Int, mb: Maybe Int) -> Maybe (Int, Int) =
+          do
+            a <- ma
+            b <- mb
+            Just((a, b))
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.DoExpr)
+        self.assertEqual(len(fn_decl.body.steps), 3)
+        self.assertIsInstance(fn_decl.body.steps[0], ast.DoBindStep)
+        self.assertEqual(fn_decl.body.steps[0].name, "a")
+        self.assertIsInstance(fn_decl.body.steps[1], ast.DoBindStep)
+        self.assertIsInstance(fn_decl.body.steps[2], ast.DoExprStep)
+
+    def test_parse_do_expression_rejects_extra_indentation(self) -> None:
+        src = """
+        fn bad(ma: Maybe Int) -> Maybe Int =
+          do
+            a <- ma
+              Just(a)
+        """
+        with self.assertRaises(ParseError) as ctx:
+            parse(src)
+        self.assertIn("Expected EOF", str(ctx.exception))
+
     def test_parse_recursive_fn(self) -> None:
         src = """
         fn fact(n: Int) -> Int =

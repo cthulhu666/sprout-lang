@@ -8,6 +8,7 @@ from .tokenizer import Token, tokenize
 INLINE_OPS = {
     "=",
     "->",
+    "<-",
     "+",
     "-",
     "*",

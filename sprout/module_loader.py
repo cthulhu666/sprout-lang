@@ -1162,6 +1162,17 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
                 branch_scope = set(current_scope)
                 branch_scope |= _pattern_bindings(branch.pattern)
                 walk_expr(branch.value, e, branch_scope)
+            return
+        do_expr = getattr(ast, "DoExpr", None)
+        do_bind_step = getattr(ast, "DoBindStep", None)
+        do_expr_step = getattr(ast, "DoExprStep", None)
+        if do_expr is not None and isinstance(e, do_expr):
+            for step in e.steps:
+                if do_bind_step is not None and isinstance(step, do_bind_step):
+                    walk_expr(step.value, e, current_scope)
+                elif do_expr_step is not None and isinstance(step, do_expr_step):
+                    walk_expr(step.value, e, current_scope)
+            return
 
     for decl in program.declarations:
         if isinstance(decl, ast.TypeDecl):

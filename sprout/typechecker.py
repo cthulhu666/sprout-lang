@@ -146,6 +146,13 @@ class GlobalMethodInfo:
     effect_vars: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class DoSequenceInfo:
+    family: str
+    payload_type: Type
+    error_type: Type | None = None
+
+
 INT = TConst("Int")
 BOOL = TConst("Bool")
 STRING = TConst("String")
@@ -757,6 +764,19 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
             for branch in expr.branches:
                 visit_expr(branch.value)
             return
+        do_expr = getattr(ast, "DoExpr", None)
+        do_bind_step = getattr(ast, "DoBindStep", None)
+        do_expr_step = getattr(ast, "DoExprStep", None)
+        if do_expr is not None and isinstance(expr, do_expr):
+            for step in expr.steps:
+                if do_bind_step is not None and isinstance(step, do_bind_step):
+                    visit_expr(step.value)
+                elif do_expr_step is not None and isinstance(step, do_expr_step):
+                    visit_expr(step.value)
+            lowered_expr = getattr(expr, "lowered_expr", None)
+            if isinstance(lowered_expr, ast.Expr):
+                visit_expr(lowered_expr)
+            return
         if isinstance(expr, ast.BinaryExpr):
             visit_expr(expr.left)
             visit_expr(expr.right)
@@ -782,6 +802,152 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
         elif isinstance(decl, ast.InstanceDecl):
             for method in decl.methods:
                 visit_expr(method.body)
+
+
+def _type_const_matches(typ: Type, name: str) -> bool:
+    resolved = apply({}, typ)
+    return isinstance(resolved, TConst) and (
+        resolved.name == name or resolved.name.rsplit(".", 1)[-1] == name.rsplit(".", 1)[-1]
+    )
+
+
+def _do_sequence_info(state: InferState, typ: Type) -> DoSequenceInfo | None:
+    resolved = apply(state.subst, typ, state.effect_subst)
+    if isinstance(resolved, TApp) and _type_const_matches(resolved.base, "Maybe"):
+        return DoSequenceInfo(family="Maybe", payload_type=resolved.arg)
+    if isinstance(resolved, TApp) and isinstance(resolved.base, TApp) and _type_const_matches(resolved.base.base, "Result"):
+        return DoSequenceInfo(
+            family="Result",
+            error_type=resolved.base.arg,
+            payload_type=resolved.arg,
+        )
+    return None
+
+
+def _make_ctor_pattern(name: str, args: list[ast.Pattern], src: object) -> ast.ConstructorPattern:
+    return ast.attach_loc(ast.ConstructorPattern(name=name, args=args), getattr(src, "line", 0), getattr(src, "column", 0))
+
+
+def _make_var_pattern(name: str, src: object) -> ast.VarPattern:
+    return ast.attach_loc(ast.VarPattern(name=name), getattr(src, "line", 0), getattr(src, "column", 0))
+
+
+def _make_var_expr(name: str, src: object) -> ast.VarExpr:
+    return ast.attach_loc(ast.VarExpr(name=name), getattr(src, "line", 0), getattr(src, "column", 0))
+
+
+def _make_call_expr(callee: ast.Expr, args: list[ast.Expr], src: object) -> ast.CallExpr:
+    return ast.attach_loc(ast.CallExpr(callee=callee, args=args), getattr(src, "line", 0), getattr(src, "column", 0))
+
+
+def _build_do_failure_expr(step: ast.DoBindStep, family: str) -> ast.Expr:
+    if family == "Maybe":
+        return _make_var_expr("Nothing", step)
+    if family == "Result":
+        err_name = "__sprout_do_err"
+        err_pattern = _make_var_pattern(err_name, step)
+        err_expr = _make_var_expr(err_name, step)
+        return _make_call_expr(_make_var_expr("Err", step), [err_expr], err_pattern)
+    raise TypeCheckError(f"Unsupported do family {family}")
+
+
+def _build_do_lowered_expr(expr: ast.DoExpr) -> ast.Expr:
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr_step is None or do_bind_step is None:
+        raise TypeCheckError("Internal error: do-step nodes are unavailable")
+    final_step = expr.steps[-1]
+    if not isinstance(final_step, do_expr_step):
+        raise TypeCheckError("Internal error: do block is missing a final expression")
+    out = final_step.value
+    for step in reversed(expr.steps[:-1]):
+        if not isinstance(step, do_bind_step):
+            raise TypeCheckError("Internal error: only bind steps may precede the final do expression")
+        family = getattr(step, "_do_family", None)
+        if family is None:
+            raise TypeCheckError("Internal error: unresolved do step family")
+        success_name = "Just" if family == "Maybe" else "Ok"
+        failure_name = "Nothing" if family == "Maybe" else "Err"
+        success_pattern = _make_ctor_pattern(success_name, [_make_var_pattern(step.name, step)], step)
+        failure_args: list[ast.Pattern] = []
+        if family == "Result":
+            failure_args = [_make_var_pattern("__sprout_do_err", step)]
+        failure_pattern = _make_ctor_pattern(failure_name, failure_args, step)
+        branches = [
+            ast.attach_loc(ast.MatchBranch(pattern=failure_pattern, value=_build_do_failure_expr(step, family)), getattr(step, "line", 0), getattr(step, "column", 0)),
+            ast.attach_loc(ast.MatchBranch(pattern=success_pattern, value=out), getattr(step, "line", 0), getattr(step, "column", 0)),
+        ]
+        out = ast.attach_loc(ast.MatchExpr(scrutinee=step.value, branches=branches), getattr(step, "line", 0), getattr(step, "column", 0))
+    lowered = ast.attach_loc(out, getattr(expr, "line", 0), getattr(expr, "column", 0))
+    return lowered
+
+
+def _rewrite_do_exprs_in_expr(expr: ast.Expr) -> ast.Expr:
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        lowered_expr = getattr(expr, "lowered_expr", None)
+        if not isinstance(lowered_expr, ast.Expr):
+            raise TypeCheckError("Internal error: do expression was not lowered during typechecking")
+        return _rewrite_do_exprs_in_expr(lowered_expr)
+    if isinstance(expr, ast.IfExpr):
+        expr.condition = _rewrite_do_exprs_in_expr(expr.condition)
+        expr.then_branch = _rewrite_do_exprs_in_expr(expr.then_branch)
+        expr.else_branch = _rewrite_do_exprs_in_expr(expr.else_branch)
+        return expr
+    if isinstance(expr, ast.MatchExpr):
+        expr.scrutinee = _rewrite_do_exprs_in_expr(expr.scrutinee)
+        for branch in expr.branches:
+            branch.value = _rewrite_do_exprs_in_expr(branch.value)
+        return expr
+    if isinstance(expr, ast.TupleExpr):
+        expr.items = [_rewrite_do_exprs_in_expr(item) for item in expr.items]
+        return expr
+    if isinstance(expr, ast.RecordExpr):
+        for field in expr.fields:
+            field.value = _rewrite_do_exprs_in_expr(field.value)
+        return expr
+    if isinstance(expr, ast.GetFieldExpr):
+        expr.record = _rewrite_do_exprs_in_expr(expr.record)
+        return expr
+    if isinstance(expr, ast.BinaryExpr):
+        expr.left = _rewrite_do_exprs_in_expr(expr.left)
+        expr.right = _rewrite_do_exprs_in_expr(expr.right)
+        return expr
+    if isinstance(expr, ast.IntRangeExpr):
+        expr.start = _rewrite_do_exprs_in_expr(expr.start)
+        expr.end = _rewrite_do_exprs_in_expr(expr.end)
+        return expr
+    if isinstance(expr, ast.UnaryExpr):
+        expr.operand = _rewrite_do_exprs_in_expr(expr.operand)
+        return expr
+    if isinstance(expr, ast.CallExpr):
+        expr.callee = _rewrite_do_exprs_in_expr(expr.callee)
+        expr.args = [_rewrite_do_exprs_in_expr(arg) for arg in expr.args]
+        return expr
+    lambda_expr = getattr(ast, "LambdaExpr", None)
+    if lambda_expr is not None and isinstance(expr, lambda_expr):
+        expr.body = _rewrite_do_exprs_in_expr(expr.body)
+        return expr
+    if do_bind_step is not None and isinstance(expr, do_bind_step):
+        expr.value = _rewrite_do_exprs_in_expr(expr.value)
+        return expr
+    if do_expr_step is not None and isinstance(expr, do_expr_step):
+        expr.value = _rewrite_do_exprs_in_expr(expr.value)
+        return expr
+    return expr
+
+
+def _rewrite_do_expressions(program: ast.Program) -> None:
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            decl.body = _rewrite_do_exprs_in_expr(decl.body)
+        elif isinstance(decl, ast.LetDecl):
+            decl.value = _rewrite_do_exprs_in_expr(decl.value)
+        elif isinstance(decl, ast.InstanceDecl):
+            for method in decl.methods:
+                method.body = _rewrite_do_exprs_in_expr(method.body)
 
 
 def build_global_method_info(class_decls: dict[str, ClassDeclInfo]) -> dict[str, GlobalMethodInfo]:
@@ -1155,6 +1321,64 @@ def infer_expr(
 
         ensure_exhaustive_match(scrutinee_t, branch_ctors, has_catchall, state, type_decls, expr)
         return _mark_expr_type(expr, out_t), out_effects
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        if not expr.steps:
+            raise tc_error("do block must contain at least one step", expr)
+        if do_bind_step is None or do_expr_step is None:
+            raise tc_error("Internal error: do-step nodes are unavailable", expr)
+
+        working_env = dict(env)
+        total_effects = PURE_EFFECT
+        sequence_family: str | None = None
+        sequence_error_type: Type | None = None
+
+        for step in expr.steps[:-1]:
+            if not isinstance(step, do_bind_step):
+                raise tc_error("Only the final step in a do block may be a plain expression", step)
+            step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
+            total_effects = merge_effects(state, total_effects, step_effects)
+            info = _do_sequence_info(state, step_t)
+            if info is None:
+                raise tc_error("do bindings currently require Maybe or Result values", step.value)
+            if sequence_family is None:
+                sequence_family = info.family
+                sequence_error_type = info.error_type
+            elif info.family != sequence_family:
+                raise tc_error(
+                    f"Cannot mix {sequence_family} and {info.family} bindings in the same do block",
+                    step.value,
+                )
+            elif info.family == "Result" and sequence_error_type is not None and info.error_type is not None:
+                unify_at(state, sequence_error_type, info.error_type, step.value)
+            setattr(step, "_do_family", info.family)
+            working_env[step.name] = Scheme(vars=(), type=info.payload_type)
+
+        final_step = expr.steps[-1]
+        if not isinstance(final_step, do_expr_step):
+            raise tc_error("A do block must end with a final expression", final_step)
+        final_t, final_effects = infer_expr(final_step.value, working_env, state, type_decls, global_methods)
+        total_effects = merge_effects(state, total_effects, final_effects)
+        if sequence_family is not None:
+            final_info = _do_sequence_info(state, final_t)
+            if final_info is None:
+                raise tc_error(
+                    f"do block started with {sequence_family} bindings, so its final expression must also return {sequence_family}",
+                    final_step.value,
+                )
+            if final_info.family != sequence_family:
+                raise tc_error(
+                    f"do block started with {sequence_family} bindings, but its final expression returns {final_info.family}",
+                    final_step.value,
+                )
+            if sequence_family == "Result" and sequence_error_type is not None and final_info.error_type is not None:
+                unify_at(state, sequence_error_type, final_info.error_type, final_step.value)
+        lowered_expr = _build_do_lowered_expr(expr)
+        setattr(expr, "lowered_expr", lowered_expr)
+        _mark_expr_type(lowered_expr, final_t)
+        return _mark_expr_type(expr, final_t), total_effects
     lambda_expr = getattr(ast, "LambdaExpr", None)
     if lambda_expr is not None and isinstance(expr, lambda_expr):
         if not expr.params:
@@ -1775,6 +1999,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             env[let_decl.name] = generalize(env, value_t, state)
 
     validate_instance_methods(program, class_decls, env, state, type_decls, global_methods)
+    _rewrite_do_expressions(program)
     _finalize_inferred_expr_types(program, state)
 
     return {name: scheme_to_string(sch, state.subst, state.effect_subst) for name, sch in env.items()}

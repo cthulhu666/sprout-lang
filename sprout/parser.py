@@ -364,6 +364,8 @@ class Parser:
         return self.mark(ast.RecordFieldDecl(name=start.value, type_expr=self.parse_type_expr()), start)
 
     def parse_expr(self):
+        if self.check("KEYWORD", "do"):
+            return self.parse_do_expr()
         if self.check("KEYWORD", "if"):
             start = self.advance()
             cond = self.parse_expr()
@@ -389,6 +391,92 @@ class Parser:
             return self.mark(ast.MatchExpr(scrutinee=scrutinee, branches=branches), start)
 
         return self.parse_pipe()
+
+    def parse_do_expr(self) -> ast.DoExpr:
+        start = self.expect("KEYWORD", "do")
+        steps: list[ast.DoStep] = []
+        block_indent: int | None = None
+
+        while True:
+            if self.check("EOF"):
+                break
+            token = self.current()
+            if token.line == start.line:
+                break
+            if block_indent is None:
+                block_indent = token.column
+            elif token.column < block_indent:
+                break
+            elif token.column > block_indent:
+                raise ParseError(f"Unexpected indentation in do block at {token.line}:{token.column}")
+
+            step_tokens = self._consume_do_step_tokens(block_indent)
+            if not step_tokens:
+                break
+            steps.append(self._parse_do_step(step_tokens))
+
+        if not steps:
+            raise ParseError(f"Expected at least one do step at {start.line}:{start.column}")
+        return self.mark(ast.DoExpr(steps=steps), start)
+
+    def _consume_do_step_tokens(self, block_indent: int) -> list[Token]:
+        start_index = self.i
+        depth = 0
+        index = self.i
+        while index < len(self.tokens):
+            token = self.tokens[index]
+            if token.kind == "EOF":
+                break
+            if index > start_index and depth == 0 and token.line > self.tokens[index - 1].line:
+                if token.column < block_indent:
+                    break
+                if token.column == block_indent and self._looks_like_do_step_start(index):
+                    break
+            if token.kind == "SYMBOL":
+                if token.value in {"(", "[", "{"}:
+                    depth += 1
+                elif token.value in {")", "]", "}"}:
+                    depth = max(0, depth - 1)
+            index += 1
+        self.i = index
+        return self.tokens[start_index:index]
+
+    def _looks_like_do_step_start(self, index: int) -> bool:
+        token = self.tokens[index]
+        if token.kind == "IDENT" and index + 1 < len(self.tokens):
+            next_token = self.tokens[index + 1]
+            if next_token.kind == "SYMBOL" and next_token.value == "<-":
+                return True
+        return self._token_starts_expr(token)
+
+    def _token_starts_expr(self, token: Token) -> bool:
+        if token.kind in {"IDENT", "INT", "STRING"}:
+            return True
+        if token.kind == "KEYWORD" and token.value in {"if", "match", "do", "true", "false"}:
+            return True
+        return token.kind == "SYMBOL" and token.value in {"\\", "[", "{", "(", "-"}
+
+    def _parse_do_step(self, tokens: list[Token]) -> ast.DoStep:
+        last = tokens[-1]
+        eof = Token("EOF", "", last.line, last.column + len(last.value))
+        parser = Parser(tokens + [eof], pipe_tmp_counter=self.pipe_tmp_counter)
+        if (
+            parser.check("IDENT")
+            and parser.i + 1 < len(parser.tokens)
+            and parser.tokens[parser.i + 1].kind == "SYMBOL"
+            and parser.tokens[parser.i + 1].value == "<-"
+        ):
+            name_token = parser.advance()
+            parser.advance()
+            value = parser.parse_expr()
+            parser.expect("EOF")
+            self.pipe_tmp_counter = parser.pipe_tmp_counter
+            return self.mark(ast.DoBindStep(name=name_token.value, value=value), name_token)
+
+        value = parser.parse_expr()
+        parser.expect("EOF")
+        self.pipe_tmp_counter = parser.pipe_tmp_counter
+        return self.mark(ast.DoExprStep(value=value), tokens[0])
 
     def parse_pipe(self):
         expr = self.parse_logical_or()
@@ -445,6 +533,16 @@ class Parser:
                 walk(node.scrutinee)
                 for branch in node.branches:
                     walk(branch.value)
+                return
+            do_expr = getattr(ast, "DoExpr", None)
+            do_bind_step = getattr(ast, "DoBindStep", None)
+            do_expr_step = getattr(ast, "DoExprStep", None)
+            if do_expr is not None and isinstance(node, do_expr):
+                for step in node.steps:
+                    if do_bind_step is not None and isinstance(step, do_bind_step):
+                        walk(step.value)
+                    elif do_expr_step is not None and isinstance(step, do_expr_step):
+                        walk(step.value)
                 return
             if isinstance(node, ast.BinaryExpr):
                 walk(node.left)

@@ -8,6 +8,9 @@ Repository features that are implemented but not specified in this document
 part of normative v0 until they are specified here or in another normative
 spec document.
 
+The current implementation also includes experimental `do` notation for
+sequencing `Maybe` and `Result`, but that surface is not part of normative v0.
+
 ## 1. Scope
 
 Sprout v0 is a statically typed, functional-first language with:

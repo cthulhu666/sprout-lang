@@ -123,6 +123,17 @@ def _walk_expr_has_raw_vector_builtin(expr: ast.Expr) -> bool:
         if _walk_expr_has_raw_vector_builtin(expr.scrutinee):
             return True
         return any(_walk_expr_has_raw_vector_builtin(branch.value) for branch in expr.branches)
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        for step in expr.steps:
+            if do_bind_step is not None and isinstance(step, do_bind_step):
+                if _walk_expr_has_raw_vector_builtin(step.value):
+                    return True
+            elif do_expr_step is not None and isinstance(step, do_expr_step):
+                if _walk_expr_has_raw_vector_builtin(step.value):
+                    return True
     return False
 
 
@@ -149,6 +160,17 @@ def _walk_expr_has_raw_map_builtin(expr: ast.Expr) -> bool:
         if _walk_expr_has_raw_map_builtin(expr.scrutinee):
             return True
         return any(_walk_expr_has_raw_map_builtin(branch.value) for branch in expr.branches)
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        for step in expr.steps:
+            if do_bind_step is not None and isinstance(step, do_bind_step):
+                if _walk_expr_has_raw_map_builtin(step.value):
+                    return True
+            elif do_expr_step is not None and isinstance(step, do_expr_step):
+                if _walk_expr_has_raw_map_builtin(step.value):
+                    return True
     return False
 
 
@@ -175,6 +197,17 @@ def _walk_expr_has_raw_string_builtin(expr: ast.Expr) -> bool:
         if _walk_expr_has_raw_string_builtin(expr.scrutinee):
             return True
         return any(_walk_expr_has_raw_string_builtin(branch.value) for branch in expr.branches)
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        for step in expr.steps:
+            if do_bind_step is not None and isinstance(step, do_bind_step):
+                if _walk_expr_has_raw_string_builtin(step.value):
+                    return True
+            elif do_expr_step is not None and isinstance(step, do_expr_step):
+                if _walk_expr_has_raw_string_builtin(step.value):
+                    return True
     return False
 
 
@@ -201,6 +234,17 @@ def _walk_expr_has_raw_bytes_builtin(expr: ast.Expr) -> bool:
         if _walk_expr_has_raw_bytes_builtin(expr.scrutinee):
             return True
         return any(_walk_expr_has_raw_bytes_builtin(branch.value) for branch in expr.branches)
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        for step in expr.steps:
+            if do_bind_step is not None and isinstance(step, do_bind_step):
+                if _walk_expr_has_raw_bytes_builtin(step.value):
+                    return True
+            elif do_expr_step is not None and isinstance(step, do_expr_step):
+                if _walk_expr_has_raw_bytes_builtin(step.value):
+                    return True
     return False
 
 
@@ -227,6 +271,17 @@ def _walk_expr_has_raw_crypto_builtin(expr: ast.Expr) -> bool:
         if _walk_expr_has_raw_crypto_builtin(expr.scrutinee):
             return True
         return any(_walk_expr_has_raw_crypto_builtin(branch.value) for branch in expr.branches)
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        for step in expr.steps:
+            if do_bind_step is not None and isinstance(step, do_bind_step):
+                if _walk_expr_has_raw_crypto_builtin(step.value):
+                    return True
+            elif do_expr_step is not None and isinstance(step, do_expr_step):
+                if _walk_expr_has_raw_crypto_builtin(step.value):
+                    return True
     return False
 
 
@@ -253,6 +308,17 @@ def _walk_expr_has_raw_range_builtin(expr: ast.Expr) -> bool:
         if _walk_expr_has_raw_range_builtin(expr.scrutinee):
             return True
         return any(_walk_expr_has_raw_range_builtin(branch.value) for branch in expr.branches)
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        for step in expr.steps:
+            if do_bind_step is not None and isinstance(step, do_bind_step):
+                if _walk_expr_has_raw_range_builtin(step.value):
+                    return True
+            elif do_expr_step is not None and isinstance(step, do_expr_step):
+                if _walk_expr_has_raw_range_builtin(step.value):
+                    return True
     return False
 
 

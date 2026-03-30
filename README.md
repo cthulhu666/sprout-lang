@@ -49,6 +49,10 @@ Normative status:
   `#@temporary`, `#@wip`, and `#@deprecated ...`. Imported uses of annotated
   exported values now emit compiler warnings, but this annotation surface is
   not part of normative v0 yet.
+- The current implementation also includes experimental `do` notation for
+  sequencing `Maybe` and `Result` values. The surface is meant to leave room
+  for broader Haskell-style sequencing later, but the current semantics are
+  intentionally narrower and are not part of normative v0 yet.
 - The current implementation uses explicit function effects in the v0 core:
   pure functions omit an annotation, effectful functions use `!{IO}`, and
   higher-order helpers may use restricted singleton effect variables such as
@@ -349,6 +353,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
   - `after(effect, value)` sequences `effect` and returns `value`
+  - experimental `do` blocks for `Maybe`/`Result` sequencing, for example:
+    `do ... x <- mx ... y <- my ... Just((x, y))`
+    See `examples/do_notation_demo.sprout` for a runnable sample.
   - forward pipe operator: `value |> f` rewrites to `f(value)`, and
     `value |> g(a, b)` rewrites to `g(a, b, value)`
   - function composition operators:

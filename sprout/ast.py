@@ -122,6 +122,26 @@ class MatchExpr(Expr):
     branches: list["MatchBranch"]
 
 
+class DoStep:
+    pass
+
+
+@dataclass
+class DoBindStep(DoStep):
+    name: str
+    value: Expr
+
+
+@dataclass
+class DoExprStep(DoStep):
+    value: Expr
+
+
+@dataclass
+class DoExpr(Expr):
+    steps: list[DoStep]
+
+
 @dataclass
 class MatchBranch:
     pattern: "Pattern"

@@ -125,6 +125,51 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("range", types)
         self.assertIn("range_fold", types)
 
+    def test_typecheck_do_notation_with_result(self) -> None:
+        src = """
+        fn pair_sum(left: Result String Int, right: Result String Int) -> Result String Int =
+          do
+            a <- left
+            b <- right
+            Ok(a + b)
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["pair_sum"], "Result String Int -> Result String Int -> Result String Int")
+
+    def test_typecheck_do_notation_rejects_mixed_families(self) -> None:
+        src = """
+        fn bad(m: Maybe Int, r: Result String Int) -> Maybe Int =
+          do
+            a <- m
+            b <- r
+            Just(a + b)
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(with_prelude(src)))
+        self.assertIn("Cannot mix Maybe and Result bindings", str(ctx.exception))
+
+    def test_typecheck_do_notation_rejects_non_sequencable_bindings(self) -> None:
+        src = """
+        fn bad(x: Int) -> Int =
+          do
+            y <- x
+            y
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("do bindings currently require Maybe or Result values", str(ctx.exception))
+
+    def test_typecheck_do_notation_requires_matching_final_family(self) -> None:
+        src = """
+        fn bad(m: Maybe Int) -> Maybe Int =
+          do
+            x <- m
+            x + 1
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(with_prelude(src)))
+        self.assertIn("final expression must also return Maybe", str(ctx.exception))
+
     def test_typecheck_int_range_expression_and_helpers(self) -> None:
         src = """
         fn sum_to(n: Int) -> Int =

@@ -113,6 +113,50 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "113")
 
+    def test_run_do_notation_short_circuits_result(self) -> None:
+        src = """
+        fn pair_sum(left: Result String Int, right: Result String Int) -> Result String Int =
+          do
+            a <- left
+            b <- right
+            Ok(a + b)
+
+        fn render(result: Result String Int) -> String =
+          match result with
+          | Ok value -> int_to_string(value)
+          | Err err -> err
+
+        fn main() -> Unit !{IO} =
+          print(render(pair_sum(Ok(10), Err("boom"))))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "boom")
+
+    def test_run_do_notation_short_circuits_maybe(self) -> None:
+        src = """
+        fn pair_sum(left: Maybe Int, right: Maybe Int) -> Maybe Int =
+          do
+            a <- left
+            b <- right
+            Just(a + b)
+
+        fn render(result: Maybe Int) -> String =
+          match result with
+          | Just value -> int_to_string(value)
+          | Nothing -> "none"
+
+        fn main() -> Unit !{IO} =
+          print(render(pair_sum(Just(10), Nothing)))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "none")
+
     def test_stdlib_vec_sort_by_uses_ord_instance(self) -> None:
         src = """
         type Box =

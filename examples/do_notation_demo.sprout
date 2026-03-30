@@ -1,0 +1,37 @@
+module examples.do_notation_demo
+
+# Demonstrates experimental do notation for Maybe and Result sequencing.
+
+fn half_if_even(x: Int) -> Maybe Int =
+  if (x / 2) * 2 == x then Just(x / 2) else Nothing
+
+fn positive(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err("not-positive")
+
+fn maybe_sum(left: Int, right: Int) -> Maybe Int =
+  do
+    a <- half_if_even(left)
+    b <- half_if_even(right)
+    Just(a + b)
+
+fn result_sum(left: Int, right: Int) -> Result String Int =
+  do
+    a <- positive(left)
+    b <- positive(right)
+    Ok(a + b)
+
+fn render_maybe(value: Maybe Int) -> String =
+  match value with
+  | Just n -> "maybe:" ++ to_string(n)
+  | Nothing -> "maybe:none"
+
+fn render_result(value: Result String Int) -> String =
+  match value with
+  | Ok n -> "result:" ++ to_string(n)
+  | Err err -> "result:" ++ err
+
+fn main() -> Unit !{IO} =
+  after(
+    print(render_maybe(maybe_sum(8, 10))),
+    print(render_result(result_sum(4, -1)))
+  )
