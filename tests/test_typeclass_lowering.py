@@ -9,6 +9,25 @@ from sprout.typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 
 
 class TypeclassLoweringTests(unittest.TestCase):
+    def test_lowering_preserves_do_until_later_elaboration(self) -> None:
+        src = """
+        fn pair_sum(left: Maybe Int, right: Maybe Int) -> Maybe Int =
+          do
+            a <- left
+            b <- right
+            Just(a + b)
+
+        fn main() -> Unit !{IO} =
+          print(pair_sum(Just(20), Just(22)))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Just(42)")
+
     def test_lowering_runs_concrete_constraint_program(self) -> None:
         src = """
         class Renderable t {

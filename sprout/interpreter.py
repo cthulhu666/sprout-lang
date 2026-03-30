@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 
 from . import ast
+from .elaborate import elaborate_program
 from .module_loader import ModuleLoadError
 from .parser import ParseError
 from .surface_checks import SurfaceCheckError
@@ -539,6 +540,7 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
 
 
 def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[str] | None = None) -> None:
+    elaborate_program(program)
     out = stdout
     runtime_in = sys.stdin
     runtime_out = sys.stdout if out is None else out

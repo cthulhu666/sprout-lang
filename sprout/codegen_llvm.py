@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import ast
+from .elaborate import elaborate_program
 
 
 class CodegenError(ValueError):
@@ -911,6 +912,7 @@ def _infer_expr_type(
 
 
 def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> str:
+    elaborate_program(program)
     type_decls = [d for d in program.declarations if isinstance(d, ast.TypeDecl)]
     all_fn_decls = [d for d in program.declarations if isinstance(d, ast.FnDecl)]
     let_decls = [d for d in program.declarations if isinstance(d, ast.LetDecl)]

@@ -452,6 +452,52 @@ def _rewrite_expr_with_specialization(
             ),
             expr,
         )
+    if isinstance(expr, ast.DoExpr):
+        rewritten_steps: list[ast.DoStep] = []
+        step_scope = set(scope)
+        for step in expr.steps:
+            if isinstance(step, ast.DoBindStep):
+                rewritten_steps.append(
+                    _clone_with_loc(
+                        ast.DoBindStep(
+                            name=step.name,
+                            value=_rewrite_expr_with_specialization(
+                                step.value,
+                                step_scope,
+                                hidden_count_by_fn,
+                                fn_decls_by_name,
+                                specializations,
+                                generated_wrappers,
+                                taken_names,
+                            ),
+                        ),
+                        step,
+                    )
+                )
+                step_scope.add(step.name)
+                if hasattr(step, "_do_family"):
+                    setattr(rewritten_steps[-1], "_do_family", getattr(step, "_do_family"))
+                continue
+            if isinstance(step, ast.DoExprStep):
+                rewritten_steps.append(
+                    _clone_with_loc(
+                        ast.DoExprStep(
+                            value=_rewrite_expr_with_specialization(
+                                step.value,
+                                step_scope,
+                                hidden_count_by_fn,
+                                fn_decls_by_name,
+                                specializations,
+                                generated_wrappers,
+                                taken_names,
+                            ),
+                        ),
+                        step,
+                    )
+                )
+                continue
+            raise TypeclassLoweringError("Unsupported do step in specialization rewrite")
+        return _clone_with_loc(ast.DoExpr(steps=rewritten_steps), expr)
     return expr
 
 
@@ -754,6 +800,56 @@ def _rewrite_expr(
                 )
             )
         return _clone_with_loc(ast.MatchExpr(scrutinee=rewritten_scrutinee, branches=rewritten_branches), expr)
+
+    if isinstance(expr, ast.DoExpr):
+        rewritten_steps: list[ast.DoStep] = []
+        step_scope = set(scope)
+        for step in expr.steps:
+            if isinstance(step, ast.DoBindStep):
+                rewritten_step = _clone_with_loc(
+                    ast.DoBindStep(
+                        name=step.name,
+                        value=_rewrite_expr(
+                            step.value,
+                            step_scope,
+                            method_aliases,
+                            current_constraints,
+                            current_binding_by_constraint,
+                            fn_decls,
+                            fn_constraints,
+                            class_method_order,
+                            instance_constraints,
+                        ),
+                    ),
+                    step,
+                )
+                if hasattr(step, "_do_family"):
+                    setattr(rewritten_step, "_do_family", getattr(step, "_do_family"))
+                rewritten_steps.append(rewritten_step)
+                step_scope.add(step.name)
+                continue
+            if isinstance(step, ast.DoExprStep):
+                rewritten_steps.append(
+                    _clone_with_loc(
+                        ast.DoExprStep(
+                            value=_rewrite_expr(
+                                step.value,
+                                step_scope,
+                                method_aliases,
+                                current_constraints,
+                                current_binding_by_constraint,
+                                fn_decls,
+                                fn_constraints,
+                                class_method_order,
+                                instance_constraints,
+                            ),
+                        ),
+                        step,
+                    )
+                )
+                continue
+            raise TypeclassLoweringError("Unsupported do step in typeclass lowering")
+        return _clone_with_loc(ast.DoExpr(steps=rewritten_steps), expr)
 
     return expr
 

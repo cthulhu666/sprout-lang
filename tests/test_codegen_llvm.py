@@ -112,6 +112,25 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertIn("call i64 @print_int(i64 42)", ir)
         self.assertIn("declare i64 @print_str(ptr)", ir)
 
+    def test_compile_do_notation_program_to_llvm(self) -> None:
+        src = """
+        fn pair_sum(left: Maybe Int, right: Maybe Int) -> Maybe Int =
+          do
+            a <- left
+            b <- right
+            Just(a + b)
+
+        fn main() -> Int =
+          match pair_sum(Just(5), Just(7)) with
+          | Just value -> value
+          | Nothing -> 0
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("define i64 @pair_sum(i64 %left, i64 %right)", ir)
+        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
+
     def test_compile_int_range_helpers_to_llvm(self) -> None:
         src = """
         fn main() -> Int !{IO} =

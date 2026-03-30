@@ -197,6 +197,12 @@ Expected scope:
 This is likely the first compiler-architecture milestone that benefits both the
 host compiler and the future self-hosted compiler substantially.
 
+Current status:
+1. the first explicit elaboration boundary is now in place for `do` notation,
+2. typechecking resolves `do` families but no longer performs the rewrite
+   itself,
+3. runtime and codegen consume an elaborated form with `do` removed.
+
 ### Stage 5: Bootstrap-Capable Self-Hosted Analysis
 
 Objective:

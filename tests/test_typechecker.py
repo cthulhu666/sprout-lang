@@ -4,7 +4,8 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from sprout import TypeCheckError, parse, typecheck_program
+from sprout import TypeCheckError, elaborate_program, parse, typecheck_program
+from sprout import ast
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from sprout.stdlib import with_http_prelude, with_prelude
 
@@ -201,6 +202,27 @@ class TypecheckerTests(unittest.TestCase):
             with self.assertRaises(TypeCheckError) as ctx:
                 typecheck_program(program)
         self.assertIn("do bindings currently require Maybe or Result values", str(ctx.exception))
+
+    def test_elaborate_program_lowers_do_after_typechecking(self) -> None:
+        src = """
+        fn pair_sum(left: Maybe Int, right: Maybe Int) -> Maybe Int =
+          do
+            a <- left
+            b <- right
+            Just(a + b)
+        """
+        program = parse(with_prelude(src))
+        fn_decl = next(
+            decl for decl in program.declarations if isinstance(decl, ast.FnDecl) and decl.name == "pair_sum"
+        )
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.DoExpr)
+
+        typecheck_program(program)
+        self.assertIsInstance(fn_decl.body, ast.DoExpr)
+
+        elaborate_program(program)
+        self.assertIsInstance(fn_decl.body, ast.MatchExpr)
 
     def test_typecheck_int_range_expression_and_helpers(self) -> None:
         src = """

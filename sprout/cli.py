@@ -29,6 +29,7 @@ from .analysis_contract import (
 )
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
+from .elaborate import ElaborateError
 from .formatter import format_source, lint_source
 from .interpreter import RuntimeError, run_program
 from .module_loader import CompilerWarning, ModuleLoadError, load_module_bundle, resolve_program_names
@@ -3635,6 +3636,7 @@ def main(argv: list[str] | None = None) -> int:
         TypeCheckError,
         RuntimeError,
         CodegenError,
+        ElaborateError,
         ModuleLoadError,
         SurfaceCheckError,
         TypeclassLoweringError,

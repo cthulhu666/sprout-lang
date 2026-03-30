@@ -122,8 +122,9 @@ fn parse_pair(a: String, b: String) -> Result String Int =
 ## 7. Desugaring Model
 
 The current implementation parses a dedicated `DoExpr`, lets typechecking
-determine which sequencing family each bind step belongs to, then rewrites the
-block to nested `match` expressions.
+determine which sequencing family each bind step belongs to, then performs a
+dedicated post-typecheck elaboration step that rewrites the block to nested
+`match` expressions.
 
 `Maybe` step:
 
@@ -169,6 +170,9 @@ The key forward-compatible choices are:
    rewrite to one container family.
 3. Sequencing resolution is type-directed, which is the right direction if
    Sprout later grows standard abstractions instead of special cases.
+4. `do` lowering now lives in an explicit elaboration pass instead of staying
+   embedded in the typechecker, which is a better fit for future typed-core
+   work and eventual self-hosting.
 
 ## 9. Diagnostics
 
