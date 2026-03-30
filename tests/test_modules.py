@@ -13,6 +13,24 @@ from sprout.typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 
 
 class ModuleLoaderTests(unittest.TestCase):
+    def test_plain_single_file_unknown_name_reaches_type_error_without_resolver_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            main = Path(tmp) / "main.sprout"
+            main.write_text(
+                """
+                fn main() -> Int =
+                  missing
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            with self.assertRaises(TypeCheckError) as ctx:
+                typecheck_program(program)
+            self.assertIn("Unknown variable missing", str(ctx.exception))
+
     def test_load_module_source_imports_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

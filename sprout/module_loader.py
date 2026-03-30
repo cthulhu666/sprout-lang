@@ -991,6 +991,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
                 _warn_for_value_use(source_path, name, node, module_info.path)
             return unqualified_values[name]
         providers = declared_value_by_name.get(name, set())
+        implicit_prelude_symbols = module_symbols.get(implicit_prelude_path)
+        if implicit_prelude_symbols is not None and name in implicit_prelude_symbols.method_locals:
+            return name
         if _has_implicit_prelude_provider(providers):
             return name
         if name in all_exported_values:
