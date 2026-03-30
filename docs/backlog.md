@@ -75,3 +75,7 @@ This file tracks open design, implementation, and tooling follow-up work.
 8. Add a minimal `Show` typeclass slice for library-friendly value formatting.
    Initial scope: `Show.to_string(x) -> String` with `Int`, `Bool`, and `String` instances, backed by a small host primitive for integer formatting.
    First milestone constraints: no promise that `print` uses `Show`, no interpolation syntax, no collection/ADT deriving, and no debugging-vs-user-display split yet.
+9. Generalize experimental `do` notation toward real monadic sequencing.
+   Current implemented scope: layout-style `do` blocks with `<-` binds, resolved type-directed for `Maybe` and `Result`, then rewritten into nested `match`.
+   Planned follow-up: if Sprout grows broader Haskell-style sequencing, add a dedicated post-typecheck elaboration step or typed core lowering pass so `do` desugaring does not stay entangled with the typechecker.
+   First milestone constraints: keep current `Maybe`/`Result` behavior stable, avoid committing prematurely to `IO` semantics, and treat parser/typechecker support as surface groundwork rather than the final compiler architecture.
