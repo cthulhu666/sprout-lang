@@ -804,18 +804,26 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
                 visit_expr(method.body)
 
 
-def _type_const_matches(typ: Type, name: str) -> bool:
+def _type_const_matches(typ: Type, name: str, *, allow_qualified_leaf_match: bool = True) -> bool:
     resolved = apply({}, typ)
-    return isinstance(resolved, TConst) and (
-        resolved.name == name or resolved.name.rsplit(".", 1)[-1] == name.rsplit(".", 1)[-1]
-    )
+    if not isinstance(resolved, TConst):
+        return False
+    if resolved.name == name:
+        return True
+    if not allow_qualified_leaf_match:
+        return False
+    return resolved.name.rsplit(".", 1)[-1] == name.rsplit(".", 1)[-1]
 
 
 def _do_sequence_info(state: InferState, typ: Type) -> DoSequenceInfo | None:
     resolved = apply(state.subst, typ, state.effect_subst)
-    if isinstance(resolved, TApp) and _type_const_matches(resolved.base, "Maybe"):
+    if isinstance(resolved, TApp) and _type_const_matches(resolved.base, "Maybe", allow_qualified_leaf_match=False):
         return DoSequenceInfo(family="Maybe", payload_type=resolved.arg)
-    if isinstance(resolved, TApp) and isinstance(resolved.base, TApp) and _type_const_matches(resolved.base.base, "Result"):
+    if (
+        isinstance(resolved, TApp)
+        and isinstance(resolved.base, TApp)
+        and _type_const_matches(resolved.base.base, "Result", allow_qualified_leaf_match=False)
+    ):
         return DoSequenceInfo(
             family="Result",
             error_type=resolved.base.arg,

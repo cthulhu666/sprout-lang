@@ -98,6 +98,45 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "five")
 
+    def test_module_resolution_do_binding_shadows_imported_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app_dir = root / "app"
+            app_dir.mkdir()
+            (app_dir / "helper.sprout").write_text(
+                """
+                module app.helper
+
+                export fn a() -> Int =
+                  99
+                """,
+                encoding="utf-8",
+            )
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module app.main
+
+                import app.helper (a)
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    do
+                      a <- Just(1)
+                      Just(a)
+                  )
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "Just(1)")
+
     def test_module_rejects_effectful_top_level_let(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

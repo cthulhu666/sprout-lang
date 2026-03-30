@@ -170,6 +170,38 @@ class TypecheckerTests(unittest.TestCase):
             typecheck_program(parse(with_prelude(src)))
         self.assertIn("final expression must also return Maybe", str(ctx.exception))
 
+    def test_typecheck_do_notation_rejects_qualified_user_maybe_type(self) -> None:
+        fake = """
+        module app.fake
+
+        export type Maybe(..) a =
+          | Yep a
+          | Nope
+        """
+        src = """
+        module app.main
+
+        import app.fake
+
+        fn bad(m: fake.Maybe Int) -> fake.Maybe Int =
+          do
+            x <- m
+            fake.Yep(x)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app_dir = root / "app"
+            app_dir.mkdir()
+            (app_dir / "fake.sprout").write_text(fake, encoding="utf-8")
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            with self.assertRaises(TypeCheckError) as ctx:
+                typecheck_program(program)
+        self.assertIn("do bindings currently require Maybe or Result values", str(ctx.exception))
+
     def test_typecheck_int_range_expression_and_helpers(self) -> None:
         src = """
         fn sum_to(n: Int) -> Int =
