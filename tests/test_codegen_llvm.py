@@ -198,7 +198,7 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertNotIn("call i64 @sprout_field", ir)
         self.assertIn("phi i64", ir)
 
-    def test_compile_direct_constructor_match_falls_back_for_top_level_var_pattern(self) -> None:
+    def test_compile_direct_constructor_match_materializes_only_var_branch(self) -> None:
         src = """
         type MaybeInt =
           | Just Int
@@ -210,15 +210,18 @@ class CodegenLlvmTests(CodegenTestCase):
           | Nothing -> 0
 
         fn main() -> Int !{IO} =
-          match if true then Just(42) else Nothing with
-          | value -> print_int(unwrap(value))
+          match if false then Just(42) else Nothing with
+          | Just value -> print_int(value)
+          | whole -> print_int(unwrap(whole))
         """
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertIn("call i64 @sprout_make1(i64 0, i64 42)", ir)
-        self.assertIn("call i64 @sprout_nothing(i64 1)", ir)
-        self.assertIn("call i64 @sprout_tag", ir)
+        main_ir = ir.split("define i64 @main", 1)[1]
+        self.assertIn("call i64 @sprout_make1(i64 0, i64 42)", main_ir)
+        self.assertIn("call i64 @sprout_nothing(i64 1)", main_ir)
+        self.assertNotIn("call i64 @sprout_tag", main_ir)
+        self.assertNotIn("call i64 @sprout_field", main_ir)
 
     def test_compile_print_adt_value(self) -> None:
         src = """

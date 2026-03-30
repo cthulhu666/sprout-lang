@@ -1680,8 +1680,6 @@ def _try_emit_direct_ctor_match(
 def _supports_direct_ctor_match(
     scrutinee: ast.Expr, branches: list[ast.MatchBranch], ctor_sigs: dict[str, CtorSig]
 ) -> bool:
-    if any(isinstance(branch.pattern, ast.VarPattern) for branch in branches):
-        return False
     return _is_direct_ctor_scrutinee(scrutinee, ctor_sigs)
 
 
@@ -1837,7 +1835,7 @@ def _emit_direct_ctor_pattern_test(
     if isinstance(pattern, ast.WildcardPattern):
         return Value(I1, "1")
     if isinstance(pattern, ast.VarPattern):
-        return None
+        return Value(I1, "1")
     if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
         return None
     if isinstance(pattern, ast.ConstructorPattern):
@@ -1868,7 +1866,9 @@ def _emit_direct_ctor_pattern_bind(
     if isinstance(pattern, (ast.WildcardPattern, ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
         return 0
     if isinstance(pattern, ast.VarPattern):
-        raise CodegenError("Direct constructor match does not support top-level variable patterns")
+        materialized = _emit_ctor_value(ctor, payloads, emitter)
+        locals_[pattern.name] = materialized
+        return _emit_push_temp_root(materialized, emitter)
     if isinstance(pattern, ast.ConstructorPattern):
         if pattern.name != ctor.name:
             return 0
@@ -1877,6 +1877,44 @@ def _emit_direct_ctor_pattern_bind(
             rooted += _emit_pattern_bind(sub, value, locals_, ctor_sigs, emitter)
         return rooted
     raise CodegenError("Unsupported pattern form in direct constructor bind")
+
+
+def _emit_ctor_value(ctor: CtorSig, payloads: list[Value], emitter: Emitter) -> Value:
+    if len(payloads) != len(ctor.arg_types):
+        raise CodegenError(
+            f"Constructor {ctor.name} expects {len(ctor.arg_types)} args, got {len(payloads)} in backend materialization"
+        )
+    tmp = emitter.tmp()
+    if len(payloads) == 0:
+        if ctor.name.rsplit(".", 1)[-1] == "Nothing":
+            emitter.emit(f"  {tmp} = call i64 @sprout_nothing(i64 {ctor.tag})")
+        else:
+            emitter.emit(f"  {tmp} = call i64 @sprout_make0(i64 {ctor.tag})")
+        return Value(I64, tmp)
+
+    rooted_payloads = 0
+    packed_payloads: list[str] = []
+    for payload in payloads:
+        rooted_payloads += _emit_push_temp_root(payload, emitter)
+        packed_payloads.append(_pack_to_i64(payload, emitter))
+    _emit_pop_temp_roots(rooted_payloads, emitter)
+
+    rooted_packed = 0
+    for packed in packed_payloads:
+        rooted_packed += _emit_push_temp_root(Value(I64, packed), emitter)
+    if len(packed_payloads) == 1:
+        emitter.emit(f"  {tmp} = call i64 @sprout_make1(i64 {ctor.tag}, i64 {packed_payloads[0]})")
+    elif len(packed_payloads) == 2:
+        emitter.emit(
+            f"  {tmp} = call i64 @sprout_make2(i64 {ctor.tag}, i64 {packed_payloads[0]}, i64 {packed_payloads[1]})"
+        )
+    else:
+        emitter.emit(
+            "  "
+            + f"{tmp} = call i64 @sprout_make3(i64 {ctor.tag}, i64 {packed_payloads[0]}, i64 {packed_payloads[1]}, i64 {packed_payloads[2]})"
+        )
+    _emit_pop_temp_roots(rooted_packed, emitter)
+    return Value(I64, tmp)
 
 
 def _finalize_match_result(branch_vals: list[tuple[Value, str]], done_label: str, emitter: Emitter) -> Value:
