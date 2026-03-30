@@ -22,6 +22,7 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 - [Int Ranges v1 Draft](./docs/int-ranges-v1-draft.md)
 - [Native REPL Roadmap](./docs/native-repl-roadmap.md)
 - [REPL Self-Hosting v1 Draft](./docs/repl-self-hosting-v1-draft.md)
+- [Compiler Self-Hosting Roadmap](./docs/compiler-self-hosting-roadmap.md)
 - [Sequencing Sugar v1 Draft](./docs/sequencing-sugar-v1-draft.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 - [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)
@@ -66,6 +67,10 @@ Normative status:
   milestones are currently deferred as product work, but the native REPL bridge
   is being shaped as reusable language-service infrastructure for those later
   directions rather than as REPL-only glue.
+- `docs/compiler-self-hosting-roadmap.md` now captures the broader staged path
+  from the current host implementation toward a compiler implemented
+  substantially in Sprout, but that roadmap is explicitly downstream of the
+  current native-REPL-first pause point.
 
 ## Repository Layout
 
