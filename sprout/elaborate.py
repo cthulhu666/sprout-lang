@@ -222,17 +222,17 @@ def _build_do_failure_core(step: ast.DoBindStep, family: str) -> core.Expr:
 
 
 def _build_do_let_core(name: str, value: ast.Expr, body: core.Expr, src: object) -> core.Expr:
-    return core.CallExpr(
-        callee=core.LambdaExpr(params=[ast.Param(name=name, type_expr=None)], body=body, src=src),
-        args=[_surface_expr_to_core(value)],
+    return core.MatchExpr(
+        scrutinee=_surface_expr_to_core(value),
+        branches=[core.MatchBranch(pattern=core.VarPattern(name=name, src=src), value=body, src=src)],
         src=src,
     )
 
 
 def _build_do_ignore_core(value: ast.Expr, body: core.Expr, index: int, src: object) -> core.Expr:
-    return core.CallExpr(
-        callee=core.LambdaExpr(params=[ast.Param(name=f"__sprout_do_ignore_{index}", type_expr=None)], body=body, src=src),
-        args=[_surface_expr_to_core(value)],
+    return core.MatchExpr(
+        scrutinee=_surface_expr_to_core(value),
+        branches=[core.MatchBranch(pattern=core.WildcardPattern(src=src), value=body, src=src)],
         src=src,
     )
 
