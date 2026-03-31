@@ -1,9 +1,10 @@
 module stdlib.repl
+import stdlib.compiler as compiler
 import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_line_once)
 import stdlib.string as string
 
 type SubmissionResult =
-  | Continue (Vec String)(Vec String)(Vec String)
+  | Continue (Vec String)(compiler.CompilerSession)
   | Exit
 
 type ReadResult =
@@ -348,7 +349,7 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
   | Just line -> gather_declaration_names(declarations, index + 1, append_declaration_names(acc, trim(line)))
   | Nothing -> acc
 
-fn completion_candidates_local(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO} =
+fn completion_candidates_local(line_buffer: String, session: compiler.CompilerSession) -> (String, Vec String) !{IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
       if string.find(prefix, ".") == -1 then
@@ -360,10 +361,10 @@ fn completion_candidates_local(line_buffer: String, imports: Vec String, declara
                 prefix,
                 lower_ascii(prefix),
                 gather_declaration_names(
-                  declarations,
+                  compiler.session_declarations(session),
                   0,
                   gather_import_names(
-                    imports,
+                    compiler.session_imports(session),
                     0,
                     append_names_from_vec(
                       append_names_from_vec(
@@ -386,7 +387,7 @@ fn completion_candidates_local(line_buffer: String, imports: Vec String, declara
           filter_names_by_prefix(
             prefix,
             lower_ascii(prefix),
-            dotted_completion_candidates(prefix, imports),
+            dotted_completion_candidates(prefix, compiler.session_imports(session)),
             0,
             vec_empty()
           )
@@ -397,63 +398,63 @@ fn apply_completion(current: String, prefix: String, matches: Vec String) -> Str
   else if vec_length(matches) != 1 then current
   else drop_last_count(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
 
-fn complete_current_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int) -> Maybe String !{IO} =
-  match completion_candidates_local(current, imports, declarations) with
+fn complete_current_line(prompt: String, history: Vec String, session: compiler.CompilerSession, current: String, cursor: Int) -> Maybe String !{IO} =
+  match completion_candidates_local(current, session) with
   | (prefix, matches) ->
-      if prefix == "" then interactive_read_line_loop(prompt, history, imports, declarations, current, string.length(current), -1, current)
-      else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, -1, current)
+      if prefix == "" then interactive_read_line_loop(prompt, history, session, current, string.length(current), -1, current)
+      else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, session, current, cursor, -1, current)
       else if vec_length(matches) == 1 then
         after(
           redraw_input(prompt, apply_completion(current, prefix, matches), string.length(apply_completion(current, prefix, matches))),
-          interactive_read_line_loop(prompt, history, imports, declarations, apply_completion(current, prefix, matches), string.length(apply_completion(current, prefix, matches)), -1, apply_completion(current, prefix, matches))
+          interactive_read_line_loop(prompt, history, session, apply_completion(current, prefix, matches), string.length(apply_completion(current, prefix, matches)), -1, apply_completion(current, prefix, matches))
         )
       else
         after(
           after(term_write("\r\n"), render_interactive_match_lines(matches, 0)),
-          after(redraw_input(prompt, current, cursor), interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, -1, current))
+          after(redraw_input(prompt, current, cursor), interactive_read_line_loop(prompt, history, session, current, cursor, -1, current))
         )
 
-fn interactive_read_line_step(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
+fn interactive_read_line_step(prompt: String, history: Vec String, session: compiler.CompilerSession, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
   if key == "" then Nothing
-  else if key == "ctrl-d" then if current == "" then after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, browse_index, draft)
+  else if key == "ctrl-d" then if current == "" then after(term_write("\r\n"), Nothing) else interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
   else if key == "enter" then after(term_write("\r\n"), Just(current))
   else if key == "backspace" then
-    if cursor <= 0 then interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, browse_index, draft)
-    else after(redraw_input(prompt, delete_before(current, cursor), cursor - 1), interactive_read_line_loop(prompt, history, imports, declarations, delete_before(current, cursor), cursor - 1, -1, delete_before(current, cursor)))
+    if cursor <= 0 then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
+    else after(redraw_input(prompt, delete_before(current, cursor), cursor - 1), interactive_read_line_loop(prompt, history, session, delete_before(current, cursor), cursor - 1, -1, delete_before(current, cursor)))
   else if key == "escape" then
-    interactive_read_line_step(prompt, history, imports, declarations, current, cursor, browse_index, draft, read_escape_token())
+    interactive_read_line_step(prompt, history, session, current, cursor, browse_index, draft, read_escape_token())
   else if key == "tab" then
-    complete_current_line(prompt, history, imports, declarations, current, cursor)
+    complete_current_line(prompt, history, session, current, cursor)
   else if key == "left" || key == "ctrl-b" then
-    if cursor <= 0 then interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, browse_index, draft)
-    else after(redraw_input(prompt, current, cursor - 1), interactive_read_line_loop(prompt, history, imports, declarations, current, cursor - 1, browse_index, draft))
+    if cursor <= 0 then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
+    else after(redraw_input(prompt, current, cursor - 1), interactive_read_line_loop(prompt, history, session, current, cursor - 1, browse_index, draft))
   else if key == "right" || key == "ctrl-f" then
-    if cursor >= string.length(current) then interactive_read_line_loop(prompt, history, imports, declarations, current, cursor, browse_index, draft)
-    else after(redraw_input(prompt, current, cursor + 1), interactive_read_line_loop(prompt, history, imports, declarations, current, cursor + 1, browse_index, draft))
+    if cursor >= string.length(current) then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
+    else after(redraw_input(prompt, current, cursor + 1), interactive_read_line_loop(prompt, history, session, current, cursor + 1, browse_index, draft))
   else if key == "ctrl-a" then
-    after(redraw_input(prompt, current, 0), interactive_read_line_loop(prompt, history, imports, declarations, current, 0, browse_index, draft))
+    after(redraw_input(prompt, current, 0), interactive_read_line_loop(prompt, history, session, current, 0, browse_index, draft))
   else if key == "ctrl-e" then
-    after(redraw_input(prompt, current, string.length(current)), interactive_read_line_loop(prompt, history, imports, declarations, current, string.length(current), browse_index, draft))
+    after(redraw_input(prompt, current, string.length(current)), interactive_read_line_loop(prompt, history, session, current, string.length(current), browse_index, draft))
   else if key == "up" then
     match history_prev(current, history, browse_index, draft) with
     | (next_current, next_index, next_draft) ->
-        after(redraw_input(prompt, next_current, string.length(next_current)), interactive_read_line_loop(prompt, history, imports, declarations, next_current, string.length(next_current), next_index, next_draft))
+        after(redraw_input(prompt, next_current, string.length(next_current)), interactive_read_line_loop(prompt, history, session, next_current, string.length(next_current), next_index, next_draft))
   else if key == "down" then
     match history_next(current, history, browse_index, draft) with
     | (next_current, next_index, next_draft) ->
-        after(redraw_input(prompt, next_current, string.length(next_current)), interactive_read_line_loop(prompt, history, imports, declarations, next_current, string.length(next_current), next_index, next_draft))
+        after(redraw_input(prompt, next_current, string.length(next_current)), interactive_read_line_loop(prompt, history, session, next_current, string.length(next_current), next_index, next_draft))
   else
-    after(redraw_input(prompt, insert_at(current, cursor, key), cursor + string.length(key)), interactive_read_line_loop(prompt, history, imports, declarations, insert_at(current, cursor, key), cursor + string.length(key), -1, insert_at(current, cursor, key)))
+    after(redraw_input(prompt, insert_at(current, cursor, key), cursor + string.length(key)), interactive_read_line_loop(prompt, history, session, insert_at(current, cursor, key), cursor + string.length(key), -1, insert_at(current, cursor, key)))
 
-fn interactive_read_line_loop(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
-  interactive_read_line_step(prompt, history, imports, declarations, current, cursor, browse_index, draft, term_read_key_once())
+fn interactive_read_line_loop(prompt: String, history: Vec String, session: compiler.CompilerSession, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+  interactive_read_line_step(prompt, history, session, current, cursor, browse_index, draft, term_read_key_once())
 
-fn interactive_read_line(prompt: String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
-  after(redraw_input(prompt, "", 0), interactive_read_line_loop(prompt, history, imports, declarations, "", 0, -1, ""))
+fn interactive_read_line(prompt: String, history: Vec String, session: compiler.CompilerSession) -> Maybe String !{IO} =
+  after(redraw_input(prompt, "", 0), interactive_read_line_loop(prompt, history, session, "", 0, -1, ""))
 
-fn read_input_line(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Maybe String !{IO} =
+fn read_input_line(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession) -> Maybe String !{IO} =
   match prompt with
-  | Just text -> interactive_read_line(text, history, imports, declarations)
+  | Just text -> interactive_read_line(text, history, session)
   | Nothing -> term_read_line_once()
 
 fn append_submission_line(acc: String, line: String) -> String =
@@ -464,18 +465,18 @@ fn block_prompt(prompt: Maybe String) -> Maybe String =
   | Just _ -> Just("block| ")
   | Nothing -> Nothing
 
-fn read_block_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String, acc: String) -> ReadResult !{IO} =
-  match read_input_line(block_prompt(prompt), history, imports, declarations) with
+fn read_block_submission(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession, acc: String) -> ReadResult !{IO} =
+  match read_input_line(block_prompt(prompt), history, session) with
   | Just line ->
       if trim(line) == ":}" then Submission(acc)
       else if trim(line) == ":cancel" || trim(line) == ":abort" then ReadNotice("cancelled block")
-      else read_block_submission(prompt, history, imports, declarations, append_submission_line(acc, line))
+      else read_block_submission(prompt, history, session, append_submission_line(acc, line))
   | Nothing -> ReadError("unterminated `:{` block; expected `:}` before end of input")
 
-fn read_submission(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> ReadResult !{IO} =
-  match read_input_line(prompt, history, imports, declarations) with
+fn read_submission(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession) -> ReadResult !{IO} =
+  match read_input_line(prompt, history, session) with
   | Just line ->
-      if trim(line) == ":{" then read_block_submission(prompt, history, imports, declarations, "")
+      if trim(line) == ":{" then read_block_submission(prompt, history, session, "")
       else Submission(line)
   | Nothing -> EndInput
 
@@ -497,15 +498,6 @@ fn render_expr_result(result: Result String (Vec String)) -> Vec String =
   | Ok lines -> lines
   | Err message -> render_error(message)
 
-fn render_instances_result(result: Result String (String, Vec String)) -> Vec String =
-  match result with
-  | Err message -> render_error(message)
-  | Ok pair ->
-      match pair with
-      | (query_type, matches) ->
-          if vec_length(matches) == 0 then single_line("No instances for " ++ query_type)
-          else single_line("Instances for " ++ query_type ++":" ) ++ matches
-
 fn help_lines() -> Vec String =
   single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, :{ ... :}, and :cancel inside block mode, plus ordinary import lines")
 
@@ -516,16 +508,6 @@ fn is_declaration(raw: String) -> Bool =
   || string.starts_with(raw, "class ")
   || string.starts_with(raw, "instance ")
   || string.starts_with(raw, "export ")
-
-fn append_source_block(acc: String, block: String) -> String =
-  if block == "" then acc
-  else if acc == "" then block
-  else acc ++ "\n\n" ++ block
-
-fn append_source_blocks(acc: String, blocks: Vec String, index: Int) -> String =
-  match vec_get(index, blocks) with
-  | Just block -> append_source_blocks(append_source_block(acc, block), blocks, index + 1)
-  | Nothing -> acc
 
 fn block_line_is_continuation(line: String) -> Bool =
   if line == "" then false
@@ -555,64 +537,70 @@ fn block_chunks_from_lines(lines: Vec String, index: Int, chunks: Vec String, cu
 fn block_chunks(raw: String) -> Vec String =
   block_chunks_from_lines(string.string_lines(raw), 0, vec_empty(), "")
 
-fn session_source(imports: Vec String, declarations: Vec String) -> String =
-  append_source_blocks(append_source_blocks("module app.repl", imports, 0), declarations, 0)
+fn handle_type_command(line: String, prefix: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+  if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":type expects an expression"), session)
+  else Continue(render_type_result(compiler.type_of(session, trim(drop_prefix(line, prefix)))), session)
 
-fn handle_type_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
-  if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":type expects an expression"), imports, declarations)
-  else Continue(render_type_result(repl_type_of_in_source(session_source(imports, declarations), trim(drop_prefix(line, prefix)))), imports, declarations)
+fn render_compiler_instances_result(result: Result String compiler.InstanceMatches) -> Vec String =
+  match result with
+  | Err message -> render_error(message)
+  | Ok payload ->
+      if vec_length(compiler.instance_match_names(payload)) == 0 then
+        single_line("No instances for " ++ compiler.instance_query_type(payload))
+      else
+        single_line("Instances for " ++ compiler.instance_query_type(payload) ++":" ) ++ compiler.instance_match_names(payload)
 
-fn handle_instances_command(line: String, prefix: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
-  if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), imports, declarations)
-  else Continue(render_instances_result(repl_instances_in_source(session_source(imports, declarations), trim(drop_prefix(line, prefix)))), imports, declarations)
+fn handle_instances_command(line: String, prefix: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+  if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), session)
+  else Continue(render_compiler_instances_result(compiler.instances(session, trim(drop_prefix(line, prefix)))), session)
 
-fn handle_import_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
-  match repl_check_source(session_source(vec_append(line, imports), declarations)) with
-  | Ok _ -> Continue(single_line("ok"), vec_append(line, imports), declarations)
-  | Err message -> Continue(render_error(message), imports, declarations)
+fn handle_import_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+  match compiler.check(compiler.with_import(line, session)) with
+  | Ok _ -> Continue(single_line("ok"), compiler.with_import(line, session))
+  | Err message -> Continue(render_error(message), session)
 
-fn handle_declaration_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
-  match repl_check_source(session_source(imports, vec_append(line, declarations))) with
-  | Ok _ -> Continue(single_line("ok"), imports, vec_append(line, declarations))
-  | Err message -> Continue(render_error(message), imports, declarations)
+fn handle_declaration_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+  match compiler.check(compiler.with_declaration(line, session)) with
+  | Ok _ -> Continue(single_line("ok"), compiler.with_declaration(line, session))
+  | Err message -> Continue(render_error(message), session)
 
-fn handle_trimmed_submission(line: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
-  if line == "" then Continue(vec_empty(), imports, declarations)
-  else if line == ":help" then Continue(help_lines(), imports, declarations)
+fn handle_trimmed_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+  if line == "" then Continue(vec_empty(), session)
+  else if line == ":help" then Continue(help_lines(), session)
   else if line == ":quit" || line == ":q" || line == ":exit" then Exit
   else if line == "module" || string.starts_with(line, "module ") then
-    Continue(render_error("repl manages its module header automatically; use `import ...` directly"), imports, declarations)
+    Continue(render_error("repl manages its module header automatically; use `import ...` directly"), session)
   else if string.starts_with(line, ":type ") then
-    handle_type_command(line, ":type ", imports, declarations)
+    handle_type_command(line, ":type ", session)
   else if string.starts_with(line, ":t ") then
-    handle_type_command(line, ":t ", imports, declarations)
+    handle_type_command(line, ":t ", session)
   else if string.starts_with(line, ":instances ") then
-    handle_instances_command(line, ":instances ", imports, declarations)
+    handle_instances_command(line, ":instances ", session)
   else if string.starts_with(line, ":i ") then
-    handle_instances_command(line, ":i ", imports, declarations)
+    handle_instances_command(line, ":i ", session)
   else if string.starts_with(line, "import ") then
-    handle_import_submission(line, imports, declarations)
+    handle_import_submission(line, session)
   else if is_declaration(line) then
-    handle_declaration_submission(line, imports, declarations)
+    handle_declaration_submission(line, session)
   else
-    Continue(render_expr_result(repl_eval_expr_in_source(session_source(imports, declarations), line)), imports, declarations)
+    Continue(render_expr_result(compiler.eval_lines(session, line)), session)
 
-fn handle_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
-  handle_trimmed_submission(trim(raw), imports, declarations)
+fn handle_submission(raw: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+  handle_trimmed_submission(trim(raw), session)
 
 fn continue_block_execution(result: SubmissionResult, chunks: Vec String, index: Int, outputs: Vec String) -> SubmissionResult !{IO} =
   match result with
-  | Continue lines next_imports next_declarations ->
-      execute_block_chunks(chunks, index + 1, outputs ++ lines, next_imports, next_declarations)
+  | Continue lines next_session ->
+      execute_block_chunks(chunks, index + 1, outputs ++ lines, next_session)
   | Exit -> Exit
 
-fn execute_block_chunks(chunks: Vec String, index: Int, outputs: Vec String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
+fn execute_block_chunks(chunks: Vec String, index: Int, outputs: Vec String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
   match vec_get(index, chunks) with
-  | Just chunk -> continue_block_execution(handle_submission(chunk, imports, declarations), chunks, index, outputs)
-  | Nothing -> Continue(outputs, imports, declarations)
+  | Just chunk -> continue_block_execution(handle_submission(chunk, session), chunks, index, outputs)
+  | Nothing -> Continue(outputs, session)
 
-fn handle_block_submission(raw: String, imports: Vec String, declarations: Vec String) -> SubmissionResult !{IO} =
-  execute_block_chunks(block_chunks(raw), 0, vec_empty(), imports, declarations)
+fn handle_block_submission(raw: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+  execute_block_chunks(block_chunks(raw), 0, vec_empty(), session)
 
 fn push_history(history: Vec String, raw: String) -> Vec String =
   if trim(raw) == "" then history
@@ -620,27 +608,30 @@ fn push_history(history: Vec String, raw: String) -> Vec String =
 
 fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec String) -> Unit !{IO} =
   match result with
-  | Continue lines next_imports next_declarations ->
-      after(render_lines(prompt, lines, 0), repl_loop(prompt, history, next_imports, next_declarations))
+  | Continue lines next_session ->
+      after(render_lines(prompt, lines, 0), repl_loop_session(prompt, history, next_session))
   | Exit -> finish_loop(prompt)
 
 fn run_repl(prompt: Maybe String) -> Unit !{IO} =
-  repl_loop(prompt, vec_empty(), vec_empty(), vec_empty())
+  repl_loop_session(prompt, vec_empty(), compiler.empty_session())
 
 fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
   if banner == "" then run_repl(prompt)
   else after(term_write(banner), run_repl(prompt))
 
-export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
-  match read_submission(prompt, history, imports, declarations) with
+fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession) -> Unit !{IO} =
+  match read_submission(prompt, history, session) with
   | Submission line ->
       if string.find(line, "\n") == -1 then
-        continue_loop(handle_submission(line, imports, declarations), prompt, push_history(history, line))
+        continue_loop(handle_submission(line, session), prompt, push_history(history, line))
       else
-        continue_loop(handle_block_submission(line, imports, declarations), prompt, push_history(history, line))
-  | ReadNotice message -> after(render_lines(prompt, single_line(message), 0), repl_loop(prompt, history, imports, declarations))
-  | ReadError message -> after(render_lines(prompt, render_error(message), 0), repl_loop(prompt, history, imports, declarations))
+        continue_loop(handle_block_submission(line, session), prompt, push_history(history, line))
+  | ReadNotice message -> after(render_lines(prompt, single_line(message), 0), repl_loop_session(prompt, history, session))
+  | ReadError message -> after(render_lines(prompt, render_error(message), 0), repl_loop_session(prompt, history, session))
   | EndInput -> finish_loop(prompt)
+
+export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
+  repl_loop_session(prompt, history, compiler.CompilerSession(imports, declarations))
 
 export fn main() -> Unit !{IO} =
   if term_is_interactive_once()

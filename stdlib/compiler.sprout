@@ -62,18 +62,37 @@ export fn eval_lines(session: CompilerSession, expr: String) -> Result String (V
 export fn instances(session: CompilerSession, query: String) -> Result String InstanceMatches !{IO} =
   match analysis_instances_in_source(session_source(session), query) with
   | Err message -> Err(message)
-  | Ok (query_type, matches) -> Ok(InstanceMatches(query_type, matches))
+  | Ok payload -> Ok(instance_matches_from_pair(payload))
+
+fn instance_matches_from_pair(payload: (String, Vec String)) -> InstanceMatches =
+  match payload with
+  | (query_type, matches) -> InstanceMatches(query_type, matches)
+
+export fn instance_query_type(value: InstanceMatches) -> String =
+  match value with
+  | InstanceMatches query_type _ -> query_type
+
+export fn instance_match_names(value: InstanceMatches) -> Vec String =
+  match value with
+  | InstanceMatches _ matches -> matches
 
 export fn symbol_inventory(session: CompilerSession) -> Result String SymbolInventory !{IO} =
   match analysis_symbol_inventory_in_source(session_source(session)) with
   | Err message -> Err(message)
-  | Ok (declared, imported, exported) -> Ok(SymbolInventory(declared, imported, exported))
+  | Ok payload -> Ok(symbol_inventory_from_tuple(payload))
+
+fn symbol_inventory_from_tuple(payload: (Vec String, Vec String, Vec String)) -> SymbolInventory =
+  match payload with
+  | (declared, imported, exported) -> SymbolInventory(declared, imported, exported)
 
 fn map_diagnostics(lines: Vec (String, Int, Int), index: Int, acc: Vec Diagnostic) -> Vec Diagnostic =
   match vec_get(index, lines) with
-  | Just (message, line, column) ->
-      map_diagnostics(lines, index + 1, vec_append(Diagnostic(message, line, column), acc))
+  | Just entry -> map_diagnostics(lines, index + 1, vec_append(diagnostic_from_tuple(entry), acc))
   | Nothing -> acc
+
+fn diagnostic_from_tuple(entry: (String, Int, Int)) -> Diagnostic =
+  match entry with
+  | (message, line, column) -> Diagnostic(message, line, column)
 
 export fn diagnostics(session: CompilerSession) -> Vec Diagnostic !{IO} =
   map_diagnostics(analysis_diagnostics_in_source(session_source(session)), 0, vec_empty())
