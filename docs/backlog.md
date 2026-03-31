@@ -78,5 +78,5 @@ This file tracks open design, implementation, and tooling follow-up work.
 9. Generalize experimental `do` notation toward real monadic sequencing.
    Current implemented scope: layout-style `do` blocks with `<-` binds, resolved type-directed for `Maybe` and `Result`, then lowered by a dedicated post-typecheck elaboration step through a small explicit core expression form into nested `match`.
    Completed compiler-architecture follow-up: `do` desugaring no longer stays entangled with the typechecker.
-   Planned next follow-up: if Sprout grows broader Haskell-style sequencing, widen that initial core/emission boundary instead of adding more typechecker-local lowering.
+   Planned next follow-up: use that same typed-core/elaboration seam to add `IO` sequencing plus pure local `let` steps before considering broader row-polymorphic effect work.
    First milestone constraints: keep current `Maybe`/`Result` behavior stable, avoid committing prematurely to `IO` semantics, and treat parser/typechecker support as surface groundwork rather than the final compiler architecture.

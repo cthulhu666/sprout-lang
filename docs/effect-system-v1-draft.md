@@ -3,189 +3,259 @@
 Status note:
 
 - The minimal `!{IO}` effect system and restricted singleton effect variables
-  such as `!{e}` are now implemented in v0.
-- This document is now about the next effect milestone after that baseline, not
-  about introducing function effects for the first time.
+  such as `!{e}` are implemented in v0 and reflected in the normative spec.
+- This document defines the recommended next effect milestone beyond that
+  baseline. It is not part of normative v0.
 
-This document is a draft design for Sprout v1 effect handling.
+This document is a design draft for the next effect milestone in Sprout.
 
-It is not part of normative v0. Its purpose is to define the first major v1
-language milestone after the v0 core is stabilized.
+The main recommendation is intentionally narrow: improve the usability of the
+existing effect model before adding richer row machinery.
 
 ## 1. Problem Statement
 
-Sprout v0 now supports explicit closed effects on function types with the
-built-in `IO` label plus restricted singleton effect variables such as `!{e}`.
-That is a good baseline, but it still does not provide:
+Sprout v0 already has a real effect surface:
 
-- purity boundaries,
-- effect tracking,
-- explicit sequencing guarantees at the type level,
-- a principled way to extend effects beyond `IO`.
+- omitted effect annotation means pure
+- `!{IO}` marks effectful functions
+- singleton effect variables such as `!{e}` support restricted higher-order
+  effect polymorphism
 
-This leaves an important gap between the language’s safety goals and its effect
-story.
+That baseline is enough to describe purity boundaries honestly, but the next
+practical gap is no longer effect syntax. The next gap is effectful
+programming ergonomics.
+
+Today the main pain points are:
+
+1. `IO` does not yet participate in the experimental `do` notation.
+2. Local sequencing often falls back to ad hoc helpers such as `after(...)`
+   instead of a coherent language story.
+3. Higher-order effect propagation is implemented, but the diagnostic story is
+   still more compiler-shaped than beginner-shaped.
+4. It is still unclear whether Sprout needs richer rows soon, or whether that
+   would just add theory before the existing `IO` model is fully usable.
+
+The risk is straightforward: if Sprout pushes toward open rows or more effect
+labels too early, it may spend design complexity before the language has proven
+the simpler model insufficient.
 
 ## 2. Goals
 
-1. Extend the current effect system without changing Sprout’s default strict evaluation.
-2. Make effectful code explicit in function types.
-3. Keep the beginner model small enough to explain in one pass.
-4. Add richer rows or additional labels later, if they remain worth the complexity.
-5. Preserve readable diagnostics and predictable execution order.
+1. Make the current effect model pleasant enough for ordinary IO-heavy code.
+2. Preserve strict, left-to-right execution and explicit effect boundaries.
+3. Improve higher-order effect diagnostics without changing the core surface
+   unnecessarily.
+4. Keep the next milestone small enough to ship end-to-end, including docs and
+   diagnostics.
+5. Avoid committing to open rows, handlers, or user-defined effects before
+   there is concrete pressure for them.
 
 ## 3. Non-Goals
 
-1. Do not introduce laziness by default.
-2. Do not add a full algebraic-effects-and-handlers design in the first v1 milestone.
-3. Do not require higher-kinded types or a typeclass-based effect library.
-4. Do not redesign the entire stdlib in the first pass beyond what effect typing requires.
+1. Do not introduce open or multi-entry effect rows in this milestone.
+2. Do not add user-defined effect labels or effect handlers.
+3. Do not redesign the language around monads or higher-kinded types.
+4. Do not change the strict evaluation model.
+5. Do not widen the normative v0 contract pre-emptively through examples or
+   stdlib APIs.
 
-## 4. Proposed Direction
+## 4. High-Level Implementation Overview
 
-The next effect milestone extends the current v0 effect system.
+Recommended order:
 
-Illustrative surface model:
+1. Keep the current v0 function-effect model unchanged:
+   pure by default, explicit `!{IO}`, singleton `!{e}` only.
+2. Extend the experimental `do` notation so `IO` can sequence through the same
+   typed-core/elaboration seam already used for `Maybe` and `Result`.
+3. Add pure local `let` steps inside `do` so effectful code does not require
+   awkward helper extraction for simple intermediate values.
+4. Improve effect diagnostics around:
+   - calling `!{IO}` from a pure function
+   - forgetting to propagate an effect variable through a higher-order helper
+   - declaring `main` or another function with an effect that is too narrow
+5. Only after this ergonomics pass, revisit whether richer rows are still
+   justified.
+
+This keeps the next milestone focused on usability, not theory expansion.
+
+## 5. Proposed Direction
+
+The recommended next effect milestone is:
+
+1. Keep the current row-shaped syntax.
+2. Keep only closed `!{IO}` and singleton `!{e}` in the contract.
+3. Add `IO` integration to the existing experimental `do` notation.
+4. Add pure local bind steps inside `do`.
+5. Sharpen effect diagnostics and examples.
+
+Illustrative target surface:
 
 ```sprout
-fn read_name() -> String !{IO}
-fn parse_age(raw: String) -> Result String Int !{}
-fn main() -> Unit !{IO}
+fn prompt_name() -> String !{IO} =
+  do
+    print("name?")
+    raw <- term_read_line_once()
+    let name = maybe_or("anonymous", raw)
+    print("hello")
+    pure(name)
 ```
 
-Interpretation:
+The exact surface spelling for plain effectful steps and final return helpers
+is still open, but the milestone should target this shape of sequential IO code
+rather than richer effect rows.
 
-- `!{}` means the function is pure.
-- `!{IO}` means the function may perform IO.
-- `!{e}` means a singleton effect variable.
-- Effects are attached to function types, not encoded as ordinary result values.
+## 6. Syntax and Semantics Impact
 
-This extends the current v0 convention where closed effects such as `!{IO}` are
-already part of function types.
+Recommended syntax direction:
 
-## 5. Core Syntax
-
-Draft syntax for function effects:
+1. Keep function effects unchanged:
+   - omitted annotation means pure
+   - `!{IO}` means observable runtime interaction
+   - `!{e}` means a singleton effect variable
+2. Keep `do` / `<-` as the sequencing surface.
+3. Add pure local bind steps inside `do`, for example:
 
 ```sprout
-fn inc(x: Int) -> Int = x + 1
-fn print_name(name: String) -> Unit !{IO} = print(name)
+do
+  line <- term_read_line_once()
+  let cleaned = trim(maybe_or("", line))
+  print(cleaned)
 ```
 
-Draft syntax for effect-polymorphic function types:
+4. Add an `IO` sequencing family to the existing `do` elaboration path rather
+   than creating a separate special-case statement language.
 
-```sprout
-fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =
-  f(f(x))
-```
+Semantics remain:
 
-Current baseline:
+1. strict
+2. left-to-right
+3. effectful when evaluated, not delayed
+4. explicit at function boundaries
 
-- effect syntax stays row-shaped: `!{...}`
-- pure-by-default remains the rule
-- mixed/open rows remain deferred
+This milestone should not change when effects happen. It should only make the
+existing model easier to express and understand.
 
-## 6. Semantics
+## 7. Type-System Impact
 
-Evaluation remains strict and left-to-right.
+The recommended type-system stance is conservative.
 
-The effect system changes what programs are accepted, not the basic runtime
-order. In particular:
+Keep:
 
-1. Pure expressions may not call effectful functions.
-2. Effectful expressions may call pure or effectful functions.
-3. `main` is expected to be effectful when it performs observable work.
-4. Effects happen when effectful expressions are evaluated under the existing
-   strict execution model.
+1. closed `!{IO}`
+2. singleton effect variables `!{e}`
+3. concrete-effect requirement for effectful `main`
 
-## 7. Typing Model
+Add or clarify:
 
-At a high level:
-
-1. Every function type carries an effect set or effect variable.
-2. Calling a function contributes its effect set to the calling context.
-3. A function declared pure must typecheck with an empty effect set.
-4. Effect-polymorphic helpers may abstract over effect variables.
+1. `do` blocks may sequence `IO` in addition to `Maybe` and `Result`
+2. a single `do` block still belongs to one sequencing family
+3. pure local `let` steps inside `do` do not change the surrounding effect
+   family
+4. higher-order helpers should keep propagating a shared singleton effect
+   variable rather than inferring richer rows
 
 Illustrative examples:
 
 ```sprout
-fn id(x: a) -> a !{} = x
-
-fn log_and_return(x: Int) -> Int !{IO} =
-  keep(print_int(x), x)
+fn apply_once(f: Int -> Int !{e}, x: Int) -> Int !{e} =
+  f(x)
 ```
-
-Potential internal representation:
-
-- extend function types from `a -> b !{IO}` to richer row forms,
-- model `e` as an effect-row variable.
-
-## 8. Diagnostics
-
-The next effect milestone should prioritize a few high-value diagnostics:
-
-1. Calling an effectful function from a pure context.
-2. Declaring a function pure when its body performs effects.
-3. Declaring a narrower effect set than the body requires.
-4. Failing to propagate an effect variable through a higher-order helper.
-
-Example style:
-
-- what failed,
-- where the effect escaped,
-- what signature change would fix it.
-
-## 9. Builtins and Stdlib Impact
-
-The next migration target is straightforward:
-
-1. Existing `!{IO}` builtins remain valid.
-2. Pure helpers in `stdlib/prelude.sprout` stay pure.
-3. Result-oriented error handling remains orthogonal to effects.
-4. Higher-order helpers gain effect-polymorphic signatures where needed.
-
-Illustrative baseline:
 
 ```sprout
-fn main() -> Unit !{IO} = print("hello")
+fn show_twice(x: Int) -> Unit !{IO} =
+  do
+    print_int(x)
+    print_int(x)
 ```
 
-Next milestone direction:
+This milestone should explicitly defer:
 
-- keep the existing closed-effect syntax,
-- add effect polymorphism,
-- and decide whether additional built-in effect labels beyond `IO` are worth
-  exposing.
+1. `!{IO, e}`
+2. `!{e, f}`
+3. user-defined effect labels
+4. row subtraction or handlers
 
-## 10. Compatibility and Migration
+## 8. Error-Message Impact
 
-Migration from the current v0 baseline should be incremental:
+This should be one of the main deliverables, not a cleanup afterthought.
 
-1. Existing `!{IO}` code remains valid.
-2. Higher-order helpers gain effect-polymorphic signatures.
-3. Documentation explains which new forms are additive versus required.
+High-value diagnostics:
 
-## 11. Milestone Plan
+1. calling a `!{IO}` function from a pure function
+2. forgetting to propagate an effect variable through a higher-order helper
+3. giving `main` an effect-polymorphic signature
+4. using a `do` bind step from the wrong sequencing family
+5. using an `IO`-sequencing form in a pure-returning `do` block
 
-Proposed next effect milestone:
+Diagnostic style should say:
 
-1. Explore whether open rows or only row variables are needed next.
-2. Improve diagnostics around higher-order effect propagation.
-3. Evaluate whether additional built-in effect labels beyond `IO` are worth exposing.
-4. Update docs and examples.
+1. what failed
+2. which expression introduced the effect
+3. what function annotation or block family change would fix it
 
-Deferred beyond the first milestone:
+Representative tone:
 
-- user-defined effect kinds beyond the initial built-in set,
-- effect handlers,
-- capability-style resource typing,
-- interaction with modules/typeclasses if those become normative first.
+- `This function is inferred pure, but this call requires !{IO}.`
+- `This helper calls an effect-polymorphic argument, so its result type must also carry !{e}.`
+- `This do block sequences IO, so its final expression must remain in the IO family.`
 
-## 12. Open Questions
+## 9. Compatibility and Migration Notes
 
-1. Should the next effect milestone add open rows, or keep only singleton row variables?
-2. Should local inference infer richer effect sets, or require more explicit
-   function-level effect annotations for clearer diagnostics?
-3. Should Sprout expose more than one built-in effect label after `IO`, or keep
-   the surface minimal longer?
+Recommended migration stance:
+
+1. existing v0 effect annotations remain valid
+2. existing `Maybe`/`Result` `do` code remains valid
+3. new `IO`-aware sequencing should be additive at first
+4. ad hoc sequencing helpers such as `after(...)` may remain temporarily, but
+   they should no longer be the preferred story once `IO` sequencing lands
+
+Compatibility rule of thumb:
+
+- prefer additive ergonomic improvement first
+- do not force a broad rewrite of existing `!{IO}` code just to introduce the
+  new sequencing path
+
+## 10. Tests to Add or Update
+
+When implemented, this milestone should add or update coverage for:
+
+1. parser tests for the chosen `IO`-related `do` forms
+2. typechecker tests for valid and invalid `IO` sequencing
+3. typechecker tests for clearer higher-order effect propagation failures
+4. runtime tests showing `IO` `do` evaluation order remains strict
+5. formatter/linter tests if the new `do` forms introduce additional spacing or
+   layout rules
+
+## 11. Spec and Documentation Impact
+
+If this draft becomes an implementation plan, the corresponding change should
+update:
+
+1. `docs/spec-v0.md` only if any part becomes normative v0
+2. `README.md` to describe the current implementation status accurately
+3. `docs/sequencing-sugar-v1-draft.md` so it no longer treats `IO` integration
+   as an undefined future direction
+4. relevant examples and tests in the same change
+
+Until then, this document remains a draft for post-v0 effect work.
+
+## 12. Decision Summary
+
+Recommended decision:
+
+1. Do not make open rows the next effect milestone.
+2. Do not add more built-in effect labels yet.
+3. Make `IO` sequencing and effect diagnostics the next effect milestone.
+4. Re-evaluate richer rows only after the existing effect model is pleasant
+   enough for ordinary programs.
+
+## 13. Open Questions
+
+1. What is the best surface for plain effectful steps inside `do` blocks:
+   bare expressions, a dedicated keyword, or both?
+2. Should `IO` `do` blocks require an explicit final constructor/helper, or
+   should the elaboration infer the final sequencing form?
+3. Should pure local `let` inside `do` be layout-only, or share the ordinary
+   `let` surface exactly?
+4. Once `IO` sequencing lands, does `after(...)` stay as a convenience helper,
+   or become legacy compatibility surface?

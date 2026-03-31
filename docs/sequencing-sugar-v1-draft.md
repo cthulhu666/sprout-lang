@@ -205,6 +205,6 @@ Likely follow-up directions include:
 1. Pure local binds inside `do`.
 2. Pattern binds in `<-` position.
 3. `Applicative`-style conveniences where they make sense.
-4. `IO` integration once the effect story is ready.
+4. `IO` integration as the next recommended sequencing/effects milestone.
 5. User-extensible sequencing abstractions, likely via typeclasses or closely
    related machinery.

@@ -67,7 +67,9 @@ Normative status:
 - Mixed/open effect rows are not supported yet; keep `!{IO}` and `!{e}` cases
   concrete for now.
 - `docs/effect-system-v1-draft.md` is now a forward-looking draft for the next
-  effect milestone beyond the implemented v0 baseline.
+  effect milestone beyond the implemented v0 baseline, with the current
+  recommended direction being `IO` sequencing ergonomics and diagnostics rather
+  than richer effect rows.
 - Native REPL work is the current tooling priority.
 - `docs/repl-self-hosting-v1-draft.md` and the language-server/compiler
   milestones are currently deferred as product work, but the native REPL bridge
