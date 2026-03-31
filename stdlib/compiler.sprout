@@ -1,0 +1,79 @@
+module stdlib.compiler
+import stdlib.string as string
+
+export type CompilerSession (..) =
+  | CompilerSession (Vec String)(Vec String)
+
+export type SymbolInventory (..) =
+  | SymbolInventory (Vec String)(Vec String)(Vec String)
+
+export type Diagnostic (..) =
+  | Diagnostic String Int Int
+
+export type InstanceMatches (..) =
+  | InstanceMatches String (Vec String)
+
+export fn empty_session() -> CompilerSession =
+  CompilerSession(vec_empty(), vec_empty())
+
+export fn session_imports(session: CompilerSession) -> Vec String =
+  match session with
+  | CompilerSession imports _ -> imports
+
+export fn session_declarations(session: CompilerSession) -> Vec String =
+  match session with
+  | CompilerSession _ declarations -> declarations
+
+export fn with_import(line: String, session: CompilerSession) -> CompilerSession =
+  match session with
+  | CompilerSession imports declarations -> CompilerSession(vec_append(line, imports), declarations)
+
+export fn with_declaration(line: String, session: CompilerSession) -> CompilerSession =
+  match session with
+  | CompilerSession imports declarations -> CompilerSession(imports, vec_append(line, declarations))
+
+fn join_lines(lines: Vec String, index: Int, acc: String) -> String =
+  match vec_get(index, lines) with
+  | Just line ->
+      if acc == "" then join_lines(lines, index + 1, line)
+      else join_lines(lines, index + 1, string.concat(string.concat(acc, "\n\n"), line))
+  | Nothing -> acc
+
+export fn session_source(session: CompilerSession) -> String =
+  match session with
+  | CompilerSession imports declarations ->
+      join_lines(declarations, 0, join_lines(imports, 0, "module app.session"))
+
+export fn check(session: CompilerSession) -> Result String Unit !{IO} =
+  analysis_check_source(session_source(session))
+
+export fn declared_names(session: CompilerSession) -> Result String (Vec String) !{IO} =
+  analysis_declared_names_in_source(session_source(session))
+
+export fn exported_names(session: CompilerSession) -> Result String (Vec String) !{IO} =
+  analysis_exported_names_in_source(session_source(session))
+
+export fn type_of(session: CompilerSession, expr: String) -> Result String String !{IO} =
+  analysis_type_of_in_source(session_source(session), expr)
+
+export fn eval_lines(session: CompilerSession, expr: String) -> Result String (Vec String) !{IO} =
+  repl_eval_expr_in_source(session_source(session), expr)
+
+export fn instances(session: CompilerSession, query: String) -> Result String InstanceMatches !{IO} =
+  match analysis_instances_in_source(session_source(session), query) with
+  | Err message -> Err(message)
+  | Ok (query_type, matches) -> Ok(InstanceMatches(query_type, matches))
+
+export fn symbol_inventory(session: CompilerSession) -> Result String SymbolInventory !{IO} =
+  match analysis_symbol_inventory_in_source(session_source(session)) with
+  | Err message -> Err(message)
+  | Ok (declared, imported, exported) -> Ok(SymbolInventory(declared, imported, exported))
+
+fn map_diagnostics(lines: Vec (String, Int, Int), index: Int, acc: Vec Diagnostic) -> Vec Diagnostic =
+  match vec_get(index, lines) with
+  | Just (message, line, column) ->
+      map_diagnostics(lines, index + 1, vec_append(Diagnostic(message, line, column), acc))
+  | Nothing -> acc
+
+export fn diagnostics(session: CompilerSession) -> Vec Diagnostic !{IO} =
+  map_diagnostics(analysis_diagnostics_in_source(session_source(session)), 0, vec_empty())

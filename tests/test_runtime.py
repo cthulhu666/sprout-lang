@@ -1748,6 +1748,128 @@ class RuntimeTests(unittest.TestCase):
             run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "27")
 
+    def test_stdlib_compiler_session_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler as compiler
+                import stdlib.string as string
+
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+
+                fn first_or(lines: Vec String, fallback: String) -> String =
+                  match vec_get(0, lines) with
+                  | Just line -> line
+                  | Nothing -> fallback
+
+                fn has_name(target: String, names: Vec String, index: Int) -> Bool =
+                  match vec_get(index, names) with
+                  | Just name -> if name == target then true else has_name(target, names, index + 1)
+                  | Nothing -> false
+
+                fn render_unit(result: Result String Unit) -> String =
+                  match result with
+                  | Ok _ -> "ok"
+                  | Err message -> string.concat("error: ", message)
+
+                fn render_names(result: Result String (Vec String), expected: String) -> String =
+                  match result with
+                  | Ok names -> if has_name(expected, names, 0) then "ok" else "missing"
+                  | Err message -> string.concat("error: ", message)
+
+                fn render_inventory(result: Result String compiler.SymbolInventory) -> String =
+                  match result with
+                  | Err message -> string.concat("error: ", message)
+                  | Ok inventory ->
+                      match inventory with
+                      | compiler.SymbolInventory declared imported exported ->
+                          if has_name("keep", declared, 0)
+                             && has_name("string", imported, 0)
+                             && has_name("keep", exported, 0)
+                          then "ok"
+                          else "bad"
+
+                fn render_type(result: Result String String) -> String =
+                  match result with
+                  | Ok value -> value
+                  | Err message -> string.concat("error: ", message)
+
+                fn render_eval(result: Result String (Vec String)) -> String =
+                  match result with
+                  | Ok lines -> first_or(lines, "<empty>")
+                  | Err message -> string.concat("error: ", message)
+
+                fn render_diagnostics(lines: Vec compiler.Diagnostic) -> String =
+                  int_to_string(vec_length(lines))
+
+                fn render_instances(result: Result String compiler.InstanceMatches) -> String =
+                  match result with
+                  | Err message -> string.concat("error: ", message)
+                  | Ok payload ->
+                      match payload with
+                      | compiler.InstanceMatches query_type matches ->
+                          if query_type == "List Int" && vec_length(matches) > 0 then "ok" else "bad"
+
+                fn analysis_session() -> compiler.CompilerSession =
+                  compiler.with_declaration(
+                    "export fn keep(x: Int) -> Int = x",
+                    compiler.with_import("import stdlib.string", compiler.empty_session())
+                  )
+
+                fn eval_session() -> compiler.CompilerSession =
+                  compiler.with_declaration("let answer = 41", compiler.empty_session())
+
+                fn main() -> Unit !{IO} =
+                  seq(
+                      print(render_unit(compiler.check(analysis_session()))),
+                    seq(
+                      print(render_names(compiler.declared_names(analysis_session()), "keep")),
+                      seq(
+                        print(render_names(compiler.exported_names(analysis_session()), "keep")),
+                        seq(
+                          print(render_inventory(compiler.symbol_inventory(analysis_session()))),
+                          seq(
+                            print(render_type(compiler.type_of(eval_session(), "answer + 1"))),
+                            seq(
+                              print(render_eval(compiler.eval_lines(eval_session(), "answer + 1"))),
+                              seq(
+                                print(render_diagnostics(compiler.diagnostics(eval_session()))),
+                                print(render_instances(compiler.instances(compiler.empty_session(), "List Int")))
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join(
+                    [
+                        "ok",
+                        "ok",
+                        "ok",
+                        "ok",
+                        "Int",
+                        "42",
+                        "0",
+                        "ok",
+                    ]
+                ),
+            )
+
     def test_runtime_function_local_where_bindings(self) -> None:
         src = """
         fn score(n: Int) -> Int =

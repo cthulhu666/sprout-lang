@@ -54,6 +54,12 @@ Normative status:
   sequencing `Maybe` and `Result` values. The surface is meant to leave room
   for broader Haskell-style sequencing later, but the current semantics are
   intentionally narrower and are not part of normative v0 yet.
+- The current implementation also includes an experimental compiler-driver
+  helper module in `stdlib/compiler.sprout`. It provides a Sprout-owned
+  `CompilerSession` wrapper over the snapshot-analysis bridge, with helpers
+  such as `check`, `type_of`, `eval_lines`, `declared_names`,
+  `exported_names`, `symbol_inventory`, `diagnostics`, and `instances`.
+  This module is not part of normative v0 yet.
 - The current implementation uses explicit function effects in the v0 core:
   pure functions omit an annotation, effectful functions use `!{IO}`, and
   higher-order helpers may use restricted singleton effect variables such as
@@ -378,6 +384,19 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `when_error(f, r)` runs `f` for `Err` and preserves `r`
 
 The current `after(effect, value)` helper in `stdlib/prelude.sprout` is a pragmatic sequencing convenience for `IO`. A more principled abstraction is likely needed later, probably in the direction of Haskell-style sequencing/typeclass machinery rather than a growing pile of ad hoc aliases.
+
+Experimental compiler helper module (in `stdlib/compiler.sprout`):
+
+- `CompilerSession` with `empty_session()`, `with_import(line, session)`, and
+  `with_declaration(line, session)`
+- `session_source(session) -> String`
+- snapshot helpers over the existing host analysis bridge:
+  `check(session)`, `declared_names(session)`, `exported_names(session)`,
+  `type_of(session, expr)`, `eval_lines(session, expr)`,
+  `symbol_inventory(session)`, `diagnostics(session)`, and
+  `instances(session, query)`
+- wrapper result types:
+  `SymbolInventory`, `Diagnostic`, and `InstanceMatches`
 
 Current call semantics note: ordinary function values support under-application.
 Sprout uses nested arrow types for multi-parameter functions, so `f(x)` returns
