@@ -13,6 +13,12 @@ export type Diagnostic (..) =
 export type InstanceMatches (..) =
   | InstanceMatches String (Vec String)
 
+type ReportPayload =
+  | ReportPayload (Vec Diagnostic)(SymbolInventory)
+
+export type CompilerReport (..) =
+  | CompilerReport Bool (Maybe String)(ReportPayload)
+
 export fn empty_session() -> CompilerSession =
   CompilerSession(vec_empty(), vec_empty())
 
@@ -46,6 +52,9 @@ export fn session_source(session: CompilerSession) -> String =
 
 export fn check(session: CompilerSession) -> Result String Unit !{IO} =
   analysis_check_source(session_source(session))
+
+fn empty_inventory() -> SymbolInventory =
+  SymbolInventory(vec_empty(), vec_empty(), vec_empty())
 
 export fn declared_names(session: CompilerSession) -> Result String (Vec String) !{IO} =
   analysis_declared_names_in_source(session_source(session))
@@ -87,12 +96,53 @@ fn symbol_inventory_from_tuple(payload: (Vec String, Vec String, Vec String)) ->
 
 fn map_diagnostics(lines: Vec (String, Int, Int), index: Int, acc: Vec Diagnostic) -> Vec Diagnostic =
   match vec_get(index, lines) with
-  | Just entry -> map_diagnostics(lines, index + 1, vec_append(diagnostic_from_tuple(entry), acc))
+  | Just value -> map_diagnostics(lines, index + 1, vec_append(diagnostic_from_tuple(value), acc))
   | Nothing -> acc
 
-fn diagnostic_from_tuple(entry: (String, Int, Int)) -> Diagnostic =
-  match entry with
+fn diagnostic_from_tuple(value: (String, Int, Int)) -> Diagnostic =
+  match value with
   | (message, line, column) -> Diagnostic(message, line, column)
 
 export fn diagnostics(session: CompilerSession) -> Vec Diagnostic !{IO} =
   map_diagnostics(analysis_diagnostics_in_source(session_source(session)), 0, vec_empty())
+
+fn inventory_or_empty(session: CompilerSession) -> SymbolInventory !{IO} =
+  match symbol_inventory(session) with
+  | Ok inventory -> inventory
+  | Err _ -> empty_inventory()
+
+fn build_report(ok: Bool, message: Maybe String, session: CompilerSession) -> CompilerReport !{IO} =
+  CompilerReport(ok, message, ReportPayload(diagnostics(session), inventory_or_empty(session)))
+
+export fn analyze(session: CompilerSession) -> CompilerReport !{IO} =
+  match check(session) with
+  | Ok _ -> build_report(true, Nothing, session)
+  | Err message -> build_report(false, Just(message), session)
+
+export fn report_is_ok(report: CompilerReport) -> Bool =
+  match report with
+  | CompilerReport ok _ _ -> ok
+
+export fn report_error_message(report: CompilerReport) -> Maybe String =
+  match report with
+  | CompilerReport _ message _ -> message
+
+export fn report_diagnostics(report: CompilerReport) -> Vec Diagnostic =
+  match report with
+  | CompilerReport _ _ payload -> payload_diagnostics(payload)
+
+export fn report_symbol_inventory(report: CompilerReport) -> SymbolInventory =
+  match report with
+  | CompilerReport _ _ payload -> payload_inventory(payload)
+
+fn payload_diagnostics(payload: ReportPayload) -> Vec Diagnostic =
+  match payload with
+  | ReportPayload items inventory -> items
+
+fn payload_inventory(payload: ReportPayload) -> SymbolInventory =
+  match payload with
+  | ReportPayload items inventory -> inventory
+
+export fn diagnostic_message(value: Diagnostic) -> String =
+  match value with
+  | Diagnostic message _ _ -> message

@@ -389,14 +389,17 @@ Experimental compiler helper module (in `stdlib/compiler.sprout`):
 
 - `CompilerSession` with `empty_session()`, `with_import(line, session)`, and
   `with_declaration(line, session)`
+- `CompilerReport` as a Sprout-owned snapshot analysis result carrying
+  validity, optional primary error text, diagnostics, and symbol inventory
 - `session_source(session) -> String`
 - snapshot helpers over the existing host analysis bridge:
+  `analyze(session)`,
   `check(session)`, `declared_names(session)`, `exported_names(session)`,
   `type_of(session, expr)`, `eval_lines(session, expr)`,
   `symbol_inventory(session)`, `diagnostics(session)`, and
   `instances(session, query)`
 - wrapper result types:
-  `SymbolInventory`, `Diagnostic`, and `InstanceMatches`
+  `SymbolInventory`, `Diagnostic`, `InstanceMatches`, and `CompilerReport`
 
 Current call semantics note: ordinary function values support under-application.
 Sprout uses nested arrow types for multi-parameter functions, so `f(x)` returns

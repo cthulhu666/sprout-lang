@@ -1805,6 +1805,18 @@ class RuntimeTests(unittest.TestCase):
                 fn render_diagnostics(lines: Vec compiler.Diagnostic) -> String =
                   int_to_string(vec_length(lines))
 
+                fn render_report(report: compiler.CompilerReport) -> String =
+                  if compiler.report_is_ok(report) then
+                    match compiler.report_symbol_inventory(report) with
+                    | compiler.SymbolInventory declared imported exported ->
+                        if has_name("keep", declared, 0)
+                           && has_name("string", imported, 0)
+                           && has_name("keep", exported, 0)
+                           && vec_length(compiler.report_diagnostics(report)) == 0
+                        then "ok"
+                        else "bad"
+                  else "bad"
+
                 fn render_instances(result: Result String compiler.InstanceMatches) -> String =
                   match result with
                   | Err message -> string.concat("error: ", message)
@@ -1830,6 +1842,8 @@ class RuntimeTests(unittest.TestCase):
                       seq(
                         print(render_names(compiler.exported_names(analysis_session()), "keep")),
                         seq(
+                          print(render_report(compiler.analyze(analysis_session()))),
+                          seq(
                           print(render_inventory(compiler.symbol_inventory(analysis_session()))),
                           seq(
                             print(render_type(compiler.type_of(eval_session(), "answer + 1"))),
@@ -1840,6 +1854,7 @@ class RuntimeTests(unittest.TestCase):
                                 print(render_instances(compiler.instances(compiler.empty_session(), "List Int")))
                               )
                             )
+                          )
                           )
                         )
                       )
@@ -1858,6 +1873,7 @@ class RuntimeTests(unittest.TestCase):
                 out.getvalue().strip(),
                 "\n".join(
                     [
+                        "ok",
                         "ok",
                         "ok",
                         "ok",

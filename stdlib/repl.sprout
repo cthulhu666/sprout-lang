@@ -550,19 +550,34 @@ fn render_compiler_instances_result(result: Result String compiler.InstanceMatch
       else
         single_line("Instances for " ++ compiler.instance_query_type(payload) ++":" ) ++ compiler.instance_match_names(payload)
 
+fn first_diagnostic_message(lines: Vec compiler.Diagnostic) -> Maybe String =
+  match vec_get(0, lines) with
+  | Just value -> Just(compiler.diagnostic_message(value))
+  | Nothing -> Nothing
+
+fn report_error_lines(report: compiler.CompilerReport) -> Vec String =
+  match compiler.report_error_message(report) with
+  | Just message -> render_error(message)
+  | Nothing ->
+      match first_diagnostic_message(compiler.report_diagnostics(report)) with
+      | Just message -> render_error(message)
+      | Nothing -> render_error("analysis failed")
+
 fn handle_instances_command(line: String, prefix: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), session)
   else Continue(render_compiler_instances_result(compiler.instances(session, trim(drop_prefix(line, prefix)))), session)
 
 fn handle_import_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
-  match compiler.check(compiler.with_import(line, session)) with
-  | Ok _ -> Continue(single_line("ok"), compiler.with_import(line, session))
-  | Err message -> Continue(render_error(message), session)
+  match compiler.analyze(compiler.with_import(line, session)) with
+  | report ->
+      if compiler.report_is_ok(report) then Continue(single_line("ok"), compiler.with_import(line, session))
+      else Continue(report_error_lines(report), session)
 
 fn handle_declaration_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
-  match compiler.check(compiler.with_declaration(line, session)) with
-  | Ok _ -> Continue(single_line("ok"), compiler.with_declaration(line, session))
-  | Err message -> Continue(render_error(message), session)
+  match compiler.analyze(compiler.with_declaration(line, session)) with
+  | report ->
+      if compiler.report_is_ok(report) then Continue(single_line("ok"), compiler.with_declaration(line, session))
+      else Continue(report_error_lines(report), session)
 
 fn handle_trimmed_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
   if line == "" then Continue(vec_empty(), session)
