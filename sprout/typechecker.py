@@ -829,6 +829,11 @@ def _do_sequence_info(state: InferState, typ: Type) -> DoSequenceInfo | None:
     return None
 
 
+def _effect_includes_io(state: InferState, effect: Effect) -> bool:
+    resolved = apply_effect(state.effect_subst, effect)
+    return isinstance(resolved, EClosed) and "IO" in resolved.labels
+
+
 def build_global_method_info(class_decls: dict[str, ClassDeclInfo]) -> dict[str, GlobalMethodInfo]:
     methods: dict[str, GlobalMethodInfo | None] = {}
     for class_name, class_info in class_decls.items():
@@ -1202,11 +1207,12 @@ def infer_expr(
         return _mark_expr_type(expr, out_t), out_effects
     do_expr = getattr(ast, "DoExpr", None)
     do_bind_step = getattr(ast, "DoBindStep", None)
+    do_let_step = getattr(ast, "DoLetStep", None)
     do_expr_step = getattr(ast, "DoExprStep", None)
     if do_expr is not None and isinstance(expr, do_expr):
         if not expr.steps:
             raise tc_error("do block must contain at least one step", expr)
-        if do_bind_step is None or do_expr_step is None:
+        if do_bind_step is None or do_expr_step is None or do_let_step is None:
             raise tc_error("Internal error: do-step nodes are unavailable", expr)
 
         working_env = dict(env)
@@ -1215,32 +1221,61 @@ def infer_expr(
         sequence_error_type: Type | None = None
 
         for step in expr.steps[:-1]:
-            if not isinstance(step, do_bind_step):
-                raise tc_error("Only the final step in a do block may be a plain expression", step)
-            step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
-            total_effects = merge_effects(state, total_effects, step_effects)
-            info = _do_sequence_info(state, step_t)
-            if info is None:
-                raise tc_error("do bindings currently require Maybe or Result values", step.value)
-            if sequence_family is None:
-                sequence_family = info.family
-                sequence_error_type = info.error_type
-            elif info.family != sequence_family:
-                raise tc_error(
-                    f"Cannot mix {sequence_family} and {info.family} bindings in the same do block",
-                    step.value,
-                )
-            elif info.family == "Result" and sequence_error_type is not None and info.error_type is not None:
-                unify_at(state, sequence_error_type, info.error_type, step.value)
-            setattr(step, "_do_family", info.family)
-            working_env[step.name] = Scheme(vars=(), type=info.payload_type)
+            if isinstance(step, do_let_step):
+                step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
+                if apply_effect(state.effect_subst, step_effects) != PURE_EFFECT:
+                    raise tc_error("do let bindings must be pure", step.value)
+                working_env[step.name] = Scheme(vars=(), type=step_t)
+                continue
+            if isinstance(step, do_bind_step):
+                step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
+                total_effects = merge_effects(state, total_effects, step_effects)
+                if sequence_family == "IO":
+                    setattr(step, "_do_family", "IO")
+                    working_env[step.name] = Scheme(vars=(), type=step_t)
+                    continue
+                info = _do_sequence_info(state, step_t)
+                if info is None:
+                    if sequence_family is None and _effect_includes_io(state, step_effects):
+                        sequence_family = "IO"
+                        setattr(step, "_do_family", "IO")
+                        working_env[step.name] = Scheme(vars=(), type=step_t)
+                        continue
+                    raise tc_error("do bindings currently require Maybe, Result, or an !{IO} expression", step.value)
+                if sequence_family is None:
+                    sequence_family = info.family
+                    sequence_error_type = info.error_type
+                elif info.family != sequence_family:
+                    raise tc_error(
+                        f"Cannot mix {sequence_family} and {info.family} bindings in the same do block",
+                        step.value,
+                    )
+                elif info.family == "Result" and sequence_error_type is not None and info.error_type is not None:
+                    unify_at(state, sequence_error_type, info.error_type, step.value)
+                setattr(step, "_do_family", info.family)
+                working_env[step.name] = Scheme(vars=(), type=info.payload_type)
+                continue
+            if isinstance(step, do_expr_step):
+                step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
+                total_effects = merge_effects(state, total_effects, step_effects)
+                if sequence_family is None:
+                    if _effect_includes_io(state, step_effects):
+                        sequence_family = "IO"
+                        continue
+                    raise tc_error("Only !{IO} expression steps may appear before the final do expression", step.value)
+                if sequence_family != "IO":
+                    raise tc_error("Only !{IO} do blocks may contain plain expression steps before the final expression", step.value)
+                if not _effect_includes_io(state, step_effects):
+                    raise tc_error("Non-final plain expression steps in an !{IO} do block must require !{IO}", step.value)
+                continue
+            raise tc_error("Unsupported do step", step)
 
         final_step = expr.steps[-1]
         if not isinstance(final_step, do_expr_step):
             raise tc_error("A do block must end with a final expression", final_step)
         final_t, final_effects = infer_expr(final_step.value, working_env, state, type_decls, global_methods)
         total_effects = merge_effects(state, total_effects, final_effects)
-        if sequence_family is not None:
+        if sequence_family is not None and sequence_family != "IO":
             final_info = _do_sequence_info(state, final_t)
             if final_info is None:
                 raise tc_error(

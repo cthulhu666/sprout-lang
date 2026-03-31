@@ -221,6 +221,22 @@ def _build_do_failure_core(step: ast.DoBindStep, family: str) -> core.Expr:
     raise ElaborateError(f"Unsupported do family {family}")
 
 
+def _build_do_let_core(name: str, value: ast.Expr, body: core.Expr, src: object) -> core.Expr:
+    return core.CallExpr(
+        callee=core.LambdaExpr(params=[ast.Param(name=name, type_expr=None)], body=body, src=src),
+        args=[_surface_expr_to_core(value)],
+        src=src,
+    )
+
+
+def _build_do_ignore_core(value: ast.Expr, body: core.Expr, index: int, src: object) -> core.Expr:
+    return core.CallExpr(
+        callee=core.LambdaExpr(params=[ast.Param(name=f"__sprout_do_ignore_{index}", type_expr=None)], body=body, src=src),
+        args=[_surface_expr_to_core(value)],
+        src=src,
+    )
+
+
 def elaborate_expr_to_core(expr: ast.Expr) -> core.Expr:
     if not isinstance(expr, ast.DoExpr):
         return _surface_expr_to_core(expr)
@@ -228,12 +244,21 @@ def elaborate_expr_to_core(expr: ast.Expr) -> core.Expr:
     if not isinstance(final_step, ast.DoExprStep):
         raise ElaborateError("Internal error: do block is missing a final expression")
     out = _surface_expr_to_core(final_step.value)
-    for step in reversed(expr.steps[:-1]):
+    for index, step in reversed(list(enumerate(expr.steps[:-1]))):
+        if isinstance(step, ast.DoLetStep):
+            out = _build_do_let_core(step.name, step.value, out, step)
+            continue
+        if isinstance(step, ast.DoExprStep):
+            out = _build_do_ignore_core(step.value, out, index, step)
+            continue
         if not isinstance(step, ast.DoBindStep):
-            raise ElaborateError("Internal error: only bind steps may precede the final do expression")
+            raise ElaborateError("Internal error: unsupported do step")
         family = getattr(step, "_do_family", None)
         if family is None:
             raise ElaborateError("Internal error: unresolved do step family")
+        if family == "IO":
+            out = _build_do_let_core(step.name, step.value, out, step)
+            continue
         success_name = "Just" if family == "Maybe" else "Ok"
         failure_name = "Nothing" if family == "Maybe" else "Err"
         success_pattern = core.ConstructorPattern(

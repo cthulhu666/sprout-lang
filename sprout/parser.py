@@ -443,6 +443,8 @@ class Parser:
 
     def _looks_like_do_step_start(self, index: int) -> bool:
         token = self.tokens[index]
+        if token.kind == "KEYWORD" and token.value == "let":
+            return True
         if token.kind == "IDENT" and index + 1 < len(self.tokens):
             next_token = self.tokens[index + 1]
             if next_token.kind == "SYMBOL" and next_token.value == "<-":
@@ -460,6 +462,14 @@ class Parser:
         last = tokens[-1]
         eof = Token("EOF", "", last.line, last.column + len(last.value))
         parser = Parser(tokens + [eof], pipe_tmp_counter=self.pipe_tmp_counter)
+        if parser.check("KEYWORD", "let"):
+            start = parser.advance()
+            name_token = parser.expect("IDENT", label="do let binding name")
+            parser.expect("SYMBOL", "=")
+            value = parser.parse_expr()
+            parser.expect("EOF")
+            self.pipe_tmp_counter = parser.pipe_tmp_counter
+            return self.mark(ast.DoLetStep(name=name_token.value, value=value), start)
         if (
             parser.check("IDENT")
             and parser.i + 1 < len(parser.tokens)

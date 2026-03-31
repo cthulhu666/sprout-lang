@@ -157,6 +157,26 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "none")
 
+    def test_run_do_notation_sequences_io_and_pure_let_steps(self) -> None:
+        src = """
+        fn render(value: Maybe String) -> String =
+          match value with
+          | Just text -> text
+          | Nothing -> "missing"
+
+        fn main() -> Unit !{IO} =
+          do
+            print("start")
+            value <- argv_get(0)
+            let label = render(value)
+            print(label)
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out, argv=["hello"])
+        self.assertEqual(out.getvalue().strip().splitlines(), ["start", "hello"])
+
     def test_stdlib_vec_sort_by_uses_ord_instance(self) -> None:
         src = """
         type Box =

@@ -78,28 +78,33 @@ The implementation currently supports:
 
 1. Layout-style `do` blocks.
 2. `<-` bind steps.
-3. A final plain expression at the end of the block.
-4. Type-directed sequencing for `Maybe a` and `Result e a`.
+3. Pure local `let` steps inside `do`.
+4. A final plain expression at the end of the block.
+5. Type-directed sequencing for `Maybe a`, `Result e a`, and `IO`-style
+   effectful steps.
 
 The implementation does not yet support:
 
-1. `IO`-specific sequencing.
-2. User-extensible sequencing abstractions.
-3. Pure local `let` statements inside `do`.
-4. Pattern destructuring in bind position.
-5. Full Haskell-style desugaring through a standard `Monad`/`Applicative`
+1. User-extensible sequencing abstractions.
+2. Pattern destructuring in bind position.
+3. Full Haskell-style desugaring through a standard `Monad`/`Applicative`
    hierarchy.
 
 ## 6. Typing Model
 
 At a high level:
 
-1. Each bind step must currently produce either `Maybe a` or `Result e a`.
-2. A single `do` block may not mix `Maybe` and `Result`.
-3. For `Result`, all bind steps and the final expression must agree on the
+1. Bind steps in a `Maybe`/`Result` block must produce either `Maybe a` or
+   `Result e a`.
+2. Non-final plain expression steps are currently reserved for `!{IO}`
+   sequencing.
+3. A single `do` block may not mix `Maybe` and `Result`.
+4. For `Result`, all bind steps and the final expression must agree on the
    error type.
-4. The final expression must return the same outer sequencing family as the
-   earlier bind steps.
+5. The final expression must return the same outer sequencing family as the
+   earlier `Maybe`/`Result` bind steps.
+6. Pure local `let` steps extend the local scope without changing the
+   sequencing family.
 
 Examples:
 

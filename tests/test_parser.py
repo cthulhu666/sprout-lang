@@ -52,6 +52,23 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body.steps[1], ast.DoBindStep)
         self.assertIsInstance(fn_decl.body.steps[2], ast.DoExprStep)
 
+    def test_parse_do_expression_with_let_and_plain_steps(self) -> None:
+        src = """
+        fn greet() -> Unit !{IO} =
+          do
+            print("hi")
+            let answer = 41
+            print(answer + 1)
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.DoExpr)
+        self.assertEqual(len(fn_decl.body.steps), 3)
+        self.assertIsInstance(fn_decl.body.steps[0], ast.DoExprStep)
+        self.assertIsInstance(fn_decl.body.steps[1], ast.DoLetStep)
+        self.assertEqual(fn_decl.body.steps[1].name, "answer")
+        self.assertIsInstance(fn_decl.body.steps[2], ast.DoExprStep)
+
     def test_parse_do_expression_rejects_extra_indentation(self) -> None:
         src = """
         fn bad(ma: Maybe Int) -> Maybe Int =

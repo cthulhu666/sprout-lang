@@ -158,7 +158,41 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
-        self.assertIn("do bindings currently require Maybe or Result values", str(ctx.exception))
+        self.assertIn("do bindings currently require Maybe, Result, or an !{IO} expression", str(ctx.exception))
+
+    def test_typecheck_do_notation_with_io_steps_and_let(self) -> None:
+        src = """
+        fn greet() -> String !{IO} =
+          do
+            print("hi")
+            line <- term_read_key()
+            let echoed = line
+            echoed
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["greet"], "String !{IO}")
+
+    def test_typecheck_do_notation_rejects_effectful_do_let(self) -> None:
+        src = """
+        fn bad() -> Unit !{IO} =
+          do
+            let ignored = print("hi")
+            print("bye")
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("do let bindings must be pure", str(ctx.exception))
+
+    def test_typecheck_do_notation_rejects_pure_non_final_expr_step(self) -> None:
+        src = """
+        fn bad() -> Int !{IO} =
+          do
+            41
+            print_int(1)
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Only !{IO} expression steps may appear before the final do expression", str(ctx.exception))
 
     def test_typecheck_do_notation_requires_matching_final_family(self) -> None:
         src = """
@@ -199,9 +233,9 @@ class TypecheckerTests(unittest.TestCase):
             bundle = load_module_bundle(main)
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
-            with self.assertRaises(TypeCheckError) as ctx:
-                typecheck_program(program)
-        self.assertIn("do bindings currently require Maybe or Result values", str(ctx.exception))
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(program)
+        self.assertIn("do bindings currently require Maybe, Result, or an !{IO} expression", str(ctx.exception))
 
     def test_elaborate_program_lowers_do_after_typechecking(self) -> None:
         src = """

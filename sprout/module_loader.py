@@ -1165,11 +1165,15 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
             return
         do_expr = getattr(ast, "DoExpr", None)
         do_bind_step = getattr(ast, "DoBindStep", None)
+        do_let_step = getattr(ast, "DoLetStep", None)
         do_expr_step = getattr(ast, "DoExprStep", None)
         if do_expr is not None and isinstance(e, do_expr):
             do_scope = set(current_scope)
             for step in e.steps:
                 if do_bind_step is not None and isinstance(step, do_bind_step):
+                    walk_expr(step.value, e, do_scope)
+                    do_scope.add(step.name)
+                elif do_let_step is not None and isinstance(step, do_let_step):
                     walk_expr(step.value, e, do_scope)
                     do_scope.add(step.name)
                 elif do_expr_step is not None and isinstance(step, do_expr_step):

@@ -133,6 +133,12 @@ class DoBindStep(DoStep):
 
 
 @dataclass
+class DoLetStep(DoStep):
+    name: str
+    value: Expr
+
+
+@dataclass
 class DoExprStep(DoStep):
     value: Expr
 

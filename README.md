@@ -53,7 +53,10 @@ Normative status:
 - The current implementation also includes experimental `do` notation for
   sequencing `Maybe` and `Result` values. The surface is meant to leave room
   for broader Haskell-style sequencing later, but the current semantics are
-  intentionally narrower and are not part of normative v0 yet.
+  intentionally narrower and are not part of normative v0 yet. The current
+  experimental implementation now also supports `IO`-sequencing-style `do`
+  blocks with non-final plain `!{IO}` expression steps plus pure local
+  `let` steps.
 - The current implementation also includes an experimental compiler-driver
   helper module in `stdlib/compiler.sprout`. It provides a Sprout-owned
   `CompilerSession` wrapper over the snapshot-analysis bridge, with helpers

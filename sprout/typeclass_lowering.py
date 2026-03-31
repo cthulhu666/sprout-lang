@@ -478,6 +478,26 @@ def _rewrite_expr_with_specialization(
                 if hasattr(step, "_do_family"):
                     setattr(rewritten_steps[-1], "_do_family", getattr(step, "_do_family"))
                 continue
+            if isinstance(step, ast.DoLetStep):
+                rewritten_steps.append(
+                    _clone_with_loc(
+                        ast.DoLetStep(
+                            name=step.name,
+                            value=_rewrite_expr_with_specialization(
+                                step.value,
+                                step_scope,
+                                hidden_count_by_fn,
+                                fn_decls_by_name,
+                                specializations,
+                                generated_wrappers,
+                                taken_names,
+                            ),
+                        ),
+                        step,
+                    )
+                )
+                step_scope.add(step.name)
+                continue
             if isinstance(step, ast.DoExprStep):
                 rewritten_steps.append(
                     _clone_with_loc(
@@ -826,6 +846,28 @@ def _rewrite_expr(
                 if hasattr(step, "_do_family"):
                     setattr(rewritten_step, "_do_family", getattr(step, "_do_family"))
                 rewritten_steps.append(rewritten_step)
+                step_scope.add(step.name)
+                continue
+            if isinstance(step, ast.DoLetStep):
+                rewritten_steps.append(
+                    _clone_with_loc(
+                        ast.DoLetStep(
+                            name=step.name,
+                            value=_rewrite_expr(
+                                step.value,
+                                step_scope,
+                                method_aliases,
+                                current_constraints,
+                                current_binding_by_constraint,
+                                fn_decls,
+                                fn_constraints,
+                                class_method_order,
+                                instance_constraints,
+                            ),
+                        ),
+                        step,
+                    )
+                )
                 step_scope.add(step.name)
                 continue
             if isinstance(step, ast.DoExprStep):
