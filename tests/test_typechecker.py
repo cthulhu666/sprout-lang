@@ -158,7 +158,7 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
-        self.assertIn("This do bind must unwrap a Maybe/Result value", str(ctx.exception))
+        self.assertIn("This do bind must unwrap a Maybe/Result value, or require !{IO}", str(ctx.exception))
 
     def test_typecheck_do_notation_with_io_steps_and_let(self) -> None:
         src = """
@@ -199,12 +199,46 @@ class TypecheckerTests(unittest.TestCase):
         fn bad(m: Maybe Int) -> Maybe Int =
           do
             x <- m
-            print("hi")
+            x + 1
             Just(x)
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(with_prelude(src)))
-        self.assertIn("plain non-final expression steps are only allowed in !{IO} do blocks", str(ctx.exception))
+        self.assertIn("plain non-final expression steps require !{IO}", str(ctx.exception))
+
+    def test_typecheck_do_notation_allows_io_step_inside_maybe_block(self) -> None:
+        src = """
+        fn greet(m: Maybe String) -> Maybe String !{IO} =
+          do
+            print("hi")
+            name <- m
+            print(name)
+            Just(name)
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["greet"], "Maybe String -> Maybe String !{IO}")
+
+    def test_typecheck_do_notation_unwraps_effectful_maybe_inside_io(self) -> None:
+        src = """
+        fn greet() -> Maybe String !{IO} =
+          do
+            print("hi")
+            name <- argv_get(0)
+            Just(name)
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["greet"], "Maybe String !{IO}")
+
+    def test_typecheck_do_notation_unwraps_effectful_result_inside_io(self) -> None:
+        src = """
+        fn load() -> Result String String !{IO} =
+          do
+            print("hi")
+            value <- repl_type_of("41")
+            Ok(value)
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["load"], "Result String String !{IO}")
 
     def test_typecheck_do_notation_requires_matching_final_family(self) -> None:
         src = """
@@ -247,7 +281,7 @@ class TypecheckerTests(unittest.TestCase):
             resolve_program_names(program, bundle)
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(program)
-        self.assertIn("This do bind must unwrap a Maybe/Result value", str(ctx.exception))
+        self.assertIn("This do bind must unwrap a Maybe/Result value, or require !{IO}", str(ctx.exception))
 
     def test_elaborate_program_lowers_do_after_typechecking(self) -> None:
         src = """

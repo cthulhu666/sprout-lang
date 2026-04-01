@@ -369,10 +369,10 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
   - `after(effect, value)` sequences `effect` and returns `value`
-  - experimental `do` blocks for `Maybe`/`Result` and `IO` sequencing, for example:
+  - experimental `do` blocks for `Maybe`/`Result`, `IO`, and mixed `IO` plus inner `Maybe`/`Result` sequencing, for example:
     `do ... x <- mx ... y <- my ... Just((x, y))`
     See `examples/do_notation_demo.sprout` for `Maybe`/`Result` and
-    `examples/io_do_demo.sprout` for `IO`.
+    `examples/io_do_demo.sprout` for mixed `IO` plus `Maybe`.
   - forward pipe operator: `value |> f` rewrites to `f(value)`, and
     `value |> g(a, b)` rewrites to `g(a, b, value)`
   - function composition operators:

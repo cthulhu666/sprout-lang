@@ -4,8 +4,9 @@ This document is a draft design for ergonomic sequencing sugar in Sprout v1.
 
 It is not part of normative v0. Its purpose is to define an experimental `do`
 surface that removes deeply nested `match` expressions when sequencing
-container-like computations such as `Maybe` and `Result`, while leaving room
-for broader Haskell-style sequencing later.
+container-like computations such as `Maybe` and `Result`, and now also supports
+narrow mixed `IO` plus inner `Maybe`/`Result` flows, while leaving room for
+broader Haskell-style sequencing later.
 
 ## 1. Problem Statement
 
@@ -80,8 +81,8 @@ The implementation currently supports:
 2. `<-` bind steps.
 3. Pure local `let` steps inside `do`.
 4. A final plain expression at the end of the block.
-5. Type-directed sequencing for `Maybe a`, `Result e a`, and `IO`-style
-   effectful steps.
+5. Type-directed sequencing for `Maybe a`, `Result e a`, `IO`-style effectful
+   steps, and the combined shapes `Maybe a !{IO}` / `Result e a !{IO}`.
 
 The implementation does not yet support:
 
@@ -96,15 +97,17 @@ At a high level:
 
 1. Bind steps in a `Maybe`/`Result` block must produce either `Maybe a` or
    `Result e a`.
-2. Non-final plain expression steps are currently reserved for `!{IO}`
-   sequencing.
+2. Bind steps that do not produce `Maybe`/`Result` must require `!{IO}`.
 3. A single `do` block may not mix `Maybe` and `Result`.
-4. For `Result`, all bind steps and the final expression must agree on the
+4. Plain non-final expression steps are reserved for `!{IO}` sequencing.
+5. For `Result`, all bind steps and the final expression must agree on the
    error type.
-5. The final expression must return the same outer sequencing family as the
-   earlier `Maybe`/`Result` bind steps.
-6. Pure local `let` steps extend the local scope without changing the
+6. If a block contains both `!{IO}` steps and `Maybe`/`Result` binds, the
+   block result is `Maybe ... !{IO}` or `Result ... !{IO}`.
+7. Pure local `let` steps extend the local scope without changing the
    sequencing family.
+8. In a mixed `IO` block, `<-` unwraps the inner `Maybe`/`Result`; code that
+   needs the whole container should use an explicit `match`.
 
 Examples:
 
@@ -122,6 +125,15 @@ fn parse_pair(a: String, b: String) -> Result String Int =
     x <- parse_nat(a)
     y <- parse_nat(b)
     Ok(x + y)
+```
+
+```sprout
+fn read_name() -> Maybe String !{IO} =
+  do
+    print("name?")
+    name <- argv_get(0)
+    print(name)
+    Just(name)
 ```
 
 ## 7. Desugaring Model
@@ -164,6 +176,24 @@ match expr with
 | Ok x -> rest
 ```
 
+An effectful `Maybe` step inside an `IO` block uses the same nested `match`
+shape, but the whole expression still carries `!{IO}` because evaluating
+`expr` is effectful:
+
+```sprout
+do
+  name <- argv_get(0)
+  Just(name)
+```
+
+desugars to:
+
+```sprout
+match argv_get(0) with
+| Nothing -> Nothing
+| Just name -> Just(name)
+```
+
 ## 8. Why This Is Still Future-Friendly
 
 The current implementation is intentionally narrower than full Haskell `do`,
@@ -187,10 +217,12 @@ The key forward-compatible choices are:
 
 Current high-value diagnostics should identify:
 
-1. A bind step that does not produce `Maybe` or `Result`.
+1. A bind step that neither produces `Maybe`/`Result` nor requires `!{IO}`.
 2. A block that mixes `Maybe` and `Result`.
 3. A final expression that returns the wrong sequencing family.
 4. A malformed block where a plain expression appears before the final step.
+5. A mixed `IO` block where a developer expected `<-` to keep the whole
+   `Maybe`/`Result` value instead of unwrapping it.
 
 ## 10. Compatibility and Status
 
@@ -200,16 +232,18 @@ Compatibility notes:
 
 1. Existing nested-`match` code remains valid.
 2. Existing combinator helpers remain valid.
-3. The feature is implemented in the prototype, but it is not yet normative
+3. Mixed `IO` plus inner `Maybe`/`Result` sequencing is experimental and may
+   still change if the ergonomics are poor in practice.
+4. The feature is implemented in the prototype, but it is not yet normative
    v0.
 
 ## 11. Follow-Up Directions
 
 Likely follow-up directions include:
 
-1. Pure local binds inside `do`.
-2. Pattern binds in `<-` position.
-3. `Applicative`-style conveniences where they make sense.
-4. `IO` integration as the next recommended sequencing/effects milestone.
-5. User-extensible sequencing abstractions, likely via typeclasses or closely
+1. Pattern binds in `<-` position.
+2. `Applicative`-style conveniences where they make sense.
+3. Deciding whether the current mixed `IO` plus inner `Maybe`/`Result` model
+   is sufficient or should grow a more general abstraction.
+4. User-extensible sequencing abstractions, likely via typeclasses or closely
    related machinery.

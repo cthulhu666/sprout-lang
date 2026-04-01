@@ -27,7 +27,9 @@ programming ergonomics.
 
 Today the main pain points are:
 
-1. `IO` does not yet participate in the experimental `do` notation.
+1. `IO` now participates in the experimental `do` notation, but the combined
+   story for `IO` plus inner `Maybe`/`Result` sequencing needs to stay narrow
+   and teachable.
 2. Local sequencing often falls back to ad hoc helpers such as `after(...)`
    instead of a coherent language story.
 3. Higher-order effect propagation is implemented, but the diagnostic story is
@@ -67,13 +69,15 @@ Recommended order:
    pure by default, explicit `!{IO}`, singleton `!{e}` only.
 2. Extend the experimental `do` notation so `IO` can sequence through the same
    typed-core/elaboration seam already used for `Maybe` and `Result`.
-3. Add pure local `let` steps inside `do` so effectful code does not require
+3. Allow the narrow combined shapes `Maybe a !{IO}` and `Result e a !{IO}` in
+   `do` blocks without introducing full generic sequencing.
+4. Add pure local `let` steps inside `do` so effectful code does not require
    awkward helper extraction for simple intermediate values.
-4. Improve effect diagnostics around:
+5. Improve effect diagnostics around:
    - calling `!{IO}` from a pure function
    - forgetting to propagate an effect variable through a higher-order helper
    - declaring `main` or another function with an effect that is too narrow
-5. Only after this ergonomics pass, revisit whether richer rows are still
+6. Only after this ergonomics pass, revisit whether richer rows are still
    justified.
 
 This keeps the next milestone focused on usability, not theory expansion.
@@ -84,25 +88,29 @@ The recommended next effect milestone is:
 
 1. Keep the current row-shaped syntax.
 2. Keep only closed `!{IO}` and singleton `!{e}` in the contract.
-3. Add `IO` integration to the existing experimental `do` notation.
-4. Add pure local bind steps inside `do`.
-5. Sharpen effect diagnostics and examples.
+3. Keep `IO` integration in the existing experimental `do` notation.
+4. Allow mixed `IO` plus inner `Maybe`/`Result` blocks for the combined shapes
+   `Maybe a !{IO}` and `Result e a !{IO}`.
+5. Add pure local bind steps inside `do`.
+6. Sharpen effect diagnostics and examples.
 
 Illustrative target surface:
 
 ```sprout
-fn prompt_name() -> String !{IO} =
+fn prompt_name() -> Maybe String !{IO} =
   do
     print("name?")
-    raw <- term_read_line_once()
-    let name = maybe_or("anonymous", raw)
+    name <- term_read_line_once()
     print("hello")
-    pure(name)
+    Just(name)
 ```
 
-The exact surface spelling for plain effectful steps and final return helpers
-is still open, but the milestone should target this shape of sequential IO code
-rather than richer effect rows.
+The surface stays intentionally small: bare `!{IO}` steps remain valid, and a
+`<-` step may also unwrap `Maybe`/`Result` when the surrounding block returns
+`Maybe ... !{IO}` or `Result ... !{IO}`. This should target ordinary sequential
+IO code rather than richer effect rows.
+If code needs to keep the whole `Maybe` or `Result` value instead of
+short-circuiting on it, it should use an explicit `match`.
 
 ## 6. Syntax and Semantics Impact
 
@@ -124,6 +132,19 @@ do
 
 4. Add an `IO` sequencing family to the existing `do` elaboration path rather
    than creating a separate special-case statement language.
+5. Permit mixed blocks such as:
+
+```sprout
+fn greet() -> Maybe String !{IO} =
+  do
+    print("name?")
+    name <- argv_get(0)
+    print(name)
+    Just(name)
+```
+
+where `name <- argv_get(0)` unwraps the inner `Maybe` after performing the `IO`
+step, and `Nothing` short-circuits out of the whole block.
 
 Semantics remain:
 
@@ -148,10 +169,13 @@ Keep:
 Add or clarify:
 
 1. `do` blocks may sequence `IO` in addition to `Maybe` and `Result`
-2. a single `do` block still belongs to one sequencing family
-3. pure local `let` steps inside `do` do not change the surrounding effect
+2. a single `do` block still belongs to at most one container family:
+   `Maybe` or `Result`
+3. `!{IO}` steps may appear alongside either container family, producing
+   `Maybe a !{IO}` or `Result e a !{IO}`
+4. pure local `let` steps inside `do` do not change the surrounding effect
    family
-4. higher-order helpers should keep propagating a shared singleton effect
+5. higher-order helpers should keep propagating a shared singleton effect
    variable rather than inferring richer rows
 
 Illustrative examples:
@@ -185,7 +209,9 @@ High-value diagnostics:
 2. forgetting to propagate an effect variable through a higher-order helper
 3. giving `main` an effect-polymorphic signature
 4. using a `do` bind step from the wrong sequencing family
-5. using an `IO`-sequencing form in a pure-returning `do` block
+5. using a plain non-final expression step without `!{IO}`
+6. forgetting that a mixed `IO` plus `Maybe`/`Result` block must still finish
+   in the same container family
 
 Diagnostic style should say:
 
@@ -197,7 +223,8 @@ Representative tone:
 
 - `This function is inferred pure, but this call requires !{IO}.`
 - `This helper calls an effect-polymorphic argument, so its result type must also carry !{e}.`
-- `This do block sequences IO, so its final expression must remain in the IO family.`
+- `This do bind must unwrap a Maybe/Result value, or require !{IO}.`
+- `This do block started with Maybe bindings, so its final expression must also return Maybe.`
 
 ## 9. Compatibility and Migration Notes
 
@@ -206,7 +233,9 @@ Recommended migration stance:
 1. existing v0 effect annotations remain valid
 2. existing `Maybe`/`Result` `do` code remains valid
 3. new `IO`-aware sequencing should be additive at first
-4. ad hoc sequencing helpers such as `after(...)` may remain temporarily, but
+4. the experimental mixed `IO` plus inner `Maybe`/`Result` block shapes are now
+   the preferred story for failure-aware effectful code
+5. ad hoc sequencing helpers such as `after(...)` may remain temporarily, but
    they should no longer be the preferred story once `IO` sequencing lands
 
 Compatibility rule of thumb:
@@ -251,11 +280,10 @@ Recommended decision:
 
 ## 13. Open Questions
 
-1. What is the best surface for plain effectful steps inside `do` blocks:
-   bare expressions, a dedicated keyword, or both?
-2. Should `IO` `do` blocks require an explicit final constructor/helper, or
-   should the elaboration infer the final sequencing form?
-3. Should pure local `let` inside `do` be layout-only, or share the ordinary
+1. Should effectful `Maybe`/`Result` binds inside `IO` remain the only mixed
+   sequencing form, or should Sprout eventually add a more general abstraction?
+2. Should pure local `let` inside `do` be layout-only, or share the ordinary
    `let` surface exactly?
-4. Once `IO` sequencing lands, does `after(...)` stay as a convenience helper,
+3. Once mixed `IO` sequencing is established, does `after(...)` stay as a
+   convenience helper,
    or become legacy compatibility surface?

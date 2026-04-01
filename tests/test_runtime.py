@@ -159,23 +159,49 @@ class RuntimeTests(unittest.TestCase):
 
     def test_run_do_notation_sequences_io_and_pure_let_steps(self) -> None:
         src = """
-        fn render(value: Maybe String) -> String =
-          match value with
-          | Just text -> text
-          | Nothing -> "missing"
-
-        fn main() -> Unit !{IO} =
+        fn main() -> Maybe String !{IO} =
           do
             print("start")
             value <- argv_get(0)
-            let label = render(value)
+            let label = str_concat("name=", value)
             print(label)
+            Just(label)
         """
         program = parse(with_prelude(src))
         typecheck_program(program)
         out = io.StringIO()
         run_program(program, stdout=out, argv=["hello"])
-        self.assertEqual(out.getvalue().strip().splitlines(), ["start", "hello"])
+        self.assertEqual(out.getvalue().strip().splitlines(), ["start", "name=hello"])
+
+    def test_run_do_notation_short_circuits_effectful_maybe_inside_io(self) -> None:
+        src = """
+        fn main() -> Maybe String !{IO} =
+          do
+            print("start")
+            value <- argv_get(0)
+            print(value)
+            Just(value)
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out, argv=[])
+        self.assertEqual(out.getvalue().strip().splitlines(), ["start"])
+
+    def test_run_do_notation_short_circuits_effectful_result_inside_io(self) -> None:
+        src = """
+        fn main() -> Result String String !{IO} =
+          do
+            print("start")
+            value <- repl_type_of("(41")
+            print(value)
+            Ok(value)
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip().splitlines(), ["start"])
 
     def test_stdlib_vec_sort_by_uses_ord_instance(self) -> None:
         src = """

@@ -1230,21 +1230,16 @@ def infer_expr(
             if isinstance(step, do_bind_step):
                 step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
                 total_effects = merge_effects(state, total_effects, step_effects)
-                if sequence_family == "IO":
+                info = _do_sequence_info(state, step_t)
+                if info is None:
+                    if not _effect_includes_io(state, step_effects):
+                        raise tc_error(
+                            "This do bind must unwrap a Maybe/Result value, or require !{IO}",
+                            step.value,
+                        )
                     setattr(step, "_do_family", "IO")
                     working_env[step.name] = Scheme(vars=(), type=step_t)
                     continue
-                info = _do_sequence_info(state, step_t)
-                if info is None:
-                    if sequence_family is None and _effect_includes_io(state, step_effects):
-                        sequence_family = "IO"
-                        setattr(step, "_do_family", "IO")
-                        working_env[step.name] = Scheme(vars=(), type=step_t)
-                        continue
-                    raise tc_error(
-                        "This do bind must unwrap a Maybe/Result value, or appear in an !{IO} do block",
-                        step.value,
-                    )
                 if sequence_family is None:
                     sequence_family = info.family
                     sequence_error_type = info.error_type
@@ -1261,24 +1256,17 @@ def infer_expr(
             if isinstance(step, do_expr_step):
                 step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
                 total_effects = merge_effects(state, total_effects, step_effects)
+                if _effect_includes_io(state, step_effects):
+                    continue
                 if sequence_family is None:
-                    if _effect_includes_io(state, step_effects):
-                        sequence_family = "IO"
-                        continue
                     raise tc_error(
                         "A non-final plain expression step is only allowed when it requires !{IO}",
                         step.value,
                     )
-                if sequence_family != "IO":
-                    raise tc_error(
-                        f"This do block already sequences {sequence_family}; plain non-final expression steps are only allowed in !{{IO}} do blocks",
-                        step.value,
-                    )
-                if not _effect_includes_io(state, step_effects):
-                    raise tc_error(
-                        "A non-final plain expression step in an !{IO} do block must itself require !{IO}",
-                        step.value,
-                    )
+                raise tc_error(
+                    f"This do block already sequences {sequence_family}; plain non-final expression steps require !{{IO}}",
+                    step.value,
+                )
                 continue
             raise tc_error("Unsupported do step", step)
 
@@ -1287,7 +1275,7 @@ def infer_expr(
             raise tc_error("A do block must end with a final expression", final_step)
         final_t, final_effects = infer_expr(final_step.value, working_env, state, type_decls, global_methods)
         total_effects = merge_effects(state, total_effects, final_effects)
-        if sequence_family is not None and sequence_family != "IO":
+        if sequence_family is not None:
             final_info = _do_sequence_info(state, final_t)
             if final_info is None:
                 raise tc_error(
