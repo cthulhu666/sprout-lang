@@ -1,0 +1,1 @@
+Executable entrypoint `main` must have type Unit !{IO}

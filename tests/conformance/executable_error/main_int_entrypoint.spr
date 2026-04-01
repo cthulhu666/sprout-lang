@@ -1,0 +1,2 @@
+fn main() -> Int !{IO} =
+  print_int(41)

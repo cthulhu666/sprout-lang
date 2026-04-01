@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 
+from sprout import cli as sprout_cli
 from sprout.interpreter import RuntimeError, run_program
 from sprout.parser import ParseError, parse
 from sprout.stdlib import with_prelude
@@ -69,6 +72,28 @@ class ConformanceTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError) as ctx:
                     run_program(lowered)
                 self.assertIn(expected, str(ctx.exception))
+
+    def test_executable_error_cases(self) -> None:
+        for spr_file in sorted((ROOT / "executable_error").glob("*.spr")):
+            with self.subTest(case=spr_file.name):
+                err_file = spr_file.with_suffix(".err")
+                expected = _read(err_file).strip()
+                extra_args = ["--with-stdlib"] if spr_file.stem.startswith("stdlib_") else []
+
+                run_output = io.StringIO()
+                with redirect_stdout(run_output):
+                    run_status = sprout_cli.main(["run", *extra_args, str(spr_file)])
+                self.assertEqual(run_status, 1)
+                self.assertIn(expected, run_output.getvalue())
+
+                with tempfile.TemporaryDirectory() as tmp:
+                    out = Path(tmp) / "case.ll"
+                    compile_output = io.StringIO()
+                    with redirect_stdout(compile_output):
+                        compile_status = sprout_cli.main(["compile", *extra_args, str(spr_file), "-o", str(out)])
+                    self.assertEqual(compile_status, 1)
+                    self.assertIn(expected, compile_output.getvalue())
+                    self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":

@@ -697,11 +697,13 @@ For module code, prefer:
 `import stdlib.string as string`
 then call helpers like `string.concat(...)` and `string.length(...)`.
 
-Application-level example wrapper:
+Example classification:
 
-- `examples/sentry_api.sprout` demonstrates how to layer Sentry-specific API helpers on top of generic `stdlib.http` + `stdlib.http_client`.
-- `examples/sentry_issue_browser_tui.sprout` is a minimal TUI-oriented scaffold module using the app-level Sentry API layer.
-- `examples/http_get_cli.sprout` is a simple CLI HTTP client that reads its URL from `argv_get(0)` and prints the response body.
+- Runnable examples define `main() -> Unit !{IO}` and can be used with `sprout run` / `sprout compile`.
+- Library-style examples expose helpers without `main`; use `sprout check` for them directly, or import them from another runnable module.
+- `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers on top of generic `stdlib.http` + `stdlib.http_client`.
+- `examples/sentry_issue_browser_tui.sprout` is a library-style TUI scaffold module using the app-level Sentry API layer.
+- `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
 
 Load stdlib prelude explicitly for standalone files:
 
