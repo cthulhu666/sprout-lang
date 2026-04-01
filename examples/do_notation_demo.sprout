@@ -1,6 +1,9 @@
 module examples.do_notation_demo
 
 # Demonstrates experimental do notation for Maybe and Result sequencing.
+#
+# Run:
+#   python3 -m sprout.cli run examples/do_notation_demo.sprout
 
 fn half_if_even(x: Int) -> Maybe Int =
   if (x / 2) * 2 == x then Just(x / 2) else Nothing
@@ -31,7 +34,7 @@ fn render_result(value: Result String Int) -> String =
   | Err err -> "result:" ++ err
 
 fn main() -> Unit !{IO} =
-  after(
-    print(render_maybe(maybe_sum(8, 10))),
+  do
+    print("do:maybe-result")
+    print(render_maybe(maybe_sum(8, 10)))
     print(render_result(result_sum(4, -1)))
-  )

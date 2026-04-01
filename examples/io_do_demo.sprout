@@ -13,7 +13,7 @@ fn render_name(value: Maybe String) -> String =
 
 fn main() -> Unit !{IO} =
   do
-    print("io-do:start")
+    print("do:io")
     raw <- argv_get(0)
     let label = "io-do:name=" ++ render_name(raw)
     print(label)
