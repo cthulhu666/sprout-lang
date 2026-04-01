@@ -76,6 +76,17 @@ Sprout action:
 Source:
 - Test262 project: <https://github.com/tc39/test262>
 
+## 7) Follow the Principle of Least Surprise
+
+Why:
+- Languages are easier to learn and debug when boundary behavior matches the
+  most obvious reading instead of relying on clever exceptions.
+
+Sprout action:
+- Prefer rules that make entrypoints, effects, and error paths predictable.
+- When a feature has a surprising edge case, either remove the edge case or
+  make it explicit in syntax and diagnostics.
+
 ## Working Rules for Sprout
 
 1. Spec first, then implementation.
@@ -84,3 +95,4 @@ Source:
 4. Features ship with diagnostics and tests.
 5. Prefer explicit extension points over hidden magic.
 6. Keep memory management abstract in core-language design docs unless the proposal intentionally adds visible ownership, lifetime, destructor, or allocator semantics.
+7. Follow the Principle of Least Surprise, especially at program boundaries and effect boundaries.

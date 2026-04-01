@@ -399,6 +399,11 @@ fn main() -> Unit !{IO} =
   print("hello")
 ```
 
+`main` is the conventional program entrypoint in v0. User-facing examples
+should prefer `Unit !{IO}` at that boundary, but the current implementation
+does not yet make a stricter normative guarantee here beyond rejecting
+effect-polymorphic `main`.
+
 ### 10.11 Non-exhaustive match (compile error)
 
 ```sprout

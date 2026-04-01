@@ -316,7 +316,7 @@ Effect notes:
 - Restricted effect polymorphism is supported for higher-order helpers via
   singleton effect variables such as:
   `fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(f(x))`.
-- `main` stays concrete when effectful; do not use `!{e}` on `main`.
+- `main` should stay concrete and user-facing examples should prefer `Unit !{IO}`.
 - Effects do not change Sprout's strict execution order; they constrain which
   functions may call which other functions.
 - Mixed/open effect rows and additional effect labels are still deferred follow-up work.
@@ -372,7 +372,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - experimental `do` blocks for `Maybe`/`Result`, `IO`, and mixed `IO` plus inner `Maybe`/`Result` sequencing, for example:
     `do ... x <- mx ... y <- my ... Just((x, y))`
     See `examples/do_notation_demo.sprout` for `Maybe`/`Result` and
-    `examples/io_do_demo.sprout` for mixed `IO` plus `Maybe`.
+    `examples/io_do_demo.sprout` for a helper-level mixed `IO` plus `Maybe` flow
+    handled by a `Unit !{IO}` `main`.
   - forward pipe operator: `value |> f` rewrites to `f(value)`, and
     `value |> g(a, b)` rewrites to `g(a, b, value)`
   - function composition operators:

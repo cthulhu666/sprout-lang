@@ -534,13 +534,13 @@ class TypecheckerTests(unittest.TestCase):
         fn show(x: Int) -> Int !{IO} =
           print_int(x)
 
-        fn main() -> Int !{IO} =
+        fn demo() -> Int !{IO} =
           apply_twice(show, 20)
         """
         types = typecheck_program(parse(src))
         self.assertEqual(types["apply_twice"], "forall e0. (Int -> Int !{e0}) -> Int -> Int !{e0}")
         self.assertEqual(types["show"], "Int -> Int !{IO}")
-        self.assertEqual(types["main"], "Int !{IO}")
+        self.assertEqual(types["demo"], "Int !{IO}")
 
     def test_typecheck_specializes_singleton_effect_variable_to_pure_when_needed(self) -> None:
         src = """

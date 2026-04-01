@@ -18,7 +18,7 @@ class ModuleLoaderTests(unittest.TestCase):
             main = Path(tmp) / "main.sprout"
             main.write_text(
                 """
-                fn main() -> Int =
+                fn demo() -> Int =
                   missing
                 """,
                 encoding="utf-8",

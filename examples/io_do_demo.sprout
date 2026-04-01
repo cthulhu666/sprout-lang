@@ -8,10 +8,13 @@ import stdlib.string
 #   python3 -m sprout.cli run examples/io_do_demo.sprout
 #   python3 -m sprout.cli run examples/io_do_demo.sprout Ada
 
-fn main() -> Maybe String !{IO} =
+fn read_name() -> Maybe String !{IO} =
   do
     print("do:io")
     name <- argv_get(0)
-    let label = string.concat("io-do:name=", name)
-    print(label)
-    Just(label)
+    Just(name)
+
+fn main() -> Unit !{IO} =
+  match read_name() with
+  | Just name -> print(string.concat("io-do:name=", name))
+  | Nothing -> print("io-do:name=anonymous")

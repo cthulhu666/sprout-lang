@@ -94,7 +94,7 @@ The recommended next effect milestone is:
 5. Add pure local bind steps inside `do`.
 6. Sharpen effect diagnostics and examples.
 
-Illustrative target surface:
+Illustrative target surface for a helper:
 
 ```sprout
 fn prompt_name() -> Maybe String !{IO} =
@@ -144,7 +144,9 @@ fn greet() -> Maybe String !{IO} =
 ```
 
 where `name <- argv_get(0)` unwraps the inner `Maybe` after performing the `IO`
-step, and `Nothing` short-circuits out of the whole block.
+step, and `Nothing` short-circuits out of the whole block. User-facing `main`
+examples should then handle that helper result explicitly and stay `Unit !{IO}`
+to avoid surprising entrypoint behavior.
 
 Semantics remain:
 

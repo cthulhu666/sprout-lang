@@ -136,6 +136,9 @@ fn read_name() -> Maybe String !{IO} =
     Just(name)
 ```
 
+At the program boundary, user-facing examples should still handle that helper
+explicitly and keep `main` as `Unit !{IO}`.
+
 ## 7. Desugaring Model
 
 The current implementation parses a dedicated `DoExpr`, lets typechecking
