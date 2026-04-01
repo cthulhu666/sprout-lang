@@ -316,7 +316,7 @@ Effect notes:
 - Restricted effect polymorphism is supported for higher-order helpers via
   singleton effect variables such as:
   `fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(f(x))`.
-- `main` should stay concrete and user-facing examples should prefer `Unit !{IO}`.
+- Executable `main` must stay concrete and have type `Unit !{IO}`.
 - Effects do not change Sprout's strict execution order; they constrain which
   functions may call which other functions.
 - Mixed/open effect rows and additional effect labels are still deferred follow-up work.

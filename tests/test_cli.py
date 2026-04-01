@@ -1727,23 +1727,39 @@ class CliTests(unittest.TestCase):
         failures: list[tuple[Path, str, str]] = []
         for path in sorted(Path("examples").glob("*.sprout")):
             with tempfile.TemporaryDirectory() as tmp:
+                source = path.read_text(encoding="utf-8")
                 out = Path(tmp) / f"{path.stem}.ll"
                 extra = example_flags.get(str(path), [])
-                proc = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "sprout.cli",
-                        "compile",
-                        *extra,
-                        str(path),
-                        "-o",
-                        str(out),
-                    ],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                )
+                if "fn main(" in source:
+                    proc = subprocess.run(
+                        [
+                            sys.executable,
+                            "-m",
+                            "sprout.cli",
+                            "compile",
+                            *extra,
+                            str(path),
+                            "-o",
+                            str(out),
+                        ],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                else:
+                    proc = subprocess.run(
+                        [
+                            sys.executable,
+                            "-m",
+                            "sprout.cli",
+                            "check",
+                            *extra,
+                            str(path),
+                        ],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
                 if proc.returncode != 0:
                     failures.append((path, proc.stdout, proc.stderr))
         if failures:
@@ -1967,6 +1983,50 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(run.returncode, 0, msg=run.stderr)
             self.assertIn("1", run.stdout)
+
+    def test_run_rejects_non_unit_io_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.sprout"
+            path.write_text(
+                """
+                module app.main
+                fn main() -> Maybe String !{IO} =
+                  Just("hello")
+                """,
+                encoding="utf-8",
+            )
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "run", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("Executable entrypoint `app.main.main` must have type Unit !{IO}", run.stdout)
+            self.assertIn("Maybe String !{IO}", run.stdout)
+
+    def test_compile_rejects_non_unit_io_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.sprout"
+            out = Path(tmp) / "out.ll"
+            path.write_text(
+                """
+                module app.main
+                fn main() -> Int !{IO} =
+                  print_int(41)
+                """,
+                encoding="utf-8",
+            )
+            compile_proc = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "compile", str(path), "-o", str(out)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_proc.returncode, 1)
+            self.assertIn("Executable entrypoint `app.main.main` must have type Unit !{IO}", compile_proc.stdout)
+            self.assertIn("Int !{IO}", compile_proc.stdout)
+            self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":

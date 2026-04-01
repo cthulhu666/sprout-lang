@@ -198,10 +198,10 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                   | Ok nonce -> length(nonce)
                   | Err _ -> 0
 
-                fn main() -> Int !{{IO}} =
+                fn main() -> Unit !{{IO}} =
                   force(
                     read_int_lines("{ints_path.as_posix()}"),
-                    print_int(map_score() + score_decode() + score_xor() + score_random())
+                    print(map_score() + score_decode() + score_xor() + score_random())
                   )
                 """,
                 encoding="utf-8",
@@ -223,7 +223,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             default_run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(default_run.stdout.strip(), "10")
             self.assertEqual(default_run.stderr, "")
-            self.assertEqual(default_run.returncode, 10)
+            self.assertEqual(default_run.returncode, 0)
 
             debug_env = os.environ.copy()
             debug_env["SPROUT_DEBUG_ALLOC"] = "1"
@@ -235,7 +235,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                 env=debug_env,
             )
             self.assertEqual(debug_run.stdout.strip(), "10")
-            self.assertEqual(debug_run.returncode, 10)
+            self.assertEqual(debug_run.returncode, 0)
             match = re.search(
                 r"\[sprout alloc\] sprout_obj=(\d+) closure=(\d+) vector=(\d+) map=(\d+) bytes=(\d+) builder=(\d+) gc_swept=(\d+)",
                 debug_run.stderr,
@@ -342,8 +342,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
           | Just x -> x
           | Nothing -> 0
 
-        fn main() -> Int !{IO} =
-          print_int(unwrap(Just(42)))
+        fn main() -> Unit !{IO} =
+          print(unwrap(Just(42)))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -365,7 +365,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_print_adt_value(self) -> None:
@@ -403,7 +403,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         src = """
         fn inc(x: Int) -> Int = x + 1
         fn apply(x: Int, f: Int -> Int) -> Int = f(x)
-        fn main() -> Int !{IO} = print_int(apply(41, inc))
+        fn main() -> Unit !{IO} = print(apply(41, inc))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -425,7 +425,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_effect_polymorphic_higher_order(self) -> None:
@@ -436,8 +436,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn show(x: Int) -> Int !{IO} =
           print_int(x)
 
-        fn main() -> Int !{IO} =
-          apply_twice(show, 1)
+        fn main() -> Unit !{IO} =
+          print(apply_twice(show, 1))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -458,8 +458,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                 check=True,
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.stdout, "1\n1\n")
-            self.assertEqual(run.returncode, 1)
+            self.assertEqual(run.stdout, "1\n1\n1\n")
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_lambda_closure(self) -> None:
@@ -467,8 +467,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn make_adder(base: Int) -> Int -> Int =
           \(x) -> base + x
 
-        fn main() -> Int !{IO} =
-          print_int(make_adder(40)(2))
+        fn main() -> Unit !{IO} =
+          print(make_adder(40)(2))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -490,7 +490,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_debug_alloc_report_counts_closures(self) -> None:
@@ -498,8 +498,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn make_adder(base: Int) -> Int -> Int =
           \(x) -> base + x
 
-        fn main() -> Int !{IO} =
-          print_int(make_adder(40)(2))
+        fn main() -> Unit !{IO} =
+          print(make_adder(40)(2))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -523,7 +523,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_DEBUG_ALLOC"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
             match = re.search(r"closure=(\d+).*gc_swept=(\d+)", run.stderr)
             self.assertIsNotNone(match)
             assert match is not None
@@ -542,10 +542,10 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
           | Just value -> value
           | Nothing -> 0
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match if true then Just(7) else Nothing with
-          | Just value -> print_int(value)
-          | whole -> print_int(unwrap(whole))
+          | Just value -> print(value)
+          | whole -> print(unwrap(whole))
         """
         control_src = """
         type MaybeInt =
@@ -560,10 +560,10 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn produce(flag: Bool) -> MaybeInt =
           if flag then Just(7) else Nothing
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match produce(true) with
-          | Just value -> print_int(value)
-          | whole -> print_int(unwrap(whole))
+          | Just value -> print(value)
+          | whole -> print(unwrap(whole))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -597,8 +597,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
 
             self.assertEqual(optimized_run.stdout.strip(), "7")
             self.assertEqual(control_run.stdout.strip(), "7")
-            self.assertEqual(optimized_run.returncode, 7)
-            self.assertEqual(control_run.returncode, 7)
+            self.assertEqual(optimized_run.returncode, 0)
+            self.assertEqual(control_run.returncode, 0)
             self.assertLess(self._sprout_obj_alloc_count(optimized_run.stderr), self._sprout_obj_alloc_count(control_run.stderr))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
@@ -610,9 +610,9 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn make_box(x: Int) -> Box =
           Box(x)
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match make_box(42) with
-          | Box(x) -> print_int(x)
+          | Box(x) -> print(x)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -636,7 +636,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_DEBUG_GC"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
             self.assertRegex(
                 run.stderr,
                 r"\[sprout gc\] cycle=\d+ reason=atexit threshold=\d+ heap_before=\d+ heap_after=\d+ swept=\d+",
@@ -694,8 +694,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             | Ok out -> churn(n - 1, acc + length(out))
             | Err _ -> acc
 
-        fn main() -> Int !{IO} =
-          print_int(churn(400, 0))
+        fn main() -> Unit !{IO} =
+          print(churn(400, 0))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -719,7 +719,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_DEBUG_GC"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "1200")
-            self.assertEqual(run.returncode, 176)
+            self.assertEqual(run.returncode, 0)
             self.assertIn("reason=threshold threshold=1024", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
@@ -735,8 +735,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             | Ok out -> churn(n - 1, acc + length(out))
             | Err _ -> acc
 
-        fn main() -> Int !{IO} =
-          print_int(churn(400, 0))
+        fn main() -> Unit !{IO} =
+          print(churn(400, 0))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -761,7 +761,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_GC_THRESHOLD"] = "off"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "1200")
-            self.assertEqual(run.returncode, 176)
+            self.assertEqual(run.returncode, 0)
             self.assertNotIn("reason=threshold", run.stderr)
             self.assertIn("reason=atexit threshold=0", run.stderr)
 
@@ -777,8 +777,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn score(vec: Vec Int) -> Int =
           vec_length(vec) + vec_get_or(0, 0, vec)
 
-        fn main() -> Int !{IO} =
-          print_int(score(build(200, vec_empty())))
+        fn main() -> Unit !{IO} =
+          print(score(build(200, vec_empty())))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -803,7 +803,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_GC_THRESHOLD"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "400")
-            self.assertEqual(run.returncode, 144)
+            self.assertEqual(run.returncode, 0)
             self.assertIn("reason=threshold threshold=1", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
@@ -815,8 +815,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn build(n: Int, acc: Builder) -> Builder =
           if n == 0 then acc else build(n - 1, builder_append(acc, builder_byte(65)))
 
-        fn main() -> Int !{IO} =
-          print_int(length(builder_build(build(64, builder_empty()))))
+        fn main() -> Unit !{IO} =
+          print(length(builder_build(build(64, builder_empty()))))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -841,7 +841,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_GC_THRESHOLD"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "64")
-            self.assertEqual(run.returncode, 64)
+            self.assertEqual(run.returncode, 0)
             self.assertIn("reason=threshold threshold=1", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
@@ -860,8 +860,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             | Ok _ -> churn(n - 1)
             | Err _ -> 0
 
-        fn main() -> Int !{IO} =
-          print_int(keep(from_string("abc"), churn(32)))
+        fn main() -> Unit !{IO} =
+          print(keep(from_string("abc"), churn(32)))
         """
         with compiled_native_binary(self, src) as bin_path:
             env = os.environ.copy()
@@ -869,7 +869,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_GC_THRESHOLD"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "10")
-        self.assertEqual(run.returncode, 10)
+        self.assertEqual(run.returncode, 0)
         self.assertIn("reason=threshold threshold=1", run.stderr)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
@@ -891,8 +891,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             | Ok _ -> churn(n - 1)
             | Err _ -> 0
 
-        fn main() -> Int !{IO} =
-          print_int(apply(keep))
+        fn main() -> Unit !{IO} =
+          print(apply(keep))
         """
         with compiled_native_binary(self, src) as bin_path:
             env = os.environ.copy()
@@ -900,7 +900,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_GC_THRESHOLD"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "10")
-        self.assertEqual(run.returncode, 10)
+        self.assertEqual(run.returncode, 0)
         self.assertIn("reason=threshold threshold=1", run.stderr)
 
     def test_runtime_managed_bytes_error_paths_do_not_manually_free_gc_objects(self) -> None:
@@ -956,9 +956,9 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
 
         let pair = (Box(1), Box(2))
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match pair with
-          | (Box(x), Box(y)) -> print_int(x + y)
+          | (Box(x), Box(y)) -> print(x + y)
         """
         program = parse(src)
         typecheck_program(program)
@@ -987,7 +987,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env["SPROUT_DEBUG_GC"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "3")
-            self.assertEqual(run.returncode, 3)
+            self.assertEqual(run.returncode, 0)
             self.assertIn("reason=atexit", run.stderr)
             alloc_match = re.search(r"gc_swept=(\d+)", run.stderr)
             self.assertIsNotNone(alloc_match)
@@ -1000,8 +1000,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         fn add(x: Int, y: Int) -> Int = x + y
         let inc = add(1)
 
-        fn main() -> Int !{IO} =
-          print_int(inc(41))
+        fn main() -> Unit !{IO} =
+          print(inc(41))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -1023,7 +1023,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_json_stringify(self) -> None:

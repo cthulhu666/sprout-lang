@@ -137,7 +137,8 @@ fn read_name() -> Maybe String !{IO} =
 ```
 
 At the program boundary, user-facing examples should still handle that helper
-explicitly and keep `main` as `Unit !{IO}`.
+explicitly and keep `main` as `Unit !{IO}`; executable entrypoints reject other
+return shapes.
 
 ## 7. Desugaring Model
 

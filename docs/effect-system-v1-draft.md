@@ -145,8 +145,8 @@ fn greet() -> Maybe String !{IO} =
 
 where `name <- argv_get(0)` unwraps the inner `Maybe` after performing the `IO`
 step, and `Nothing` short-circuits out of the whole block. User-facing `main`
-examples should then handle that helper result explicitly and stay `Unit !{IO}`
-to avoid surprising entrypoint behavior.
+must then handle that helper result explicitly and stay `Unit !{IO}`; the
+executable entrypoint boundary rejects other return shapes.
 
 Semantics remain:
 

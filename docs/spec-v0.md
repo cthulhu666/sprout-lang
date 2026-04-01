@@ -400,9 +400,10 @@ fn main() -> Unit !{IO} =
 ```
 
 `main` is the conventional program entrypoint in v0. User-facing examples
-should prefer `Unit !{IO}` at that boundary, but the current implementation
-does not yet make a stricter normative guarantee here beyond rejecting
-effect-polymorphic `main`.
+should use `Unit !{IO}` at that boundary. Executable entrypoints accepted by
+`sprout run` and `sprout compile` must have type `Unit !{IO}`; helper
+functions may still use shapes such as `Maybe a !{IO}` or `Result e a !{IO}`
+and be handled explicitly from `main`.
 
 ### 10.11 Non-exhaustive match (compile error)
 

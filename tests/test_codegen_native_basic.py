@@ -13,8 +13,8 @@ class CodegenNativeBasicTests(CodegenTestCase):
           match pair with
           | (x, y) -> x + y
 
-        fn main() -> Int !{IO} =
-          print_int(sum_pair((20, 22)))
+        fn main() -> Unit !{IO} =
+          print(sum_pair((20, 22)))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -37,7 +37,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_reachable_helper_inside_tuple_expr(self) -> None:
@@ -47,9 +47,9 @@ class CodegenNativeBasicTests(CodegenTestCase):
         fn pair(x: Int) -> (Int, Int) =
           (bump(x), bump(x + 1))
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match pair(40) with
-          | (left, right) -> print_int(left + right)
+          | (left, right) -> print(left + right)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -71,7 +71,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "83")
-            self.assertEqual(run.returncode, 83)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_print_tuple_value(self) -> None:
@@ -112,10 +112,10 @@ class CodegenNativeBasicTests(CodegenTestCase):
         fn make_none() -> MaybeInt =
           Nothing
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match make_none() with
-          | Nothing -> print_int(0)
-          | Just value -> print_int(value)
+          | Nothing -> print(0)
+          | Just value -> print(value)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -149,10 +149,10 @@ class CodegenNativeBasicTests(CodegenTestCase):
 
         let none = Nothing
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match none with
-          | Nothing -> print_int(0)
-          | Just value -> print_int(value)
+          | Nothing -> print(0)
+          | Just value -> print(value)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -212,8 +212,8 @@ class CodegenNativeBasicTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_and_execute(self) -> None:
         src = """
-        fn main() -> Int !{IO} =
-          print_int(42)
+        fn main() -> Unit !{IO} =
+          print(42)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -236,7 +236,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_direct_constructor_match_executes_without_maybe_regression(self) -> None:
@@ -245,10 +245,10 @@ class CodegenNativeBasicTests(CodegenTestCase):
           | Just Int
           | Nothing
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match if false then Just(7) else Nothing with
-          | Just value -> print_int(value)
-          | Nothing -> print_int(0)
+          | Just value -> print(value)
+          | Nothing -> print(0)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -285,10 +285,10 @@ class CodegenNativeBasicTests(CodegenTestCase):
           | Just value -> value
           | Nothing -> 0
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match if false then Just(7) else Nothing with
-          | Just value -> print_int(value)
-          | whole -> print_int(unwrap(whole))
+          | Just value -> print(value)
+          | whole -> print(unwrap(whole))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -320,10 +320,10 @@ class CodegenNativeBasicTests(CodegenTestCase):
           | Just Int
           | Nothing
 
-        fn main() -> Int !{IO} =
+        fn main() -> Unit !{IO} =
           match (match true with | true -> Just(7) | false -> Nothing) with
-          | Just value -> print_int(value)
-          | Nothing -> print_int(0)
+          | Just value -> print(value)
+          | Nothing -> print(0)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -346,7 +346,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "7")
-            self.assertEqual(run.returncode, 7)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_program_receives_program_args(self) -> None:
@@ -422,8 +422,8 @@ class CodegenNativeBasicTests(CodegenTestCase):
         fn side() -> Bool !{IO} =
           print_int(1) == 1
 
-        fn main() -> Int !{IO} =
-          if false && side() then print_int(0) else print_int(42)
+        fn main() -> Unit !{IO} =
+          if false && side() then print(0) else print(42)
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -445,7 +445,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.stdout.strip(), "42")
-            self.assertEqual(run.returncode, 42)
+            self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_main_io_unit(self) -> None:

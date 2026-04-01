@@ -595,10 +595,10 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
-                fn main() -> Int !{IO} =
+                fn main() -> Unit !{IO} =
                   match analysis_symbol_locations_in_source("module app.lib\n\nlet apple = 1\ntype Fruit =\n  | Banana") with
-                  | Ok locations -> print_int(vec_length(locations))
-                  | Err _ -> print_int(0)
+                  | Ok locations -> print(vec_length(locations))
+                  | Err _ -> print(0)
                 """,
                 encoding="utf-8",
             )
@@ -616,7 +616,7 @@ for line in sys.stdin:
                 check=True,
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
-            self.assertEqual(run.returncode, 3)
+            self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stderr, "")
             self.assertEqual(run.stdout.strip(), "3")
 
@@ -629,8 +629,8 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
-                fn main() -> Int !{IO} =
-                  print_int(vec_length(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing")))
+                fn main() -> Unit !{IO} =
+                  print(vec_length(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing")))
                 """,
                 encoding="utf-8",
             )
@@ -648,7 +648,7 @@ for line in sys.stdin:
                 check=True,
             )
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=self._native_analysis_service_env())
-            self.assertEqual(run.returncode, 1)
+            self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stderr, "")
             self.assertEqual(run.stdout.strip(), "1")
 

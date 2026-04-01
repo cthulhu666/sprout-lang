@@ -56,6 +56,16 @@ def _print_warnings(warnings: list[CompilerWarning]) -> None:
         )
 
 
+def _validate_executable_entrypoint(typed: dict[str, str], entry_main_name: str) -> None:
+    main_type = typed.get(entry_main_name)
+    if main_type is None:
+        raise TypeCheckError(f"Executable entrypoint `{entry_main_name}` is missing")
+    if main_type != "Unit !{IO}":
+        raise TypeCheckError(
+            f"Executable entrypoint `{entry_main_name}` must have type Unit !{{IO}}, got {main_type}"
+        )
+
+
 def cmd_parse(path: Path) -> int:
     bundle = load_module_bundle(path)
     source = bundle.source
@@ -135,7 +145,13 @@ def cmd_run(
     typecheck_program(tree)
     validate_public_surface(tree, bundle)
     lowered = lower_typeclasses(tree)
-    typecheck_program(lowered)
+    entry_main_name = "main"
+    if bundle is not None:
+        entry_info = bundle.modules[path.resolve()]
+        if entry_info.header.module is not None:
+            entry_main_name = f"{entry_info.header.module}.main"
+    typed = typecheck_program(lowered)
+    _validate_executable_entrypoint(typed, entry_main_name)
     run_program(lowered, argv=program_args)
     return 0
 
@@ -162,12 +178,13 @@ def cmd_compile(
     typecheck_program(tree)
     validate_public_surface(tree, bundle)
     lowered = lower_typeclasses(tree)
-    typecheck_program(lowered)
     entry_main_name = "main"
     if bundle is not None:
         entry_info = bundle.modules[path.resolve()]
         if entry_info.header.module is not None:
             entry_main_name = f"{entry_info.header.module}.main"
+    typed = typecheck_program(lowered)
+    _validate_executable_entrypoint(typed, entry_main_name)
     llvm_ir = compile_to_llvm(lowered, entry_main_name=entry_main_name)
 
     if not native:
