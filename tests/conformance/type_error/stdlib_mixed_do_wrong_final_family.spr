@@ -1,0 +1,5 @@
+fn bad() -> Maybe Int !{IO} =
+  do
+    print("x")
+    x <- Just(1)
+    Ok(x)

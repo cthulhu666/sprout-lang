@@ -1,0 +1,22 @@
+module examples.io_result_do_demo
+
+import stdlib.bytes
+import stdlib.crypto
+import stdlib.string
+
+# Demonstrates experimental do notation for mixed IO and Result sequencing.
+#
+# Run:
+#   python3 -m sprout.cli run examples/io_result_do_demo.sprout
+
+fn random_payload_size() -> Result crypto.CryptoError Int !{IO} =
+  do
+    print("do:io-result")
+    payload <- crypto.random_bytes(8)
+    let size = bytes.length(payload)
+    Ok(size)
+
+fn main() -> Unit !{IO} =
+  match random_payload_size() with
+  | Ok size -> print(string.concat("io-do:bytes=", to_string(size)))
+  | Err err -> print("io-do:crypto-error")

@@ -1,0 +1,12 @@
+fn configured_label() -> Maybe String !{IO} =
+  do
+    print("mixed:maybe:start")
+    value <- Just("ready")
+    let suffix = "-ok"
+    print("mixed:maybe:after-bind")
+    Just(value ++ suffix)
+
+fn main() -> Unit !{IO} =
+  match configured_label() with
+  | Just value -> print(value)
+  | Nothing -> print("mixed:maybe:none")

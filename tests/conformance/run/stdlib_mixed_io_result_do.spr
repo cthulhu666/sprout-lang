@@ -1,0 +1,12 @@
+fn checked_value() -> Result String Int !{IO} =
+  do
+    print("mixed:result:start")
+    value <- Ok(4)
+    let total = value + 2
+    print("mixed:result:after-bind")
+    Ok(total)
+
+fn main() -> Unit !{IO} =
+  match checked_value() with
+  | Ok value -> print(value)
+  | Err err -> print(err)

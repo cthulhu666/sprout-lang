@@ -1,0 +1,5 @@
+fn bad() -> Maybe Int =
+  do
+    x <- Just(1)
+    y <- Ok(2)
+    Just(x + y)

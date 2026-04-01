@@ -375,8 +375,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
     `<-` to unwrap an inner `Maybe`/`Result` and short-circuit on failure; code
     that needs the whole container should use explicit `match`.
     See `examples/do_notation_demo.sprout` for `Maybe`/`Result` and
-    `examples/io_do_demo.sprout` for a helper-level mixed `IO` plus `Maybe` flow
-    handled by a `Unit !{IO}` `main`.
+    `examples/io_do_demo.sprout` / `examples/io_result_do_demo.sprout` for
+    helper-level mixed `IO` plus `Maybe` / `Result` flows handled by a
+    `Unit !{IO}` `main`.
   - forward pipe operator: `value |> f` rewrites to `f(value)`, and
     `value |> g(a, b)` rewrites to `g(a, b, value)`
   - function composition operators:
@@ -393,7 +394,10 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `when_ok(f, r)` runs `f` for `Ok` and preserves `r`
   - `when_error(f, r)` runs `f` for `Err` and preserves `r`
 
-The current `after(effect, value)` helper in `stdlib/prelude.sprout` is a pragmatic sequencing convenience for `IO`. A more principled abstraction is likely needed later, probably in the direction of Haskell-style sequencing/typeclass machinery rather than a growing pile of ad hoc aliases.
+The current `after(effect, value)` helper in `stdlib/prelude.sprout` is a
+lightweight compatibility convenience for single-step `IO` sequencing. It is
+still supported, but `do` is the preferred surface for multi-step sequencing
+and mixed `IO` plus `Maybe`/`Result` flows.
 
 Experimental compiler helper module (in `stdlib/compiler.sprout`):
 

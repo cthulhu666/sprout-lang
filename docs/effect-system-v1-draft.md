@@ -259,8 +259,9 @@ Recommended migration stance:
 3. new `IO`-aware sequencing should be additive at first
 4. the experimental mixed `IO` plus inner `Maybe`/`Result` block shapes are the
    preferred story for failure-aware effectful code at this stage
-5. ad hoc sequencing helpers such as `after(...)` may remain temporarily, but
-   they should no longer be the preferred story once `IO` sequencing lands
+5. lightweight sequencing helpers such as `after(...)` may remain as
+   compatibility/convenience surface, but they should no longer be the
+   preferred story once `IO` sequencing lands
 
 Compatibility rule of thumb:
 
@@ -308,6 +309,5 @@ Recommended decision:
 
 1. Should pure local `let` inside `do` be layout-only, or share the ordinary
    `let` surface exactly?
-2. Once mixed `IO` sequencing is established, does `after(...)` stay as a
-   convenience helper,
-   or become legacy compatibility surface?
+2. Should `after(...)` remain only a small convenience for single-step `IO`
+   sequencing, or shrink further over time?

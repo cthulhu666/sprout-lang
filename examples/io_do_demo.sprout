@@ -6,15 +6,16 @@ import stdlib.string
 #
 # Run:
 #   python3 -m sprout.cli run examples/io_do_demo.sprout
-#   python3 -m sprout.cli run examples/io_do_demo.sprout Ada
+#   SPROUT_NAME="  Ada  " python3 -m sprout.cli run examples/io_do_demo.sprout
 
-fn read_name() -> Maybe String !{IO} =
+fn configured_name() -> Maybe String !{IO} =
   do
-    print("do:io")
-    name <- argv_get(0)
-    Just(name)
+    print("do:io-maybe")
+    raw <- env_get("SPROUT_NAME")
+    let cleaned = string.trim(raw)
+    Just(cleaned)
 
 fn main() -> Unit !{IO} =
-  match read_name() with
+  match configured_name() with
   | Just name -> print(string.concat("io-do:name=", name))
   | Nothing -> print("io-do:name=anonymous")

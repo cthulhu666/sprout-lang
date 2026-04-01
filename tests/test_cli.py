@@ -1720,6 +1720,41 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stdout.strip(), "43\n43\n43\n43\nerror:too-small\n7")
 
+    def test_run_io_do_demo_without_configured_name(self) -> None:
+        env = dict(os.environ)
+        env.pop("SPROUT_NAME", None)
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sprout.cli",
+                "run",
+                "examples/io_do_demo.sprout",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stdout.strip(), "do:io-maybe\nio-do:name=anonymous")
+
+    def test_run_io_result_do_demo(self) -> None:
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sprout.cli",
+                "run",
+                "examples/io_result_do_demo.sprout",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stdout.strip(), "do:io-result\nio-do:bytes=8")
+
     def test_compile_all_examples(self) -> None:
         example_flags = {
             "examples/result_demo.sprout": ["--with-stdlib"],

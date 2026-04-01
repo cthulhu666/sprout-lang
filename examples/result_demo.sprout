@@ -49,4 +49,7 @@ fn piped_error_demo() -> Unit !{IO} =
   print_result(piped_result_flow(Ok(3)), 7)
 
 fn main() -> Unit !{IO} =
-  after(manual_ok_demo(), after(piped_ok_demo(), piped_error_demo()))
+  do
+    manual_ok_demo()
+    piped_ok_demo()
+    piped_error_demo()

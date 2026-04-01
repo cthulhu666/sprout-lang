@@ -1,0 +1,1 @@
+Cannot mix Maybe and Result bindings in the same do block
