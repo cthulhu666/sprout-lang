@@ -27,6 +27,7 @@ from .analysis_contract import (
     OP_SYMBOL_LOCATIONS_IN_SOURCE,
     OP_TYPE_OF_IN_SOURCE,
 )
+from . import ast
 from .ast import to_dict
 from .codegen_llvm import CodegenError, compile_to_llvm
 from .elaborate import ElaborateError
@@ -56,10 +57,22 @@ def _print_warnings(warnings: list[CompilerWarning]) -> None:
         )
 
 
-def _validate_executable_entrypoint(typed: dict[str, str], entry_main_name: str) -> None:
+def _validate_executable_entrypoint(program: ast.Program, typed: dict[str, str], entry_main_name: str) -> None:
     main_type = typed.get(entry_main_name)
     if main_type is None:
         raise TypeCheckError(f"Executable entrypoint `{entry_main_name}` is missing")
+    main_decl = next(
+        (
+            decl
+            for decl in program.declarations
+            if isinstance(decl, ast.FnDecl) and decl.name == entry_main_name
+        ),
+        None,
+    )
+    if main_decl is None:
+        raise TypeCheckError(f"Executable entrypoint `{entry_main_name}` is missing")
+    if len(main_decl.params) != 0:
+        raise TypeCheckError(f"Executable entrypoint `{entry_main_name}` must take zero arguments")
     if main_type != "Unit !{IO}":
         raise TypeCheckError(
             f"Executable entrypoint `{entry_main_name}` must have type Unit !{{IO}}, got {main_type}"
@@ -151,7 +164,7 @@ def cmd_run(
         if entry_info.header.module is not None:
             entry_main_name = f"{entry_info.header.module}.main"
     typed = typecheck_program(lowered)
-    _validate_executable_entrypoint(typed, entry_main_name)
+    _validate_executable_entrypoint(lowered, typed, entry_main_name)
     run_program(lowered, argv=program_args)
     return 0
 
@@ -184,7 +197,7 @@ def cmd_compile(
         if entry_info.header.module is not None:
             entry_main_name = f"{entry_info.header.module}.main"
     typed = typecheck_program(lowered)
-    _validate_executable_entrypoint(typed, entry_main_name)
+    _validate_executable_entrypoint(lowered, typed, entry_main_name)
     llvm_ir = compile_to_llvm(lowered, entry_main_name=entry_main_name)
 
     if not native:

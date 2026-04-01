@@ -2028,6 +2028,48 @@ class CliTests(unittest.TestCase):
             self.assertIn("Int !{IO}", compile_proc.stdout)
             self.assertFalse(out.exists())
 
+    def test_run_rejects_non_zero_arity_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.sprout"
+            path.write_text(
+                """
+                module app.main
+                fn main(x: Int) -> Unit !{IO} =
+                  print(x)
+                """,
+                encoding="utf-8",
+            )
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "run", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("Executable entrypoint `app.main.main` must take zero arguments", run.stdout)
+
+    def test_compile_rejects_missing_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.sprout"
+            out = Path(tmp) / "out.ll"
+            path.write_text(
+                """
+                module app.main
+                fn helper() -> Unit !{IO} =
+                  print("ok")
+                """,
+                encoding="utf-8",
+            )
+            compile_proc = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "compile", str(path), "-o", str(out)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_proc.returncode, 1)
+            self.assertIn("Executable entrypoint `app.main.main` is missing", compile_proc.stdout)
+            self.assertFalse(out.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

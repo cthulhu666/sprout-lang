@@ -1,0 +1,2 @@
+fn helper() -> Unit !{IO} =
+  print("ok")

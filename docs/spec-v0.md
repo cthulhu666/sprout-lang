@@ -399,9 +399,9 @@ fn main() -> Unit !{IO} =
   print("hello")
 ```
 
-`main` is the conventional program entrypoint in v0. User-facing examples
-should use `Unit !{IO}` at that boundary. Executable entrypoints accepted by
-`sprout run` and `sprout compile` must have type `Unit !{IO}`; helper
+`main` is the conventional program entrypoint in v0. Executable entrypoints
+accepted by `sprout run` and `sprout compile` must be a zero-argument
+`fn main() -> Unit !{IO}` after module qualification is resolved. Helper
 functions may still use shapes such as `Maybe a !{IO}` or `Result e a !{IO}`
 and be handled explicitly from `main`.
 
