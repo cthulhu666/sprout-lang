@@ -371,6 +371,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `after(effect, value)` sequences `effect` and returns `value`
   - experimental `do` blocks for `Maybe`/`Result`, `IO`, and mixed `IO` plus inner `Maybe`/`Result` sequencing, for example:
     `do ... x <- mx ... y <- my ... Just((x, y))`
+    The intended current model is intentionally narrow: mixed `IO` blocks use
+    `<-` to unwrap an inner `Maybe`/`Result` and short-circuit on failure; code
+    that needs the whole container should use explicit `match`.
     See `examples/do_notation_demo.sprout` for `Maybe`/`Result` and
     `examples/io_do_demo.sprout` for a helper-level mixed `IO` plus `Maybe` flow
     handled by a `Unit !{IO}` `main`.

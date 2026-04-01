@@ -5,8 +5,9 @@ This document is a draft design for ergonomic sequencing sugar in Sprout v1.
 It is not part of normative v0. Its purpose is to define an experimental `do`
 surface that removes deeply nested `match` expressions when sequencing
 container-like computations such as `Maybe` and `Result`, and now also supports
-narrow mixed `IO` plus inner `Maybe`/`Result` flows, while leaving room for
-broader Haskell-style sequencing later.
+narrow mixed `IO` plus inner `Maybe`/`Result` flows as the intended near-term
+sequencing model, while leaving room for broader Haskell-style sequencing only
+if later experience justifies it.
 
 ## 1. Problem Statement
 
@@ -91,6 +92,15 @@ The implementation does not yet support:
 3. Full Haskell-style desugaring through a standard `Monad`/`Applicative`
    hierarchy.
 
+Recommended interpretation:
+
+1. The current `Maybe`/`Result` plus narrow mixed-`IO` behavior is the intended
+   experimental design at this stage, not just parser groundwork.
+2. A mixed block is for short-circuiting through an inner `Maybe`/`Result`
+   while still performing `IO`.
+3. Code that needs the whole `Maybe`/`Result` value should use explicit
+   `match`, not expect `<-` to preserve the container.
+
 ## 6. Typing Model
 
 At a high level:
@@ -108,6 +118,9 @@ At a high level:
    sequencing family.
 8. In a mixed `IO` block, `<-` unwraps the inner `Maybe`/`Result`; code that
    needs the whole container should use an explicit `match`.
+9. This narrow mixed form is the recommended stopping point for now; broader
+   sequencing abstractions are deferred until concrete usage shows they are
+   necessary.
 
 Examples:
 
@@ -236,8 +249,9 @@ Compatibility notes:
 
 1. Existing nested-`match` code remains valid.
 2. Existing combinator helpers remain valid.
-3. Mixed `IO` plus inner `Maybe`/`Result` sequencing is experimental and may
-   still change if the ergonomics are poor in practice.
+3. Mixed `IO` plus inner `Maybe`/`Result` sequencing is experimental, but it is
+   currently the intended near-term sequencing story rather than a placeholder
+   for immediate generalization.
 4. The feature is implemented in the prototype, but it is not yet normative
    v0.
 
@@ -247,7 +261,8 @@ Likely follow-up directions include:
 
 1. Pattern binds in `<-` position.
 2. `Applicative`-style conveniences where they make sense.
-3. Deciding whether the current mixed `IO` plus inner `Maybe`/`Result` model
-   is sufficient or should grow a more general abstraction.
+3. Re-evaluating whether the current mixed `IO` plus inner `Maybe`/`Result`
+   model has proven insufficient in real code before adding a more general
+   abstraction.
 4. User-extensible sequencing abstractions, likely via typeclasses or closely
    related machinery.

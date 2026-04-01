@@ -9,8 +9,10 @@ Status note:
 
 This document is a design draft for the next effect milestone in Sprout.
 
-The main recommendation is intentionally narrow: improve the usability of the
-existing effect model before adding richer row machinery.
+The main recommendation is intentionally narrow: treat the current mixed
+`IO` plus inner `Maybe`/`Result` `do` model as the intended v0-era endpoint
+for sequencing sugar, improve its usability, and defer richer row machinery
+or more general sequencing abstractions until real pressure appears.
 
 ## 1. Problem Statement
 
@@ -28,8 +30,8 @@ programming ergonomics.
 Today the main pain points are:
 
 1. `IO` now participates in the experimental `do` notation, but the combined
-   story for `IO` plus inner `Maybe`/`Result` sequencing needs to stay narrow
-   and teachable.
+   story for `IO` plus inner `Maybe`/`Result` sequencing still needs a clearer
+   statement of intent so it reads as a deliberate design, not a halfway step.
 2. Local sequencing often falls back to ad hoc helpers such as `after(...)`
    instead of a coherent language story.
 3. Higher-order effect propagation is implemented, but the diagnostic story is
@@ -77,8 +79,8 @@ Recommended order:
    - calling `!{IO}` from a pure function
    - forgetting to propagate an effect variable through a higher-order helper
    - declaring `main` or another function with an effect that is too narrow
-6. Only after this ergonomics pass, revisit whether richer rows are still
-   justified.
+6. Only after this ergonomics pass and real usage experience, revisit whether
+   richer rows or broader sequencing abstractions are still justified.
 
 This keeps the next milestone focused on usability, not theory expansion.
 
@@ -94,6 +96,15 @@ The recommended next effect milestone is:
 5. Add pure local bind steps inside `do`.
 6. Sharpen effect diagnostics and examples.
 
+Recommended stopping point for this slice:
+
+- treat mixed `IO` plus inner `Maybe`/`Result` sequencing as sufficient for the
+  current language stage
+- require anything broader to justify itself with concrete examples that are
+  genuinely awkward under the current model
+- prefer explicit `match` over speculative generalization when code needs to
+  preserve the whole container value
+
 Illustrative target surface for a helper:
 
 ```sprout
@@ -107,8 +118,9 @@ fn prompt_name() -> Maybe String !{IO} =
 
 The surface stays intentionally small: bare `!{IO}` steps remain valid, and a
 `<-` step may also unwrap `Maybe`/`Result` when the surrounding block returns
-`Maybe ... !{IO}` or `Result ... !{IO}`. This should target ordinary sequential
-IO code rather than richer effect rows.
+`Maybe ... !{IO}` or `Result ... !{IO}`. This is the recommended v0-era
+sequencing story for ordinary sequential IO code with failure; it is not
+intended to imply a broader monadic abstraction yet.
 If code needs to keep the whole `Maybe` or `Result` value instead of
 short-circuiting on it, it should use an explicit `match`.
 
@@ -147,6 +159,16 @@ where `name <- argv_get(0)` unwraps the inner `Maybe` after performing the `IO`
 step, and `Nothing` short-circuits out of the whole block. User-facing `main`
 must then handle that helper result explicitly and stay `Unit !{IO}`; the
 executable entrypoint boundary rejects other return shapes.
+
+Recommended interpretation rules:
+
+1. A plain non-final expression step is only for `!{IO}` sequencing.
+2. A `<-` step inside mixed `IO` sequencing unwraps the inner `Maybe` or
+   `Result`; it does not bind the whole container.
+3. A mixed block still has one container family, `Maybe` or `Result`, and
+   must finish in that same family.
+4. If code needs to observe or preserve the whole `Maybe`/`Result` value, it
+   should leave `do` for an explicit `match`.
 
 Semantics remain:
 
@@ -235,8 +257,8 @@ Recommended migration stance:
 1. existing v0 effect annotations remain valid
 2. existing `Maybe`/`Result` `do` code remains valid
 3. new `IO`-aware sequencing should be additive at first
-4. the experimental mixed `IO` plus inner `Maybe`/`Result` block shapes are now
-   the preferred story for failure-aware effectful code
+4. the experimental mixed `IO` plus inner `Maybe`/`Result` block shapes are the
+   preferred story for failure-aware effectful code at this stage
 5. ad hoc sequencing helpers such as `after(...)` may remain temporarily, but
    they should no longer be the preferred story once `IO` sequencing lands
 
@@ -277,15 +299,15 @@ Recommended decision:
 1. Do not make open rows the next effect milestone.
 2. Do not add more built-in effect labels yet.
 3. Make `IO` sequencing and effect diagnostics the next effect milestone.
-4. Re-evaluate richer rows only after the existing effect model is pleasant
-   enough for ordinary programs.
+4. Treat the current mixed `IO` plus inner `Maybe`/`Result` `do` model as the
+   intended near-term stopping point.
+5. Re-evaluate richer rows only after the existing effect model is pleasant
+   enough for ordinary programs and concrete gaps remain.
 
 ## 13. Open Questions
 
-1. Should effectful `Maybe`/`Result` binds inside `IO` remain the only mixed
-   sequencing form, or should Sprout eventually add a more general abstraction?
-2. Should pure local `let` inside `do` be layout-only, or share the ordinary
+1. Should pure local `let` inside `do` be layout-only, or share the ordinary
    `let` surface exactly?
-3. Once mixed `IO` sequencing is established, does `after(...)` stay as a
+2. Once mixed `IO` sequencing is established, does `after(...)` stay as a
    convenience helper,
    or become legacy compatibility surface?
