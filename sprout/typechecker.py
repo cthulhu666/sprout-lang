@@ -1241,7 +1241,10 @@ def infer_expr(
                         setattr(step, "_do_family", "IO")
                         working_env[step.name] = Scheme(vars=(), type=step_t)
                         continue
-                    raise tc_error("do bindings currently require Maybe, Result, or an !{IO} expression", step.value)
+                    raise tc_error(
+                        "This do bind must unwrap a Maybe/Result value, or appear in an !{IO} do block",
+                        step.value,
+                    )
                 if sequence_family is None:
                     sequence_family = info.family
                     sequence_error_type = info.error_type
@@ -1262,11 +1265,20 @@ def infer_expr(
                     if _effect_includes_io(state, step_effects):
                         sequence_family = "IO"
                         continue
-                    raise tc_error("Only !{IO} expression steps may appear before the final do expression", step.value)
+                    raise tc_error(
+                        "A non-final plain expression step is only allowed when it requires !{IO}",
+                        step.value,
+                    )
                 if sequence_family != "IO":
-                    raise tc_error("Only !{IO} do blocks may contain plain expression steps before the final expression", step.value)
+                    raise tc_error(
+                        f"This do block already sequences {sequence_family}; plain non-final expression steps are only allowed in !{{IO}} do blocks",
+                        step.value,
+                    )
                 if not _effect_includes_io(state, step_effects):
-                    raise tc_error("Non-final plain expression steps in an !{IO} do block must require !{IO}", step.value)
+                    raise tc_error(
+                        "A non-final plain expression step in an !{IO} do block must itself require !{IO}",
+                        step.value,
+                    )
                 continue
             raise tc_error("Unsupported do step", step)
 

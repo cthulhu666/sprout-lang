@@ -158,7 +158,7 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
-        self.assertIn("do bindings currently require Maybe, Result, or an !{IO} expression", str(ctx.exception))
+        self.assertIn("This do bind must unwrap a Maybe/Result value", str(ctx.exception))
 
     def test_typecheck_do_notation_with_io_steps_and_let(self) -> None:
         src = """
@@ -192,7 +192,19 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
-        self.assertIn("Only !{IO} expression steps may appear before the final do expression", str(ctx.exception))
+        self.assertIn("A non-final plain expression step is only allowed when it requires !{IO}", str(ctx.exception))
+
+    def test_typecheck_do_notation_rejects_plain_expr_step_in_maybe_block(self) -> None:
+        src = """
+        fn bad(m: Maybe Int) -> Maybe Int =
+          do
+            x <- m
+            print("hi")
+            Just(x)
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(with_prelude(src)))
+        self.assertIn("plain non-final expression steps are only allowed in !{IO} do blocks", str(ctx.exception))
 
     def test_typecheck_do_notation_requires_matching_final_family(self) -> None:
         src = """
@@ -235,7 +247,7 @@ class TypecheckerTests(unittest.TestCase):
             resolve_program_names(program, bundle)
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(program)
-        self.assertIn("do bindings currently require Maybe, Result, or an !{IO} expression", str(ctx.exception))
+        self.assertIn("This do bind must unwrap a Maybe/Result value", str(ctx.exception))
 
     def test_elaborate_program_lowers_do_after_typechecking(self) -> None:
         src = """
