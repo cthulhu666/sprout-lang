@@ -400,10 +400,11 @@ fn main() -> Unit !{IO} =
 ```
 
 `main` is the conventional program entrypoint in v0. Executable entrypoints
-accepted by `sprout run` and `sprout compile` must be a zero-argument
-`fn main() -> Unit !{IO}` after module qualification is resolved. Helper
-functions may still use shapes such as `Maybe a !{IO}` or `Result e a !{IO}`
-and be handled explicitly from `main`.
+accepted by `sprout run` and `sprout compile` must be exactly a zero-argument
+`fn main() -> Unit !{IO}` after module qualification is resolved. Pure `main`
+definitions and effect-polymorphic `main` definitions are rejected at the
+executable boundary. Helper functions may still use shapes such as
+`Maybe a !{IO}` or `Result e a !{IO}` and be handled explicitly from `main`.
 
 ### 10.11 Non-exhaustive match (compile error)
 

@@ -57,10 +57,22 @@ def _print_warnings(warnings: list[CompilerWarning]) -> None:
         )
 
 
+def _missing_entrypoint_message(entry_main_name: str) -> str:
+    return f"Executable entrypoint `{entry_main_name}` is missing"
+
+
+def _entrypoint_arity_message(entry_main_name: str) -> str:
+    return f"Executable entrypoint `{entry_main_name}` must take zero arguments"
+
+
+def _entrypoint_type_message(entry_main_name: str, actual_type: str) -> str:
+    return f"Executable entrypoint `{entry_main_name}` must have type Unit !{{IO}}, got {actual_type}"
+
+
 def _validate_executable_entrypoint(program: ast.Program, typed: dict[str, str], entry_main_name: str) -> None:
     main_type = typed.get(entry_main_name)
     if main_type is None:
-        raise TypeCheckError(f"Executable entrypoint `{entry_main_name}` is missing")
+        raise TypeCheckError(_missing_entrypoint_message(entry_main_name))
     main_decl = next(
         (
             decl
@@ -70,13 +82,11 @@ def _validate_executable_entrypoint(program: ast.Program, typed: dict[str, str],
         None,
     )
     if main_decl is None:
-        raise TypeCheckError(f"Executable entrypoint `{entry_main_name}` is missing")
+        raise TypeCheckError(_missing_entrypoint_message(entry_main_name))
     if len(main_decl.params) != 0:
-        raise TypeCheckError(f"Executable entrypoint `{entry_main_name}` must take zero arguments")
+        raise TypeCheckError(_entrypoint_arity_message(entry_main_name))
     if main_type != "Unit !{IO}":
-        raise TypeCheckError(
-            f"Executable entrypoint `{entry_main_name}` must have type Unit !{{IO}}, got {main_type}"
-        )
+        raise TypeCheckError(_entrypoint_type_message(entry_main_name, main_type))
 
 
 def cmd_parse(path: Path) -> int:

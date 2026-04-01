@@ -166,6 +166,27 @@ class ModuleLoaderTests(unittest.TestCase):
                 typecheck_program(program)
             self.assertIn("Top-level let bindings must not perform effects", str(ctx.exception))
 
+    def test_module_rejects_effect_polymorphic_qualified_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module app.main
+
+                fn main() -> Unit !{e} =
+                  print("ok")
+                """,
+                encoding="utf-8",
+            )
+
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            with self.assertRaises(TypeCheckError) as ctx:
+                typecheck_program(program)
+            self.assertIn("main must not be effect-polymorphic", str(ctx.exception))
+
     def test_module_resolution_warns_on_imported_deprecated_value_use(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

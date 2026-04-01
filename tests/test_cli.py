@@ -2070,6 +2070,48 @@ class CliTests(unittest.TestCase):
             self.assertIn("Executable entrypoint `app.main.main` is missing", compile_proc.stdout)
             self.assertFalse(out.exists())
 
+    def test_run_rejects_pure_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.sprout"
+            path.write_text(
+                """
+                module app.main
+                fn main() -> Unit =
+                  print("ok")
+                """,
+                encoding="utf-8",
+            )
+            run = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "run", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 1)
+            self.assertIn("Function app.main.main requires undeclared effects", run.stdout)
+
+    def test_compile_rejects_effect_polymorphic_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.sprout"
+            out = Path(tmp) / "out.ll"
+            path.write_text(
+                """
+                module app.main
+                fn main() -> Unit !{e} =
+                  print("ok")
+                """,
+                encoding="utf-8",
+            )
+            compile_proc = subprocess.run(
+                [sys.executable, "-m", "sprout.cli", "compile", str(path), "-o", str(out)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_proc.returncode, 1)
+            self.assertIn("main must not be effect-polymorphic", compile_proc.stdout)
+            self.assertFalse(out.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1829,7 +1829,9 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         fn_decl = decl
         if fn_decl.name in fn_types:
             raise TypeCheckError(f"Duplicate function {fn_decl.name}")
-        if fn_decl.name == "main" and isinstance(effect_from_names(fn_decl.effects), EVar):
+        if (fn_decl.name == "main" or fn_decl.name.endswith(".main")) and isinstance(
+            effect_from_names(fn_decl.effects), EVar
+        ):
             raise tc_error("main must not be effect-polymorphic; use a concrete effect such as !{IO}", fn_decl)
         fn_t, fn_effects = fn_type_from_decl(fn_decl, state)
         fn_types[fn_decl.name] = fn_t
