@@ -253,7 +253,9 @@ export fn render(resp: HttpServerResponse) -> Result HttpServerError String =
         Ok(inject_headers(raw, render_extra_headers(headers)))
 
 fn write_and_close(conn: Int, payload: String) -> Unit !{IO} =
-  after(tcp_write(conn, payload), tcp_close(conn))
+  do
+    tcp_write(conn, payload)
+    tcp_close(conn)
 
 fn handle_connection(conn: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
   match read_request(conn) with
