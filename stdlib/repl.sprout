@@ -32,7 +32,7 @@ fn render_lines(prompt: Maybe String, lines: Vec String, index: Int) -> Unit !{I
   | Nothing -> term_noop()
 
 fn single_line(text: String) -> Vec String =
-  vec_append(text, vec_empty())
+  vec_singleton(text)
 
 fn char_at(raw: String, index: Int) -> String =
   string.slice(raw, index, 1)

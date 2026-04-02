@@ -1580,6 +1580,17 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "66")
 
+    def test_stdlib_vec_singleton(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          print(vec_get_or(0, -1, vec_singleton(42)))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "42")
+
     def test_stdlib_vec_filter_helpers(self) -> None:
         src = """
         fn sample() -> Vec Int =

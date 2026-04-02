@@ -1,5 +1,5 @@
 module examples.typeclass_collections_demo
-import stdlib.collections (Vec, vec_append, vec_empty, vec_fold)
+import stdlib.collections (Vec, vec_append, vec_singleton, vec_fold)
 
 class Summable c {
   fn sum_values(xs: c) -> Int
@@ -20,5 +20,5 @@ fn sum_vec(values: Vec Int) -> Int where Summable (Vec Int) =
 
 fn main() -> Unit !{IO} =
   print(
-    sum_vec(vec_append(5, vec_append(4, vec_append(3, vec_empty()))))
+    sum_vec(vec_append(5, vec_append(4, vec_singleton(3))))
   )

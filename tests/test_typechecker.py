@@ -846,6 +846,15 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
 
+    def test_typecheck_stdlib_vec_singleton(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          print(vec_get_or(0, 0, vec_singleton(41)))
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertIn("vec_singleton", types)
+        self.assertEqual(types["main"], "Unit !{IO}")
+
     def test_typecheck_with_http_stdlib_loaded(self) -> None:
         src = """
         fn main() -> Unit !{IO} =

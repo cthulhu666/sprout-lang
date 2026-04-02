@@ -1,5 +1,5 @@
 module examples.typeclass_functor_foldable_demo
-import stdlib.collections (Functor, Foldable, List, Vec, vec_append, vec_empty)
+import stdlib.collections (Functor, Foldable, List, Vec, vec_append, vec_singleton)
 
 fn add_one(x: Int) -> Int = x + 1
 fn add(acc: Int, x: Int) -> Int = acc + x
@@ -17,7 +17,7 @@ fn sample_list() -> List Int =
   [1, 2, 3]
 
 fn sample_vec() -> Vec Int =
-  vec_append(6, vec_append(5, vec_append(4, vec_empty())))
+  vec_append(6, vec_append(5, vec_singleton(4)))
 
 fn main() -> Unit !{IO} =
   print(map_and_sum_list(sample_list()) + map_and_sum_vec(sample_vec()))

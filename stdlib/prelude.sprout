@@ -91,6 +91,9 @@ export fn list_append(left: List a, right: List a) -> List a =
 export fn vec_empty() -> Vec a =
   Vec(vector_empty())
 
+export fn vec_singleton(value: a) -> Vec a =
+  vec_append(value, vec_empty())
+
 fn vec_prepend_into(acc: Vector a, first: a, source: Vector a, index: Int, total: Int) -> Vector a =
   if index == 0 then
     vec_prepend_into(vector_append(acc, first), first, source, 1, total)

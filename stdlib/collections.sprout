@@ -2,3 +2,6 @@ module stdlib.collections
 
 # Compatibility namespace for the foundational collection surface that now
 # lives in the implicit prelude.
+
+export fn vec_singleton(value: a) -> Vec a =
+  vec_append(value, vec_empty())

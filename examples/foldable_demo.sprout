@@ -1,11 +1,11 @@
 module examples.foldable_demo
-import stdlib.collections (Foldable, List, Vec, vec_append, vec_empty, vec_length, foldable_to_vec)
+import stdlib.collections (Foldable, List, Vec, vec_append, vec_singleton, vec_length, foldable_to_vec)
 
 fn list_sample() -> List Int =
   [1, 2, 3]
 
 fn vec_sample() -> Vec Int =
-  vec_append(5, vec_append(4, vec_empty()))
+  vec_append(5, vec_singleton(4))
 
 fn list_to_vec(xs: List Int) -> Vec Int where Foldable List =
   foldable_to_vec(xs)

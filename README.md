@@ -332,6 +332,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
   - `vec_empty()`
+  - `vec_singleton(value)`
   - `vec_prepend(value, vec)`
   - `vec_append(value, vec)`
   - `vec_length(vec)`
