@@ -184,26 +184,19 @@ fn signatures(password: String, client_first_bare_raw: String, server: ScramServ
         Err(ScramInvalidNonce("SCRAM server nonce does not extend client nonce"))
 
 export fn client_proof(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError String =
-  match signatures(password, client_first_bare_raw, server, channel_binding) with
-  | Err err -> Err(err)
-  | Ok triple ->
-      match triple with
-      | (_, proof_b64, _) -> Ok(proof_b64)
+  do
+    (_, proof_b64, _) <- signatures(password, client_first_bare_raw, server, channel_binding)
+    Ok(proof_b64)
 
 export fn client_final_message(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError String =
-  match signatures(password, client_first_bare_raw, server, channel_binding) with
-  | Err err -> Err(err)
-  | Ok triple ->
-      match triple with
-      | (client_final_without_proof_raw, proof_b64, _) ->
-          Ok(string.concat(client_final_without_proof_raw, string.concat(",p=", proof_b64)))
+  do
+    (client_final_without_proof_raw, proof_b64, _) <- signatures(password, client_first_bare_raw, server, channel_binding)
+    Ok(string.concat(client_final_without_proof_raw, string.concat(",p=", proof_b64)))
 
 export fn server_signature(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> Result ScramError String =
-  match signatures(password, client_first_bare_raw, server, channel_binding) with
-  | Err err -> Err(err)
-  | Ok triple ->
-      match triple with
-      | (_, _, signature_b64) -> Ok(signature_b64)
+  do
+    (_, _, signature_b64) <- signatures(password, client_first_bare_raw, server, channel_binding)
+    Ok(signature_b64)
 
 fn server_final_verifier(raw: String) -> Result ScramError String =
   match attr_value(raw, "e") with
