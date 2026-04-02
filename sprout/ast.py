@@ -128,7 +128,7 @@ class DoStep:
 
 @dataclass
 class DoBindStep(DoStep):
-    name: str
+    pattern: "Pattern"
     value: Expr
 
 

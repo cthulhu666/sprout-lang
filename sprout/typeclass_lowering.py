@@ -238,6 +238,11 @@ def _concretize_call_constraints(
 def _pattern_bindings(pat: ast.Pattern) -> set[str]:
     if isinstance(pat, ast.VarPattern):
         return {pat.name}
+    if isinstance(pat, ast.TuplePattern):
+        out: set[str] = set()
+        for item in pat.items:
+            out |= _pattern_bindings(item)
+        return out
     if isinstance(pat, ast.ConstructorPattern):
         out: set[str] = set()
         for arg in pat.args:
@@ -460,7 +465,7 @@ def _rewrite_expr_with_specialization(
                 rewritten_steps.append(
                     _clone_with_loc(
                         ast.DoBindStep(
-                            name=step.name,
+                            pattern=step.pattern,
                             value=_rewrite_expr_with_specialization(
                                 step.value,
                                 step_scope,
@@ -474,7 +479,7 @@ def _rewrite_expr_with_specialization(
                         step,
                     )
                 )
-                step_scope.add(step.name)
+                step_scope |= _pattern_bindings(step.pattern)
                 if hasattr(step, "_do_family"):
                     setattr(rewritten_steps[-1], "_do_family", getattr(step, "_do_family"))
                 continue
@@ -828,7 +833,7 @@ def _rewrite_expr(
             if isinstance(step, ast.DoBindStep):
                 rewritten_step = _clone_with_loc(
                     ast.DoBindStep(
-                        name=step.name,
+                        pattern=step.pattern,
                         value=_rewrite_expr(
                             step.value,
                             step_scope,
@@ -846,7 +851,7 @@ def _rewrite_expr(
                 if hasattr(step, "_do_family"):
                     setattr(rewritten_step, "_do_family", getattr(step, "_do_family"))
                 rewritten_steps.append(rewritten_step)
-                step_scope.add(step.name)
+                step_scope |= _pattern_bindings(step.pattern)
                 continue
             if isinstance(step, ast.DoLetStep):
                 rewritten_steps.append(

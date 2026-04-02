@@ -221,10 +221,10 @@ def _build_do_failure_core(step: ast.DoBindStep, family: str) -> core.Expr:
     raise ElaborateError(f"Unsupported do family {family}")
 
 
-def _build_do_let_core(name: str, value: ast.Expr, body: core.Expr, src: object) -> core.Expr:
+def _build_do_let_core(pattern: ast.Pattern, value: ast.Expr, body: core.Expr, src: object) -> core.Expr:
     return core.MatchExpr(
         scrutinee=_surface_expr_to_core(value),
-        branches=[core.MatchBranch(pattern=core.VarPattern(name=name, src=src), value=body, src=src)],
+        branches=[core.MatchBranch(pattern=_surface_pattern_to_core(pattern), value=body, src=src)],
         src=src,
     )
 
@@ -246,7 +246,7 @@ def elaborate_expr_to_core(expr: ast.Expr) -> core.Expr:
     out = _surface_expr_to_core(final_step.value)
     for index, step in reversed(list(enumerate(expr.steps[:-1]))):
         if isinstance(step, ast.DoLetStep):
-            out = _build_do_let_core(step.name, step.value, out, step)
+            out = _build_do_let_core(ast.VarPattern(name=step.name), step.value, out, step)
             continue
         if isinstance(step, ast.DoExprStep):
             out = _build_do_ignore_core(step.value, out, index, step)
@@ -257,13 +257,13 @@ def elaborate_expr_to_core(expr: ast.Expr) -> core.Expr:
         if family is None:
             raise ElaborateError("Internal error: unresolved do step family")
         if family == "IO":
-            out = _build_do_let_core(step.name, step.value, out, step)
+            out = _build_do_let_core(step.pattern, step.value, out, step)
             continue
         success_name = "Just" if family == "Maybe" else "Ok"
         failure_name = "Nothing" if family == "Maybe" else "Err"
         success_pattern = core.ConstructorPattern(
             name=success_name,
-            args=[core.VarPattern(name=step.name, src=step)],
+            args=[_surface_pattern_to_core(step.pattern)],
             src=step,
         )
         failure_args: list[core.Pattern] = []

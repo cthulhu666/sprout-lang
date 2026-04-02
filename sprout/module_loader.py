@@ -1100,6 +1100,10 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
             walk_type(t.right, node)
 
     def walk_pattern(p: ast.Pattern, node: object | None = None) -> None:
+        if isinstance(p, ast.TuplePattern):
+            for item in p.items:
+                walk_pattern(item, node)
+            return
         if isinstance(p, ast.ConstructorPattern):
             p.name = resolve_value_name(p.name, node or p)
             for arg in p.args:
@@ -1108,6 +1112,11 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
     def _pattern_bindings(p: ast.Pattern) -> set[str]:
         if isinstance(p, ast.VarPattern):
             return {p.name}
+        if isinstance(p, ast.TuplePattern):
+            out: set[str] = set()
+            for item in p.items:
+                out |= _pattern_bindings(item)
+            return out
         if isinstance(p, ast.ConstructorPattern):
             out: set[str] = set()
             for arg in p.args:
@@ -1172,7 +1181,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
             for step in e.steps:
                 if do_bind_step is not None and isinstance(step, do_bind_step):
                     walk_expr(step.value, e, do_scope)
-                    do_scope.add(step.name)
+                    walk_pattern(step.pattern, e)
+                    do_scope |= _pattern_bindings(step.pattern)
                 elif do_let_step is not None and isinstance(step, do_let_step):
                     walk_expr(step.value, e, do_scope)
                     do_scope.add(step.name)

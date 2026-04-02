@@ -137,6 +137,27 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(with_prelude(src)))
         self.assertEqual(types["pair_sum"], "Result String Int -> Result String Int -> Result String Int")
 
+    def test_typecheck_do_notation_with_irrefutable_tuple_bind_pattern(self) -> None:
+        src = """
+        fn pair_sum(parts: Maybe (Int, Int)) -> Maybe Int =
+          do
+            (a, b) <- parts
+            Just(a + b)
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["pair_sum"], "Maybe (Int, Int) -> Maybe Int")
+
+    def test_typecheck_do_notation_rejects_refutable_bind_pattern(self) -> None:
+        src = """
+        fn bad(parts: Maybe (Maybe Int)) -> Maybe Int =
+          do
+            Just(x) <- parts
+            Just(x)
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(with_prelude(src)))
+        self.assertIn("do bind patterns must be irrefutable", str(ctx.exception))
+
     def test_typecheck_do_notation_rejects_mixed_families(self) -> None:
         src = """
         fn bad(m: Maybe Int, r: Result String Int) -> Maybe Int =
@@ -304,6 +325,22 @@ class TypecheckerTests(unittest.TestCase):
         elaborate_program(program)
         self.assertIsInstance(getattr(program, "core_declarations")["pair_sum"], core.MatchExpr)
         self.assertIsInstance(fn_decl.body, ast.MatchExpr)
+
+    def test_elaborate_program_lowers_do_tuple_bind_pattern(self) -> None:
+        src = """
+        fn pair_sum(parts: Maybe (Int, Int)) -> Maybe Int =
+          do
+            (a, b) <- parts
+            Just(a + b)
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        elaborate_program(program)
+        lowered = getattr(program, "core_declarations")["pair_sum"]
+        self.assertIsInstance(lowered, core.MatchExpr)
+        success_branch = lowered.branches[1]
+        self.assertIsInstance(success_branch.pattern, core.ConstructorPattern)
+        self.assertIsInstance(success_branch.pattern.args[0], core.TuplePattern)
 
     def test_typecheck_int_range_expression_and_helpers(self) -> None:
         src = """

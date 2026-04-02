@@ -1230,6 +1230,11 @@ def infer_expr(
             if isinstance(step, do_bind_step):
                 step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
                 total_effects = merge_effects(state, total_effects, step_effects)
+                if not _pattern_is_irrefutable_within_value(step.pattern):
+                    raise tc_error(
+                        "do bind patterns must be irrefutable; use match for constructor or literal checks",
+                        step.pattern,
+                    )
                 info = _do_sequence_info(state, step_t)
                 if info is None:
                     if not _effect_includes_io(state, step_effects):
@@ -1238,7 +1243,7 @@ def infer_expr(
                             step.value,
                         )
                     setattr(step, "_do_family", "IO")
-                    working_env[step.name] = Scheme(vars=(), type=step_t)
+                    infer_pattern(step.pattern, step_t, working_env, state, type_decls)
                     continue
                 if sequence_family is None:
                     sequence_family = info.family
@@ -1251,7 +1256,7 @@ def infer_expr(
                 elif info.family == "Result" and sequence_error_type is not None and info.error_type is not None:
                     unify_at(state, sequence_error_type, info.error_type, step.value)
                 setattr(step, "_do_family", info.family)
-                working_env[step.name] = Scheme(vars=(), type=info.payload_type)
+                infer_pattern(step.pattern, info.payload_type, working_env, state, type_decls)
                 continue
             if isinstance(step, do_expr_step):
                 step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)

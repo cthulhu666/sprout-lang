@@ -79,7 +79,8 @@ Interpretation:
 The implementation currently supports:
 
 1. Layout-style `do` blocks.
-2. `<-` bind steps.
+2. `<-` bind steps with irrefutable bind patterns such as names, `_`, and tuple
+   destructuring.
 3. Pure local `let` steps inside `do`.
 4. A final plain expression at the end of the block.
 5. Type-directed sequencing for `Maybe a`, `Result e a`, `IO`-style effectful
@@ -88,7 +89,7 @@ The implementation currently supports:
 The implementation does not yet support:
 
 1. User-extensible sequencing abstractions.
-2. Pattern destructuring in bind position.
+2. Refutable bind patterns in bind position.
 3. Full Haskell-style desugaring through a standard `Monad`/`Applicative`
    hierarchy.
 
@@ -118,7 +119,10 @@ At a high level:
    sequencing family.
 8. In a mixed `IO` block, `<-` unwraps the inner `Maybe`/`Result`; code that
    needs the whole container should use an explicit `match`.
-9. This narrow mixed form is the recommended stopping point for now; broader
+9. Bind patterns are currently restricted to irrefutable forms. Tuple
+   destructuring such as `(a, b) <- pair` is allowed, but constructor or
+   literal checks such as `Just x <- value` remain explicit `match`.
+10. This narrow mixed form is the recommended stopping point for now; broader
    sequencing abstractions are deferred until concrete usage shows they are
    necessary.
 

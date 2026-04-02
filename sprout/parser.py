@@ -470,18 +470,17 @@ class Parser:
             parser.expect("EOF")
             self.pipe_tmp_counter = parser.pipe_tmp_counter
             return self.mark(ast.DoLetStep(name=name_token.value, value=value), start)
-        if (
-            parser.check("IDENT")
-            and parser.i + 1 < len(parser.tokens)
-            and parser.tokens[parser.i + 1].kind == "SYMBOL"
-            and parser.tokens[parser.i + 1].value == "<-"
-        ):
-            name_token = parser.advance()
-            parser.advance()
-            value = parser.parse_expr()
-            parser.expect("EOF")
-            self.pipe_tmp_counter = parser.pipe_tmp_counter
-            return self.mark(ast.DoBindStep(name=name_token.value, value=value), name_token)
+        if parser._starts_pattern_atom() or parser.check("IDENT", "_"):
+            checkpoint = parser.i
+            try:
+                pattern = parser.parse_pattern()
+                parser.expect("SYMBOL", "<-")
+                value = parser.parse_expr()
+                parser.expect("EOF")
+                self.pipe_tmp_counter = parser.pipe_tmp_counter
+                return self.mark(ast.DoBindStep(pattern=pattern, value=value), pattern)
+            except ParseError:
+                parser.i = checkpoint
 
         value = parser.parse_expr()
         parser.expect("EOF")

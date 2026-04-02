@@ -48,9 +48,23 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body, ast.DoExpr)
         self.assertEqual(len(fn_decl.body.steps), 3)
         self.assertIsInstance(fn_decl.body.steps[0], ast.DoBindStep)
-        self.assertEqual(fn_decl.body.steps[0].name, "a")
+        self.assertIsInstance(fn_decl.body.steps[0].pattern, ast.VarPattern)
+        self.assertEqual(fn_decl.body.steps[0].pattern.name, "a")
         self.assertIsInstance(fn_decl.body.steps[1], ast.DoBindStep)
         self.assertIsInstance(fn_decl.body.steps[2], ast.DoExprStep)
+
+    def test_parse_do_expression_with_tuple_bind_pattern(self) -> None:
+        src = """
+        fn pair(parts: Maybe (Int, Int)) -> Maybe Int =
+          do
+            (a, b) <- parts
+            Just(a + b)
+        """
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl.body, ast.DoExpr)
+        self.assertIsInstance(fn_decl.body.steps[0], ast.DoBindStep)
+        self.assertIsInstance(fn_decl.body.steps[0].pattern, ast.TuplePattern)
 
     def test_parse_do_expression_with_let_and_plain_steps(self) -> None:
         src = """
