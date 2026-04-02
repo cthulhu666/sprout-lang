@@ -661,6 +661,9 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_read_key_once() -> String !{IO}`
 - `term_read_line_once() -> Maybe String !{IO}`
 
+These helpers follow the current sequencing style rule: use `do` for
+multi-step `IO`, and keep `after(...)` for trivial single-step convenience.
+
 Collections module (in `stdlib/collections.sprout`):
 
 - compatibility namespace for the foundational collection/typeclass surface now defined in the prelude
