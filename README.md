@@ -121,12 +121,15 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Run parallel test files locally: `mise exec -- just test-parallel` (`SPROUT_TEST_JOBS` controls concurrency; default is 4)
+- Run the default full test gate in parallel: `mise exec -- just test` (`SPROUT_TEST_JOBS` controls concurrency; default is 4)
+- Run the parallel runner explicitly: `mise exec -- just test-parallel`
+- Run the serial fallback suite: `mise exec -- just test-serial`
 - Start REPL: `mise exec -- python -m sprout.cli repl` (default interpreter-launched path) or `mise exec -- python -m sprout.cli repl --native` (experimental native launcher backed by `analysis-service`; both run the Sprout-hosted frontend in [stdlib/repl.sprout](./stdlib/repl.sprout); [examples/repl_hosted.sprout](./examples/repl_hosted.sprout) remains a thin wrapper; the native launcher now reuses a cached compiled REPL binary between launches and the compiled native frontend carries its own default `analysis-service` command based on the Python used at compile time; loads the foundational prelude by default; interactive mode detection, line editing, `Tab` completion, and `Up`/`Down` history now live in Sprout code; `Tab` completion is ASCII case-insensitive and can complete imported namespace members such as `json.string` after `import stdlib.json`; `:{` and `:}` execute explicit multiline REPL blocks sequentially behind a distinct `block| ` continuation prompt, and `:cancel` aborts the current block; ordinary `import ...` lines work inside the session)
   If native REPL cache build fails, the launcher now reports the native compile error directly and suggests the interpreter-backed `repl` path.
   Native REPL startup itself no longer requires a live `analysis-service`; the bridge is contacted lazily on the first analysis-backed action such as `import`, declaration acceptance, `:type`, `:instances`, or expression evaluation.
 - Run tests: `mise exec -- just test`
-- Run full test suite explicitly: `mise exec -- just test-all`
+- Run serial full test suite explicitly: `mise exec -- just test-serial`
+- Run legacy serial alias: `mise exec -- just test-all`
 - Run integration-style IO tests: `mise exec -- just test-integration`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
 - Build native binary (clang): `mise exec -- just compile-native /tmp/prog.sprout /tmp/prog`
@@ -136,7 +139,7 @@ Integration-style IO test convention:
 - Service-backed tests live in [tests/test_integration_io.py](./tests/test_integration_io.py).
 - Shared local-fixture helpers live in [tests/integration_support.py](./tests/integration_support.py).
 - Prefer local mock services on `127.0.0.1` over external hosted dependencies.
-- Keep `just test` and `just test-all` as the full suite; use `mise exec -- just test-parallel` for a faster per-file local loop and `mise exec -- just test-integration` when iterating on service-backed interpreter/native behavior.
+- Keep `just test` as the default authoritative gate, use `mise exec -- just test-parallel` when you want to invoke the same runner explicitly, use `mise exec -- just test-serial` or `mise exec -- just test-all` only for fallback/debugging, and use `mise exec -- just test-integration` when iterating on service-backed interpreter/native behavior.
 
 ## Builtin Helpers (v0)
 

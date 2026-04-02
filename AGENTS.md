@@ -66,8 +66,8 @@ For any non-trivial language change, include:
 4. Keep diagnostics stable and understandable; avoid noisy cascades.
 5. Preferred execution path for local commands:
    `mise exec -- just <task>`
-6. For intermediate verification during development, prefer `mise exec -- just test-parallel` over serial `just test` when the parallel runner covers the needed scope.
-7. Final verification still requires the authoritative full-suite run via `mise exec -- just test`.
+6. For intermediate verification during development, prefer `mise exec -- just test` or `mise exec -- just test-parallel` over serial `just test-serial` when the parallel runner covers the needed scope.
+7. Final verification uses the authoritative parallel full-suite run via `mise exec -- just test`; use `mise exec -- just test-serial` only as a fallback when diagnosing runner discrepancies or order-sensitive failures.
 8. Spec-affecting changes should also add or update conformance coverage where practical.
 
 ## Definition of Done
@@ -79,7 +79,7 @@ For coding tasks, work is done only when:
 3. Relevant docs/spec updates are complete and in sync with the implementation.
 4. Formatting and linting have been run when applicable.
 5. The entire test suite has been run via `mise exec -- just test`.
-6. During implementation, the faster local loop should usually use `mise exec -- just test-parallel` unless the task specifically requires serial/full-suite behavior earlier.
+6. During implementation, the faster local loop should usually use `mise exec -- just test` or `mise exec -- just test-parallel`; use `mise exec -- just test-serial` only when the task specifically requires serial/full-suite debugging earlier.
 7. If sandbox or environment restrictions block the full suite, rerun it with escalated permissions rather than accepting partial verification.
 8. The full suite passes.
 9. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.

@@ -4,6 +4,9 @@ default:
   @just --list
 
 test:
+  python3 scripts/run_parallel_tests.py
+
+test-serial:
   python3 -m unittest discover -s tests -v
 
 test-all:
