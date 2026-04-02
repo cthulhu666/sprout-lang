@@ -3,8 +3,8 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default:
   @just --list
 
-test:
-  python3 scripts/run_parallel_tests.py
+test *mods:
+  python3 scripts/run_parallel_tests.py {{mods}}
 
 test-serial:
   python3 -m unittest discover -s tests -v
@@ -12,8 +12,8 @@ test-serial:
 test-all:
   python3 -m unittest discover -s tests -v
 
-test-parallel:
-  python3 scripts/run_parallel_tests.py
+test-parallel *mods:
+  python3 scripts/run_parallel_tests.py {{mods}}
 
 test-integration:
   python3 -m unittest discover -s tests -p 'test_integration_io.py' -v

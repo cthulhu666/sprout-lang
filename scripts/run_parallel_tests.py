@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+import shlex
 import subprocess
 import sys
 import threading
@@ -15,8 +16,17 @@ def discover_tests() -> list[str]:
     )
 
 
+def select_tests(argv: list[str]) -> list[str]:
+    if argv:
+        return argv
+    configured = os.environ.get("SPROUT_TESTS", "").strip()
+    if configured:
+        return shlex.split(configured)
+    return discover_tests()
+
+
 def main() -> int:
-    tests = discover_tests()
+    tests = select_tests(sys.argv[1:])
     if not tests:
         print("No test files found", file=sys.stderr)
         return 1
