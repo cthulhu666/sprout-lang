@@ -24,7 +24,9 @@ class Workload:
     name: str
     expected_stdout: str
     source: str | None
+    source_path: str | None = None
     stdin_path: str | None = None
+    stdin_text: str | None = None
     tier: str = "fast"
 
 
@@ -85,7 +87,30 @@ fn main() -> Unit !{IO} =
         name="aoc_day5",
         expected_stdout="examples.aoc_2025_day_5.Answers(789, 343329651880509)",
         source=None,
+        source_path="examples/aoc_2025_day_5.sprout",
         stdin_path="day5input",
+        tier="real",
+    ),
+    Workload(
+        name="aoc_day3",
+        expected_stdout="examples.aoc_2025_day_3.Answers(29700, 299999998040850)",
+        source=None,
+        source_path="examples/aoc_2025_day_3.sprout",
+        stdin_text="".join(
+            "".join(str((row * 7 + col * 3) % 10) for col in range(80)) + "\n"
+            for row in range(300)
+        ),
+        tier="real",
+    ),
+    Workload(
+        name="aoc_day4_small",
+        expected_stdout="examples.aoc_2025_day_4.Answers(2048, 2048)",
+        source=None,
+        source_path="examples/aoc_2025_day_4.sprout",
+        stdin_text="".join(
+            "".join("@" if (row * col + row + col) % 5 in (0, 1) else "." for col in range(80)) + "\n"
+            for row in range(80)
+        ),
         tier="real",
     ),
 )
@@ -142,10 +167,9 @@ def parse_args() -> argparse.Namespace:
 def compile_workload(workload: Workload, tmp_path: Path) -> Path:
     bin_path = tmp_path / workload.name
     if workload.source is None:
-        if workload.name == "aoc_day5":
-            source_path = Path("examples/aoc_2025_day_5.sprout")
-        else:
+        if workload.source_path is None:
             raise RuntimeError(f"No compile source configured for workload {workload.name}")
+        source_path = Path(workload.source_path)
     else:
         source_path = tmp_path / f"{workload.name}.sprout"
         source_path.write_text(workload.source + "\n", encoding="utf-8")
@@ -204,9 +228,14 @@ def run_workload(bin_path: Path, workload: Workload, threshold_label: str) -> Su
     env["SPROUT_DEBUG_GC"] = "1"
     env["SPROUT_GC_THRESHOLD"] = threshold_label
     stdin_handle = None
+    stdin_temp_path: Path | None = None
     try:
         if workload.stdin_path is not None:
             stdin_handle = Path(workload.stdin_path).open("r", encoding="utf-8")
+        elif workload.stdin_text is not None:
+            stdin_temp_path = Path(tempfile.gettempdir()) / f"sprout_gc_{workload.name}_stdin.txt"
+            stdin_temp_path.write_text(workload.stdin_text, encoding="utf-8")
+            stdin_handle = stdin_temp_path.open("r", encoding="utf-8")
         started = time.perf_counter()
         run = subprocess.run(
             [str(bin_path)],
@@ -220,6 +249,8 @@ def run_workload(bin_path: Path, workload: Workload, threshold_label: str) -> Su
     finally:
         if stdin_handle is not None:
             stdin_handle.close()
+        if stdin_temp_path is not None and stdin_temp_path.exists():
+            stdin_temp_path.unlink()
     if run.returncode != 0:
         raise RuntimeError(
             f"{workload.name} failed under threshold {threshold_label}:"

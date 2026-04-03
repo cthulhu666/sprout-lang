@@ -145,7 +145,7 @@ Integration-style IO test convention:
 - Shared local-fixture helpers live in [tests/integration_support.py](./tests/integration_support.py).
 - Prefer local mock services on `127.0.0.1` over external hosted dependencies.
 - Keep `just test` as the default authoritative gate when run without filters, use targeted forms such as `mise exec -- just test tests.test_parser tests.test_typechecker` or `SPROUT_TESTS="..." mise exec -- just test` for faster local loops, use `mise exec -- just test-parallel` when you want to invoke the same runner explicitly, use `mise exec -- just test-serial` or `mise exec -- just test-all` only for fallback/debugging, and use `mise exec -- just test-integration` when iterating on service-backed interpreter/native behavior.
-- Use `mise exec -- just measure-gc-thresholds` for the fast default tuning loop and `mise exec -- just measure-gc-real` or `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 --threshold off --threshold 4096` for heavier real workloads; the script summarizes GC cycles, swept nodes, max live heap, wall time, and elapsed microseconds across the selected thresholds.
+- Use `mise exec -- just measure-gc-thresholds` for the fast default tuning loop and `mise exec -- just measure-gc-real` or targeted runs such as `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 --threshold off --threshold 4096` for heavier real workloads. The opt-in real set currently includes `aoc_day3`, `aoc_day4_small`, and `aoc_day5`, and the script summarizes GC cycles, swept nodes, max live heap, wall time, and elapsed microseconds across the selected thresholds.
 
 ## Builtin Helpers (v0)
 
