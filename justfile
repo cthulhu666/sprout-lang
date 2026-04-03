@@ -21,6 +21,9 @@ test-integration:
 measure-gc-thresholds:
   python3 scripts/measure_gc_thresholds.py
 
+measure-gc-real:
+  python3 scripts/measure_gc_thresholds.py --include-real
+
 parse file:
   python3 -m sprout.cli parse {{file}}
 

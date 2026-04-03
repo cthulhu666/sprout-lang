@@ -289,12 +289,14 @@ Recommended debug-mode outputs:
 
 Current measurement workflow:
 
-- `mise exec -- just measure-gc-thresholds` compiles a small set of fixed
-  allocation-heavy native workloads and compares `SPROUT_GC_THRESHOLD`
-  settings including `off`, `1`, `128`, `1024`, and `4096`.
+- `mise exec -- just measure-gc-thresholds` runs the fast synthetic workload
+  set by default.
+- `mise exec -- just measure-gc-real` or
+  `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 ...` opt into
+  heavier real workloads such as the current `day5input` file-processing case.
 - The summary reports cycle counts, sweep totals, max live heap, and total/max
-  `elapsed_us` so threshold tuning can stay measurement-driven instead of
-  guess-based.
+  `elapsed_us`, along with wall-clock time, so threshold tuning can stay
+  measurement-driven instead of guess-based.
 
 These should remain implementation diagnostics, not user-facing language
 features.

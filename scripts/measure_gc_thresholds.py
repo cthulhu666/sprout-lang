@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import time
 import subprocess
 import sys
 import tempfile
@@ -22,7 +23,9 @@ GC_LINE = re.compile(
 class Workload:
     name: str
     expected_stdout: str
-    source: str
+    source: str | None
+    stdin_path: str | None = None
+    tier: str = "fast"
 
 
 WORKLOADS = (
@@ -43,6 +46,7 @@ fn churn(n: Int, acc: Int) -> Int =
 fn main() -> Unit !{IO} =
   print(churn(200, 0))
 """.strip(),
+        tier="fast",
     ),
     Workload(
         name="vector_build",
@@ -60,6 +64,7 @@ fn score(vec: Vec Int) -> Int =
 fn main() -> Unit !{IO} =
   print(score(build(200, vec_empty())))
 """.strip(),
+        tier="fast",
     ),
     Workload(
         name="builder_build",
@@ -74,6 +79,14 @@ fn build(n: Int, acc: Builder) -> Builder =
 fn main() -> Unit !{IO} =
   print(length(builder_build(build(64, builder_empty()))))
 """.strip(),
+        tier="fast",
+    ),
+    Workload(
+        name="aoc_day5",
+        expected_stdout="examples.aoc_2025_day_5.Answers(789, 343329651880509)",
+        source=None,
+        stdin_path="day5input",
+        tier="real",
     ),
 )
 
@@ -101,6 +114,7 @@ class Summary:
     max_live: int
     total_elapsed_us: int
     max_elapsed_us: int
+    wall_seconds: float
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,22 +129,33 @@ def parse_args() -> argparse.Namespace:
         "--workload",
         action="append",
         dest="workloads",
-        help=f"Workload name to run. Repeatable. Defaults to all: {', '.join(w.name for w in WORKLOADS)}.",
+        help=f"Workload name to run. Repeatable. Defaults to fast workloads: {', '.join(w.name for w in WORKLOADS if w.tier == 'fast')}.",
+    )
+    parser.add_argument(
+        "--include-real",
+        action="store_true",
+        help="Include opt-in real workloads such as aoc_day5 in addition to the fast default set.",
     )
     return parser.parse_args()
 
 
 def compile_workload(workload: Workload, tmp_path: Path) -> Path:
-    spr_path = tmp_path / f"{workload.name}.sprout"
     bin_path = tmp_path / workload.name
-    spr_path.write_text(workload.source + "\n", encoding="utf-8")
+    if workload.source is None:
+        if workload.name == "aoc_day5":
+            source_path = Path("examples/aoc_2025_day_5.sprout")
+        else:
+            raise RuntimeError(f"No compile source configured for workload {workload.name}")
+    else:
+        source_path = tmp_path / f"{workload.name}.sprout"
+        source_path.write_text(workload.source + "\n", encoding="utf-8")
     subprocess.run(
         [
             sys.executable,
             "-m",
             "sprout.cli",
             "compile",
-            str(spr_path),
+            str(source_path),
             "--native",
             "--with-stdlib",
             "-o",
@@ -159,7 +184,7 @@ def parse_cycles(stderr: str) -> list[Cycle]:
     return cycles
 
 
-def summarize(workload: Workload, threshold_label: str, cycles: list[Cycle]) -> Summary:
+def summarize(workload: Workload, threshold_label: str, cycles: list[Cycle], wall_seconds: float) -> Summary:
     return Summary(
         workload=workload.name,
         threshold_label=threshold_label,
@@ -170,6 +195,7 @@ def summarize(workload: Workload, threshold_label: str, cycles: list[Cycle]) -> 
         max_live=max((cycle.live for cycle in cycles), default=0),
         total_elapsed_us=sum(cycle.elapsed_us for cycle in cycles),
         max_elapsed_us=max((cycle.elapsed_us for cycle in cycles), default=0),
+        wall_seconds=wall_seconds,
     )
 
 
@@ -177,7 +203,23 @@ def run_workload(bin_path: Path, workload: Workload, threshold_label: str) -> Su
     env = os.environ.copy()
     env["SPROUT_DEBUG_GC"] = "1"
     env["SPROUT_GC_THRESHOLD"] = threshold_label
-    run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+    stdin_handle = None
+    try:
+        if workload.stdin_path is not None:
+            stdin_handle = Path(workload.stdin_path).open("r", encoding="utf-8")
+        started = time.perf_counter()
+        run = subprocess.run(
+            [str(bin_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            stdin=stdin_handle,
+        )
+        wall_seconds = time.perf_counter() - started
+    finally:
+        if stdin_handle is not None:
+            stdin_handle.close()
     if run.returncode != 0:
         raise RuntimeError(
             f"{workload.name} failed under threshold {threshold_label}:"
@@ -194,7 +236,7 @@ def run_workload(bin_path: Path, workload: Workload, threshold_label: str) -> Su
         raise RuntimeError(
             f"{workload.name} produced no GC diagnostics under threshold {threshold_label}."
         )
-    return summarize(workload, threshold_label, cycles)
+    return summarize(workload, threshold_label, cycles, wall_seconds)
 
 
 def render_table(rows: list[Summary]) -> str:
@@ -208,6 +250,7 @@ def render_table(rows: list[Summary]) -> str:
         "max_live",
         "total_elapsed_us",
         "max_elapsed_us",
+        "wall_seconds",
     )
     values = [headers] + [
         (
@@ -220,6 +263,7 @@ def render_table(rows: list[Summary]) -> str:
             str(row.max_live),
             str(row.total_elapsed_us),
             str(row.max_elapsed_us),
+            f"{row.wall_seconds:.2f}",
         )
         for row in rows
     ]
@@ -233,9 +277,9 @@ def render_table(rows: list[Summary]) -> str:
     return "\n".join(lines)
 
 
-def selected_workloads(names: list[str] | None) -> list[Workload]:
+def selected_workloads(names: list[str] | None, include_real: bool) -> list[Workload]:
     if not names:
-        return list(WORKLOADS)
+        return [workload for workload in WORKLOADS if workload.tier == "fast" or include_real]
     available = {workload.name: workload for workload in WORKLOADS}
     missing = [name for name in names if name not in available]
     if missing:
@@ -246,7 +290,7 @@ def selected_workloads(names: list[str] | None) -> list[Workload]:
 def main() -> int:
     args = parse_args()
     thresholds = args.thresholds or ["off", "1", "128", "1024", "4096"]
-    workloads = selected_workloads(args.workloads)
+    workloads = selected_workloads(args.workloads, args.include_real)
     rows: list[Summary] = []
 
     with tempfile.TemporaryDirectory() as tmp:
