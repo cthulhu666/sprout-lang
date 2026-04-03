@@ -287,6 +287,15 @@ Recommended debug-mode outputs:
 - collection count and sweep count,
 - optional maximum pause timing in debug builds.
 
+Current measurement workflow:
+
+- `mise exec -- just measure-gc-thresholds` compiles a small set of fixed
+  allocation-heavy native workloads and compares `SPROUT_GC_THRESHOLD`
+  settings including `off`, `1`, `128`, `1024`, and `4096`.
+- The summary reports cycle counts, sweep totals, max live heap, and total/max
+  `elapsed_us` so threshold tuning can stay measurement-driven instead of
+  guess-based.
+
 These should remain implementation diagnostics, not user-facing language
 features.
 

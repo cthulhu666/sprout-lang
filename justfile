@@ -18,6 +18,9 @@ test-parallel *mods:
 test-integration:
   python3 -m unittest discover -s tests -p 'test_integration_io.py' -v
 
+measure-gc-thresholds:
+  python3 scripts/measure_gc_thresholds.py
+
 parse file:
   python3 -m sprout.cli parse {{file}}
 
