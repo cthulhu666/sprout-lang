@@ -300,6 +300,17 @@ Current measurement workflow:
   measurement-driven instead of guess-based; the raw GC logs also now expose
   `alloc_since_gc` for trigger analysis on individual workloads.
 
+Current measured takeaway:
+
+- `aoc_day5`-style file-processing runs improve markedly with
+  `SPROUT_GC_THRESHOLD=4096` compared with `off`.
+- `aoc_day3` regresses badly at `4096` and `8192` despite productive sweeps,
+  which suggests the current limitation is stop-the-world mark/sweep pause cost
+  on larger live heaps rather than a trigger firing on too little new churn.
+- As a result, the current default threshold remains conservative until the
+  collector policy or pause cost improves; workload-specific overrides are the
+  current practical escape hatch.
+
 These should remain implementation diagnostics, not user-facing language
 features.
 
