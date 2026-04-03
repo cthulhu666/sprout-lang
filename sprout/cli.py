@@ -262,6 +262,7 @@ typedef struct ManagedNode {
   size_t aux_slots;
   int marked;
   struct ManagedNode* next;
+  struct ManagedNode* hash_next;
 } ManagedNode;
 
 typedef enum {
@@ -329,6 +330,7 @@ typedef struct {
 } HttpUrl;
 
 static ManagedNode* g_heap_nodes = NULL;
+static ManagedNode* g_heap_index[131071];
 static RootNode* g_root_nodes = NULL;
 static RootNode* g_temp_root_nodes = NULL;
 static SproutObj* g_nothing_singleton = NULL;
@@ -522,6 +524,39 @@ static SproutObj* unbox_ptr(long long h) {
   return (SproutObj*)(uintptr_t)h;
 }
 
+static size_t sprout_managed_ptr_hash(void* ptr) {
+  uintptr_t value = (uintptr_t)ptr;
+  value ^= value >> 33;
+  value *= (uintptr_t)0xff51afd7ed558ccdULL;
+  value ^= value >> 33;
+  return (size_t)(value % (uintptr_t)(sizeof(g_heap_index) / sizeof(g_heap_index[0])));
+}
+
+static void sprout_managed_index_insert(ManagedNode* node) {
+  size_t bucket = sprout_managed_ptr_hash(node->ptr);
+  node->hash_next = g_heap_index[bucket];
+  g_heap_index[bucket] = node;
+}
+
+static void sprout_managed_index_remove(ManagedNode* node) {
+  size_t bucket = sprout_managed_ptr_hash(node->ptr);
+  ManagedNode* prev = NULL;
+  ManagedNode* current = g_heap_index[bucket];
+  while (current != NULL) {
+    if (current == node) {
+      if (prev == NULL) {
+        g_heap_index[bucket] = current->hash_next;
+      } else {
+        prev->hash_next = current->hash_next;
+      }
+      node->hash_next = NULL;
+      return;
+    }
+    prev = current;
+    current = current->hash_next;
+  }
+}
+
 static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slots) {
   ManagedNode* n = (ManagedNode*)malloc(sizeof(ManagedNode));
   if (n == NULL) tcp_fail("register_managed_ptr: out of memory");
@@ -530,13 +565,16 @@ static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slot
   n->aux_slots = aux_slots;
   n->marked = 0;
   n->next = g_heap_nodes;
+  n->hash_next = NULL;
   g_heap_nodes = n;
+  sprout_managed_index_insert(n);
   g_managed_heap_count++;
   g_managed_alloc_since_gc++;
 }
 
 static ManagedNode* find_managed_ptr(void* ptr) {
-  for (ManagedNode* n = g_heap_nodes; n != NULL; n = n->next) {
+  size_t bucket = sprout_managed_ptr_hash(ptr);
+  for (ManagedNode* n = g_heap_index[bucket]; n != NULL; n = n->hash_next) {
     if (n->ptr == ptr) return n;
   }
   return NULL;
@@ -887,6 +925,7 @@ static void sprout_gc_sweep(void) {
     ManagedNode* next = node->next;
     if (!node->marked) {
       if (node->ptr == g_nothing_singleton) g_nothing_singleton = NULL;
+      sprout_managed_index_remove(node);
       sprout_gc_free_payload(node);
       if (prev == NULL) {
         g_heap_nodes = next;
