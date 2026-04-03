@@ -232,8 +232,8 @@ Current implementation status:
 - `SPROUT_GC_THRESHOLD=<positive-int>` overrides that threshold and
   `SPROUT_GC_THRESHOLD=off` disables in-process collection,
 - opt-in debug logging exists for validation and now reports the active
-  threshold, live managed-node count, and per-cycle elapsed time with each
-  cycle,
+  threshold, live managed-node count, managed allocations since the previous
+  cycle, and per-cycle elapsed time with each cycle,
 - debug allocation reporting now includes a `gc_swept` count.
 
 Remaining work before this stage can be considered fully complete:
@@ -297,7 +297,8 @@ Current measurement workflow:
   and the generated `aoc_day3` / `aoc_day4_small` example inputs.
 - The summary reports cycle counts, sweep totals, max live heap, and total/max
   `elapsed_us`, along with wall-clock time, so threshold tuning can stay
-  measurement-driven instead of guess-based.
+  measurement-driven instead of guess-based; the raw GC logs also now expose
+  `alloc_since_gc` for trigger analysis on individual workloads.
 
 These should remain implementation diagnostics, not user-facing language
 features.

@@ -368,6 +368,7 @@ static long long g_debug_alloc_builder = 0;
 static long long g_debug_gc_swept = 0;
 static long long g_gc_cycle_count = 0;
 static long long g_managed_heap_count = 0;
+static long long g_managed_alloc_since_gc = 0;
 static long long g_gc_threshold = 1024;
 
 static void tcp_fail(const char* msg);
@@ -460,19 +461,21 @@ static void sprout_gc_log_cycle(
   const char* reason,
   long long heap_before,
   long long heap_after,
+  long long alloc_since_gc,
   long long swept_delta,
   long long elapsed_us
 ) {
   if (!g_debug_gc_enabled) return;
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld swept=%lld elapsed_us=%lld\\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld\\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
     heap_before,
     heap_after,
     heap_after,
+    alloc_since_gc,
     swept_delta,
     elapsed_us
   );
@@ -524,6 +527,7 @@ static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slot
   n->next = g_heap_nodes;
   g_heap_nodes = n;
   g_managed_heap_count++;
+  g_managed_alloc_since_gc++;
 }
 
 static ManagedNode* find_managed_ptr(void* ptr) {
@@ -896,6 +900,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   g_gc_active = 1;
   long long started_us = sprout_now_micros();
   long long heap_before = g_managed_heap_count;
+  long long alloc_since_gc = g_managed_alloc_since_gc;
   long long swept_before = g_debug_gc_swept;
   g_gc_cycle_count++;
   sprout_gc_mark_roots();
@@ -903,7 +908,8 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
-  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, g_debug_gc_swept - swept_before, elapsed_us);
+  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
+  g_managed_alloc_since_gc = 0;
   g_gc_active = 0;
 }
 
