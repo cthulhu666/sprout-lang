@@ -295,10 +295,11 @@ Current measurement workflow:
   `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 ...` opt into
   heavier real workloads such as the current `day5input` file-processing case
   and the generated `aoc_day3` / `aoc_day4_small` example inputs.
-- The summary reports cycle counts, sweep totals, max live heap, and total/max
-  `elapsed_us`, along with wall-clock time, so threshold tuning can stay
-  measurement-driven instead of guess-based; the raw GC logs also now expose
-  `alloc_since_gc` for trigger analysis on individual workloads.
+- The summary reports cycle counts, sweep totals, max live heap, max root-slot
+  count, max marked-node count, and total/max `elapsed_us`, along with
+  wall-clock time, so threshold tuning can stay measurement-driven instead of
+  guess-based; the raw GC logs also now expose `alloc_since_gc` for trigger
+  analysis on individual workloads.
 
 Current measured takeaway:
 

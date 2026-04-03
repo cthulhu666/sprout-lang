@@ -370,6 +370,7 @@ static long long g_gc_cycle_count = 0;
 static long long g_managed_heap_count = 0;
 static long long g_managed_alloc_since_gc = 0;
 static long long g_gc_threshold = 1024;
+static long long g_gc_marked_count = 0;
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -461,6 +462,8 @@ static void sprout_gc_log_cycle(
   const char* reason,
   long long heap_before,
   long long heap_after,
+  long long root_count,
+  long long marked_count,
   long long alloc_since_gc,
   long long swept_delta,
   long long elapsed_us
@@ -468,13 +471,15 @@ static void sprout_gc_log_cycle(
   if (!g_debug_gc_enabled) return;
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld\\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld\\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
     heap_before,
     heap_after,
     heap_after,
+    root_count,
+    marked_count,
     alloc_since_gc,
     swept_delta,
     elapsed_us
@@ -784,6 +789,7 @@ static void sprout_gc_mark_value(long long value) {
 static void sprout_gc_mark_node(ManagedNode* node) {
   if (node == NULL || node->marked) return;
   node->marked = 1;
+  g_gc_marked_count++;
   size_t child_count = sprout_heap_child_count(node);
   for (size_t i = 0; i < child_count; i++) {
     long long child = sprout_heap_child_value(node, i);
@@ -794,6 +800,13 @@ static void sprout_gc_mark_node(ManagedNode* node) {
 static void sprout_gc_mark_ptr(void* ptr) {
   ManagedNode* node = find_managed_ptr(ptr);
   if (node != NULL) sprout_gc_mark_node(node);
+}
+
+static long long sprout_gc_root_count(void) {
+  long long count = 0;
+  for (RootNode* root = g_root_nodes; root != NULL; root = root->next) count++;
+  for (RootNode* root = g_temp_root_nodes; root != NULL; root = root->next) count++;
+  return count;
 }
 
 static void sprout_gc_mark_roots(void) {
@@ -900,15 +913,17 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   g_gc_active = 1;
   long long started_us = sprout_now_micros();
   long long heap_before = g_managed_heap_count;
+  long long root_count = sprout_gc_root_count();
   long long alloc_since_gc = g_managed_alloc_since_gc;
   long long swept_before = g_debug_gc_swept;
   g_gc_cycle_count++;
+  g_gc_marked_count = 0;
   sprout_gc_mark_roots();
   sprout_gc_sweep();
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
-  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
+  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
   g_managed_alloc_since_gc = 0;
   g_gc_active = 0;
 }

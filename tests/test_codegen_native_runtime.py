@@ -16,8 +16,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         cycles = []
         for match in re.finditer(
             r"\[sprout gc\] cycle=(\d+) reason=([a-z]+) threshold=(\d+) "
-            r"heap_before=(\d+) heap_after=(\d+) live=(\d+) alloc_since_gc=(\d+) "
-            r"swept=(\d+) elapsed_us=(\d+)",
+            r"heap_before=(\d+) heap_after=(\d+) live=(\d+) roots=(\d+) marked=(\d+) "
+            r"alloc_since_gc=(\d+) swept=(\d+) elapsed_us=(\d+)",
             stderr,
         ):
             cycles.append(
@@ -28,9 +28,11 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                     "heap_before": int(match.group(4)),
                     "heap_after": int(match.group(5)),
                     "live": int(match.group(6)),
-                    "alloc_since_gc": int(match.group(7)),
-                    "swept": int(match.group(8)),
-                    "elapsed_us": int(match.group(9)),
+                    "roots": int(match.group(7)),
+                    "marked": int(match.group(8)),
+                    "alloc_since_gc": int(match.group(9)),
+                    "swept": int(match.group(10)),
+                    "elapsed_us": int(match.group(11)),
                 }
             )
         return cycles
@@ -41,6 +43,9 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         for cycle in cycles:
             self.assertEqual(cycle["live"], cycle["heap_after"])
             self.assertGreaterEqual(cycle["heap_before"], cycle["heap_after"])
+            self.assertGreaterEqual(cycle["roots"], 0)
+            self.assertGreaterEqual(cycle["marked"], 0)
+            self.assertGreaterEqual(cycle["heap_after"], cycle["marked"])
             self.assertGreaterEqual(cycle["alloc_since_gc"], 0)
             self.assertGreaterEqual(cycle["elapsed_us"], 0)
         return cycles

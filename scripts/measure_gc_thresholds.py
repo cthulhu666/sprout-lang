@@ -14,7 +14,8 @@ import tempfile
 GC_LINE = re.compile(
     r"\[sprout gc\] cycle=(?P<cycle>\d+) reason=(?P<reason>[a-z]+) "
     r"threshold=(?P<threshold>\d+) heap_before=(?P<heap_before>\d+) "
-    r"heap_after=(?P<heap_after>\d+) live=(?P<live>\d+) "
+    r"heap_after=(?P<heap_after>\d+) live=(?P<live>\d+) roots=(?P<roots>\d+) "
+    r"marked=(?P<marked>\d+) alloc_since_gc=(?P<alloc_since_gc>\d+) "
     r"swept=(?P<swept>\d+) elapsed_us=(?P<elapsed_us>\d+)"
 )
 
@@ -124,6 +125,9 @@ class Cycle:
     heap_before: int
     heap_after: int
     live: int
+    roots: int
+    marked: int
+    alloc_since_gc: int
     swept: int
     elapsed_us: int
 
@@ -137,6 +141,8 @@ class Summary:
     atexit_cycles: int
     swept_total: int
     max_live: int
+    max_roots: int
+    max_marked: int
     total_elapsed_us: int
     max_elapsed_us: int
     wall_seconds: float
@@ -201,6 +207,9 @@ def parse_cycles(stderr: str) -> list[Cycle]:
                 heap_before=int(match.group("heap_before")),
                 heap_after=int(match.group("heap_after")),
                 live=int(match.group("live")),
+                roots=int(match.group("roots")),
+                marked=int(match.group("marked")),
+                alloc_since_gc=int(match.group("alloc_since_gc")),
                 swept=int(match.group("swept")),
                 elapsed_us=int(match.group("elapsed_us")),
             )
@@ -217,6 +226,8 @@ def summarize(workload: Workload, threshold_label: str, cycles: list[Cycle], wal
         atexit_cycles=sum(1 for cycle in cycles if cycle.reason == "atexit"),
         swept_total=sum(cycle.swept for cycle in cycles),
         max_live=max((cycle.live for cycle in cycles), default=0),
+        max_roots=max((cycle.roots for cycle in cycles), default=0),
+        max_marked=max((cycle.marked for cycle in cycles), default=0),
         total_elapsed_us=sum(cycle.elapsed_us for cycle in cycles),
         max_elapsed_us=max((cycle.elapsed_us for cycle in cycles), default=0),
         wall_seconds=wall_seconds,
@@ -279,6 +290,8 @@ def render_table(rows: list[Summary]) -> str:
         "atexit_cycles",
         "swept_total",
         "max_live",
+        "max_roots",
+        "max_marked",
         "total_elapsed_us",
         "max_elapsed_us",
         "wall_seconds",
@@ -292,6 +305,8 @@ def render_table(rows: list[Summary]) -> str:
             str(row.atexit_cycles),
             str(row.swept_total),
             str(row.max_live),
+            str(row.max_roots),
+            str(row.max_marked),
             str(row.total_elapsed_us),
             str(row.max_elapsed_us),
             f"{row.wall_seconds:.2f}",
