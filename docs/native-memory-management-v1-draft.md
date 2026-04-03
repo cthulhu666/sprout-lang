@@ -232,7 +232,8 @@ Current implementation status:
 - `SPROUT_GC_THRESHOLD=<positive-int>` overrides that threshold and
   `SPROUT_GC_THRESHOLD=off` disables in-process collection,
 - opt-in debug logging exists for validation and now reports the active
-  threshold with each cycle,
+  threshold, live managed-node count, and per-cycle elapsed time with each
+  cycle,
 - debug allocation reporting now includes a `gc_swept` count.
 
 Remaining work before this stage can be considered fully complete:

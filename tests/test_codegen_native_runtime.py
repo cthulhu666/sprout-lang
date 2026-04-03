@@ -12,6 +12,36 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         assert match is not None
         return int(match.group(1))
 
+    def _gc_cycles(self, stderr: str) -> list[dict[str, int | str]]:
+        cycles = []
+        for match in re.finditer(
+            r"\[sprout gc\] cycle=(\d+) reason=([a-z]+) threshold=(\d+) "
+            r"heap_before=(\d+) heap_after=(\d+) live=(\d+) swept=(\d+) elapsed_us=(\d+)",
+            stderr,
+        ):
+            cycles.append(
+                {
+                    "cycle": int(match.group(1)),
+                    "reason": match.group(2),
+                    "threshold": int(match.group(3)),
+                    "heap_before": int(match.group(4)),
+                    "heap_after": int(match.group(5)),
+                    "live": int(match.group(6)),
+                    "swept": int(match.group(7)),
+                    "elapsed_us": int(match.group(8)),
+                }
+            )
+        return cycles
+
+    def _assert_gc_cycles_have_live_and_timing(self, stderr: str) -> list[dict[str, int | str]]:
+        cycles = self._gc_cycles(stderr)
+        self.assertNotEqual(cycles, [])
+        for cycle in cycles:
+            self.assertEqual(cycle["live"], cycle["heap_after"])
+            self.assertGreaterEqual(cycle["heap_before"], cycle["heap_after"])
+            self.assertGreaterEqual(cycle["elapsed_us"], 0)
+        return cycles
+
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_int_range_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -637,10 +667,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "42")
             self.assertEqual(run.returncode, 0)
-            self.assertRegex(
-                run.stderr,
-                r"\[sprout gc\] cycle=\d+ reason=atexit threshold=\d+ heap_before=\d+ heap_after=\d+ swept=\d+",
-            )
+            cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+            self.assertTrue(any(cycle["reason"] == "atexit" for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_collects_during_execution_and_preserves_live_values(self) -> None:
@@ -678,8 +706,9 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "3")
             self.assertEqual(run.returncode, 0)
-            self.assertIn("reason=threshold threshold=1", run.stderr)
-            self.assertIn("reason=atexit threshold=1", run.stderr)
+            cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+            self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1 for cycle in cycles))
+            self.assertTrue(any(cycle["reason"] == "atexit" and cycle["threshold"] == 1 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_default_threshold_collects_during_execution(self) -> None:
@@ -720,7 +749,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "1200")
             self.assertEqual(run.returncode, 0)
-            self.assertIn("reason=threshold threshold=1024", run.stderr)
+            cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+            self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1024 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_off_disables_mid_execution_collection(self) -> None:
@@ -763,7 +793,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             self.assertEqual(run.stdout.strip(), "1200")
             self.assertEqual(run.returncode, 0)
             self.assertNotIn("reason=threshold", run.stderr)
-            self.assertIn("reason=atexit threshold=0", run.stderr)
+            cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+            self.assertTrue(any(cycle["reason"] == "atexit" and cycle["threshold"] == 0 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_preserves_live_vector_flow(self) -> None:
@@ -804,7 +835,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "400")
             self.assertEqual(run.returncode, 0)
-            self.assertIn("reason=threshold threshold=1", run.stderr)
+            cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+            self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_preserves_live_builder_flow(self) -> None:
@@ -842,7 +874,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "64")
             self.assertEqual(run.returncode, 0)
-            self.assertIn("reason=threshold threshold=1", run.stderr)
+            cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+            self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_preserves_direct_call_argument_values(self) -> None:
@@ -870,7 +903,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "10")
         self.assertEqual(run.returncode, 0)
-        self.assertIn("reason=threshold threshold=1", run.stderr)
+        cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+        self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_preserves_local_function_call_argument_values(self) -> None:
@@ -901,7 +935,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "10")
         self.assertEqual(run.returncode, 0)
-        self.assertIn("reason=threshold threshold=1", run.stderr)
+        cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+        self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1 for cycle in cycles))
 
     def test_runtime_managed_bytes_error_paths_do_not_manually_free_gc_objects(self) -> None:
         runtime_src = Path(sprout_cli.__file__).read_text(encoding="utf-8")
@@ -946,7 +981,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                 run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "eof")
         self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertIn("reason=atexit threshold=1", run.stderr)
+        cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+        self.assertTrue(any(cycle["reason"] == "atexit" and cycle["threshold"] == 1 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_tuple_global_root_keeps_children_live_at_exit(self) -> None:

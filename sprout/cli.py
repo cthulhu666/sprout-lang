@@ -388,6 +388,7 @@ static char* base64_encode_bytes(const unsigned char* data, size_t len);
 static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err);
 static void sprout_gc_collect(void);
 static void sprout_gc_collect_with_reason(const char* reason);
+static long long sprout_now_micros(void);
 
 static int sprout_debug_alloc_truthy(const char* value) {
   if (value == NULL || value[0] == '\\0') return 0;
@@ -449,22 +450,31 @@ static void sprout_gc_maybe_register(void) {
   g_gc_collect_registered = 1;
 }
 
+static long long sprout_now_micros(void) {
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) != 0) return 0;
+  return ((long long)tv.tv_sec * 1000000LL) + (long long)tv.tv_usec;
+}
+
 static void sprout_gc_log_cycle(
   const char* reason,
   long long heap_before,
   long long heap_after,
-  long long swept_delta
+  long long swept_delta,
+  long long elapsed_us
 ) {
   if (!g_debug_gc_enabled) return;
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld swept=%lld\\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld swept=%lld elapsed_us=%lld\\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
     heap_before,
     heap_after,
-    swept_delta
+    heap_after,
+    swept_delta,
+    elapsed_us
   );
 }
 
@@ -884,12 +894,16 @@ static void sprout_gc_collect(void) {
 static void sprout_gc_collect_with_reason(const char* reason) {
   if (g_gc_active) return;
   g_gc_active = 1;
+  long long started_us = sprout_now_micros();
   long long heap_before = g_managed_heap_count;
   long long swept_before = g_debug_gc_swept;
   g_gc_cycle_count++;
   sprout_gc_mark_roots();
   sprout_gc_sweep();
-  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, g_debug_gc_swept - swept_before);
+  long long finished_us = sprout_now_micros();
+  long long elapsed_us = 0;
+  if (finished_us >= started_us) elapsed_us = finished_us - started_us;
+  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, g_debug_gc_swept - swept_before, elapsed_us);
   g_gc_active = 0;
 }
 
