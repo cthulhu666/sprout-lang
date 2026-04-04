@@ -99,9 +99,9 @@ Definition of done:
 ### 8) External Integration Example Layer
 
 - [~] `P0` Add `examples/sentry_api.sprout` with typed wrappers for key endpoints:
-  - list issues
-  - issue details
-  - pagination cursor extraction
+  - typed list-issue summary decoding is now implemented
+  - issue details remain pending
+  - pagination cursor extraction remains pending
 - [ ] `P1` Add auth/token helpers and secure configuration loading.
 - [ ] `P1` Add integration tests with mocked HTTP responses.
 
@@ -114,9 +114,9 @@ Definition of done:
 ### 9) Issue Browser TUI App
 
 - [~] `P0` Build `examples/sentry_issue_browser_tui.sprout`:
-  - load token/org/project config
-  - fetch first page
-  - render list
+  - load token/org/project config from environment is now implemented
+  - fetch first page is now implemented
+  - render list is now implemented
   - key navigation (`j/k`, enter)
   - refresh/retry
 - [ ] `P1` Add issue detail panel.

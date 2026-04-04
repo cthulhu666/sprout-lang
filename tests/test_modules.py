@@ -1073,6 +1073,88 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
+    def test_examples_sentry_api_decodes_issue_summaries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import examples.sentry_api (issue_short_id, issue_title, sentry_decode_issue_summaries)
+                import stdlib.string as string
+
+                fn main() -> Unit !{IO} =
+                  match json_parse("[{\\"shortId\\":\\"APP-17\\",\\"title\\":\\"Broken checkout\\",\\"status\\":\\"unresolved\\"}]") with
+                  | Err _ -> print("decode-error")
+                  | Ok payload ->
+                      match vec_get(0, sentry_decode_issue_summaries(payload)) with
+                      | Nothing -> print("missing")
+                      | Just issue -> print(string.concat(issue_short_id(issue), string.concat(":", issue_title(issue))))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "APP-17:Broken checkout")
+
+    def test_examples_sentry_tui_renders_issue_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import examples.sentry_api (sentry_decode_issue_summaries)
+                import examples.sentry_issue_browser_tui (render_issue_list)
+
+                fn main() -> Unit !{IO} =
+                  match json_parse("[{\\"shortId\\":\\"APP-17\\",\\"title\\":\\"Broken checkout\\",\\"status\\":\\"unresolved\\"},{\\"shortId\\":\\"APP-18\\",\\"title\\":\\"Slow query\\",\\"status\\":\\"resolved\\"}]") with
+                  | Err _ -> print("decode-error")
+                  | Ok payload -> print(render_issue_list(sentry_decode_issue_summaries(payload)))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "Sentry issues\n- [unresolved] APP-17 - Broken checkout\n- [resolved] APP-18 - Slow query",
+            )
+
+    def test_examples_sentry_tui_load_config_reports_missing_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import examples.sentry_issue_browser_tui (run_from_env)
+
+                fn main() -> Unit !{IO} =
+                  print(run_from_env())
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            with patch.dict("os.environ", {}, clear=True):
+                run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "Configuration error: missing environment variable: SENTRY_ORG",
+            )
+
     def test_import_examples_aoc_2025_day_3_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1,18 +1,23 @@
 module examples.sentry_api
 import stdlib.http (Result, HttpError, http_response_body, HttpResponse)
-import stdlib.json (Json, JsonError, json_get_field, json_get_string)
+import stdlib.json (Json, JsonArray, JsonArrayStep, JsonError, json_array_next, json_get_array, json_get_field, json_get_string)
 import stdlib.http_client (http_get)
-import stdlib.string as string
+import stdlib.string as strlib
+
+export type IssueSummary(..) =
+  | IssueSummary String String String
 
 export fn sentry_auth_header(token: String) -> String =
-  string.concat("Authorization: Bearer ", token)
+  strlib.concat("Authorization: Bearer ", token)
+
+fn concat3(a: String, b: String, c: String) -> String =
+  strlib.concat(a, strlib.concat(b, c))
+
+fn concat4(a: String, b: String, c: String, d: String) -> String =
+  strlib.concat(a, concat3(b, c, d))
 
 fn sentry_issues_url(org: String, project: String) -> String =
-  "https://sentry.io/api/0/projects/"
-  ++ org
-  ++ "/"
-  ++ project
-  ++ "/issues/"
+  concat4("https://sentry.io/api/0/projects/", org, "/", concat3(project, "/", "issues/"))
 
 fn json_error_to_http_error(err: JsonError) -> HttpError =
   match err with
@@ -23,17 +28,65 @@ fn parse_json_response(resp: HttpResponse) -> Result HttpError Json =
   | Ok value -> Ok(value)
   | Err err -> Err(json_error_to_http_error(err))
 
-export fn sentry_list_issues(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError Json !{IO} =
+fn json_string_or_fallback(value: Json, fallback: String) -> String =
+  match json_get_string(value) with
+  | Just text -> text
+  | Nothing -> fallback
+
+fn issue_field_or_fallback(issue: Json, key: String, fallback: String) -> String =
+  match json_get_field(issue, key) with
+  | Just value -> json_string_or_fallback(value, fallback)
+  | Nothing -> fallback
+
+fn issue_summary_from_json(issue: Json) -> IssueSummary =
+  IssueSummary(
+    issue_field_or_fallback(issue, "shortId", "<missing-short-id>"),
+    issue_field_or_fallback(issue, "title", "<missing-title>"),
+    issue_field_or_fallback(issue, "status", "<missing-status>")
+  )
+
+fn decode_issue_array(items: JsonArray) -> Vec IssueSummary =
+  match json_array_next(items) with
+  | Nothing -> vec_empty()
+  | Just step ->
+      match step with
+      | JsonArrayStep issue rest -> vec_prepend(issue_summary_from_json(issue), decode_issue_array(rest))
+
+export fn sentry_decode_issue_summaries(value: Json) -> Vec IssueSummary =
+  match json_get_array(value) with
+  | Just items -> decode_issue_array(items)
+  | Nothing -> vec_empty()
+
+export fn issue_short_id(summary: IssueSummary) -> String =
+  match summary with
+  | IssueSummary short_id _ _ -> short_id
+
+export fn issue_title(summary: IssueSummary) -> String =
+  match summary with
+  | IssueSummary _ title _ -> title
+
+export fn issue_status(summary: IssueSummary) -> String =
+  match summary with
+  | IssueSummary _ _ status -> status
+
+export fn sentry_http_error_message(err: HttpError) -> String =
+  match err with
+  | HttpTimeout -> "request timed out"
+  | HttpNetwork message -> strlib.concat("network error: ", message)
+  | HttpBadStatus _ -> "unexpected HTTP status"
+  | HttpDecode message -> strlib.concat("decode error: ", message)
+
+export fn sentry_list_issues_json(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError Json !{IO} =
   match http_get(sentry_issues_url(org, project), sentry_auth_header(token), timeout_ms) with
   | Ok resp -> parse_json_response(resp)
   | Err err -> Err(err)
 
-fn json_title_or_fallback(value: Json) -> String =
-  match json_get_string(value) with
-  | Just s -> s
-  | Nothing -> "<title-not-string>"
+export fn sentry_list_issues(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError (Vec IssueSummary) !{IO} =
+  match sentry_list_issues_json(org, project, token, timeout_ms) with
+  | Ok value -> Ok(sentry_decode_issue_summaries(value))
+  | Err err -> Err(err)
 
 export fn sentry_first_issue_title(issues: Json) -> String =
-  match json_get_field(issues, "title") with
-  | Just title_json -> json_title_or_fallback(title_json)
+  match vec_get(0, sentry_decode_issue_summaries(issues)) with
+  | Just summary -> issue_title(summary)
   | Nothing -> "<title-missing>"

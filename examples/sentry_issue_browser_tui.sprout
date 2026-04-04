@@ -1,18 +1,67 @@
 module examples.sentry_issue_browser_tui
-import examples.sentry_api (sentry_list_issues)
-import stdlib.json (Json)
+import examples.sentry_api (IssueSummary, issue_short_id, issue_status, issue_title, sentry_http_error_message, sentry_list_issues)
 import stdlib.terminal (term_render_line)
+import stdlib.string as strlib
 
-fn issue_count_text(issues: Json) -> String =
-  "issues payload loaded"
+export type SentryConfig(..) =
+  | SentryConfig String String String
+
+fn read_env_required(name: String) -> Result String String !{IO} =
+  match env_get(name) with
+  | Just value -> Ok(value)
+  | Nothing -> Err(strlib.concat("missing environment variable: ", name))
+
+fn concat3(a: String, b: String, c: String) -> String =
+  strlib.concat(a, strlib.concat(b, c))
+
+fn concat4(a: String, b: String, c: String, d: String) -> String =
+  strlib.concat(a, concat3(b, c, d))
+
+export fn load_config() -> Result String SentryConfig !{IO} =
+  match read_env_required("SENTRY_ORG") with
+  | Err err -> Err(err)
+  | Ok org ->
+      match read_env_required("SENTRY_PROJECT") with
+      | Err err -> Err(err)
+      | Ok project ->
+          match read_env_required("SENTRY_TOKEN") with
+          | Err err -> Err(err)
+          | Ok token -> Ok(SentryConfig(org, project, token))
+
+fn format_issue_row(summary: IssueSummary) -> String =
+  concat3(
+    concat4("- [", issue_status(summary), "] ", issue_short_id(summary)),
+    " - ",
+    issue_title(summary)
+  )
+
+fn render_issue_rows(index: Int, total: Int, issues: Vec IssueSummary) -> String =
+  if index >= total then ""
+  else
+    match vec_get(index, issues) with
+    | Nothing -> ""
+    | Just summary ->
+        if index + 1 >= total then format_issue_row(summary)
+        else concat3(format_issue_row(summary), "\n", render_issue_rows(index + 1, total, issues))
+
+export fn render_issue_list(issues: Vec IssueSummary) -> String =
+  if vec_length(issues) == 0 then "No issues returned."
+  else concat3("Sentry issues", "\n", render_issue_rows(0, vec_length(issues), issues))
 
 export fn run_once(org: String, project: String, token: String) -> String !{IO} =
   match sentry_list_issues(org, project, token, 3000) with
-  | Ok issues -> issue_count_text(issues)
-  | Err _ -> "request failed"
+  | Ok issues -> render_issue_list(issues)
+  | Err err -> strlib.concat("Request failed: ", sentry_http_error_message(err))
+
+export fn run_from_env() -> String !{IO} =
+  match load_config() with
+  | Err err -> strlib.concat("Configuration error: ", err)
+  | Ok config ->
+      match config with
+      | SentryConfig org project token -> run_once(org, project, token)
 
 fn boot_message() -> String =
-  "sentry tui scaffold: run_once(org, project, token)"
+  "sentry issue browser: set SENTRY_ORG, SENTRY_PROJECT, and SENTRY_TOKEN"
 
 export fn sentry_tui_demo_main() -> Unit !{IO} =
   term_render_line(1, boot_message())
