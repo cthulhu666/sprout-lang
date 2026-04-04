@@ -674,6 +674,98 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "sprout-ok\nTrue\nTrue\nTrue\nTrue")
 
+    def test_stdlib_regex_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.regex as regex
+                import stdlib.string (concat, length, slice)
+
+                fn render_match(start: Int, end: Int, left: String, right: String, replaced: String, escaped: String) -> String =
+                  concat(
+                    int_to_string(start),
+                    concat(
+                      "|",
+                      concat(
+                        int_to_string(end),
+                        concat(
+                          "|",
+                          concat(
+                            left,
+                            concat("|", concat(right, concat("|", concat(replaced, concat("|", escaped)))))
+                          )
+                        )
+                      )
+                    )
+                  )
+
+                fn render_found(re: regex.Regex) -> String =
+                  match regex.find_first(re, "sprout-42-lang") with
+                  | Just(regex.Match start end) ->
+                      if regex.is_match(re, "room 101") then
+                        render_match(
+                          start,
+                          end,
+                          slice("sprout-42-lang", 0, start),
+                          slice("sprout-42-lang", end, length("sprout-42-lang") - end),
+                          regex.replace_all_literal(re, "ID", "x7y8z"),
+                          regex.escape("(a+b)")
+                        )
+                      else
+                        "bad-match"
+                  | Nothing -> "missing-find"
+
+                fn main() -> Unit !{IO} =
+                  match regex.compile("\\\\d+") with
+                  | Ok re -> print(render_found(re))
+                  | Err _ -> print("compile-failed")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "7|9|sprout-|-lang|xIDyIDz|\\(a\\+b\\)")
+
+    def test_stdlib_regex_compile_reports_invalid_and_unsupported_patterns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.regex as regex
+                import stdlib.string (concat)
+
+                fn render(result: Result regex.RegexError regex.Regex) -> String =
+                  match result with
+                  | Ok _ -> "ok"
+                  | Err err ->
+                      match err with
+                      | regex.RegexInvalidPattern msg -> concat("invalid:", msg)
+                      | regex.RegexUnsupportedFeature msg -> concat("unsupported:", msg)
+
+                fn main() -> Unit !{IO} =
+                  print(concat(render(regex.compile("(")), concat("|", render(regex.compile("a{2}")))))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            result = out.getvalue().strip()
+            self.assertIn("invalid:", result)
+            self.assertIn("|unsupported:counted repetition", result)
+
     def test_http_stdlib_echo_response(self) -> None:
         src = """
         fn main() -> Unit !{IO} =

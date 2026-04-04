@@ -1677,6 +1677,35 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "spr|out|lang|sprout|alpha|beta|empty")
 
+    def test_import_stdlib_regex_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.regex as regex
+
+                fn main() -> Unit !{IO} =
+                  match regex.compile("ab|cd") with
+                  | Ok re ->
+                      print(
+                        if regex.is_match(re, "--cd--")
+                        then regex.replace_all_literal(re, "X", "ab cd")
+                        else "bad-match"
+                      )
+                  | Err _ -> print("compile-failed")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "X X")
+
     def test_import_stdlib_repl_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

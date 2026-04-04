@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import os
 from pathlib import Path
+import re
 import selectors
 import socket
 import sys
@@ -78,6 +79,71 @@ class BuilderValue:
 class IntRangeValue:
     start: int
     end: int
+
+
+_REGEX_SHORTHAND_ESCAPES = {
+    "d": "[0-9]",
+    "w": "[A-Za-z0-9_]",
+    "s": "[ \t\r\n]",
+}
+
+_REGEX_SHORTHAND_CLASS_ESCAPES = {
+    "d": "0-9",
+    "w": "A-Za-z0-9_",
+    "s": " \t\r\n",
+}
+
+
+def _translate_regex_pattern(pattern: str) -> str:
+    out: list[str] = []
+    in_class = False
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            if i + 1 >= len(pattern):
+                raise ValueError("invalid regex pattern: trailing escape")
+            esc = pattern[i + 1]
+            if esc.isdigit():
+                raise ValueError("unsupported regex feature: backreferences")
+            if esc in _REGEX_SHORTHAND_ESCAPES:
+                out.append(
+                    _REGEX_SHORTHAND_CLASS_ESCAPES[esc]
+                    if in_class
+                    else _REGEX_SHORTHAND_ESCAPES[esc]
+                )
+            elif esc in "\\.^$*+?()[]|{}-":
+                out.append("\\" + esc)
+            else:
+                raise ValueError(f"unsupported regex feature: escape \\{esc}")
+            i += 2
+            continue
+        if not in_class:
+            if ch == "[":
+                in_class = True
+                out.append(ch)
+            elif ch in "{}":
+                raise ValueError("unsupported regex feature: counted repetition")
+            elif ch in "*+?" and i + 1 < len(pattern) and pattern[i + 1] == "?":
+                raise ValueError("unsupported regex feature: non-greedy quantifiers")
+            elif ch == "(" and i + 1 < len(pattern) and pattern[i + 1] == "?":
+                raise ValueError("unsupported regex feature: extended group syntax")
+            else:
+                out.append(ch)
+        else:
+            if ch == "]":
+                in_class = False
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _compile_regex_pattern(pattern: str) -> re.Pattern[str]:
+    translated = _translate_regex_pattern(pattern)
+    try:
+        return re.compile(translated)
+    except re.error as exc:
+        raise ValueError(f"invalid regex pattern: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -733,6 +799,67 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(left, str) or not isinstance(right, str):
             raise RuntimeError("str_compare expects String, String")
         return (left > right) - (left < right)
+
+    def builtin_regex_validate(args: list[object]) -> object:
+        pattern = args[0]
+        if not isinstance(pattern, str):
+            raise RuntimeError("regex_validate expects String")
+        try:
+            _compile_regex_pattern(pattern)
+        except ValueError as exc:
+            return ADTValue(constructor="Err", args=(str(exc),))
+        return ADTValue(constructor="Ok", args=(None,))
+
+    def builtin_regex_is_match(args: list[object]) -> object:
+        pattern = args[0]
+        text = args[1]
+        if not isinstance(pattern, str) or not isinstance(text, str):
+            raise RuntimeError("regex_is_match expects String, String")
+        try:
+            compiled = _compile_regex_pattern(pattern)
+        except ValueError as exc:
+            raise RuntimeError(f"regex_is_match: {exc}") from exc
+        return compiled.search(text) is not None
+
+    def builtin_regex_find_range(args: list[object]) -> object:
+        pattern = args[0]
+        text = args[1]
+        if not isinstance(pattern, str) or not isinstance(text, str):
+            raise RuntimeError("regex_find_range expects String, String")
+        try:
+            compiled = _compile_regex_pattern(pattern)
+        except ValueError as exc:
+            raise RuntimeError(f"regex_find_range: {exc}") from exc
+        match = compiled.search(text)
+        if match is None:
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(
+            constructor="Just",
+            args=(IntRangeValue(start=match.start(), end=match.end()),),
+        )
+
+    def builtin_regex_replace_all_literal(args: list[object]) -> object:
+        pattern = args[0]
+        replacement = args[1]
+        text = args[2]
+        if not isinstance(pattern, str) or not isinstance(replacement, str) or not isinstance(text, str):
+            raise RuntimeError("regex_replace_all_literal expects String, String, String")
+        try:
+            compiled = _compile_regex_pattern(pattern)
+        except ValueError as exc:
+            raise RuntimeError(f"regex_replace_all_literal: {exc}") from exc
+        return compiled.sub(lambda _: replacement, text)
+
+    def builtin_regex_escape(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("regex_escape expects String")
+        escaped: list[str] = []
+        for ch in raw:
+            if ch in ".^$*+?()[]{}|\\":
+                escaped.append("\\")
+            escaped.append(ch)
+        return "".join(escaped)
 
     def builtin_bytes_empty(args: list[object]) -> object:
         return BytesValue(items=b"")
@@ -1753,6 +1880,14 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         BuiltinFunction(name="str_starts_with", arity=2, fn=builtin_str_starts_with),
     )
     env.set("str_compare", BuiltinFunction(name="str_compare", arity=2, fn=builtin_str_compare))
+    env.set("regex_validate", BuiltinFunction(name="regex_validate", arity=1, fn=builtin_regex_validate))
+    env.set("regex_is_match", BuiltinFunction(name="regex_is_match", arity=2, fn=builtin_regex_is_match))
+    env.set("regex_find_range", BuiltinFunction(name="regex_find_range", arity=2, fn=builtin_regex_find_range))
+    env.set(
+        "regex_replace_all_literal",
+        BuiltinFunction(name="regex_replace_all_literal", arity=3, fn=builtin_regex_replace_all_literal),
+    )
+    env.set("regex_escape", BuiltinFunction(name="regex_escape", arity=1, fn=builtin_regex_escape))
     env.set("bytes_empty", BuiltinFunction(name="bytes_empty", arity=0, fn=builtin_bytes_empty))
     env.set("bytes_length", BuiltinFunction(name="bytes_length", arity=1, fn=builtin_bytes_length))
     env.set("bytes_get", BuiltinFunction(name="bytes_get", arity=2, fn=builtin_bytes_get))

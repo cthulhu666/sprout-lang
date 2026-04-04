@@ -226,6 +226,7 @@ def cmd_compile(
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <regex.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -383,6 +384,14 @@ static CtorMeta* find_ctor(long long tag);
 static char* alloc_cstr(size_t len, const char* ctx);
 static char* dup_slice(const char* start, size_t len);
 static char* dup_cstr(const char* s);
+static void buf_init(ByteBuf* buf);
+static void buf_append_bytes(ByteBuf* buf, const char* data, size_t len);
+static void buf_append_cstr(ByteBuf* buf, const char* text);
+static void buf_append_char(ByteBuf* buf, char ch);
+static void regex_builtin_fail(const char* builtin, const char* detail);
+static int regex_compile_ere(const char* pattern, regex_t* out_regex, char** out_error);
+static size_t sprout_utf8_char_width(unsigned char lead);
+static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_limit);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
 static IntRangeVal* sprout_alloc_range_val(const char* ctx);
@@ -1993,6 +2002,101 @@ long long str_compare(const char* left, const char* right) {
   return 0;
 }
 
+long long regex_validate(const char* pattern) {
+  if (pattern == NULL) tcp_fail("regex_validate: null input");
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)error);
+  }
+  regfree(&compiled);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), 0);
+}
+
+_Bool regex_is_match(const char* pattern, const char* text) {
+  if (pattern == NULL || text == NULL) tcp_fail("regex_is_match: null input");
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    regex_builtin_fail("regex_is_match", error);
+  }
+  regmatch_t match;
+  int status = regexec(&compiled, text, 1, &match, 0);
+  regfree(&compiled);
+  return status == 0;
+}
+
+long long regex_find_range(const char* pattern, const char* text) {
+  if (pattern == NULL || text == NULL) tcp_fail("regex_find_range: null input");
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    regex_builtin_fail("regex_find_range", error);
+  }
+  regmatch_t match;
+  int status = regexec(&compiled, text, 1, &match, 0);
+  regfree(&compiled);
+  if (status == REG_NOMATCH) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  if (status != 0 || match.rm_so < 0 || match.rm_eo < 0) {
+    tcp_fail("regex_find_range: regexec failed");
+  }
+  IntRangeVal* range = sprout_alloc_range_val("regex_find_range: out of memory");
+  range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
+  range->end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)range);
+}
+
+const char* regex_replace_all_literal(const char* pattern, const char* replacement, const char* text) {
+  if (pattern == NULL || replacement == NULL || text == NULL) {
+    tcp_fail("regex_replace_all_literal: null input");
+  }
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    regex_builtin_fail("regex_replace_all_literal", error);
+  }
+  ByteBuf out;
+  buf_init(&out);
+  const char* cursor = text;
+  regmatch_t match;
+  while (regexec(&compiled, cursor, 1, &match, 0) == 0) {
+    if (match.rm_so < 0 || match.rm_eo < 0) {
+      regfree(&compiled);
+      tcp_fail("regex_replace_all_literal: regexec failed");
+    }
+    size_t start = (size_t)match.rm_so;
+    size_t end = (size_t)match.rm_eo;
+    buf_append_bytes(&out, cursor, start);
+    buf_append_cstr(&out, replacement);
+    if (end == 0) {
+      if (cursor[0] == '\\0') break;
+      size_t width = sprout_utf8_char_width((unsigned char)cursor[0]);
+      buf_append_bytes(&out, cursor, width);
+      cursor += width;
+    } else {
+      cursor += end;
+    }
+  }
+  buf_append_cstr(&out, cursor);
+  regfree(&compiled);
+  return out.data;
+}
+
+const char* regex_escape(const char* raw) {
+  if (raw == NULL) tcp_fail("regex_escape: null input");
+  ByteBuf out;
+  buf_init(&out);
+  for (size_t i = 0; raw[i] != '\\0'; i++) {
+    if (strchr(".^$*+?()[]{}|\\\\", raw[i]) != NULL) {
+      buf_append_char(&out, '\\\\');
+    }
+    buf_append_char(&out, raw[i]);
+  }
+  return out.data == NULL ? dup_cstr("") : out.data;
+}
+
 const char* char_to_string(const char* ch) {
   if (ch == NULL) tcp_fail("char_to_string: null input");
   return ch;
@@ -2025,6 +2129,13 @@ static void buf_append_cstr(ByteBuf* buf, const char* text) {
   buf_append_bytes(buf, text, strlen(text));
 }
 
+static void buf_append_char(ByteBuf* buf, char ch) {
+  buf_reserve(buf, buf->len + 2);
+  buf->data[buf->len] = ch;
+  buf->len += 1;
+  buf->data[buf->len] = '\\0';
+}
+
 static char* alloc_cstr(size_t len, const char* ctx) {
   char* out = (char*)malloc(len + 1);
   if (out == NULL) tcp_fail(ctx);
@@ -2041,6 +2152,135 @@ static char* dup_slice(const char* start, size_t len) {
 
 static char* dup_cstr(const char* text) {
   return dup_slice(text, strlen(text));
+}
+
+static char* regex_prefixed_error(const char* prefix, const char* detail) {
+  size_t prefix_len = strlen(prefix);
+  size_t detail_len = strlen(detail);
+  char* out = alloc_cstr(prefix_len + detail_len, "regex_validate: out of memory");
+  memcpy(out, prefix, prefix_len);
+  memcpy(out + prefix_len, detail, detail_len);
+  out[prefix_len + detail_len] = '\\0';
+  return out;
+}
+
+static void regex_builtin_fail(const char* builtin, const char* detail) {
+  size_t builtin_len = strlen(builtin);
+  size_t detail_len = strlen(detail);
+  char* out = alloc_cstr(builtin_len + 2 + detail_len, "regex_validate: out of memory");
+  memcpy(out, builtin, builtin_len);
+  out[builtin_len] = ':';
+  out[builtin_len + 1] = ' ';
+  memcpy(out + builtin_len + 2, detail, detail_len);
+  out[builtin_len + 2 + detail_len] = '\\0';
+  tcp_fail(out);
+}
+
+static int regex_translate_pattern(const char* pattern, char** out_pattern, char** out_error) {
+  ByteBuf out;
+  buf_init(&out);
+  int in_class = 0;
+  for (size_t i = 0; pattern[i] != '\\0';) {
+    char ch = pattern[i];
+    if (ch == '\\\\') {
+      char esc = pattern[i + 1];
+      if (esc == '\\0') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("invalid regex pattern: trailing escape");
+        return 0;
+      }
+      if (esc >= '0' && esc <= '9') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: backreferences");
+        return 0;
+      }
+      if (esc == 'd') {
+        if (in_class) buf_append_cstr(&out, "0-9");
+        else buf_append_cstr(&out, "[0-9]");
+      } else if (esc == 'w') {
+        if (in_class) buf_append_cstr(&out, "A-Za-z0-9_");
+        else buf_append_cstr(&out, "[A-Za-z0-9_]");
+      } else if (esc == 's') {
+        if (in_class) {
+          buf_append_cstr(&out, " \\t\\r\\n");
+        } else {
+          buf_append_cstr(&out, "[ \\t\\r\\n]");
+        }
+      } else if (strchr("\\\\.^$*+?()[]|{}-", esc) != NULL) {
+        buf_append_char(&out, '\\\\');
+        buf_append_char(&out, esc);
+      } else {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = regex_prefixed_error("unsupported regex feature: escape \\\\", (char[]){esc, '\\0'});
+        return 0;
+      }
+      i += 2;
+      continue;
+    }
+    if (!in_class) {
+      if (ch == '[') {
+        in_class = 1;
+        buf_append_char(&out, ch);
+      } else if (ch == '{' || ch == '}') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: counted repetition");
+        return 0;
+      } else if ((ch == '*' || ch == '+' || ch == '?') && pattern[i + 1] == '?') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: non-greedy quantifiers");
+        return 0;
+      } else if (ch == '(' && pattern[i + 1] == '?') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: extended group syntax");
+        return 0;
+      } else {
+        buf_append_char(&out, ch);
+      }
+    } else {
+      if (ch == ']') in_class = 0;
+      buf_append_char(&out, ch);
+    }
+    i += 1;
+  }
+  if (out.data == NULL) out.data = alloc_cstr(0, "regex_validate: out of memory");
+  *out_pattern = out.data;
+  *out_error = NULL;
+  return 1;
+}
+
+static int regex_compile_ere(const char* pattern, regex_t* out_regex, char** out_error) {
+  char* translated = NULL;
+  char* translation_error = NULL;
+  if (!regex_translate_pattern(pattern, &translated, &translation_error)) {
+    *out_error = translation_error;
+    return 0;
+  }
+  int status = regcomp(out_regex, translated, REG_EXTENDED);
+  free(translated);
+  if (status != 0) {
+    char errbuf[256];
+    regerror(status, out_regex, errbuf, sizeof(errbuf));
+    *out_error = regex_prefixed_error("invalid regex pattern: ", errbuf);
+    return 0;
+  }
+  *out_error = NULL;
+  return 1;
+}
+
+static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_limit) {
+  size_t count = 0;
+  size_t i = 0;
+  while (s[i] != '\\0' && i < byte_limit) {
+    i += sprout_utf8_char_width((unsigned char)s[i]);
+    count += 1;
+  }
+  return (long long)count;
 }
 
 static char* upper_copy(const char* text) {

@@ -1589,6 +1589,17 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "str_find": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),
         "str_starts_with": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, BOOL))),
         "str_compare": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),
+        "regex_validate": Scheme(
+            vars=(),
+            type=TFunc(STRING, TApp(TApp(result_type, STRING), UNIT)),
+        ),
+        "regex_is_match": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, BOOL))),
+        "regex_find_range": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, TApp(maybe_type, INT_RANGE)))),
+        "regex_replace_all_literal": Scheme(
+            vars=(),
+            type=TFunc(STRING, TFunc(STRING, TFunc(STRING, STRING))),
+        ),
+        "regex_escape": Scheme(vars=(), type=TFunc(STRING, STRING)),
         "bytes_empty": Scheme(vars=(), type=TConst("Bytes")),
         "bytes_length": Scheme(vars=(), type=TFunc(TConst("Bytes"), INT)),
         "bytes_get": Scheme(vars=(), type=TFunc(TConst("Bytes"), TFunc(INT, TApp(maybe_type, INT)))),

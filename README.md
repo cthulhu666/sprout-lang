@@ -53,6 +53,10 @@ Normative status:
   `string_chars`. Source literals currently reject `\0` until native execution
   can preserve embedded NUL code points consistently. This surface is not part
   of normative v0 yet.
+- The current implementation also includes an experimental `stdlib.regex`
+  module for compiled regex values, first-match search, literal replacement,
+  and plain-text escaping. It intentionally stays out of core syntax and
+  `match` patterns for now, and is not part of normative v0 yet.
 - The current implementation also includes an experimental declaration-status
   annotation slice via top-level comment directives such as `#@unstable`,
   `#@temporary`, `#@wip`, and `#@deprecated ...`. Imported uses of annotated
@@ -342,7 +346,7 @@ Effect notes:
   functions may call which other functions.
 - Mixed/open effect rows and additional effect labels are still deferred follow-up work.
 
-String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
+String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules. The same applies to raw `regex_*` helpers, which are internal to `stdlib.regex`.
 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
@@ -731,6 +735,24 @@ String module (in `stdlib/string.sprout`):
 For module code, prefer:
 `import stdlib.string as string`
 then call helpers like `string.concat(...)` and `string.length(...)`.
+
+Regex module (experimental, in `stdlib/regex.sprout`):
+
+- `compile(pattern: String) -> Result RegexError Regex`
+- `is_match(re: Regex, text: String) -> Bool`
+- `find_first(re: Regex, text: String) -> Maybe Match`
+- `split_first(re: Regex, text: String) -> Maybe (String, String)`
+- `replace_all_literal(re: Regex, replacement: String, text: String) -> String`
+- `escape(raw: String) -> String`
+- `RegexError` distinguishes `RegexInvalidPattern String` from `RegexUnsupportedFeature String`
+- `Match(..)` exposes `Match start end` code-point offsets
+- Supported regex surface is intentionally small: literals, `.`, `*`, `+`, `?`, grouping, alternation, character classes, anchors, escaped metacharacters, and ASCII shorthands `\d`, `\w`, `\s`
+- Deliberately unsupported in this milestone: counted repetition `{m,n}`, non-greedy quantifiers, extended `(?...)` group syntax, and backreferences
+- Patterns are ordinary `String` literals, so backslashes must survive Sprout string parsing first; for example, write `"\\\\d+"` in source to pass `\d+` to the regex compiler
+
+For module code, prefer:
+`import stdlib.regex as regex`
+then call helpers like `regex.compile(...)` and `regex.replace_all_literal(...)`.
 
 Example classification:
 

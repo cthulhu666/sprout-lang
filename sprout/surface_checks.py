@@ -42,6 +42,14 @@ RAW_STRING_BUILTINS = {
     "str_compare",
 }
 
+RAW_REGEX_BUILTINS = {
+    "regex_validate",
+    "regex_is_match",
+    "regex_find_range",
+    "regex_replace_all_literal",
+    "regex_escape",
+}
+
 RAW_BYTES_BUILTINS = {
     "bytes_empty",
     "bytes_length",
@@ -266,6 +274,47 @@ def _walk_expr_has_raw_bytes_builtin(expr: ast.Expr) -> bool:
     return False
 
 
+def _walk_expr_has_raw_regex_builtin(expr: ast.Expr) -> bool:
+    if isinstance(expr, ast.VarExpr):
+        return expr.name in RAW_REGEX_BUILTINS
+    if isinstance(expr, ast.UnaryExpr):
+        return _walk_expr_has_raw_regex_builtin(expr.operand)
+    if isinstance(expr, ast.IntRangeExpr):
+        return _walk_expr_has_raw_regex_builtin(expr.start) or _walk_expr_has_raw_regex_builtin(expr.end)
+    if isinstance(expr, ast.BinaryExpr):
+        return _walk_expr_has_raw_regex_builtin(expr.left) or _walk_expr_has_raw_regex_builtin(expr.right)
+    if isinstance(expr, ast.CallExpr):
+        if _walk_expr_has_raw_regex_builtin(expr.callee):
+            return True
+        return any(_walk_expr_has_raw_regex_builtin(arg) for arg in expr.args)
+    if isinstance(expr, ast.IfExpr):
+        return (
+            _walk_expr_has_raw_regex_builtin(expr.condition)
+            or _walk_expr_has_raw_regex_builtin(expr.then_branch)
+            or _walk_expr_has_raw_regex_builtin(expr.else_branch)
+        )
+    if isinstance(expr, ast.MatchExpr):
+        if _walk_expr_has_raw_regex_builtin(expr.scrutinee):
+            return True
+        return any(_walk_expr_has_raw_regex_builtin(branch.value) for branch in expr.branches)
+    do_expr = getattr(ast, "DoExpr", None)
+    do_bind_step = getattr(ast, "DoBindStep", None)
+    do_let_step = getattr(ast, "DoLetStep", None)
+    do_expr_step = getattr(ast, "DoExprStep", None)
+    if do_expr is not None and isinstance(expr, do_expr):
+        for step in expr.steps:
+            if do_bind_step is not None and isinstance(step, do_bind_step):
+                if _walk_expr_has_raw_regex_builtin(step.value):
+                    return True
+            elif do_let_step is not None and isinstance(step, do_let_step):
+                if _walk_expr_has_raw_regex_builtin(step.value):
+                    return True
+            elif do_expr_step is not None and isinstance(step, do_expr_step):
+                if _walk_expr_has_raw_regex_builtin(step.value):
+                    return True
+    return False
+
+
 def _walk_expr_has_raw_crypto_builtin(expr: ast.Expr) -> bool:
     if isinstance(expr, ast.VarExpr):
         return expr.name in RAW_CRYPTO_BUILTINS
@@ -394,6 +443,8 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
                 _ensure_allowed(bundle, decl.body, "string builtin")
             if _walk_expr_has_raw_bytes_builtin(decl.body):
                 _ensure_allowed(bundle, decl.body, "bytes_* builtin")
+            if _walk_expr_has_raw_regex_builtin(decl.body):
+                _ensure_allowed(bundle, decl.body, "regex_* builtin")
             if _walk_expr_has_raw_crypto_builtin(decl.body):
                 _ensure_allowed(bundle, decl.body, "crypto_* builtin")
             if _walk_expr_has_raw_range_builtin(decl.body):
@@ -407,6 +458,8 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
                 _ensure_allowed(bundle, decl.value, "string builtin")
             if _walk_expr_has_raw_bytes_builtin(decl.value):
                 _ensure_allowed(bundle, decl.value, "bytes_* builtin")
+            if _walk_expr_has_raw_regex_builtin(decl.value):
+                _ensure_allowed(bundle, decl.value, "regex_* builtin")
             if _walk_expr_has_raw_crypto_builtin(decl.value):
                 _ensure_allowed(bundle, decl.value, "crypto_* builtin")
             if _walk_expr_has_raw_range_builtin(decl.value):
@@ -436,6 +489,8 @@ def validate_public_surface(program: ast.Program, bundle: ModuleBundle | None) -
                     _ensure_allowed(bundle, method.body, "string builtin")
                 if _walk_expr_has_raw_bytes_builtin(method.body):
                     _ensure_allowed(bundle, method.body, "bytes_* builtin")
+                if _walk_expr_has_raw_regex_builtin(method.body):
+                    _ensure_allowed(bundle, method.body, "regex_* builtin")
                 if _walk_expr_has_raw_crypto_builtin(method.body):
                     _ensure_allowed(bundle, method.body, "crypto_* builtin")
                 if _walk_expr_has_raw_range_builtin(method.body):

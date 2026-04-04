@@ -729,6 +729,20 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertIn("declare i64 @str_compare(ptr, ptr)", ir)
         self.assertIn("declare ptr @int_to_string(i64)", ir)
 
+    def test_compile_regex_builtins_to_llvm(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          print(regex_escape("a+b"))
+        """
+        program = parse(src)
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare i64 @regex_validate(ptr)", ir)
+        self.assertIn("declare i1 @regex_is_match(ptr, ptr)", ir)
+        self.assertIn("declare i64 @regex_find_range(ptr, ptr)", ir)
+        self.assertIn("declare ptr @regex_replace_all_literal(ptr, ptr, ptr)", ir)
+        self.assertIn("declare ptr @regex_escape(ptr)", ir)
+
     def test_compile_string_equality_uses_content_compare(self) -> None:
         src = """
         fn main() -> Unit !{IO} =
