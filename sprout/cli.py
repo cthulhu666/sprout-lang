@@ -1359,7 +1359,44 @@ static const char* sprout_json_skip_ws(const char* pos) {
   while (*pos == ' ' || *pos == '\\n' || *pos == '\\r' || *pos == '\\t') pos++;
   return pos;
 }
-static char* sprout_json_parse_string(const char** pos_ptr) {
+static int sprout_json_parse_hex4(const char* pos, unsigned int* out) {
+  if (strlen(pos) < 4) return 0;
+  unsigned int value = 0;
+  for (int i = 0; i < 4; i++) {
+    unsigned char ch = (unsigned char)pos[i];
+    value <<= 4;
+    if (ch >= '0' && ch <= '9') {
+      value |= (unsigned int)(ch - '0');
+    } else if (ch >= 'a' && ch <= 'f') {
+      value |= (unsigned int)(10 + ch - 'a');
+    } else if (ch >= 'A' && ch <= 'F') {
+      value |= (unsigned int)(10 + ch - 'A');
+    } else {
+      return 0;
+    }
+  }
+  *out = value;
+  return 1;
+}
+static size_t sprout_json_append_utf8(char* out, size_t idx, unsigned int codepoint) {
+  if (codepoint <= 0x7f) {
+    out[idx++] = (char)codepoint;
+  } else if (codepoint <= 0x7ff) {
+    out[idx++] = (char)(0xc0 | ((codepoint >> 6) & 0x1f));
+    out[idx++] = (char)(0x80 | (codepoint & 0x3f));
+  } else if (codepoint <= 0xffff) {
+    out[idx++] = (char)(0xe0 | ((codepoint >> 12) & 0x0f));
+    out[idx++] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+    out[idx++] = (char)(0x80 | (codepoint & 0x3f));
+  } else {
+    out[idx++] = (char)(0xf0 | ((codepoint >> 18) & 0x07));
+    out[idx++] = (char)(0x80 | ((codepoint >> 12) & 0x3f));
+    out[idx++] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+    out[idx++] = (char)(0x80 | (codepoint & 0x3f));
+  }
+  return idx;
+}
+static char* sprout_json_parse_string_impl(const char** pos_ptr, const char** err_msg) {
   const char* pos = sprout_json_skip_ws(*pos_ptr);
   if (pos == NULL || *pos != '"') return NULL;
   pos++;
@@ -1372,14 +1409,29 @@ static char* sprout_json_parse_string(const char** pos_ptr) {
       *pos_ptr = pos + 1;
       return out;
     }
+    if ((unsigned char)*pos < 0x20) {
+      if (err_msg != NULL) *err_msg = "invalid control character in string";
+      free(out);
+      return NULL;
+    }
     if (*pos == '\\\\') {
       pos++;
-      if (*pos == '\\0') break;
+      if (*pos == '\\0') {
+        if (err_msg != NULL) *err_msg = "unterminated escape sequence";
+        free(out);
+        return NULL;
+      }
       switch (*pos) {
         case '\\\\':
         case '"':
         case '/':
           out[idx++] = *pos;
+          break;
+        case 'b':
+          out[idx++] = '\\b';
+          break;
+        case 'f':
+          out[idx++] = '\\f';
           break;
         case 'n':
           out[idx++] = '\\n';
@@ -1390,9 +1442,40 @@ static char* sprout_json_parse_string(const char** pos_ptr) {
         case 't':
           out[idx++] = '\\t';
           break;
-        default:
-          out[idx++] = *pos;
+        case 'u': {
+          unsigned int codepoint = 0;
+          if (!sprout_json_parse_hex4(pos + 1, &codepoint)) {
+            if (err_msg != NULL) *err_msg = "invalid unicode escape";
+            free(out);
+            return NULL;
+          }
+          pos += 4;
+          if (codepoint >= 0xd800 && codepoint <= 0xdbff) {
+            if (pos[1] != '\\\\' || pos[2] != 'u') {
+              if (err_msg != NULL) *err_msg = "missing low surrogate";
+              free(out);
+              return NULL;
+            }
+            unsigned int low = 0;
+            if (!sprout_json_parse_hex4(pos + 3, &low) || low < 0xdc00 || low > 0xdfff) {
+              if (err_msg != NULL) *err_msg = "invalid low surrogate";
+              free(out);
+              return NULL;
+            }
+            codepoint = 0x10000 + (((codepoint - 0xd800) << 10) | (low - 0xdc00));
+            pos += 6;
+          } else if (codepoint >= 0xdc00 && codepoint <= 0xdfff) {
+            if (err_msg != NULL) *err_msg = "unexpected low surrogate";
+            free(out);
+            return NULL;
+          }
+          idx = sprout_json_append_utf8(out, idx, codepoint);
           break;
+        }
+        default:
+          if (err_msg != NULL) *err_msg = "invalid escape sequence";
+          free(out);
+          return NULL;
       }
       pos++;
       continue;
@@ -1402,6 +1485,9 @@ static char* sprout_json_parse_string(const char** pos_ptr) {
   }
   free(out);
   return NULL;
+}
+static char* sprout_json_parse_string(const char** pos_ptr) {
+  return sprout_json_parse_string_impl(pos_ptr, NULL);
 }
 static VectorVal* sprout_json_extract_string_array(const char* text, const char* key) {
   const char* pos = sprout_json_after_key(text, key);
@@ -2457,12 +2543,277 @@ static void json_append_value(ByteBuf* out, long long value) {
   }
 }
 
+static long long json_parse_value(const char** pos_ptr, char** err_msg);
+
+static long long json_parse_ok_result(long long value) {
+  long long rooted_value = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), value);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+static long long json_parse_err_result(const char* message) {
+  long long err = sprout_make1(
+    find_ctor_tag_by_name("stdlib.json.JsonDecode"),
+    (long long)(uintptr_t)dup_cstr(message)
+  );
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+static long long json_parse_reverse_array_items(long long reversed) {
+  long long rooted_reversed = reversed;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_reversed);
+  long long out = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil"));
+  SPROUT_GC_PUSH_I64_LOCAL(out);
+  long long cursor = reversed;
+  while (json_ctor_is(json_ctor_name(cursor), "JsonArrayCons")) {
+    long long value = sprout_field(cursor, 0);
+    SPROUT_GC_PUSH_I64_LOCAL(value);
+    out = sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), value, out);
+    SPROUT_GC_POP_LOCALS(1);
+    cursor = sprout_field(cursor, 1);
+  }
+  SPROUT_GC_POP_LOCALS(1);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+static long long json_parse_reverse_object_items(long long reversed) {
+  long long rooted_reversed = reversed;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_reversed);
+  long long out = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil"));
+  SPROUT_GC_PUSH_I64_LOCAL(out);
+  long long cursor = reversed;
+  while (json_ctor_is(json_ctor_name(cursor), "JsonObjectCons")) {
+    long long key = sprout_field(cursor, 0);
+    long long value = sprout_field(cursor, 1);
+    SPROUT_GC_PUSH_I64_LOCAL(value);
+    out = sprout_make3(find_ctor_tag_by_name("stdlib.json.JsonObjectCons"), key, value, out);
+    SPROUT_GC_POP_LOCALS(1);
+    cursor = sprout_field(cursor, 2);
+  }
+  SPROUT_GC_POP_LOCALS(1);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+static long long json_parse_array(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  pos++;
+  long long reversed = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil"));
+  SPROUT_GC_PUSH_I64_LOCAL(reversed);
+  pos = sprout_json_skip_ws(pos);
+  if (*pos == ']') {
+    long long list = json_parse_reverse_array_items(reversed);
+    SPROUT_GC_PUSH_I64_LOCAL(list);
+    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), list);
+    SPROUT_GC_POP_LOCALS(2);
+    *pos_ptr = pos + 1;
+    return out;
+  }
+  while (*pos != '\\0') {
+    long long value = json_parse_value(&pos, err_msg);
+    if (err_msg != NULL && *err_msg != NULL) {
+      SPROUT_GC_POP_LOCALS(1);
+      return 0;
+    }
+    SPROUT_GC_PUSH_I64_LOCAL(value);
+    reversed = sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), value, reversed);
+    SPROUT_GC_POP_LOCALS(1);
+    pos = sprout_json_skip_ws(pos);
+    if (*pos == ']') {
+      long long list = json_parse_reverse_array_items(reversed);
+      SPROUT_GC_PUSH_I64_LOCAL(list);
+      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), list);
+      SPROUT_GC_POP_LOCALS(2);
+      *pos_ptr = pos + 1;
+      return out;
+    }
+    if (*pos != ',') {
+      if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ',' or ']'");
+      SPROUT_GC_POP_LOCALS(1);
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos + 1);
+  }
+  if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unterminated array");
+  SPROUT_GC_POP_LOCALS(1);
+  return 0;
+}
+
+static long long json_parse_object(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  pos++;
+  long long reversed = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil"));
+  SPROUT_GC_PUSH_I64_LOCAL(reversed);
+  pos = sprout_json_skip_ws(pos);
+  if (*pos == '}') {
+    long long list = json_parse_reverse_object_items(reversed);
+    SPROUT_GC_PUSH_I64_LOCAL(list);
+    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), list);
+    SPROUT_GC_POP_LOCALS(2);
+    *pos_ptr = pos + 1;
+    return out;
+  }
+  while (*pos != '\\0') {
+    const char* parse_string_err = NULL;
+    char* key = sprout_json_parse_string_impl(&pos, &parse_string_err);
+    if (key == NULL) {
+      if (err_msg != NULL && *err_msg == NULL) {
+        *err_msg = dup_cstr(parse_string_err != NULL ? parse_string_err : "expected string key");
+      }
+      SPROUT_GC_POP_LOCALS(1);
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos);
+    if (*pos != ':') {
+      free(key);
+      if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ':' after object key");
+      SPROUT_GC_POP_LOCALS(1);
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos + 1);
+    long long value = json_parse_value(&pos, err_msg);
+    if (err_msg != NULL && *err_msg != NULL) {
+      free(key);
+      SPROUT_GC_POP_LOCALS(1);
+      return 0;
+    }
+    SPROUT_GC_PUSH_I64_LOCAL(value);
+    reversed = sprout_make3(
+      find_ctor_tag_by_name("stdlib.json.JsonObjectCons"),
+      (long long)(uintptr_t)key,
+      value,
+      reversed
+    );
+    SPROUT_GC_POP_LOCALS(1);
+    pos = sprout_json_skip_ws(pos);
+    if (*pos == '}') {
+      long long list = json_parse_reverse_object_items(reversed);
+      SPROUT_GC_PUSH_I64_LOCAL(list);
+      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), list);
+      SPROUT_GC_POP_LOCALS(2);
+      *pos_ptr = pos + 1;
+      return out;
+    }
+    if (*pos != ',') {
+      if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ',' or '}'");
+      SPROUT_GC_POP_LOCALS(1);
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos + 1);
+  }
+  if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unterminated object");
+  SPROUT_GC_POP_LOCALS(1);
+  return 0;
+}
+
+static long long json_parse_number(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  const char* start = pos;
+  if (*pos == '-') pos++;
+  if (*pos == '0') {
+    pos++;
+  } else if (*pos >= '1' && *pos <= '9') {
+    while (*pos >= '0' && *pos <= '9') pos++;
+  } else {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("invalid number");
+    return 0;
+  }
+  if (*pos == '.' || *pos == 'e' || *pos == 'E') {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("only integer JSON numbers are supported");
+    return 0;
+  }
+  size_t len = (size_t)(pos - start);
+  char* raw = dup_slice(start, len);
+  char* end = NULL;
+  long long parsed = strtoll(raw, &end, 10);
+  int valid = end != NULL && *end == '\\0';
+  free(raw);
+  if (!valid) {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("invalid number");
+    return 0;
+  }
+  *pos_ptr = pos;
+  return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonInt"), parsed);
+}
+
+static long long json_parse_value(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  if (pos == NULL || *pos == '\\0') {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unexpected end of input");
+    return 0;
+  }
+  if (*pos == '"') {
+    const char* parse_string_err = NULL;
+    char* value = sprout_json_parse_string_impl(&pos, &parse_string_err);
+    if (value == NULL) {
+      if (err_msg != NULL && *err_msg == NULL) {
+        *err_msg = dup_cstr(parse_string_err != NULL ? parse_string_err : "invalid string");
+      }
+      return 0;
+    }
+    *pos_ptr = pos;
+    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonString"), (long long)(uintptr_t)value);
+  }
+  if (*pos == '{') {
+    long long out = json_parse_object(&pos, err_msg);
+    if (err_msg == NULL || *err_msg == NULL) *pos_ptr = pos;
+    return out;
+  }
+  if (*pos == '[') {
+    long long out = json_parse_array(&pos, err_msg);
+    if (err_msg == NULL || *err_msg == NULL) *pos_ptr = pos;
+    return out;
+  }
+  if (strncmp(pos, "true", 4) == 0) {
+    *pos_ptr = pos + 4;
+    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonBool"), 1);
+  }
+  if (strncmp(pos, "false", 5) == 0) {
+    *pos_ptr = pos + 5;
+    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonBool"), 0);
+  }
+  if (strncmp(pos, "null", 4) == 0) {
+    *pos_ptr = pos + 4;
+    return sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonNull"));
+  }
+  if (*pos == '-' || (*pos >= '0' && *pos <= '9')) {
+    long long out = json_parse_number(&pos, err_msg);
+    if (err_msg == NULL || *err_msg == NULL) *pos_ptr = pos;
+    return out;
+  }
+  if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unexpected token");
+  return 0;
+}
+
 const char* json_stringify(long long value) {
   ByteBuf out;
   buf_init(&out);
   json_append_value(&out, value);
   if (out.data == NULL) return dup_cstr("");
   return out.data;
+}
+
+long long json_parse(const char* raw) {
+  if (raw == NULL) tcp_fail("json_parse expects String");
+  const char* pos = raw;
+  char* err_msg = NULL;
+  long long value = json_parse_value(&pos, &err_msg);
+  if (err_msg != NULL) {
+    long long out = json_parse_err_result(err_msg);
+    free(err_msg);
+    return out;
+  }
+  pos = sprout_json_skip_ws(pos);
+  if (pos == NULL || *pos != '\\0') {
+    return json_parse_err_result("unexpected trailing characters");
+  }
+  return json_parse_ok_result(value);
 }
 
 static int parse_http_url(const char* url, HttpUrl* out, char** err) {

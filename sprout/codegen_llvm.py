@@ -116,6 +116,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "tcp_close_listener": FnSig(name="tcp_close_listener", params=[I64], ret=I64),
     "tcp_echo_serve": FnSig(name="tcp_echo_serve", params=[I64, I64], ret=I64),
     "http_request": FnSig(name="http_request", params=[I8_PTR, I8_PTR, I8_PTR, I8_PTR, I64], ret=I64),
+    "json_parse": FnSig(name="json_parse", params=[I8_PTR], ret=I64),
     "json_stringify": FnSig(name="json_stringify", params=[I64], ret=I8_PTR),
     "term_clear": FnSig(name="term_clear", params=[], ret=I64),
     "term_move": FnSig(name="term_move", params=[I64, I64], ret=I64),

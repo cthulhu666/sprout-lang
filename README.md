@@ -761,7 +761,7 @@ Example classification:
 - Library-style examples expose helpers without `main`; use `sprout check` for them directly, or import them from another runnable module.
 - `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers plus typed issue-summary decoding on top of generic `stdlib.http` + `stdlib.http_client`.
 - `examples/sentry_issue_browser_tui.sprout` is a library-style first-page issue browser module with environment-based config loading and formatted list rendering.
-- `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `sprout run`.
+- `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `sprout run` and `sprout compile --native`.
 - `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
 - `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
 - `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
@@ -787,6 +787,8 @@ Load HTTP and JSON helpers:
   `python3 -m sprout.cli run examples/regex_demo.sprout "ticket=AB-42 owner=ada"`
 - Sentry issue browser:
   `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token python3 -m sprout.cli run examples/sentry_issue_browser.sprout`
+- Native Sentry issue browser build:
+  `mise exec -- just compile-native examples/sentry_issue_browser.sprout /tmp/sentry_issue_browser`
 - Sentry issue browser helper flow:
   `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token python3 -m sprout.cli repl`
   then import `examples.sentry_issue_browser_tui` and evaluate `run_from_env()`

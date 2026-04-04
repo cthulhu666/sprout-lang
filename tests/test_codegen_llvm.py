@@ -776,6 +776,18 @@ class CodegenLlvmTests(CodegenTestCase):
         ir = compile_to_llvm(program)
         self.assertIn("declare ptr @json_stringify(i64)", ir)
 
+    def test_compile_json_parse_to_llvm(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          match json_parse("{\\"ok\\":true}") with
+          | Ok value -> print(json_stringify(value))
+          | Err _ -> print("err")
+        """
+        program = parse(with_http_prelude(src))
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("declare i64 @json_parse(ptr)", ir)
+
     def test_compile_http_prelude_registers_qualified_runtime_ctors(self) -> None:
         src = """
         fn main() -> Unit !{IO} =

@@ -1111,6 +1111,37 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             self.assertEqual(run.returncode, 0, msg=run.stderr)
             self.assertEqual(run.stdout.strip(), '{"ok":true,"items":[2,"x\\n"]}')
 
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_json_parse_roundtrip(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          match json_parse("{\\"ok\\":true,\\"items\\":[2,\\"x\\\\n\\"],\\"meta\\":{\\"count\\":2}}") with
+          | Ok value -> print(json_stringify(value))
+          | Err _ -> print("err")
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    "--with-http-stdlib",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            self.assertEqual(run.stdout.strip(), '{"ok":true,"items":[2,"x\\n"],"meta":{"count":2}}')
+
 
 if __name__ == "__main__":
     unittest.main()

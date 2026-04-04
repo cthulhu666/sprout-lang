@@ -1805,16 +1805,13 @@ class CliTests(unittest.TestCase):
         example_flags = {
             "examples/result_demo.sprout": ["--with-stdlib"],
         }
-        check_only_examples = {
-            "examples/sentry_issue_browser.sprout",
-        }
         failures: list[tuple[Path, str, str]] = []
         for path in sorted(Path("examples").glob("*.sprout")):
             with tempfile.TemporaryDirectory() as tmp:
                 source = path.read_text(encoding="utf-8")
                 out = Path(tmp) / f"{path.stem}.ll"
                 extra = example_flags.get(str(path), [])
-                if "fn main(" in source and str(path) not in check_only_examples:
+                if "fn main(" in source:
                     proc = subprocess.run(
                         [
                             sys.executable,
