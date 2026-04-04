@@ -382,6 +382,14 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body, ast.CharExpr)
         self.assertEqual(fn_decl.body.value, "\n")
 
+    def test_parse_rejects_nul_char_escape(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"\\0 escape is not supported in char literals"):
+            parse("fn main() -> Char = '\\0'")
+
+    def test_parse_rejects_nul_string_escape(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"\\0 escape is not supported in string literals"):
+            parse('fn main() -> String = "a\\0b"')
+
     def test_parse_rejects_multi_codepoint_char_literal(self) -> None:
         with self.assertRaises(ValueError):
             parse("fn main() -> Char = 'ab'")

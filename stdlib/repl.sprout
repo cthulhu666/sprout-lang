@@ -35,7 +35,7 @@ fn single_line(text: String) -> Vec String =
   vec_singleton(text)
 
 fn char_at(raw: String, index: Int) -> Char =
-  string.char_at_or(raw, index, '\0')
+  string.char_at_or(raw, index, '?')
 
 fn trim(raw: String) -> String =
   string.trim(raw)
@@ -147,7 +147,7 @@ fn contains_name(names: Vec String, value: String, index: Int) -> Bool =
 
 fn lower_char(value: Char) -> Char =
   if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)) == -1 then value
-  else string.char_at_or("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)), '\0')
+  else string.char_at_or("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)), '?')
 
 fn lower_ascii_from(raw: String, index: Int, acc: String) -> String =
   if index >= string.length(raw) then acc

@@ -50,7 +50,9 @@ Normative status:
   semantics slice: distinct `Char` values and char literals such as `'a'`,
   `String` helper semantics defined in terms of Unicode code points, and
   stdlib helpers such as `char_at`, `char_at_or`, `string_from_char`, and
-  `string_chars`. This surface is not part of normative v0 yet.
+  `string_chars`. Source literals currently reject `\0` until native execution
+  can preserve embedded NUL code points consistently. This surface is not part
+  of normative v0 yet.
 - The current implementation also includes an experimental declaration-status
   annotation slice via top-level comment directives such as `#@unstable`,
   `#@temporary`, `#@wip`, and `#@deprecated ...`. Imported uses of annotated

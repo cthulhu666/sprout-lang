@@ -31,7 +31,7 @@ export fn random_nonce(count: Int) -> Result crypto.CryptoError String !{IO} =
   | Ok value -> Ok(crypto.base64_encode(value))
 
 fn char_at(raw: String, index: Int) -> Char =
-  string.char_at_or(raw, index, '\0')
+  string.char_at_or(raw, index, '?')
 
 fn escape_username_from(raw: String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc

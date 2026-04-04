@@ -25,7 +25,7 @@ fn initials_from(raw: String, index: Int, take_next: Bool, acc: String) -> Strin
     else
       initials_from(raw, index + 1, false, acc)
 where
-  ch = string.char_at_or(raw, index, '\0')
+  ch = string.char_at_or(raw, index, '?')
 
 fn initials(raw: String) -> String =
   initials_from(raw, 0, true, "")
@@ -38,7 +38,7 @@ fn strip_vowels_from(raw: String, index: Int, acc: String) -> String =
     else
       strip_vowels_from(raw, index + 1, string.concat(acc, string.string_from_char(ch)))
 where
-  ch = string.char_at_or(raw, index, '\0')
+  ch = string.char_at_or(raw, index, '?')
 
 fn strip_vowels(raw: String) -> String =
   strip_vowels_from(raw, 0, "")

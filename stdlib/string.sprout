@@ -95,7 +95,7 @@ fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)
 
 fn line_count_until(raw: String, line_start: Int, newline_index: Int) -> Int =
-  if newline_index > line_start && is_carriage_return(char_at_or(raw, newline_index - 1, '\0')) then
+  if newline_index > line_start && is_carriage_return(char_at_or(raw, newline_index - 1, '?')) then
     newline_index - line_start - 1
   else
     newline_index - line_start
@@ -105,7 +105,7 @@ fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec Str
     if line_start >= total then acc
     else append_line(acc, slice(raw, line_start, total - line_start))
   else
-    if is_newline(char_at_or(raw, index, '\0')) then
+    if is_newline(char_at_or(raw, index, '?')) then
       lines_loop(
         raw,
         index + 1,
@@ -113,7 +113,7 @@ fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec Str
         total,
         append_line(acc, slice(raw, line_start, line_count_until(raw, line_start, index)))
       )
-    else if is_carriage_return(char_at_or(raw, index, '\0')) then
+    else if is_carriage_return(char_at_or(raw, index, '?')) then
       lines_loop(raw, index + 1, line_start, total, acc)
     else
       lines_loop(raw, index + 1, line_start, total, acc)
@@ -127,8 +127,8 @@ fn digit_value(ch: Char) -> Int =
 fn digits_loop(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
   if index >= total then acc
   else
-    if digit_value(char_at_or(raw, index, '\0')) >= 0 then
-      digits_loop(raw, index + 1, total, vec_append(digit_value(char_at_or(raw, index, '\0')), acc))
+    if digit_value(char_at_or(raw, index, '?')) >= 0 then
+      digits_loop(raw, index + 1, total, vec_append(digit_value(char_at_or(raw, index, '?')), acc))
     else
       digits_loop(raw, index + 1, total, acc)
 
@@ -137,7 +137,7 @@ export fn string_digits(raw: String) -> Vec Int =
 
 fn chars_loop(raw: String, index: Int, total: Int, acc: Vec Char) -> Vec Char =
   if index >= total then acc
-  else chars_loop(raw, index + 1, total, vec_append(char_at_or(raw, index, '\0'), acc))
+  else chars_loop(raw, index + 1, total, vec_append(char_at_or(raw, index, '?'), acc))
 
 export fn string_chars(raw: String) -> Vec Char =
   chars_loop(raw, 0, length(raw), vec_empty())

@@ -99,7 +99,9 @@ def tokenize(source: str) -> list[Token]:
             while i < len(source) and source[i] != "'":
                 if source[i] == "\\" and i + 1 < len(source):
                     nxt = source[i + 1]
-                    mapping = {"0": "\0", "n": "\n", "r": "\r", "t": "\t", '"': '"', "'": "'", "\\": "\\"}
+                    mapping = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "'": "'", "\\": "\\"}
+                    if nxt == "0":
+                        raise TokenizeError(f"\\0 escape is not supported in char literals at {start_line}:{start_col}")
                     chars.append(mapping.get(nxt, nxt))
                     advance(2)
                 else:
@@ -121,7 +123,9 @@ def tokenize(source: str) -> list[Token]:
             while i < len(source) and source[i] != '"':
                 if source[i] == "\\" and i + 1 < len(source):
                     nxt = source[i + 1]
-                    mapping = {"0": "\0", "n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+                    mapping = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+                    if nxt == "0":
+                        raise TokenizeError(f"\\0 escape is not supported in string literals at {start_line}:{start_col}")
                     chars.append(mapping.get(nxt, nxt))
                     advance(2)
                 else:

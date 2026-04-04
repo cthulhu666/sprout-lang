@@ -18,6 +18,9 @@ normative v0 core.
 - Char literals use single quotes, for example `'a'`, `'\n'`, and `'ż'`.
 - A char literal must contain exactly one Unicode code point after escapes are
   decoded.
+- Source string and char literals currently reject `\0`; embedded NUL code
+  points are not part of the experimental contract until the native runtime can
+  preserve them consistently.
 - `String` values are defined in terms of Unicode code points for:
   `length`, `slice`, `take`, `drop`, `find`, `char_at`, `char_at_or`, and
   `string_chars`.
