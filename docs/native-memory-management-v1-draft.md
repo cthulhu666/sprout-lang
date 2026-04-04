@@ -228,7 +228,7 @@ Current implementation status:
 - collection currently runs at process exit via `atexit(...)`,
 - the native profile now also enables threshold-triggered mid-execution
   collection by default using a fixed managed-node threshold,
-- the current default threshold is `1024` managed heap nodes,
+- the current default threshold is `4096` managed heap nodes,
 - `SPROUT_GC_THRESHOLD=<positive-int>` overrides that threshold and
   `SPROUT_GC_THRESHOLD=off` disables in-process collection,
 - opt-in debug logging exists for validation and now reports the active
@@ -303,14 +303,18 @@ Current measurement workflow:
 
 Current measured takeaway:
 
-- `aoc_day5`-style file-processing runs improve markedly with
-  `SPROUT_GC_THRESHOLD=4096` compared with `off`.
-- `aoc_day3` regresses badly at `4096` and `8192` despite productive sweeps,
-  which suggests the current limitation is stop-the-world mark/sweep pause cost
-  on larger live heaps rather than a trigger firing on too little new churn.
-- As a result, the current default threshold remains conservative until the
-  collector policy or pause cost improves; workload-specific overrides are the
-  current practical escape hatch.
+- The original threshold tuning problem turned out to be dominated by
+  mark-time pointer lookup cost, not just trigger policy.
+- After adding a managed-node pointer index for GC marking, both
+  `aoc_day3`-style and `aoc_day5`-style workloads improve markedly with
+  `SPROUT_GC_THRESHOLD=4096` compared with both `off` and the previous `1024`
+  default.
+- Current measurements show `1024` still triggers far too often, while `4096`
+  and `8192` are both good on the measured real workloads; the runtime now
+  defaults to `4096` as the safer next step.
+- `SPROUT_GC_THRESHOLD` remains useful for workload-specific comparison and
+  future tuning, but the default no longer depends on the old linear-lookup GC
+  behavior.
 
 These should remain implementation diagnostics, not user-facing language
 features.

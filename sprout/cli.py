@@ -371,7 +371,7 @@ static long long g_debug_gc_swept = 0;
 static long long g_gc_cycle_count = 0;
 static long long g_managed_heap_count = 0;
 static long long g_managed_alloc_since_gc = 0;
-static long long g_gc_threshold = 1024;
+static long long g_gc_threshold = 4096;
 static long long g_gc_marked_count = 0;
 
 static void tcp_fail(const char* msg);

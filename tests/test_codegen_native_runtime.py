@@ -732,7 +732,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             | Err _ -> acc
 
         fn main() -> Unit !{IO} =
-          print(churn(400, 0))
+          print(churn(2000, 0))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -755,10 +755,10 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env = os.environ.copy()
             env["SPROUT_DEBUG_GC"] = "1"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
-            self.assertEqual(run.stdout.strip(), "1200")
+            self.assertEqual(run.stdout.strip(), "6000")
             self.assertEqual(run.returncode, 0)
             cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
-            self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1024 for cycle in cycles))
+            self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 4096 for cycle in cycles))
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_gc_threshold_off_disables_mid_execution_collection(self) -> None:
