@@ -1002,6 +1002,28 @@ class RuntimeTests(unittest.TestCase):
                 ),
             )
 
+    def test_stdlib_scram_parse_server_first_rejects_non_decimal_iterations(self) -> None:
+        src = """
+        module main
+        import stdlib.scram as scram
+
+        fn main() -> Unit !{IO} =
+          match scram.parse_server_first("r=nonce,s=c2FsdA==,i=12x") with
+          | Ok _ -> print("ok")
+          | Err err -> print(scram.error_message(err))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "SCRAM iteration count must be decimal digits")
+
     def test_terminal_builtins_emit_ansi(self) -> None:
         src = """
         fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b

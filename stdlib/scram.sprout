@@ -30,14 +30,14 @@ export fn random_nonce(count: Int) -> Result crypto.CryptoError String !{IO} =
   | Err err -> Err(err)
   | Ok value -> Ok(crypto.base64_encode(value))
 
-fn char_at(raw: String, index: Int) -> String =
-  string.slice(raw, index, 1)
+fn char_at(raw: String, index: Int) -> Char =
+  string.char_at_or(raw, index, '\0')
 
 fn escape_username_from(raw: String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc
-  else if char_at(raw, index) == "," then escape_username_from(raw, index + 1, total, string.concat(acc, "=2C"))
-  else if char_at(raw, index) == "=" then escape_username_from(raw, index + 1, total, string.concat(acc, "=3D"))
-  else escape_username_from(raw, index + 1, total, string.concat(acc, char_at(raw, index)))
+  else if char_at(raw, index) == ',' then escape_username_from(raw, index + 1, total, string.concat(acc, "=2C"))
+  else if char_at(raw, index) == '=' then escape_username_from(raw, index + 1, total, string.concat(acc, "=3D"))
+  else escape_username_from(raw, index + 1, total, string.concat(acc, string.string_from_char(char_at(raw, index))))
 
 fn escape_username(raw: String) -> String =
   escape_username_from(raw, 0, string.length(raw), "")
@@ -69,7 +69,7 @@ fn attr_value(raw: String, key: String) -> Maybe String =
 
 fn digits_only(raw: String, index: Int, total: Int) -> Bool =
   if index >= total then true
-  else if string.contains("0123456789", char_at(raw, index)) then digits_only(raw, index + 1, total)
+  else if string.contains("0123456789", string.string_from_char(char_at(raw, index))) then digits_only(raw, index + 1, total)
   else false
 
 fn parse_positive_int(raw: String) -> Result ScramError Int =

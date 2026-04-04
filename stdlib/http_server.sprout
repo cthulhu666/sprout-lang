@@ -22,25 +22,25 @@ fn find_headers_end(raw: String) -> Int =
 fn find_line_end(raw: String) -> Int =
   string.find(raw, "\r\n")
 
-fn char_at(raw: String, index: Int) -> String =
-  string.slice(raw, index, 1)
+fn char_at(raw: String, index: Int) -> Char =
+  string.char_at_or(raw, index, '\0')
 
-fn lower_char(ch: String) -> String =
-  if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) < 0 then ch
-  else string.slice("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch), 1)
+fn lower_char(ch: Char) -> Char =
+  if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch)) < 0 then ch
+  else string.char_at_or("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch)), '\0')
 
 fn lower_ascii_from(raw: String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc
-  else lower_ascii_from(raw, index + 1, total, string.concat(acc, lower_char(char_at(raw, index))))
+  else lower_ascii_from(raw, index + 1, total, string.concat(acc, string.string_from_char(lower_char(char_at(raw, index)))))
 
 fn lower_ascii(raw: String) -> String =
   lower_ascii_from(raw, 0, string.length(raw), "")
 
 fn split_lines_from(raw: String, index: Int, total: Int, acc: Vec String, current: String) -> Vec String =
   if index >= total then vec_append(current, acc)
-  else if char_at(raw, index) == "\r" then split_lines_from(raw, index + 1, total, acc, current)
-  else if char_at(raw, index) == "\n" then split_lines_from(raw, index + 1, total, vec_append(current, acc), "")
-  else split_lines_from(raw, index + 1, total, acc, string.concat(current, char_at(raw, index)))
+  else if char_at(raw, index) == '\r' then split_lines_from(raw, index + 1, total, acc, current)
+  else if char_at(raw, index) == '\n' then split_lines_from(raw, index + 1, total, vec_append(current, acc), "")
+  else split_lines_from(raw, index + 1, total, acc, string.concat(current, string.string_from_char(char_at(raw, index))))
 
 fn split_lines(raw: String) -> Vec String =
   split_lines_from(raw, 0, string.length(raw), vec_empty(), "")
@@ -81,7 +81,7 @@ where
 
 fn all_digits(raw: String, index: Int, total: Int) -> Bool =
   if index >= total then true
-  else if string.find("0123456789", char_at(raw, index)) < 0 then false
+  else if string.find("0123456789", string.string_from_char(char_at(raw, index))) < 0 then false
   else all_digits(raw, index + 1, total)
 
 fn parse_content_length(headers: Dict String) -> Result HttpServerError Int =

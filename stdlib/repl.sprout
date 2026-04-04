@@ -34,8 +34,8 @@ fn render_lines(prompt: Maybe String, lines: Vec String, index: Int) -> Unit !{I
 fn single_line(text: String) -> Vec String =
   vec_singleton(text)
 
-fn char_at(raw: String, index: Int) -> String =
-  string.slice(raw, index, 1)
+fn char_at(raw: String, index: Int) -> Char =
+  string.char_at_or(raw, index, '\0')
 
 fn trim(raw: String) -> String =
   string.trim(raw)
@@ -111,20 +111,20 @@ fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit !{IO}
   | Just line -> after(term_write(line ++ "\r\n"), render_interactive_match_lines(matches, index + 1))
   | Nothing -> term_noop()
 
-fn contains_char(chars: String, target: String, index: Int) -> Bool =
+fn contains_char(chars: String, target: Char, index: Int) -> Bool =
   if index >= string.length(chars) then false
-  else if string.slice(chars, index, 1) == target then true
+  else if char_at(chars, index) == target then true
   else contains_char(chars, target, index + 1)
 
-fn is_completion_start_char(value: String) -> Bool =
+fn is_completion_start_char(value: Char) -> Bool =
   contains_char("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_:", value, 0)
 
-fn is_completion_rest_char(value: String) -> Bool =
+fn is_completion_rest_char(value: Char) -> Bool =
   contains_char("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:", value, 0)
 
 fn completion_prefix_from(line_buffer: String, index: Int) -> String =
   if index < 0 then ""
-  else if is_completion_rest_char(char_at(line_buffer, index)) then completion_prefix_from(line_buffer, index - 1) ++ char_at(line_buffer, index)
+  else if is_completion_rest_char(char_at(line_buffer, index)) then completion_prefix_from(line_buffer, index - 1) ++ string.string_from_char(char_at(line_buffer, index))
   else ""
 
 fn completion_prefix(line_buffer: String) -> String =
@@ -145,13 +145,13 @@ fn contains_name(names: Vec String, value: String, index: Int) -> Bool =
   | Just item -> if item == value then true else contains_name(names, value, index + 1)
   | Nothing -> false
 
-fn lower_char(value: String) -> String =
-  if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", value) == -1 then value
-  else string.slice("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", value), 1)
+fn lower_char(value: Char) -> Char =
+  if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)) == -1 then value
+  else string.char_at_or("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)), '\0')
 
 fn lower_ascii_from(raw: String, index: Int, acc: String) -> String =
   if index >= string.length(raw) then acc
-  else lower_ascii_from(raw, index + 1, acc ++ lower_char(char_at(raw, index)))
+  else lower_ascii_from(raw, index + 1, acc ++ string.string_from_char(lower_char(char_at(raw, index))))
 
 fn lower_ascii(raw: String) -> String =
   lower_ascii_from(raw, 0, "")
@@ -190,12 +190,12 @@ fn append_names_from_vec(acc: Vec String, names: Vec String, index: Int) -> Vec 
 
 fn skip_spaces_from(raw: String, index: Int) -> Int =
   if index >= string.length(raw) then index
-  else if char_at(raw, index) == " " || char_at(raw, index) == "\t" then skip_spaces_from(raw, index + 1)
+  else if char_at(raw, index) == ' ' || char_at(raw, index) == '\t' then skip_spaces_from(raw, index + 1)
   else index
 
 fn skip_to_space_or_delim(raw: String, index: Int) -> Int =
   if index >= string.length(raw) then index
-  else if char_at(raw, index) == " " || char_at(raw, index) == "\t" || char_at(raw, index) == "("|| char_at(raw, index) ==":" || char_at(raw, index) == "=" || char_at(raw, index) == "|" then index
+  else if char_at(raw, index) == ' ' || char_at(raw, index) == '\t' || char_at(raw, index) == '(' || char_at(raw, index) == ':' || char_at(raw, index) == '=' || char_at(raw, index) == '|' then index
   else skip_to_space_or_delim(raw, index + 1)
 
 fn take_name_from(raw: String, index: Int) -> String =
@@ -207,7 +207,7 @@ fn module_leaf_name(raw: String) -> String =
 
 fn module_leaf_name_from(raw: String, index: Int, start: Int) -> String =
   if index >= string.length(raw) then string.slice(raw, start, string.length(raw) - start)
-  else if char_at(raw, index) == "." then module_leaf_name_from(raw, index + 1, index + 1)
+  else if char_at(raw, index) == '.' then module_leaf_name_from(raw, index + 1, index + 1)
   else module_leaf_name_from(raw, index + 1, start)
 
 fn first_from_pair(pair: (String, String)) -> String =
@@ -272,13 +272,13 @@ fn gather_import_names(imports: Vec String, index: Int, acc: Vec String) -> Vec 
       else gather_import_names(imports, index + 1, acc)
   | Nothing -> acc
 
-fn replace_char(raw: String, from: String, to: String, index: Int, acc: String) -> String =
+fn replace_char(raw: String, from: Char, to: Char, index: Int, acc: String) -> String =
   if index >= string.length(raw) then acc
-  else if char_at(raw, index) == from then replace_char(raw, from, to, index + 1, acc ++ to)
-  else replace_char(raw, from, to, index + 1, acc ++ char_at(raw, index))
+  else if char_at(raw, index) == from then replace_char(raw, from, to, index + 1, acc ++ string.string_from_char(to))
+  else replace_char(raw, from, to, index + 1, acc ++ string.string_from_char(char_at(raw, index)))
 
 fn module_path(module_name: String) -> String =
-  replace_char(module_name, ".", "/", 0, "") ++ ".sprout"
+  replace_char(module_name, '.', '/', 0, "") ++ ".sprout"
 
 fn append_exported_names(names: Vec String, line: String) -> Vec String =
   append_declaration_names(names, trim(line))
@@ -512,10 +512,10 @@ fn is_declaration(raw: String) -> Bool =
 fn block_line_is_continuation(line: String) -> Bool =
   if line == "" then false
   else
-    char_at(line, 0) == " "
-      || char_at(line, 0) == "\t"
-      || char_at(line, 0) == "|"
-      || trim(line) =="}"
+    char_at(line, 0) == ' '
+      || char_at(line, 0) == '\t'
+      || char_at(line, 0) == '|'
+      || trim(line) == "}"
       || trim(line) == "else"
 
 fn finalize_block_chunk(chunks: Vec String, current: String) -> Vec String =

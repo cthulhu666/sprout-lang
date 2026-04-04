@@ -1543,6 +1543,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(prefix, "ans")
         self.assertIn("answer", matches)
 
+    def test_repl_completion_candidates_keep_dotted_prefixes(self) -> None:
+        from sprout.repl_host import ReplSession
+
+        session = ReplSession(imports=["import stdlib.string"])
+        prefix, matches = session.completion_candidates("string.st")
+
+        self.assertEqual(prefix, "string.st")
+        self.assertEqual(matches, [])
+
     def test_run_with_http_stdlib_flag(self) -> None:
         src = """
         fn main() -> Unit !{IO} =
