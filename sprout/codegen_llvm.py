@@ -2098,17 +2098,46 @@ def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, 
         emitter.emit(f"  {tag_tmp} = call i64 @sprout_tag(i64 {value.ir})")
         eq_tag = emitter.tmp()
         emitter.emit(f"  {eq_tag} = icmp eq i64 {tag_tmp}, {ctor.tag}")
-        acc = Value(I1, eq_tag)
-
-        for idx, (arg_pat, arg_typ) in enumerate(zip(pattern.args, ctor.arg_types)):
-            field = _emit_ctor_field(value.ir, idx, arg_typ, emitter)
-            test = _emit_pattern_test(arg_pat, field, ctor_sigs, emitter)
-            and_tmp = emitter.tmp()
-            emitter.emit(f"  {and_tmp} = and i1 {acc.ir}, {test.ir}")
-            acc = Value(I1, and_tmp)
-        return acc
+        if not pattern.args:
+            return Value(I1, eq_tag)
+        return _emit_ctor_pattern_test(eq_tag, value.ir, ctor, pattern.args, ctor_sigs, emitter)
 
     raise CodegenError("Unsupported pattern form in backend")
+
+
+def _emit_ctor_pattern_test(
+    eq_tag_ir: str,
+    handle_ir: str,
+    ctor: CtorSig,
+    arg_patterns: list[ast.Pattern],
+    ctor_sigs: dict[str, CtorSig],
+    emitter: Emitter,
+) -> Value:
+    check_label = emitter.block("match_ctor_check")
+    mismatch_label = emitter.block("match_ctor_mismatch")
+    done_label = emitter.block("match_ctor_done")
+    emitter.emit(f"  br i1 {eq_tag_ir}, label %{check_label}, label %{mismatch_label}")
+
+    emitter.label(check_label)
+    for idx, (arg_pat, arg_typ) in enumerate(zip(arg_patterns, ctor.arg_types)):
+        field = _emit_ctor_field(handle_ir, idx, arg_typ, emitter)
+        test = _emit_pattern_test(arg_pat, field, ctor_sigs, emitter)
+        next_label = emitter.block("match_ctor_next")
+        emitter.emit(f"  br i1 {test.ir}, label %{next_label}, label %{mismatch_label}")
+        emitter.label(next_label)
+
+    matched_block = emitter.current_block
+    if matched_block is None:
+        raise CodegenError("Internal backend error: constructor pattern match lost current block")
+    emitter.emit(f"  br label %{done_label}")
+
+    emitter.label(mismatch_label)
+    emitter.emit(f"  br label %{done_label}")
+
+    emitter.label(done_label)
+    out = emitter.tmp()
+    emitter.emit(f"  {out} = phi i1 [ 1, %{matched_block} ], [ 0, %{mismatch_label} ]")
+    return Value(I1, out)
 
 
 def _emit_pattern_bind(
