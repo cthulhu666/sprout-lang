@@ -67,8 +67,9 @@ For any non-trivial language change, include:
 5. Preferred execution path for local commands:
    `mise exec -- just <task>`
 6. For intermediate verification during development, prefer targeted parallel runs through `mise exec -- just test ...` or `SPROUT_TESTS="..." mise exec -- just test` before falling back to the full parallel gate; use serial `just test-serial` only when the task requires order-sensitive debugging.
-7. Final verification uses the authoritative parallel full-suite run via `mise exec -- just test` with no explicit test filter; use `mise exec -- just test-serial` only as a fallback when diagnosing runner discrepancies or order-sensitive failures.
-8. Spec-affecting changes should also add or update conformance coverage where practical.
+7. Final verification uses the authoritative parallel full-suite run via `mise exec -- just test` with no explicit test filter for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec; use `mise exec -- just test-serial` only as a fallback when diagnosing runner discrepancies or order-sensitive failures.
+8. Docs-only or examples-only changes may use targeted verification instead of the full suite when they do not modify `sprout/`, `stdlib/`, test expectations, or the normative spec; at minimum, verify the commands and examples you changed still work as documented.
+9. Spec-affecting changes should also add or update conformance coverage where practical.
 
 ## Definition of Done
 
@@ -78,13 +79,14 @@ For coding tasks, work is done only when:
 2. The implementation is complete.
 3. Relevant docs/spec updates are complete and in sync with the implementation.
 4. Formatting and linting have been run when applicable.
-5. The entire test suite has been run via `mise exec -- just test` with no explicit test filter.
+5. The entire test suite has been run via `mise exec -- just test` with no explicit test filter for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
 6. During implementation, the faster local loop should usually use targeted parallel runs such as `mise exec -- just test tests.test_parser tests.test_typechecker` or `SPROUT_TESTS="tests.test_parser tests.test_typechecker" mise exec -- just test`; use `mise exec -- just test-serial` only when the task specifically requires serial/full-suite debugging earlier.
-7. If sandbox or environment restrictions block the full suite, rerun it with escalated permissions rather than accepting partial verification.
-8. The full suite passes.
-9. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
-10. The changes are committed.
-11. A self-review has been performed before handoff.
+7. Docs-only or examples-only changes may skip the full suite when they do not modify `sprout/`, `stdlib/`, test expectations, or the normative spec, but they must still be verified in a way that matches the change, such as re-running documented commands or executing the updated examples.
+8. If sandbox or environment restrictions block required full-suite verification, rerun it with escalated permissions rather than accepting partial verification.
+9. Required verification passes.
+10. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
+11. The changes are committed.
+12. A self-review has been performed before handoff.
 
 ## Directory Conventions
 
