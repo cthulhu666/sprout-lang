@@ -1,0 +1,47 @@
+module examples.regex_demo
+import stdlib.regex as regex
+import stdlib.string as string
+
+# Regex ergonomics demo.
+#
+# Run:
+#   python3 -m sprout.cli run examples/regex_demo.sprout "ticket=AB-42 owner=ada"
+
+fn render_match(raw: String, start: Int, end: Int, replaced: String, escaped: String) -> String =
+  "matched="
+  ++ string.slice(raw, start, end - start)
+  ++ "|prefix="
+  ++ string.slice(raw, 0, start)
+  ++ "|suffix="
+  ++ string.slice(raw, end, string.length(raw) - end)
+  ++ "|replaced="
+  ++ replaced
+  ++ "|escaped="
+  ++ escaped
+
+fn summarize_found(re: regex.Regex, raw: String) -> String =
+  match regex.find_first(re, raw) with
+  | Just(regex.Match start end) ->
+      render_match(
+        raw,
+        start,
+        end,
+        regex.replace_all_literal(re, "<ID>", raw),
+        regex.escape("literal [A-Z]+")
+      )
+  | Nothing ->
+      if regex.is_match(re, raw) then "regex matched but no range"
+      else "no id found"
+
+fn summarize(raw: String) -> String =
+  match regex.compile("[A-Z][A-Z]-[0-9]+") with
+  | Ok re -> summarize_found(re, raw)
+  | Err err ->
+      match err with
+      | regex.RegexInvalidPattern msg -> "invalid pattern: " ++ msg
+      | regex.RegexUnsupportedFeature msg -> "unsupported pattern: " ++ msg
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing -> print("usage: sprout run examples/regex_demo.sprout <text>")
+  | Just raw -> print(summarize(raw))

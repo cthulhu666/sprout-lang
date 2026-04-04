@@ -1729,6 +1729,26 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stdout.strip(), "len=17|first=z|last=ń|initials=zgj|no_vowels=zżłć gśl jźń")
 
+    def test_run_regex_demo(self) -> None:
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sprout.cli",
+                "run",
+                "examples/regex_demo.sprout",
+                "ticket=AB-42 owner=ada",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(
+            run.stdout.strip(),
+            "matched=AB-42|prefix=ticket=|suffix= owner=ada|replaced=ticket=<ID> owner=ada|escaped=literal \\[A-Z\\]\\+",
+        )
+
     def test_run_result_control_flow_demo(self) -> None:
         run = subprocess.run(
             [

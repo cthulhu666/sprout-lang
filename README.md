@@ -762,6 +762,7 @@ Example classification:
 - `examples/sentry_issue_browser_tui.sprout` is a library-style TUI scaffold module using the app-level Sentry API layer.
 - `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
 - `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
+- `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
 
 Load stdlib prelude explicitly for standalone files:
 
@@ -780,6 +781,8 @@ Load HTTP and JSON helpers:
   `python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/`
 - Example text demo:
   `python3 -m sprout.cli run examples/text_demo.sprout "zażółć gęślą jaźń"`
+- Example regex demo:
+  `python3 -m sprout.cli run examples/regex_demo.sprout "ticket=AB-42 owner=ada"`
 - Collections helper demo:
   `python3 -m sprout.cli run examples/collections_demo.sprout`
 - Typeclass collections demo (experimental surface area, not normative v0):
