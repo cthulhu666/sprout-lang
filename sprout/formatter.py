@@ -128,10 +128,21 @@ def _format_code(code: str) -> str:
 
 
 def _render_token(token: Token) -> str:
+    if token.kind == "CHAR":
+        escaped = (
+            token.value.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\0", "\\0")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+        )
+        return f"'{escaped}'"
     if token.kind == "STRING":
         escaped = (
             token.value.replace("\\", "\\\\")
             .replace('"', '\\"')
+            .replace("\0", "\\0")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
             .replace("\t", "\\t")
@@ -165,7 +176,7 @@ def _needs_space(
         return False
     if curr.value in {")", "]", "}"}:
         return False
-    if prev.value in {")", "]", "}"} and curr.kind in {"IDENT", "KEYWORD", "INT", "STRING"}:
+    if prev.value in {")", "]", "}"} and curr.kind in {"IDENT", "KEYWORD", "INT", "STRING", "CHAR"}:
         return True
     if prev.value in {"(", "[", "{"}:
         return False
@@ -187,7 +198,7 @@ def _needs_space(
 
 
 def _is_word_like(token: Token) -> bool:
-    return token.kind in {"IDENT", "KEYWORD", "INT", "STRING"}
+    return token.kind in {"IDENT", "KEYWORD", "INT", "STRING", "CHAR"}
 
 
 def _is_call_like(
@@ -216,7 +227,7 @@ def _is_call_like(
         return not _looks_like_type_group(prev, next_token)
     if prev_prev.kind == "KEYWORD":
         return prev_prev.value not in {"import", "class", "instance", "type"}
-    if prev_prev.kind in {"IDENT", "INT", "STRING"}:
+    if prev_prev.kind in {"IDENT", "INT", "STRING", "CHAR"}:
         return False
     if prev_prev.value in {")", "]", "}"}:
         return True

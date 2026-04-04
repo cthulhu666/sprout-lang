@@ -1563,7 +1563,7 @@ class ModuleLoaderTests(unittest.TestCase):
             main.write_text(
                 """
                 module main
-                import stdlib.string (char_at_or, concat, trim, contains, ends_with)
+                import stdlib.string (char_at_or, concat, trim, contains, ends_with, string_from_char)
 
                 fn suffix_status() -> String =
                   if ends_with("sprout-lang", "lang") then "ok" else "bad-end"
@@ -1573,7 +1573,7 @@ class ModuleLoaderTests(unittest.TestCase):
 
                 fn main() -> Unit !{IO} =
                   print(
-                    concat(trim(" \\t sprout\\n"), concat("|", concat(char_at_or("abc", 1, "?"), concat("|", contains_status()))))
+                    concat(trim(" \\t sprout\\n"), concat("|", concat(string_from_char(char_at_or("abc", 1, '?')), concat("|", contains_status()))))
                   )
                 """,
                 encoding="utf-8",

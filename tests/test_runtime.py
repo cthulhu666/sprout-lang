@@ -1633,13 +1633,13 @@ class RuntimeTests(unittest.TestCase):
             main.write_text(
                 """
                 module main
-                import stdlib.string (char_at_or, concat)
+                import stdlib.string (char_at, char_at_or, concat, string_chars, string_from_char)
 
                 fn main() -> Unit !{IO} =
                   print(
                     concat(
-                      char_at_or("sprout", 2, "?"),
-                      concat("|", concat(char_at_or("sprout", -1, "?"), concat("|", char_at_or("sprout", 20, "?"))))
+                      string_from_char(char_at_or("sprout", 2, '?')),
+                      concat("|", concat(string_from_char(char_at_or("sprout", -1, '?')), concat("|", string_from_char(char_at_or("sprout", 20, '?')))))
                     )
                   )
                 """,
@@ -1652,6 +1652,63 @@ class RuntimeTests(unittest.TestCase):
             out = io.StringIO()
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "r|?|?")
+
+    def test_stdlib_string_char_and_unicode_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (vec_get_or, vec_length)
+                import stdlib.string (char_at, char_at_or, concat, length, slice, string_chars, string_from_char)
+
+                fn from_maybe_char(value: Maybe Char) -> String =
+                  match value with
+                  | Just(ch) -> string_from_char(ch)
+                  | Nothing -> "none"
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    concat(
+                      string_from_char(char_at_or("zażółć", 2, '?')),
+                      concat(
+                        "|",
+                        concat(
+                          from_maybe_char(char_at("zażółć", 4)),
+                          concat(
+                            "|",
+                            concat(
+                              int_to_string(length("zażółć")),
+                              concat(
+                                "|",
+                                concat(
+                                  slice("zażółć", 1, 3),
+                                  concat(
+                                    "|",
+                                    concat(
+                                      string_from_char(vec_get_or(3, '?', string_chars("żółw"))),
+                                      concat("|", int_to_string(vec_length(string_chars("żółw"))))
+                                    )
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ż|ł|6|ażó|w|4")
 
     def test_stdlib_math_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

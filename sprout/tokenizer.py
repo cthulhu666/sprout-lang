@@ -92,6 +92,28 @@ def tokenize(source: str) -> list[Token]:
             tokens.append(Token("INT", source[start_i:i], start_line, start_col))
             continue
 
+        if ch == "'":
+            start_line, start_col = line, col
+            advance()
+            chars: list[str] = []
+            while i < len(source) and source[i] != "'":
+                if source[i] == "\\" and i + 1 < len(source):
+                    nxt = source[i + 1]
+                    mapping = {"0": "\0", "n": "\n", "r": "\r", "t": "\t", '"': '"', "'": "'", "\\": "\\"}
+                    chars.append(mapping.get(nxt, nxt))
+                    advance(2)
+                else:
+                    chars.append(source[i])
+                    advance()
+            if i >= len(source):
+                raise TokenizeError(f"Unterminated char literal at {start_line}:{start_col}")
+            advance()
+            value = "".join(chars)
+            if len(value) != 1:
+                raise TokenizeError(f"Char literal must contain exactly one code point at {start_line}:{start_col}")
+            tokens.append(Token("CHAR", value, start_line, start_col))
+            continue
+
         if ch == '"':
             start_line, start_col = line, col
             advance()
@@ -99,7 +121,7 @@ def tokenize(source: str) -> list[Token]:
             while i < len(source) and source[i] != '"':
                 if source[i] == "\\" and i + 1 < len(source):
                     nxt = source[i + 1]
-                    mapping = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+                    mapping = {"0": "\0", "n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
                     chars.append(mapping.get(nxt, nxt))
                     advance(2)
                 else:

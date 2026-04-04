@@ -1,6 +1,6 @@
 module examples.aoc_2025_day_4
 import stdlib.collections (Vec, vec_append, vec_empty, vec_filter, vec_get_or, vec_length)
-import stdlib.string (char_at_or, concat, length, string_lines)
+import stdlib.string (char_at_or, concat, length, string_from_char, string_lines)
 
 # Advent of Code 2025 Day 4: Printing Department
 # part1 counts currently accessible rolls.
@@ -16,14 +16,14 @@ fn bool_to_int(value: Bool) -> Int =
 fn line_at(grid: Vec String, row: Int) -> String =
   vec_get_or(row, "", grid)
 
-fn cell_at(grid: Vec String, row: Int, col: Int) -> String =
-  if row < 0 then "."
-  else char_at_or(line, col, ".")
+fn cell_at(grid: Vec String, row: Int, col: Int) -> Char =
+  if row < 0 then '.'
+  else char_at_or(line, col, '.')
 where
   line = line_at(grid, row)
 
 fn is_roll(grid: Vec String, row: Int, col: Int) -> Bool =
-  cell_at(grid, row, col) == "@"
+  cell_at(grid, row, col) == '@'
 
 fn occupied_neighbors(grid: Vec String, row: Int, col: Int) -> Int =
   bool_to_int(is_roll(grid, row - 1, col - 1))
@@ -69,7 +69,7 @@ fn remove_accessible_from_row(
         row,
         col + 1,
         width,
-        concat(acc, char_at_or(line, col, ".")),
+        concat(acc, string_from_char(char_at_or(line, col, '.'))),
         removed
       )
 where

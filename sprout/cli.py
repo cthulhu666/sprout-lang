@@ -1895,9 +1895,38 @@ const char* str_concat(const char* left, const char* right) {
   return out;
 }
 
+static size_t sprout_utf8_char_width(unsigned char lead) {
+  if ((lead & 0x80) == 0) return 1;
+  if ((lead & 0xE0) == 0xC0) return 2;
+  if ((lead & 0xF0) == 0xE0) return 3;
+  if ((lead & 0xF8) == 0xF0) return 4;
+  tcp_fail("str_len: invalid UTF-8 lead byte");
+  return 1;
+}
+
+static size_t sprout_utf8_codepoint_count(const char* s) {
+  size_t count = 0;
+  size_t i = 0;
+  while (s[i] != '\\0') {
+    i += sprout_utf8_char_width((unsigned char)s[i]);
+    count++;
+  }
+  return count;
+}
+
+static size_t sprout_utf8_byte_offset(const char* s, size_t codepoint_offset) {
+  size_t i = 0;
+  size_t count = 0;
+  while (s[i] != '\\0' && count < codepoint_offset) {
+    i += sprout_utf8_char_width((unsigned char)s[i]);
+    count++;
+  }
+  return i;
+}
+
 long long str_len(const char* s) {
   if (s == NULL) tcp_fail("str_len: null input");
-  return (long long)strlen(s);
+  return (long long)sprout_utf8_codepoint_count(s);
 }
 
 _Bool str_eq(const char* left, const char* right) {
@@ -1908,28 +1937,46 @@ _Bool str_eq(const char* left, const char* right) {
 const char* str_slice(const char* s, long long start, long long length) {
   if (s == NULL) tcp_fail("str_slice: null input");
   if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
-  size_t slen = strlen(s);
-  if ((size_t)start >= slen) {
+  size_t total = sprout_utf8_codepoint_count(s);
+  if ((size_t)start >= total) {
     char* out = (char*)malloc(1);
     if (out == NULL) tcp_fail("str_slice: out of memory");
     out[0] = '\\0';
     return out;
   }
-  size_t avail = slen - (size_t)start;
-  size_t want = (size_t)length;
-  size_t take = want < avail ? want : avail;
+  size_t start_byte = sprout_utf8_byte_offset(s, (size_t)start);
+  size_t end_codepoint = (size_t)start + (size_t)length;
+  if (end_codepoint > total) end_codepoint = total;
+  size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
+  size_t take = end_byte - start_byte;
   char* out = (char*)malloc(take + 1);
   if (out == NULL) tcp_fail("str_slice: out of memory");
-  memcpy(out, s + start, take);
+  memcpy(out, s + start_byte, take);
   out[take] = '\\0';
   return out;
+}
+
+long long str_char_at(const char* s, long long index) {
+  if (s == NULL) tcp_fail("str_char_at: null input");
+  if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  size_t total = sprout_utf8_codepoint_count(s);
+  if ((size_t)index >= total) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  const char* out = str_slice(s, index, 1);
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)out);
 }
 
 long long str_find(const char* haystack, const char* needle) {
   if (haystack == NULL || needle == NULL) tcp_fail("str_find: null input");
   const char* pos = strstr(haystack, needle);
   if (pos == NULL) return -1;
-  return (long long)(pos - haystack);
+  size_t prefix_len = (size_t)(pos - haystack);
+  size_t count = 0;
+  size_t i = 0;
+  while (i < prefix_len) {
+    i += sprout_utf8_char_width((unsigned char)haystack[i]);
+    count++;
+  }
+  return (long long)count;
 }
 
 _Bool str_starts_with(const char* s, const char* prefix) {
@@ -1944,6 +1991,11 @@ long long str_compare(const char* left, const char* right) {
   if (cmp < 0) return -1;
   if (cmp > 0) return 1;
   return 0;
+}
+
+const char* char_to_string(const char* ch) {
+  if (ch == NULL) tcp_fail("char_to_string: null input");
+  return ch;
 }
 
 static void buf_init(ByteBuf* buf) {

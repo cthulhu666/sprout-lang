@@ -36,6 +36,12 @@ class StringExpr(Expr):
 
 
 @dataclass
+class CharExpr(Expr):
+    value: str
+    src: object | None = None
+
+
+@dataclass
 class TupleExpr(Expr):
     items: list[Expr]
     src: object | None = None
@@ -145,6 +151,12 @@ class BoolPattern(Pattern):
 
 @dataclass
 class StringPattern(Pattern):
+    value: str
+    src: object | None = None
+
+
+@dataclass
+class CharPattern(Pattern):
     value: str
     src: object | None = None
 

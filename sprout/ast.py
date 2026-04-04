@@ -206,6 +206,11 @@ class StringExpr(Expr):
 
 
 @dataclass
+class CharExpr(Expr):
+    value: str
+
+
+@dataclass
 class TupleExpr(Expr):
     items: list[Expr]
 
@@ -254,6 +259,11 @@ class BoolPattern(Pattern):
 
 @dataclass
 class StringPattern(Pattern):
+    value: str
+
+
+@dataclass
+class CharPattern(Pattern):
     value: str
 
 

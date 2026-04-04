@@ -260,7 +260,7 @@ def _rewrite_expr_with_specialization(
     generated_wrappers: list[ast.FnDecl],
     taken_names: set[str],
 ) -> ast.Expr:
-    if isinstance(expr, (ast.IntExpr, ast.BoolExpr, ast.StringExpr, ast.VarExpr)):
+    if isinstance(expr, (ast.IntExpr, ast.BoolExpr, ast.StringExpr, ast.CharExpr, ast.VarExpr)):
         return expr
     if isinstance(expr, ast.LambdaExpr):
         return _clone_with_loc(
@@ -545,7 +545,7 @@ def _rewrite_expr(
             return expr
         return _clone_with_loc(ast.VarExpr(alias), expr)
 
-    if isinstance(expr, ast.IntExpr) or isinstance(expr, ast.BoolExpr) or isinstance(expr, ast.StringExpr):
+    if isinstance(expr, ast.IntExpr) or isinstance(expr, ast.BoolExpr) or isinstance(expr, ast.StringExpr) or isinstance(expr, ast.CharExpr):
         return expr
 
     if isinstance(expr, ast.LambdaExpr):

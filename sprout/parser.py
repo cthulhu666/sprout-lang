@@ -452,7 +452,7 @@ class Parser:
         return self._token_starts_expr(token)
 
     def _token_starts_expr(self, token: Token) -> bool:
-        if token.kind in {"IDENT", "INT", "STRING"}:
+        if token.kind in {"IDENT", "INT", "STRING", "CHAR"}:
             return True
         if token.kind == "KEYWORD" and token.value in {"if", "match", "do", "true", "false"}:
             return True
@@ -727,6 +727,9 @@ class Parser:
         if self.check("INT"):
             tok = self.advance()
             return self.mark(ast.IntExpr(value=int(tok.value)), tok)
+        if self.check("CHAR"):
+            tok = self.advance()
+            return self.mark(ast.CharExpr(value=tok.value), tok)
         if self.check("STRING"):
             tok = self.advance()
             return self.mark(ast.StringExpr(value=tok.value), tok)
@@ -777,6 +780,9 @@ class Parser:
         if self.match("KEYWORD", "false"):
             tok = self.tokens[self.i - 1]
             return self.mark(ast.BoolPattern(value=False), tok)
+        if self.check("CHAR"):
+            tok = self.advance()
+            return self.mark(ast.CharPattern(value=tok.value), tok)
         if self.check("STRING"):
             tok = self.advance()
             return self.mark(ast.StringPattern(value=tok.value), tok)
@@ -814,6 +820,9 @@ class Parser:
         if self.match("KEYWORD", "false"):
             tok = self.tokens[self.i - 1]
             return self.mark(ast.BoolPattern(value=False), tok)
+        if self.check("CHAR"):
+            tok = self.advance()
+            return self.mark(ast.CharPattern(value=tok.value), tok)
         if self.check("STRING"):
             tok = self.advance()
             return self.mark(ast.StringPattern(value=tok.value), tok)
@@ -919,7 +928,7 @@ class Parser:
         return self.check("IDENT") or self.check("SYMBOL", "(")
 
     def _starts_pattern_atom(self) -> bool:
-        if self.check("INT") or self.check("STRING"):
+        if self.check("INT") or self.check("STRING") or self.check("CHAR"):
             return True
         if self.check("IDENT"):
             return True

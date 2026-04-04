@@ -156,6 +156,7 @@ class DoSequenceInfo:
 INT = TConst("Int")
 BOOL = TConst("Bool")
 STRING = TConst("String")
+CHAR = TConst("Char")
 UNIT = TConst("Unit")
 INT_RANGE = TConst("IntRange")
 PURE_EFFECT = EClosed()
@@ -982,6 +983,8 @@ def infer_expr(
         return _mark_expr_type(expr, BOOL), PURE_EFFECT
     if isinstance(expr, ast.StringExpr):
         return _mark_expr_type(expr, STRING), PURE_EFFECT
+    if isinstance(expr, ast.CharExpr):
+        return _mark_expr_type(expr, CHAR), PURE_EFFECT
     if isinstance(expr, ast.IntRangeExpr):
         start_t, start_effects = infer_expr(expr.start, env, state, type_decls, global_methods)
         end_t, end_effects = infer_expr(expr.end, env, state, type_decls, global_methods)
@@ -1342,6 +1345,9 @@ def infer_pattern(
     if isinstance(pattern, ast.StringPattern):
         unify_at(state, expected_type, STRING, pattern)
         return None
+    if isinstance(pattern, ast.CharPattern):
+        unify_at(state, expected_type, CHAR, pattern)
+        return None
     if isinstance(pattern, ast.TuplePattern):
         expected = apply(state.subst, expected_type, state.effect_subst)
         if isinstance(expected, TVar):
@@ -1445,12 +1451,16 @@ def _top_level_literal_key(pattern: ast.Pattern) -> tuple[str, object] | None:
         return ("bool", pattern.value)
     if isinstance(pattern, ast.StringPattern):
         return ("string", pattern.value)
+    if isinstance(pattern, ast.CharPattern):
+        return ("char", pattern.value)
     return None
 
 
 def _format_literal_key(key: tuple[str, object]) -> str:
     kind, value = key
     if kind == "string":
+        return repr(value)
+    if kind == "char":
         return repr(value)
     if kind == "bool":
         return "true" if value else "false"
@@ -1563,6 +1573,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             type=TFunc(INT, TApp(maybe_type, STRING), IO_EFFECT),
         ),
         "parse_int": Scheme(vars=(), type=TFunc(TConst("String"), INT)),
+        "char_to_string": Scheme(vars=(), type=TFunc(CHAR, STRING)),
         "split_words": Scheme(
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("List"), TConst("String"))),
@@ -1574,6 +1585,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "str_concat": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, STRING))),
         "str_len": Scheme(vars=(), type=TFunc(STRING, INT)),
         "str_slice": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(INT, STRING)))),
+        "str_char_at": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TApp(maybe_type, CHAR)))),
         "str_find": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),
         "str_starts_with": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, BOOL))),
         "str_compare": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),

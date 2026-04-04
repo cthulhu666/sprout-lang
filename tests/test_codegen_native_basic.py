@@ -103,6 +103,43 @@ class CodegenNativeBasicTests(CodegenTestCase):
             self.assertEqual(run.returncode, 0)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_unicode_string_codepoint_helpers(self) -> None:
+        src = """
+        module stdlib.unicode_test
+
+        fn main() -> Unit !{IO} =
+          print(
+            int_to_string(str_len("zażółć"))
+            ++ "|"
+            ++ str_slice("zażółć", 1, 3)
+            ++ "|"
+            ++ int_to_string(str_find("zażółć", "ół"))
+          )
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "6|ażó|3")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_nothing_singleton_execution(self) -> None:
         src = """
         type MaybeInt =

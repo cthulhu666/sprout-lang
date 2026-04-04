@@ -20,6 +20,7 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 - [Effect System v0 Plan](./docs/effect-system-v0-plan.md)
 - [Effect System v1 Draft](./docs/effect-system-v1-draft.md)
 - [Int Ranges v1 Draft](./docs/int-ranges-v1-draft.md)
+- [Char and Text v1 Draft](./docs/char-text-v1-draft.md)
 - [Native REPL Roadmap](./docs/native-repl-roadmap.md)
 - [REPL Self-Hosting v1 Draft](./docs/repl-self-hosting-v1-draft.md)
 - [Compiler Self-Hosting Roadmap](./docs/compiler-self-hosting-roadmap.md)
@@ -45,6 +46,11 @@ Normative status:
   descending unit-step semantics, and prelude helpers such as `range`,
   `range_contains`, `range_count`, `range_to_list`, `range_to_vec`, and
   `range_fold`. Integer ranges are not part of normative v0 yet.
+- The current implementation also includes an experimental `Char` and text
+  semantics slice: distinct `Char` values and char literals such as `'a'`,
+  `String` helper semantics defined in terms of Unicode code points, and
+  stdlib helpers such as `char_at`, `char_at_or`, `string_from_char`, and
+  `string_chars`. This surface is not part of normative v0 yet.
 - The current implementation also includes an experimental declaration-status
   annotation slice via top-level comment directives such as `#@unstable`,
   `#@temporary`, `#@wip`, and `#@deprecated ...`. Imported uses of annotated
@@ -277,10 +283,12 @@ Pure value transforms and runtime-backed persistent data helpers:
 
 - `parse_int(s: String) -> Int`
 - `int_to_string(value: Int) -> String` (runtime primitive; public formatting should prefer `Show.to_string`)
+- `char_to_string(value: Char) -> String`
 - `split_words(s: String) -> List String`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
 - `str_slice(s: String, start: Int, len: Int) -> String`
+- `str_char_at(s: String, index: Int) -> Maybe Char`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`
 - `str_compare(left: String, right: String) -> Int` (`-1`, `0`, `1`)
@@ -332,7 +340,7 @@ Effect notes:
   functions may call which other functions.
 - Mixed/open effect rows and additional effect labels are still deferred follow-up work.
 
-String/runtime helpers are host-implemented primitives. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
+String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules.
 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
@@ -704,7 +712,9 @@ String module (in `stdlib/string.sprout`):
 - `starts_with(raw: String, prefix: String) -> Bool`
 - `contains(raw: String, needle: String) -> Bool`
 - `ends_with(raw: String, suffix: String) -> Bool`
-- `char_at_or(raw: String, index: Int, fallback: String) -> String`
+- `char_at(raw: String, index: Int) -> Maybe Char`
+- `char_at_or(raw: String, index: Int, fallback: Char) -> Char`
+- `string_from_char(ch: Char) -> String`
 - `trim_left(raw: String) -> String`
 - `trim_right(raw: String) -> String`
 - `trim(raw: String) -> String`
@@ -712,6 +722,7 @@ String module (in `stdlib/string.sprout`):
 - `strip_prefix(raw: String, prefix: String) -> Maybe String`
 - `strip_suffix(raw: String, suffix: String) -> Maybe String`
 - `split_once(raw: String, sep: String) -> Maybe (String, String)`
+- `string_chars(raw: String) -> Vec Char`
 - `string_lines(raw: String) -> Vec String`
 - `string_digits(raw: String) -> Vec Int`
 

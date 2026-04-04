@@ -374,6 +374,18 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(fn_decl.body, ast.StringExpr)
         self.assertEqual(fn_decl.body.value, "a\r\nb")
 
+    def test_parse_char_literal_and_escape(self) -> None:
+        src = "fn main() -> Char = '\\n'"
+        program = parse(src)
+        fn_decl = program.declarations[0]
+        self.assertIsInstance(fn_decl, ast.FnDecl)
+        self.assertIsInstance(fn_decl.body, ast.CharExpr)
+        self.assertEqual(fn_decl.body.value, "\n")
+
+    def test_parse_rejects_multi_codepoint_char_literal(self) -> None:
+        with self.assertRaises(ValueError):
+            parse("fn main() -> Char = 'ab'")
+
     def test_parse_export_prefix_on_declarations(self) -> None:
         src = """
         export type Box a =

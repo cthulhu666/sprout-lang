@@ -32,9 +32,11 @@ RAW_MAP_BUILTINS = {
 RAW_STRING_BUILTINS = {
     "split_words",
     "int_to_string",
+    "char_to_string",
     "str_concat",
     "str_len",
     "str_slice",
+    "str_char_at",
     "str_find",
     "str_starts_with",
     "str_compare",

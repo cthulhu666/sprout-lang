@@ -290,6 +290,8 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
         return expr.value
     if isinstance(expr, ast.StringExpr):
         return expr.value
+    if isinstance(expr, ast.CharExpr):
+        return expr.value
     if isinstance(expr, ast.IntRangeExpr):
         start = eval_expr(expr.start, env)
         end = eval_expr(expr.end, env)
@@ -507,6 +509,8 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
         return {} if value == pattern.value else None
     if isinstance(pattern, ast.StringPattern):
         return {} if value == pattern.value else None
+    if isinstance(pattern, ast.CharPattern):
+        return {} if value == pattern.value else None
     if isinstance(pattern, ast.TuplePattern):
         if not isinstance(value, TupleValue):
             return None
@@ -686,6 +690,17 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             return ""
         return raw[start : start + length]
 
+    def builtin_str_char_at(args: list[object]) -> object:
+        raw = args[0]
+        index = args[1]
+        if not isinstance(raw, str):
+            raise RuntimeError("str_char_at expects String as first argument")
+        if not isinstance(index, int):
+            raise RuntimeError("str_char_at expects Int index")
+        if index < 0 or index >= len(raw):
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(raw[index],))
+
     def builtin_str_find(args: list[object]) -> object:
         haystack = args[0]
         needle = args[1]
@@ -705,6 +720,12 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(value, int) or isinstance(value, bool):
             raise RuntimeError("int_to_string expects Int")
         return str(value)
+
+    def builtin_char_to_string(args: list[object]) -> object:
+        value = args[0]
+        if not isinstance(value, str) or len(value) != 1:
+            raise RuntimeError("char_to_string expects Char")
+        return value
 
     def builtin_str_compare(args: list[object]) -> object:
         left = args[0]
@@ -1717,6 +1738,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("argv_get", BuiltinFunction(name="argv_get", arity=1, fn=builtin_argv_get))
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("int_to_string", BuiltinFunction(name="int_to_string", arity=1, fn=builtin_int_to_string))
+    env.set("char_to_string", BuiltinFunction(name="char_to_string", arity=1, fn=builtin_char_to_string))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
     env.set("int_range", BuiltinFunction(name="int_range", arity=2, fn=builtin_int_range))
     env.set("int_range_start", BuiltinFunction(name="int_range_start", arity=1, fn=builtin_int_range_start))
@@ -1724,6 +1746,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("str_concat", BuiltinFunction(name="str_concat", arity=2, fn=builtin_str_concat))
     env.set("str_len", BuiltinFunction(name="str_len", arity=1, fn=builtin_str_len))
     env.set("str_slice", BuiltinFunction(name="str_slice", arity=3, fn=builtin_str_slice))
+    env.set("str_char_at", BuiltinFunction(name="str_char_at", arity=2, fn=builtin_str_char_at))
     env.set("str_find", BuiltinFunction(name="str_find", arity=2, fn=builtin_str_find))
     env.set(
         "str_starts_with",

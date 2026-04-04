@@ -57,9 +57,11 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "int_range_start": FnSig(name="int_range_start", params=[I64], ret=I64),
     "int_range_end": FnSig(name="int_range_end", params=[I64], ret=I64),
     "int_to_string": FnSig(name="int_to_string", params=[I64], ret=I8_PTR),
+    "char_to_string": FnSig(name="char_to_string", params=[I8_PTR], ret=I8_PTR),
     "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
     "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
     "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
+    "str_char_at": FnSig(name="str_char_at", params=[I8_PTR, I64], ret=I64),
     "str_eq": FnSig(name="str_eq", params=[I8_PTR, I8_PTR], ret=I1),
     "str_find": FnSig(name="str_find", params=[I8_PTR, I8_PTR], ret=I64),
     "str_starts_with": FnSig(name="str_starts_with", params=[I8_PTR, I8_PTR], ret=I1),
@@ -286,6 +288,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
         if node.name == "Bool":
             return I1
         if node.name == "String":
+            return I8_PTR
+        if node.name == "Char":
             return I8_PTR
         if node.name == "Bytes":
             return I64
@@ -869,6 +873,8 @@ def _infer_expr_type(
         return I1
     if isinstance(expr, ast.StringExpr):
         return I8_PTR
+    if isinstance(expr, ast.CharExpr):
+        return I8_PTR
     if isinstance(expr, ast.TupleExpr):
         return _tuple_lltype([_infer_expr_type(item, globals_info, sigs, ctor_sigs) for item in expr.items])
     if isinstance(expr, ast.VarExpr):
@@ -1308,6 +1314,11 @@ def _emit_expr(
     if isinstance(expr, ast.BoolExpr):
         return Value(I1, "1" if expr.value else "0")
     if isinstance(expr, ast.StringExpr):
+        gname, length = emitter.string_const(expr.value)
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = getelementptr inbounds [{length} x i8], ptr {gname}, i64 0, i64 0")
+        return Value(I8_PTR, tmp)
+    if isinstance(expr, ast.CharExpr):
         gname, length = emitter.string_const(expr.value)
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = getelementptr inbounds [{length} x i8], ptr {gname}, i64 0, i64 0")
@@ -1908,7 +1919,7 @@ def _emit_direct_ctor_pattern_test(
         return Value(I1, "1")
     if isinstance(pattern, ast.VarPattern):
         return Value(I1, "1")
-    if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
+    if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern, ast.CharPattern)):
         return None
     if isinstance(pattern, ast.ConstructorPattern):
         if pattern.name != ctor.name:
@@ -1935,7 +1946,7 @@ def _emit_direct_ctor_pattern_bind(
     ctor_sigs: dict[str, CtorSig],
     emitter: Emitter,
 ) -> int:
-    if isinstance(pattern, (ast.WildcardPattern, ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
+    if isinstance(pattern, (ast.WildcardPattern, ast.IntPattern, ast.BoolPattern, ast.StringPattern, ast.CharPattern)):
         return 0
     if isinstance(pattern, ast.VarPattern):
         materialized = _emit_ctor_value(ctor, payloads, emitter)
@@ -2044,6 +2055,13 @@ def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, 
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value.ir}, ptr {literal_ptr})")
         return Value(I1, tmp)
+    if isinstance(pattern, ast.CharPattern):
+        if value.typ != I8_PTR:
+            raise CodegenError("Char pattern expects Char scrutinee")
+        literal_ptr, _ = emitter.string_const(pattern.value)
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value.ir}, ptr {literal_ptr})")
+        return Value(I1, tmp)
     if isinstance(pattern, ast.TuplePattern):
         tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
         if tuple_items is None:
@@ -2100,7 +2118,7 @@ def _emit_pattern_bind(
     if isinstance(pattern, ast.VarPattern):
         locals_[pattern.name] = value
         return _emit_push_temp_root(value, emitter)
-    if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern)):
+    if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern, ast.CharPattern)):
         return 0
     if isinstance(pattern, ast.TuplePattern):
         tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)

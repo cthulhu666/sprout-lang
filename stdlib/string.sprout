@@ -36,37 +36,40 @@ export fn ends_with(raw: String, suffix: String) -> Bool =
   if length(suffix) > length(raw) then false
   else slice(raw, length(raw) - length(suffix), length(suffix)) == suffix
 
-fn char_at(raw: String, index: Int) -> String =
-  slice(raw, index, 1)
+export fn char_at(raw: String, index: Int) -> Maybe Char =
+  str_char_at(raw, index)
 
-export fn char_at_or(raw: String, index: Int, fallback: String) -> String =
-  if index < 0 then fallback
-  else if index >= length(raw) then fallback
-  else char_at(raw, index)
+export fn char_at_or(raw: String, index: Int, fallback: Char) -> Char =
+  match char_at(raw, index) with
+  | Just(ch) -> ch
+  | Nothing -> fallback
 
-fn is_newline(ch: String) -> Bool =
-  find("\n", ch) == 0
+export fn string_from_char(ch: Char) -> String =
+  char_to_string(ch)
 
-fn is_carriage_return(ch: String) -> Bool =
-  find("\r", ch) == 0
+fn is_newline(ch: Char) -> Bool =
+  ch == '\n'
 
-fn is_space(ch: String) -> Bool =
-  find(" ", ch) == 0
+fn is_carriage_return(ch: Char) -> Bool =
+  ch == '\r'
 
-fn is_tab(ch: String) -> Bool =
-  find("\t", ch) == 0
+fn is_space(ch: Char) -> Bool =
+  ch == ' '
 
-fn is_ascii_whitespace(ch: String) -> Bool =
+fn is_tab(ch: Char) -> Bool =
+  ch == '\t'
+
+fn is_ascii_whitespace(ch: Char) -> Bool =
   is_space(ch) || is_tab(ch) || is_newline(ch) || is_carriage_return(ch)
 
 export fn trim_left(raw: String) -> String =
   if length(raw) == 0 then raw
-  else if is_ascii_whitespace(char_at(raw, 0)) then trim_left(slice(raw, 1, length(raw) - 1))
+  else if is_ascii_whitespace(char_at_or(raw, 0, ' ')) then trim_left(slice(raw, 1, length(raw) - 1))
   else raw
 
 export fn trim_right(raw: String) -> String =
   if length(raw) == 0 then raw
-  else if is_ascii_whitespace(char_at(raw, length(raw) - 1)) then trim_right(slice(raw, 0, length(raw) - 1))
+  else if is_ascii_whitespace(char_at_or(raw, length(raw) - 1, ' ')) then trim_right(slice(raw, 0, length(raw) - 1))
   else raw
 
 export fn trim(raw: String) -> String =
@@ -92,7 +95,7 @@ fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)
 
 fn line_count_until(raw: String, line_start: Int, newline_index: Int) -> Int =
-  if newline_index > line_start && is_carriage_return(char_at(raw, newline_index - 1)) then
+  if newline_index > line_start && is_carriage_return(char_at_or(raw, newline_index - 1, '\0')) then
     newline_index - line_start - 1
   else
     newline_index - line_start
@@ -102,7 +105,7 @@ fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec Str
     if line_start >= total then acc
     else append_line(acc, slice(raw, line_start, total - line_start))
   else
-    if is_newline(char_at(raw, index)) then
+    if is_newline(char_at_or(raw, index, '\0')) then
       lines_loop(
         raw,
         index + 1,
@@ -110,7 +113,7 @@ fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec Str
         total,
         append_line(acc, slice(raw, line_start, line_count_until(raw, line_start, index)))
       )
-    else if is_carriage_return(char_at(raw, index)) then
+    else if is_carriage_return(char_at_or(raw, index, '\0')) then
       lines_loop(raw, index + 1, line_start, total, acc)
     else
       lines_loop(raw, index + 1, line_start, total, acc)
@@ -118,16 +121,23 @@ fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec Str
 export fn string_lines(raw: String) -> Vec String =
   lines_loop(raw, 0, 0, length(raw), vec_empty())
 
-fn digit_value(ch: String) -> Int =
-  find("0123456789", ch)
+fn digit_value(ch: Char) -> Int =
+  find("0123456789", string_from_char(ch))
 
 fn digits_loop(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
   if index >= total then acc
   else
-    if digit_value(char_at(raw, index)) >= 0 then
-      digits_loop(raw, index + 1, total, vec_append(digit_value(char_at(raw, index)), acc))
+    if digit_value(char_at_or(raw, index, '\0')) >= 0 then
+      digits_loop(raw, index + 1, total, vec_append(digit_value(char_at_or(raw, index, '\0')), acc))
     else
       digits_loop(raw, index + 1, total, acc)
 
 export fn string_digits(raw: String) -> Vec Int =
   digits_loop(raw, 0, length(raw), vec_empty())
+
+fn chars_loop(raw: String, index: Int, total: Int, acc: Vec Char) -> Vec Char =
+  if index >= total then acc
+  else chars_loop(raw, index + 1, total, vec_append(char_at_or(raw, index, '\0'), acc))
+
+export fn string_chars(raw: String) -> Vec Char =
+  chars_loop(raw, 0, length(raw), vec_empty())

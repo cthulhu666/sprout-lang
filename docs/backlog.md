@@ -65,6 +65,7 @@ This file tracks open design, implementation, and tooling follow-up work.
    First milestone constraints: no row polymorphism, no structural subtyping, no implicit field punning, and no attempt to fold records into the current ADT surface without a dedicated spec.
 6. Add a Unicode `Char` type and define string text semantics in v1.
    Initial scope: distinct `Char` values and literals, `String` text defined in terms of Unicode code points, and a small helper surface such as `char_at`, `char_at_or`, `string_from_char`, and `string_chars`.
+   Landed initial slice: distinct `Char` type/literals, code-point-based string `length`/`slice`/`find` behavior across interpreter and native execution, and `stdlib.string` helpers `char_at`, `char_at_or`, `string_from_char`, and `string_chars`.
    First milestone constraints: code-point indexing/length/slice semantics only, no grapheme-cluster-aware APIs yet, and no promise of full Unicode normalization or one-to-many case mapping in the initial slice.
 7. Add fast `Vec` sorting helpers in v1.
    Landed initial slice: `Ord`-constrained `vec_sort(vec)` and `vec_sort_by(key, vec)` helpers.

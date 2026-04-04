@@ -871,6 +871,18 @@ class TypecheckerTests(unittest.TestCase):
             typecheck_program(parse(src))
         self.assertIn("Unreachable match branch for literal 'ok'", str(ctx.exception))
 
+    def test_type_error_unreachable_duplicate_char_literal_pattern(self) -> None:
+        src = """
+        fn bad(ch: Char) -> Int =
+          match ch with
+          | 'x' -> 1
+          | 'x' -> 2
+          | 'y' -> 3
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("Unreachable match branch for literal 'x'", str(ctx.exception))
+
     def test_typecheck_string_builtins(self) -> None:
         src = """
         fn main() -> Unit !{IO} =
@@ -882,6 +894,14 @@ class TypecheckerTests(unittest.TestCase):
         """
         types = typecheck_program(parse(src))
         self.assertIn("main", types)
+
+    def test_typecheck_char_builtin_and_literal(self) -> None:
+        src = """
+        fn main() -> String =
+          char_to_string('ż')
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["main"], "String")
 
     def test_typecheck_stdlib_vec_singleton(self) -> None:
         src = """
