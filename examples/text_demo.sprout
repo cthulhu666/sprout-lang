@@ -1,0 +1,67 @@
+module examples.text_demo
+import stdlib.string as string
+
+# Unicode-aware text summary demo.
+#
+# Run:
+#   python3 -m sprout.cli run examples/text_demo.sprout "zażółć gęślą jaźń"
+
+fn is_word_separator(ch: Char) -> Bool =
+  ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+
+fn is_vowel(ch: Char) -> Bool =
+  ch == 'a' || ch == 'e' || ch == 'i' || ch == 'o' || ch == 'u' || ch == 'y'
+  || ch == 'A' || ch == 'E' || ch == 'I' || ch == 'O' || ch == 'U' || ch == 'Y'
+  || ch == 'ą' || ch == 'ę' || ch == 'ó'
+  || ch == 'Ą' || ch == 'Ę' || ch == 'Ó'
+
+fn initials_from(raw: String, index: Int, take_next: Bool, acc: String) -> String =
+  if index >= string.length(raw) then acc
+  else
+    if is_word_separator(ch) then
+      initials_from(raw, index + 1, true, acc)
+    else if take_next then
+      initials_from(raw, index + 1, false, string.concat(acc, string.string_from_char(ch)))
+    else
+      initials_from(raw, index + 1, false, acc)
+where
+  ch = string.char_at_or(raw, index, '\0')
+
+fn initials(raw: String) -> String =
+  initials_from(raw, 0, true, "")
+
+fn strip_vowels_from(raw: String, index: Int, acc: String) -> String =
+  if index >= string.length(raw) then acc
+  else
+    if is_vowel(ch) then
+      strip_vowels_from(raw, index + 1, acc)
+    else
+      strip_vowels_from(raw, index + 1, string.concat(acc, string.string_from_char(ch)))
+where
+  ch = string.char_at_or(raw, index, '\0')
+
+fn strip_vowels(raw: String) -> String =
+  strip_vowels_from(raw, 0, "")
+
+fn summarize(raw: String) -> String =
+  "len="
+  ++ length_text
+  ++ "|first="
+  ++ first_text
+  ++ "|last="
+  ++ last_text
+  ++ "|initials="
+  ++ initials_text
+  ++ "|no_vowels="
+  ++ no_vowels_text
+where
+  length_text = to_string(string.length(raw))
+  first_text = string.string_from_char(string.char_at_or(raw, 0, '?'))
+  last_text = string.string_from_char(string.char_at_or(raw, string.length(raw) - 1, '?'))
+  initials_text = initials(raw)
+  no_vowels_text = strip_vowels(raw)
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing -> print("usage: sprout run examples/text_demo.sprout <text>")
+  | Just raw -> print(summarize(raw))

@@ -737,6 +737,7 @@ Example classification:
 - `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers on top of generic `stdlib.http` + `stdlib.http_client`.
 - `examples/sentry_issue_browser_tui.sprout` is a library-style TUI scaffold module using the app-level Sentry API layer.
 - `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
+- `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
 
 Load stdlib prelude explicitly for standalone files:
 
@@ -753,6 +754,8 @@ Load HTTP and JSON helpers:
   `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/http_echo_server.sprout`
 - Example HTTP GET CLI:
   `python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/`
+- Example text demo:
+  `python3 -m sprout.cli run examples/text_demo.sprout "zażółć gęślą jaźń"`
 - Collections helper demo:
   `python3 -m sprout.cli run examples/collections_demo.sprout`
 - Typeclass collections demo (experimental surface area, not normative v0):

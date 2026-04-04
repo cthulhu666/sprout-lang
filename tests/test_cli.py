@@ -1712,6 +1712,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertIn("57", run.stdout)
 
+    def test_run_text_demo(self) -> None:
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sprout.cli",
+                "run",
+                "examples/text_demo.sprout",
+                "zażółć gęślą jaźń",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stdout.strip(), "len=17|first=z|last=ń|initials=zgj|no_vowels=zżłć gśl jźń")
+
     def test_run_result_control_flow_demo(self) -> None:
         run = subprocess.run(
             [
