@@ -11,4 +11,4 @@ fn payload() -> json.Json =
   )
 
 fn main() -> Unit !{IO} =
-  print(json_stringify(payload()))
+  print(json.stringify(payload()))

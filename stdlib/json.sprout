@@ -37,6 +37,12 @@ export fn int(value: Int) -> Json =
 export fn string(value: String) -> Json =
   JsonString(value)
 
+export fn parse(raw: String) -> Result JsonError Json =
+  json_parse(raw)
+
+export fn stringify(value: Json) -> String =
+  json_stringify(value)
+
 fn json_array_from_list(items: List Json) -> JsonArray =
   match items with
   | Nil -> JsonArrayNil

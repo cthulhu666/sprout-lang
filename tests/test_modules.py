@@ -792,7 +792,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   )
 
                 fn main() -> Unit !{IO} =
-                  print(json_stringify(payload()))
+                  print(json.stringify(payload()))
                 """,
                 encoding="utf-8",
             )
@@ -1081,10 +1081,11 @@ class ModuleLoaderTests(unittest.TestCase):
                 """
                 module main
                 import examples.sentry_api (issue_short_id, issue_title, sentry_decode_issue_summaries)
+                import stdlib.json (parse)
                 import stdlib.string as string
 
                 fn main() -> Unit !{IO} =
-                  match json_parse("[{\\"shortId\\":\\"APP-17\\",\\"title\\":\\"Broken checkout\\",\\"status\\":\\"unresolved\\"}]") with
+                  match parse("[{\\"shortId\\":\\"APP-17\\",\\"title\\":\\"Broken checkout\\",\\"status\\":\\"unresolved\\"}]") with
                   | Err _ -> print("decode-error")
                   | Ok payload ->
                       match vec_get(0, sentry_decode_issue_summaries(payload)) with
@@ -1110,9 +1111,10 @@ class ModuleLoaderTests(unittest.TestCase):
                 module main
                 import examples.sentry_api (sentry_decode_issue_summaries)
                 import examples.sentry_issue_browser_tui (render_issue_list)
+                import stdlib.json (parse)
 
                 fn main() -> Unit !{IO} =
-                  match json_parse("[{\\"shortId\\":\\"APP-17\\",\\"title\\":\\"Broken checkout\\",\\"status\\":\\"unresolved\\"},{\\"shortId\\":\\"APP-18\\",\\"title\\":\\"Slow query\\",\\"status\\":\\"resolved\\"}]") with
+                  match parse("[{\\"shortId\\":\\"APP-17\\",\\"title\\":\\"Broken checkout\\",\\"status\\":\\"unresolved\\"},{\\"shortId\\":\\"APP-18\\",\\"title\\":\\"Slow query\\",\\"status\\":\\"resolved\\"}]") with
                   | Err _ -> print("decode-error")
                   | Ok payload -> print(render_issue_list(sentry_decode_issue_summaries(payload)))
                 """,

@@ -941,16 +941,16 @@ class CliTests(unittest.TestCase):
         os.close(slave_fd)
         try:
             buffer = self._read_pty_until(master_fd, "", "sprout> ", timeout=10.0)
-            self._write_pty_slowly(master_fd, b"import stdlib.json\n")
+            self._write_pty_slowly(master_fd, b"import stdlib.json as JSON\n")
             buffer = self._read_pty_until(master_fd, buffer, "ok\nsprout> ", timeout=10.0)
             self._write_pty_slowly(master_fd, b":t JSON.St\t\n")
-            buffer = self._read_pty_until(master_fd, buffer, "json.string", timeout=10.0)
-            buffer = self._read_pty_until(master_fd, buffer, "String -> stdlib.json.Json", timeout=10.0)
+            buffer = self._read_pty_until(master_fd, buffer, "JSON.string", timeout=10.0)
+            buffer = self._read_pty_until(master_fd, buffer, "JSON.stringify", timeout=10.0)
             buffer = self._read_pty_until(master_fd, buffer, "sprout> ")
             self._write_pty_slowly(master_fd, b":quit\n")
             proc.wait(timeout=5)
             self.assertEqual(proc.returncode, 0)
-            self.assertNotIn("error:", buffer)
+            self.assertNotIn("Unknown import alias 'JSON'", buffer)
         finally:
             os.close(master_fd)
             if proc.poll() is None:

@@ -323,8 +323,7 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `map_set(m: Map a, key: String, value: a) -> Map a`
 - `map_remove(m: Map a, key: String) -> Map a`
 - `map_size(m: Map a) -> Int`
-- `json_parse(raw: String) -> Result stdlib.json.JsonError stdlib.json.Json`
-- `json_stringify(value: stdlib.json.Json) -> String`
+- public JSON entrypoints live in `stdlib.json` as `parse(raw)` and `stringify(value)`
 - `vector_empty() -> Vector a`
 - `vector_length(v: Vector a) -> Int`
 - `vector_get(v: Vector a, index: Int) -> Maybe a`
@@ -572,8 +571,8 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
 - builder helpers: `null()`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`
-- `json_parse(raw) -> Result JsonError Json`
-- `json_stringify(value: Json) -> String` (compact JSON for the currently representable subset)
+- `parse(raw) -> Result JsonError Json`
+- `stringify(value: Json) -> String` (compact JSON for the currently representable subset)
 - `json_get_field(value, key) -> Maybe Json`
 - `json_get_string(value) -> Maybe String`
 - `json_get_int(value) -> Maybe Int`

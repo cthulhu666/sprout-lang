@@ -1,6 +1,6 @@
 module examples.sentry_api
 import stdlib.http (Result, HttpError, http_response_body, HttpResponse)
-import stdlib.json (Json, JsonArray, JsonArrayStep, JsonError, json_array_next, json_get_array, json_get_field, json_get_string)
+import stdlib.json (Json, JsonArray, JsonArrayStep, JsonError, json_array_next, json_get_array, json_get_field, json_get_string, parse)
 import stdlib.http_client (http_get)
 import stdlib.string as strlib
 
@@ -24,7 +24,7 @@ fn json_error_to_http_error(err: JsonError) -> HttpError =
   | JsonDecode msg -> HttpDecode(msg)
 
 fn parse_json_response(resp: HttpResponse) -> Result HttpError Json =
-  match json_parse(http_response_body(resp)) with
+  match parse(http_response_body(resp)) with
   | Ok value -> Ok(value)
   | Err err -> Err(json_error_to_http_error(err))
 
