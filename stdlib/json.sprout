@@ -61,6 +61,13 @@ fn json_object_from_pairs(items: List (String, Json)) -> JsonObject =
 export fn object_from_pairs(items: List (String, Json)) -> Json =
   JsonObject(json_object_from_pairs(items))
 
+fn json_object_append_entry(obj: JsonObject, entry: (String, Json)) -> JsonObject =
+  match entry with
+  | (key, value) -> JsonObjectCons(key, value, obj)
+
+export fn object_from_dict(items: Dict Json) -> Json =
+  JsonObject(vec_fold(json_object_append_entry, JsonObjectNil, dict_entries(items)))
+
 fn json_object_find(obj: JsonObject, key: String) -> Maybe Json =
   match obj with
   | JsonObjectNil -> Nothing

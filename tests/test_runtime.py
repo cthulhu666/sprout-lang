@@ -953,6 +953,44 @@ class RuntimeTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), '{"title":"hello","count":2,"items":["a",true,null]}')
 
+    def test_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Dict, dict_empty, dict_entries, dict_set, vec_get_or)
+                import stdlib.json as json
+                import stdlib.string as string
+
+                fn sample() -> Dict json.Json =
+                  dict_set("beta", json.int(11), dict_set("alpha", json.string("hi"), dict_empty()))
+
+                fn entry_metric(entry: (String, json.Json)) -> Int =
+                  match entry with
+                  | (_, json.JsonInt(value)) -> value
+                  | (_, json.JsonString(value)) -> string.length(value)
+                  | _ -> 0
+
+                fn main() -> Unit !{IO} =
+                  do
+                    print(json.stringify(json.object_from_dict(sample())))
+                    print(
+                      entry_metric(vec_get_or(0, ("missing", json.null()), dict_entries(sample())))
+                      + entry_metric(vec_get_or(1, ("missing", json.null()), dict_entries(sample())))
+                    )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), '{"beta":11,"alpha":"hi"}\n13')
+
     def test_stdlib_crypto_helpers(self) -> None:
         src = """
         module main

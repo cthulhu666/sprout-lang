@@ -389,6 +389,20 @@ export fn dict_values(dict: Dict v) -> Vec v =
   match dict with
   | Dict raw -> dict_values_from(raw, 0, map_size(raw), vec_empty())
 
+fn dict_entries_from(raw: Map v, index: Int, total: Int, acc: Vec (String, v)) -> Vec (String, v) =
+  if index >= total then acc
+  else
+    match map_nth_key(raw, index) with
+    | Nothing -> acc
+    | Just key ->
+        match map_nth_value(raw, index) with
+        | Nothing -> acc
+        | Just value -> dict_entries_from(raw, index + 1, total, vec_append((key, value), acc))
+
+export fn dict_entries(dict: Dict v) -> Vec (String, v) =
+  match dict with
+  | Dict raw -> dict_entries_from(raw, 0, map_size(raw), vec_empty())
+
 export class Semigroup t {
   fn append(x: t, y: t) -> t
 }

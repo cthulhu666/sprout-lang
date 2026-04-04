@@ -59,6 +59,7 @@ MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
     "dict_remove": "dict_remove",
     "dict_keys": "dict_keys",
     "dict_values": "dict_values",
+    "dict_entries": "dict_entries",
     },
     "stdlib.http": {
         "Just": "Just",

@@ -383,6 +383,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `dict_remove(key, dict)`
   - `dict_keys(dict) -> Vec String`
   - `dict_values(dict) -> Vec v`
+  - `dict_entries(dict) -> Vec (String, v)`
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
 - `Show t`, `Ord t`, `Semigroup t`, `Functor f`, and `Foldable f`
 - `to_string(x)` is the default `Show` operation
@@ -570,7 +571,7 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
-- builder helpers: `null()`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`
+- builder helpers: `null()`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`, `object_from_dict(items)`
 - `parse(raw) -> Result JsonError Json`
 - `stringify(value: Json) -> String` (compact JSON for the currently representable subset)
 - `json_get_field(value, key) -> Maybe Json`
