@@ -290,11 +290,13 @@ Recommended debug-mode outputs:
 Current measurement workflow:
 
 - `mise exec -- just measure-gc-thresholds` runs the fast synthetic workload
-  set by default.
+  set by default; this is now mainly a GC regression/stress loop rather than
+  the primary signal for choosing between production threshold values.
 - `mise exec -- just measure-gc-real` or
   `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 ...` opt into
   heavier real workloads such as the current `day5input` file-processing case
-  and the generated `aoc_day3` / `aoc_day4_small` example inputs.
+  and the generated `aoc_day3` / `aoc_day4_small` example inputs; these real
+  workloads are the main input for default-threshold tuning.
 - The summary reports cycle counts, sweep totals, max live heap, max root-slot
   count, max marked-node count, and total/max `elapsed_us`, along with
   wall-clock time, so threshold tuning can stay measurement-driven instead of
