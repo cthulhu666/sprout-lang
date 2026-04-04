@@ -1805,13 +1805,16 @@ class CliTests(unittest.TestCase):
         example_flags = {
             "examples/result_demo.sprout": ["--with-stdlib"],
         }
+        check_only_examples = {
+            "examples/sentry_issue_browser.sprout",
+        }
         failures: list[tuple[Path, str, str]] = []
         for path in sorted(Path("examples").glob("*.sprout")):
             with tempfile.TemporaryDirectory() as tmp:
                 source = path.read_text(encoding="utf-8")
                 out = Path(tmp) / f"{path.stem}.ll"
                 extra = example_flags.get(str(path), [])
-                if "fn main(" in source:
+                if "fn main(" in source and str(path) not in check_only_examples:
                     proc = subprocess.run(
                         [
                             sys.executable,
@@ -1849,6 +1852,20 @@ class CliTests(unittest.TestCase):
                 for path, stdout, stderr in failures
             )
             self.fail(f"example compile failures:\n{details}")
+
+    def test_run_sentry_issue_browser_reports_missing_env(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, "-m", "sprout.cli", "run", "examples/sentry_issue_browser.sprout"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={},
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn(
+            "Configuration error: missing environment variable: SENTRY_ORG",
+            proc.stdout,
+        )
 
     def test_compile_native_foldable_to_vec_demo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
