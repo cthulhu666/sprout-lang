@@ -85,6 +85,24 @@ fn main() -> Unit !{IO} =
         tier="fast",
     ),
     Workload(
+        name="vector_build_medium",
+        expected_stdout="5000",
+        source="""
+module main
+import stdlib.collections (Vec, vec_append, vec_empty, vec_get_or, vec_length)
+
+fn build(n: Int, acc: Vec Int) -> Vec Int =
+  if n == 0 then acc else build(n - 1, vec_append(n, acc))
+
+fn score(vec: Vec Int) -> Int =
+  vec_length(vec) + vec_get_or(0, 0, vec)
+
+fn main() -> Unit !{IO} =
+  print(score(build(2500, vec_empty())))
+""".strip(),
+        tier="real",
+    ),
+    Workload(
         name="aoc_day5",
         expected_stdout="examples.aoc_2025_day_5.Answers(789, 343329651880509)",
         source=None,
