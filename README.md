@@ -570,6 +570,7 @@ Current experimental scope:
 JSON stdlib helpers (in `stdlib/json.sprout`):
 
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
+- `JsonEncode a` plus `encode(value)` for directly encodable values (`Json`, `Int`, `Bool`, `String`)
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
 - builder helpers: `null()`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`, `object_from_dict(items)`
 - `parse(raw) -> Result JsonError Json`

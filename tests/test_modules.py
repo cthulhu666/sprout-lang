@@ -755,7 +755,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.json as json
 
                 fn payload() -> json.Json =
-                  json.object_from_pairs([("count", json.int(2))])
+                  json.object_from_pairs([("count", 2)])
 
                 fn has_count(value: json.Json) -> String =
                   match json.json_get_field(value, "count") with
@@ -770,8 +770,10 @@ class ModuleLoaderTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
             out = io.StringIO()
-            run_program(program, stdout=out)
+            run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
@@ -785,21 +787,19 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.json as json
                 import stdlib.string as string
 
-                fn payload() -> Dict json.Json =
-                  dict_set("count", json.int(2), dict_set("title", json.string("hello"), dict_empty()))
+                fn payload() -> Dict Int =
+                  dict_set("count", 2, dict_set("title", 5, dict_empty()))
 
-                fn entry_metric(entry: (String, json.Json)) -> Int =
+                fn entry_metric(entry: (String, Int)) -> Int =
                   match entry with
-                  | (_, json.JsonInt(value)) -> value
-                  | (_, json.JsonString(value)) -> string.length(value)
-                  | _ -> 0
+                  | (key, value) -> string.length(key) + value
 
                 fn main() -> Unit !{IO} =
                   do
                     print(json.stringify(json.object_from_dict(payload())))
                     print(
-                      entry_metric(vec_get_or(0, ("missing", json.null()), dict_entries(payload())))
-                      + entry_metric(vec_get_or(1, ("missing", json.null()), dict_entries(payload())))
+                      entry_metric(vec_get_or(0, ("missing", -1), dict_entries(payload())))
+                      + entry_metric(vec_get_or(1, ("missing", -1), dict_entries(payload())))
                     )
                 """,
                 encoding="utf-8",
@@ -808,9 +808,11 @@ class ModuleLoaderTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
             out = io.StringIO()
-            run_program(program, stdout=out)
-            self.assertEqual(out.getvalue().strip(), '{"count":2,"title":"hello"}\n7')
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), '{"count":2,"title":5}\n17')
 
     def test_qualified_module_value_resolution_inside_tuple_expr(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -838,8 +840,10 @@ class ModuleLoaderTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
             out = io.StringIO()
-            run_program(program, stdout=out)
+            run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), '{"title":"hello","count":2}')
 
     def test_import_stdlib_net_helpers(self) -> None:

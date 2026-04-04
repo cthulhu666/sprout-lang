@@ -949,9 +949,41 @@ class RuntimeTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
             out = io.StringIO()
-            run_program(program, stdout=out)
+            run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), '{"title":"hello","count":2,"items":["a",true,null]}')
+
+    def test_json_object_from_pairs_supports_plain_int_values(self) -> None:
+        src = """
+        module test.main
+        import stdlib.json as json
+
+        fn sample() -> json.Json =
+          json.object_from_pairs(
+            [
+              ("foo", 1),
+              ("bar", 2)
+            ]
+          )
+
+        fn main() -> Unit !{IO} =
+          print(json.stringify(sample()))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), '{"foo":1,"bar":2}')
 
     def test_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -964,21 +996,19 @@ class RuntimeTests(unittest.TestCase):
                 import stdlib.json as json
                 import stdlib.string as string
 
-                fn sample() -> Dict json.Json =
-                  dict_set("beta", json.int(11), dict_set("alpha", json.string("hi"), dict_empty()))
+                fn sample() -> Dict Int =
+                  dict_set("beta", 11, dict_set("alpha", 2, dict_empty()))
 
-                fn entry_metric(entry: (String, json.Json)) -> Int =
+                fn entry_metric(entry: (String, Int)) -> Int =
                   match entry with
-                  | (_, json.JsonInt(value)) -> value
-                  | (_, json.JsonString(value)) -> string.length(value)
-                  | _ -> 0
+                  | (key, value) -> string.length(key) + value
 
                 fn main() -> Unit !{IO} =
                   do
                     print(json.stringify(json.object_from_dict(sample())))
                     print(
-                      entry_metric(vec_get_or(0, ("missing", json.null()), dict_entries(sample())))
-                      + entry_metric(vec_get_or(1, ("missing", json.null()), dict_entries(sample())))
+                      entry_metric(vec_get_or(0, ("missing", -1), dict_entries(sample())))
+                      + entry_metric(vec_get_or(1, ("missing", -1), dict_entries(sample())))
                     )
                 """,
                 encoding="utf-8",
@@ -987,9 +1017,11 @@ class RuntimeTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
             out = io.StringIO()
-            run_program(program, stdout=out)
-            self.assertEqual(out.getvalue().strip(), '{"beta":11,"alpha":"hi"}\n13')
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), '{"beta":11,"alpha":2}\n22')
 
     def test_stdlib_crypto_helpers(self) -> None:
         src = """

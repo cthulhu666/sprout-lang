@@ -25,6 +25,10 @@ export type JsonArrayStep(..) =
 export type JsonObjectStep(..) =
   | JsonObjectStep String Json JsonObject
 
+export class JsonEncode a {
+  fn encode_json(value: a) -> Json
+}
+
 export fn null() -> Json =
   JsonNull
 
@@ -36,6 +40,9 @@ export fn int(value: Int) -> Json =
 
 export fn string(value: String) -> Json =
   JsonString(value)
+
+export fn encode(value: a) -> Json where JsonEncode a =
+  encode_json(value)
 
 export fn parse(raw: String) -> Result JsonError Json =
   json_parse(raw)
@@ -51,22 +58,46 @@ fn json_array_from_list(items: List Json) -> JsonArray =
 export fn array_from_list(items: List Json) -> Json =
   JsonArray(json_array_from_list(items))
 
-fn json_object_from_pairs(items: List (String, Json)) -> JsonObject =
+fn json_object_from_pairs(items: List (String, a)) -> JsonObject where JsonEncode a =
   match items with
   | Nil -> JsonObjectNil
   | Cons pair rest ->
       match pair with
-      | (key, value) -> JsonObjectCons(key, value, json_object_from_pairs(rest))
+      | (key, value) -> JsonObjectCons(key, encode(value), json_object_from_pairs(rest))
 
-export fn object_from_pairs(items: List (String, Json)) -> Json =
+export fn object_from_pairs(items: List (String, a)) -> Json where JsonEncode a =
   JsonObject(json_object_from_pairs(items))
 
-fn json_object_append_entry(obj: JsonObject, entry: (String, Json)) -> JsonObject =
-  match entry with
-  | (key, value) -> JsonObjectCons(key, value, obj)
+fn json_object_from_dict_entries(entries: Vec (String, a), index: Int, total: Int, obj: JsonObject) -> JsonObject where JsonEncode a =
+  if index >= total then obj
+  else
+    match vec_get(index, entries) with
+    | Nothing -> obj
+    | Just (key, value) ->
+        json_object_from_dict_entries(entries, index + 1, total, JsonObjectCons(key, encode(value), obj))
 
-export fn object_from_dict(items: Dict Json) -> Json =
-  JsonObject(vec_fold(json_object_append_entry, JsonObjectNil, dict_entries(items)))
+export fn object_from_dict(items: Dict a) -> Json where JsonEncode a =
+  JsonObject(json_object_from_dict_entries(dict_entries(items), 0, vec_length(dict_entries(items)), JsonObjectNil))
+
+instance JsonEncode Json {
+  fn encode_json(value: Json) -> Json =
+    value
+}
+
+instance JsonEncode Int {
+  fn encode_json(value: Int) -> Json =
+    int(value)
+}
+
+instance JsonEncode Bool {
+  fn encode_json(value: Bool) -> Json =
+    bool(value)
+}
+
+instance JsonEncode String {
+  fn encode_json(value: String) -> Json =
+    string(value)
+}
 
 fn json_object_find(obj: JsonObject, key: String) -> Maybe Json =
   match obj with

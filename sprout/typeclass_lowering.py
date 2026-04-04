@@ -20,6 +20,8 @@ def _copy_type_expr(node: ast.TypeExpr) -> ast.TypeExpr:
         return ast.TypeArrow(left=_copy_type_expr(node.left), right=_copy_type_expr(node.right), effects=node.effects)
     if isinstance(node, ast.TypeEffect):
         return ast.TypeEffect(base=_copy_type_expr(node.base), effects=node.effects)
+    if isinstance(node, ast.TupleType):
+        return ast.TupleType(items=[_copy_type_expr(item) for item in node.items])
     raise TypeclassLoweringError(f"Unsupported type expression in lowering copy: {node}")
 
 
@@ -33,6 +35,8 @@ def _type_expr_is_concrete(node: ast.TypeExpr) -> bool:
         return _type_expr_is_concrete(node.left) and _type_expr_is_concrete(node.right)
     if isinstance(node, ast.TypeEffect):
         return _type_expr_is_concrete(node.base)
+    if isinstance(node, ast.TupleType):
+        return all(_type_expr_is_concrete(item) for item in node.items)
     return False
 
 
@@ -44,6 +48,20 @@ def _type_name_matches(left: str, right: str) -> bool:
     if left_qualified and right_qualified:
         return False
     return left.rsplit(".", 1)[-1] == right.rsplit(".", 1)[-1]
+
+
+def _class_name_matches(left: str, right: str) -> bool:
+    return _type_name_matches(left, right)
+
+
+def _lookup_matching_class(mapping: dict[str, object], class_name: str):
+    direct = mapping.get(class_name)
+    if direct is not None:
+        return direct
+    for candidate_name, value in mapping.items():
+        if _class_name_matches(candidate_name, class_name):
+            return value
+    return None
 
 
 def _type_expr_equal(left: ast.TypeExpr, right: ast.TypeExpr) -> bool:
@@ -59,6 +77,10 @@ def _type_expr_equal(left: ast.TypeExpr, right: ast.TypeExpr) -> bool:
         )
     if isinstance(left, ast.TypeEffect) and isinstance(right, ast.TypeEffect):
         return left.effects == right.effects and _type_expr_equal(left.base, right.base)
+    if isinstance(left, ast.TupleType) and isinstance(right, ast.TupleType):
+        return len(left.items) == len(right.items) and all(
+            _type_expr_equal(left_item, right_item) for left_item, right_item in zip(left.items, right.items)
+        )
     return False
 
 
@@ -74,6 +96,8 @@ def _type_expr_mangle(node: ast.TypeExpr) -> str:
         return f"Fn_{_type_expr_mangle(node.left)}_{_type_expr_mangle(node.right)}{effects}"
     if isinstance(node, ast.TypeEffect):
         return f"{_type_expr_mangle(node.base)}_eff_{'_'.join(node.effects)}"
+    if isinstance(node, ast.TupleType):
+        return "Tuple_" + "_".join(_type_expr_mangle(item) for item in node.items)
     raise TypeclassLoweringError(f"Unsupported type expression in lowering: {node}")
 
 
@@ -103,6 +127,8 @@ def _substitute_type_expr(node: ast.TypeExpr, subs: dict[str, ast.TypeExpr]) -> 
         )
     if isinstance(node, ast.TypeEffect):
         return ast.TypeEffect(base=_substitute_type_expr(node.base, subs), effects=node.effects)
+    if isinstance(node, ast.TupleType):
+        return ast.TupleType(items=[_substitute_type_expr(item, subs) for item in node.items])
     raise TypeclassLoweringError(f"Unsupported type expression in substitution: {node}")
 
 
@@ -132,11 +158,16 @@ def _match_type_expr_pattern(
         )
     if isinstance(pattern, ast.TypeEffect) and isinstance(candidate, ast.TypeEffect):
         return pattern.effects == candidate.effects and _match_type_expr_pattern(pattern.base, candidate.base, env)
+    if isinstance(pattern, ast.TupleType) and isinstance(candidate, ast.TupleType):
+        return len(pattern.items) == len(candidate.items) and all(
+            _match_type_expr_pattern(pattern_item, candidate_item, env)
+            for pattern_item, candidate_item in zip(pattern.items, candidate.items)
+        )
     return False
 
 
 def _constraint_matches_pattern(pattern: ast.TypeConstraint, candidate: ast.TypeConstraint) -> bool:
-    if pattern.class_name != candidate.class_name:
+    if not _class_name_matches(pattern.class_name, candidate.class_name):
         return False
     if len(pattern.args) != len(candidate.args):
         return False
@@ -171,6 +202,11 @@ def _collect_type_expr_substitution(
             pattern.right,
             actual.right,
             env,
+        )
+    if isinstance(pattern, ast.TupleType) and isinstance(actual, ast.TupleType):
+        return len(pattern.items) == len(actual.items) and all(
+            _collect_type_expr_substitution(pattern_item, actual_item, env)
+            for pattern_item, actual_item in zip(pattern.items, actual.items)
         )
     return False
 
@@ -741,7 +777,7 @@ def _rewrite_expr(
                             f"Cannot resolve constraint {needed.class_name} for call to {expr.callee.name}"
                         )
 
-                    for method_name in class_method_order.get(needed.class_name, []):
+                    for method_name in _lookup_matching_class(class_method_order, needed.class_name) or []:
                         target = method_source.get(method_name)
                         if target is None:
                             raise TypeclassLoweringError(
@@ -995,7 +1031,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
             binding_by_constraint: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
 
             for idx, constraint in enumerate(decl.constraints):
-                class_decl = class_decls.get(constraint.class_name)
+                class_decl = _lookup_matching_class(class_decls, constraint.class_name)
                 if class_decl is None:
                     continue
                 subs = {
@@ -1095,7 +1131,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
         binding_by_constraint: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
 
         for idx, constraint in enumerate(wrapper.constraints):
-            class_decl = class_decls.get(constraint.class_name)
+            class_decl = _lookup_matching_class(class_decls, constraint.class_name)
             if class_decl is None:
                 continue
             subs = {
