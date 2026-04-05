@@ -239,6 +239,8 @@ def cmd_compile(
 #include <termios.h>
 #include <unistd.h>
 #ifdef __APPLE__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #include <Security/SecureTransport.h>
 #include <Security/SecTrust.h>
 #include <Security/SecCertificate.h>
@@ -3003,7 +3005,10 @@ static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* d
     return errSSLClosedAbort;
   }
   conn->last_errno = 0;
-  if (n == 0) return errSSLClosedGraceful;
+  if (n == 0) {
+    *dataLength = 0;
+    return errSSLClosedGraceful;
+  }
   *dataLength = (size_t)n;
   return noErr;
 }
@@ -3022,6 +3027,10 @@ static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, si
     return errSSLClosedAbort;
   }
   conn->last_errno = 0;
+  if (n == 0) {
+    *dataLength = 0;
+    return errSSLClosedAbort;
+  }
   *dataLength = (size_t)n;
   return noErr;
 }
@@ -3030,11 +3039,25 @@ static int tls_status_timed_out(const TlsConn* conn) {
   return conn != NULL && (conn->last_errno == EAGAIN || conn->last_errno == EWOULDBLOCK);
 }
 
+static int tls_status_is_auth_event(OSStatus status) {
+  return status == errSSLPeerAuthCompleted || status == errSSLServerAuthCompleted;
+}
+
+static char* tls_error_message(const char* prefix, OSStatus status, const TlsConn* conn) {
+  char detail[256];
+  if (conn != NULL && conn->last_errno != 0) {
+    snprintf(detail, sizeof(detail), "%s (status=%d, errno=%d: %s)", prefix, (int)status, conn->last_errno, strerror(conn->last_errno));
+  } else {
+    snprintf(detail, sizeof(detail), "%s (status=%d)", prefix, (int)status);
+  }
+  return dup_cstr(detail);
+}
+
 static OSStatus tls_handshake(SSLContextRef ctx, TlsConn* conn) {
   while (1) {
     conn->last_errno = 0;
     OSStatus status = SSLHandshake(ctx);
-    if (status == noErr || status == errSSLPeerAuthCompleted || status == errSSLServerAuthCompleted) {
+    if (status == noErr || tls_status_is_auth_event(status)) {
       return noErr;
     }
     if (status == errSSLWouldBlock) {
@@ -3053,6 +3076,7 @@ static OSStatus tls_write_all(SSLContextRef ctx, TlsConn* conn, const char* data
     OSStatus status = SSLWrite(ctx, data + offset, len - offset, &written);
     offset += written;
     if (status == noErr) continue;
+    if (tls_status_is_auth_event(status)) continue;
     if (status == errSSLWouldBlock) {
       if (written == 0 && tls_status_timed_out(conn)) return status;
       continue;
@@ -3072,6 +3096,7 @@ static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* respo
       buf_append_bytes(response, chunk, chunk_len);
     }
     if (status == noErr) continue;
+    if (tls_status_is_auth_event(status)) continue;
     if (status == errSSLClosedGraceful || status == errSSLClosedNoNotify || status == errSSLClosedAbort) {
       return response->len > 0 ? noErr : status;
     }
@@ -3141,7 +3166,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
         }
         continue;
       }
-      if (status == errSSLPeerAuthCompleted || status == errSSLServerAuthCompleted) {
+      if (tls_status_is_auth_event(status)) {
         SecTrustRef trust = NULL;
         OSStatus trust_status = SSLCopyPeerTrust(ctx, &trust);
         if (trust_status == noErr && trust != NULL) {
@@ -3171,7 +3196,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
     close(fd);
     return http_err1(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)dup_cstr("tls handshake failed")
+      (long long)(uintptr_t)tls_error_message("tls handshake failed", status, &tls)
     );
   }
 
@@ -3186,7 +3211,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
     close(fd);
     return http_err1(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)dup_cstr("tls write failed")
+      (long long)(uintptr_t)tls_error_message("tls write failed", status, &tls)
     );
   }
 
@@ -3203,11 +3228,12 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
     free(response.data);
     return http_err1(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)dup_cstr("tls read failed")
+      (long long)(uintptr_t)tls_error_message("tls read failed", status, &tls)
     );
   }
   return http_response_result(response.data);
 }
+#pragma clang diagnostic pop
 #endif
 
 static void append_header_block(ByteBuf* out, const char* raw) {
