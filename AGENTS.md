@@ -8,6 +8,7 @@ Sprout is a statically typed, functional-first language aimed at strong safety w
 
 Primary design references:
 - `docs/spec-v0.md`
+- `docs/style-guide-v0.md`
 - `docs/language-design-v0.md`
 - `docs/language-design-best-practices.md`
 
@@ -22,6 +23,7 @@ Primary design references:
 7. Before making any non-trivial change, present a short high-level implementation overview and wait for user approval.
 8. Explicitly call out any proposal to add a new builtin or to keep functionality in the host runtime instead of implementing it in Sprout; builtin/runtime additions require user approval up front.
 9. Prefer fixing root-cause issues over introducing workarounds when the root cause is reasonably tractable.
+10. When editing Sprout source examples, stdlib code, or user-facing snippets, follow `docs/style-guide-v0.md` unless a stronger file-local convention already exists.
 
 ## Docs and TODO Hygiene
 
@@ -38,11 +40,12 @@ Primary design references:
 ## Spec and Source of Truth
 
 1. `docs/spec-v0.md` is the normative source of truth for the stable Sprout core.
-2. `README.md` should summarize current capabilities, but must not silently contradict the normative spec.
-3. Supporting design docs should explain rationale and tradeoffs; they do not override the normative spec.
-4. Experimental or prototype-only features must be labeled consistently across `README.md`, `docs/*.md`, examples, and tests.
-5. Do not widen the language contract implicitly through examples, stdlib surface area, or implementation alone.
-6. If a change alters syntax, semantics, typing rules, evaluation order, visibility/export rules, or diagnostics expectations, update the relevant spec/docs before considering the task complete.
+2. `docs/style-guide-v0.md` is the default non-normative source-style guide for repository Sprout code and code snippets.
+3. `README.md` should summarize current capabilities, but must not silently contradict the normative spec.
+4. Supporting design docs should explain rationale and tradeoffs; they do not override the normative spec.
+5. Experimental or prototype-only features must be labeled consistently across `README.md`, `docs/*.md`, examples, and tests.
+6. Do not widen the language contract implicitly through examples, stdlib surface area, implementation, or style guidance.
+7. If a change alters syntax, semantics, typing rules, evaluation order, visibility/export rules, or diagnostics expectations, update the relevant spec/docs before considering the task complete.
 
 ## Design Change Process
 

@@ -16,6 +16,7 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 ## Docs
 
 - [Specification v0 (Normative)](./docs/spec-v0.md)
+- [Style Guide v0 (Non-Normative)](./docs/style-guide-v0.md)
 - [Language Design v0](./docs/language-design-v0.md)
 - [Effect System v0 Plan](./docs/effect-system-v0-plan.md)
 - [Effect System v1 Draft](./docs/effect-system-v1-draft.md)
@@ -31,6 +32,9 @@ interpreter runtime, early native backend, module loader, and stdlib examples.
 Normative status:
 
 - `docs/spec-v0.md` defines the stable Sprout core for v0.
+- `docs/style-guide-v0.md` defines the default repository source-style
+  conventions for humans and AI agents, but it does not change the language
+  contract.
 - Features described elsewhere in this README but not specified in `docs/spec-v0.md`
   are implementation features or experimental extensions.
 - Function-local `where` blocks on `fn` declarations are part of the normative v0 core.
