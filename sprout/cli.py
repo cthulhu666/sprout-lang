@@ -2995,12 +2995,17 @@ static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* d
   TlsConn* conn = (TlsConn*)(uintptr_t)connection;
   if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
   size_t requested = *dataLength;
+  if (requested == 0) {
+    *dataLength = 0;
+    return noErr;
+  }
   ssize_t n;
   while (1) {
     n = recv(conn->fd, data, requested, 0);
     if (n >= 0) break;
     if (errno == EINTR) continue;
     conn->last_errno = errno;
+    *dataLength = 0;
     if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
     return errSSLClosedAbort;
   }
@@ -3017,12 +3022,17 @@ static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, si
   TlsConn* conn = (TlsConn*)(uintptr_t)connection;
   if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
   size_t requested = *dataLength;
+  if (requested == 0) {
+    *dataLength = 0;
+    return noErr;
+  }
   ssize_t n;
   while (1) {
     n = send(conn->fd, data, requested, 0);
     if (n >= 0) break;
     if (errno == EINTR) continue;
     conn->last_errno = errno;
+    *dataLength = 0;
     if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
     return errSSLClosedAbort;
   }
