@@ -115,27 +115,29 @@ fn detail_line(label: String, value: String) -> String =
   concat3(label, ": ", value)
 
 fn render_issue_detail(detail: IssueDetail) -> String =
-  concat3(
-    concat3(
-      concat3(
-        concat3(
-          concat3(
-            concat3("Issue detail\n\n", detail_line("Short ID", issue_detail_short_id(detail)), "\n"),
-            detail_line("Title", issue_detail_title(detail)),
-            "\n"
-          ),
-          detail_line("Status", issue_detail_status(detail)),
-          "\n"
-        ),
-        detail_line("Level", issue_detail_level(detail)),
-        "\n"
-      ),
-      concat3(detail_line("Culprit", issue_detail_culprit(detail)), "\n", detail_line("Issue ID", issue_detail_id(detail))),
-      "\n"
-    ),
-    concat3(detail_line("Permalink", issue_detail_permalink(detail)), "\n\nLeft/esc returns  r reloads  q quits", ""),
-    ""
-  )
+  "Issue detail\n\n"
+  ++ short_id_line
+  ++ "\n"
+  ++ title_line
+  ++ "\n"
+  ++ status_line
+  ++ "\n"
+  ++ level_line
+  ++ "\n"
+  ++ culprit_line
+  ++ "\n"
+  ++ issue_id_line
+  ++ "\n"
+  ++ permalink_line
+  ++ "\n\nLeft/esc returns  r reloads  q quits"
+where
+  short_id_line = detail_line("Short ID", issue_detail_short_id(detail))
+  title_line = detail_line("Title", issue_detail_title(detail))
+  status_line = detail_line("Status", issue_detail_status(detail))
+  level_line = detail_line("Level", issue_detail_level(detail))
+  culprit_line = detail_line("Culprit", issue_detail_culprit(detail))
+  issue_id_line = detail_line("Issue ID", issue_detail_id(detail))
+  permalink_line = detail_line("Permalink", issue_detail_permalink(detail))
 
 fn render_frame(frame: String) -> Unit !{IO} =
   do
