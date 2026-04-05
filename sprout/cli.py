@@ -2986,6 +2986,11 @@ static OSStatus tls_configure_peer_trust(SecTrustRef trust) {
   return status;
 }
 
+static int tls_uses_custom_ca_anchor(void) {
+  const char* anchor_path = getenv("SPROUT_HTTP_CA_CERT");
+  return anchor_path != NULL && anchor_path[0] != '\\0';
+}
+
 typedef struct {
   int fd;
   int last_errno;
@@ -3160,7 +3165,8 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
     return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr("tls context creation failed"));
   }
   OSStatus status = SSLSetIOFuncs(ctx, tls_read_func, tls_write_func);
-  if (status == noErr) status = SSLSetSessionOption(ctx, kSSLSessionOptionBreakOnServerAuth, true);
+  int use_custom_ca = tls_uses_custom_ca_anchor();
+  if (status == noErr && use_custom_ca) status = SSLSetSessionOption(ctx, kSSLSessionOptionBreakOnServerAuth, true);
   if (status == noErr) status = SSLSetConnection(ctx, (SSLConnectionRef)&tls);
   if (status == noErr) status = SSLSetPeerDomainName(ctx, parsed->host, strlen(parsed->host));
   if (status == noErr) {
@@ -3176,7 +3182,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
         }
         continue;
       }
-      if (tls_status_is_auth_event(status)) {
+      if (use_custom_ca && tls_status_is_auth_event(status)) {
         SecTrustRef trust = NULL;
         OSStatus trust_status = SSLCopyPeerTrust(ctx, &trust);
         if (trust_status == noErr && trust != NULL) {
