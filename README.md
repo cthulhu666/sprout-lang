@@ -761,7 +761,7 @@ Example classification:
 - Library-style examples expose helpers without `main`; use `sprout check` for them directly, or import them from another runnable module.
 - `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers plus typed issue-summary decoding on top of generic `stdlib.http` + `stdlib.http_client`.
 - `examples/sentry_issue_browser_tui.sprout` is a library-style first-page issue browser module with environment-based config loading and formatted list rendering.
-- `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `sprout run` and `sprout compile --native`.
+- `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `sprout run` and `sprout compile --native`, including HTTPS-backed Sentry API calls in native mode.
 - `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
 - `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
 - `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
@@ -818,7 +818,7 @@ Typed TCP client builtins are also available and now use `Bytes` payloads for ra
 Application code should prefer the typed `stdlib.net` wrapper API over bare `Int` socket handles.
 Raw `bytes_*` primitives are internal to `stdlib.*`; application code should use `stdlib.bytes`.
 `to_string` rejects invalid UTF-8 and decoded NUL bytes; `read_c_string` is the intended helper for null-terminated protocol strings.
-`http_request` is available in interpreter and native modes for plain `http://` requests.
+`http_request` is available in interpreter and native modes for plain `http://` requests. Native mode also supports `https://` on macOS via the system TLS stack.
 
 Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
 

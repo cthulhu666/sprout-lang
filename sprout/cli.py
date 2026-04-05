@@ -238,6 +238,11 @@ def cmd_compile(
 #include <signal.h>
 #include <termios.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <Security/SecureTransport.h>
+#include <Security/SecTrust.h>
+#include <Security/SecCertificate.h>
+#endif
 
 typedef struct {
   long long tag;
@@ -328,6 +333,7 @@ typedef struct {
   char* host;
   char* port;
   char* path;
+  int use_tls;
 } HttpUrl;
 
 static ManagedNode* g_heap_nodes = NULL;
@@ -2817,9 +2823,16 @@ long long json_parse(const char* raw) {
 }
 
 static int parse_http_url(const char* url, HttpUrl* out, char** err) {
-  const char* prefix = "http://";
-  size_t prefix_len = strlen(prefix);
-  if (strncmp(url, prefix, prefix_len) != 0) {
+  const char* http_prefix = "http://";
+  const char* https_prefix = "https://";
+  size_t prefix_len = 0;
+  if (strncmp(url, http_prefix, strlen(http_prefix)) == 0) {
+    out->use_tls = 0;
+    prefix_len = strlen(http_prefix);
+  } else if (strncmp(url, https_prefix, strlen(https_prefix)) == 0) {
+    out->use_tls = 1;
+    prefix_len = strlen(https_prefix);
+  } else {
     *err = dup_cstr("unsupported url scheme");
     return 0;
   }
@@ -2843,7 +2856,7 @@ static int parse_http_url(const char* url, HttpUrl* out, char** err) {
     out->port = dup_slice(colon + 1, (size_t)(host_end - colon - 1));
   } else {
     out->host = dup_slice(rest, (size_t)(host_end - rest));
-    out->port = dup_cstr("80");
+    out->port = dup_cstr(out->use_tls ? "443" : "80");
   }
   out->path = slash != NULL ? dup_cstr(slash) : dup_cstr("/");
   return 1;
@@ -2854,6 +2867,348 @@ static void free_http_url(HttpUrl* url) {
   free(url->port);
   free(url->path);
 }
+
+static long long http_response_result(char* response_data) {
+  if (response_data == NULL || response_data[0] == '\\0') {
+    free(response_data);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("remote closed connection without response")
+    );
+  }
+
+  const char* sep = strstr(response_data, "\\r\\n\\r\\n");
+  size_t sep_len = 4;
+  if (sep == NULL) {
+    sep = strstr(response_data, "\\n\\n");
+    sep_len = 2;
+  }
+  if (sep == NULL) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid http response"));
+  }
+
+  const char* line_end = strstr(response_data, "\\r\\n");
+  size_t line_sep_len = 2;
+  if (line_end == NULL || line_end > sep) {
+    line_end = strstr(response_data, "\\n");
+    line_sep_len = 1;
+  }
+  if (line_end == NULL || line_end > sep) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+  }
+
+  const char* code_start = strchr(response_data, ' ');
+  if (code_start == NULL || code_start >= line_end) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+  }
+  code_start++;
+  char* code_end = NULL;
+  long long status = strtoll(code_start, &code_end, 10);
+  if (code_end == code_start || code_end > line_end) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status code"));
+  }
+  if (status >= 400) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpBadStatus", status);
+  }
+
+  const char* headers_start = line_end + line_sep_len;
+  char* headers = dup_slice(headers_start, (size_t)(sep - headers_start));
+  char* body_out = dup_cstr(sep + sep_len);
+  free(response_data);
+  return http_ok_response(status, headers, body_out);
+}
+
+#ifdef __APPLE__
+static unsigned char* read_binary_file(const char* path, size_t* out_len) {
+  FILE* f = fopen(path, "rb");
+  if (f == NULL) return NULL;
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  long size = ftell(f);
+  if (size < 0) {
+    fclose(f);
+    return NULL;
+  }
+  if (fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  unsigned char* data = (unsigned char*)malloc((size_t)size);
+  if (size > 0 && data == NULL) {
+    fclose(f);
+    return NULL;
+  }
+  size_t got = fread(data, 1, (size_t)size, f);
+  fclose(f);
+  if (got != (size_t)size) {
+    free(data);
+    return NULL;
+  }
+  if (out_len != NULL) *out_len = got;
+  return data;
+}
+
+static OSStatus tls_configure_peer_trust(SecTrustRef trust) {
+  const char* anchor_path = getenv("SPROUT_HTTP_CA_CERT");
+  if (anchor_path == NULL || anchor_path[0] == '\\0') {
+    return noErr;
+  }
+  size_t cert_len = 0;
+  unsigned char* cert_data = read_binary_file(anchor_path, &cert_len);
+  if (cert_data == NULL) return errSecIO;
+  CFDataRef cf_data = CFDataCreate(kCFAllocatorDefault, cert_data, cert_len);
+  free(cert_data);
+  if (cf_data == NULL) return errSecAllocate;
+  SecCertificateRef cert = SecCertificateCreateWithData(kCFAllocatorDefault, cf_data);
+  CFRelease(cf_data);
+  if (cert == NULL) return errSecDecode;
+  const void* values[1] = {cert};
+  CFArrayRef anchors = CFArrayCreate(kCFAllocatorDefault, values, 1, &kCFTypeArrayCallBacks);
+  if (anchors == NULL) {
+    CFRelease(cert);
+    return errSecAllocate;
+  }
+  OSStatus status = SecTrustSetAnchorCertificates(trust, anchors);
+  if (status == noErr) {
+    status = SecTrustSetAnchorCertificatesOnly(trust, true);
+  }
+  CFRelease(anchors);
+  CFRelease(cert);
+  return status;
+}
+
+typedef struct {
+  int fd;
+  int last_errno;
+} TlsConn;
+
+static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* dataLength) {
+  TlsConn* conn = (TlsConn*)(uintptr_t)connection;
+  if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
+  size_t requested = *dataLength;
+  ssize_t n;
+  while (1) {
+    n = recv(conn->fd, data, requested, 0);
+    if (n >= 0) break;
+    if (errno == EINTR) continue;
+    conn->last_errno = errno;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    return errSSLClosedAbort;
+  }
+  conn->last_errno = 0;
+  if (n == 0) return errSSLClosedGraceful;
+  *dataLength = (size_t)n;
+  return noErr;
+}
+
+static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, size_t* dataLength) {
+  TlsConn* conn = (TlsConn*)(uintptr_t)connection;
+  if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
+  size_t requested = *dataLength;
+  ssize_t n;
+  while (1) {
+    n = send(conn->fd, data, requested, 0);
+    if (n >= 0) break;
+    if (errno == EINTR) continue;
+    conn->last_errno = errno;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    return errSSLClosedAbort;
+  }
+  conn->last_errno = 0;
+  *dataLength = (size_t)n;
+  return noErr;
+}
+
+static int tls_status_timed_out(const TlsConn* conn) {
+  return conn != NULL && (conn->last_errno == EAGAIN || conn->last_errno == EWOULDBLOCK);
+}
+
+static OSStatus tls_handshake(SSLContextRef ctx, TlsConn* conn) {
+  while (1) {
+    conn->last_errno = 0;
+    OSStatus status = SSLHandshake(ctx);
+    if (status == noErr || status == errSSLPeerAuthCompleted || status == errSSLServerAuthCompleted) {
+      return noErr;
+    }
+    if (status == errSSLWouldBlock) {
+      if (tls_status_timed_out(conn)) return status;
+      continue;
+    }
+    return status;
+  }
+}
+
+static OSStatus tls_write_all(SSLContextRef ctx, TlsConn* conn, const char* data, size_t len) {
+  size_t offset = 0;
+  while (offset < len) {
+    size_t written = len - offset;
+    conn->last_errno = 0;
+    OSStatus status = SSLWrite(ctx, data + offset, len - offset, &written);
+    offset += written;
+    if (status == noErr) continue;
+    if (status == errSSLWouldBlock) {
+      if (written == 0 && tls_status_timed_out(conn)) return status;
+      continue;
+    }
+    return status;
+  }
+  return noErr;
+}
+
+static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* response) {
+  char chunk[4096];
+  while (1) {
+    size_t chunk_len = sizeof(chunk);
+    conn->last_errno = 0;
+    OSStatus status = SSLRead(ctx, chunk, sizeof(chunk), &chunk_len);
+    if (chunk_len > 0) {
+      buf_append_bytes(response, chunk, chunk_len);
+    }
+    if (status == noErr) continue;
+    if (status == errSSLClosedGraceful || status == errSSLClosedNoNotify || status == errSSLClosedAbort) {
+      return response->len > 0 ? noErr : status;
+    }
+    if (status == errSSLWouldBlock) {
+      if (chunk_len == 0 && tls_status_timed_out(conn)) return status;
+      continue;
+    }
+    return status;
+  }
+}
+
+static long long http_request_tls(HttpUrl* parsed, const char* request_data, size_t request_len, long long timeout_ms) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  struct addrinfo* infos = NULL;
+  int gai = getaddrinfo(parsed->host, parsed->port, &hints, &infos);
+  if (gai != 0) {
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
+  }
+
+  int fd = -1;
+  int last_errno = 0;
+  for (struct addrinfo* it = infos; it != NULL; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd < 0) {
+      last_errno = errno;
+      continue;
+    }
+    struct timeval tv;
+    tv.tv_sec = (time_t)(timeout_ms / 1000);
+    tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
+    last_errno = errno;
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(infos);
+  if (fd < 0) {
+    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
+  }
+
+  TlsConn tls = {.fd = fd, .last_errno = 0};
+  SSLContextRef ctx = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
+  if (ctx == NULL) {
+    close(fd);
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr("tls context creation failed"));
+  }
+  OSStatus status = SSLSetIOFuncs(ctx, tls_read_func, tls_write_func);
+  if (status == noErr) status = SSLSetSessionOption(ctx, kSSLSessionOptionBreakOnServerAuth, true);
+  if (status == noErr) status = SSLSetConnection(ctx, (SSLConnectionRef)&tls);
+  if (status == noErr) status = SSLSetPeerDomainName(ctx, parsed->host, strlen(parsed->host));
+  if (status == noErr) {
+    while (1) {
+      tls.last_errno = 0;
+      status = SSLHandshake(ctx);
+      if (status == noErr) break;
+      if (status == errSSLWouldBlock) {
+        if (tls_status_timed_out(&tls)) {
+          SSLDisposeContext(ctx);
+          close(fd);
+          return http_err0("stdlib.http.HttpTimeout");
+        }
+        continue;
+      }
+      if (status == errSSLPeerAuthCompleted || status == errSSLServerAuthCompleted) {
+        SecTrustRef trust = NULL;
+        OSStatus trust_status = SSLCopyPeerTrust(ctx, &trust);
+        if (trust_status == noErr && trust != NULL) {
+          trust_status = tls_configure_peer_trust(trust);
+          if (trust_status == noErr && !SecTrustEvaluateWithError(trust, NULL)) {
+            trust_status = errSecNotTrusted;
+          }
+        } else if (trust_status == noErr) {
+          trust_status = errSecIO;
+        }
+        if (trust != NULL) CFRelease(trust);
+        if (trust_status != noErr) {
+          SSLDisposeContext(ctx);
+          close(fd);
+          return http_err1(
+            "stdlib.http.HttpNetwork",
+            (long long)(uintptr_t)dup_cstr("tls certificate verification failed")
+          );
+        }
+        continue;
+      }
+      break;
+    }
+  }
+  if (status != noErr) {
+    SSLDisposeContext(ctx);
+    close(fd);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("tls handshake failed")
+    );
+  }
+
+  status = tls_write_all(ctx, &tls, request_data, request_len);
+  if (status == errSSLWouldBlock && tls_status_timed_out(&tls)) {
+    SSLDisposeContext(ctx);
+    close(fd);
+    return http_err0("stdlib.http.HttpTimeout");
+  }
+  if (status != noErr) {
+    SSLDisposeContext(ctx);
+    close(fd);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("tls write failed")
+    );
+  }
+
+  ByteBuf response;
+  buf_init(&response);
+  status = tls_read_append(ctx, &tls, &response);
+  SSLDisposeContext(ctx);
+  close(fd);
+  if (status == errSSLWouldBlock && tls_status_timed_out(&tls)) {
+    free(response.data);
+    return http_err0("stdlib.http.HttpTimeout");
+  }
+  if (status != noErr) {
+    free(response.data);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("tls read failed")
+    );
+  }
+  return http_response_result(response.data);
+}
+#endif
 
 static void append_header_block(ByteBuf* out, const char* raw) {
   const char* line = raw;
@@ -2906,6 +3261,47 @@ long long http_request(const char* method, const char* url, const char* headers_
     return out;
   }
 
+  ByteBuf header_block;
+  buf_init(&header_block);
+  append_header_block(&header_block, headers_raw);
+
+  ByteBuf request;
+  buf_init(&request);
+  char* method_upper = upper_copy(method);
+  buf_append_cstr(&request, method_upper);
+  buf_append_cstr(&request, " ");
+  buf_append_cstr(&request, parsed.path);
+  buf_append_cstr(&request, " HTTP/1.1\\r\\nHost: ");
+  buf_append_cstr(&request, parsed.host);
+  buf_append_cstr(&request, "\\r\\nConnection: close\\r\\n");
+  buf_append_bytes(&request, header_block.data == NULL ? "" : header_block.data, header_block.len);
+  char content_len[64];
+  snprintf(content_len, sizeof(content_len), "Content-Length: %zu\\r\\n", strlen(body));
+  buf_append_cstr(&request, content_len);
+  buf_append_cstr(&request, "\\r\\n");
+  buf_append_cstr(&request, body);
+
+  free(method_upper);
+  free(header_block.data);
+
+#ifdef __APPLE__
+  if (parsed.use_tls) {
+    long long out = http_request_tls(&parsed, request.data, request.len, timeout_ms);
+    free(request.data);
+    free_http_url(&parsed);
+    return out;
+  }
+#else
+  if (parsed.use_tls) {
+    free(request.data);
+    free_http_url(&parsed);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("https unsupported on this platform")
+    );
+  }
+#endif
+
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_socktype = SOCK_STREAM;
@@ -2913,6 +3309,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   struct addrinfo* infos = NULL;
   int gai = getaddrinfo(parsed.host, parsed.port, &hints, &infos);
   if (gai != 0) {
+    free(request.data);
     free_http_url(&parsed);
     return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
   }
@@ -2937,33 +3334,11 @@ long long http_request(const char* method, const char* url, const char* headers_
   }
   freeaddrinfo(infos);
   if (fd < 0) {
+    free(request.data);
     free_http_url(&parsed);
     if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
     return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
   }
-
-  ByteBuf header_block;
-  buf_init(&header_block);
-  append_header_block(&header_block, headers_raw);
-
-  ByteBuf request;
-  buf_init(&request);
-  char* method_upper = upper_copy(method);
-  buf_append_cstr(&request, method_upper);
-  buf_append_cstr(&request, " ");
-  buf_append_cstr(&request, parsed.path);
-  buf_append_cstr(&request, " HTTP/1.1\\r\\nHost: ");
-  buf_append_cstr(&request, parsed.host);
-  buf_append_cstr(&request, "\\r\\nConnection: close\\r\\n");
-  buf_append_bytes(&request, header_block.data == NULL ? "" : header_block.data, header_block.len);
-  char content_len[64];
-  snprintf(content_len, sizeof(content_len), "Content-Length: %zu\\r\\n", strlen(body));
-  buf_append_cstr(&request, content_len);
-  buf_append_cstr(&request, "\\r\\n");
-  buf_append_cstr(&request, body);
-
-  free(method_upper);
-  free(header_block.data);
 
   if (!send_all(fd, request.data, request.len)) {
     int send_errno = errno;
@@ -3000,59 +3375,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   }
   close(fd);
   free_http_url(&parsed);
-
-  if (response.data == NULL || response.len == 0) {
-    free(response.data);
-    return http_err1(
-      "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)dup_cstr("remote closed connection without response")
-    );
-  }
-
-  const char* sep = strstr(response.data, "\\r\\n\\r\\n");
-  size_t sep_len = 4;
-  if (sep == NULL) {
-    sep = strstr(response.data, "\\n\\n");
-    sep_len = 2;
-  }
-  if (sep == NULL) {
-    free(response.data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid http response"));
-  }
-
-  const char* line_end = strstr(response.data, "\\r\\n");
-  size_t line_sep_len = 2;
-  if (line_end == NULL || line_end > sep) {
-    line_end = strstr(response.data, "\\n");
-    line_sep_len = 1;
-  }
-  if (line_end == NULL || line_end > sep) {
-    free(response.data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
-  }
-
-  const char* code_start = strchr(response.data, ' ');
-  if (code_start == NULL || code_start >= line_end) {
-    free(response.data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
-  }
-  code_start++;
-  char* code_end = NULL;
-  long long status = strtoll(code_start, &code_end, 10);
-  if (code_end == code_start || code_end > line_end) {
-    free(response.data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status code"));
-  }
-  if (status >= 400) {
-    free(response.data);
-    return http_err1("stdlib.http.HttpBadStatus", status);
-  }
-
-  const char* headers_start = line_end + line_sep_len;
-  char* headers = dup_slice(headers_start, (size_t)(sep - headers_start));
-  char* body_out = dup_cstr(sep + sep_len);
-  free(response.data);
-  return http_ok_response(status, headers, body_out);
+  return http_response_result(response.data);
 }
 
 long long vector_empty() {
@@ -4286,7 +4609,11 @@ long long tcp_echo_serve(long long port, long long max_connections) {
         tmp_c.write(runtime_c)
         c_path = Path(tmp_c.name)
     try:
-        subprocess.run([clang, str(ll_path), str(c_path), "-O2", "-o", str(out)], check=True)
+        clang_cmd = [clang, str(ll_path), str(c_path), "-O2"]
+        if sys.platform == "darwin":
+            clang_cmd.extend(["-framework", "Security", "-framework", "CoreFoundation"])
+        clang_cmd.extend(["-o", str(out)])
+        subprocess.run(clang_cmd, check=True)
     finally:
         ll_path.unlink(missing_ok=True)
         c_path.unlink(missing_ok=True)

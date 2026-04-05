@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import ssl
 import time
 import unittest
 from collections.abc import Callable, Iterator
@@ -147,6 +148,31 @@ def running_http_server(
     except PermissionError:
         case.skipTest("network socket bind not permitted in this environment")
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="http-server")
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1.0)
+
+
+@contextmanager
+def running_https_server(
+    case: unittest.TestCase,
+    handler_cls: type[BaseHTTPRequestHandler],
+    *,
+    certfile: Path,
+    keyfile: Path,
+) -> Iterator[int]:
+    try:
+        server = HTTPServer(("127.0.0.1", 0), handler_cls)
+    except PermissionError:
+        case.skipTest("network socket bind not permitted in this environment")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile=str(certfile), keyfile=str(keyfile))
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="https-server")
     thread.start()
     try:
         yield int(server.server_address[1])

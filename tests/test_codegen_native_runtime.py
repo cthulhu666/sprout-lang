@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import unittest
+from http.server import BaseHTTPRequestHandler
 
 from tests.codegen_test_support import *
 
@@ -1141,6 +1143,166 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, msg=run.stderr)
             self.assertEqual(run.stdout.strip(), '{"ok":true,"items":[2,"x\\n"],"meta":{"count":2}}')
+
+    @unittest.skipUnless(shutil.which("clang") and shutil.which("openssl"), "clang or openssl not installed")
+    def test_native_http_request_https(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            ca_key_pem = tmp_path / "ca.key"
+            ca_pem = tmp_path / "ca.pem"
+            ca_der = tmp_path / "ca.der"
+            server_key_pem = tmp_path / "server.key"
+            server_csr = tmp_path / "server.csr"
+            server_pem = tmp_path / "server.pem"
+            server_ext = tmp_path / "server.ext"
+            server_ext.write_text(
+                "[v3_req]\n"
+                "subjectAltName=DNS:localhost\n"
+                "basicConstraints=CA:FALSE\n"
+                "keyUsage=critical,digitalSignature,keyEncipherment\n"
+                "extendedKeyUsage=serverAuth\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-keyout",
+                    str(ca_key_pem),
+                    "-out",
+                    str(ca_pem),
+                    "-days",
+                    "1",
+                    "-subj",
+                    "/CN=Sprout Test CA",
+                    "-addext",
+                    "basicConstraints=critical,CA:TRUE",
+                    "-addext",
+                    "keyUsage=critical,keyCertSign,cRLSign",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    "openssl",
+                    "req",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-keyout",
+                    str(server_key_pem),
+                    "-out",
+                    str(server_csr),
+                    "-subj",
+                    "/CN=localhost",
+                    "-addext",
+                    "subjectAltName=DNS:localhost",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    "openssl",
+                    "x509",
+                    "-req",
+                    "-in",
+                    str(server_csr),
+                    "-CA",
+                    str(ca_pem),
+                    "-CAkey",
+                    str(ca_key_pem),
+                    "-CAcreateserial",
+                    "-out",
+                    str(server_pem),
+                    "-days",
+                    "1",
+                    "-sha256",
+                    "-extfile",
+                    str(server_ext),
+                    "-extensions",
+                    "v3_req",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    "openssl",
+                    "x509",
+                    "-in",
+                    str(ca_pem),
+                    "-outform",
+                    "der",
+                    "-out",
+                    str(ca_der),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            class Handler(BaseHTTPRequestHandler):
+                def do_GET(self) -> None:  # noqa: N802
+                    payload = b"https-ok"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+
+                def log_message(self, format: str, *args: object) -> None:
+                    return
+
+            with running_https_server(self, Handler, certfile=server_pem, keyfile=server_key_pem) as port:
+                src = f"""
+                fn main() -> Unit !{{IO}} =
+                  match http_request("GET", "https://localhost:{port}/", "", "", 5000) with
+                  | Ok (HttpResponse status _ body) ->
+                      if status == 200 && str_find(body, "https-ok") >= 0 then
+                        print(body)
+                      else
+                        print("bad")
+                  | Err HttpTimeout -> print("timeout")
+                  | Err (HttpNetwork msg) -> print(msg)
+                  | Err (HttpBadStatus code) -> print(code)
+                  | Err (HttpDecode msg) -> print(msg)
+                """
+                spr_path = tmp_path / "prog.sprout"
+                bin_path = tmp_path / "prog"
+                spr_path.write_text(src, encoding="utf-8")
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "sprout.cli",
+                        "compile",
+                        "--with-http-stdlib",
+                        str(spr_path),
+                        "--native",
+                        "-o",
+                        str(bin_path),
+                    ],
+                    check=True,
+                    env={**os.environ, "SPROUT_HTTP_CA_CERT": str(ca_der)},
+                )
+                run = subprocess.run(
+                    [str(bin_path)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env={**os.environ, "SPROUT_HTTP_CA_CERT": str(ca_der)},
+                )
+                self.assertEqual(run.returncode, 0, msg=run.stderr)
+                self.assertEqual(run.stdout.strip(), "https-ok")
 
 
 if __name__ == "__main__":
