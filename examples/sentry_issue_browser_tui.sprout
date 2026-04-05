@@ -79,6 +79,10 @@ fn issue_count_text(issues: Vec IssueSummary) -> String =
 fn help_text() -> String =
   "Arrows/j/k move  Enter opens details  r refreshes  q quits"
 
+fn render_status_line(status_line: String) -> String =
+  if status_line == "" then ""
+  else "\n" ++ status_line
+
 fn render_visible_issue_rows(index: Int, total: Int, issues: Vec IssueSummary, selected: Int, scroll: Int, window_size: Int) -> String =
   if index >= total || index >= scroll + window_size then ""
   else
@@ -105,11 +109,13 @@ fn render_issue_browser(issues: Vec IssueSummary, selected: Int, scroll: Int, st
       "\nq quits  r refreshes"
     )
   else
-    concat3(
-      concat3("Sentry issues  ", issue_count_text(issues), "\n"),
-      concat3(render_visible_issue_rows(0, vec_length(issues), issues, selected, scroll, visible_window_size()), "\n\n", help_text()),
-      concat3("\n", status_line, "")
-    )
+    "Sentry issues  "
+    ++ issue_count_text(issues)
+    ++ "\n"
+    ++ render_visible_issue_rows(0, vec_length(issues), issues, selected, scroll, visible_window_size())
+    ++ "\n\n"
+    ++ help_text()
+    ++ render_status_line(status_line)
 
 fn detail_line(label: String, value: String) -> String =
   concat3(label, ": ", value)
@@ -187,7 +193,7 @@ fn open_selected_issue(org: String, project: String, token: String, issues: Vec 
 
 fn reload_issue_detail(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int, scroll: Int) -> Unit !{IO} =
   match vec_get(selected, issues) with
-  | Nothing -> list_loop(org, project, token, issues, selected, scroll, help_text())
+  | Nothing -> list_loop(org, project, token, issues, selected, scroll, "")
   | Just summary ->
       match fetch_issue_detail(token, summary) with
       | Ok next_detail -> detail_loop(org, project, token, issues, selected, scroll, next_detail)
@@ -211,8 +217,8 @@ fn detail_loop(org: String, project: String, token: String, issues: Vec IssueSum
     render_frame(render_issue_detail(detail))
     match term_read_key_once() with
     | "q" -> term_write("")
-    | "escape" -> list_loop(org, project, token, issues, selected, scroll, help_text())
-    | "left" -> list_loop(org, project, token, issues, selected, scroll, help_text())
+    | "escape" -> list_loop(org, project, token, issues, selected, scroll, "")
+    | "left" -> list_loop(org, project, token, issues, selected, scroll, "")
     | "r" -> reload_issue_detail(org, project, token, issues, selected, scroll)
     | _ -> detail_loop(org, project, token, issues, selected, scroll, detail)
 
@@ -230,7 +236,7 @@ export fn run_from_env() -> String !{IO} =
 
 fn interactive_boot(org: String, project: String, token: String) -> Unit !{IO} =
   match fetch_issues(org, project, token) with
-  | Ok issues -> list_loop(org, project, token, issues, 0, 0, help_text())
+  | Ok issues -> list_loop(org, project, token, issues, 0, 0, "")
   | Err err -> initial_error_loop(org, project, token, err)
 
 export fn run_interactive_from_env() -> Unit !{IO} =
