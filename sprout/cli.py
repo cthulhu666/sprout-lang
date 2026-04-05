@@ -225,6 +225,7 @@ def cmd_compile(
     runtime_c = """#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <string.h>
 #include <regex.h>
 #include <sys/socket.h>
@@ -2870,6 +2871,129 @@ static void free_http_url(HttpUrl* url) {
   free(url->path);
 }
 
+static char ascii_lower_char(char ch) {
+  if (ch >= 'A' && ch <= 'Z') return (char)(ch - 'A' + 'a');
+  return ch;
+}
+
+static int ascii_ieq_char(char left, char right) {
+  return ascii_lower_char(left) == ascii_lower_char(right);
+}
+
+static int ascii_contains_token_ci(const char* text, const char* token) {
+  if (text == NULL || token == NULL || token[0] == '\\0') return 0;
+  size_t token_len = strlen(token);
+  const char* cursor = text;
+  while (*cursor != '\\0') {
+    while (*cursor == ' ' || *cursor == '\\t' || *cursor == ',') cursor++;
+    const char* start = cursor;
+    while (*cursor != '\\0' && *cursor != ',') cursor++;
+    const char* end = cursor;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\\t')) end--;
+    if ((size_t)(end - start) == token_len) {
+      size_t i = 0;
+      while (i < token_len && ascii_ieq_char(start[i], token[i])) i++;
+      if (i == token_len) return 1;
+    }
+    if (*cursor == ',') cursor++;
+  }
+  return 0;
+}
+
+static char* http_header_value_ci(const char* headers, const char* key) {
+  if (headers == NULL || key == NULL) return NULL;
+  size_t key_len = strlen(key);
+  const char* line = headers;
+  while (*line != '\\0') {
+    const char* end = line;
+    while (*end != '\\0' && *end != '\\n' && *end != '\\r') end++;
+    const char* colon = NULL;
+    for (const char* p = line; p < end; p++) {
+      if (*p == ':') {
+        colon = p;
+        break;
+      }
+    }
+    if (colon != NULL) {
+      const char* key_start = line;
+      while (key_start < colon && (*key_start == ' ' || *key_start == '\\t')) key_start++;
+      const char* key_end = colon;
+      while (key_end > key_start && (key_end[-1] == ' ' || key_end[-1] == '\\t')) key_end--;
+      if ((size_t)(key_end - key_start) == key_len) {
+        size_t i = 0;
+        while (i < key_len && ascii_ieq_char(key_start[i], key[i])) i++;
+        if (i == key_len) {
+          const char* value_start = colon + 1;
+          while (value_start < end && (*value_start == ' ' || *value_start == '\\t')) value_start++;
+          const char* value_end = end;
+          while (value_end > value_start && (value_end[-1] == ' ' || value_end[-1] == '\\t')) value_end--;
+          return dup_slice(value_start, (size_t)(value_end - value_start));
+        }
+      }
+    }
+    while (*end == '\\r' || *end == '\\n') end++;
+    line = end;
+  }
+  return NULL;
+}
+
+static int hex_digit_value(char ch) {
+  if (ch >= '0' && ch <= '9') return ch - '0';
+  if (ch >= 'a' && ch <= 'f') return 10 + (ch - 'a');
+  if (ch >= 'A' && ch <= 'F') return 10 + (ch - 'A');
+  return -1;
+}
+
+static char* http_decode_chunked_body(const char* body, char** err) {
+  ByteBuf out;
+  buf_init(&out);
+  const char* cursor = body;
+  while (1) {
+    while (*cursor == '\\r' || *cursor == '\\n') cursor++;
+    const char* size_start = cursor;
+    while (*cursor != '\\0' && *cursor != '\\r' && *cursor != '\\n' && *cursor != ';') cursor++;
+    const char* size_end = cursor;
+    if (size_start == size_end) {
+      free(out.data);
+      *err = dup_cstr("invalid chunk size");
+      return NULL;
+    }
+    size_t chunk_size = 0;
+    for (const char* p = size_start; p < size_end; p++) {
+      int digit = hex_digit_value(*p);
+      if (digit < 0) {
+        free(out.data);
+        *err = dup_cstr("invalid chunk size");
+        return NULL;
+      }
+      chunk_size = (chunk_size * 16u) + (size_t)digit;
+    }
+    while (*cursor != '\\0' && *cursor != '\\n') cursor++;
+    if (*cursor == '\\n') cursor++;
+    if (chunk_size == 0) {
+      while (*cursor == '\\r' || *cursor == '\\n') cursor++;
+      break;
+    }
+    if (strlen(cursor) < chunk_size) {
+      free(out.data);
+      *err = dup_cstr("truncated chunk data");
+      return NULL;
+    }
+    buf_append_bytes(&out, cursor, chunk_size);
+    cursor += chunk_size;
+    if (cursor[0] == '\\r' && cursor[1] == '\\n') {
+      cursor += 2;
+    } else if (cursor[0] == '\\n') {
+      cursor += 1;
+    } else {
+      free(out.data);
+      *err = dup_cstr("invalid chunk terminator");
+      return NULL;
+    }
+  }
+  return out.data != NULL ? out.data : dup_cstr("");
+}
+
 static long long http_response_result(char* response_data) {
   if (response_data == NULL || response_data[0] == '\\0') {
     free(response_data);
@@ -2921,6 +3045,40 @@ static long long http_response_result(char* response_data) {
   const char* headers_start = line_end + line_sep_len;
   char* headers = dup_slice(headers_start, (size_t)(sep - headers_start));
   char* body_out = dup_cstr(sep + sep_len);
+  char* transfer_encoding = http_header_value_ci(headers, "Transfer-Encoding");
+  char* content_encoding = http_header_value_ci(headers, "Content-Encoding");
+  if (content_encoding != NULL) {
+    if (content_encoding[0] != '\\0' && !ascii_contains_token_ci(content_encoding, "identity")) {
+      free(content_encoding);
+      free(transfer_encoding);
+      free(headers);
+      free(body_out);
+      free(response_data);
+      return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("unsupported content encoding"));
+    }
+    free(content_encoding);
+  }
+  if (transfer_encoding != NULL) {
+    if (ascii_contains_token_ci(transfer_encoding, "chunked")) {
+      char* chunk_err = NULL;
+      char* decoded = http_decode_chunked_body(body_out, &chunk_err);
+      free(body_out);
+      body_out = decoded;
+      if (chunk_err != NULL) {
+        free(transfer_encoding);
+        free(headers);
+        free(response_data);
+        return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)chunk_err);
+      }
+    } else if (transfer_encoding[0] != '\\0') {
+      free(transfer_encoding);
+      free(headers);
+      free(body_out);
+      free(response_data);
+      return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("unsupported transfer encoding"));
+    }
+    free(transfer_encoding);
+  }
   free(response_data);
   return http_ok_response(status, headers, body_out);
 }
@@ -3068,10 +3226,26 @@ static char* tls_error_message(const char* prefix, OSStatus status, const TlsCon
   return dup_cstr(detail);
 }
 
+static int tls_debug_enabled(void) {
+  const char* raw = getenv("SPROUT_HTTP_TLS_DEBUG");
+  return raw != NULL && raw[0] != '\\0' && strcmp(raw, "0") != 0;
+}
+
+static void tls_debug_log(const char* fmt, ...) {
+  if (!tls_debug_enabled()) return;
+  va_list args;
+  va_start(args, fmt);
+  fprintf(stderr, "[sprout tls] ");
+  vfprintf(stderr, fmt, args);
+  fprintf(stderr, "\\n");
+  va_end(args);
+}
+
 static OSStatus tls_handshake(SSLContextRef ctx, TlsConn* conn) {
   while (1) {
     conn->last_errno = 0;
     OSStatus status = SSLHandshake(ctx);
+    tls_debug_log("handshake status=%d errno=%d", (int)status, conn->last_errno);
     if (status == noErr || tls_status_is_auth_event(status)) {
       return noErr;
     }
@@ -3089,6 +3263,7 @@ static OSStatus tls_write_all(SSLContextRef ctx, TlsConn* conn, const char* data
     size_t written = len - offset;
     conn->last_errno = 0;
     OSStatus status = SSLWrite(ctx, data + offset, len - offset, &written);
+    tls_debug_log("write status=%d wrote=%zu remaining=%zu errno=%d", (int)status, written, len - offset, conn->last_errno);
     offset += written;
     if (status == noErr) continue;
     if (tls_status_is_auth_event(status)) continue;
@@ -3107,6 +3282,7 @@ static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* respo
     size_t chunk_len = sizeof(chunk);
     conn->last_errno = 0;
     OSStatus status = SSLRead(ctx, chunk, sizeof(chunk), &chunk_len);
+    tls_debug_log("read status=%d chunk_len=%zu errno=%d", (int)status, chunk_len, conn->last_errno);
     if (chunk_len > 0) {
       buf_append_bytes(response, chunk, chunk_len);
     }
@@ -3159,13 +3335,15 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
   }
 
   TlsConn tls = {.fd = fd, .last_errno = 0};
+  int use_custom_ca = tls_uses_custom_ca_anchor();
+  tls_debug_log("connect host=%s port=%s timeout_ms=%lld custom_ca=%s", parsed->host, parsed->port, timeout_ms, use_custom_ca ? "yes" : "no");
   SSLContextRef ctx = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
   if (ctx == NULL) {
     close(fd);
     return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr("tls context creation failed"));
   }
   OSStatus status = SSLSetIOFuncs(ctx, tls_read_func, tls_write_func);
-  int use_custom_ca = tls_uses_custom_ca_anchor();
+  tls_debug_log("manual_trust=%d", use_custom_ca ? 1 : 0);
   if (status == noErr && use_custom_ca) status = SSLSetSessionOption(ctx, kSSLSessionOptionBreakOnServerAuth, true);
   if (status == noErr) status = SSLSetConnection(ctx, (SSLConnectionRef)&tls);
   if (status == noErr) status = SSLSetPeerDomainName(ctx, parsed->host, strlen(parsed->host));

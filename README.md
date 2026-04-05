@@ -565,7 +565,7 @@ Current experimental scope:
 - `Content-Length` request bodies
 - `Connection: close` responses only
 - sequential request handling per accepted connection
-- no keep-alive, chunked transfer encoding, TLS, or multi-reactor native server runtime yet
+- no keep-alive, chunked transfer encoding for server responses, TLS server support, or multi-reactor native server runtime yet
 
 JSON stdlib helpers (in `stdlib/json.sprout`):
 
@@ -819,6 +819,7 @@ Application code should prefer the typed `stdlib.net` wrapper API over bare `Int
 Raw `bytes_*` primitives are internal to `stdlib.*`; application code should use `stdlib.bytes`.
 `to_string` rejects invalid UTF-8 and decoded NUL bytes; `read_c_string` is the intended helper for null-terminated protocol strings.
 `http_request` is available in interpreter and native modes for plain `http://` requests. Native mode also supports `https://` on macOS via the system TLS stack.
+Set `SPROUT_HTTP_TLS_DEBUG=1` when running a native binary to emit TLS handshake/read/write debug lines to stderr.
 
 Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
 

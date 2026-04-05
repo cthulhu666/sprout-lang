@@ -23,10 +23,25 @@ fn json_error_to_http_error(err: JsonError) -> HttpError =
   match err with
   | JsonDecode msg -> HttpDecode(msg)
 
+fn preview_limit() -> Int =
+  160
+
+fn preview_body(body: String) -> String =
+  if strlib.length(body) <= preview_limit() then body
+  else strlib.concat(strlib.slice(body, 0, preview_limit()), "...")
+
 fn parse_json_response(resp: HttpResponse) -> Result HttpError Json =
   match parse(http_response_body(resp)) with
   | Ok value -> Ok(value)
-  | Err err -> Err(json_error_to_http_error(err))
+  | Err err ->
+      match json_error_to_http_error(err) with
+      | HttpDecode msg ->
+          Err(
+            HttpDecode(
+              concat4(msg, "; body starts with: ", "\"", concat3(preview_body(http_response_body(resp)), "\"", ""))
+            )
+          )
+      | other -> Err(other)
 
 fn json_string_or_fallback(value: Json, fallback: String) -> String =
   match json_get_string(value) with

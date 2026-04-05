@@ -403,6 +403,41 @@ class NativeIoIntegrationTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stdout.strip(), "ok:hello")
 
+    def test_native_http_request_chunked_json_body(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                for chunk in (b'{"ok":', b"true", b',"items":[1,2]}'):
+                    self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii"))
+                    self.wfile.write(chunk + b"\r\n")
+                self.wfile.write(b"0\r\n\r\n")
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        with running_http_server(self, Handler) as port:
+            run = self._run_native(
+                f"""
+                import stdlib.json as json
+
+                fn main() -> Unit !{{IO}} =
+                  match http_request("GET", "http://127.0.0.1:{port}/chunked", "", "", 500) with
+                  | Ok (HttpResponse _ _ body) ->
+                      match json.parse(body) with
+                      | Ok value -> print(json.stringify(value))
+                      | Err _ -> print("json-err")
+                  | Err _ -> print("http-err")
+                """,
+                with_http_stdlib=True,
+            )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stdout.strip(), '{"ok":true,"items":[1,2]}')
+
     def test_native_http_request_http_error(self) -> None:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
