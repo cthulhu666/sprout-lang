@@ -1144,6 +1144,75 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "APP-17:Broken checkout")
 
+    def test_examples_sentry_api_decodes_issue_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import examples.sentry_api (issue_detail_culprit, issue_detail_permalink, issue_detail_short_id, issue_detail_status, sentry_decode_issue_detail)
+                import stdlib.json (parse)
+                import stdlib.string as strlib
+
+                fn main() -> Unit !{IO} =
+                  match parse("{\\"id\\":\\"123\\",\\"shortId\\":\\"APP-17\\",\\"title\\":\\"Broken checkout\\",\\"status\\":\\"unresolved\\",\\"level\\":\\"error\\",\\"culprit\\":\\"checkout.submit\\",\\"permalink\\":\\"https://sentry.io/issues/123/\\"}") with
+                  | Err _ -> print("decode-error")
+                  | Ok payload ->
+                      match sentry_decode_issue_detail(payload) with
+                      | detail ->
+                          print(
+                            strlib.concat(
+                              strlib.concat(
+                                strlib.concat(issue_detail_short_id(detail), "|"),
+                                strlib.concat(issue_detail_status(detail), "|")
+                              ),
+                              strlib.concat(
+                                strlib.concat(issue_detail_culprit(detail), "|"),
+                                issue_detail_permalink(detail)
+                              )
+                            )
+                          )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "APP-17|unresolved|checkout.submit|https://sentry.io/issues/123/",
+            )
+
+    def test_examples_sentry_tui_entrypoint_falls_back_to_non_interactive_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import examples.sentry_issue_browser_tui (run_entrypoint)
+
+                fn main() -> Unit !{IO} =
+                  run_entrypoint()
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            with patch.dict("os.environ", {}, clear=True):
+                run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "Configuration error: missing environment variable: SENTRY_ORG",
+            )
+
     def test_examples_sentry_tui_renders_issue_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

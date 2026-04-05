@@ -4,8 +4,23 @@ import stdlib.json (Json, JsonArray, JsonArrayStep, JsonError, json_array_next, 
 import stdlib.http_client (http_get)
 import stdlib.string as strlib
 
-export type IssueSummary(..) =
-  | IssueSummary String String String
+export type IssueRef (..) =
+  | IssueRef String String
+
+export type IssueSummary (..) =
+  | IssueSummary IssueRef String String
+
+export type IssueIdentity (..) =
+  | IssueIdentity String String String
+
+export type IssueStatusInfo (..) =
+  | IssueStatusInfo String String
+
+export type IssueLinks (..) =
+  | IssueLinks String String
+
+export type IssueDetail (..) =
+  | IssueDetail IssueIdentity IssueStatusInfo IssueLinks
 
 export fn sentry_auth_header(token: String) -> String =
   strlib.concat("Authorization: Bearer ", token)
@@ -18,6 +33,9 @@ fn concat4(a: String, b: String, c: String, d: String) -> String =
 
 fn sentry_issues_url(org: String, project: String) -> String =
   concat4("https://sentry.io/api/0/projects/", org, "/", concat3(project, "/", "issues/"))
+
+fn sentry_issue_detail_url(issue_id: String) -> String =
+  concat4("https://sentry.io/api/0/issues/", issue_id, "/", "")
 
 fn json_error_to_http_error(err: JsonError) -> HttpError =
   match err with
@@ -55,9 +73,29 @@ fn issue_field_or_fallback(issue: Json, key: String, fallback: String) -> String
 
 fn issue_summary_from_json(issue: Json) -> IssueSummary =
   IssueSummary(
-    issue_field_or_fallback(issue, "shortId", "<missing-short-id>"),
+    IssueRef(
+      issue_field_or_fallback(issue, "id", "<missing-id>"),
+      issue_field_or_fallback(issue, "shortId", "<missing-short-id>")
+    ),
     issue_field_or_fallback(issue, "title", "<missing-title>"),
     issue_field_or_fallback(issue, "status", "<missing-status>")
+  )
+
+fn issue_detail_from_json(issue: Json) -> IssueDetail =
+  IssueDetail(
+    IssueIdentity(
+      issue_field_or_fallback(issue, "id", "<missing-id>"),
+      issue_field_or_fallback(issue, "shortId", "<missing-short-id>"),
+      issue_field_or_fallback(issue, "title", "<missing-title>")
+    ),
+    IssueStatusInfo(
+      issue_field_or_fallback(issue, "status", "<missing-status>"),
+      issue_field_or_fallback(issue, "level", "<missing-level>")
+    ),
+    IssueLinks(
+      issue_field_or_fallback(issue, "culprit", "<missing-culprit>"),
+      issue_field_or_fallback(issue, "permalink", "<missing-permalink>")
+    )
   )
 
 fn decode_issue_array(items: JsonArray) -> Vec IssueSummary =
@@ -72,9 +110,20 @@ export fn sentry_decode_issue_summaries(value: Json) -> Vec IssueSummary =
   | Just items -> decode_issue_array(items)
   | Nothing -> vec_empty()
 
+export fn sentry_decode_issue_detail(value: Json) -> IssueDetail =
+  issue_detail_from_json(value)
+
+export fn issue_id(summary: IssueSummary) -> String =
+  match summary with
+  | IssueSummary issue_ref _ _ ->
+      match issue_ref with
+      | IssueRef issue_id _ -> issue_id
+
 export fn issue_short_id(summary: IssueSummary) -> String =
   match summary with
-  | IssueSummary short_id _ _ -> short_id
+  | IssueSummary issue_ref _ _ ->
+      match issue_ref with
+      | IssueRef _ short_id -> short_id
 
 export fn issue_title(summary: IssueSummary) -> String =
   match summary with
@@ -83,6 +132,48 @@ export fn issue_title(summary: IssueSummary) -> String =
 export fn issue_status(summary: IssueSummary) -> String =
   match summary with
   | IssueSummary _ _ status -> status
+
+export fn issue_detail_id(detail: IssueDetail) -> String =
+  match detail with
+  | IssueDetail identity _ _ ->
+      match identity with
+      | IssueIdentity issue_id _ _ -> issue_id
+
+export fn issue_detail_short_id(detail: IssueDetail) -> String =
+  match detail with
+  | IssueDetail identity _ _ ->
+      match identity with
+      | IssueIdentity _ short_id _ -> short_id
+
+export fn issue_detail_title(detail: IssueDetail) -> String =
+  match detail with
+  | IssueDetail identity _ _ ->
+      match identity with
+      | IssueIdentity _ _ title -> title
+
+export fn issue_detail_status(detail: IssueDetail) -> String =
+  match detail with
+  | IssueDetail _ status_info _ ->
+      match status_info with
+      | IssueStatusInfo status _ -> status
+
+export fn issue_detail_level(detail: IssueDetail) -> String =
+  match detail with
+  | IssueDetail _ status_info _ ->
+      match status_info with
+      | IssueStatusInfo _ level -> level
+
+export fn issue_detail_culprit(detail: IssueDetail) -> String =
+  match detail with
+  | IssueDetail _ _ links ->
+      match links with
+      | IssueLinks culprit _ -> culprit
+
+export fn issue_detail_permalink(detail: IssueDetail) -> String =
+  match detail with
+  | IssueDetail _ _ links ->
+      match links with
+      | IssueLinks _ permalink -> permalink
 
 export fn sentry_http_error_message(err: HttpError) -> String =
   match err with
@@ -99,6 +190,16 @@ export fn sentry_list_issues_json(org: String, project: String, token: String, t
 export fn sentry_list_issues(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError (Vec IssueSummary) !{IO} =
   match sentry_list_issues_json(org, project, token, timeout_ms) with
   | Ok value -> Ok(sentry_decode_issue_summaries(value))
+  | Err err -> Err(err)
+
+export fn sentry_issue_detail_json(issue_id: String, token: String, timeout_ms: Int) -> Result HttpError Json !{IO} =
+  match http_get(sentry_issue_detail_url(issue_id), sentry_auth_header(token), timeout_ms) with
+  | Ok resp -> parse_json_response(resp)
+  | Err err -> Err(err)
+
+export fn sentry_get_issue_detail(issue_id: String, token: String, timeout_ms: Int) -> Result HttpError IssueDetail !{IO} =
+  match sentry_issue_detail_json(issue_id, token, timeout_ms) with
+  | Ok value -> Ok(issue_detail_from_json(value))
   | Err err -> Err(err)
 
 export fn sentry_first_issue_title(issues: Json) -> String =

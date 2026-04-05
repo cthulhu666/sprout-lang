@@ -1,5 +1,5 @@
 module examples.sentry_issue_browser
-import examples.sentry_issue_browser_tui (run_from_env)
+import examples.sentry_issue_browser_tui (run_entrypoint)
 
 fn main() -> Unit !{IO} =
-  print(run_from_env())
+  run_entrypoint()

@@ -100,7 +100,7 @@ Definition of done:
 
 - [~] `P0` Add `examples/sentry_api.sprout` with typed wrappers for key endpoints:
   - typed list-issue summary decoding is now implemented
-  - issue details remain pending
+  - issue details are now implemented for the interactive browser
   - pagination cursor extraction remains pending
 - [ ] `P1` Add auth/token helpers and secure configuration loading.
 - [ ] `P1` Add integration tests with mocked HTTP responses.
@@ -117,9 +117,9 @@ Definition of done:
   - load token/org/project config from environment is now implemented
   - fetch first page is now implemented
   - render list is now implemented
-  - key navigation (`j/k`, enter)
-  - refresh/retry
-- [ ] `P1` Add issue detail panel.
+  - key navigation (`j/k`, arrows, enter) is now implemented
+  - refresh/retry is now implemented
+- [x] `P1` Add issue detail panel.
 - [ ] `P1` Add filtering/sorting controls.
 - [ ] `P2` Add search and pagination UI.
 

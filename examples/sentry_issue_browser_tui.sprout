@@ -1,9 +1,9 @@
 module examples.sentry_issue_browser_tui
-import examples.sentry_api (IssueSummary, issue_short_id, issue_status, issue_title, sentry_http_error_message, sentry_list_issues)
-import stdlib.terminal (term_render_line)
+import examples.sentry_api (IssueDetail, IssueSummary, issue_detail_culprit, issue_detail_id, issue_detail_level, issue_detail_permalink, issue_detail_short_id, issue_detail_status, issue_detail_title, issue_id, issue_short_id, issue_status, issue_title, sentry_get_issue_detail, sentry_http_error_message, sentry_list_issues)
+import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_render_line, term_reset_screen)
 import stdlib.string as strlib
 
-export type SentryConfig(..) =
+export type SentryConfig (..) =
   | SentryConfig String String String
 
 fn read_env_required(name: String) -> Result String String !{IO} =
@@ -35,6 +35,13 @@ fn format_issue_row(summary: IssueSummary) -> String =
     issue_title(summary)
   )
 
+fn format_selected_issue_row(summary: IssueSummary) -> String =
+  concat3(
+    concat4("> [", issue_status(summary), "] ", issue_short_id(summary)),
+    " - ",
+    issue_title(summary)
+  )
+
 fn render_issue_rows(index: Int, total: Int, issues: Vec IssueSummary) -> String =
   if index >= total then ""
   else
@@ -48,10 +55,169 @@ export fn render_issue_list(issues: Vec IssueSummary) -> String =
   if vec_length(issues) == 0 then "No issues returned."
   else concat3("Sentry issues", "\n", render_issue_rows(0, vec_length(issues), issues))
 
-export fn run_once(org: String, project: String, token: String) -> String !{IO} =
+fn max_int(left: Int, right: Int) -> Int =
+  if left >= right then left else right
+
+fn min_int(left: Int, right: Int) -> Int =
+  if left <= right then left else right
+
+fn visible_window_size() -> Int =
+  12
+
+fn clamp_selection(selected: Int, issues: Vec IssueSummary) -> Int =
+  if vec_length(issues) <= 0 then 0
+  else min_int(max_int(selected, 0), vec_length(issues) - 1)
+
+fn scroll_for_selection(selected: Int, scroll: Int) -> Int =
+  if selected < scroll then selected
+  else if selected >= scroll + visible_window_size() then selected - visible_window_size() + 1
+  else scroll
+
+fn issue_count_text(issues: Vec IssueSummary) -> String =
+  strlib.concat("Issues: ", to_string(vec_length(issues)))
+
+fn help_text() -> String =
+  "Arrows/j/k move  Enter opens details  r refreshes  q quits"
+
+fn render_visible_issue_rows(index: Int, total: Int, issues: Vec IssueSummary, selected: Int, scroll: Int, window_size: Int) -> String =
+  if index >= total || index >= scroll + window_size then ""
+  else
+    match vec_get(index, issues) with
+    | Nothing -> ""
+    | Just summary ->
+        if index < scroll then
+          render_visible_issue_rows(index + 1, total, issues, selected, scroll, window_size)
+        else
+          if index + 1 >= total || index + 1 >= scroll + window_size then
+            if index == selected then format_selected_issue_row(summary) else format_issue_row(summary)
+          else
+            concat3(
+              if index == selected then format_selected_issue_row(summary) else format_issue_row(summary),
+              "\n",
+              render_visible_issue_rows(index + 1, total, issues, selected, scroll, window_size)
+            )
+
+fn render_issue_browser(issues: Vec IssueSummary, selected: Int, scroll: Int, status_line: String) -> String =
+  if vec_length(issues) == 0 then
+    concat3(
+      "Sentry issues\n\nNo issues returned.\n\n",
+      status_line,
+      "\nq quits  r refreshes"
+    )
+  else
+    concat3(
+      concat3("Sentry issues  ", issue_count_text(issues), "\n"),
+      concat3(render_visible_issue_rows(0, vec_length(issues), issues, selected, scroll, visible_window_size()), "\n\n", help_text()),
+      concat3("\n", status_line, "")
+    )
+
+fn detail_line(label: String, value: String) -> String =
+  concat3(label, ": ", value)
+
+fn render_issue_detail(detail: IssueDetail) -> String =
+  concat3(
+    concat3(
+      concat3(
+        concat3(
+          concat3(
+            concat3("Issue detail\n\n", detail_line("Short ID", issue_detail_short_id(detail)), "\n"),
+            detail_line("Title", issue_detail_title(detail)),
+            "\n"
+          ),
+          detail_line("Status", issue_detail_status(detail)),
+          "\n"
+        ),
+        detail_line("Level", issue_detail_level(detail)),
+        "\n"
+      ),
+      concat3(detail_line("Culprit", issue_detail_culprit(detail)), "\n", detail_line("Issue ID", issue_detail_id(detail))),
+      "\n"
+    ),
+    concat3(detail_line("Permalink", issue_detail_permalink(detail)), "\n\nLeft/esc returns  r reloads  q quits", ""),
+    ""
+  )
+
+fn render_frame(frame: String) -> Unit !{IO} =
+  do
+    term_reset_screen()
+    term_write(frame)
+
+fn fetch_issues(org: String, project: String, token: String) -> Result String (Vec IssueSummary) !{IO} =
   match sentry_list_issues(org, project, token, 3000) with
+  | Ok issues -> Ok(issues)
+  | Err err -> Err(strlib.concat("Request failed: ", sentry_http_error_message(err)))
+
+fn fetch_issue_detail(token: String, summary: IssueSummary) -> Result String IssueDetail !{IO} =
+  match sentry_get_issue_detail(issue_id(summary), token, 3000) with
+  | Ok detail -> Ok(detail)
+  | Err err -> Err(strlib.concat("Request failed: ", sentry_http_error_message(err)))
+
+fn initial_error_loop(org: String, project: String, token: String, message: String) -> Unit !{IO} =
+  do
+    render_frame(concat3("Sentry issues\n\n", message, "\n\nr retries  q quits"))
+    match term_read_key_once() with
+    | "q" -> term_write("")
+    | "r" -> interactive_boot(org, project, token)
+    | _ -> initial_error_loop(org, project, token, message)
+
+fn refresh_list(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int) -> Unit !{IO} =
+  match fetch_issues(org, project, token) with
+  | Ok next_issues ->
+      list_loop(
+        org,
+        project,
+        token,
+        next_issues,
+        clamp_selection(selected, next_issues),
+        scroll_for_selection(clamp_selection(selected, next_issues), 0),
+        "Refreshed issue list."
+      )
+  | Err err ->
+      list_loop(org, project, token, issues, selected, scroll_for_selection(selected, 0), err)
+
+fn open_selected_issue(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int, scroll: Int, status_line: String) -> Unit !{IO} =
+  match vec_get(selected, issues) with
+  | Nothing -> list_loop(org, project, token, issues, selected, scroll, status_line)
+  | Just summary ->
+      match fetch_issue_detail(token, summary) with
+      | Ok detail -> detail_loop(org, project, token, issues, selected, scroll, detail)
+      | Err err -> list_loop(org, project, token, issues, selected, scroll, err)
+
+fn reload_issue_detail(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int, scroll: Int) -> Unit !{IO} =
+  match vec_get(selected, issues) with
+  | Nothing -> list_loop(org, project, token, issues, selected, scroll, help_text())
+  | Just summary ->
+      match fetch_issue_detail(token, summary) with
+      | Ok next_detail -> detail_loop(org, project, token, issues, selected, scroll, next_detail)
+      | Err err -> list_loop(org, project, token, issues, selected, scroll, err)
+
+fn list_loop(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int, scroll: Int, status_line: String) -> Unit !{IO} =
+  do
+    render_frame(render_issue_browser(issues, selected, scroll, status_line))
+    match term_read_key_once() with
+    | "q" -> term_write("")
+    | "k" -> list_loop(org, project, token, issues, clamp_selection(selected - 1, issues), scroll_for_selection(clamp_selection(selected - 1, issues), scroll), status_line)
+    | "up" -> list_loop(org, project, token, issues, clamp_selection(selected - 1, issues), scroll_for_selection(clamp_selection(selected - 1, issues), scroll), status_line)
+    | "j" -> list_loop(org, project, token, issues, clamp_selection(selected + 1, issues), scroll_for_selection(clamp_selection(selected + 1, issues), scroll), status_line)
+    | "down" -> list_loop(org, project, token, issues, clamp_selection(selected + 1, issues), scroll_for_selection(clamp_selection(selected + 1, issues), scroll), status_line)
+    | "r" -> refresh_list(org, project, token, issues, selected)
+    | "enter" -> open_selected_issue(org, project, token, issues, selected, scroll, status_line)
+    | _ -> list_loop(org, project, token, issues, selected, scroll, status_line)
+
+fn detail_loop(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int, scroll: Int, detail: IssueDetail) -> Unit !{IO} =
+  do
+    render_frame(render_issue_detail(detail))
+    match term_read_key_once() with
+    | "q" -> term_write("")
+    | "escape" -> list_loop(org, project, token, issues, selected, scroll, help_text())
+    | "left" -> list_loop(org, project, token, issues, selected, scroll, help_text())
+    | "r" -> reload_issue_detail(org, project, token, issues, selected, scroll)
+    | _ -> detail_loop(org, project, token, issues, selected, scroll, detail)
+
+export fn run_once(org: String, project: String, token: String) -> String !{IO} =
+  match fetch_issues(org, project, token) with
   | Ok issues -> render_issue_list(issues)
-  | Err err -> strlib.concat("Request failed: ", sentry_http_error_message(err))
+  | Err err -> err
 
 export fn run_from_env() -> String !{IO} =
   match load_config() with
@@ -60,8 +226,29 @@ export fn run_from_env() -> String !{IO} =
       match config with
       | SentryConfig org project token -> run_once(org, project, token)
 
+fn interactive_boot(org: String, project: String, token: String) -> Unit !{IO} =
+  match fetch_issues(org, project, token) with
+  | Ok issues -> list_loop(org, project, token, issues, 0, 0, help_text())
+  | Err err -> initial_error_loop(org, project, token, err)
+
+export fn run_interactive_from_env() -> Unit !{IO} =
+  match load_config() with
+  | Err err -> term_render_line(1, strlib.concat("Configuration error: ", err))
+  | Ok config ->
+      match config with
+      | SentryConfig org project token ->
+          do
+            term_hide_cursor()
+            interactive_boot(org, project, token)
+            term_show_cursor()
+            term_reset_screen()
+
 fn boot_message() -> String =
   "sentry issue browser: set SENTRY_ORG, SENTRY_PROJECT, and SENTRY_TOKEN"
 
 export fn sentry_tui_demo_main() -> Unit !{IO} =
   term_render_line(1, boot_message())
+
+export fn run_entrypoint() -> Unit !{IO} =
+  if term_is_interactive_once() then run_interactive_from_env()
+  else print(run_from_env())
