@@ -3178,6 +3178,7 @@ static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* d
     return errSSLClosedGraceful;
   }
   *dataLength = (size_t)n;
+  if ((size_t)n < requested) return errSSLWouldBlock;
   return noErr;
 }
 
@@ -3205,6 +3206,7 @@ static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, si
     return errSSLClosedAbort;
   }
   *dataLength = (size_t)n;
+  if ((size_t)n < requested) return errSSLWouldBlock;
   return noErr;
 }
 
