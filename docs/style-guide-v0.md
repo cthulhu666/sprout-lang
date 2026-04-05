@@ -103,6 +103,15 @@ Avoid:
 - Names that encode incidental implementation details such as `tmp_value`,
   `helper2`, or `data1`
 
+Nuance:
+
+- Conventional short names such as `f`, `xs`, `acc`, `n`, `err`, or `r` are
+  acceptable when the declaration is local and the role is obvious from the
+  type and surrounding code.
+- In exported signatures and teaching examples, rename only the placeholders
+  that stay ambiguous even with their types. Prefer `value`, `left`, and
+  `right` over bare `x` and `y` in public interfaces.
+
 ## 5. Type Annotations
 
 Sprout supports inference, but repository style should still optimize for

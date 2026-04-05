@@ -246,11 +246,11 @@ export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_sum(vec_map(f, vec))
 
 export class Show a {
-  fn to_string(x: a) -> String
+  fn to_string(value: a) -> String
 }
 
 export class Ord a {
-  fn compare(x: a, y: a) -> Int
+  fn compare(left: a, right: a) -> Int
 }
 
 export fn ord_lt(x: a, y: a) -> Bool where Ord a =
@@ -404,7 +404,7 @@ export fn dict_entries(dict: Dict v) -> Vec (String, v) =
   | Dict raw -> dict_entries_from(raw, 0, map_size(raw), vec_empty())
 
 export class Semigroup t {
-  fn append(x: t, y: t) -> t
+  fn append(left: t, right: t) -> t
 }
 
 export class Functor f {
@@ -422,47 +422,47 @@ export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
   fold_values(step, init, xs)
 
 instance Semigroup String {
-  fn append(x: String, y: String) -> String =
-    str_concat(x, y)
+  fn append(left: String, right: String) -> String =
+    str_concat(left, right)
 }
 
 instance Show Int {
-  fn to_string(x: Int) -> String =
-    int_to_string(x)
+  fn to_string(value: Int) -> String =
+    int_to_string(value)
 }
 
 instance Show Bool {
-  fn to_string(x: Bool) -> String =
-    if x then "True" else "False"
+  fn to_string(value: Bool) -> String =
+    if value then "True" else "False"
 }
 
 instance Show String {
-  fn to_string(x: String) -> String =
-    x
+  fn to_string(value: String) -> String =
+    value
 }
 
 instance Ord Int {
-  fn compare(x: Int, y: Int) -> Int =
-    if x < y then -1
-    else if x > y then 1
+  fn compare(left: Int, right: Int) -> Int =
+    if left < right then -1
+    else if left > right then 1
     else 0
 }
 
 instance Ord Bool {
-  fn compare(x: Bool, y: Bool) -> Int =
-    if x == y then 0
-    else if x then 1
+  fn compare(left: Bool, right: Bool) -> Int =
+    if left == right then 0
+    else if left then 1
     else -1
 }
 
 instance Ord String {
-  fn compare(x: String, y: String) -> Int =
-    str_compare(x, y)
+  fn compare(left: String, right: String) -> Int =
+    str_compare(left, right)
 }
 
 instance Semigroup (List a) {
-  fn append(x: List a, y: List a) -> List a =
-    list_append(x, y)
+  fn append(left: List a, right: List a) -> List a =
+    list_append(left, right)
 }
 
 instance Functor List {
@@ -489,8 +489,8 @@ fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
   vec_append(item, acc)
 
 instance Semigroup (Vec a) {
-  fn append(x: Vec a, y: Vec a) -> Vec a =
-    vec_fold(vec_append_flip, x, y)
+  fn append(left: Vec a, right: Vec a) -> Vec a =
+    vec_fold(vec_append_flip, left, right)
 }
 
 fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict v =
@@ -504,9 +504,9 @@ fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict 
         | Just value -> dict_append_entries(dict_set(key, value, acc), raw, index + 1, total)
 
 instance Semigroup (Dict v) {
-  fn append(x: Dict v, y: Dict v) -> Dict v =
-    match y with
-    | Dict raw -> dict_append_entries(x, raw, 0, map_size(raw))
+  fn append(left: Dict v, right: Dict v) -> Dict v =
+    match right with
+    | Dict raw -> dict_append_entries(left, raw, 0, map_size(raw))
 }
 
 export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
