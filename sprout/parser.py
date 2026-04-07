@@ -755,6 +755,9 @@ class Parser:
             return self.mark(ast.VarExpr(name=tok.value), tok)
         if self.match("SYMBOL", "("):
             open_tok = self.tokens[self.i - 1]
+            if self.check("SYMBOL", ")"):
+                self.advance()
+                return self.mark(ast.UnitExpr(), open_tok)
             expr = self.parse_expr()
             if self.match("SYMBOL", ","):
                 items = [expr, self.parse_expr()]
@@ -788,6 +791,9 @@ class Parser:
             return self.mark(ast.StringPattern(value=tok.value), tok)
         if self.match("SYMBOL", "("):
             open_tok = self.tokens[self.i - 1]
+            if self.check("SYMBOL", ")"):
+                self.advance()
+                return self.mark(ast.UnitPattern(), open_tok)
             inner = self.parse_pattern()
             if self.match("SYMBOL", ","):
                 items = [inner, self.parse_pattern()]
@@ -834,6 +840,9 @@ class Parser:
             return self.mark(ast.VarPattern(name=name), tok)
         if self.match("SYMBOL", "("):
             open_tok = self.tokens[self.i - 1]
+            if self.check("SYMBOL", ")"):
+                self.advance()
+                return self.mark(ast.UnitPattern(), open_tok)
             inner = self.parse_pattern()
             if self.match("SYMBOL", ","):
                 items = [inner, self.parse_pattern()]

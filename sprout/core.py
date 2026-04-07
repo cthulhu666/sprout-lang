@@ -42,6 +42,11 @@ class CharExpr(Expr):
 
 
 @dataclass
+class UnitExpr(Expr):
+    src: object | None = None
+
+
+@dataclass
 class TupleExpr(Expr):
     items: list[Expr]
     src: object | None = None
@@ -158,6 +163,11 @@ class StringPattern(Pattern):
 @dataclass
 class CharPattern(Pattern):
     value: str
+    src: object | None = None
+
+
+@dataclass
+class UnitPattern(Pattern):
     src: object | None = None
 
 

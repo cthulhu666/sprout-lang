@@ -211,6 +211,11 @@ class CharExpr(Expr):
 
 
 @dataclass
+class UnitExpr(Expr):
+    pass
+
+
+@dataclass
 class TupleExpr(Expr):
     items: list[Expr]
 
@@ -265,6 +270,11 @@ class StringPattern(Pattern):
 @dataclass
 class CharPattern(Pattern):
     value: str
+
+
+@dataclass
+class UnitPattern(Pattern):
+    pass
 
 
 @dataclass

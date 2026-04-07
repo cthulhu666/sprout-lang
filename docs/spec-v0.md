@@ -31,7 +31,7 @@ Out of scope for v0:
 
 - Identifiers: `[a-zA-Z_][a-zA-Z0-9_]*`
 - Keywords: `fn`, `let`, `where`, `type`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
-- Literals: integer, boolean, string
+- Literals: integer, boolean, string, unit (`()`)
 - Comments: line comments start with `#` and continue to end of line
 
 ## 3. Program Structure
@@ -183,12 +183,20 @@ Tuple expressions use comma-separated elements inside parentheses:
 
 `(x)` remains ordinary grouping, not a 1-tuple.
 
+The unique value of `Unit` is written `()`:
+
+```sprout
+()
+```
+
 Tuple patterns are positional and arity-sensitive:
 
 ```sprout
 match pair with
 | (x, y) -> x
 ```
+
+`()` is the unit pattern and matches only the `Unit` value.
 
 Composition operators are ordinary binary operators on functions:
 

@@ -1603,6 +1603,24 @@ class RuntimeTests(unittest.TestCase):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "missing")
 
+    def test_match_unit_literal_and_pattern(self) -> None:
+        src = """
+        fn value_or_unit(x: Unit) -> String =
+          match x with
+          | () -> "unit"
+
+        fn main() -> Unit !{IO} =
+          match env_get("SPROUT_TEST_ENV_GET") with
+          | Just value -> print(value)
+          | Nothing -> ()
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        out = io.StringIO()
+        with patch.dict(os.environ, {"SPROUT_TEST_ENV_GET": "sprout-env"}, clear=False):
+            run_program(program, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "sprout-env")
+
     def test_argv_get_builtin_returns_program_argument(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

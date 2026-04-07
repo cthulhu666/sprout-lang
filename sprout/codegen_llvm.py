@@ -1329,6 +1329,8 @@ def _emit_expr(
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = getelementptr inbounds [{length} x i8], ptr {gname}, i64 0, i64 0")
         return Value(I8_PTR, tmp)
+    if isinstance(expr, ast.UnitExpr):
+        return Value(I64, "0")
     if isinstance(expr, ast.TupleExpr):
         items = [_emit_expr(item, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for item in expr.items]
         tuple_items = [item.typ for item in items]
@@ -2068,6 +2070,12 @@ def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, 
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value.ir}, ptr {literal_ptr})")
         return Value(I1, tmp)
+    if isinstance(pattern, ast.UnitPattern):
+        if value.typ != I64:
+            raise CodegenError("Unit pattern expects Unit scrutinee")
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = icmp eq i64 {value.ir}, 0")
+        return Value(I1, tmp)
     if isinstance(pattern, ast.TuplePattern):
         tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
         if tuple_items is None:
@@ -2153,7 +2161,7 @@ def _emit_pattern_bind(
     if isinstance(pattern, ast.VarPattern):
         locals_[pattern.name] = value
         return _emit_push_temp_root(value, emitter)
-    if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern, ast.CharPattern)):
+    if isinstance(pattern, (ast.IntPattern, ast.BoolPattern, ast.StringPattern, ast.CharPattern, ast.UnitPattern)):
         return 0
     if isinstance(pattern, ast.TuplePattern):
         tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)

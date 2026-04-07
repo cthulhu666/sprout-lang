@@ -358,6 +358,8 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
         return expr.value
     if isinstance(expr, ast.CharExpr):
         return expr.value
+    if isinstance(expr, ast.UnitExpr):
+        return None
     if isinstance(expr, ast.IntRangeExpr):
         start = eval_expr(expr.start, env)
         end = eval_expr(expr.end, env)
@@ -577,6 +579,8 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
         return {} if value == pattern.value else None
     if isinstance(pattern, ast.CharPattern):
         return {} if value == pattern.value else None
+    if isinstance(pattern, ast.UnitPattern):
+        return {} if value is None else None
     if isinstance(pattern, ast.TuplePattern):
         if not isinstance(value, TupleValue):
             return None

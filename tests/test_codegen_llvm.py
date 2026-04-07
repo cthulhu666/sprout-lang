@@ -561,6 +561,23 @@ class CodegenLlvmTests(CodegenTestCase):
             ir = compile_to_llvm(program)
             self.assertIn("declare i64 @env_get(ptr)", ir)
 
+    def test_compile_unit_literal_and_pattern_to_llvm(self) -> None:
+        src = """
+        fn value_or_unit(x: Unit) -> Int =
+          match x with
+          | () -> 1
+
+        fn main() -> Unit !{IO} =
+          match env_get("SPROUT_TEST_ENV_GET") with
+          | Just value -> print(value)
+          | Nothing -> ()
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        ir = compile_to_llvm(program)
+        self.assertIn("icmp eq i64", ir)
+        self.assertIn("ret i64 0", ir)
+
     def test_compile_bytes_builtins_to_llvm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

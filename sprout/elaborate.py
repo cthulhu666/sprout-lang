@@ -36,6 +36,8 @@ def _core_pattern_to_ast(pattern: core.Pattern) -> ast.Pattern:
         return _attach_ast_loc(ast.StringPattern(value=pattern.value), pattern.src)
     if isinstance(pattern, core.CharPattern):
         return _attach_ast_loc(ast.CharPattern(value=pattern.value), pattern.src)
+    if isinstance(pattern, core.UnitPattern):
+        return _attach_ast_loc(ast.UnitPattern(), pattern.src)
     if isinstance(pattern, core.TuplePattern):
         return _attach_ast_loc(ast.TuplePattern(items=[_core_pattern_to_ast(item) for item in pattern.items]), pattern.src)
     if isinstance(pattern, core.ConstructorPattern):
@@ -57,6 +59,8 @@ def core_expr_to_ast(expr: core.Expr) -> ast.Expr:
         return _attach_ast_loc(ast.StringExpr(value=expr.value), expr.src)
     if isinstance(expr, core.CharExpr):
         return _attach_ast_loc(ast.CharExpr(value=expr.value), expr.src)
+    if isinstance(expr, core.UnitExpr):
+        return _attach_ast_loc(ast.UnitExpr(), expr.src)
     if isinstance(expr, core.TupleExpr):
         return _attach_ast_loc(ast.TupleExpr(items=[core_expr_to_ast(item) for item in expr.items]), expr.src)
     if isinstance(expr, core.RecordExpr):
@@ -137,6 +141,8 @@ def _surface_pattern_to_core(pattern: ast.Pattern) -> core.Pattern:
         return core.StringPattern(value=pattern.value, src=pattern)
     if isinstance(pattern, ast.CharPattern):
         return core.CharPattern(value=pattern.value, src=pattern)
+    if isinstance(pattern, ast.UnitPattern):
+        return core.UnitPattern(src=pattern)
     if isinstance(pattern, ast.TuplePattern):
         return core.TuplePattern(items=[_surface_pattern_to_core(item) for item in pattern.items], src=pattern)
     if isinstance(pattern, ast.ConstructorPattern):
@@ -159,6 +165,8 @@ def _surface_expr_to_core(expr: ast.Expr) -> core.Expr:
         return core.StringExpr(value=expr.value, src=expr)
     if isinstance(expr, ast.CharExpr):
         return core.CharExpr(value=expr.value, src=expr)
+    if isinstance(expr, ast.UnitExpr):
+        return core.UnitExpr(src=expr)
     if isinstance(expr, ast.TupleExpr):
         return core.TupleExpr(items=[_surface_expr_to_core(item) for item in expr.items], src=expr)
     if isinstance(expr, ast.RecordExpr):

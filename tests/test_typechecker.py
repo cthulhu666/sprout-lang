@@ -193,6 +193,21 @@ class TypecheckerTests(unittest.TestCase):
         types = typecheck_program(parse(with_prelude(src)))
         self.assertEqual(types["greet"], "String !{IO}")
 
+    def test_typecheck_unit_literal_and_pattern(self) -> None:
+        src = """
+        fn value_or_unit(x: Unit) -> Int =
+          match x with
+          | () -> 1
+
+        fn main() -> Unit !{IO} =
+          match env_get("SPROUT_TEST_ENV_GET") with
+          | Just value -> print(value)
+          | Nothing -> ()
+        """
+        types = typecheck_program(parse(with_prelude(src)))
+        self.assertEqual(types["value_or_unit"], "Unit -> Int")
+        self.assertEqual(types["main"], "Unit !{IO}")
+
     def test_typecheck_do_notation_rejects_effectful_do_let(self) -> None:
         src = """
         fn bad() -> Unit !{IO} =

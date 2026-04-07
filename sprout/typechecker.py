@@ -994,6 +994,8 @@ def infer_expr(
         return _mark_expr_type(expr, STRING), PURE_EFFECT
     if isinstance(expr, ast.CharExpr):
         return _mark_expr_type(expr, CHAR), PURE_EFFECT
+    if isinstance(expr, ast.UnitExpr):
+        return _mark_expr_type(expr, UNIT), PURE_EFFECT
     if isinstance(expr, ast.IntRangeExpr):
         start_t, start_effects = infer_expr(expr.start, env, state, type_decls, global_methods)
         end_t, end_effects = infer_expr(expr.end, env, state, type_decls, global_methods)
@@ -1357,6 +1359,9 @@ def infer_pattern(
     if isinstance(pattern, ast.CharPattern):
         unify_at(state, expected_type, CHAR, pattern)
         return None
+    if isinstance(pattern, ast.UnitPattern):
+        unify_at(state, expected_type, UNIT, pattern)
+        return None
     if isinstance(pattern, ast.TuplePattern):
         expected = apply(state.subst, expected_type, state.effect_subst)
         if isinstance(expected, TVar):
@@ -1462,6 +1467,8 @@ def _top_level_literal_key(pattern: ast.Pattern) -> tuple[str, object] | None:
         return ("string", pattern.value)
     if isinstance(pattern, ast.CharPattern):
         return ("char", pattern.value)
+    if isinstance(pattern, ast.UnitPattern):
+        return ("unit", ())
     return None
 
 
@@ -1473,6 +1480,8 @@ def _format_literal_key(key: tuple[str, object]) -> str:
         return repr(value)
     if kind == "bool":
         return "true" if value else "false"
+    if kind == "unit":
+        return "()"
     return str(value)
 
 

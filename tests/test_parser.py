@@ -83,6 +83,22 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(fn_decl.body.steps[1].name, "answer")
         self.assertIsInstance(fn_decl.body.steps[2], ast.DoExprStep)
 
+    def test_parse_unit_literal_and_pattern(self) -> None:
+        src = """
+        fn main() -> Unit !{IO} =
+          ()
+
+        fn value_or_unit(x: Unit) -> Int =
+          match x with
+          | () -> 1
+        """
+        program = parse(src)
+        main_decl = program.declarations[0]
+        self.assertIsInstance(main_decl.body, ast.UnitExpr)
+        value_decl = program.declarations[1]
+        self.assertIsInstance(value_decl.body, ast.MatchExpr)
+        self.assertIsInstance(value_decl.body.branches[0].pattern, ast.UnitPattern)
+
     def test_parse_do_expression_rejects_extra_indentation(self) -> None:
         src = """
         fn bad(ma: Maybe Int) -> Maybe Int =
