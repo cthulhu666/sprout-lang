@@ -2,7 +2,8 @@ module examples.io_do_demo
 
 import stdlib.string
 
-# Demonstrates experimental do notation for mixed IO and Maybe sequencing.
+# Demonstrates experimental do notation for mixed IO and Maybe sequencing,
+# including a pure local `let` step inside the effectful block.
 #
 # Run:
 #   python3 -m sprout.cli run examples/io_do_demo.sprout

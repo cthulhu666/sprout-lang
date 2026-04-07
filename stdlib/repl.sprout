@@ -110,7 +110,10 @@ fn history_next(current: String, history: Vec String, browse_index: Int, draft: 
 
 fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit !{IO} =
   match vec_get(index, matches) with
-  | Just line -> after(term_write(line ++ "\r\n"), render_interactive_match_lines(matches, index + 1))
+  | Just line ->
+      do
+        term_write(line ++ "\r\n")
+        render_interactive_match_lines(matches, index + 1)
   | Nothing -> term_noop()
 
 fn contains_char(chars: String, target: Char, index: Int) -> Bool =
@@ -658,7 +661,9 @@ fn push_history(history: Vec String, raw: String) -> Vec String =
 fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec String) -> Unit !{IO} =
   match result with
   | Continue lines next_session ->
-      after(render_lines(prompt, lines, 0), repl_loop_session(prompt, history, next_session))
+      do
+        render_lines(prompt, lines, 0)
+        repl_loop_session(prompt, history, next_session)
   | Exit -> finish_loop(prompt)
 
 fn run_repl(prompt: Maybe String) -> Unit !{IO} =
@@ -666,7 +671,10 @@ fn run_repl(prompt: Maybe String) -> Unit !{IO} =
 
 fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
   if banner == "" then run_repl(prompt)
-  else after(term_write(banner), run_repl(prompt))
+  else
+    do
+      term_write(banner)
+      run_repl(prompt)
 
 fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession) -> Unit !{IO} =
   match read_submission(prompt, history, session) with
@@ -675,8 +683,14 @@ fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compile
         continue_loop(handle_submission(line, session), prompt, push_history(history, line))
       else
         continue_loop(handle_block_submission(line, session), prompt, push_history(history, line))
-  | ReadNotice message -> after(render_lines(prompt, single_line(message), 0), repl_loop_session(prompt, history, session))
-  | ReadError message -> after(render_lines(prompt, render_error(message), 0), repl_loop_session(prompt, history, session))
+  | ReadNotice message ->
+      do
+        render_lines(prompt, single_line(message), 0)
+        repl_loop_session(prompt, history, session)
+  | ReadError message ->
+      do
+        render_lines(prompt, render_error(message), 0)
+        repl_loop_session(prompt, history, session)
   | EndInput -> finish_loop(prompt)
 
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
