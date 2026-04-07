@@ -584,13 +584,25 @@ class TypecheckerTests(unittest.TestCase):
         self.assertEqual(types["show"], "Int -> Int !{IO}")
         self.assertEqual(types["demo"], "Int !{IO}")
 
-    def test_typecheck_specializes_singleton_effect_variable_to_pure_when_needed(self) -> None:
+    def test_typecheck_rejects_missing_effect_propagation_for_effect_polymorphic_helper(self) -> None:
         src = """
         fn call_once(f: Int -> Int !{e}, x: Int) -> Int =
           f(x)
         """
-        types = typecheck_program(parse(src))
-        self.assertEqual(types["call_once"], "(Int -> Int) -> Int -> Int")
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("effect-polymorphic argument", str(ctx.exception))
+        self.assertIn("!{e}", str(ctx.exception))
+
+    def test_typecheck_reports_pure_function_calling_io_requires_io(self) -> None:
+        src = """
+        fn bad() -> Unit =
+          print("ok")
+        """
+        with self.assertRaises(TypeCheckError) as ctx:
+            typecheck_program(parse(src))
+        self.assertIn("declared pure", str(ctx.exception))
+        self.assertIn("!{IO}", str(ctx.exception))
 
     def test_typecheck_rejects_effect_polymorphic_main(self) -> None:
         src = """

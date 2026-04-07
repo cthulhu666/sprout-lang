@@ -341,6 +341,15 @@ def ensure_effect_allowed(state: InferState, actual: Effect, declared: Effect) -
     declared = apply_effect(state.effect_subst, declared)
     if actual == PURE_EFFECT:
         return
+    if declared == PURE_EFFECT:
+        if isinstance(actual, EClosed) and "IO" in actual.labels:
+            raise TypeCheckError(
+                "This function is declared pure, but this call requires !{IO}. Add !{IO} to the function signature."
+            )
+        if isinstance(actual, EVar):
+            raise TypeCheckError(
+                "This helper calls an effect-polymorphic argument, so its type must also carry !{e}."
+            )
     unify_effects(state, actual, declared)
 
 
