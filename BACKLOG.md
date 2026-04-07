@@ -153,6 +153,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Extend the v0 effect system beyond singleton rows: decide and implement mixed/open row support such as `!{IO, e}`.
-2. Refine effect granularity beyond the current built-in `IO` label where that distinction materially improves language ergonomics or safety.
-3. Audit higher-order stdlib helpers for places where restricted effect polymorphism can simplify APIs or remove duplicated pure/IO variants.
+1. Consolidate the current effect-system ergonomics milestone: treat mixed `IO` plus inner `Maybe`/`Result` `do` sequencing and pure local `let` steps as the intended near-term model, update representative stdlib/example code to match it, and improve diagnostics around effect propagation and `do` misuse.
+2. Reduce workaround-style sequencing helpers where direct `do` notation is clearer, especially in stdlib and user-facing examples that currently rely on `after(...)` or repetitive manual `match` propagation for mixed `IO` plus `Maybe`/`Result` flows.
+3. Revisit richer effect rows or finer-grained effect labels only after the ergonomics pass, and only if real code still shows recurring pressure that the current `!{IO}` and `!{e}` model cannot express cleanly.

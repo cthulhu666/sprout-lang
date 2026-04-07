@@ -7,12 +7,14 @@ Status note:
 - This document defines the recommended next effect milestone beyond that
   baseline. It is not part of normative v0.
 
-This document is a design draft for the next effect milestone in Sprout.
+This document is a design draft for the current recommended next effect
+milestone in Sprout.
 
 The main recommendation is intentionally narrow: treat the current mixed
-`IO` plus inner `Maybe`/`Result` `do` model as the intended v0-era endpoint
-for sequencing sugar, improve its usability, and defer richer row machinery
-or more general sequencing abstractions until real pressure appears.
+`IO` plus inner `Maybe`/`Result` `do` model plus pure local `let` steps as the
+intended v0-era endpoint for sequencing sugar, improve its usability and
+diagnostics, and defer richer row machinery or more general sequencing
+abstractions until real pressure appears.
 
 ## 1. Problem Statement
 
@@ -95,6 +97,10 @@ The recommended next effect milestone is:
    `Maybe a !{IO}` and `Result e a !{IO}`.
 5. Add pure local bind steps inside `do`.
 6. Sharpen effect diagnostics and examples.
+
+This document should be read as the preferred roadmap direction for effect work
+after the implemented v0 baseline, unless later code examples demonstrate that
+the narrower ergonomics-first approach is insufficient.
 
 Recommended stopping point for this slice:
 
