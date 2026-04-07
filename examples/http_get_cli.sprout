@@ -18,10 +18,18 @@ fn http_error_message(err: HttpError) -> String =
   | HttpBadStatus _ -> "http error status"
   | HttpDecode msg -> "decode error: " ++ msg
 
+fn result_from_maybe(err: e, value: Maybe a) -> Result e a =
+  match value with
+  | Just raw -> Ok(raw)
+  | Nothing -> Err(err)
+
+fn fetch_body_from_argv() -> Result String String !{IO} =
+  do
+    url <- result_from_maybe("usage: sprout run examples/http_get_cli.sprout <url>", argv_get(0))
+    resp <- result_map_error(http_error_message, http_get(url, "", 5000))
+    Ok(http_response_body(resp))
+
 fn main() -> Unit !{IO} =
-  match argv_get(0) with
-  | Nothing -> print("usage: sprout run examples/http_get_cli.sprout <url>")
-  | Just url ->
-      match http_get(url, "", 5000) with
-      | Ok resp -> print(http_response_body(resp))
-      | Err err -> print(http_error_message(err))
+  match fetch_body_from_argv() with
+  | Ok body -> print(body)
+  | Err err -> print(err)

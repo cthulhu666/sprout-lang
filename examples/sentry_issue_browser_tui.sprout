@@ -18,15 +18,11 @@ fn concat4(a: String, b: String, c: String, d: String) -> String =
   strlib.concat(a, concat3(b, c, d))
 
 export fn load_config() -> Result String SentryConfig !{IO} =
-  match read_env_required("SENTRY_ORG") with
-  | Err err -> Err(err)
-  | Ok org ->
-      match read_env_required("SENTRY_PROJECT") with
-      | Err err -> Err(err)
-      | Ok project ->
-          match read_env_required("SENTRY_TOKEN") with
-          | Err err -> Err(err)
-          | Ok token -> Ok(SentryConfig(org, project, token))
+  do
+    org <- read_env_required("SENTRY_ORG")
+    project <- read_env_required("SENTRY_PROJECT")
+    token <- read_env_required("SENTRY_TOKEN")
+    Ok(SentryConfig(org, project, token))
 
 fn format_issue_row(summary: IssueSummary) -> String =
   concat3(
