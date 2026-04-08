@@ -91,7 +91,8 @@ Normative status:
   effect milestone beyond the implemented v0 baseline. The active recommended
   direction is `IO` sequencing ergonomics and diagnostics, including the
   narrow mixed `IO` plus inner `Maybe`/`Result` `do` model, rather than richer
-  effect rows.
+  effect rows. A focused audit of the current examples and stdlib code did not
+  find concrete pressure yet for multi-entry rows or additional effect labels.
 - Native REPL work is the current tooling priority.
 - `docs/repl-self-hosting-v1-draft.md` and the language-server/compiler
   milestones are currently deferred as product work, but the native REPL bridge
@@ -349,7 +350,10 @@ Effect notes:
 - Executable `main` must stay concrete and have type `Unit !{IO}`.
 - Effects do not change Sprout's strict execution order; they constrain which
   functions may call which other functions.
-- Mixed/open effect rows and additional effect labels are still deferred follow-up work.
+- Mixed/open effect rows and additional effect labels are still deferred
+  follow-up work, and remain deferred until real code demonstrates recurring
+  pressure that the current `!{IO}` and singleton `!{e}` model cannot express
+  cleanly.
 
 String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules. The same applies to raw `regex_*` helpers, which are internal to `stdlib.regex`.
 

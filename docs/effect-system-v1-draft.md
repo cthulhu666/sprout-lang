@@ -65,6 +65,18 @@ the simpler model insufficient.
 5. Do not widen the normative v0 contract pre-emptively through examples or
    stdlib APIs.
 
+Current validation status:
+
+- A focused audit of the current examples, stdlib code, and effect-heavy user
+  flows did not show concrete pressure yet for multi-entry rows, multiple
+  effect variables, or additional effect labels.
+- The remaining awkward cases are narrower sequencing ergonomics issues,
+  especially preserving the whole `Maybe`/`Result` container while continuing
+  with more `IO`, rather than evidence that the function-effect model itself is
+  too weak.
+- Treat richer rows and labels as deferred until concrete examples accumulate
+  beyond those ergonomics concerns.
+
 ## 4. High-Level Implementation Overview
 
 Recommended order:

@@ -238,6 +238,17 @@ Recommended order:
 7. Add effect polymorphism as a follow-up slice if the closed-effect core
    behaves well.
 
+Status after validation:
+
+- The closed-effect core now appears sufficient for current repository code and
+  representative user-facing examples.
+- The next effect-related design task is not richer rows, but settling how the
+  builtin surface participates in effect tracking and documenting that
+  convention clearly.
+- Any revisit of richer rows or additional labels should wait for concrete
+  examples that the current `!{IO}` plus singleton `!{e}` model cannot express
+  cleanly.
+
 ## 14. Diagnostics
 
 The first milestone should prioritize a small number of high-value errors:

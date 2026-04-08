@@ -153,6 +153,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Reduce workaround-style sequencing helpers where direct `do` notation is clearer, especially in stdlib code that still relies on `after(...)` or repetitive manual `match` propagation for mixed `IO` plus `Maybe`/`Result` flows.
-2. Revisit richer effect rows or finer-grained effect labels only after the ergonomics pass, and only if real code still shows recurring pressure that the current `!{IO}` and `!{e}` model cannot express cleanly.
-3. Keep the docs/examples aligned with the narrow `do` story as new user-facing sequencing cases land.
+1. Decide how builtins participate in effect tracking; the builtin surface is audited, but the design decision and convention cleanup are still open.
+2. Keep the docs/examples aligned with the narrow `do` story as new user-facing sequencing cases land.
+3. Gather concrete examples of any remaining awkward effectful control flow, especially cases where users need to preserve whole `Maybe`/`Result` containers while continuing `IO`, before reconsidering richer effect rows or finer-grained effect labels.
