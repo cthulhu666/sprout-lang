@@ -23,7 +23,7 @@ Definition of done:
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 - [~] `P1` Decide how builtins participate in effect tracking; the builtin surface is now audited/documented, but the design decision and convention cleanup are still open.
-- [ ] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
+- [x] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
 - [x] `P2` Align function composition operator direction with Elm/F# conventions; `f >> g` now means `g(f(x))` and `f << g` means `f(g(x))`.
 
 ### 2) Networking and HTTP Client
@@ -153,6 +153,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Consolidate the current effect-system ergonomics milestone: treat mixed `IO` plus inner `Maybe`/`Result` `do` sequencing and pure local `let` steps as the intended near-term model, update representative stdlib/example code to match it, and improve diagnostics around effect propagation and `do` misuse.
-2. Reduce workaround-style sequencing helpers where direct `do` notation is clearer, especially in stdlib and user-facing examples that currently rely on `after(...)` or repetitive manual `match` propagation for mixed `IO` plus `Maybe`/`Result` flows.
-3. Revisit richer effect rows or finer-grained effect labels only after the ergonomics pass, and only if real code still shows recurring pressure that the current `!{IO}` and `!{e}` model cannot express cleanly.
+1. Reduce workaround-style sequencing helpers where direct `do` notation is clearer, especially in stdlib code that still relies on `after(...)` or repetitive manual `match` propagation for mixed `IO` plus `Maybe`/`Result` flows.
+2. Revisit richer effect rows or finer-grained effect labels only after the ergonomics pass, and only if real code still shows recurring pressure that the current `!{IO}` and `!{e}` model cannot express cleanly.
+3. Keep the docs/examples aligned with the narrow `do` story as new user-facing sequencing cases land.

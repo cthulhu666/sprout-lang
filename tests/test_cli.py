@@ -1783,7 +1783,7 @@ class CliTests(unittest.TestCase):
             env=env,
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stdout.strip(), "do:io-maybe\nio-do:name=anonymous")
+        self.assertEqual(run.stdout.strip(), "do:io-maybe\nreading SPROUT_NAME\nio-do:name=anonymous")
 
     def test_run_io_result_do_demo(self) -> None:
         run = subprocess.run(
@@ -1799,7 +1799,7 @@ class CliTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stdout.strip(), "do:io-result\nio-do:bytes=8")
+        self.assertEqual(run.stdout.strip(), "do:io-result\ncapturing payload size\nio-do:bytes=8")
 
     def test_compile_all_examples(self) -> None:
         example_flags = {

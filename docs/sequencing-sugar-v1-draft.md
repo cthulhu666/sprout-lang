@@ -6,8 +6,9 @@ It is not part of normative v0. Its purpose is to define an experimental `do`
 surface that removes deeply nested `match` expressions when sequencing
 container-like computations such as `Maybe` and `Result`, and now also supports
 narrow mixed `IO` plus inner `Maybe`/`Result` flows as the intended near-term
-sequencing model, while leaving room for broader Haskell-style sequencing only
-if later experience justifies it.
+sequencing model. That narrow shape is the preferred story for multi-step `IO`
+and mixed failure-aware code at this stage, while broader Haskell-style
+sequencing remains deferred until later experience justifies it.
 
 ## 1. Problem Statement
 
@@ -101,6 +102,8 @@ Recommended interpretation:
    while still performing `IO`.
 3. Code that needs the whole `Maybe`/`Result` value should use explicit
    `match`, not expect `<-` to preserve the container.
+4. `after(...)` may remain as a tiny compatibility convenience, but it should
+   not be presented as the primary shape for multi-step `IO`.
 
 ## 6. Typing Model
 
@@ -255,7 +258,8 @@ Compatibility notes:
 2. Existing combinator helpers remain valid.
 3. Mixed `IO` plus inner `Maybe`/`Result` sequencing is experimental, but it is
    currently the intended near-term sequencing story rather than a placeholder
-   for immediate generalization.
+   for immediate generalization. It is the preferred shape for multi-step `IO`
+   and mixed failure-aware flows in current docs and examples.
 4. The feature is implemented in the prototype, but it is not yet normative
    v0.
 

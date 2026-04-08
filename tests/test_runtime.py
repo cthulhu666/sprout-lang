@@ -367,7 +367,9 @@ class RuntimeTests(unittest.TestCase):
         src = """
         fn add(x: Int, y: Int) -> Int = x + y
         fn mark(label: String, value: Int) -> Int !{IO} =
-          after(print(label), value)
+          do
+            print(label)
+            value
 
         fn main() -> Unit !{IO} =
           print(

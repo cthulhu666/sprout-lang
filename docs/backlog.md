@@ -79,6 +79,6 @@ This file tracks open design, implementation, and tooling follow-up work.
 9. Generalize experimental `do` notation toward real monadic sequencing.
    Current implemented scope: layout-style `do` blocks with `<-` binds, resolved type-directed for `Maybe` and `Result`, then lowered by a dedicated post-typecheck elaboration step through a small explicit core expression form into nested `match`.
    Completed compiler-architecture follow-up: `do` desugaring no longer stays entangled with the typechecker.
-   Completed language follow-up: the experimental `do` surface now supports `IO`, pure local `let` steps, and narrow mixed `IO` plus inner `Maybe`/`Result` sequencing.
-   Planned next follow-up: stabilize the intended experimental contract with clearer docs/examples and only revisit broader sequencing abstractions if real code shows the narrow model is insufficient.
+   Completed language follow-up: the experimental `do` surface now supports `IO`, pure local `let` steps, and narrow mixed `IO` plus inner `Maybe`/`Result` sequencing. That narrow mixed shape is now the preferred near-term story for multi-step `IO` and mixed failure-aware flows, with `after(...)` left as a compatibility convenience only.
+   Planned next follow-up: prune remaining helper-heavy call sites that still obscure the `do` story, and only revisit broader sequencing abstractions if real code shows the narrow model is insufficient.
    First milestone constraints: keep current `Maybe`/`Result` behavior stable, keep mixed `IO` sequencing intentionally narrow, and prefer explicit `match` over speculative generalization when code needs the whole container value.

@@ -70,10 +70,11 @@ Normative status:
   sequencing `Maybe` and `Result` values. The surface is meant to leave room
   for broader Haskell-style sequencing later, but the current semantics are
   intentionally narrower and are not part of normative v0 yet. The current
-  experimental implementation now also supports `IO`-sequencing-style `do`
-  blocks with non-final plain `!{IO}` expression steps, pure local
-  `let` steps, and irrefutable bind patterns such as tuple destructuring in
-  `<-` steps.
+  implementation treats `do` as the preferred surface for multi-step `IO` and
+  mixed `IO` plus inner `Maybe`/`Result` flows. It also supports
+  `IO`-sequencing-style `do` blocks with non-final plain `!{IO}` expression
+  steps, pure local `let` steps, and irrefutable bind patterns such as tuple
+  destructuring in `<-` steps.
 - The current implementation also includes an experimental compiler-driver
   helper module in `stdlib/compiler.sprout`. It provides a Sprout-owned
   `CompilerSession` wrapper over the snapshot-analysis bridge, with helpers
@@ -399,12 +400,14 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - prelude instances are currently provided for `String`, `List a`, `Vec a`, and `Dict v`
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
-  - `after(effect, value)` sequences `effect` and returns `value`
+  - `after(effect, value)` sequences `effect` and returns `value` as a small
+    compatibility convenience for single-step `IO`
   - experimental `do` blocks for `Maybe`/`Result`, `IO`, and mixed `IO` plus inner `Maybe`/`Result` sequencing, for example:
     `do ... x <- mx ... y <- my ... Just((x, y))`
     The intended current model is intentionally narrow: mixed `IO` blocks use
     `<-` to unwrap an inner `Maybe`/`Result` and short-circuit on failure; code
-    that needs the whole container should use explicit `match`.
+    that needs the whole container should use explicit `match`. This is the
+    preferred story for multi-step `IO` and mixed failure-aware flows.
     See `examples/do_notation_demo.sprout` for `Maybe`/`Result` and
     `examples/io_do_demo.sprout` / `examples/io_result_do_demo.sprout` for
     helper-level mixed `IO` plus `Maybe` / `Result` flows handled by a
@@ -426,9 +429,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `when_error(f, r)` runs `f` for `Err` and preserves `r`
 
 The current `after(effect, value)` helper in `stdlib/prelude.sprout` is a
-lightweight compatibility convenience for single-step `IO` sequencing. It is
-still supported, but `do` is the preferred surface for multi-step sequencing
-and mixed `IO` plus `Maybe`/`Result` flows.
+small compatibility convenience for single-step `IO` sequencing. It is still
+supported, but `do` is the preferred surface for multi-step sequencing and
+mixed `IO` plus `Maybe`/`Result` flows.
 
 Experimental compiler helper module (in `stdlib/compiler.sprout`):
 
@@ -694,7 +697,8 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_read_line_once() -> Maybe String !{IO}`
 
 These helpers follow the current sequencing style rule: use `do` for
-multi-step `IO`, and keep `after(...)` for trivial single-step convenience.
+multi-step `IO` and mixed `IO` plus `Maybe`/`Result` flows, and keep
+`after(...)` only for trivial single-step convenience.
 
 Collections module (in `stdlib/collections.sprout`):
 

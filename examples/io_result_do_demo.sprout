@@ -4,8 +4,8 @@ import stdlib.bytes
 import stdlib.crypto
 import stdlib.string
 
-# Demonstrates experimental do notation for mixed IO and Result sequencing,
-# including a pure local `let` step inside the effectful block.
+# Demonstrates the preferred narrow do notation for mixed IO and Result
+# sequencing, including a pure local `let` step inside the effectful block.
 #
 # Run:
 #   python3 -m sprout.cli run examples/io_result_do_demo.sprout
@@ -13,6 +13,7 @@ import stdlib.string
 fn random_payload_size() -> Result crypto.CryptoError Int !{IO} =
   do
     print("do:io-result")
+    print("capturing payload size")
     payload <- crypto.random_bytes(8)
     let size = bytes.length(payload)
     Ok(size)

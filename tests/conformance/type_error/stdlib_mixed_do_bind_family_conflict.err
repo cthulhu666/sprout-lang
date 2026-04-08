@@ -1,1 +1,1 @@
-Cannot mix Maybe and Result bindings in the same do block
+This do block started with Maybe bindings, but this step returns Result. Keep one short-circuit family per do block.

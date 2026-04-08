@@ -168,7 +168,8 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(with_prelude(src)))
-        self.assertIn("Cannot mix Maybe and Result bindings", str(ctx.exception))
+        self.assertIn("started with Maybe bindings, but this step returns Result", str(ctx.exception))
+        self.assertIn("Keep one short-circuit family per do block", str(ctx.exception))
 
     def test_typecheck_do_notation_rejects_non_sequencable_bindings(self) -> None:
         src = """
@@ -180,6 +181,7 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
         self.assertIn("This do bind must unwrap a Maybe/Result value, or require !{IO}", str(ctx.exception))
+        self.assertIn("Use let for pure values", str(ctx.exception))
 
     def test_typecheck_do_notation_with_io_steps_and_let(self) -> None:
         src = """
@@ -218,6 +220,7 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
         self.assertIn("do let bindings must be pure", str(ctx.exception))
+        self.assertIn("Move the effectful call to its own step or bind it with <-", str(ctx.exception))
 
     def test_typecheck_do_notation_rejects_pure_non_final_expr_step(self) -> None:
         src = """
@@ -228,7 +231,8 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(src))
-        self.assertIn("A non-final plain expression step is only allowed when it requires !{IO}", str(ctx.exception))
+        self.assertIn("This non-final do step is pure", str(ctx.exception))
+        self.assertIn("use let to name a pure value", str(ctx.exception))
 
     def test_typecheck_do_notation_rejects_plain_expr_step_in_maybe_block(self) -> None:
         src = """
@@ -240,7 +244,8 @@ class TypecheckerTests(unittest.TestCase):
         """
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(with_prelude(src)))
-        self.assertIn("plain non-final expression steps require !{IO}", str(ctx.exception))
+        self.assertIn("a non-final plain expression step still requires !{IO}", str(ctx.exception))
+        self.assertIn("Wrap the final value in Just(...)", str(ctx.exception))
 
     def test_typecheck_do_notation_allows_io_step_inside_maybe_block(self) -> None:
         src = """
@@ -286,6 +291,7 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(parse(with_prelude(src)))
         self.assertIn("final expression must also return Maybe", str(ctx.exception))
+        self.assertIn("Wrap the final value in Just(...)", str(ctx.exception))
 
     def test_typecheck_do_notation_rejects_qualified_user_maybe_type(self) -> None:
         fake = """
@@ -318,6 +324,7 @@ class TypecheckerTests(unittest.TestCase):
         with self.assertRaises(TypeCheckError) as ctx:
             typecheck_program(program)
         self.assertIn("This do bind must unwrap a Maybe/Result value, or require !{IO}", str(ctx.exception))
+        self.assertIn("match if you need the whole container", str(ctx.exception))
 
     def test_elaborate_program_lowers_do_after_typechecking(self) -> None:
         src = """

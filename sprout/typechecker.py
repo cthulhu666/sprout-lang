@@ -1238,7 +1238,10 @@ def infer_expr(
             if isinstance(step, do_let_step):
                 step_t, step_effects = infer_expr(step.value, working_env, state, type_decls, global_methods)
                 if apply_effect(state.effect_subst, step_effects) != PURE_EFFECT:
-                    raise tc_error("do let bindings must be pure", step.value)
+                    raise tc_error(
+                        "do let bindings must be pure. Move the effectful call to its own step or bind it with <-.",
+                        step.value,
+                    )
                 working_env[step.name] = Scheme(vars=(), type=step_t)
                 continue
             if isinstance(step, do_bind_step):
@@ -1253,7 +1256,7 @@ def infer_expr(
                 if info is None:
                     if not _effect_includes_io(state, step_effects):
                         raise tc_error(
-                            "This do bind must unwrap a Maybe/Result value, or require !{IO}",
+                            "This do bind must unwrap a Maybe/Result value, or require !{IO}. Use let for pure values, or match if you need the whole container.",
                             step.value,
                         )
                     setattr(step, "_do_family", "IO")
@@ -1264,7 +1267,7 @@ def infer_expr(
                     sequence_error_type = info.error_type
                 elif info.family != sequence_family:
                     raise tc_error(
-                        f"Cannot mix {sequence_family} and {info.family} bindings in the same do block",
+                        f"This do block started with {sequence_family} bindings, but this step returns {info.family}. Keep one short-circuit family per do block.",
                         step.value,
                     )
                 elif info.family == "Result" and sequence_error_type is not None and info.error_type is not None:
@@ -1279,11 +1282,11 @@ def infer_expr(
                     continue
                 if sequence_family is None:
                     raise tc_error(
-                        "A non-final plain expression step is only allowed when it requires !{IO}",
+                        "This non-final do step is pure. Non-final plain expression steps are only allowed when they require !{IO}; use let to name a pure value or make it the final expression.",
                         step.value,
                     )
                 raise tc_error(
-                    f"This do block already sequences {sequence_family}; plain non-final expression steps require !{{IO}}",
+                    f"This do block already sequences {sequence_family}; a non-final plain expression step still requires !{{IO}}. Wrap the final value in {('Just' if sequence_family == 'Maybe' else 'Ok')}(...) or use let for a pure intermediate value.",
                     step.value,
                 )
                 continue
@@ -1298,12 +1301,12 @@ def infer_expr(
             final_info = _do_sequence_info(state, final_t)
             if final_info is None:
                 raise tc_error(
-                    f"do block started with {sequence_family} bindings, so its final expression must also return {sequence_family}",
+                    f"This do block started with {sequence_family} bindings, so its final expression must also return {sequence_family}. Wrap the final value in {('Just' if sequence_family == 'Maybe' else 'Ok')}(...) or leave do for an explicit match.",
                     final_step.value,
                 )
             if final_info.family != sequence_family:
                 raise tc_error(
-                    f"do block started with {sequence_family} bindings, but its final expression returns {final_info.family}",
+                    f"This do block started with {sequence_family} bindings, but its final expression returns {final_info.family}. Keep one short-circuit family per do block.",
                     final_step.value,
                 )
             if sequence_family == "Result" and sequence_error_type is not None and final_info.error_type is not None:

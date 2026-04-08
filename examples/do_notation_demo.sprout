@@ -1,6 +1,6 @@
 module examples.do_notation_demo
 
-# Demonstrates experimental do notation for Maybe and Result sequencing.
+# Demonstrates the preferred narrow do notation for Maybe and Result sequencing.
 #
 # Run:
 #   python3 -m sprout.cli run examples/do_notation_demo.sprout
@@ -15,13 +15,15 @@ fn maybe_sum(left: Int, right: Int) -> Maybe Int =
   do
     a <- half_if_even(left)
     b <- half_if_even(right)
-    Just(a + b)
+    let total = a + b
+    Just(total)
 
 fn result_sum(left: Int, right: Int) -> Result String Int =
   do
     a <- positive(left)
     b <- positive(right)
-    Ok(a + b)
+    let total = a + b
+    Ok(total)
 
 fn render_maybe(value: Maybe Int) -> String =
   match value with
