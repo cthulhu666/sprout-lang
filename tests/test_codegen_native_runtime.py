@@ -1074,21 +1074,21 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_json_stringify(self) -> None:
         src = """
-        fn sample() -> Json =
-          JsonObject(
-            JsonObjectCons(
-              "ok",
-              JsonBool(true),
-              JsonObjectCons(
-                "items",
-                JsonArray(JsonArrayCons(JsonInt(2), JsonArrayCons(JsonString("x\\n"), JsonArrayNil))),
-                JsonObjectNil
+        import stdlib.json as json
+
+        fn sample() -> json.Json =
+          json.object_from_pairs(
+            Cons(
+              ("ok", json.bool(true)),
+              Cons(
+                ("items", json.array_from_list(Cons(json.int(2), Cons(json.string("x\\n"), Nil)))),
+                Nil
               )
             )
           )
 
         fn main() -> Unit !{IO} =
-          print(json_stringify(sample()))
+          print(json.stringify(sample()))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -1116,10 +1116,15 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_json_parse_roundtrip(self) -> None:
         src = """
+        import stdlib.json as json
+
+        fn render(raw: String) -> String =
+          match json.parse(raw) with
+          | Ok value -> json.stringify(value)
+          | Err _ -> "err"
+
         fn main() -> Unit !{IO} =
-          match json_parse("{\\"ok\\":true,\\"items\\":[2,\\"x\\\\n\\"],\\"meta\\":{\\"count\\":2}}") with
-          | Ok value -> print(json_stringify(value))
-          | Err _ -> print("err")
+          print(render("{\\"ok\\":true,\\"items\\":[2,\\"x\\\\n\\"],\\"meta\\":{\\"count\\":2}}"))
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -1264,10 +1269,12 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
 
             with running_https_server(self, Handler, certfile=server_pem, keyfile=server_key_pem) as port:
                 src = f"""
+                import stdlib.string as string
+
                 fn main() -> Unit !{{IO}} =
                   match http_request("GET", "https://localhost:{port}/", "", "", 5000) with
                   | Ok (HttpResponse status _ body) ->
-                      if status == 200 && str_find(body, "https-ok") >= 0 then
+                      if status == 200 && string.find(body, "https-ok") >= 0 then
                         print(body)
                       else
                         print("bad")

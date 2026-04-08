@@ -1577,6 +1577,36 @@ class CliTests(unittest.TestCase):
             self.assertIn("HTTP/1.1 200 OK", run.stdout)
             self.assertIn("ready", run.stdout)
 
+    def test_check_with_http_stdlib_and_json_import_does_not_duplicate_prelude(self) -> None:
+        src = """
+        import stdlib.json as json
+
+        fn render(raw: String) -> String =
+          match json.parse(raw) with
+          | Ok value -> json.stringify(value)
+          | Err _ -> "json-err"
+
+        fn main() -> Unit !{IO} =
+          print(render("{\\"ok\\":true}"))
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "http_json_test.spr"
+            path.write_text(src, encoding="utf-8")
+            run = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "check",
+                    "--with-http-stdlib",
+                    str(path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 0, msg=run.stderr or run.stdout)
+
     def test_run_passes_program_args_to_argv_get(self) -> None:
         src = """
         module main

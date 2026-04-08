@@ -425,12 +425,14 @@ class NativeIoIntegrationTests(unittest.TestCase):
                 f"""
                 import stdlib.json as json
 
+                fn render_json_body(body: String) -> String =
+                  match json.parse(body) with
+                  | Ok value -> json.stringify(value)
+                  | Err _ -> "json-err"
+
                 fn main() -> Unit !{{IO}} =
                   match http_request("GET", "http://127.0.0.1:{port}/chunked", "", "", 500) with
-                  | Ok (HttpResponse _ _ body) ->
-                      match json.parse(body) with
-                      | Ok value -> print(json.stringify(value))
-                      | Err _ -> print("json-err")
+                  | Ok (HttpResponse _ _ body) -> print(render_json_body(body))
                   | Err _ -> print("http-err")
                 """,
                 with_http_stdlib=True,

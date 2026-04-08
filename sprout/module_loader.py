@@ -415,7 +415,7 @@ def _resolve_module(module_name: str, importer: Path) -> Path:
     )
 
 
-def load_module_bundle(entry_path: Path) -> ModuleBundle:
+def load_module_bundle(entry_path: Path, *, entry_source_override: str | None = None) -> ModuleBundle:
     entry = entry_path.resolve()
     ordered: list[Path] = []
     modules: dict[Path, ModuleInfo] = {}
@@ -430,7 +430,10 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
             raise ModuleLoadError(f"Import cycle detected: {cycle}")
 
         visiting.append(path)
-        source = path.read_text(encoding="utf-8")
+        if path == entry and entry_source_override is not None:
+            source = entry_source_override
+        else:
+            source = path.read_text(encoding="utf-8")
         header = parse_header(source, path)
         for imp in header.imports:
             imp_path = _resolve_module(imp.module, path)
@@ -583,8 +586,8 @@ def load_module_bundle(entry_path: Path) -> ModuleBundle:
     return ModuleBundle(source="".join(chunks), modules=modules, segments=segments)
 
 
-def load_module_source(entry_path: Path) -> str:
-    return load_module_bundle(entry_path).source
+def load_module_source(entry_path: Path, *, entry_source_override: str | None = None) -> str:
+    return load_module_bundle(entry_path, entry_source_override=entry_source_override).source
 
 
 def _module_for_line(bundle: ModuleBundle, line: int) -> ModuleInfo | None:

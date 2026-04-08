@@ -37,7 +37,7 @@ from .module_loader import CompilerWarning, ModuleLoadError, load_module_bundle,
 from .parser import ParseError, parse
 from .repl import cmd_repl
 from .surface_checks import SurfaceCheckError, validate_public_surface
-from .stdlib import with_http_prelude, with_prelude
+from .stdlib import with_prelude
 from .tokenizer import TokenizeError
 from .typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 from .typechecker import TypeCheckError, typecheck_program
@@ -47,6 +47,28 @@ def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
     if bundle is None:
         return False
     return any(path.name == "prelude.sprout" and "stdlib" in path.parts for path in bundle.modules)
+
+
+HTTP_STDLIB_IMPORT = (
+    "import stdlib.http "
+    "(HttpResponse, HttpError, HttpStatusError, RequestPathVersion, RequestLine, "
+    "parse_request_line, http_response, http_ok, http_bad_request, "
+    "request_line_to_string, http_echo_response, http_response_body)"
+)
+
+
+def _with_http_stdlib_entry_source(source: str) -> str:
+    lines = source.splitlines(keepends=True)
+    insert_at = 0
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("module "):
+            insert_at = index + 1
+        break
+    injected = [f"{HTTP_STDLIB_IMPORT}\n", "\n"]
+    return "".join(lines[:insert_at] + injected + lines[insert_at:])
 
 
 def _print_warnings(warnings: list[CompilerWarning]) -> None:
@@ -127,12 +149,12 @@ def cmd_lint(path: Path) -> int:
 
 
 def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
-    bundle = load_module_bundle(path)
-    source = bundle.source
+    entry_source_override = None
     if with_http_stdlib:
-        source = with_http_prelude(source)
-        bundle = None
-    elif with_stdlib and not _bundle_has_implicit_prelude(bundle):
+        entry_source_override = _with_http_stdlib_entry_source(path.read_text(encoding="utf-8"))
+    bundle = load_module_bundle(path, entry_source_override=entry_source_override)
+    source = bundle.source
+    if not with_http_stdlib and with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -153,12 +175,12 @@ def cmd_run(
     with_http_stdlib: bool = False,
     program_args: list[str] | None = None,
 ) -> int:
-    bundle = load_module_bundle(path)
-    source = bundle.source
+    entry_source_override = None
     if with_http_stdlib:
-        source = with_http_prelude(source)
-        bundle = None
-    elif with_stdlib and not _bundle_has_implicit_prelude(bundle):
+        entry_source_override = _with_http_stdlib_entry_source(path.read_text(encoding="utf-8"))
+    bundle = load_module_bundle(path, entry_source_override=entry_source_override)
+    source = bundle.source
+    if not with_http_stdlib and with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -186,12 +208,12 @@ def cmd_compile(
     with_http_stdlib: bool = False,
     native: bool = False,
 ) -> int:
-    bundle = load_module_bundle(path)
-    source = bundle.source
+    entry_source_override = None
     if with_http_stdlib:
-        source = with_http_prelude(source)
-        bundle = None
-    elif with_stdlib and not _bundle_has_implicit_prelude(bundle):
+        entry_source_override = _with_http_stdlib_entry_source(path.read_text(encoding="utf-8"))
+    bundle = load_module_bundle(path, entry_source_override=entry_source_override)
+    source = bundle.source
+    if not with_http_stdlib and with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
