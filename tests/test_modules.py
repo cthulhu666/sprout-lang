@@ -816,6 +816,27 @@ class ModuleLoaderTests(unittest.TestCase):
                 resolve_program_names(program, bundle)
             self.assertIn("analysis_check_source", str(ctx.exception))
 
+    def test_public_modules_do_not_get_raw_repl_builtins_implicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+
+                fn main() -> Unit !{IO} =
+                  match repl_check_source("module app") with
+                  | Ok _ -> print("ok")
+                  | Err message -> print(message)
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError) as ctx:
+                resolve_program_names(program, bundle)
+            self.assertIn("repl_check_source", str(ctx.exception))
+
     def test_import_stdlib_terminal_wrappers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

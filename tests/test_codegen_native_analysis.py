@@ -7,7 +7,7 @@ from tests.codegen_test_support import *
 
 class CodegenNativeAnalysisTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_service_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_service_builtin_is_internal_to_public_modules(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -22,7 +22,7 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
                 """,
                 encoding="utf-8",
             )
-            subprocess.run(
+            run = subprocess.run(
                 [
                     sys.executable,
                     "-m",
@@ -33,15 +33,17 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
                     "-o",
                     str(bin_path),
                 ],
-                check=True,
+                check=False,
+                capture_output=True,
+                text=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_type_of`: not supported in native backend", run.stderr)
+            self.assertNotEqual(run.returncode, 0)
+            output = run.stdout + run.stderr
+            self.assertIn("repl_type_of", output)
+            self.assertIn("internal", output)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_complete_builtin_reports_unsupported_backend(self) -> None:
+    def test_native_repl_complete_builtin_is_internal_to_public_modules(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             spr_path = tmp_path / "prog.sprout"
@@ -55,7 +57,7 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
                 """,
                 encoding="utf-8",
             )
-            subprocess.run(
+            run = subprocess.run(
                 [
                     sys.executable,
                     "-m",
@@ -66,12 +68,14 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
                     "-o",
                     str(bin_path),
                 ],
-                check=True,
+                check=False,
+                capture_output=True,
+                text=True,
             )
-            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 1)
-            self.assertEqual(run.stdout, "")
-            self.assertIn("runtime error: builtin `repl_complete`: not supported in native backend", run.stderr)
+            self.assertNotEqual(run.returncode, 0)
+            output = run.stdout + run.stderr
+            self.assertIn("repl_complete", output)
+            self.assertIn("internal", output)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_complete_in_state_builtin_runs_via_analysis_service(self) -> None:
@@ -82,6 +86,7 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 import stdlib.collections (vec_empty, vec_append)
 
                 fn first_or(lines: Vec String, fallback: String) -> String =
@@ -95,7 +100,7 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
                   vec_append(x, vec_empty())
 
                 fn main() -> Unit !{IO} =
-                  match repl_complete_in_state("fr", singleton("import stdlib.bytes (from_string)"), singleton("let answer = 41")) with
+                  match compiler.complete_in_state("fr", singleton("import stdlib.bytes (from_string)"), singleton("let answer = 41")) with
                   | (prefix, matches) -> print(prefix ++ ":" ++ first_or(matches, "<empty>"))
                 """,
                 encoding="utf-8",
@@ -133,8 +138,9 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_type_of_in_source("module app.repl", "1") with
+                  match compiler.type_of_in_source("module app.repl", "1") with
                   | Ok inferred -> print(inferred)
                   | Err message -> print(message)
                 """,
@@ -173,8 +179,9 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_type_of_in_source("module app.repl", "missing") with
+                  match compiler.type_of_in_source("module app.repl", "missing") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -213,8 +220,9 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_check_source("module app.repl\n\nlet local = 41") with
+                  match compiler.check_source("module app.repl\n\nlet local = 41") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -248,12 +256,13 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
     def test_native_repl_bridge_reuses_one_analysis_service_process_per_run(self) -> None:
         src = """
         module main
+        import stdlib.compiler as compiler
 
         fn main() -> Unit !{IO} =
-          match repl_check_source("module app.repl") with
+          match compiler.check_source("module app.repl") with
           | Err message -> print(message)
           | Ok _ ->
-              match repl_check_source("module app.repl\n\nlet local = 41") with
+              match compiler.check_source("module app.repl\n\nlet local = 41") with
               | Err message -> print(message)
               | Ok _ -> print("ok")
         """
@@ -293,12 +302,13 @@ for line in sys.stdin:
     def test_native_repl_bridge_restarts_service_once_after_mid_run_exit(self) -> None:
         src = """
         module main
+        import stdlib.compiler as compiler
 
         fn main() -> Unit !{IO} =
-          match repl_check_source("module app.repl") with
+          match compiler.check_source("module app.repl") with
           | Err message -> print(message)
           | Ok _ ->
-              match repl_check_source("module app.repl\n\nlet local = 41") with
+              match compiler.check_source("module app.repl\n\nlet local = 41") with
               | Err message -> print(message)
               | Ok _ -> print("ok")
         """
@@ -347,9 +357,10 @@ for line in sys.stdin:
     def test_native_repl_eval_bridge_does_not_retry_after_transport_loss(self) -> None:
         src = """
         module main
+        import stdlib.compiler as compiler
 
         fn main() -> Unit !{IO} =
-          match repl_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1") with
+          match compiler.eval_lines_in_source("module app.repl\n\nlet local = 41", "local + 1") with
           | Ok lines -> print("ok")
           | Err message -> print(message)
         """
@@ -388,9 +399,10 @@ for line in sys.stdin:
     def test_native_repl_check_source_builtin_reports_bad_service_command_clearly(self) -> None:
         src = """
         module main
+        import stdlib.compiler as compiler
 
         fn main() -> Unit !{IO} =
-          match repl_check_source("module app.repl\n\nlet broken = missing") with
+          match compiler.check_source("module app.repl\n\nlet broken = missing") with
           | Ok _ -> print("ok")
           | Err message -> print(message)
         """
@@ -412,8 +424,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_check_source("module app.repl\n\nlet broken = missing") with
+                  match compiler.check_source("module app.repl\n\nlet broken = missing") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -452,6 +465,7 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn contains(target: String, lines: Vec String) -> Bool =
                   match lines with
                   | Vec raw ->
@@ -460,7 +474,7 @@ for line in sys.stdin:
                       | Nothing -> false
 
                 fn main() -> Unit !{IO} =
-                  match repl_declared_names_in_source("module app.repl\n\nlet zebra = 1\nlet apple = 2") with
+                  match compiler.declared_names_in_source("module app.repl\n\nlet zebra = 1\nlet apple = 2") with
                   | Ok names -> print(if contains("apple", names) then "ok" else "missing")
                   | Err message -> print(message)
                 """,
@@ -493,8 +507,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_exported_names_in_source("module app.lib\n\nlet banana = 1") with
+                  match compiler.exported_names_in_source("module app.lib\n\nlet banana = 1") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -527,8 +542,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_symbol_inventory_in_source("module app.lib\nimport stdlib.bytes (from_string)\nlet apple = from_string(\\\"x\\\")") with
+                  match compiler.symbol_inventory_in_source("module app.lib\nimport stdlib.bytes (from_string)\nlet apple = from_string(\\\"x\\\")") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -631,8 +647,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  print(vec_length(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing")))
+                  print(vec_length(compiler.diagnostics_in_source("module app.repl\n\nlet broken = missing")))
                 """,
                 encoding="utf-8",
             )
@@ -663,6 +680,7 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn first_or(lines: Vec String, fallback: String) -> String =
                   match lines with
                   | Vec raw ->
@@ -671,7 +689,7 @@ for line in sys.stdin:
                       | Nothing -> fallback
 
                 fn main() -> Unit !{IO} =
-                  match repl_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1") with
+                  match compiler.eval_lines_in_source("module app.repl\n\nlet local = 41", "local + 1") with
                   | Ok lines -> print(first_or(lines, "<empty>"))
                   | Err message -> print(message)
                 """,
@@ -710,8 +728,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_eval_expr_in_source("module app.repl", "print(1)") with
+                  match compiler.eval_lines_in_source("module app.repl", "print(1)") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -750,14 +769,16 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
-                fn render_pair(pair: (String, Vec String)) -> String =
-                  match pair with
-                  | (query_type, raw) ->
-                      if vec_length(raw) == 0 then query_type
-                      else vec_get_or(0, query_type, raw)
+                import stdlib.compiler as compiler
+
+                fn render_pair(pair: compiler.InstanceMatches) -> String =
+                  if vec_length(compiler.instance_match_names(pair)) == 0 then
+                    compiler.instance_query_type(pair)
+                  else
+                    vec_get_or(0, compiler.instance_query_type(pair), compiler.instance_match_names(pair))
 
                 fn main() -> Unit !{IO} =
-                  match repl_instances_in_source("module app.repl", "List Int") with
+                  match compiler.instances_in_source("module app.repl", "List Int") with
                   | Ok pair -> print(render_pair(pair))
                   | Err message -> print(message)
                 """,
@@ -796,8 +817,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match repl_instances_in_source("module app.repl", "(") with
+                  match compiler.instances_in_source("module app.repl", "(") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,

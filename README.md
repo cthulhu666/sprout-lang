@@ -252,6 +252,10 @@ Experimental snapshot analysis hooks:
 - `repl_instances(source: String) -> Result String (String, Vec String) !{IO}`
 - `repl_complete(line_buffer: String) -> (String, Vec String) !{IO}`
 
+These legacy `repl_*` hooks are compatibility-only runtime surface now. They
+are no longer part of the implicit builtin prelude for ordinary modules;
+prefer `stdlib.compiler` instead.
+
 These are implementation hooks for the Sprout-hosted REPL frontend. They are
 still mostly interpreter-backed. The current near-term priority is making that
 bridge native-capable rather than making it self-hosted. The canonical

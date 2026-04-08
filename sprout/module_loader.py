@@ -877,9 +877,6 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "analysis_diagnostics_in_source",
         "analysis_type_of_in_source",
         "analysis_instances_in_source",
-        "term_write",
-    }
-    public_builtin_values |= {
         "repl_add_import",
         "repl_add_declaration",
         "repl_eval_expr",
@@ -896,6 +893,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "repl_complete",
         "repl_complete_in_state",
         "repl_reset_session",
+        "term_write",
     }
     builtin_types = {"Int", "Bool", "String", "Bytes", "Builder", "Unit", "List", "Vector", "Map"}
     module_symbols = _build_module_symbols(program, bundle)

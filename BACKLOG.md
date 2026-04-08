@@ -22,7 +22,8 @@ Definition of done:
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
-- [~] `P1` Decide how builtins participate in effect tracking; the builtin surface is now audited/documented, and raw `term_*` plus `analysis_*` hooks no longer sit in the implicit prelude for ordinary modules, but the full convention cleanup is still open around the remaining legacy `repl_*` compatibility surface.
+- [~] `P1` Decide how builtins participate in effect tracking; the builtin surface is now audited/documented, and raw `term_*`, `analysis_*`, and legacy `repl_*` hooks no longer sit in the implicit prelude for ordinary modules, but the broader builtin-surface convention cleanup is still open.
+- [ ] `P2` Move `stdlib.compiler` to a dedicated tooling/compiler namespace once the non-stdlib tooling-package model is settled.
 - [x] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
 - [x] `P2` Align function composition operator direction with Elm/F# conventions; `f >> g` now means `g(f(x))` and `f << g` means `f(g(x))`.
 
