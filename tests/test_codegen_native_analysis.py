@@ -561,8 +561,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match analysis_symbol_inventory_in_source("module app.lib\nimport stdlib.bytes (from_string)\nlet apple = from_string(\\\"x\\\")") with
+                  match compiler.symbol_inventory_in_source("module app.lib\nimport stdlib.bytes (from_string)\nlet apple = from_string(\\\"x\\\")") with
                   | Ok _ -> print("ok")
                   | Err message -> print(message)
                 """,
@@ -595,8 +596,9 @@ for line in sys.stdin:
             spr_path.write_text(
                 """
                 module main
+                import stdlib.compiler as compiler
                 fn main() -> Unit !{IO} =
-                  match analysis_symbol_locations_in_source("module app.lib\n\nlet apple = 1\ntype Fruit =\n  | Banana") with
+                  match compiler.symbol_locations_in_source("module app.lib\n\nlet apple = 1\ntype Fruit =\n  | Banana") with
                   | Ok locations -> print(vec_length(locations))
                   | Err _ -> print(0)
                 """,

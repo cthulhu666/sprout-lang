@@ -914,9 +914,10 @@ class CodegenNativeBasicTests(CodegenTestCase):
             spr_path.write_text(
                 """
                 module main
+                import stdlib.terminal as terminal
 
                 fn main() -> Unit !{IO} =
-                  print(term_read_key())
+                  print(terminal.term_read_key_once())
                 """,
                 encoding="utf-8",
             )
@@ -941,9 +942,10 @@ class CodegenNativeBasicTests(CodegenTestCase):
     def test_native_term_read_key_builtin_normalizes_up_arrow(self) -> None:
         src = """
         module main
+        import stdlib.terminal as terminal
 
         fn main() -> Unit !{IO} =
-          print(term_read_key())
+          print(terminal.term_read_key_once())
         """
         with compiled_native_binary(self, src) as bin_path:
             master_fd, slave_fd = pty.openpty()
@@ -995,6 +997,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
                 """
                 module main
                 import stdlib.collections (Maybe)
+                import stdlib.terminal as terminal
 
                 fn render(v: Maybe String) -> String =
                   match v with
@@ -1002,7 +1005,7 @@ class CodegenNativeBasicTests(CodegenTestCase):
                   | Nothing -> "eof"
 
                 fn main() -> Unit !{IO} =
-                  print(render(term_read_line()))
+                  print(render(terminal.term_read_line_once()))
                 """,
                 encoding="utf-8",
             )
@@ -1036,8 +1039,9 @@ class CodegenNativeBasicTests(CodegenTestCase):
             spr_path.write_text(
                 """
                 module main
+                import stdlib.terminal as terminal
                 fn main() -> Unit !{IO} =
-                  print(term_is_interactive())
+                  print(terminal.term_is_interactive_once())
                 """,
                 encoding="utf-8",
             )

@@ -53,23 +53,43 @@ export fn session_source(session: CompilerSession) -> String =
 export fn check(session: CompilerSession) -> Result String Unit !{IO} =
   analysis_check_source(session_source(session))
 
+export fn check_source(module_source: String) -> Result String Unit !{IO} =
+  analysis_check_source(module_source)
+
 fn empty_inventory() -> SymbolInventory =
   SymbolInventory(vec_empty(), vec_empty(), vec_empty())
 
 export fn declared_names(session: CompilerSession) -> Result String (Vec String) !{IO} =
   analysis_declared_names_in_source(session_source(session))
 
+export fn declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO} =
+  analysis_declared_names_in_source(module_source)
+
 export fn exported_names(session: CompilerSession) -> Result String (Vec String) !{IO} =
   analysis_exported_names_in_source(session_source(session))
+
+export fn exported_names_in_source(module_source: String) -> Result String (Vec String) !{IO} =
+  analysis_exported_names_in_source(module_source)
 
 export fn type_of(session: CompilerSession, expr: String) -> Result String String !{IO} =
   analysis_type_of_in_source(session_source(session), expr)
 
+export fn type_of_in_source(module_source: String, expr: String) -> Result String String !{IO} =
+  analysis_type_of_in_source(module_source, expr)
+
 export fn eval_lines(session: CompilerSession, expr: String) -> Result String (Vec String) !{IO} =
   repl_eval_expr_in_source(session_source(session), expr)
 
+export fn eval_lines_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO} =
+  repl_eval_expr_in_source(module_source, expr)
+
 export fn instances(session: CompilerSession, query: String) -> Result String InstanceMatches !{IO} =
   match analysis_instances_in_source(session_source(session), query) with
+  | Err message -> Err(message)
+  | Ok payload -> Ok(instance_matches_from_pair(payload))
+
+export fn instances_in_source(module_source: String, query: String) -> Result String InstanceMatches !{IO} =
+  match analysis_instances_in_source(module_source, query) with
   | Err message -> Err(message)
   | Ok payload -> Ok(instance_matches_from_pair(payload))
 
@@ -90,6 +110,11 @@ export fn symbol_inventory(session: CompilerSession) -> Result String SymbolInve
   | Err message -> Err(message)
   | Ok payload -> Ok(symbol_inventory_from_tuple(payload))
 
+export fn symbol_inventory_in_source(module_source: String) -> Result String SymbolInventory !{IO} =
+  match analysis_symbol_inventory_in_source(module_source) with
+  | Err message -> Err(message)
+  | Ok payload -> Ok(symbol_inventory_from_tuple(payload))
+
 fn symbol_inventory_from_tuple(payload: (Vec String, Vec String, Vec String)) -> SymbolInventory =
   match payload with
   | (declared, imported, exported) -> SymbolInventory(declared, imported, exported)
@@ -105,6 +130,18 @@ fn diagnostic_from_tuple(value: (String, Int, Int)) -> Diagnostic =
 
 export fn diagnostics(session: CompilerSession) -> Vec Diagnostic !{IO} =
   map_diagnostics(analysis_diagnostics_in_source(session_source(session)), 0, vec_empty())
+
+export fn diagnostics_in_source(module_source: String) -> Vec Diagnostic !{IO} =
+  map_diagnostics(analysis_diagnostics_in_source(module_source), 0, vec_empty())
+
+export fn symbol_locations_in_source(module_source: String) -> Result String (Vec (String, String, Int, Int)) !{IO} =
+  analysis_symbol_locations_in_source(module_source)
+
+export fn complete(session: CompilerSession, line_buffer: String) -> (String, Vec String) !{IO} =
+  repl_complete_in_state(line_buffer, session_imports(session), session_declarations(session))
+
+export fn complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO} =
+  repl_complete_in_state(line_buffer, imports, declarations)
 
 fn inventory_or_empty(session: CompilerSession) -> SymbolInventory !{IO} =
   match symbol_inventory(session) with

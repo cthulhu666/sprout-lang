@@ -171,6 +171,11 @@ Integration-style IO test convention:
 
 Runtime builtins (host-implemented):
 
+Only a small subset is intended as the default implicit builtin surface.
+Raw terminal control hooks and the neutral `analysis_*` snapshot hooks now sit
+behind `stdlib.terminal` and `stdlib.compiler` for ordinary modules, even
+though the underlying host builtins still exist.
+
 `!{IO}` builtins:
 
 - `print(x) -> Unit !{IO}`
@@ -203,6 +208,10 @@ Runtime builtins (host-implemented):
 - `term_read_line() -> Maybe String !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF)
 - `term_write(text: String) -> Unit !{IO}`
 
+Application code should prefer the package surface in `stdlib.terminal`
+(`write`, `hide_cursor`, `show_cursor`, `term_read_key_once`, and related
+helpers) instead of the raw `term_*` hooks.
+
 Experimental snapshot analysis hooks:
 
 - Active snapshot/state hooks used by the current Sprout REPL frontend.
@@ -223,6 +232,9 @@ Experimental snapshot analysis hooks:
   `analysis_exported_names_in_source`, `analysis_symbol_inventory_in_source`,
   `analysis_symbol_locations_in_source`, `analysis_diagnostics_in_source`,
   `analysis_type_of_in_source`, `analysis_instances_in_source`.
+- Application code should prefer `stdlib.compiler` for these capabilities.
+  The raw `analysis_*` hooks are no longer part of the implicit builtin
+  prelude for ordinary modules.
 - Python-side analysis helpers in `sprout.analysis` now also expose
   `symbol_metadata_in_source(...)` for structured top-level/import symbol
   metadata, including optional definition locations for imported symbols when

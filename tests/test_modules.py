@@ -776,6 +776,92 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(lowered, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
+    def test_public_modules_do_not_get_raw_terminal_builtins_implicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+
+                fn main() -> Unit !{IO} =
+                  term_write("hello")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError) as ctx:
+                resolve_program_names(program, bundle)
+            self.assertIn("term_write", str(ctx.exception))
+
+    def test_public_modules_do_not_get_raw_analysis_builtins_implicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+
+                fn main() -> Unit !{IO} =
+                  match analysis_check_source("module app") with
+                  | Ok _ -> print("ok")
+                  | Err message -> print(message)
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            with self.assertRaises(ModuleLoadError) as ctx:
+                resolve_program_names(program, bundle)
+            self.assertIn("analysis_check_source", str(ctx.exception))
+
+    def test_import_stdlib_terminal_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.terminal as terminal
+
+                fn main() -> Unit !{IO} =
+                  terminal.write("ok")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ok")
+
+    def test_import_stdlib_compiler_direct_source_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler as compiler
+
+                fn main() -> Unit !{IO} =
+                  match compiler.check_source("module app\n\nlet answer = 41") with
+                  | Ok _ -> print("ok")
+                  | Err message -> print(message)
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "ok")
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

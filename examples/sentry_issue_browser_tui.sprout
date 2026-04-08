@@ -1,6 +1,6 @@
 module examples.sentry_issue_browser_tui
 import examples.sentry_api (IssueDetail, IssueSummary, issue_detail_culprit, issue_detail_id, issue_detail_level, issue_detail_permalink, issue_detail_short_id, issue_detail_status, issue_detail_title, issue_id, issue_short_id, issue_status, issue_title, sentry_get_issue_detail, sentry_http_error_message, sentry_list_issues)
-import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_render_line, term_reset_screen)
+import stdlib.terminal as terminal
 import stdlib.string as strlib
 
 export type SentryConfig (..) =
@@ -143,8 +143,8 @@ where
 
 fn render_frame(frame: String) -> Unit !{IO} =
   do
-    term_reset_screen()
-    term_write(frame)
+    terminal.term_reset_screen()
+    terminal.write(frame)
 
 fn fetch_issues(org: String, project: String, token: String) -> Result String (Vec IssueSummary) !{IO} =
   match sentry_list_issues(org, project, token, 3000) with
@@ -159,8 +159,8 @@ fn fetch_issue_detail(token: String, summary: IssueSummary) -> Result String Iss
 fn initial_error_loop(org: String, project: String, token: String, message: String) -> Unit !{IO} =
   do
     render_frame(concat3("Sentry issues\n\n", message, "\n\nr retries  q quits"))
-    match term_read_key_once() with
-    | "q" -> term_write("")
+    match terminal.term_read_key_once() with
+    | "q" -> terminal.write("")
     | "r" -> interactive_boot(org, project, token)
     | _ -> initial_error_loop(org, project, token, message)
 
@@ -198,8 +198,8 @@ fn reload_issue_detail(org: String, project: String, token: String, issues: Vec 
 fn list_loop(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int, scroll: Int, status_line: String) -> Unit !{IO} =
   do
     render_frame(render_issue_browser(issues, selected, scroll, status_line))
-    match term_read_key_once() with
-    | "q" -> term_write("")
+    match terminal.term_read_key_once() with
+    | "q" -> terminal.write("")
     | "k" -> list_loop(org, project, token, issues, clamp_selection(selected - 1, issues), scroll_for_selection(clamp_selection(selected - 1, issues), scroll), status_line)
     | "up" -> list_loop(org, project, token, issues, clamp_selection(selected - 1, issues), scroll_for_selection(clamp_selection(selected - 1, issues), scroll), status_line)
     | "j" -> list_loop(org, project, token, issues, clamp_selection(selected + 1, issues), scroll_for_selection(clamp_selection(selected + 1, issues), scroll), status_line)
@@ -211,8 +211,8 @@ fn list_loop(org: String, project: String, token: String, issues: Vec IssueSumma
 fn detail_loop(org: String, project: String, token: String, issues: Vec IssueSummary, selected: Int, scroll: Int, detail: IssueDetail) -> Unit !{IO} =
   do
     render_frame(render_issue_detail(detail))
-    match term_read_key_once() with
-    | "q" -> term_write("")
+    match terminal.term_read_key_once() with
+    | "q" -> terminal.write("")
     | "escape" -> list_loop(org, project, token, issues, selected, scroll, "")
     | "left" -> list_loop(org, project, token, issues, selected, scroll, "")
     | "r" -> reload_issue_detail(org, project, token, issues, selected, scroll)
@@ -237,22 +237,22 @@ fn interactive_boot(org: String, project: String, token: String) -> Unit !{IO} =
 
 export fn run_interactive_from_env() -> Unit !{IO} =
   match load_config() with
-  | Err err -> term_render_line(1, strlib.concat("Configuration error: ", err))
+  | Err err -> terminal.term_render_line(1, strlib.concat("Configuration error: ", err))
   | Ok config ->
       match config with
       | SentryConfig org project token ->
           do
-            term_hide_cursor()
+            terminal.hide_cursor()
             interactive_boot(org, project, token)
-            term_show_cursor()
-            term_reset_screen()
+            terminal.show_cursor()
+            terminal.term_reset_screen()
 
 fn boot_message() -> String =
   "sentry issue browser: set SENTRY_ORG, SENTRY_PROJECT, and SENTRY_TOKEN"
 
 export fn sentry_tui_demo_main() -> Unit !{IO} =
-  term_render_line(1, boot_message())
+  terminal.term_render_line(1, boot_message())
 
 export fn run_entrypoint() -> Unit !{IO} =
-  if term_is_interactive_once() then run_interactive_from_env()
+  if terminal.term_is_interactive_once() then run_interactive_from_env()
   else print(run_from_env())

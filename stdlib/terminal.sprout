@@ -1,5 +1,20 @@
 module stdlib.terminal
 
+export fn clear() -> Unit !{IO} =
+  term_clear()
+
+export fn move(row: Int, col: Int) -> Unit !{IO} =
+  term_move(row, col)
+
+export fn hide_cursor() -> Unit !{IO} =
+  term_hide_cursor()
+
+export fn show_cursor() -> Unit !{IO} =
+  term_show_cursor()
+
+export fn write(text: String) -> Unit !{IO} =
+  term_write(text)
+
 export fn term_home() -> Unit !{IO} =
   term_move(1, 1)
 
@@ -10,8 +25,8 @@ export fn term_reset_screen() -> Unit !{IO} =
 
 export fn term_render_line(row: Int, text: String) -> Unit !{IO} =
   do
-    term_move(row, 1)
-    term_write(text)
+    move(row, 1)
+    write(text)
 
 export fn term_read_key_once() -> String !{IO} =
   term_read_key()

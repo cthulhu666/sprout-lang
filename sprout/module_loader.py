@@ -391,6 +391,15 @@ def _implicit_prelude_path() -> Path:
     return (Path(__file__).resolve().parent.parent / "stdlib" / "prelude.sprout").resolve()
 
 
+def _is_stdlib_module_path(bundle: ModuleBundle, path: Path) -> bool:
+    info = bundle.modules.get(path)
+    if info is not None and info.header.module is not None:
+        mod = info.header.module
+        if mod == "stdlib" or mod.startswith("stdlib."):
+            return True
+    return "stdlib" in path.parts
+
+
 def _resolve_module(module_name: str, importer: Path) -> Path:
     rel = _module_path(module_name)
     toolchain_root = Path(__file__).resolve().parent.parent
@@ -780,7 +789,7 @@ def _imports_for_module(
 
 
 def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[CompilerWarning]:
-    builtin_values = {
+    public_builtin_values = {
         "print",
         "print_int",
         "read_lines",
@@ -851,6 +860,8 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "http_request",
         "json_parse",
         "json_stringify",
+    }
+    stdlib_internal_builtin_values = {
         "term_clear",
         "term_move",
         "term_hide_cursor",
@@ -858,31 +869,33 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "term_read_key",
         "term_read_line",
         "term_is_interactive",
+        "analysis_check_source",
+        "analysis_declared_names_in_source",
+        "analysis_exported_names_in_source",
+        "analysis_symbol_inventory_in_source",
+        "analysis_symbol_locations_in_source",
+        "analysis_diagnostics_in_source",
+        "analysis_type_of_in_source",
+        "analysis_instances_in_source",
+        "term_write",
+    }
+    public_builtin_values |= {
         "repl_add_import",
         "repl_add_declaration",
         "repl_eval_expr",
         "repl_eval_expr_in_source",
         "repl_check_source",
-        "analysis_check_source",
         "repl_declared_names_in_source",
-        "analysis_declared_names_in_source",
         "repl_exported_names_in_source",
-        "analysis_exported_names_in_source",
         "repl_symbol_inventory_in_source",
-        "analysis_symbol_inventory_in_source",
-        "analysis_symbol_locations_in_source",
         "repl_diagnostics_in_source",
-        "analysis_diagnostics_in_source",
         "repl_type_of",
         "repl_type_of_in_source",
-        "analysis_type_of_in_source",
         "repl_instances",
         "repl_instances_in_source",
-        "analysis_instances_in_source",
         "repl_complete",
         "repl_complete_in_state",
         "repl_reset_session",
-        "term_write",
     }
     builtin_types = {"Int", "Bool", "String", "Bytes", "Builder", "Unit", "List", "Vector", "Map"}
     module_symbols = _build_module_symbols(program, bundle)
@@ -987,8 +1000,16 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
                 f"exported values: {_fmt_names(set(target_symbols.exported_values))}",
             )
 
-        if name in builtin_values:
+        if name in public_builtin_values:
             return name
+        if _is_stdlib_module_path(bundle, module_info.path) and name in stdlib_internal_builtin_values:
+            return name
+        if name in stdlib_internal_builtin_values:
+            raise _node_module_error(
+                bundle,
+                node,
+                f"Value {name!r} is internal; use the corresponding stdlib package wrapper instead.",
+            )
         if name in symbols.value_locals:
             return symbols.value_locals[name]
         if name in symbols.method_locals or name in imported_methods:
