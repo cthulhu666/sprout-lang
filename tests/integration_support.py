@@ -64,11 +64,9 @@ def _cleanup_native_binary_cache() -> None:
 atexit.register(_cleanup_native_binary_cache)
 
 
-def _native_binary_cache_key(source: str, *, with_http_stdlib: bool, filename: str) -> str:
+def _native_binary_cache_key(source: str, *, filename: str) -> str:
     digest = hashlib.sha256()
     digest.update(filename.encode("utf-8"))
-    digest.update(b"\0")
-    digest.update(b"1" if with_http_stdlib else b"0")
     digest.update(b"\0")
     digest.update(source.encode("utf-8"))
     digest.update(b"\0")
@@ -97,10 +95,9 @@ def _compiled_native_binary_path(
     case: unittest.TestCase,
     source: str,
     *,
-    with_http_stdlib: bool = False,
     filename: str = "prog.sprout",
 ) -> Path:
-    key = _native_binary_cache_key(source, with_http_stdlib=with_http_stdlib, filename=filename)
+    key = _native_binary_cache_key(source, filename=filename)
     build_lock = _native_binary_build_lock(key)
     with build_lock:
         with _NATIVE_BINARY_CACHE_LOCK:
@@ -122,8 +119,6 @@ def _compiled_native_binary_path(
             tmp_bin = cache_dir / f"prog.{os.getpid()}.{threading.get_ident()}"
             spr_path.write_text(source, encoding="utf-8")
             cmd = [sys.executable, "-m", "sprout.cli", "compile"]
-            if with_http_stdlib:
-                cmd.append("--with-http-stdlib")
             cmd.extend([str(spr_path), "--native", "-o", str(tmp_bin)])
             compile_proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
             case.assertEqual(
@@ -262,12 +257,10 @@ def compiled_native_binary(
     case: unittest.TestCase,
     source: str,
     *,
-    with_http_stdlib: bool = False,
     filename: str = "prog.sprout",
 ) -> Iterator[Path]:
     yield _compiled_native_binary_path(
         case,
         source,
-        with_http_stdlib=with_http_stdlib,
         filename=filename,
     )

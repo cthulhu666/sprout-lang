@@ -773,46 +773,54 @@ class CodegenLlvmTests(CodegenTestCase):
 
     def test_compile_http_request_to_llvm(self) -> None:
         src = """
+        import stdlib.http (http_response_body)
+
         fn main() -> Unit !{IO} =
           match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
           | Ok resp -> print(http_response_body(resp))
           | Err _ -> print("err")
         """
-        program = parse(with_http_prelude(src))
+        program = self._load_module_program(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("declare i64 @http_request(ptr, ptr, ptr, ptr, i64)", ir)
 
     def test_compile_json_stringify_to_llvm(self) -> None:
         src = """
+        import stdlib.json as json
+
         fn main() -> Unit !{IO} =
-          print(json_stringify(JsonArray(JsonArrayCons(JsonInt(1), JsonArrayNil))))
+          print(json.stringify(json.JsonArray(json.JsonArrayCons(json.JsonInt(1), json.JsonArrayNil))))
         """
-        program = parse(with_http_prelude(src))
+        program = self._load_module_program(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("declare ptr @json_stringify(i64)", ir)
 
     def test_compile_json_parse_to_llvm(self) -> None:
         src = """
+        import stdlib.json (parse, stringify)
+
         fn main() -> Unit !{IO} =
-          match json_parse("{\\"ok\\":true}") with
-          | Ok value -> print(json_stringify(value))
+          match parse("{\\"ok\\":true}") with
+          | Ok value -> print(stringify(value))
           | Err _ -> print("err")
         """
-        program = parse(with_http_prelude(src))
+        program = self._load_module_program(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("declare i64 @json_parse(ptr)", ir)
 
     def test_compile_http_prelude_registers_qualified_runtime_ctors(self) -> None:
         src = """
+        import stdlib.http (http_response_body)
+
         fn main() -> Unit !{IO} =
           match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
           | Ok resp -> print(http_response_body(resp))
           | Err _ -> print("err")
         """
-        program = parse(with_http_prelude(src))
+        program = self._load_module_program(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 8"), 2)

@@ -16,7 +16,6 @@ from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
 from sprout import cli as sprout_cli
 from sprout.analysis_bridge import default_analysis_service_cmd
 from sprout.module_loader import load_module_bundle, resolve_program_names
-from sprout.stdlib import with_http_prelude
 from tests.integration_support import compiled_native_binary, running_https_server, running_tcp_fixture
 
 
@@ -27,3 +26,13 @@ class CodegenTestCase(unittest.TestCase):
         env = dict(os.environ)
         env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
         return env
+
+    def _load_module_program(self, source: str, *, filename: str = "main.sprout"):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / filename
+            path.write_text(source, encoding="utf-8")
+            bundle = load_module_bundle(path)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            return program

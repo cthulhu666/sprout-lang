@@ -7,10 +7,19 @@ import unittest
 from sprout import TypeCheckError, elaborate_program, parse, typecheck_program
 from sprout import ast, core
 from sprout.module_loader import load_module_bundle, resolve_program_names
-from sprout.stdlib import with_http_prelude, with_prelude
+from sprout.stdlib import with_prelude
 
 
 class TypecheckerTests(unittest.TestCase):
+    def _typecheck_module_source(self, src: str) -> dict[str, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            main = Path(tmp) / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            return typecheck_program(program)
+
     def test_typecheck_valid_program(self) -> None:
         src = """
         type Maybe a =
@@ -951,22 +960,26 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("vec_singleton", types)
         self.assertEqual(types["main"], "Unit !{IO}")
 
-    def test_typecheck_with_http_stdlib_loaded(self) -> None:
+    def test_typecheck_with_http_imports(self) -> None:
         src = """
+        module main
+        import stdlib.http (http_echo_response)
+        import stdlib.json as json
+
         fn main() -> Unit !{IO} =
           print(http_echo_response("GET /ping HTTP/1.1\\r\\n\\r\\n"))
         """
-        types = typecheck_program(parse(with_http_prelude(src)))
-        self.assertIn("http_echo_response", types)
-        self.assertIn("http_response_body", types)
+        types = self._typecheck_module_source(src)
+        self.assertIn("stdlib.http.http_echo_response", types)
+        self.assertIn("stdlib.http.http_response_body", types)
         self.assertIn("http_request", types)
         self.assertIn("json_parse", types)
         self.assertIn("json_stringify", types)
-        self.assertIn("json_get_field", types)
-        self.assertIn("json_get_int", types)
-        self.assertIn("json_get_array", types)
-        self.assertIn("json_array_next", types)
-        self.assertIn("json_object_next", types)
+        self.assertIn("stdlib.json.json_get_field", types)
+        self.assertIn("stdlib.json.json_get_int", types)
+        self.assertIn("stdlib.json.json_get_array", types)
+        self.assertIn("stdlib.json.json_array_next", types)
+        self.assertIn("stdlib.json.json_object_next", types)
 
     def test_typecheck_terminal_builtins(self) -> None:
         src = """

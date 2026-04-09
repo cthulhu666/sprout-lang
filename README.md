@@ -801,10 +801,9 @@ Load stdlib prelude explicitly for standalone files:
 - `python3 -m sprout.cli run --with-stdlib your_file.sprout`
 - module-loaded programs get the foundational prelude implicitly
 
-Load HTTP and JSON helpers:
+Load HTTP and JSON helpers via imports such as `import stdlib.http (...)`, `import stdlib.http_client (...)`, `import stdlib.json as json`, and `import stdlib.string as string`.
+There is no `--with-http-stdlib` CLI compatibility mode.
 
-- `python3 -m sprout.cli check --with-http-stdlib your_file.sprout`
-- `python3 -m sprout.cli run --with-http-stdlib your_file.sprout`
 - Pass program arguments to `sprout run` after the source path; inside Sprout, read them with `argv_get(index)`.
 - Example HTTP echo server:
   `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/http_echo_server.sprout`

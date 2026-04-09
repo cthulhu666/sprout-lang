@@ -1552,8 +1552,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(prefix, "string.st")
         self.assertEqual(matches, [])
 
-    def test_run_with_http_stdlib_flag(self) -> None:
+    def test_run_with_http_imports(self) -> None:
         src = """
+        module main
+        import stdlib.http (http_ok)
+
         fn main() -> Unit !{IO} =
           print(http_ok("ready"))
         """
@@ -1566,7 +1569,6 @@ class CliTests(unittest.TestCase):
                     "-m",
                     "sprout.cli",
                     "run",
-                    "--with-http-stdlib",
                     str(path),
                 ],
                 check=False,
@@ -1577,8 +1579,9 @@ class CliTests(unittest.TestCase):
             self.assertIn("HTTP/1.1 200 OK", run.stdout)
             self.assertIn("ready", run.stdout)
 
-    def test_check_with_http_stdlib_and_json_import_does_not_duplicate_prelude(self) -> None:
+    def test_check_with_http_and_json_imports(self) -> None:
         src = """
+        module main
         import stdlib.json as json
 
         fn render(raw: String) -> String =
@@ -1598,7 +1601,6 @@ class CliTests(unittest.TestCase):
                     "-m",
                     "sprout.cli",
                     "check",
-                    "--with-http-stdlib",
                     str(path),
                 ],
                 check=False,

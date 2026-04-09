@@ -295,6 +295,9 @@ class CodegenNativeBasicTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_compile_http_request_program(self) -> None:
         src = """
+        module main
+        import stdlib.http (HttpResponse, http_response_body)
+
         fn main() -> Unit !{IO} =
           match http_request("GET", "http://127.0.0.1:8080/ok", "", "", 500) with
           | Ok resp -> print(http_response_body(resp))
@@ -311,7 +314,6 @@ class CodegenNativeBasicTests(CodegenTestCase):
                     "-m",
                     "sprout.cli",
                     "compile",
-                    "--with-http-stdlib",
                     str(spr_path),
                     "--native",
                     "-o",

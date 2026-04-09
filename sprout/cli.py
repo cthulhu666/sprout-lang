@@ -49,28 +49,6 @@ def _bundle_has_implicit_prelude(bundle: object | None) -> bool:
     return any(path.name == "prelude.sprout" and "stdlib" in path.parts for path in bundle.modules)
 
 
-HTTP_STDLIB_IMPORT = (
-    "import stdlib.http "
-    "(HttpResponse, HttpError, HttpStatusError, RequestPathVersion, RequestLine, "
-    "parse_request_line, http_response, http_ok, http_bad_request, "
-    "request_line_to_string, http_echo_response, http_response_body)"
-)
-
-
-def _with_http_stdlib_entry_source(source: str) -> str:
-    lines = source.splitlines(keepends=True)
-    insert_at = 0
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith("module "):
-            insert_at = index + 1
-        break
-    injected = [f"{HTTP_STDLIB_IMPORT}\n", "\n"]
-    return "".join(lines[:insert_at] + injected + lines[insert_at:])
-
-
 def _print_warnings(warnings: list[CompilerWarning]) -> None:
     for warning in warnings:
         print(
@@ -148,13 +126,10 @@ def cmd_lint(path: Path) -> int:
     return 1
 
 
-def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = False) -> int:
-    entry_source_override = None
-    if with_http_stdlib:
-        entry_source_override = _with_http_stdlib_entry_source(path.read_text(encoding="utf-8"))
-    bundle = load_module_bundle(path, entry_source_override=entry_source_override)
+def cmd_check(path: Path, with_stdlib: bool = False) -> int:
+    bundle = load_module_bundle(path)
     source = bundle.source
-    if not with_http_stdlib and with_stdlib and not _bundle_has_implicit_prelude(bundle):
+    if with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -172,15 +147,11 @@ def cmd_check(path: Path, with_stdlib: bool = False, with_http_stdlib: bool = Fa
 def cmd_run(
     path: Path,
     with_stdlib: bool = False,
-    with_http_stdlib: bool = False,
     program_args: list[str] | None = None,
 ) -> int:
-    entry_source_override = None
-    if with_http_stdlib:
-        entry_source_override = _with_http_stdlib_entry_source(path.read_text(encoding="utf-8"))
-    bundle = load_module_bundle(path, entry_source_override=entry_source_override)
+    bundle = load_module_bundle(path)
     source = bundle.source
-    if not with_http_stdlib and with_stdlib and not _bundle_has_implicit_prelude(bundle):
+    if with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -205,15 +176,11 @@ def cmd_compile(
     path: Path,
     out: Path,
     with_stdlib: bool = False,
-    with_http_stdlib: bool = False,
     native: bool = False,
 ) -> int:
-    entry_source_override = None
-    if with_http_stdlib:
-        entry_source_override = _with_http_stdlib_entry_source(path.read_text(encoding="utf-8"))
-    bundle = load_module_bundle(path, entry_source_override=entry_source_override)
+    bundle = load_module_bundle(path)
     source = bundle.source
-    if not with_http_stdlib and with_stdlib and not _bundle_has_implicit_prelude(bundle):
+    if with_stdlib and not _bundle_has_implicit_prelude(bundle):
         source = with_prelude(source)
         bundle = None
     tree = parse(source)
@@ -4880,29 +4847,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_check = sub.add_parser("check", help="typecheck a Sprout file")
     p_check.add_argument("file", type=Path)
     p_check.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
-    p_check.add_argument(
-        "--with-http-stdlib",
-        action="store_true",
-        help="load stdlib http helpers",
-    )
     p_run = sub.add_parser("run", help="typecheck and run a Sprout file")
     p_run.add_argument("file", type=Path)
     p_run.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
-    p_run.add_argument(
-        "--with-http-stdlib",
-        action="store_true",
-        help="load stdlib http helpers",
-    )
     p_run.add_argument("program_args", nargs="*", help="arguments exposed to the program via argv_get")
     p_compile = sub.add_parser("compile", help="typecheck and compile a Sprout file")
     p_compile.add_argument("file", type=Path)
     p_compile.add_argument("-o", "--output", type=Path, required=True, help="output file")
     p_compile.add_argument("--with-stdlib", action="store_true", help="load stdlib prelude")
-    p_compile.add_argument(
-        "--with-http-stdlib",
-        action="store_true",
-        help="load stdlib http helpers",
-    )
     p_compile.add_argument(
         "--native",
         action="store_true",
@@ -4935,13 +4887,11 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_check(
                 args.file,
                 with_stdlib=args.with_stdlib,
-                with_http_stdlib=args.with_http_stdlib,
             )
         if args.command == "run":
             return cmd_run(
                 args.file,
                 with_stdlib=args.with_stdlib,
-                with_http_stdlib=args.with_http_stdlib,
                 program_args=args.program_args,
             )
         if args.command == "compile":
@@ -4949,7 +4899,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.file,
                 out=args.output,
                 with_stdlib=args.with_stdlib,
-                with_http_stdlib=args.with_http_stdlib,
                 native=args.native,
             )
         if args.command == "analysis-service":

@@ -1074,6 +1074,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_json_stringify(self) -> None:
         src = """
+        module main
         import stdlib.json as json
 
         fn sample() -> json.Json =
@@ -1101,7 +1102,6 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                     "-m",
                     "sprout.cli",
                     "compile",
-                    "--with-http-stdlib",
                     str(spr_path),
                     "--native",
                     "-o",
@@ -1116,6 +1116,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_json_parse_roundtrip(self) -> None:
         src = """
+        module main
         import stdlib.json as json
 
         fn render(raw: String) -> String =
@@ -1137,7 +1138,6 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                     "-m",
                     "sprout.cli",
                     "compile",
-                    "--with-http-stdlib",
                     str(spr_path),
                     "--native",
                     "-o",
@@ -1269,6 +1269,8 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
 
             with running_https_server(self, Handler, certfile=server_pem, keyfile=server_key_pem) as port:
                 src = f"""
+                module main
+                import stdlib.http (HttpError, HttpResponse)
                 import stdlib.string as string
 
                 fn main() -> Unit !{{IO}} =
@@ -1292,7 +1294,6 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                         "-m",
                         "sprout.cli",
                         "compile",
-                        "--with-http-stdlib",
                         str(spr_path),
                         "--native",
                         "-o",

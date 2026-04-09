@@ -27,18 +27,9 @@ from integration_support import (
 )
 from sprout import parse, run_program, typecheck_program
 from sprout.module_loader import load_module_bundle, resolve_program_names
-from sprout.stdlib import with_http_prelude
 
 
 class InterpreterIoIntegrationTests(unittest.TestCase):
-    def _run_source(self, src: str, *, with_http_stdlib: bool = False) -> str:
-        full_src = with_http_prelude(src) if with_http_stdlib else src
-        program = parse(full_src)
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
-        return out.getvalue().strip()
-
     def _run_module_source(self, src: str) -> str:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -200,14 +191,16 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
                 return
 
         with running_http_server(self, Handler) as port:
-            out = self._run_source(
+            out = self._run_module_source(
                 f"""
+                module main
+                import stdlib.http (HttpResponse, http_response_body)
+
                 fn main() -> Unit !{{IO}} =
                   match http_request("POST", "http://127.0.0.1:{port}/echo", "X-Test: yes", "hello", 500) with
                   | Ok resp -> print(http_response_body(resp))
                   | Err _ -> print("err")
-                """,
-                with_http_stdlib=True,
+                """
             )
         self.assertEqual(out, "ok:hello")
 
@@ -221,8 +214,11 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
                 return
 
         with running_http_server(self, Handler) as port:
-            out = self._run_source(
+            out = self._run_module_source(
                 f"""
+                module main
+                import stdlib.http (HttpError)
+
                 fn main() -> Unit !{{IO}} =
                   match http_request("GET", "http://127.0.0.1:{port}/missing", "", "", 500) with
                   | Ok _ -> print(0)
@@ -232,8 +228,7 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
                       | HttpTimeout -> print(-1)
                       | HttpNetwork _ -> print(-2)
                       | HttpDecode _ -> print(-3)
-                """,
-                with_http_stdlib=True,
+                """
             )
         self.assertEqual(out, "404")
 
@@ -275,11 +270,10 @@ class NativeIoIntegrationTests(unittest.TestCase):
         self,
         source: str,
         *,
-        with_http_stdlib: bool = False,
         argv: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         argv = argv or []
-        with compiled_native_binary(self, source, with_http_stdlib=with_http_stdlib) as bin_path:
+        with compiled_native_binary(self, source) as bin_path:
             return subprocess.run([str(bin_path), *argv], check=False, capture_output=True, text=True)
 
     def test_compiled_native_binary_caches_identical_sources(self) -> None:
@@ -300,9 +294,9 @@ class NativeIoIntegrationTests(unittest.TestCase):
                 self.assertTrue(first.exists())
             with compiled_native_binary(self, source) as second:
                 self.assertEqual(first, second)
-            with compiled_native_binary(self, source, with_http_stdlib=True) as third:
-                self.assertNotEqual(first, third)
-        self.assertEqual(mocked_run.call_count, 2)
+            with compiled_native_binary(self, source) as third:
+                self.assertEqual(first, third)
+        self.assertEqual(mocked_run.call_count, 1)
 
     def test_native_tcp_echo_once(self) -> None:
         port = find_free_port(self)
@@ -393,12 +387,14 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with running_http_server(self, Handler) as port:
             run = self._run_native(
                 f"""
+                module main
+                import stdlib.http (HttpResponse, http_response_body)
+
                 fn main() -> Unit !{{IO}} =
                   match http_request("POST", "http://127.0.0.1:{port}/echo", "X-Test: yes", "hello", 500) with
                   | Ok resp -> print(http_response_body(resp))
                   | Err _ -> print("err")
-                """,
-                with_http_stdlib=True,
+                """
             )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stdout.strip(), "ok:hello")
@@ -423,6 +419,8 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with running_http_server(self, Handler) as port:
             run = self._run_native(
                 f"""
+                module main
+                import stdlib.http (HttpResponse)
                 import stdlib.json as json
 
                 fn render_json_body(body: String) -> String =
@@ -434,8 +432,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
                   match http_request("GET", "http://127.0.0.1:{port}/chunked", "", "", 500) with
                   | Ok (HttpResponse _ _ body) -> print(render_json_body(body))
                   | Err _ -> print("http-err")
-                """,
-                with_http_stdlib=True,
+                """
             )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stdout.strip(), '{"ok":true,"items":[1,2]}')
@@ -452,6 +449,9 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with running_http_server(self, Handler) as port:
             run = self._run_native(
                 f"""
+                module main
+                import stdlib.http (HttpError)
+
                 fn main() -> Unit !{{IO}} =
                   match http_request("GET", "http://127.0.0.1:{port}/missing", "", "", 500) with
                   | Ok _ -> print(0)
@@ -461,8 +461,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
                       | HttpTimeout -> print(-1)
                       | HttpNetwork _ -> print(-2)
                       | HttpDecode _ -> print(-3)
-                """,
-                with_http_stdlib=True,
+                """
             )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertEqual(run.stdout.strip(), "404")
@@ -515,6 +514,9 @@ class NativeIoIntegrationTests(unittest.TestCase):
         with running_tcp_fixture(self, handle) as port:
             run = self._run_native(
                 f"""
+                module main
+                import stdlib.http (HttpError)
+
                 fn main() -> Unit !{{IO}} =
                   match http_request("GET", "http://127.0.0.1:{port}/", "", "", 500) with
                   | Ok _ -> print("ok")
@@ -524,8 +526,7 @@ class NativeIoIntegrationTests(unittest.TestCase):
                       | HttpTimeout -> print("timeout")
                       | HttpBadStatus _ -> print("bad-status")
                       | HttpDecode _ -> print("decode")
-                """,
-                with_http_stdlib=True,
+                """
             )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
         self.assertIn("remote closed connection without response", run.stdout)

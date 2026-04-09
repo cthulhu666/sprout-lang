@@ -9,11 +9,24 @@ from unittest.mock import patch
 
 from sprout import RuntimeError, parse, run_program, typecheck_program
 from sprout.module_loader import load_module_bundle, resolve_program_names
-from sprout.stdlib import with_http_prelude, with_prelude
+from sprout.stdlib import with_prelude
 from sprout.typeclass_lowering import lower_typeclasses
 
 
 class RuntimeTests(unittest.TestCase):
+    def _load_module_program(self, src: str) -> tuple[object, io.StringIO]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            return program, out
+
     def test_run_main_prints_result(self) -> None:
         src = """
         fn fact(n: Int) -> Int =
@@ -770,13 +783,12 @@ class RuntimeTests(unittest.TestCase):
 
     def test_http_stdlib_echo_response(self) -> None:
         src = """
+        import stdlib.http (http_echo_response)
+
         fn main() -> Unit !{IO} =
           print(http_echo_response("GET /hello HTTP/1.1\\r\\nHost: local\\r\\n\\r\\n"))
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         result = out.getvalue()
         self.assertIn("HTTP/1.1 200 OK", result)
         self.assertIn("Connection: close", result)
@@ -784,17 +796,18 @@ class RuntimeTests(unittest.TestCase):
 
     def test_http_stdlib_response_body_helper(self) -> None:
         src = """
+        import stdlib.http (HttpResponse, http_response_body)
+
         fn main() -> Unit !{IO} =
           print(http_response_body(HttpResponse(200, "h: v", "payload")))
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         self.assertEqual(out.getvalue().strip(), "payload")
 
     def test_json_parse_and_lookup(self) -> None:
         src = """
+        import stdlib.json (Json, json_get_field, json_get_string, parse)
+
         fn json_string_or_default(value: Json) -> String =
           match json_get_string(value) with
           | Just s -> s
@@ -806,32 +819,30 @@ class RuntimeTests(unittest.TestCase):
           | Nothing -> "missing"
 
         fn main() -> Unit !{IO} =
-          match json_parse("{\\"title\\":\\"hello\\",\\"count\\":2}") with
+          match parse("{\\"title\\":\\"hello\\",\\"count\\":2}") with
           | Ok value -> print(title_or_missing(value))
           | Err _ -> print("decode-error")
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         self.assertEqual(out.getvalue().strip(), "hello")
 
     def test_http_response_formats_supported_status(self) -> None:
         src = """
+        import stdlib.http (http_response)
+
         fn main() -> Unit !{IO} =
           match http_response(503, "down") with
           | Ok response -> print(response)
           | Err _ -> print("err")
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         self.assertIn("HTTP/1.1 503 Service Unavailable", out.getvalue())
         self.assertIn("down", out.getvalue())
 
     def test_http_response_rejects_unsupported_status(self) -> None:
         src = """
+        import stdlib.http (HttpStatusError, http_response)
+
         fn main() -> Unit !{IO} =
           match http_response(418, "teapot") with
           | Ok _ -> print("ok")
@@ -839,29 +850,27 @@ class RuntimeTests(unittest.TestCase):
               match err with
               | HttpUnsupportedStatus code -> print(code)
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         self.assertEqual(out.getvalue().strip(), "418")
 
     def test_json_parse_invalid(self) -> None:
         src = """
+        import stdlib.json (JsonError, parse)
+
         fn main() -> Unit !{IO} =
-          match json_parse("{bad json}") with
+          match parse("{bad json}") with
           | Ok _ -> print("ok")
           | Err e ->
               match e with
               | JsonDecode _ -> print("decode-error")
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         self.assertEqual(out.getvalue().strip(), "decode-error")
 
     def test_json_array_and_object_iteration_helpers(self) -> None:
         src = """
+        import stdlib.json (Json, JsonArray, JsonArrayStep, json_array_next, json_get_array, json_get_field, json_get_int, parse)
+
         fn int_from_json(value: Json) -> Int =
           match json_get_int(value) with
           | Just n -> n
@@ -887,43 +896,39 @@ class RuntimeTests(unittest.TestCase):
           | Nothing -> -5
 
         fn main() -> Unit !{IO} =
-          match json_parse("{\\"items\\":[1,2]}") with
+          match parse("{\\"items\\":[1,2]}") with
           | Ok value -> print(first_int_from_value(value))
           | Err _ -> print(-6)
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         self.assertEqual(out.getvalue().strip(), "1")
 
     def test_json_stringify_compact_and_escaped(self) -> None:
         src = """
-        fn sample() -> Json =
-          JsonObject(
-            JsonObjectCons(
+        import stdlib.json as json
+
+        fn sample() -> json.Json =
+          json.JsonObject(
+            json.JsonObjectCons(
               "message",
-              JsonString("hi\\n\\"ok\\""),
-              JsonObjectCons(
+              json.JsonString("hi\\n\\"ok\\""),
+              json.JsonObjectCons(
                 "items",
-                JsonArray(
-                  JsonArrayCons(
-                    JsonInt(1),
-                    JsonArrayCons(JsonBool(false), JsonArrayCons(JsonNull, JsonArrayNil))
+                json.JsonArray(
+                  json.JsonArrayCons(
+                    json.JsonInt(1),
+                    json.JsonArrayCons(json.JsonBool(false), json.JsonArrayCons(json.JsonNull, json.JsonArrayNil))
                   )
                 ),
-                JsonObjectNil
+                json.JsonObjectNil
               )
             )
           )
 
         fn main() -> Unit !{IO} =
-          print(json_stringify(sample()))
+          print(json.stringify(sample()))
         """
-        program = parse(with_http_prelude(src))
-        typecheck_program(program)
-        out = io.StringIO()
-        run_program(program, stdout=out)
+        _, out = self._load_module_program(src)
         self.assertEqual(out.getvalue().strip(), '{"message":"hi\\n\\"ok\\"","items":[1,false,null]}')
 
     def test_json_builder_helpers(self) -> None:
@@ -941,7 +946,7 @@ class RuntimeTests(unittest.TestCase):
           )
 
         fn main() -> Unit !{IO} =
-          print(json_stringify(sample()))
+          print(json.stringify(sample()))
         """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
