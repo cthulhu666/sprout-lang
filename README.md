@@ -215,7 +215,9 @@ helpers) instead of the raw `term_*` hooks.
 Experimental snapshot analysis hooks:
 
 - Active snapshot/state hooks used by the current Sprout REPL frontend.
-  The host implementation now routes snapshot analysis through `sprout.analysis`:
+  The host implementation now routes snapshot analysis through the split
+  snapshot/execution backend seam, with compatibility helpers still re-exported
+  from `sprout.analysis`:
 - `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
 - `repl_check_source(module_source: String) -> Result String Unit !{IO}`
 - `repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}`
@@ -235,13 +237,10 @@ Experimental snapshot analysis hooks:
 - Application code should prefer `stdlib.compiler` for these capabilities.
   The raw `analysis_*` hooks are no longer part of the implicit builtin
   prelude for ordinary modules.
-- Python-side analysis helpers in `sprout.analysis` now also expose
-  `symbol_metadata_in_source(...)` for structured top-level/import symbol
-  metadata, including optional definition locations for imported symbols when
-  the provider declaration is available, without widening the builtin/runtime
-  ABI. They also expose
-  `structured_diagnostics_in_source(...)` for severity/stage/location-aware
-  diagnostics records while the builtin bridge keeps the older tuple shape.
+- Python-side analysis helpers exposed from `sprout.analysis` are now backed by
+  `sprout.analysis_snapshot_backend` for snapshot-oriented symbol metadata and
+  structured diagnostics, while the builtin bridge keeps the older tuple-shaped
+  diagnostics ABI.
 
 - Legacy compatibility hooks still present in the host runtime, but no longer used
   by `stdlib/repl.sprout`:

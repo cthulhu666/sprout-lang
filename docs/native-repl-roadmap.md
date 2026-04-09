@@ -32,10 +32,8 @@ is:
 The remaining work to reach that pause point is deliberately smaller than full
 Python elimination:
 
-1. finish moving the remaining snapshot-query implementations out of
-   `sprout.analysis`,
-2. decide which backend bundle should be replaced first after the pause, and
-3. keep the native REPL docs/tests aligned with that narrower backend-focused
+1. decide which backend bundle should be replaced first after the pause, and
+2. keep the native REPL docs/tests aligned with that narrower backend-focused
    status.
 
 ## Problem Statement
@@ -98,7 +96,9 @@ Current experimental runtime progress:
    `repl_type_of_in_source(...)`, `repl_instances_in_source(...)`,
    `repl_complete_in_state(...)`, and `repl_reset_session()` now form the
    active hosted bridge used by `stdlib/repl.sprout`. Snapshot analysis for
-   that bridge now lives in `sprout.analysis` rather than the REPL host module.
+   that bridge now lives in `sprout.analysis_snapshot_backend`, with
+   `sprout.analysis` retained as a compatibility facade rather than the
+   implementation home.
 3. Legacy compatibility hooks still exist in the host runtime:
    `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
    `repl_type_of(...)`, `repl_instances(...)`, and `repl_complete(...)`.
@@ -207,9 +207,10 @@ Current experimental runtime progress:
    completion capability is now the first backend bundle whose implementation
    no longer routes through the monolithic `sprout.analysis` module; that
    module now re-exports the completion helpers for compatibility. The simpler
-   snapshot-query operations (`declared`, `exported`, `symbol_inventory`, and
-   symbol locations) now do the same through `sprout.analysis_snapshot_backend`,
-   while diagnostics still live in `sprout.analysis`.
+   snapshot-query operations (`declared`, `exported`, `symbol_inventory`,
+   symbol locations, diagnostics, structured diagnostics, and symbol metadata)
+   now do the same through `sprout.analysis_snapshot_backend`, with
+   `sprout.analysis` reduced to compatibility wrappers for that surface.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

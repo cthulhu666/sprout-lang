@@ -23,8 +23,10 @@ Sprout now has a REPL frontend that is mostly written in Sprout:
 But the actual session engine still lives in host code:
 
 - `sprout/repl_host.py` owns session state,
-- `sprout.analysis.py` now owns snapshot-oriented parsing, name resolution,
-  typechecking, evaluation, instance lookup, symbol inventory, and diagnostics,
+- `sprout.analysis.py` now mainly acts as a compatibility facade over split
+  analysis backends, with snapshot-oriented symbol/diagnostic queries living in
+  `sprout.analysis_snapshot_backend` and execution-oriented checks/eval/type
+  queries still routed through host-backed analysis code,
 - completion data and session mutation are still host-implemented,
 - the frontend reaches those services through the experimental `repl_*`
   builtins.
@@ -116,8 +118,9 @@ extends the shared analysis path with flat `(category, name, line, column)`
 entries for top-level declarations and constructors.
 
 The current host implementation of those snapshot-oriented services now lives
-in `sprout.analysis.py`; `sprout.repl_host.py` remains the stateful REPL
-session shim.
+primarily in `sprout.analysis_snapshot_backend.py`, with `sprout.analysis.py`
+kept as a compatibility facade; `sprout.repl_host.py` remains the stateful
+REPL session shim.
 
 Historical `repl_*` builtin names remain as compatibility surface, but the
 same shared snapshot-analysis subset is now also available under neutral

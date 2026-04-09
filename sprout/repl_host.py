@@ -11,11 +11,13 @@ from .analysis import (
     check_source,
     completion_candidates_in_state as analysis_completion_candidates_in_state,
     completion_matches_in_state as analysis_completion_matches_in_state,
-    declared_names_in_source,
-    diagnostics_in_source,
     eval_expression_lines_in_source,
     infer_type_in_source,
     instances_in_source,
+)
+from .analysis_snapshot_backend import (
+    diagnostics_in_source,
+    python_snapshot_declared_names_in_source as declared_names_in_source,
 )
 from .interpreter import RuntimeError, run_program
 from .module_loader import load_module_bundle, resolve_program_names

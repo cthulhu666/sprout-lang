@@ -1498,42 +1498,42 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_declared_names_in_source expects String module source")
-        from .analysis import declared_names_in_source
+        from .analysis_snapshot_backend import python_snapshot_declared_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(declared_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_declared_names_in_source(source)))
 
     def builtin_analysis_declared_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_declared_names_in_source expects String module source")
-        from .analysis import declared_names_in_source
+        from .analysis_snapshot_backend import python_snapshot_declared_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(declared_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_declared_names_in_source(source)))
 
     def builtin_repl_exported_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_exported_names_in_source expects String module source")
-        from .analysis import exported_names_in_source
+        from .analysis_snapshot_backend import python_snapshot_exported_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(exported_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_exported_names_in_source(source)))
 
     def builtin_analysis_exported_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_exported_names_in_source expects String module source")
-        from .analysis import exported_names_in_source
+        from .analysis_snapshot_backend import python_snapshot_exported_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(exported_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_exported_names_in_source(source)))
 
     def builtin_repl_symbol_inventory_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_symbol_inventory_in_source expects String module source")
-        from .analysis import symbol_inventory_in_source
+        from .analysis_snapshot_backend import python_snapshot_symbol_inventory_in_source
 
         def _inventory() -> TupleValue:
-            declared, imported, exported = symbol_inventory_in_source(source)
+            declared, imported, exported = python_snapshot_symbol_inventory_in_source(source)
             return TupleValue(
                 items=(
                     _repl_vec_string(declared),
@@ -1548,10 +1548,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_symbol_inventory_in_source expects String module source")
-        from .analysis import symbol_inventory_in_source
+        from .analysis_snapshot_backend import python_snapshot_symbol_inventory_in_source
 
         def _inventory() -> TupleValue:
-            declared, imported, exported = symbol_inventory_in_source(source)
+            declared, imported, exported = python_snapshot_symbol_inventory_in_source(source)
             return TupleValue(
                 items=(
                     _repl_vec_string(declared),
@@ -1566,7 +1566,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_symbol_locations_in_source expects String module source")
-        from .analysis import symbol_locations_in_source
+        from .analysis_snapshot_backend import python_snapshot_symbol_locations_in_source
 
         def _locations() -> ADTValue:
             return ADTValue(
@@ -1575,7 +1575,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                     VectorValue(
                         tuple(
                             TupleValue(items=(category, name, line, column))
-                            for category, name, line, column in symbol_locations_in_source(source)
+                            for category, name, line, column in python_snapshot_symbol_locations_in_source(source)
                         )
                     ),
                 ),
@@ -1587,7 +1587,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_diagnostics_in_source expects String module source")
-        from .analysis import diagnostics_in_source
+        from .analysis_snapshot_backend import diagnostics_in_source
 
         return _repl_vec_diagnostic(diagnostics_in_source(source))
 
@@ -1595,7 +1595,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_diagnostics_in_source expects String module source")
-        from .analysis import diagnostics_in_source
+        from .analysis_snapshot_backend import diagnostics_in_source
 
         return _repl_vec_diagnostic(diagnostics_in_source(source))
 

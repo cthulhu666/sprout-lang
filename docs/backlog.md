@@ -15,7 +15,6 @@ This file tracks open design, implementation, and tooling follow-up work.
    - no active frontend behavior depends on legacy mutable-session hooks
    - docs describe the unfinished work as backend replacement, not frontend instability
    Planned stop-point work:
-   - finish moving the remaining snapshot-query implementations out of `sprout.analysis`
    - choose the first post-pause backend-replacement target
    Deferred scope: the self-hosted session-engine work in `repl-self-hosting-v1-draft.md` and the broader compiler direction in `compiler-self-hosting-roadmap.md` are no longer the active milestone; treat them as post-native-REPL directions.
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
