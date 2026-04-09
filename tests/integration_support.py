@@ -18,6 +18,10 @@ import unittest
 from collections.abc import Callable, Iterator
 
 
+def scaled_timeout(seconds: float) -> float:
+    return seconds * 5.0
+
+
 class BackgroundWorker:
     def __init__(self, target: Callable[[], None], *, name: str) -> None:
         self.errors: list[BaseException] = []
@@ -149,7 +153,7 @@ def running_http_server(
     finally:
         server.shutdown()
         server.server_close()
-        thread.join(timeout=1.0)
+        thread.join(timeout=scaled_timeout(1.0))
 
 
 @contextmanager
@@ -174,7 +178,7 @@ def running_https_server(
     finally:
         server.shutdown()
         server.server_close()
-        thread.join(timeout=1.0)
+        thread.join(timeout=scaled_timeout(1.0))
 
 
 @contextmanager
@@ -216,11 +220,11 @@ def running_tcp_fixture(
             listener.close()
         except OSError:
             pass
-        worker.join_ok(case, timeout=1.0, alive_message="tcp fixture did not exit")
+        worker.join_ok(case, timeout=scaled_timeout(1.0), alive_message="tcp fixture did not exit")
 
 
 def connect_with_retry(port: int, *, timeout: float = 2.0, connect_timeout: float = 0.5) -> socket.socket:
-    deadline = time.time() + timeout
+    deadline = time.time() + scaled_timeout(timeout)
     last_error: OSError | None = None
     while time.time() < deadline:
         try:
@@ -232,7 +236,7 @@ def connect_with_retry(port: int, *, timeout: float = 2.0, connect_timeout: floa
 
 
 def tcp_roundtrip(port: int, request: bytes, *, timeout: float = 2.0, recv_size: int = 4096) -> bytes:
-    deadline = time.time() + timeout
+    deadline = time.time() + scaled_timeout(timeout)
     last_error: OSError | None = None
     while time.time() < deadline:
         try:

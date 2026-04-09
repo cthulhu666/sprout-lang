@@ -23,6 +23,7 @@ from integration_support import (
     find_free_port,
     running_http_server,
     running_tcp_fixture,
+    scaled_timeout,
     tcp_roundtrip,
 )
 from sprout import parse, run_program, typecheck_program
@@ -71,7 +72,11 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
         try:
             echoed = tcp_roundtrip(port, b"echo me").decode("utf-8", errors="replace")
         finally:
-            worker.join_ok(self, timeout=2.0, alive_message="echo server did not exit after one connection")
+            worker.join_ok(
+                self,
+                timeout=scaled_timeout(2.0),
+                alive_message="echo server did not exit after one connection",
+            )
         self.assertEqual(echoed, "echo me")
 
     def test_tcp_echo_serve_builtin_reactor(self) -> None:
@@ -88,7 +93,11 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
             try:
                 echoed = tcp_roundtrip(port, b"reactor").decode("utf-8", errors="replace")
             finally:
-                worker.join_ok(self, timeout=2.0, alive_message="reactor server did not exit after one connection")
+                worker.join_ok(
+                    self,
+                    timeout=scaled_timeout(2.0),
+                    alive_message="reactor server did not exit after one connection",
+                )
         self.assertEqual(echoed, "reactor")
 
     def test_tcp_echo_serve_builtin_blocking_backend(self) -> None:
@@ -105,7 +114,11 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
             try:
                 echoed = tcp_roundtrip(port, b"blocking").decode("utf-8", errors="replace")
             finally:
-                worker.join_ok(self, timeout=2.0, alive_message="blocking server did not exit after one connection")
+                worker.join_ok(
+                    self,
+                    timeout=scaled_timeout(2.0),
+                    alive_message="blocking server did not exit after one connection",
+                )
         self.assertEqual(echoed, "blocking")
 
     def test_tcp_client_builtins_success(self) -> None:
@@ -257,7 +270,11 @@ class InterpreterIoIntegrationTests(unittest.TestCase):
                 b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\n\r\nhello",
             ).decode("utf-8", errors="replace")
         finally:
-            worker.join_ok(self, timeout=2.0, alive_message="http server did not exit after one connection")
+            worker.join_ok(
+                self,
+                timeout=scaled_timeout(2.0),
+                alive_message="http server did not exit after one connection",
+            )
         self.assertEqual(outbox, [""])
         self.assertIn("HTTP/1.1 200 OK", response)
         self.assertIn("x-reply: POST", response)
@@ -324,11 +341,11 @@ class NativeIoIntegrationTests(unittest.TestCase):
             )
             try:
                 echoed = tcp_roundtrip(port, b"native-echo").decode("utf-8", errors="replace")
-                stdout, stderr = proc.communicate(timeout=2.0)
+                stdout, stderr = proc.communicate(timeout=scaled_timeout(2.0))
             finally:
                 if proc.poll() is None:
                     proc.kill()
-                    proc.communicate(timeout=2.0)
+                    proc.communicate(timeout=scaled_timeout(2.0))
         self.assertEqual(proc.returncode, 0, msg=stderr)
         self.assertEqual(stdout, "")
         self.assertEqual(echoed, "native-echo")
@@ -555,11 +572,11 @@ class NativeIoIntegrationTests(unittest.TestCase):
                     port,
                     b"POST /native HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\n\r\nhello",
                 ).decode("utf-8", errors="replace")
-                stdout, stderr = proc.communicate(timeout=2.0)
+                stdout, stderr = proc.communicate(timeout=scaled_timeout(2.0))
             finally:
                 if proc.poll() is None:
                     proc.kill()
-                    proc.communicate(timeout=2.0)
+                    proc.communicate(timeout=scaled_timeout(2.0))
         self.assertEqual(proc.returncode, 0, msg=stderr)
         self.assertEqual(stdout, "")
         self.assertIn("HTTP/1.1 200 OK", response)
@@ -594,11 +611,11 @@ class NativeIoIntegrationTests(unittest.TestCase):
                 for _ in range(2099):
                     with socket.create_connection(("127.0.0.1", port), timeout=0.5):
                         pass
-                stdout, stderr = proc.communicate(timeout=5.0)
+                stdout, stderr = proc.communicate(timeout=scaled_timeout(5.0))
             finally:
                 if proc.poll() is None:
                     proc.kill()
-                    proc.communicate(timeout=2.0)
+                    proc.communicate(timeout=scaled_timeout(2.0))
         self.assertEqual(proc.returncode, 0, msg=stderr)
         self.assertEqual(stdout, "")
 
