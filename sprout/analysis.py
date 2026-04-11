@@ -13,14 +13,14 @@ from .analysis_execution_backend import (
 from .analysis_snapshot_backend import (
     Diagnostic,
     SourceLocation,
+    declared_names_in_source as snapshot_declared_names_in_source,
+    diagnostics_in_source as snapshot_diagnostics_in_source,
+    exported_names_in_source as snapshot_exported_names_in_source,
     SymbolMetadata,
-    diagnostics_in_source as python_snapshot_diagnostics_in_source,
-    python_snapshot_declared_names_in_source,
-    python_snapshot_exported_names_in_source,
-    python_snapshot_symbol_inventory_in_source,
-    python_snapshot_symbol_locations_in_source,
-    python_snapshot_symbol_metadata_in_source,
-    structured_diagnostics_in_source as python_snapshot_structured_diagnostics_in_source,
+    structured_diagnostics_in_source as snapshot_structured_diagnostics_in_source,
+    symbol_inventory_in_source as snapshot_symbol_inventory_in_source,
+    symbol_locations_in_source as snapshot_symbol_locations_in_source,
+    symbol_metadata_in_source as snapshot_symbol_metadata_in_source,
 )
 
 __all__ = [
@@ -50,31 +50,31 @@ def analysis_eval_expr_in_source(source: str, expr: str) -> tuple[str, ...]:
 
 
 def declared_names_in_source(source: str) -> list[str]:
-    return python_snapshot_declared_names_in_source(source)
+    return snapshot_declared_names_in_source(source)
 
 
 def exported_names_in_source(source: str) -> list[str]:
-    return python_snapshot_exported_names_in_source(source)
+    return snapshot_exported_names_in_source(source)
 
 
 def symbol_inventory_in_source(source: str) -> tuple[list[str], list[str], list[str]]:
-    return python_snapshot_symbol_inventory_in_source(source)
+    return snapshot_symbol_inventory_in_source(source)
 
 
 def symbol_locations_in_source(source: str) -> list[tuple[str, str, int, int]]:
-    return python_snapshot_symbol_locations_in_source(source)
+    return snapshot_symbol_locations_in_source(source)
 
 
 def symbol_metadata_in_source(source: str) -> list[SymbolMetadata]:
-    return python_snapshot_symbol_metadata_in_source(source)
+    return snapshot_symbol_metadata_in_source(source)
 
 
 def structured_diagnostics_in_source(source: str) -> list[Diagnostic]:
-    return python_snapshot_structured_diagnostics_in_source(source)
+    return snapshot_structured_diagnostics_in_source(source)
 
 
 def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:
-    return python_snapshot_diagnostics_in_source(source)
+    return snapshot_diagnostics_in_source(source)
 
 
 def analysis_complete_in_state(

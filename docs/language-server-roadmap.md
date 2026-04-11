@@ -60,7 +60,9 @@ The implementation should be split into four layers.
 
 ### 4.1 Analysis Layer
 
-Add a reusable compiler-service layer, for example `sprout.analysis`, that:
+Add a reusable compiler-service layer, for example split backend modules such
+as `sprout.analysis_snapshot_backend` and `sprout.analysis_execution_backend`,
+with `sprout.analysis` kept as a compatibility facade:
 
 - accepts source text and file/module context
 - parses and typechecks programs
@@ -147,16 +149,17 @@ should stop being string-only.
 
 Current state:
 
-- `sprout.analysis` now exposes `symbol_locations_in_source(...)` and
-  `symbol_metadata_in_source(...)` for top-level declarations and explicit
+- `sprout.analysis_snapshot_backend` now owns `symbol_locations_in_source(...)`
+  and `symbol_metadata_in_source(...)` for top-level declarations and explicit
   imports in a single checked snapshot, including definition-site locations for
   imported symbols when the provider declaration is available in the checked
   module bundle
-- `sprout.analysis` also exposes `structured_diagnostics_in_source(...)` with
-  severity/stage/location records, while the builtin-facing diagnostics query
-  still uses the older tuple bridge
-- that is enough for early symbol indexing experiments, but not yet for locals,
-  full definition links, or range-accurate editor features
+- `sprout.analysis_snapshot_backend` also owns
+  `structured_diagnostics_in_source(...)` with severity/stage/location records,
+  while the builtin-facing diagnostics query still uses the older tuple bridge
+- `sprout.analysis` remains a compatibility facade over those snapshot helpers,
+  which is enough for early symbol indexing experiments, but not yet for
+  locals, full definition links, or range-accurate editor features
 
 Needed semantic information includes:
 
@@ -376,7 +379,9 @@ The first implementation slice should be:
 
 1. Add a proper span model across AST and parser output.
 2. Add structured diagnostics shared by parser, module loader, and typechecker.
-3. Extract a reusable `sprout.analysis` API for whole-file analysis.
+3. Extract reusable backend-owned analysis APIs, starting with
+   `sprout.analysis_snapshot_backend` and keeping `sprout.analysis` as a
+   compatibility facade.
 4. Add tests for spans and diagnostics.
 5. Review that foundation before starting protocol work.
 

@@ -29,15 +29,19 @@ __all__ = [
     "Diagnostic",
     "SourceLocation",
     "SymbolMetadata",
+    "declared_names_in_source",
     "diagnostics_in_source",
+    "exported_names_in_source",
+    "symbol_locations_in_source",
+    "symbol_metadata_in_source",
+    "symbol_inventory_in_source",
+    "structured_diagnostics_in_source",
     "python_snapshot_declared_names_in_source",
     "python_snapshot_diagnostics_in_source",
     "python_snapshot_exported_names_in_source",
     "python_snapshot_symbol_metadata_in_source",
     "python_snapshot_symbol_inventory_in_source",
     "python_snapshot_symbol_locations_in_source",
-    "structured_diagnostics_in_source",
-    "symbol_metadata_in_source",
 ]
 
 
@@ -476,6 +480,10 @@ def _diagnostic_entry(exc: Exception, bundle: ModuleBundle | None = None) -> Dia
 
 
 def python_snapshot_declared_names_in_source(module_source: str) -> list[str]:
+    return declared_names_in_source(module_source)
+
+
+def declared_names_in_source(module_source: str) -> list[str]:
     composed = _compose_snapshot_source(module_source)
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
@@ -489,6 +497,10 @@ def python_snapshot_declared_names_in_source(module_source: str) -> list[str]:
 
 
 def python_snapshot_exported_names_in_source(module_source: str) -> list[str]:
+    return exported_names_in_source(module_source)
+
+
+def exported_names_in_source(module_source: str) -> list[str]:
     composed = _compose_snapshot_source(module_source)
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
@@ -514,6 +526,10 @@ def python_snapshot_exported_names_in_source(module_source: str) -> list[str]:
 
 
 def python_snapshot_symbol_inventory_in_source(module_source: str) -> tuple[list[str], list[str], list[str]]:
+    return symbol_inventory_in_source(module_source)
+
+
+def symbol_inventory_in_source(module_source: str) -> tuple[list[str], list[str], list[str]]:
     composed = _compose_snapshot_source(module_source)
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
@@ -546,6 +562,10 @@ def python_snapshot_diagnostics_in_source(module_source: str) -> list[tuple[str,
 
 
 def python_snapshot_symbol_locations_in_source(module_source: str) -> list[tuple[str, str, int, int]]:
+    return symbol_locations_in_source(module_source)
+
+
+def symbol_locations_in_source(module_source: str) -> list[tuple[str, str, int, int]]:
     composed = _compose_snapshot_source(module_source)
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = (Path(tmpdir) / "repl_session.sprout").resolve()
