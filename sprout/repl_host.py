@@ -7,7 +7,7 @@ import tempfile
 from typing import Callable, TextIO
 
 from . import ast
-from .analysis import (
+from .analysis_completion_backend import (
     completion_candidates_in_state as analysis_completion_candidates_in_state,
     completion_matches_in_state as analysis_completion_matches_in_state,
 )

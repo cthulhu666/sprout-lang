@@ -50,7 +50,8 @@ from sprout.analysis_stdio import cmd_analysis_stdio
 
 class CliAnalysisTests(unittest.TestCase):
     def test_analysis_completion_candidates_in_state_matches_imports_and_declarations(self) -> None:
-        prefix, matches = completion_candidates_in_state(
+        backend = default_completion_backend()
+        prefix, matches = backend.complete_in_state(
             "fr",
             ["import stdlib.bytes (from_string)"],
             ["let answer = 41"],
@@ -58,6 +59,22 @@ class CliAnalysisTests(unittest.TestCase):
 
         self.assertEqual(prefix, "fr")
         self.assertEqual(matches, ["from_string"])
+        self.assertEqual(
+            (prefix, matches),
+            completion_candidates_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+        )
+        self.assertEqual(
+            (prefix, matches),
+            analysis_complete_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+        )
 
     def test_analysis_alias_helpers_match_existing_execution_helpers(self) -> None:
         self.assertEqual(
@@ -580,13 +597,28 @@ class CliAnalysisTests(unittest.TestCase):
 
     def test_default_completion_backend_matches_canonical_analysis_surface(self) -> None:
         backend = default_completion_backend()
+        expected = backend.complete_in_state(
+            "fr",
+            ["import stdlib.bytes (from_string)"],
+            ["let answer = 41"],
+        )
+
+        self.assertEqual(expected, python_completion_complete_in_state(
+            "fr",
+            ["import stdlib.bytes (from_string)"],
+            ["let answer = 41"],
+        ))
         self.assertEqual(
-            backend.complete_in_state(
+            expected,
+            completion_candidates_in_state(
                 "fr",
                 ["import stdlib.bytes (from_string)"],
                 ["let answer = 41"],
             ),
-            completion_candidates_in_state(
+        )
+        self.assertEqual(
+            expected,
+            analysis_complete_in_state(
                 "fr",
                 ["import stdlib.bytes (from_string)"],
                 ["let answer = 41"],
@@ -647,12 +679,21 @@ class CliAnalysisTests(unittest.TestCase):
         )
 
     def test_analysis_backend_completion_matches_analysis_surface(self) -> None:
+        expected = default_completion_backend().complete_in_state(
+            "fr",
+            ["import stdlib.bytes (from_string)"],
+            ["let answer = 41"],
+        )
         self.assertEqual(
+            expected,
             default_analysis_backend().complete_in_state(
                 "fr",
                 ["import stdlib.bytes (from_string)"],
                 ["let answer = 41"],
             ),
+        )
+        self.assertEqual(
+            expected,
             completion_candidates_in_state(
                 "fr",
                 ["import stdlib.bytes (from_string)"],
@@ -661,13 +702,30 @@ class CliAnalysisTests(unittest.TestCase):
         )
 
     def test_analysis_completion_backend_matches_analysis_surface(self) -> None:
+        expected = default_completion_backend().complete_in_state(
+            "fr",
+            ["import stdlib.bytes (from_string)"],
+            ["let answer = 41"],
+        )
         self.assertEqual(
+            expected,
             python_completion_complete_in_state(
                 "fr",
                 ["import stdlib.bytes (from_string)"],
                 ["let answer = 41"],
             ),
+        )
+        self.assertEqual(
+            expected,
             completion_candidates_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+        )
+        self.assertEqual(
+            expected,
+            analysis_complete_in_state(
                 "fr",
                 ["import stdlib.bytes (from_string)"],
                 ["let answer = 41"],

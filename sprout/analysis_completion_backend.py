@@ -8,6 +8,7 @@ from .parser import parse
 from .stdlib import prelude_path
 
 __all__ = [
+    "analysis_complete_in_state",
     "completion_candidates_in_state",
     "completion_matches_in_state",
     "python_completion_complete_in_state",
@@ -144,9 +145,17 @@ def completion_candidates_in_state(
     return prefix, _completion_from_prefix(prefix, imports, declarations)
 
 
-def python_completion_complete_in_state(
+def analysis_complete_in_state(
     line_buffer: str,
     imports: list[str],
     declarations: list[str],
 ) -> tuple[str, list[str]]:
     return completion_candidates_in_state(line_buffer, imports, declarations)
+
+
+def python_completion_complete_in_state(
+    line_buffer: str,
+    imports: list[str],
+    declarations: list[str],
+) -> tuple[str, list[str]]:
+    return analysis_complete_in_state(line_buffer, imports, declarations)

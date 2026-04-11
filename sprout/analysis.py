@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .analysis_completion_backend import (
+    analysis_complete_in_state,
     completion_candidates_in_state,
     completion_matches_in_state,
 )
@@ -75,11 +76,3 @@ def structured_diagnostics_in_source(source: str) -> list[Diagnostic]:
 
 def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:
     return snapshot_diagnostics_in_source(source)
-
-
-def analysis_complete_in_state(
-    line_buffer: str,
-    imports: list[str],
-    declarations: list[str],
-) -> tuple[str, list[str]]:
-    return completion_candidates_in_state(line_buffer, imports, declarations)
