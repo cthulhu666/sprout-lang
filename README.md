@@ -540,29 +540,23 @@ fn double_if_large(x: Int) -> Result String Int =
   if x > 10 then Ok(x * 2) else Err("too-small")
 fn show_ok(x: Int) -> Unit !{IO} = print(x)
 fn show_error(e: String) -> Unit !{IO} = print(e)
+fn prefix_error(e: String) -> String = "error:" ++ e
 
-# Nested style
-when_error(
-  show_error,
-  when_ok(
-    show_ok,
-    result_pipe_ok(
-      inc,
-      result_pipe(
-        double_if_large,
-        Ok(pipe(inc, 20))
-      ),
-    )
+# Preferred sequencing style: use `do` for the step-by-step `Result` flow.
+let result =
+  result_map_error(
+    prefix_error,
+    do
+      value <- Ok(21)
+      doubled <- double_if_large(value)
+      Ok(inc(doubled))
   )
-)
 
-# Piped style
-Ok(20)
-|> result_pipe_ok(inc)
-|> result_pipe(double_if_large)
-|> result_pipe_ok(inc)
-|> when_ok(show_ok)
-|> when_error(show_error)
+do
+  match result with
+  | Ok value -> show_ok(value)
+  | Err err -> show_error(err)
+  print(result_with_default(0, result))
 ```
 
 Runnable demo:
