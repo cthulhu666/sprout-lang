@@ -26,7 +26,7 @@ But the actual session engine still lives in host code:
 - `sprout.analysis.py` now mainly acts as a compatibility facade over split
   analysis backends, with snapshot-oriented symbol/diagnostic queries living in
   `sprout.analysis_snapshot_backend` and execution-oriented checks/eval/type
-  queries still routed through host-backed analysis code,
+  queries living in `sprout.analysis_execution_backend`,
 - completion data and session mutation are still host-implemented,
 - the frontend reaches those services through the experimental `repl_*`
   builtins.

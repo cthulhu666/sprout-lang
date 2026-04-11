@@ -198,9 +198,10 @@ Current experimental runtime progress:
    into smaller implementation bundles below that seam, with the read-only
    snapshot symbol/query operations living separately from execution-oriented
    backend operations. The execution-oriented `check`, `type`, `instances`,
-   and `eval` paths now also live in their own backend module, leaving the
-   local-state completion path. That completion path now also lives in its own
-   backend module, so `sprout.analysis_backend_python` is now composition-only.
+   and `eval` paths now live in `sprout.analysis_execution_backend`, leaving
+   the local-state completion path. That completion path now also lives in its
+   own backend module, so `sprout.analysis_backend_python` is now
+   composition-only.
    The adapter/dispatcher seam is also now exercised in tests against a second
    concrete backend implementation (`StubAnalysisBackend`) so the bridge is no
    longer only validated against the default Python analysis backend. The
@@ -216,7 +217,8 @@ Current experimental runtime progress:
    snapshot-query operations (`declared`, `exported`, `symbol_inventory`,
    symbol locations, diagnostics, structured diagnostics, and symbol metadata)
    now do the same through `sprout.analysis_snapshot_backend`, with
-   `sprout.analysis` reduced to compatibility wrappers for that surface.
+   `sprout.analysis` reduced to compatibility wrappers for that surface, while
+   execution helpers live in `sprout.analysis_execution_backend`.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.
