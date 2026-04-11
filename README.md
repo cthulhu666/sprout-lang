@@ -225,8 +225,8 @@ Experimental snapshot analysis hooks:
 
 - Active snapshot/state hooks used by the current Sprout REPL frontend.
   The host implementation now routes in-source execution through
-  `sprout.analysis_execution_backend`, completion through the split
-  completion backend helpers, and snapshot analysis through
+  `sprout.analysis_execution_backend`, completion through
+  `sprout.analysis_completion_backend`, and snapshot analysis through
   `sprout.analysis_snapshot_backend`, while `sprout.analysis` remains a
   compatibility facade:
 - `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`

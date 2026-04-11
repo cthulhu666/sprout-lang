@@ -101,7 +101,7 @@ Current experimental runtime progress:
    active hosted bridge used by `stdlib/repl.sprout`. Snapshot analysis for
    that bridge now lives in `sprout.analysis_snapshot_backend`, while
    in-source execution and completion route through the split execution and
-   completion backend helpers; `sprout.analysis` is retained as a
+   `sprout.analysis_completion_backend` helpers; `sprout.analysis` is retained as a
    compatibility facade rather than the implementation home.
 3. Legacy compatibility hooks still exist in the host runtime:
    `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
@@ -218,7 +218,8 @@ Current experimental runtime progress:
    symbol locations, diagnostics, structured diagnostics, and symbol metadata)
    now do the same through `sprout.analysis_snapshot_backend`, with
    `sprout.analysis` reduced to compatibility wrappers for that surface, while
-   execution helpers live in `sprout.analysis_execution_backend`.
+   execution helpers live in `sprout.analysis_execution_backend` and
+   completion helpers in `sprout.analysis_completion_backend`.
 10. Verification should increasingly target the dedicated module entrypoint
     rather than the hidden CLI compatibility wrapper, so the remaining Python
     dependency is narrowed to the analysis-service module boundary itself.

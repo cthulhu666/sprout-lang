@@ -21,7 +21,7 @@ Sprout already has the core ingredients needed for IDE support:
 - module loader
 - typechecker
 - formatter
-- REPL-oriented completion helpers
+- `sprout.analysis_completion_backend` for completion helpers
 
 However, those pieces are currently optimized for batch CLI execution and
 human-readable diagnostics. A language server needs:
