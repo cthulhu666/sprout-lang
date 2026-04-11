@@ -21,6 +21,10 @@ from .analysis_snapshot_backend import (
 
 __all__ = [
     "DEFAULT_ANALYSIS_BACKEND",
+    "DEFAULT_COMPLETION_BACKEND",
+    "DEFAULT_EXECUTION_BACKEND",
+    "DEFAULT_SNAPSHOT_BACKEND",
+    "compose_analysis_backend",
     "default_analysis_backend",
     "default_completion_backend",
     "default_execution_backend",
@@ -50,6 +54,41 @@ class _FunctionAnalysisBackend(AnalysisBackend):
     instances_in_source: Callable[[str, str], tuple[str, list[str]]]
     eval_expr_in_source: Callable[[str, str], tuple[str, ...]]
     complete_in_state: Callable[[str, list[str], list[str]], tuple[str, list[str]]]
+
+
+def _python_function_backend() -> _FunctionAnalysisBackend:
+    return _FunctionAnalysisBackend(
+        check_source=python_backend_check_source,
+        type_of_in_source=python_backend_type_of_in_source,
+        declared_names_in_source=python_backend_declared_names_in_source,
+        exported_names_in_source=python_backend_exported_names_in_source,
+        symbol_inventory_in_source=python_backend_symbol_inventory_in_source,
+        diagnostics_in_source=python_backend_diagnostics_in_source,
+        symbol_locations_in_source=python_backend_symbol_locations_in_source,
+        instances_in_source=python_backend_instances_in_source,
+        eval_expr_in_source=python_backend_eval_expr_in_source,
+        complete_in_state=python_backend_complete_in_state,
+    )
+
+
+def compose_analysis_backend(
+    *,
+    snapshot_backend: AnalysisSnapshotBackend,
+    execution_backend: AnalysisExecutionBackend,
+    completion_backend: AnalysisCompletionBackend,
+) -> AnalysisBackend:
+    return _FunctionAnalysisBackend(
+        check_source=execution_backend.check_source,
+        type_of_in_source=execution_backend.type_of_in_source,
+        declared_names_in_source=snapshot_backend.declared_names_in_source,
+        exported_names_in_source=snapshot_backend.exported_names_in_source,
+        symbol_inventory_in_source=snapshot_backend.symbol_inventory_in_source,
+        diagnostics_in_source=snapshot_backend.diagnostics_in_source,
+        symbol_locations_in_source=snapshot_backend.symbol_locations_in_source,
+        instances_in_source=execution_backend.instances_in_source,
+        eval_expr_in_source=execution_backend.eval_expr_in_source,
+        complete_in_state=completion_backend.complete_in_state,
+    )
 
 
 def python_backend_check_source(module_source: str) -> None:
@@ -96,17 +135,16 @@ def python_backend_complete_in_state(
     return python_completion_complete_in_state(line_buffer, imports, declarations)
 
 
-DEFAULT_ANALYSIS_BACKEND: AnalysisBackend = _FunctionAnalysisBackend(
-    check_source=python_backend_check_source,
-    type_of_in_source=python_backend_type_of_in_source,
-    declared_names_in_source=python_backend_declared_names_in_source,
-    exported_names_in_source=python_backend_exported_names_in_source,
-    symbol_inventory_in_source=python_backend_symbol_inventory_in_source,
-    diagnostics_in_source=python_backend_diagnostics_in_source,
-    symbol_locations_in_source=python_backend_symbol_locations_in_source,
-    instances_in_source=python_backend_instances_in_source,
-    eval_expr_in_source=python_backend_eval_expr_in_source,
-    complete_in_state=python_backend_complete_in_state,
+DEFAULT_SNAPSHOT_BACKEND: AnalysisSnapshotBackend = _python_function_backend()
+
+DEFAULT_EXECUTION_BACKEND: AnalysisExecutionBackend = _python_function_backend()
+
+DEFAULT_COMPLETION_BACKEND: AnalysisCompletionBackend = _python_function_backend()
+
+DEFAULT_ANALYSIS_BACKEND: AnalysisBackend = compose_analysis_backend(
+    snapshot_backend=DEFAULT_SNAPSHOT_BACKEND,
+    execution_backend=DEFAULT_EXECUTION_BACKEND,
+    completion_backend=DEFAULT_COMPLETION_BACKEND,
 )
 
 
@@ -115,12 +153,12 @@ def default_analysis_backend() -> AnalysisBackend:
 
 
 def default_snapshot_backend() -> AnalysisSnapshotBackend:
-    return DEFAULT_ANALYSIS_BACKEND
+    return DEFAULT_SNAPSHOT_BACKEND
 
 
 def default_execution_backend() -> AnalysisExecutionBackend:
-    return DEFAULT_ANALYSIS_BACKEND
+    return DEFAULT_EXECUTION_BACKEND
 
 
 def default_completion_backend() -> AnalysisCompletionBackend:
-    return DEFAULT_ANALYSIS_BACKEND
+    return DEFAULT_COMPLETION_BACKEND

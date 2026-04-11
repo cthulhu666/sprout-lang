@@ -192,16 +192,18 @@ Current experimental runtime progress:
    broader `sprout.analysis` module directly. The dispatcher also accepts an
    injected backend now, so the request/response protocol is no longer tied to
    one concrete Python implementation object. The neutral adapter/session
-   runner now accepts an injected backend as well, while `python -m
-   sprout.analysis_adapter` still defaults to the current Python-backed
-   implementation. The default Python backend is now also starting to split
-   into smaller implementation bundles below that seam, with the read-only
-   snapshot symbol/query operations living separately from execution-oriented
-   backend operations. The execution-oriented `check`, `type`, `instances`,
-   and `eval` paths now live in `sprout.analysis_execution_backend`, leaving
-   the local-state completion path. That completion path now also lives in its
-   own backend module, so `sprout.analysis_backend_python` is now
-   composition-only.
+   runner now accepts injected snapshot, execution, and completion bundles as
+   well, while `python -m sprout.analysis_adapter` still defaults to the
+   current Python-backed implementation. The default Python backend is now also
+   starting to split into smaller implementation bundles below that seam, with
+   the read-only snapshot symbol/query operations living separately from
+   execution-oriented backend operations. The execution-oriented `check`,
+   `type`, `instances`, and `eval` paths now live in
+   `sprout.analysis_execution_backend`, leaving the local-state completion
+   path. That completion path now also lives in its own backend module, so
+   `sprout.analysis_backend_python` is now composition-only and the service
+   path defaults to explicit backend-bundle composition rather than a single
+   monolithic Python backend object.
    The adapter/dispatcher seam is also now exercised in tests against a second
    concrete backend implementation (`StubAnalysisBackend`) so the bridge is no
    longer only validated against the default Python analysis backend. The

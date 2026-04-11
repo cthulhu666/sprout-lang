@@ -304,7 +304,9 @@ compatibility wrapper over the reusable dispatcher in
 [sprout/analysis_dispatch.py](./sprout/analysis_dispatch.py) and protocol loop
 in [sprout/analysis_protocol.py](./sprout/analysis_protocol.py), which is the
 intended replacement seam for a future non-Python native service. That bridge
-is being treated as reusable language-service infrastructure for later
+is now wired by default from explicit snapshot, execution, and completion
+backend bundles rather than only through the monolithic compatibility backend
+object, and it is being treated as reusable language-service infrastructure for later
 self-hosted compiler and language-server work, not as REPL-only plumbing. The launcher
 reuses both a cached
 compiled REPL binary between launches and one long-lived analysis-service

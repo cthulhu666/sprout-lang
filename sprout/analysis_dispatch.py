@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .analysis_backend import AnalysisBackend
-from .analysis_backend_python import default_analysis_backend
+from .analysis_backend import AnalysisBackend, AnalysisCompletionBackend, AnalysisExecutionBackend, AnalysisSnapshotBackend
+from .analysis_backend_python import default_completion_backend, default_execution_backend, default_snapshot_backend
 from .analysis_contract import (
     KEY_CATEGORIES,
     KEY_COLUMNS,
@@ -78,28 +78,42 @@ def _require_string_list(payload: object, field: str) -> list[str]:
 def dispatch_request(
     request: object,
     backend: AnalysisBackend | None = None,
+    *,
+    snapshot_backend: AnalysisSnapshotBackend | None = None,
+    execution_backend: AnalysisExecutionBackend | None = None,
+    completion_backend: AnalysisCompletionBackend | None = None,
 ) -> dict[str, object]:
-    backend = default_analysis_backend() if backend is None else backend
+    if backend is None:
+        snapshot_backend = default_snapshot_backend() if snapshot_backend is None else snapshot_backend
+        execution_backend = default_execution_backend() if execution_backend is None else execution_backend
+        completion_backend = default_completion_backend() if completion_backend is None else completion_backend
+    else:
+        snapshot_backend = backend
+        execution_backend = backend
+        completion_backend = backend
+    assert snapshot_backend is not None
+    assert execution_backend is not None
+    assert completion_backend is not None
     if not isinstance(request, dict):
         return _error("analysis service request must be a JSON object")
     op = request.get("op")
     try:
         if op == OP_CHECK_SOURCE:
-            backend.check_source(_require_string(request, "module_source"))
+            execution_backend.check_source(_require_string(request, "module_source"))
             return _ok(None)
         if op == OP_TYPE_OF_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             expr = _require_string(request, "expr")
-            return _ok(backend.type_of_in_source(module_source, expr))
+            return _ok(execution_backend.type_of_in_source(module_source, expr))
         if op == OP_DECLARED_NAMES_IN_SOURCE:
-            return _ok(backend.declared_names_in_source(_require_string(request, "module_source")))
+            return _ok(snapshot_backend.declared_names_in_source(_require_string(request, "module_source")))
         if op == OP_EXPORTED_NAMES_IN_SOURCE:
-            return _ok(backend.exported_names_in_source(_require_string(request, "module_source")))
+            return _ok(snapshot_backend.exported_names_in_source(_require_string(request, "module_source")))
         if op == OP_SYMBOL_INVENTORY_IN_SOURCE:
-            declared, imported, exported = backend.symbol_inventory_in_source(_require_string(request, "module_source"))
+            declared, imported, exported = snapshot_backend.symbol_inventory_in_source(_require_string(request, "module_source"))
             return _ok({KEY_DECLARED: declared, KEY_IMPORTED: imported, KEY_EXPORTED: exported})
         if op == OP_DIAGNOSTICS_IN_SOURCE:
-            diagnostics = backend.diagnostics_in_source(_require_string(request, "module_source"))
+            diagnostics = snapshot_backend.diagnostics_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
                     KEY_MESSAGES: [message for message, _, _ in diagnostics],
@@ -108,7 +122,7 @@ def dispatch_request(
                 }
             )
         if op == OP_SYMBOL_LOCATIONS_IN_SOURCE:
-            locations = backend.symbol_locations_in_source(_require_string(request, "module_source"))
+            locations = snapshot_backend.symbol_locations_in_source(_require_string(request, "module_source"))
             return _ok(
                 {
                     KEY_CATEGORIES: [category for category, _, _, _ in locations],
@@ -120,17 +134,17 @@ def dispatch_request(
         if op == OP_INSTANCES_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             query = _require_string(request, "query")
-            query_type, matches = backend.instances_in_source(module_source, query)
+            query_type, matches = execution_backend.instances_in_source(module_source, query)
             return _ok({KEY_MATCHES: matches, KEY_QUERY_TYPE: query_type})
         if op == OP_EVAL_EXPR_IN_SOURCE:
             module_source = _require_string(request, "module_source")
             expr = _require_string(request, "expr")
-            return _ok(list(backend.eval_expr_in_source(module_source, expr)))
+            return _ok(list(execution_backend.eval_expr_in_source(module_source, expr)))
         if op == OP_COMPLETE_IN_STATE:
             line_buffer = _require_string(request, "line_buffer")
             imports = _require_string_list(request, "imports")
             declarations = _require_string_list(request, "declarations")
-            prefix, matches = backend.complete_in_state(line_buffer, imports, declarations)
+            prefix, matches = completion_backend.complete_in_state(line_buffer, imports, declarations)
             return _ok({KEY_MATCHES: matches, KEY_PREFIX: prefix})
     except ValueError as exc:
         return _error(str(exc))

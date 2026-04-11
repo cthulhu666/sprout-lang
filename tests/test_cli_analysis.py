@@ -17,6 +17,7 @@ from sprout.analysis import (
 from sprout.analysis_adapter import cmd_analysis_adapter, run_analysis_adapter_session, run_analysis_stdio_session
 from sprout.analysis_backend import AnalysisBackend
 from sprout.analysis_backend_python import (
+    compose_analysis_backend,
     default_analysis_backend,
     default_completion_backend,
     default_execution_backend,
@@ -36,6 +37,7 @@ from sprout.analysis_dispatch import dispatch_request
 from sprout.analysis_protocol import run_json_service_session
 from sprout.analysis_service import cmd_analysis_service
 from sprout.analysis_snapshot_backend import (
+    symbol_locations_in_source as snapshot_symbol_locations_in_source,
     python_snapshot_declared_names_in_source,
     python_snapshot_diagnostics_in_source,
     python_snapshot_exported_names_in_source,
@@ -222,6 +224,31 @@ class CliAnalysisTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(stdout.getvalue()), response_ok("Fake"))
+        self.assertEqual(fake_backend.seen, ("module app.repl\n\nlet local = 41", "local + 1"))
+
+    def test_analysis_adapter_session_accepts_explicit_backend_bundles(self) -> None:
+        class FakeExecutionBackend:
+            def check_source(self, module_source: str) -> None:
+                raise AssertionError("unexpected check_source call")
+
+            def type_of_in_source(self, module_source: str, expr: str) -> str:
+                self.seen = (module_source, expr)
+                return "BundleFake"
+
+            def instances_in_source(self, module_source: str, query: str) -> tuple[str, list[str]]:
+                raise AssertionError("unexpected instances_in_source call")
+
+            def eval_expr_in_source(self, module_source: str, expr: str) -> tuple[str, ...]:
+                raise AssertionError("unexpected eval_expr_in_source call")
+
+        fake_backend = FakeExecutionBackend()
+        stdin = StringIO(json.dumps(request_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1")))
+        stdout = StringIO()
+
+        exit_code = run_analysis_adapter_session(stdin=stdin, stdout=stdout, execution_backend=fake_backend)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), response_ok("BundleFake"))
         self.assertEqual(fake_backend.seen, ("module app.repl\n\nlet local = 41", "local + 1"))
 
     def test_analysis_adapter_session_supports_stub_backend_inventory_result(self) -> None:
@@ -487,6 +514,31 @@ class CliAnalysisTests(unittest.TestCase):
             response_ok("Fake"),
         )
 
+    def test_analysis_dispatch_accepts_explicit_backend_bundles(self) -> None:
+        class FakeSnapshotBackend:
+            def declared_names_in_source(self, module_source: str) -> list[str]:
+                raise AssertionError("unexpected")
+
+            def exported_names_in_source(self, module_source: str) -> list[str]:
+                raise AssertionError("unexpected")
+
+            def symbol_inventory_in_source(self, module_source: str) -> tuple[list[str], list[str], list[str]]:
+                return (["declared"], ["imported"], ["exported"])
+
+            def diagnostics_in_source(self, module_source: str) -> list[tuple[str, int, int]]:
+                raise AssertionError("unexpected")
+
+            def symbol_locations_in_source(self, module_source: str) -> list[tuple[str, str, int, int]]:
+                raise AssertionError("unexpected")
+
+        self.assertEqual(
+            dispatch_request(
+                {"op": "symbol_inventory_in_source", "module_source": "module app.repl"},
+                snapshot_backend=FakeSnapshotBackend(),
+            ),
+            response_ok({"declared": ["declared"], "imported": ["imported"], "exported": ["exported"]}),
+        )
+
     def test_analysis_backend_type_query_matches_analysis_surface(self) -> None:
         self.assertEqual(
             python_backend_type_of_in_source("module app.repl\n\nlet local = 41", "local"),
@@ -497,6 +549,24 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertEqual(
             default_analysis_backend().type_of_in_source("module app.repl\n\nlet local = 41", "local"),
             infer_type_in_source("module app.repl\n\nlet local = 41", "local"),
+        )
+
+    def test_compose_analysis_backend_combines_backend_bundles(self) -> None:
+        snapshot_backend = default_snapshot_backend()
+        execution_backend = default_execution_backend()
+        completion_backend = default_completion_backend()
+        backend = compose_analysis_backend(
+            snapshot_backend=snapshot_backend,
+            execution_backend=execution_backend,
+            completion_backend=completion_backend,
+        )
+
+        source = "module app.repl\n\nlet local = 41"
+        self.assertEqual(backend.type_of_in_source(source, "local"), execution_backend.type_of_in_source(source, "local"))
+        self.assertEqual(backend.symbol_inventory_in_source(source), snapshot_backend.symbol_inventory_in_source(source))
+        self.assertEqual(
+            backend.complete_in_state("lo", [], ["let local = 41"]),
+            completion_backend.complete_in_state("lo", [], ["let local = 41"]),
         )
 
     def test_python_execution_backend_helpers_match_default_execution_backend(self) -> None:
@@ -733,9 +803,7 @@ class CliAnalysisTests(unittest.TestCase):
         )
 
     def test_analysis_symbol_locations_in_source_reports_top_level_locations(self) -> None:
-        from sprout.analysis import symbol_locations_in_source
-
-        locations = symbol_locations_in_source(
+        locations = snapshot_symbol_locations_in_source(
             "module app.lib\n\nlet alpha = 1\n\nfn beta(x: Int) -> Int = x\n\nclass Render a {\n  fn render(value: a) -> String\n}\n\ntype Box =\n  | Wrap String"
         )
 
@@ -746,9 +814,7 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertIn(("constructor", "Wrap", 12, 5), locations)
 
     def test_analysis_symbol_metadata_in_source_reports_declared_and_imported_symbols(self) -> None:
-        from sprout.analysis import symbol_metadata_in_source
-
-        entries = symbol_metadata_in_source(
+        entries = snapshot_symbol_metadata_in_source(
             "module app.lib\n\nimport stdlib.string\nimport stdlib.string (concat)\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nlet local = 1"
         )
 
@@ -804,9 +870,7 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertEqual(by_name["from_string"].definition_location.column, 1)
 
     def test_structured_diagnostics_in_source_reports_stage_and_location(self) -> None:
-        from sprout.analysis import structured_diagnostics_in_source
-
-        type_diagnostics = structured_diagnostics_in_source(
+        type_diagnostics = snapshot_structured_diagnostics_in_source(
             "module app.repl\n\nlet broken = missing"
         )
         self.assertEqual(len(type_diagnostics), 1)
@@ -819,7 +883,7 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertEqual(type_diag.location.line, 3)
         self.assertEqual(type_diag.location.column, 14)
 
-        parse_diagnostics = structured_diagnostics_in_source(
+        parse_diagnostics = snapshot_structured_diagnostics_in_source(
             "module app.repl\n\nlet broken ="
         )
         self.assertEqual(len(parse_diagnostics), 1)

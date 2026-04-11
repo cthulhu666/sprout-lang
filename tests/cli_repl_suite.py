@@ -684,7 +684,7 @@ class CliReplTests(unittest.TestCase):
         self.assertIn("render", names)
 
     def test_repl_declared_names_in_source_reports_declared_symbols(self) -> None:
-        from sprout.analysis import declared_names_in_source
+        from sprout.analysis_snapshot_backend import declared_names_in_source
 
         names = set(
             declared_names_in_source(
@@ -699,7 +699,7 @@ class CliReplTests(unittest.TestCase):
         self.assertIn("local", names)
 
     def test_repl_exported_names_in_source_reports_explicit_exports(self) -> None:
-        from sprout.analysis import exported_names_in_source
+        from sprout.analysis_snapshot_backend import exported_names_in_source
 
         names = set(
             exported_names_in_source(
@@ -713,7 +713,7 @@ class CliReplTests(unittest.TestCase):
         self.assertNotIn("hidden", names)
 
     def test_repl_symbol_inventory_in_source_reports_declared_imported_and_exported_names(self) -> None:
-        from sprout.analysis import symbol_inventory_in_source
+        from sprout.analysis_snapshot_backend import symbol_inventory_in_source
 
         declared, imported, exported = symbol_inventory_in_source(
             "module app.lib\n\nimport stdlib.string\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nlet local = 1"
