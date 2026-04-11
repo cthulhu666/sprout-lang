@@ -176,6 +176,15 @@ Raw terminal control hooks and the neutral `analysis_*` snapshot hooks now sit
 behind `stdlib.terminal` and `stdlib.compiler` for ordinary modules, even
 though the underlying host builtins still exist.
 
+Builtin effect convention:
+
+- runtime-bound host interaction uses `!{IO}`
+- pure host-backed computation stays pure
+- `Maybe` / `Result` describe value-level failure or optionality, not
+  effectfulness
+- internal and compatibility hooks still follow the same typing rule, but they
+  are not part of the preferred ordinary-module surface
+
 `!{IO}` builtins:
 
 - `print(x) -> Unit !{IO}`
@@ -359,6 +368,11 @@ Effect notes:
 - Sprout v0 now tracks the built-in `IO` effect on function types.
 - Pure functions omit an effect annotation.
 - Effectful functions use `!{IO}`, for example `fn main() -> Unit !{IO} = ...`.
+- Host-implemented builtins follow the same rule as user-defined functions:
+  their declared type determines whether they are pure or `!{IO}`.
+- Builtins that interact with runtime or external state use `!{IO}` even when
+  they return `Maybe` or `Result`; pure value transforms stay pure even when
+  they return `Maybe` or `Result`.
 - Restricted effect polymorphism is supported for higher-order helpers via
   singleton effect variables such as:
   `fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(f(x))`.

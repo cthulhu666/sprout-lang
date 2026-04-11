@@ -591,6 +591,15 @@ class TypecheckerTests(unittest.TestCase):
         for name, expected_type in expected.items():
             self.assertEqual(types[name], expected_type, msg=name)
 
+    def test_builtin_effect_convention_distinguishes_runtime_interaction_from_result_shape(self) -> None:
+        types = typecheck_program(parse('fn main() -> Unit !{IO} = print("ok")'))
+        self.assertEqual(types["env_get"], "String -> Maybe String !{IO}")
+        self.assertEqual(types["http_request"], "String -> String -> String -> String -> Int -> Result stdlib.http.HttpError stdlib.http.HttpResponse !{IO}")
+        self.assertEqual(types["crypto_random_bytes"], "Int -> Result stdlib.crypto.CryptoError Bytes !{IO}")
+        self.assertEqual(types["regex_validate"], "String -> Result String Unit")
+        self.assertEqual(types["bytes_to_utf8"], "Bytes -> Result stdlib.bytes.Utf8Error String")
+        self.assertRegex(types["map_get"], r"^forall ([A-Za-z][A-Za-z0-9_]*)\. Map \1 -> String -> Maybe \1$")
+
     def test_typecheck_generalizes_singleton_effect_variable(self) -> None:
         src = """
         fn apply_twice(f: Int -> Int !{e}, x: Int) -> Int !{e} =

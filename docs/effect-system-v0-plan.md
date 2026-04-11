@@ -180,6 +180,14 @@ For ordinary non-`main` functions, omitted effect annotation should mean pure.
 
 ## 11. Builtin Migration
 
+The implemented v0 convention is:
+
+- host-implemented builtins are typed and checked exactly like ordinary
+  functions
+- runtime/external interaction is tracked with `!{IO}`
+- `Maybe` and `Result` remain ordinary value-level result shapes and do not
+  imply either purity or effectfulness by themselves
+
 Pure builtins stay pure:
 
 - `parse_int`

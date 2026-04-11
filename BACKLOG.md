@@ -22,7 +22,7 @@ Definition of done:
 - [x] `P0` Add `Result e a` and core helpers in stdlib (`map`, `map_error`, `and_then`, `with_default`).
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
-- [~] `P1` Decide how builtins participate in effect tracking; the builtin surface is now audited/documented, and raw `term_*`, `analysis_*`, and legacy `repl_*` hooks no longer sit in the implicit prelude for ordinary modules, but the broader builtin-surface convention cleanup is still open.
+- [x] `P1` Decide how builtins participate in effect tracking; host-implemented builtins now follow the same effect-typing rule as ordinary functions, with runtime/external interaction tracked via `!{IO}` and value-level `Maybe`/`Result` shapes kept separate from effectfulness.
 - [ ] `P2` Move `stdlib.compiler` to a dedicated tooling/compiler namespace once the non-stdlib tooling-package model is settled.
 - [x] `P2` Add effect-sequencing sugar for `IO Unit` flows (`do` blocks or a dedicated sequencing operator).
 - [x] `P2` Align function composition operator direction with Elm/F# conventions; `f >> g` now means `g(f(x))` and `f << g` means `f(g(x))`.
@@ -154,6 +154,6 @@ Definition of done:
 
 ## Next 3 Tasks (Execution Order)
 
-1. Decide how builtins participate in effect tracking; the builtin surface is audited, but the design decision and convention cleanup are still open.
-2. Keep the docs/examples aligned with the narrow `do` story as new user-facing sequencing cases land.
-3. Gather concrete examples of any remaining awkward effectful control flow, especially cases where users need to preserve whole `Maybe`/`Result` containers while continuing `IO`, before reconsidering richer effect rows or finer-grained effect labels.
+1. Keep the docs/examples aligned with the narrow `do` story as new user-facing sequencing cases land.
+2. Gather concrete examples of any remaining awkward effectful control flow, especially cases where users need to preserve whole `Maybe`/`Result` containers while continuing `IO`, before reconsidering richer effect rows or finer-grained effect labels.
+3. Continue builtin-surface cleanup by preferring stdlib package entrypoints over raw compatibility hooks in ordinary user-facing examples and docs.

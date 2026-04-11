@@ -244,6 +244,13 @@ Effect note for v0:
 
 - Calling a function typed with `!{IO}` behaves like any other strict function call.
 - Effects happen when the call expression is evaluated.
+- Host-implemented builtins participate in effect checking exactly like ordinary
+  functions; their declared function type is the language contract.
+- A builtin uses `!{IO}` when evaluating the call may interact with runtime or
+  external state such as terminal IO, files, environment, network, randomness,
+  or host-backed analysis services.
+- A builtin stays pure when it only computes or transforms values, even if its
+  result type is `Maybe ...` or `Result ...`.
 - v0 provides only restricted effect polymorphism via singleton effect variables
   such as `!{e}`.
 - v0 does not provide delayed execution, mixed/open effect rows, or handlers.
