@@ -302,7 +302,7 @@ class CliCommandTests(unittest.TestCase):
 
     def test_run_result_control_flow_demo(self) -> None:
         run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "run", "--with-stdlib", "examples/result_demo.sprout"],
+            [sys.executable, "-m", "sprout.cli", "run", "examples/result_demo.sprout", "21"],
             check=False,
             capture_output=True,
             text=True,
@@ -334,9 +334,7 @@ class CliCommandTests(unittest.TestCase):
         self.assertEqual(run.stdout.strip(), "do:io-result\ncapturing payload size\nio-do:bytes=8")
 
     def test_compile_all_examples(self) -> None:
-        example_flags = {
-            "examples/result_demo.sprout": ["--with-stdlib"],
-        }
+        example_flags = {}
         failures: list[tuple[Path, str, str]] = []
         for path in sorted(Path("examples").glob("*.sprout")):
             with tempfile.TemporaryDirectory() as tmp:

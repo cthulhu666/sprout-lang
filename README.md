@@ -544,13 +544,17 @@ fn compute(x: Int) -> Result String Int =
     Ok((large * 2) + 1)
 
 fn main() -> Unit !{IO} =
-  match compute(21) with
-  | Ok value -> print(value)
-  | Err err -> print(err)
+  match argv_get(0) with
+  | Nothing -> print("usage: ... <int>")
+  | Just raw ->
+      match compute(parse_int(raw)) with
+      | Ok value -> print(value)
+      | Err err -> print(err)
 ```
 
 Runnable demo:
-- `python3 -m sprout.cli run --with-stdlib examples/result_demo.sprout`
+- `python3 -m sprout.cli run examples/result_demo.sprout 21`
+- `python3 -m sprout.cli run examples/result_demo.sprout 3`
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 
