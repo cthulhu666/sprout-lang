@@ -35,7 +35,16 @@ from sprout.analysis_contract import KEY_MATCHES, KEY_PREFIX, OP_CHECK_SOURCE, O
 from sprout.analysis_dispatch import dispatch_request
 from sprout.analysis_protocol import run_json_service_session
 from sprout.analysis_service import cmd_analysis_service
-from sprout.analysis_snapshot_backend import python_snapshot_symbol_inventory_in_source, python_snapshot_symbol_locations_in_source
+from sprout.analysis_snapshot_backend import (
+    python_snapshot_declared_names_in_source,
+    python_snapshot_diagnostics_in_source,
+    python_snapshot_exported_names_in_source,
+    python_snapshot_symbol_inventory_in_source,
+    python_snapshot_symbol_locations_in_source,
+    python_snapshot_symbol_metadata_in_source,
+    structured_diagnostics_in_source as snapshot_structured_diagnostics_in_source,
+    symbol_metadata_in_source as snapshot_symbol_metadata_in_source,
+)
 from sprout.analysis_stdio import cmd_analysis_stdio
 
 
@@ -499,12 +508,66 @@ class CliAnalysisTests(unittest.TestCase):
             ]
         )
 
+        def normalize_metadata(entries: list[object]) -> list[tuple[object, ...]]:
+            normalized: list[tuple[object, ...]] = []
+            for entry in entries:
+                location = getattr(entry, "location")
+                definition_location = getattr(entry, "definition_location")
+                normalized.append(
+                    (
+                        getattr(entry, "visible_name"),
+                        getattr(entry, "kind"),
+                        getattr(entry, "canonical_name"),
+                        getattr(entry, "origin_module"),
+                        getattr(location, "line"),
+                        getattr(location, "column"),
+                        None
+                        if definition_location is None
+                        else (getattr(definition_location, "line"), getattr(definition_location, "column")),
+                        getattr(entry, "introduced_via"),
+                        getattr(entry, "exported"),
+                        getattr(entry, "imported_from_module"),
+                    )
+                )
+            return normalized
+
+        def normalize_diagnostics(entries: list[object]) -> list[tuple[object, ...]]:
+            normalized: list[tuple[object, ...]] = []
+            for entry in entries:
+                location = getattr(entry, "location")
+                normalized.append(
+                    (
+                        getattr(entry, "severity"),
+                        getattr(entry, "stage"),
+                        getattr(entry, "message"),
+                        None if location is None else (getattr(location, "line"), getattr(location, "column")),
+                    )
+                )
+            return normalized
+
         backend = default_snapshot_backend()
+        self.assertEqual(backend.declared_names_in_source(source), python_snapshot_declared_names_in_source(source))
         self.assertEqual(backend.declared_names_in_source(source), sprout_analysis.declared_names_in_source(source))
+        self.assertEqual(backend.exported_names_in_source(source), python_snapshot_exported_names_in_source(source))
         self.assertEqual(backend.exported_names_in_source(source), sprout_analysis.exported_names_in_source(source))
+        self.assertEqual(backend.symbol_inventory_in_source(source), python_snapshot_symbol_inventory_in_source(source))
         self.assertEqual(backend.symbol_inventory_in_source(source), sprout_analysis.symbol_inventory_in_source(source))
+        self.assertEqual(backend.diagnostics_in_source(source), python_snapshot_diagnostics_in_source(source))
         self.assertEqual(backend.diagnostics_in_source(source), sprout_analysis.diagnostics_in_source(source))
+        self.assertEqual(backend.symbol_locations_in_source(source), python_snapshot_symbol_locations_in_source(source))
         self.assertEqual(backend.symbol_locations_in_source(source), sprout_analysis.symbol_locations_in_source(source))
+        self.assertEqual(
+            normalize_metadata(python_snapshot_symbol_metadata_in_source(source)),
+            normalize_metadata(snapshot_symbol_metadata_in_source(source)),
+        )
+        self.assertEqual(
+            normalize_metadata(snapshot_symbol_metadata_in_source(source)),
+            normalize_metadata(sprout_analysis.symbol_metadata_in_source(source)),
+        )
+        self.assertEqual(
+            normalize_diagnostics(snapshot_structured_diagnostics_in_source(source)),
+            normalize_diagnostics(sprout_analysis.structured_diagnostics_in_source(source)),
+        )
 
     def test_default_execution_backend_matches_canonical_analysis_surface(self) -> None:
         source = "module app.repl\n\nlet local = 41"
