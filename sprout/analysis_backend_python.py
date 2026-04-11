@@ -22,6 +22,9 @@ from .analysis_snapshot_backend import (
 __all__ = [
     "DEFAULT_ANALYSIS_BACKEND",
     "default_analysis_backend",
+    "default_completion_backend",
+    "default_execution_backend",
+    "default_snapshot_backend",
     "python_backend_check_source",
     "python_backend_complete_in_state",
     "python_backend_declared_names_in_source",

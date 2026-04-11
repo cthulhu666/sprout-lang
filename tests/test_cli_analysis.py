@@ -16,7 +16,13 @@ from sprout.analysis import (
 )
 from sprout.analysis_adapter import cmd_analysis_adapter, run_analysis_adapter_session, run_analysis_stdio_session
 from sprout.analysis_backend import AnalysisBackend
-from sprout.analysis_backend_python import default_analysis_backend, python_backend_type_of_in_source
+from sprout.analysis_backend_python import (
+    default_analysis_backend,
+    default_completion_backend,
+    default_execution_backend,
+    default_snapshot_backend,
+    python_backend_type_of_in_source,
+)
 from sprout.analysis_backend_stub import StubAnalysisBackend
 from sprout.analysis_bridge import analysis_service_env_var_name, analysis_service_retry_allowed, analysis_service_start_error
 from sprout.analysis_bridge_runtime import render_analysis_bridge_helpers_c, render_analysis_bridge_request_helpers_c, render_analysis_bridge_response_helpers_c, render_analysis_bridge_runtime_c
@@ -462,6 +468,47 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertEqual(
             default_analysis_backend().type_of_in_source("module app.repl\n\nlet local = 41", "local"),
             infer_type_in_source("module app.repl\n\nlet local = 41", "local"),
+        )
+
+    def test_default_snapshot_backend_matches_canonical_analysis_surface(self) -> None:
+        source = "\n".join(
+            [
+                "module app.repl",
+                "",
+                "import stdlib.string as string",
+                "export let local = string.concat(\"a\", \"b\")",
+            ]
+        )
+
+        backend = default_snapshot_backend()
+        self.assertEqual(backend.declared_names_in_source(source), sprout_analysis.declared_names_in_source(source))
+        self.assertEqual(backend.exported_names_in_source(source), sprout_analysis.exported_names_in_source(source))
+        self.assertEqual(backend.symbol_inventory_in_source(source), sprout_analysis.symbol_inventory_in_source(source))
+        self.assertEqual(backend.diagnostics_in_source(source), sprout_analysis.diagnostics_in_source(source))
+        self.assertEqual(backend.symbol_locations_in_source(source), sprout_analysis.symbol_locations_in_source(source))
+
+    def test_default_execution_backend_matches_canonical_analysis_surface(self) -> None:
+        source = "module app.repl\n\nlet local = 41"
+        backend = default_execution_backend()
+
+        self.assertIsNone(backend.check_source(source))
+        self.assertEqual(backend.type_of_in_source(source, "local"), infer_type_in_source(source, "local"))
+        self.assertEqual(backend.instances_in_source(source, "List Int"), sprout_analysis.instances_in_source(source, "List Int"))
+        self.assertEqual(backend.eval_expr_in_source(source, "local + 1"), analysis_eval_expr_in_source(source, "local + 1"))
+
+    def test_default_completion_backend_matches_canonical_analysis_surface(self) -> None:
+        backend = default_completion_backend()
+        self.assertEqual(
+            backend.complete_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+            completion_candidates_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
         )
 
     def test_analysis_backend_symbol_inventory_matches_analysis_surface(self) -> None:
