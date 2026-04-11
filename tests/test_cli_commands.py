@@ -308,7 +308,7 @@ class CliCommandTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stdout.strip(), "43\n43\n43\n43\nerror:too-small\n7")
+        self.assertEqual(run.stdout.strip(), "43")
 
     def test_run_io_do_demo_without_configured_name(self) -> None:
         env = dict(os.environ)

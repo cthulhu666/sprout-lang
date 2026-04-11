@@ -535,28 +535,18 @@ then call helpers like `math.mod(...)` and `math.gcd(...)`.
 Example usage:
 
 ```sprout
-fn inc(x: Int) -> Int = x + 1
-fn double_if_large(x: Int) -> Result String Int =
-  if x > 10 then Ok(x * 2) else Err("too-small")
-fn show_ok(x: Int) -> Unit !{IO} = print(x)
-fn show_error(e: String) -> Unit !{IO} = print(e)
-fn prefix_error(e: String) -> String = "error:" ++ e
+fn require_large(x: Int) -> Result String Int =
+  if x > 10 then Ok(x) else Err("too-small")
 
-# Preferred sequencing style: use `do` for the step-by-step `Result` flow.
-let result =
-  result_map_error(
-    prefix_error,
-    do
-      value <- Ok(21)
-      doubled <- double_if_large(value)
-      Ok(inc(doubled))
-  )
+fn compute(x: Int) -> Result String Int =
+  do
+    large <- require_large(x)
+    Ok((large * 2) + 1)
 
-do
-  match result with
-  | Ok value -> show_ok(value)
-  | Err err -> show_error(err)
-  print(result_with_default(0, result))
+fn main() -> Unit !{IO} =
+  match compute(21) with
+  | Ok value -> print(value)
+  | Err err -> print(err)
 ```
 
 Runnable demo:
