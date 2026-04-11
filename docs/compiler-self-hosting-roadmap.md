@@ -161,8 +161,9 @@ Current status:
    `declared_names`, `exported_names`, `type_of`, `eval_lines`,
    `symbol_inventory`, `diagnostics`, and `instances` queries,
 3. it still relies on host-backed `analysis_*` capabilities and
-   `repl_eval_expr_in_source(...)`, so compile/lower orchestration remains
-   future Stage 2 work rather than completed self-hosting.
+   `repl_eval_expr_in_source(...)`/`repl_complete_in_state(...)`, so
+   compile/lower orchestration remains future Stage 2 work rather than
+   completed self-hosting.
 4. Phase 1 work should keep that wrapper compiler-facing rather than
    REPL-shaped, starting with the execution-oriented backend bundle behind the
    existing bridge contract.

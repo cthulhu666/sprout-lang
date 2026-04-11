@@ -224,9 +224,10 @@ helpers) instead of the raw `term_*` hooks.
 Experimental snapshot analysis hooks:
 
 - Active snapshot/state hooks used by the current Sprout REPL frontend.
-  The host implementation now routes snapshot analysis through the split
-  snapshot/execution backend seam, with compatibility helpers still re-exported
-  from `sprout.analysis`:
+  The host implementation now routes in-source execution and completion
+  through the split execution/completion backend helpers, while snapshot
+  analysis remains behind the split snapshot/backend seam with compatibility
+  helpers still re-exported from `sprout.analysis`:
 - `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
 - `repl_check_source(module_source: String) -> Result String Unit !{IO}`
 - `repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}`

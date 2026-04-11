@@ -99,9 +99,10 @@ Current experimental runtime progress:
    `repl_type_of_in_source(...)`, `repl_instances_in_source(...)`,
    `repl_complete_in_state(...)`, and `repl_reset_session()` now form the
    active hosted bridge used by `stdlib/repl.sprout`. Snapshot analysis for
-   that bridge now lives in `sprout.analysis_snapshot_backend`, with
-   `sprout.analysis` retained as a compatibility facade rather than the
-   implementation home.
+   that bridge now lives in `sprout.analysis_snapshot_backend`, while
+   in-source execution and completion route through the split execution and
+   completion backend helpers; `sprout.analysis` is retained as a
+   compatibility facade rather than the implementation home.
 3. Legacy compatibility hooks still exist in the host runtime:
    `repl_add_import(...)`, `repl_add_declaration(...)`, `repl_eval_expr(...)`,
    `repl_type_of(...)`, `repl_instances(...)`, and `repl_complete(...)`.
@@ -138,7 +139,9 @@ Current experimental runtime progress:
    `repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
    `repl_instances_in_source(...)`, and `analysis_instances_in_source(...)`,
    plus `repl_eval_expr_in_source(...)` and compatibility-only
-   `repl_complete_in_state(...)`.
+   `repl_complete_in_state(...)`, with those in-source execution/completion
+   calls now flowing through the backend bundle helpers rather than the
+   monolithic analysis facade.
    The remaining snapshot hooks are still unsupported in native binaries.
 8. End-to-end native execution of the current Sprout REPL frontend is now
    covered in tests by compiling and running `examples/repl_hosted.sprout`
