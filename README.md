@@ -93,7 +93,7 @@ Normative status:
   narrow mixed `IO` plus inner `Maybe`/`Result` `do` model, rather than richer
   effect rows. A focused audit of the current examples and stdlib code did not
   find concrete pressure yet for multi-entry rows or additional effect labels.
-- Native REPL work is the current tooling priority.
+- Native REPL work is the current tooling priority, and the first backend-replacement slice is the execution-oriented backend bundle behind the current bridge contract.
 - `docs/repl-self-hosting-v1-draft.md` and the language-server/compiler
   milestones are currently deferred as product work, but the native REPL bridge
   is being shaped as reusable language-service infrastructure for those later

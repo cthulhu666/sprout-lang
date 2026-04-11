@@ -1375,7 +1375,7 @@ class RuntimeTests(unittest.TestCase):
                     seq(
                       print(render_instances_result(repl_instances_in_source("module app.repl", "List Int"))),
                       seq(
-                      print(render_completion_result(repl_complete_in_state("str", Vec(vector_empty()), Vec(vector_empty())))),
+                      print(render_completion_result(analysis_complete_in_state("str", Vec(vector_empty()), Vec(vector_empty())))),
                       seq(
                       print(render_unit_result(repl_check_source("module app.repl\n\nlet local = 41"))),
                       seq(
@@ -1395,7 +1395,7 @@ class RuntimeTests(unittest.TestCase):
                       seq(
                       print(render_diagnostics_result(repl_diagnostics_in_source("module app.repl\n\nlet broken = missing"))),
                       seq(
-                      print(render_expr_result(repl_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
+                      print(render_expr_result(analysis_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
                       seq(
                       print(render_type_result(repl_type_of_in_source("module app.repl\n\nlet local = 41", "local + 1"))),
                       seq(

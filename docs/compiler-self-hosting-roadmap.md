@@ -110,7 +110,8 @@ Expected outcomes:
 2. active frontend behavior no longer depends on legacy REPL-specific host
    commands, and
 3. docs describe the next work as backend replacement rather than REPL
-   stabilization.
+   stabilization, with the execution-oriented backend bundle as the first
+   replacement target.
 
 This stage is already the active project priority.
 
@@ -162,6 +163,9 @@ Current status:
 3. it still relies on host-backed `analysis_*` capabilities and
    `repl_eval_expr_in_source(...)`, so compile/lower orchestration remains
    future Stage 2 work rather than completed self-hosting.
+4. Phase 1 work should keep that wrapper compiler-facing rather than
+   REPL-shaped, starting with the execution-oriented backend bundle behind the
+   existing bridge contract.
 
 ### Stage 3: Self-Hosted Frontend Slices
 

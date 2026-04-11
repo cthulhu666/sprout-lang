@@ -567,6 +567,7 @@ class TypecheckerTests(unittest.TestCase):
             "repl_add_declaration": "String -> Result String Unit !{IO}",
             "repl_eval_expr": "String -> Result String Vec String !{IO}",
             "repl_eval_expr_in_source": "String -> String -> Result String Vec String !{IO}",
+            "analysis_eval_expr_in_source": "String -> String -> Result String Vec String !{IO}",
             "repl_check_source": "String -> Result String Unit !{IO}",
             "analysis_check_source": "String -> Result String Unit !{IO}",
             "repl_declared_names_in_source": "String -> Result String Vec String !{IO}",
@@ -586,6 +587,7 @@ class TypecheckerTests(unittest.TestCase):
             "analysis_instances_in_source": "String -> String -> Result String (String, Vec String) !{IO}",
             "repl_complete": "String -> (String, Vec String) !{IO}",
             "repl_complete_in_state": "String -> Vec String -> Vec String -> (String, Vec String) !{IO}",
+            "analysis_complete_in_state": "String -> Vec String -> Vec String -> (String, Vec String) !{IO}",
             "repl_reset_session": "Unit !{IO}",
         }
         for name, expected_type in expected.items():
@@ -1007,6 +1009,7 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("repl_add_declaration", types)
         self.assertIn("repl_eval_expr", types)
         self.assertIn("repl_eval_expr_in_source", types)
+        self.assertIn("analysis_eval_expr_in_source", types)
         self.assertIn("repl_check_source", types)
         self.assertIn("analysis_check_source", types)
         self.assertIn("repl_declared_names_in_source", types)
@@ -1026,6 +1029,7 @@ class TypecheckerTests(unittest.TestCase):
         self.assertIn("analysis_instances_in_source", types)
         self.assertIn("repl_complete", types)
         self.assertIn("repl_complete_in_state", types)
+        self.assertIn("analysis_complete_in_state", types)
         self.assertIn("repl_reset_session", types)
 
     def test_typecheck_vector_builtins(self) -> None:

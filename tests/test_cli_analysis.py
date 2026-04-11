@@ -7,7 +7,13 @@ import unittest
 from io import StringIO
 
 from sprout import analysis as sprout_analysis
-from sprout.analysis import completion_candidates_in_state, infer_type_in_source, symbol_inventory_in_source
+from sprout.analysis import (
+    analysis_complete_in_state,
+    analysis_eval_expr_in_source,
+    completion_candidates_in_state,
+    infer_type_in_source,
+    symbol_inventory_in_source,
+)
 from sprout.analysis_adapter import cmd_analysis_adapter, run_analysis_adapter_session, run_analysis_stdio_session
 from sprout.analysis_backend import AnalysisBackend
 from sprout.analysis_backend_python import default_analysis_backend, python_backend_type_of_in_source
@@ -34,6 +40,20 @@ class CliAnalysisTests(unittest.TestCase):
 
         self.assertEqual(prefix, "fr")
         self.assertEqual(matches, ["from_string"])
+
+    def test_analysis_alias_helpers_match_existing_execution_helpers(self) -> None:
+        self.assertEqual(
+            analysis_eval_expr_in_source("module app.repl\n\nlet local = 41", "local + 1"),
+            ("42",),
+        )
+        self.assertEqual(
+            analysis_complete_in_state(
+                "fr",
+                ["import stdlib.bytes (from_string)"],
+                ["let answer = 41"],
+            ),
+            ("fr", ["from_string"]),
+        )
 
     def test_analysis_bridge_centralizes_service_env_and_start_error(self) -> None:
         self.assertEqual(analysis_service_env_var_name(), "SPROUT_ANALYSIS_SERVICE_CMD")

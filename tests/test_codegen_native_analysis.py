@@ -130,6 +130,58 @@ class CodegenNativeAnalysisTests(CodegenTestCase):
             self.assertEqual(run.stdout.strip(), "fr:from_string")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_analysis_complete_in_state_builtin_runs_via_analysis_service(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.compiler as compiler
+                import stdlib.collections (vec_empty, vec_append)
+
+                fn first_or(lines: Vec String, fallback: String) -> String =
+                  match lines with
+                  | Vec raw ->
+                      match vec_get(0, Vec(raw)) with
+                      | Just first -> first
+                      | Nothing -> fallback
+
+                fn singleton(x: String) -> Vec String =
+                  vec_append(x, vec_empty())
+
+                fn main() -> Unit !{IO} =
+                  match compiler.complete_in_state("fr", singleton("import stdlib.bytes (from_string)"), singleton("let answer = 41")) with
+                  | (prefix, matches) -> print(prefix ++ ":" ++ first_or(matches, "<empty>"))
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "fr:from_string")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_type_of_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -691,6 +743,55 @@ for line in sys.stdin:
                 fn main() -> Unit !{IO} =
                   match compiler.eval_lines_in_source("module app.repl\n\nlet local = 41", "local + 1") with
                   | Ok lines -> print(first_or(lines, "<empty>"))
+                  | Err message -> print(message)
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run(
+                [str(bin_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=self._native_analysis_service_env(),
+            )
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "42")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_analysis_eval_expr_in_source_builtin_runs_via_analysis_service(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.compiler as compiler
+
+                fn first_or_empty(lines: Vec String) -> String =
+                  match lines with
+                  | Vec raw ->
+                      match vec_get(0, Vec(raw)) with
+                      | Just first -> first
+                      | Nothing -> "<empty>"
+
+                fn main() -> Unit !{IO} =
+                  match compiler.eval_lines_in_source("module app.repl\n\nlet local = 41", "local + 1") with
+                  | Ok lines -> print(first_or_empty(lines))
                   | Err message -> print(message)
                 """,
                 encoding="utf-8",

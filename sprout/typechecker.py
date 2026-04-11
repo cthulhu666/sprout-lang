@@ -1748,6 +1748,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             TApp(TApp(result_type, STRING), TApp(TConst("Vec"), STRING)),
             effects=IO_EFFECT,
         ),
+        "analysis_eval_expr_in_source": builtin_scheme(
+            [STRING, STRING],
+            TApp(TApp(result_type, STRING), TApp(TConst("Vec"), STRING)),
+            effects=IO_EFFECT,
+        ),
         "repl_check_source": builtin_scheme(
             [STRING],
             TApp(TApp(result_type, STRING), UNIT),
@@ -1857,6 +1862,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             effects=IO_EFFECT,
         ),
         "repl_complete_in_state": builtin_scheme(
+            [STRING, TApp(TConst("Vec"), STRING), TApp(TConst("Vec"), STRING)],
+            TTuple((STRING, TApp(TConst("Vec"), STRING))),
+            effects=IO_EFFECT,
+        ),
+        "analysis_complete_in_state": builtin_scheme(
             [STRING, TApp(TConst("Vec"), STRING), TApp(TConst("Vec"), STRING)],
             TTuple((STRING, TApp(TConst("Vec"), STRING))),
             effects=IO_EFFECT,

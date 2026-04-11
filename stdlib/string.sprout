@@ -1,5 +1,5 @@
 module stdlib.string
-import stdlib.collections (List, Vec, vec_empty, vec_append)
+import stdlib.collections (List, Vec, vec_empty, vec_append, vec_get)
 
 export fn words(raw: String) -> List String =
   split_words(raw)
@@ -90,6 +90,16 @@ export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
   if is_empty(sep) then Nothing
   else if find(raw, sep) < 0 then Nothing
   else Just((take(raw, find(raw, sep)), drop(raw, find(raw, sep) + length(sep))))
+
+export fn join_with(separator: String, lines: Vec String) -> String =
+  join_with_from(separator, lines, 0, "")
+
+fn join_with_from(separator: String, lines: Vec String, index: Int, acc: String) -> String =
+  match vec_get(index, lines) with
+  | Just line ->
+      if index == 0 then join_with_from(separator, lines, index + 1, line)
+      else join_with_from(separator, lines, index + 1, str_concat(str_concat(acc, separator), line))
+  | Nothing -> acc
 
 fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)

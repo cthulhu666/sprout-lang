@@ -38,17 +38,22 @@ export fn with_declaration(line: String, session: CompilerSession) -> CompilerSe
   match session with
   | CompilerSession imports declarations -> CompilerSession(imports, vec_append(line, declarations))
 
-fn join_lines(lines: Vec String, index: Int, acc: String) -> String =
-  match vec_get(index, lines) with
-  | Just line ->
-      if acc == "" then join_lines(lines, index + 1, line)
-      else join_lines(lines, index + 1, string.concat(string.concat(acc, "\n\n"), line))
-  | Nothing -> acc
+fn append_nonempty_chunk(chunk: String, chunks: Vec String) -> Vec String =
+  if string.is_empty(chunk) then chunks else vec_append(chunk, chunks)
 
 export fn session_source(session: CompilerSession) -> String =
   match session with
   | CompilerSession imports declarations ->
-      join_lines(declarations, 0, join_lines(imports, 0, "module app.session"))
+      string.join_with(
+        "\n\n",
+        append_nonempty_chunk(
+          string.join_with("\n\n", declarations),
+          append_nonempty_chunk(
+            string.join_with("\n\n", imports),
+            vec_append("module app.session", vec_empty())
+          )
+        )
+      )
 
 export fn check(session: CompilerSession) -> Result String Unit !{IO} =
   analysis_check_source(session_source(session))
@@ -77,11 +82,14 @@ export fn type_of(session: CompilerSession, expr: String) -> Result String Strin
 export fn type_of_in_source(module_source: String, expr: String) -> Result String String !{IO} =
   analysis_type_of_in_source(module_source, expr)
 
+fn compiler_eval_lines_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO} =
+  analysis_eval_expr_in_source(module_source, expr)
+
 export fn eval_lines(session: CompilerSession, expr: String) -> Result String (Vec String) !{IO} =
-  repl_eval_expr_in_source(session_source(session), expr)
+  compiler_eval_lines_in_source(session_source(session), expr)
 
 export fn eval_lines_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO} =
-  repl_eval_expr_in_source(module_source, expr)
+  compiler_eval_lines_in_source(module_source, expr)
 
 export fn instances(session: CompilerSession, query: String) -> Result String InstanceMatches !{IO} =
   match analysis_instances_in_source(session_source(session), query) with
@@ -137,11 +145,14 @@ export fn diagnostics_in_source(module_source: String) -> Vec Diagnostic !{IO} =
 export fn symbol_locations_in_source(module_source: String) -> Result String (Vec (String, String, Int, Int)) !{IO} =
   analysis_symbol_locations_in_source(module_source)
 
+fn compiler_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO} =
+  analysis_complete_in_state(line_buffer, imports, declarations)
+
 export fn complete(session: CompilerSession, line_buffer: String) -> (String, Vec String) !{IO} =
-  repl_complete_in_state(line_buffer, session_imports(session), session_declarations(session))
+  compiler_complete_in_state(line_buffer, session_imports(session), session_declarations(session))
 
 export fn complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO} =
-  repl_complete_in_state(line_buffer, imports, declarations)
+  compiler_complete_in_state(line_buffer, imports, declarations)
 
 fn inventory_or_empty(session: CompilerSession) -> SymbolInventory !{IO} =
   match symbol_inventory(session) with

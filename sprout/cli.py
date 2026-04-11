@@ -1773,8 +1773,8 @@ static long long sprout_analysis_symbol_locations_result(const char* op, const c
 }
 static long long sprout_analysis_completion_result(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
   char* escaped_line_buffer = sprout_json_escape(line_buffer);
-  char* imports_json = sprout_json_encode_string_array_from_vec_handle(imports_handle, "repl_complete_in_state", "imports");
-  char* declarations_json = sprout_json_encode_string_array_from_vec_handle(declarations_handle, "repl_complete_in_state", "declarations");
+  char* imports_json = sprout_json_encode_string_array_from_vec_handle(imports_handle, "analysis_complete_in_state", "imports");
+  char* declarations_json = sprout_json_encode_string_array_from_vec_handle(declarations_handle, "analysis_complete_in_state", "declarations");
   size_t request_len = strlen(escaped_line_buffer) + strlen(imports_json) + strlen(declarations_json) + 88;
   char* request = alloc_cstr(request_len, "analysis service: out of memory");
   snprintf(
@@ -1792,12 +1792,12 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
   char* error = NULL;
   if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed("__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__"), &response, &error)) {
     free(request);
-    sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    sprout_builtin_fail_detail("analysis_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
   }
   free(request);
   if (sprout_json_field_is_true(response, "ok")) {
     return sprout_analysis_completion_tuple_or_fail(
-      "repl_complete_in_state",
+      "analysis_complete_in_state",
       response,
       "prefix",
       "matches"
@@ -1805,7 +1805,7 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
   }
   error = sprout_json_extract_string(response, "error");
   free(response);
-  sprout_builtin_fail_detail("repl_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  sprout_builtin_fail_detail("analysis_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   return 0;
 }
 long long repl_add_import(const char* source) {
@@ -1823,8 +1823,11 @@ long long repl_eval_expr(const char* source) {
   tcp_fail("repl_eval_expr: not supported in native backend");
   return 0;
 }
-long long repl_eval_expr_in_source(const char* module_source, const char* expr) {
+long long analysis_eval_expr_in_source(const char* module_source, const char* expr) {
   return sprout_analysis_vec_string_result("__SPROUT_ANALYSIS_OP_EVAL_EXPR_IN_SOURCE__", module_source, expr);
+}
+long long repl_eval_expr_in_source(const char* module_source, const char* expr) {
+  return analysis_eval_expr_in_source(module_source, expr);
 }
 long long repl_check_source(const char* module_source) {
   return sprout_analysis_check_source_result("__SPROUT_ANALYSIS_OP_CHECK_SOURCE__", module_source);
@@ -1886,8 +1889,11 @@ long long repl_complete(const char* source) {
   tcp_fail("repl_complete: not supported in native backend");
   return 0;
 }
-long long repl_complete_in_state(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
+long long analysis_complete_in_state(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
   return sprout_analysis_completion_result(line_buffer, imports_handle, declarations_handle);
+}
+long long repl_complete_in_state(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
+  return analysis_complete_in_state(line_buffer, imports_handle, declarations_handle);
 }
 long long repl_reset_session(void) {
   return 0;

@@ -32,6 +32,8 @@ __all__ = [
     "check_source",
     "completion_candidates_in_state",
     "completion_matches_in_state",
+    "analysis_complete_in_state",
+    "analysis_eval_expr_in_source",
     "declared_names_in_source",
     "Diagnostic",
     "diagnostics_in_source",
@@ -172,6 +174,10 @@ def check_source(source: str) -> None:
     _parse_and_check_source(source)
 
 
+def analysis_eval_expr_in_source(source: str, expr: str) -> tuple[str, ...]:
+    return eval_expression_lines_in_source(source, expr)
+
+
 def declared_names_in_source(source: str) -> list[str]:
     return python_snapshot_declared_names_in_source(source)
 
@@ -198,6 +204,14 @@ def structured_diagnostics_in_source(source: str) -> list[Diagnostic]:
 
 def diagnostics_in_source(source: str) -> list[tuple[str, int, int]]:
     return python_snapshot_diagnostics_in_source(source)
+
+
+def analysis_complete_in_state(
+    line_buffer: str,
+    imports: list[str],
+    declarations: list[str],
+) -> tuple[str, list[str]]:
+    return completion_candidates_in_state(line_buffer, imports, declarations)
 
 
 def eval_expression_lines_in_source(source: str, expr: str) -> tuple[str, ...]:

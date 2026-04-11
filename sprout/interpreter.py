@@ -1474,9 +1474,18 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         expr = args[1]
         if not isinstance(module_source, str) or not isinstance(expr, str):
             raise RuntimeError("repl_eval_expr_in_source expects String module source and String expression")
-        from .analysis import eval_expression_lines_in_source
+        from .analysis import analysis_eval_expr_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(eval_expression_lines_in_source(module_source, expr)))
+        return _repl_wrap(lambda: _repl_vec_string(analysis_eval_expr_in_source(module_source, expr)))
+
+    def builtin_analysis_eval_expr_in_source(args: list[object]) -> object:
+        module_source = args[0]
+        expr = args[1]
+        if not isinstance(module_source, str) or not isinstance(expr, str):
+            raise RuntimeError("analysis_eval_expr_in_source expects String module source and String expression")
+        from .analysis import analysis_eval_expr_in_source
+
+        return _repl_wrap(lambda: _repl_vec_string(analysis_eval_expr_in_source(module_source, expr)))
 
     def builtin_repl_check_source(args: list[object]) -> object:
         source = args[0]
@@ -1689,9 +1698,35 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                 items.append(item)
             return items
 
-        from .analysis import completion_candidates_in_state
+        from .analysis import analysis_complete_in_state
 
-        prefix, matches = completion_candidates_in_state(
+        prefix, matches = analysis_complete_in_state(
+            line_buffer,
+            _to_string_list(imports, "imports"),
+            _to_string_list(declarations, "declarations"),
+        )
+        return TupleValue(items=(prefix, _repl_vec_string(matches)))
+
+    def builtin_analysis_complete_in_state(args: list[object]) -> object:
+        line_buffer = args[0]
+        imports = args[1]
+        declarations = args[2]
+        if not isinstance(line_buffer, str):
+            raise RuntimeError("analysis_complete_in_state expects String line buffer and Vec String imports/declarations")
+
+        def _to_string_list(value: object, label: str) -> list[str]:
+            if not isinstance(value, ADTValue) or value.constructor != "Vec" or len(value.args) != 1 or not isinstance(value.args[0], VectorValue):
+                raise RuntimeError(f"analysis_complete_in_state expects {label} to be Vec String")
+            items: list[str] = []
+            for item in value.args[0].items:
+                if not isinstance(item, str):
+                    raise RuntimeError(f"analysis_complete_in_state expects {label} to contain only String values")
+                items.append(item)
+            return items
+
+        from .analysis import analysis_complete_in_state
+
+        prefix, matches = analysis_complete_in_state(
             line_buffer,
             _to_string_list(imports, "imports"),
             _to_string_list(declarations, "declarations"),
@@ -1979,6 +2014,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     )
     env.set("repl_eval_expr", BuiltinFunction(name="repl_eval_expr", arity=1, fn=builtin_repl_eval_expr))
     env.set("repl_eval_expr_in_source", BuiltinFunction(name="repl_eval_expr_in_source", arity=2, fn=builtin_repl_eval_expr_in_source))
+    env.set(
+        "analysis_eval_expr_in_source",
+        BuiltinFunction(name="analysis_eval_expr_in_source", arity=2, fn=builtin_analysis_eval_expr_in_source),
+    )
     env.set("repl_check_source", BuiltinFunction(name="repl_check_source", arity=1, fn=builtin_repl_check_source))
     env.set("analysis_check_source", BuiltinFunction(name="analysis_check_source", arity=1, fn=builtin_analysis_check_source))
     env.set("repl_declared_names_in_source", BuiltinFunction(name="repl_declared_names_in_source", arity=1, fn=builtin_repl_declared_names_in_source))
@@ -1998,6 +2037,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("analysis_instances_in_source", BuiltinFunction(name="analysis_instances_in_source", arity=2, fn=builtin_analysis_instances_in_source))
     env.set("repl_complete", BuiltinFunction(name="repl_complete", arity=1, fn=builtin_repl_complete))
     env.set("repl_complete_in_state", BuiltinFunction(name="repl_complete_in_state", arity=3, fn=builtin_repl_complete_in_state))
+    env.set(
+        "analysis_complete_in_state",
+        BuiltinFunction(name="analysis_complete_in_state", arity=3, fn=builtin_analysis_complete_in_state),
+    )
     env.set("repl_reset_session", BuiltinFunction(name="repl_reset_session", arity=0, fn=builtin_repl_reset_session))
     env.set("term_write", BuiltinFunction(name="term_write", arity=1, fn=builtin_term_write))
     env.set("tcp_listen", BuiltinFunction(name="tcp_listen", arity=1, fn=builtin_tcp_listen))

@@ -32,7 +32,7 @@ is:
 The remaining work to reach that pause point is deliberately smaller than full
 Python elimination:
 
-1. decide which backend bundle should be replaced first after the pause, and
+1. replace the execution-oriented backend bundle first after the pause, and
 2. keep the native REPL docs/tests aligned with that narrower backend-focused
    status.
 
@@ -64,6 +64,9 @@ binary, those boundaries need to be made explicit first.
 6. Keep the host bridge reusable enough that later self-hosted compiler and
    language-server work can consume the same service boundary instead of
    rebuilding parallel infrastructure.
+7. Replace compiler-facing capabilities in a staged order that starts with the
+   execution-oriented backend bundle, while preserving the current adapter and
+   request/response contract.
 
 ## Non-Goals
 
