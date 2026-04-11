@@ -21,6 +21,9 @@ from sprout.analysis_backend_python import (
     default_completion_backend,
     default_execution_backend,
     default_snapshot_backend,
+    python_backend_check_source,
+    python_backend_eval_expr_in_source,
+    python_backend_instances_in_source,
     python_backend_type_of_in_source,
 )
 from sprout.analysis_backend_stub import StubAnalysisBackend
@@ -468,6 +471,22 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertEqual(
             default_analysis_backend().type_of_in_source("module app.repl\n\nlet local = 41", "local"),
             infer_type_in_source("module app.repl\n\nlet local = 41", "local"),
+        )
+
+    def test_python_execution_backend_helpers_match_default_execution_backend(self) -> None:
+        source = "module app.repl\n\nlet local = 41"
+        backend = default_execution_backend()
+
+        self.assertIsNone(python_backend_check_source(source))
+        self.assertIsNone(backend.check_source(source))
+        self.assertEqual(python_backend_type_of_in_source(source, "local"), backend.type_of_in_source(source, "local"))
+        self.assertEqual(
+            python_backend_instances_in_source(source, "List Int"),
+            backend.instances_in_source(source, "List Int"),
+        )
+        self.assertEqual(
+            python_backend_eval_expr_in_source(source, "local + 1"),
+            backend.eval_expr_in_source(source, "local + 1"),
         )
 
     def test_default_snapshot_backend_matches_canonical_analysis_surface(self) -> None:
