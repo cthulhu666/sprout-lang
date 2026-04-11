@@ -8,9 +8,11 @@ from typing import Callable, TextIO
 
 from . import ast
 from .analysis import (
-    check_source,
     completion_candidates_in_state as analysis_completion_candidates_in_state,
     completion_matches_in_state as analysis_completion_matches_in_state,
+)
+from .analysis_execution_backend import (
+    check_source,
     eval_expression_lines_in_source,
     infer_type_in_source,
     instances_in_source,
