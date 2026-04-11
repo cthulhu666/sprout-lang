@@ -1445,6 +1445,31 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         ) as exc:
             return _repl_err(str(exc))
 
+    def _default_execution_backend():
+        from .analysis_backend_python import default_execution_backend
+
+        return default_execution_backend()
+
+    def _default_snapshot_backend():
+        from .analysis_backend_python import default_snapshot_backend
+
+        return default_snapshot_backend()
+
+    def _default_completion_backend():
+        from .analysis_backend_python import default_completion_backend
+
+        return default_completion_backend()
+
+    def _to_string_list(value: object, label: str, *, builtin: str) -> list[str]:
+        if not isinstance(value, ADTValue) or value.constructor != "Vec" or len(value.args) != 1 or not isinstance(value.args[0], VectorValue):
+            raise RuntimeError(f"{builtin} expects {label} to be Vec String")
+        items: list[str] = []
+        for item in value.args[0].items:
+            if not isinstance(item, str):
+                raise RuntimeError(f"{builtin} expects {label} to contain only String values")
+            items.append(item)
+        return items
+
     def builtin_repl_add_import(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
@@ -1474,75 +1499,66 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         expr = args[1]
         if not isinstance(module_source, str) or not isinstance(expr, str):
             raise RuntimeError("repl_eval_expr_in_source expects String module source and String expression")
-        from .analysis import analysis_eval_expr_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(analysis_eval_expr_in_source(module_source, expr)))
+        return _repl_wrap(lambda: _repl_vec_string(_default_execution_backend().eval_expr_in_source(module_source, expr)))
 
     def builtin_analysis_eval_expr_in_source(args: list[object]) -> object:
         module_source = args[0]
         expr = args[1]
         if not isinstance(module_source, str) or not isinstance(expr, str):
             raise RuntimeError("analysis_eval_expr_in_source expects String module source and String expression")
-        from .analysis import analysis_eval_expr_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(analysis_eval_expr_in_source(module_source, expr)))
+        return _repl_wrap(lambda: _repl_vec_string(_default_execution_backend().eval_expr_in_source(module_source, expr)))
 
     def builtin_repl_check_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_check_source expects String module source")
-        from .analysis import check_source
 
-        return _repl_wrap(lambda: check_source(source))
+        return _repl_wrap(lambda: _default_execution_backend().check_source(source))
 
     def builtin_analysis_check_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_check_source expects String module source")
-        from .analysis import check_source
 
-        return _repl_wrap(lambda: check_source(source))
+        return _repl_wrap(lambda: _default_execution_backend().check_source(source))
 
     def builtin_repl_declared_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_declared_names_in_source expects String module source")
-        from .analysis_snapshot_backend import python_snapshot_declared_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_declared_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(_default_snapshot_backend().declared_names_in_source(source)))
 
     def builtin_analysis_declared_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_declared_names_in_source expects String module source")
-        from .analysis_snapshot_backend import python_snapshot_declared_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_declared_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(_default_snapshot_backend().declared_names_in_source(source)))
 
     def builtin_repl_exported_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_exported_names_in_source expects String module source")
-        from .analysis_snapshot_backend import python_snapshot_exported_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_exported_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(_default_snapshot_backend().exported_names_in_source(source)))
 
     def builtin_analysis_exported_names_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_exported_names_in_source expects String module source")
-        from .analysis_snapshot_backend import python_snapshot_exported_names_in_source
 
-        return _repl_wrap(lambda: _repl_vec_string(python_snapshot_exported_names_in_source(source)))
+        return _repl_wrap(lambda: _repl_vec_string(_default_snapshot_backend().exported_names_in_source(source)))
 
     def builtin_repl_symbol_inventory_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_symbol_inventory_in_source expects String module source")
-        from .analysis_snapshot_backend import python_snapshot_symbol_inventory_in_source
 
         def _inventory() -> TupleValue:
-            declared, imported, exported = python_snapshot_symbol_inventory_in_source(source)
+            declared, imported, exported = _default_snapshot_backend().symbol_inventory_in_source(source)
             return TupleValue(
                 items=(
                     _repl_vec_string(declared),
@@ -1557,10 +1573,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_symbol_inventory_in_source expects String module source")
-        from .analysis_snapshot_backend import python_snapshot_symbol_inventory_in_source
 
         def _inventory() -> TupleValue:
-            declared, imported, exported = python_snapshot_symbol_inventory_in_source(source)
+            declared, imported, exported = _default_snapshot_backend().symbol_inventory_in_source(source)
             return TupleValue(
                 items=(
                     _repl_vec_string(declared),
@@ -1575,7 +1590,6 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_symbol_locations_in_source expects String module source")
-        from .analysis_snapshot_backend import python_snapshot_symbol_locations_in_source
 
         def _locations() -> ADTValue:
             return ADTValue(
@@ -1584,7 +1598,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                     VectorValue(
                         tuple(
                             TupleValue(items=(category, name, line, column))
-                            for category, name, line, column in python_snapshot_symbol_locations_in_source(source)
+                            for category, name, line, column in _default_snapshot_backend().symbol_locations_in_source(source)
                         )
                     ),
                 ),
@@ -1596,17 +1610,15 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("repl_diagnostics_in_source expects String module source")
-        from .analysis_snapshot_backend import diagnostics_in_source
 
-        return _repl_vec_diagnostic(diagnostics_in_source(source))
+        return _repl_vec_diagnostic(_default_snapshot_backend().diagnostics_in_source(source))
 
     def builtin_analysis_diagnostics_in_source(args: list[object]) -> object:
         source = args[0]
         if not isinstance(source, str):
             raise RuntimeError("analysis_diagnostics_in_source expects String module source")
-        from .analysis_snapshot_backend import diagnostics_in_source
 
-        return _repl_vec_diagnostic(diagnostics_in_source(source))
+        return _repl_vec_diagnostic(_default_snapshot_backend().diagnostics_in_source(source))
 
     def builtin_repl_type_of(args: list[object]) -> object:
         source = args[0]
@@ -1621,18 +1633,16 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         expr = args[1]
         if not isinstance(module_source, str) or not isinstance(expr, str):
             raise RuntimeError("repl_type_of_in_source expects String module source and String expression")
-        from .analysis import infer_type_in_source
 
-        return _repl_wrap(lambda: infer_type_in_source(module_source, expr))
+        return _repl_wrap(lambda: _default_execution_backend().type_of_in_source(module_source, expr))
 
     def builtin_analysis_type_of_in_source(args: list[object]) -> object:
         module_source = args[0]
         expr = args[1]
         if not isinstance(module_source, str) or not isinstance(expr, str):
             raise RuntimeError("analysis_type_of_in_source expects String module source and String expression")
-        from .analysis import infer_type_in_source
 
-        return _repl_wrap(lambda: infer_type_in_source(module_source, expr))
+        return _repl_wrap(lambda: _default_execution_backend().type_of_in_source(module_source, expr))
 
     def builtin_repl_instances(args: list[object]) -> object:
         source = args[0]
@@ -1651,10 +1661,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         type_expr_source = args[1]
         if not isinstance(module_source, str) or not isinstance(type_expr_source, str):
             raise RuntimeError("repl_instances_in_source expects String module source and String type")
-        from .analysis import instances_in_source
 
         def _instances() -> TupleValue:
-            query_type, matches = instances_in_source(module_source, type_expr_source)
+            query_type, matches = _default_execution_backend().instances_in_source(module_source, type_expr_source)
             return TupleValue(items=(query_type, _repl_vec_string(matches)))
 
         return _repl_wrap(_instances)
@@ -1664,10 +1673,9 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         type_expr_source = args[1]
         if not isinstance(module_source, str) or not isinstance(type_expr_source, str):
             raise RuntimeError("analysis_instances_in_source expects String module source and String type")
-        from .analysis import instances_in_source
 
         def _instances() -> TupleValue:
-            query_type, matches = instances_in_source(module_source, type_expr_source)
+            query_type, matches = _default_execution_backend().instances_in_source(module_source, type_expr_source)
             return TupleValue(items=(query_type, _repl_vec_string(matches)))
 
         return _repl_wrap(_instances)
@@ -1687,23 +1695,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         declarations = args[2]
         if not isinstance(line_buffer, str):
             raise RuntimeError("repl_complete_in_state expects String line buffer and Vec String imports/declarations")
-
-        def _to_string_list(value: object, label: str) -> list[str]:
-            if not isinstance(value, ADTValue) or value.constructor != "Vec" or len(value.args) != 1 or not isinstance(value.args[0], VectorValue):
-                raise RuntimeError(f"repl_complete_in_state expects {label} to be Vec String")
-            items: list[str] = []
-            for item in value.args[0].items:
-                if not isinstance(item, str):
-                    raise RuntimeError(f"repl_complete_in_state expects {label} to contain only String values")
-                items.append(item)
-            return items
-
-        from .analysis import analysis_complete_in_state
-
-        prefix, matches = analysis_complete_in_state(
+        prefix, matches = _default_completion_backend().complete_in_state(
             line_buffer,
-            _to_string_list(imports, "imports"),
-            _to_string_list(declarations, "declarations"),
+            _to_string_list(imports, "imports", builtin="repl_complete_in_state"),
+            _to_string_list(declarations, "declarations", builtin="repl_complete_in_state"),
         )
         return TupleValue(items=(prefix, _repl_vec_string(matches)))
 
@@ -1713,23 +1708,10 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         declarations = args[2]
         if not isinstance(line_buffer, str):
             raise RuntimeError("analysis_complete_in_state expects String line buffer and Vec String imports/declarations")
-
-        def _to_string_list(value: object, label: str) -> list[str]:
-            if not isinstance(value, ADTValue) or value.constructor != "Vec" or len(value.args) != 1 or not isinstance(value.args[0], VectorValue):
-                raise RuntimeError(f"analysis_complete_in_state expects {label} to be Vec String")
-            items: list[str] = []
-            for item in value.args[0].items:
-                if not isinstance(item, str):
-                    raise RuntimeError(f"analysis_complete_in_state expects {label} to contain only String values")
-                items.append(item)
-            return items
-
-        from .analysis import analysis_complete_in_state
-
-        prefix, matches = analysis_complete_in_state(
+        prefix, matches = _default_completion_backend().complete_in_state(
             line_buffer,
-            _to_string_list(imports, "imports"),
-            _to_string_list(declarations, "declarations"),
+            _to_string_list(imports, "imports", builtin="analysis_complete_in_state"),
+            _to_string_list(declarations, "declarations", builtin="analysis_complete_in_state"),
         )
         return TupleValue(items=(prefix, _repl_vec_string(matches)))
 
