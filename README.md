@@ -248,6 +248,10 @@ Experimental snapshot analysis hooks:
 - Application code should prefer `stdlib.compiler` for these capabilities.
   The raw `analysis_*` hooks are no longer part of the implicit builtin
   prelude for ordinary modules.
+- Experimental compiler-building helpers may also live under
+  `stdlib.compiler.*` submodules as the self-hosting toolchain grows; those
+  modules are compiler/tooling-oriented rather than stable general-purpose
+  stdlib surface.
 - Python-side analysis helpers exposed from `sprout.analysis` are now backed by
   `sprout.analysis_snapshot_backend` for snapshot-oriented symbol metadata and
   structured diagnostics, and by `sprout.analysis_execution_backend` for

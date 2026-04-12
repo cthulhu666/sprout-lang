@@ -1,0 +1,80 @@
+module stdlib.compiler.source
+import stdlib.string as string
+
+export type SourcePos (..) =
+  | SourcePos Int Int Int
+
+export type SourceCursor (..) =
+  | SourceCursor String Int SourcePos
+
+export fn cursor_from_string(raw: String) -> SourceCursor =
+  SourceCursor(raw, 0, SourcePos(0, 1, 1))
+
+export fn source_position(cursor: SourceCursor) -> SourcePos =
+  match cursor with
+  | SourceCursor _ _ pos -> pos
+
+export fn position_index(pos: SourcePos) -> Int =
+  match pos with
+  | SourcePos index _ _ -> index
+
+export fn position_line(pos: SourcePos) -> Int =
+  match pos with
+  | SourcePos _ line _ -> line
+
+export fn position_column(pos: SourcePos) -> Int =
+  match pos with
+  | SourcePos _ _ column -> column
+
+fn cursor_source(cursor: SourceCursor) -> String =
+  match cursor with
+  | SourceCursor raw _ _ -> raw
+
+fn cursor_index(cursor: SourceCursor) -> Int =
+  match cursor with
+  | SourceCursor _ index _ -> index
+
+fn remaining_text(cursor: SourceCursor) -> String =
+  string.drop(cursor_source(cursor), cursor_index(cursor))
+
+export fn at_end(cursor: SourceCursor) -> Bool =
+  cursor_index(cursor) >= string.length(cursor_source(cursor))
+
+export fn peek_char(cursor: SourceCursor) -> Maybe Char =
+  string.char_at(cursor_source(cursor), cursor_index(cursor))
+
+fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
+  match pos with
+  | SourcePos index line column ->
+      if ch == '\n' || ch == '\r' then
+        SourcePos(index + 1, line + 1, 1)
+      else
+        SourcePos(index + 1, line, column + 1)
+
+export fn advance_char(cursor: SourceCursor) -> SourceCursor =
+  match cursor with
+  | SourceCursor raw index pos ->
+      match string.char_at(raw, index) with
+      | Nothing -> cursor
+      | Just ch -> SourceCursor(raw, index + 1, advance_position(pos, ch))
+
+export fn match_char(expected: Char, cursor: SourceCursor) -> Maybe SourceCursor =
+  match peek_char(cursor) with
+  | Just ch ->
+      if ch == expected then Just(advance_char(cursor))
+      else Nothing
+  | Nothing -> Nothing
+
+fn advance_expected(cursor: SourceCursor, expected: String, index: Int, total: Int) -> SourceCursor =
+  if index >= total then
+    cursor
+  else
+    match string.char_at(expected, index) with
+    | Just _ -> advance_expected(advance_char(cursor), expected, index + 1, total)
+    | Nothing -> cursor
+
+export fn match_string(expected: String, cursor: SourceCursor) -> Maybe SourceCursor =
+  if string.starts_with(remaining_text(cursor), expected) then
+    Just(advance_expected(cursor, expected, 0, string.length(expected)))
+  else
+    Nothing

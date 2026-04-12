@@ -883,6 +883,94 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "ok")
 
+    def test_import_stdlib_compiler_source_cursor_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler.source as source
+                import stdlib.string as string
+
+                fn render_char(value: Maybe Char) -> String =
+                  match value with
+                  | Nothing -> "_"
+                  | Just ch -> string.string_from_char(ch)
+
+                fn render_pos(cursor: source.SourceCursor) -> String =
+                  string.concat(
+                    int_to_string(source.position_index(source.source_position(cursor))),
+                    string.concat(
+                      ":",
+                      string.concat(
+                        int_to_string(source.position_line(source.source_position(cursor))),
+                        string.concat(":", int_to_string(source.position_column(source.source_position(cursor))))
+                      )
+                    )
+                  )
+
+                fn render_match_char(cursor: source.SourceCursor) -> String =
+                  match source.match_char('a', cursor) with
+                  | Nothing -> "no-match"
+                  | Just next_cursor ->
+                      string.concat(
+                        render_char(source.peek_char(next_cursor)),
+                        if source.at_end(next_cursor) then "|end" else "|more"
+                      )
+
+                fn render_match_string(cursor: source.SourceCursor) -> String =
+                  match source.match_string("ab", cursor) with
+                  | Nothing -> "no-match"
+                  | Just next_cursor ->
+                      if source.at_end(next_cursor) then "done" else "open"
+
+                fn render_summary(cursor: source.SourceCursor) -> String =
+                  string.concat(
+                    render_char(source.peek_char(cursor)),
+                    string.concat(
+                      "|",
+                      string.concat(
+                        render_pos(cursor),
+                        string.concat(
+                          "|",
+                          match source.match_char('a', cursor) with
+                          | Nothing -> "missing-advance"
+                          | Just advanced ->
+                              string.concat(
+                                render_char(source.peek_char(advanced)),
+                                string.concat(
+                                  "|",
+                                  string.concat(
+                                    render_pos(advanced),
+                                    string.concat(
+                                      "|",
+                                      string.concat(
+                                        render_match_char(cursor),
+                                        string.concat("|", render_match_string(cursor))
+                                      )
+                                    )
+                                  )
+                                )
+                              )
+                        )
+                      )
+                    )
+                  )
+
+                fn main() -> Unit !{IO} =
+                  print(render_summary(source.cursor_from_string("ab")))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "a|0:1:1|b|1:1:2|b|more|done")
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
