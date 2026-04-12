@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 from tests.cli_repl_suite import CliReplTests
-from sprout.analysis_service_config import default_analysis_service_cmd
+from sprout.analysis_service_python import default_analysis_service_cmd
 
 
 _NATIVE_REPL_CACHE_DIR: str | None = None

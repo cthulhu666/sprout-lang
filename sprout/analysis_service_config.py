@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import shlex
-import sys
-
 from .analysis_contract import (
     OP_CHECK_SOURCE,
     OP_COMPLETE_IN_STATE,
@@ -47,14 +44,8 @@ __all__ = [
     "analysis_service_request_failed_error",
     "analysis_service_retry_allowed",
     "analysis_service_start_error",
-    "default_analysis_service_cmd",
     "render_analysis_service_retry_allowed_c",
 ]
-
-
-def default_analysis_service_cmd(python_executable: str | None = None) -> str:
-    executable = sys.executable if python_executable is None else python_executable
-    return f"{shlex.quote(executable)} -m sprout.analysis_adapter"
 
 
 def analysis_service_env_var_name() -> str:

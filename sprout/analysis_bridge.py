@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .analysis_service_python import default_analysis_service_cmd
 from .analysis_service_config import (
     ANALYSIS_SERVICE_EMPTY_RESPONSE,
     ANALYSIS_SERVICE_ENV_VAR,
@@ -13,7 +14,6 @@ from .analysis_service_config import (
     analysis_service_request_failed_error,
     analysis_service_retry_allowed,
     analysis_service_start_error,
-    default_analysis_service_cmd,
 )
 
 __all__ = [

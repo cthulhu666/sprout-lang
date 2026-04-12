@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
-from sprout.analysis_service_config import default_analysis_service_cmd
+from sprout.analysis_service_python import default_analysis_service_cmd
 
 
 class CliReplTests(unittest.TestCase):

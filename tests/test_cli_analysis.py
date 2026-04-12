@@ -41,6 +41,7 @@ from sprout.analysis_service_config import (
     analysis_service_start_error,
     render_analysis_service_retry_allowed_c,
 )
+from sprout.analysis_service_python import default_analysis_service_cmd
 from sprout.analysis_snapshot_backend import (
     symbol_locations_in_source as snapshot_symbol_locations_in_source,
     python_snapshot_declared_names_in_source,
@@ -100,6 +101,9 @@ class CliAnalysisTests(unittest.TestCase):
     def test_analysis_service_config_centralizes_service_env_and_start_error(self) -> None:
         self.assertEqual(analysis_service_env_var_name(), "SPROUT_ANALYSIS_SERVICE_CMD")
         self.assertIn(analysis_service_env_var_name(), analysis_service_start_error())
+
+    def test_analysis_service_python_default_command_targets_adapter_module(self) -> None:
+        self.assertIn("-m sprout.analysis_adapter", default_analysis_service_cmd())
 
     def test_analysis_service_config_retry_policy_tracks_replay_safe_operations(self) -> None:
         rendered_policy = render_analysis_service_retry_allowed_c()
