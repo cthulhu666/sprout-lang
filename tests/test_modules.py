@@ -971,6 +971,179 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "a|0:1:1|b|1:1:2|b|more|done")
 
+    def test_import_stdlib_compiler_token_types(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler.source as source
+                import stdlib.compiler.token as token
+                import stdlib.string as string
+
+                fn render_kind(value: token.TokenKind) -> String =
+                  match value with
+                  | token.TokenIdentKind -> "ident"
+                  | token.TokenKeywordKind -> "keyword"
+                  | token.TokenIntKind -> "int"
+                  | token.TokenCharKind -> "char"
+                  | token.TokenStringKind -> "string"
+                  | token.TokenSymbolKind -> "symbol"
+                  | token.TokenEofKind -> "eof"
+
+                fn render_pos(pos: source.SourcePos) -> String =
+                  string.concat(
+                    int_to_string(source.position_index(pos)),
+                    string.concat(
+                      ":",
+                      string.concat(
+                        int_to_string(source.position_line(pos)),
+                        string.concat(":", int_to_string(source.position_column(pos)))
+                      )
+                    )
+                  )
+
+                fn render_token(value: token.Token) -> String =
+                  string.concat(
+                    render_kind(token.token_kind(value)),
+                    string.concat(
+                      "|",
+                      string.concat(
+                        token.token_text(value),
+                        string.concat("|", render_pos(token.token_position(value)))
+                      )
+                    )
+                  )
+
+                fn render_error(value: token.TokenizeError) -> String =
+                  string.concat(
+                    token.error_message(value),
+                    string.concat("|", render_pos(token.error_position(value)))
+                  )
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    string.concat(
+                      render_token(token.Token(token.TokenKeywordKind, "fn", source.SourcePos(3, 2, 4))),
+                      string.concat(
+                        "|",
+                        string.concat(
+                          render_token(token.eof_token(source.SourcePos(5, 4, 6))),
+                          string.concat(
+                            "|",
+                            string.concat(
+                              if token.is_eof_token(token.eof_token(source.SourcePos(5, 4, 6))) then "eof" else "not-eof",
+                              string.concat(
+                                "|",
+                                render_error(token.TokenizeError("bad char", source.SourcePos(8, 3, 2)))
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "keyword|fn|3:2:4|eof||5:4:6|eof|bad char|8:3:2")
+
+    def test_import_stdlib_compiler_lexer_tokenize_bootstrap_subset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Vec, vec_append, vec_empty, vec_get, vec_length)
+                import stdlib.compiler.lexer as lexer
+                import stdlib.compiler.source as source
+                import stdlib.compiler.token as token
+                import stdlib.string as string
+
+                fn render_kind(value: token.TokenKind) -> String =
+                  match value with
+                  | token.TokenIdentKind -> "ident"
+                  | token.TokenKeywordKind -> "keyword"
+                  | token.TokenIntKind -> "int"
+                  | token.TokenCharKind -> "char"
+                  | token.TokenStringKind -> "string"
+                  | token.TokenSymbolKind -> "symbol"
+                  | token.TokenEofKind -> "eof"
+
+                fn render_pos(pos: source.SourcePos) -> String =
+                  string.concat(
+                    int_to_string(source.position_line(pos)),
+                    string.concat(":", int_to_string(source.position_column(pos)))
+                  )
+
+                fn render_token(value: token.Token) -> String =
+                  string.concat(
+                    render_kind(token.token_kind(value)),
+                    string.concat(
+                      ":",
+                      string.concat(
+                        token.token_text(value),
+                        string.concat("@", render_pos(token.token_position(value)))
+                      )
+                    )
+                  )
+
+                fn append_rendered(acc: String, current: String) -> String =
+                  if acc == "" then current else string.concat(acc, string.concat(",", current))
+
+                fn render_tokens(tokens: Vec token.Token, index: Int, total: Int, acc: String) -> String =
+                  if index >= total then acc
+                  else
+                    match vec_get(index, tokens) with
+                    | Nothing -> acc
+                    | Just value -> render_tokens(tokens, index + 1, total, append_rendered(acc, render_token(value)))
+
+                fn render_result(value: Result token.TokenizeError (Vec token.Token)) -> String =
+                  match value with
+                  | Ok tokens -> render_tokens(tokens, 0, vec_length(tokens), "")
+                  | Err err ->
+                      string.concat(
+                        token.error_message(err),
+                        string.concat("@", render_pos(token.error_position(err)))
+                      )
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    string.concat(
+                      render_result(lexer.tokenize("fn add(x) -> x # note")),
+                      string.concat(
+                        "|",
+                        string.concat(
+                          render_result(lexer.tokenize("let value = 42")),
+                          string.concat("|", render_result(lexer.tokenize("@")))
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "keyword:fn@1:1,ident:add@1:4,symbol:(@1:7,ident:x@1:8,symbol:)@1:9,symbol:->@1:11,ident:x@1:14,eof:@1:22|"
+                "keyword:let@1:1,ident:value@1:5,symbol:=@1:11,int:42@1:13,eof:@1:15|"
+                "Unexpected character @@1:1",
+            )
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

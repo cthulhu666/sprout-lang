@@ -81,6 +81,11 @@ Normative status:
   such as `check`, `type_of`, `eval_lines`, `declared_names`,
   `exported_names`, `symbol_inventory`, `diagnostics`, and `instances`.
   This module is not part of normative v0 yet.
+- The current implementation also includes experimental compiler-building
+  support modules under `stdlib.compiler.*`, beginning with source-cursor,
+  token data helpers, and a bootstrap lexer for self-hosting work. These
+  modules are compiler/tooling infrastructure rather than stable
+  general-purpose stdlib surface.
 - The current implementation uses explicit function effects in the v0 core:
   pure functions omit an annotation, effectful functions use `!{IO}`, and
   higher-order helpers may use restricted singleton effect variables such as

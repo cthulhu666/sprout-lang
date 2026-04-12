@@ -1,0 +1,113 @@
+module stdlib.compiler.lexer
+import stdlib.collections (Vec, vec_append, vec_empty)
+import stdlib.string as string
+import stdlib.compiler.source as source
+import stdlib.compiler.token as token
+
+fn cursor_position(cursor: source.SourceCursor) -> source.SourcePos =
+  source.source_position(cursor)
+
+fn cursor_index(cursor: source.SourceCursor) -> Int =
+  source.position_index(cursor_position(cursor))
+
+fn slice_between(raw: String, start: source.SourceCursor, end: source.SourceCursor) -> String =
+  string.slice(raw, cursor_index(start), cursor_index(end) - cursor_index(start))
+
+fn is_ident_continue(ch: Char) -> Bool =
+  string.is_ident_continue(ch) || ch == '.'
+
+fn advance_while(raw: String, cursor: source.SourceCursor, pred: Char -> Bool) -> source.SourceCursor =
+  match source.peek_char(cursor) with
+  | Just ch ->
+      if pred(ch) then advance_while(raw, source.advance_char(cursor), pred)
+      else cursor
+  | Nothing -> cursor
+
+fn scan_ident_end(raw: String, cursor: source.SourceCursor) -> source.SourceCursor =
+  advance_while(raw, source.advance_char(cursor), is_ident_continue)
+
+fn scan_int_end(raw: String, cursor: source.SourceCursor) -> source.SourceCursor =
+  advance_while(raw, source.advance_char(cursor), string.is_ascii_digit)
+
+fn skip_comment(raw: String, cursor: source.SourceCursor) -> source.SourceCursor =
+  match source.peek_char(cursor) with
+  | Just ch ->
+      if ch == '\n' then cursor
+      else skip_comment(raw, source.advance_char(cursor))
+  | Nothing -> cursor
+
+fn is_keyword(raw: String) -> Bool =
+  raw == "export" ||
+  raw == "fn" ||
+  raw == "let" ||
+  raw == "type" ||
+  raw == "class" ||
+  raw == "instance" ||
+  raw == "where" ||
+  raw == "match" ||
+  raw == "with" ||
+  raw == "do" ||
+  raw == "if" ||
+  raw == "then" ||
+  raw == "else" ||
+  raw == "true" ||
+  raw == "false"
+
+fn single_symbol(ch: Char) -> Bool =
+  string.contains("()=,:+-*/<>\\!{}[]|", string.string_from_char(ch))
+
+fn emit_token(kind: token.TokenKind, raw: String, start: source.SourceCursor, end: source.SourceCursor) -> token.Token =
+  token.Token(kind, slice_between(raw, start, end), cursor_position(start))
+
+fn ident_token(raw: String, start: source.SourceCursor, end: source.SourceCursor) -> token.Token =
+  ident_token_from_text(slice_between(raw, start, end), start)
+
+fn ident_token_from_text(text: String, start: source.SourceCursor) -> token.Token =
+  token.Token(
+    if is_keyword(text) then token.TokenKeywordKind else token.TokenIdentKind,
+    text,
+    cursor_position(start)
+  )
+
+fn unexpected_char_error(ch: Char, cursor: source.SourceCursor) -> token.TokenizeError =
+  token.TokenizeError(
+    string.concat("Unexpected character ", string.string_from_char(ch)),
+    cursor_position(cursor)
+  )
+
+fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+  match source.peek_char(cursor) with
+  | Nothing -> Ok(vec_append(token.eof_token(cursor_position(cursor)), acc))
+  | Just ch ->
+      if string.is_ascii_whitespace(ch) then
+        tokenize_from(raw, source.advance_char(cursor), acc)
+      else if ch == '#' then
+        tokenize_from(raw, skip_comment(raw, source.advance_char(cursor)), acc)
+      else
+        match source.match_string("->", cursor) with
+        | Just next ->
+            tokenize_from(raw, next, vec_append(emit_token(token.TokenSymbolKind, raw, cursor, next), acc))
+        | Nothing ->
+            if string.is_ident_start(ch) then
+              tokenize_from(
+                raw,
+                scan_ident_end(raw, cursor),
+                vec_append(ident_token(raw, cursor, scan_ident_end(raw, cursor)), acc)
+              )
+            else if string.is_ascii_digit(ch) then
+              tokenize_from(
+                raw,
+                scan_int_end(raw, cursor),
+                vec_append(emit_token(token.TokenIntKind, raw, cursor, scan_int_end(raw, cursor)), acc)
+              )
+            else if single_symbol(ch) then
+              tokenize_from(
+                raw,
+                source.advance_char(cursor),
+                vec_append(emit_token(token.TokenSymbolKind, raw, cursor, source.advance_char(cursor)), acc)
+              )
+            else
+              Err(unexpected_char_error(ch, cursor))
+
+export fn tokenize(raw: String) -> Result token.TokenizeError (Vec token.Token) =
+  tokenize_from(raw, source.cursor_from_string(raw), vec_empty())

@@ -1,0 +1,45 @@
+module stdlib.compiler.token
+import stdlib.compiler.source as source
+
+export type TokenKind (..) =
+  | TokenIdentKind
+  | TokenKeywordKind
+  | TokenIntKind
+  | TokenCharKind
+  | TokenStringKind
+  | TokenSymbolKind
+  | TokenEofKind
+
+export type Token (..) =
+  | Token TokenKind String source.SourcePos
+
+export type TokenizeError (..) =
+  | TokenizeError String source.SourcePos
+
+export fn token_kind(token: Token) -> TokenKind =
+  match token with
+  | Token kind _ _ -> kind
+
+export fn token_text(token: Token) -> String =
+  match token with
+  | Token _ text _ -> text
+
+export fn token_position(token: Token) -> source.SourcePos =
+  match token with
+  | Token _ _ position -> position
+
+export fn error_message(value: TokenizeError) -> String =
+  match value with
+  | TokenizeError message _ -> message
+
+export fn error_position(value: TokenizeError) -> source.SourcePos =
+  match value with
+  | TokenizeError _ position -> position
+
+export fn eof_token(position: source.SourcePos) -> Token =
+  Token(TokenEofKind, "", position)
+
+export fn is_eof_token(token: Token) -> Bool =
+  match token_kind(token) with
+  | TokenEofKind -> true
+  | _ -> false
