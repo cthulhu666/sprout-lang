@@ -119,7 +119,7 @@ Current experimental runtime progress:
 5. The current native-focused milestone is making the active frontend services
    callable from compiled clients without depending on Python REPL internals.
 6. The canonical native-REPL subprocess boundary is now
-   `python -m sprout.analysis_adapter` as the
+   `python -m sprout.analysis_service_entrypoint` as the
    first explicit bridge for snapshot-oriented `check_source`,
    `declared_names_in_source`, `exported_names_in_source`,
    `symbol_inventory_in_source`, `diagnostics_in_source`,
@@ -194,7 +194,7 @@ Current experimental runtime progress:
    injected backend now, so the request/response protocol is no longer tied to
    one concrete Python implementation object. The neutral adapter/session
    runner now accepts injected snapshot, execution, and completion bundles as
-   well, while `python -m sprout.analysis_adapter` still defaults to the
+   well, while `python -m sprout.analysis_service_entrypoint` still defaults to the
    current Python-backed implementation. The default Python backend is now also
    starting to split into smaller implementation bundles below that seam, with
    the read-only snapshot symbol/query operations living separately from

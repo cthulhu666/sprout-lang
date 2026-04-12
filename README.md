@@ -272,7 +272,7 @@ These are implementation hooks for the Sprout-hosted REPL frontend. They are
 still mostly interpreter-backed. The current near-term priority is making that
 bridge native-capable rather than making it self-hosted. The canonical
 analysis-service subprocess boundary is now
-`python -m sprout.analysis_adapter` for snapshot `check_source` and
+`python -m sprout.analysis_service_entrypoint` for snapshot `check_source` and
 `declared_names_in_source` / `exported_names_in_source` /
 `symbol_inventory_in_source` / `diagnostics_in_source` /
 `type_of_in_source` / `instances_in_source` / `eval_expr_in_source` queries,
@@ -297,9 +297,9 @@ errors in native binaries. End-to-end native execution of the current Sprout
 REPL frontend is now verified by compiling and running
 `examples/repl_hosted.sprout` with that bridge in place, and the user-facing
 `repl --native` launcher now exposes that path experimentally while still using
-the Python `analysis-service` bridge underneath. The canonical stdio adapter is
-[sprout/analysis_adapter.py](./sprout/analysis_adapter.py), while
-[sprout/analysis_stdio.py](./sprout/analysis_stdio.py) is now only a
+the Python `analysis-service` bridge underneath. The canonical service entrypoint is
+[sprout/analysis_service_entrypoint.py](./sprout/analysis_service_entrypoint.py), while
+[sprout/analysis_adapter.py](./sprout/analysis_adapter.py) is now only a
 compatibility wrapper over the reusable dispatcher in
 [sprout/analysis_dispatch.py](./sprout/analysis_dispatch.py) and protocol loop
 in [sprout/analysis_protocol.py](./sprout/analysis_protocol.py), which is the
@@ -316,7 +316,7 @@ reuses both a cached
 compiled REPL binary between launches and one long-lived analysis-service
 subprocess per native program run, with one automatic restart for replay-safe
 snapshot queries if that child dies mid-session. The hidden
-`sprout.analysis_stdio`, `sprout.analysis_service`, and
+`sprout.analysis_adapter`, `sprout.analysis_service`, and
 `sprout.cli analysis-service` remain only as compatibility wrappers.
 The error-text and replay-safe retry helpers now live in
 `sprout.analysis_service_config`, the Python default service-command helper

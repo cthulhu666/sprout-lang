@@ -102,8 +102,10 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertEqual(analysis_service_env_var_name(), "SPROUT_ANALYSIS_SERVICE_CMD")
         self.assertIn(analysis_service_env_var_name(), analysis_service_start_error())
 
-    def test_analysis_service_python_default_command_targets_adapter_module(self) -> None:
-        self.assertIn("-m sprout.analysis_adapter", default_analysis_service_cmd())
+    def test_analysis_service_python_default_command_targets_neutral_entrypoint(self) -> None:
+        cmd = default_analysis_service_cmd()
+        self.assertIn("-m sprout.analysis_service_entrypoint", cmd)
+        self.assertNotIn("-m sprout.analysis_adapter", cmd)
 
     def test_analysis_service_config_retry_policy_tracks_replay_safe_operations(self) -> None:
         rendered_policy = render_analysis_service_retry_allowed_c()
@@ -114,7 +116,7 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertNotIn(OP_EVAL_EXPR_IN_SOURCE, rendered_policy)
 
     def test_analysis_bridge_runtime_renders_without_policy_placeholders(self) -> None:
-        runtime = render_analysis_bridge_runtime_c("python -m sprout.analysis_adapter")
+        runtime = render_analysis_bridge_runtime_c(default_analysis_service_cmd())
         self.assertIn("sprout_run_analysis_service", runtime)
         self.assertIn(analysis_service_env_var_name(), runtime)
         self.assertNotIn("__SPROUT_ANALYSIS_SERVICE_", runtime)
@@ -174,6 +176,18 @@ class CliAnalysisTests(unittest.TestCase):
     def test_analysis_service_module_wrapper_check_source_returns_structured_success(self) -> None:
         run = subprocess.run(
             [sys.executable, "-m", "sprout.analysis_service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=json.dumps(request_check_source("module app.repl\n\nlet local = 41")),
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(json.loads(run.stdout), response_ok(None))
+
+    def test_analysis_service_entrypoint_module_check_source_returns_structured_success(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "-m", "sprout.analysis_service_entrypoint"],
             check=False,
             capture_output=True,
             text=True,

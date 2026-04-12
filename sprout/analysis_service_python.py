@@ -8,4 +8,4 @@ __all__ = ["default_analysis_service_cmd"]
 
 def default_analysis_service_cmd(python_executable: str | None = None) -> str:
     executable = sys.executable if python_executable is None else python_executable
-    return f"{shlex.quote(executable)} -m sprout.analysis_adapter"
+    return f"{shlex.quote(executable)} -m sprout.analysis_service_entrypoint"
