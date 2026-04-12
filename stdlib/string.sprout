@@ -59,8 +59,29 @@ fn is_space(ch: Char) -> Bool =
 fn is_tab(ch: Char) -> Bool =
   ch == '\t'
 
-fn is_ascii_whitespace(ch: Char) -> Bool =
+export fn is_ascii_whitespace(ch: Char) -> Bool =
   is_space(ch) || is_tab(ch) || is_newline(ch) || is_carriage_return(ch)
+
+fn is_ascii_digit_char(ch: Char) -> Bool =
+  digit_value(ch) >= 0
+
+fn is_ascii_alpha_char(ch: Char) -> Bool =
+  find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", string_from_char(ch)) >= 0
+
+export fn is_ascii_digit(ch: Char) -> Bool =
+  is_ascii_digit_char(ch)
+
+export fn is_ascii_alpha(ch: Char) -> Bool =
+  is_ascii_alpha_char(ch)
+
+export fn is_ascii_alnum(ch: Char) -> Bool =
+  is_ascii_alpha_char(ch) || is_ascii_digit_char(ch)
+
+export fn is_ident_start(ch: Char) -> Bool =
+  is_ascii_alpha_char(ch) || ch == '_'
+
+export fn is_ident_continue(ch: Char) -> Bool =
+  is_ident_start(ch) || is_ascii_digit_char(ch)
 
 export fn trim_left(raw: String) -> String =
   if length(raw) == 0 then raw

@@ -1945,6 +1945,108 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "sprout|b|ok")
 
+    def test_import_stdlib_string_ascii_predicates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.string as string
+
+                fn flag(value: Bool) -> String =
+                  if value then "1" else "0"
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    string.concat(
+                      flag(string.is_ascii_whitespace(' ')),
+                      string.concat(
+                        flag(string.is_ascii_whitespace('\\t')),
+                        string.concat(
+                          flag(string.is_ascii_whitespace('\\n')),
+                          string.concat(
+                            flag(string.is_ascii_whitespace('\\r')),
+                            string.concat(
+                              flag(string.is_ascii_whitespace('x')),
+                              string.concat(
+                                "|",
+                                string.concat(
+                                  flag(string.is_ascii_digit('0')),
+                                  string.concat(
+                                    flag(string.is_ascii_digit('9')),
+                                    string.concat(
+                                      flag(string.is_ascii_digit('a')),
+                                      string.concat(
+                                        "|",
+                                        string.concat(
+                                          flag(string.is_ascii_alpha('a')),
+                                          string.concat(
+                                            flag(string.is_ascii_alpha('Z')),
+                                            string.concat(
+                                              flag(string.is_ascii_alpha('1')),
+                                              string.concat(
+                                                "|",
+                                                string.concat(
+                                                  flag(string.is_ascii_alnum('A')),
+                                                  string.concat(
+                                                    flag(string.is_ascii_alnum('7')),
+                                                    string.concat(
+                                                      flag(string.is_ascii_alnum('_')),
+                                                      string.concat(
+                                                        "|",
+                                                        string.concat(
+                                                          flag(string.is_ident_start('a')),
+                                                          string.concat(
+                                                            flag(string.is_ident_start('_')),
+                                                            string.concat(
+                                                              flag(string.is_ident_start('1')),
+                                                              string.concat(
+                                                                "|",
+                                                                string.concat(
+                                                                  flag(string.is_ident_continue('a')),
+                                                                  string.concat(
+                                                                    flag(string.is_ident_continue('_')),
+                                                                    string.concat(
+                                                                      flag(string.is_ident_continue('1')),
+                                                                      flag(string.is_ident_continue('-'))
+                                                                    )
+                                                                  )
+                                                                )
+                                                              )
+                                                            )
+                                                          )
+                                                        )
+                                                      )
+                                                    )
+                                                  )
+                                                )
+                                              )
+                                            )
+                                          )
+                                        )
+                                      )
+                                    )
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "11110|110|110|110|110|1110")
+
     def test_import_stdlib_string_split_and_strip_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

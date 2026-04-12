@@ -766,6 +766,12 @@ String module (in `stdlib/string.sprout`):
 - `char_at(raw: String, index: Int) -> Maybe Char`
 - `char_at_or(raw: String, index: Int, fallback: Char) -> Char`
 - `string_from_char(ch: Char) -> String`
+- `is_ascii_whitespace(ch: Char) -> Bool`
+- `is_ascii_digit(ch: Char) -> Bool`
+- `is_ascii_alpha(ch: Char) -> Bool`
+- `is_ascii_alnum(ch: Char) -> Bool`
+- `is_ident_start(ch: Char) -> Bool`
+- `is_ident_continue(ch: Char) -> Bool`
 - `trim_left(raw: String) -> String`
 - `trim_right(raw: String) -> String`
 - `trim(raw: String) -> String`
