@@ -154,10 +154,7 @@ fn try_ops(cursor: source.SourceCursor, ops: List String) -> Maybe source.Source
 
 # Tries all multi-char operators in Python-matching priority order.
 fn try_multi_char_symbol(cursor: source.SourceCursor) -> Maybe source.SourceCursor =
-  try_ops(cursor,
-    Cons("->", Cons("<-", Cons("==", Cons("!=", Cons("<=", Cons(">=",
-    Cons("&&", Cons("||", Cons(">>", Cons("<<", Cons("|>", Cons("++",
-    Cons("..", Nil))))))))))))))
+  try_ops(cursor, ["->", "<-", "==", "!=", "<=", ">=", "&&", "||", ">>", "<<", "|>", "++", ".."])
 
 fn emit_ident(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
   tokenize_from(raw, end_cursor, vec_append(ident_token(raw, cursor, end_cursor), acc))
