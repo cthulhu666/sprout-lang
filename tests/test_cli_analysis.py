@@ -28,7 +28,6 @@ from sprout.analysis_backend_python import (
     python_backend_type_of_in_source,
 )
 from sprout.analysis_backend_stub import StubAnalysisBackend
-from sprout.analysis_bridge import analysis_service_env_var_name, analysis_service_retry_allowed, analysis_service_start_error
 from sprout.analysis_bridge_runtime import render_analysis_bridge_helpers_c, render_analysis_bridge_request_helpers_c, render_analysis_bridge_response_helpers_c, render_analysis_bridge_runtime_c
 from sprout.analysis_cli import cmd_analysis_cli
 from sprout.analysis_completion_backend import python_completion_complete_in_state
@@ -36,6 +35,12 @@ from sprout.analysis_contract import KEY_MATCHES, KEY_PREFIX, OP_CHECK_SOURCE, O
 from sprout.analysis_dispatch import dispatch_request
 from sprout.analysis_protocol import run_json_service_session
 from sprout.analysis_service import cmd_analysis_service
+from sprout.analysis_service_config import (
+    analysis_service_env_var_name,
+    analysis_service_retry_allowed,
+    analysis_service_start_error,
+    render_analysis_service_retry_allowed_c,
+)
 from sprout.analysis_snapshot_backend import (
     symbol_locations_in_source as snapshot_symbol_locations_in_source,
     python_snapshot_declared_names_in_source,
@@ -92,14 +97,17 @@ class CliAnalysisTests(unittest.TestCase):
             ("fr", ["from_string"]),
         )
 
-    def test_analysis_bridge_centralizes_service_env_and_start_error(self) -> None:
+    def test_analysis_service_config_centralizes_service_env_and_start_error(self) -> None:
         self.assertEqual(analysis_service_env_var_name(), "SPROUT_ANALYSIS_SERVICE_CMD")
         self.assertIn(analysis_service_env_var_name(), analysis_service_start_error())
 
-    def test_analysis_bridge_retry_policy_tracks_replay_safe_operations(self) -> None:
+    def test_analysis_service_config_retry_policy_tracks_replay_safe_operations(self) -> None:
+        rendered_policy = render_analysis_service_retry_allowed_c()
         self.assertTrue(analysis_service_retry_allowed(OP_CHECK_SOURCE))
         self.assertTrue(analysis_service_retry_allowed(OP_COMPLETE_IN_STATE))
         self.assertFalse(analysis_service_retry_allowed(OP_EVAL_EXPR_IN_SOURCE))
+        self.assertIn(f'strcmp(op, "{OP_CHECK_SOURCE}") == 0', rendered_policy)
+        self.assertNotIn(OP_EVAL_EXPR_IN_SOURCE, rendered_policy)
 
     def test_analysis_bridge_runtime_renders_without_policy_placeholders(self) -> None:
         runtime = render_analysis_bridge_runtime_c("python -m sprout.analysis_adapter")

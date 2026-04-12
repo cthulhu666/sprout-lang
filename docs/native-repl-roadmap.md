@@ -170,11 +170,12 @@ Current experimental runtime progress:
    contract in `sprout.analysis_backend`, and the current Python-backed
    implementation lives below that seam in `sprout.analysis_backend_python`.
    Bridge command resolution, startup/error
-   messages, and replay-safe retry policy are now centralized in shared
-   analysis-bridge contract helpers instead of being spread across the native
+   messages, and replay-safe retry policy are now centralized in
+   `sprout.analysis_service_config` instead of being spread across the native
    launcher, tests, and embedded runtime template. The persistent-child stdio
    lifecycle block is now also rendered from a dedicated bridge-runtime helper
-   instead of living inline inside `sprout.cli`, and the repeated
+   that consumes that narrower config seam instead of living inline inside
+   `sprout.cli`, and the repeated
    `module_source` request builders above that seam now use shared bridge
    helper functions rather than open-coded `snprintf` blocks in each wrapper.
    The simplest shared response shapes now do the same for native-side

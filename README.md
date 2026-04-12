@@ -306,7 +306,9 @@ in [sprout/analysis_protocol.py](./sprout/analysis_protocol.py), which is the
 intended replacement seam for a future non-Python native service. That bridge
 is now wired by default from explicit snapshot, execution, and completion
 backend bundles rather than only through the monolithic compatibility backend
-object, and it is being treated as reusable language-service infrastructure for later
+object. Service command resolution, startup/error strings, and replay-safe
+retry policy now live in [sprout/analysis_service_config.py](./sprout/analysis_service_config.py),
+and the bridge/runtime layer consumes that narrower service-config seam. It is being treated as reusable language-service infrastructure for later
 self-hosted compiler and language-server work, not as REPL-only plumbing. The launcher
 reuses both a cached
 compiled REPL binary between launches and one long-lived analysis-service
@@ -314,6 +316,9 @@ subprocess per native program run, with one automatic restart for replay-safe
 snapshot queries if that child dies mid-session. The hidden
 `sprout.analysis_stdio`, `sprout.analysis_service`, and
 `sprout.cli analysis-service` remain only as compatibility wrappers.
+The service-command, error-text, and replay-safe retry helpers now live in
+`sprout.analysis_service_config`, while `sprout.analysis_bridge` remains a
+compatibility facade.
 Native programs can override the service command via
 `SPROUT_ANALYSIS_SERVICE_CMD`; if that command is invalid, native REPL and
 native snapshot-query failures now point back to that env var explicitly.

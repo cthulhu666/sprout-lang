@@ -2,23 +2,13 @@ from __future__ import annotations
 
 import json
 
-from .analysis_bridge import (
+from .analysis_service_config import (
     analysis_service_empty_response_error,
     analysis_service_env_var_name,
     analysis_service_invalid_response_error,
     analysis_service_request_failed_error,
+    render_analysis_service_retry_allowed_c,
     analysis_service_start_error,
-)
-from .analysis_contract import (
-    OP_CHECK_SOURCE,
-    OP_COMPLETE_IN_STATE,
-    OP_DECLARED_NAMES_IN_SOURCE,
-    OP_DIAGNOSTICS_IN_SOURCE,
-    OP_EXPORTED_NAMES_IN_SOURCE,
-    OP_INSTANCES_IN_SOURCE,
-    OP_SYMBOL_INVENTORY_IN_SOURCE,
-    OP_SYMBOL_LOCATIONS_IN_SOURCE,
-    OP_TYPE_OF_IN_SOURCE,
 )
 
 __all__ = [
@@ -86,17 +76,6 @@ static int sprout_analysis_service_is_stale(void) {
     return 1;
   }
   return 0;
-}
-static int sprout_analysis_service_retry_allowed(const char* op) {
-  return strcmp(op, "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_TYPE_OF_IN_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_DECLARED_NAMES_IN_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_EXPORTED_NAMES_IN_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_SYMBOL_INVENTORY_IN_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_DIAGNOSTICS_IN_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_SYMBOL_LOCATIONS_IN_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_INSTANCES_IN_SOURCE__") == 0
-    || strcmp(op, "__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__") == 0;
 }
 static int sprout_ensure_analysis_service(char** error_out) {
   if (!sprout_analysis_service_sigpipe_ignored) {
@@ -197,7 +176,9 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
   *error_out = dup_cstr("__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
   return 0;
 }
-""".replace(
+"""
+        + render_analysis_service_retry_allowed_c()
+    ).replace(
             '"__SPROUT_DEFAULT_ANALYSIS_SERVICE_CMD__"',
             json.dumps(embedded_analysis_service_cmd),
         ).replace(
@@ -212,35 +193,7 @@ static int sprout_run_analysis_service(const char* request_json, int retry_once,
         ).replace(
             '"__SPROUT_ANALYSIS_SERVICE_START_FAILED__"',
             json.dumps(analysis_service_start_error()),
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_CHECK_SOURCE__",
-            OP_CHECK_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_TYPE_OF_IN_SOURCE__",
-            OP_TYPE_OF_IN_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_DECLARED_NAMES_IN_SOURCE__",
-            OP_DECLARED_NAMES_IN_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_EXPORTED_NAMES_IN_SOURCE__",
-            OP_EXPORTED_NAMES_IN_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_SYMBOL_INVENTORY_IN_SOURCE__",
-            OP_SYMBOL_INVENTORY_IN_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_DIAGNOSTICS_IN_SOURCE__",
-            OP_DIAGNOSTICS_IN_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_SYMBOL_LOCATIONS_IN_SOURCE__",
-            OP_SYMBOL_LOCATIONS_IN_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_INSTANCES_IN_SOURCE__",
-            OP_INSTANCES_IN_SOURCE,
-        ).replace(
-            "__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__",
-            OP_COMPLETE_IN_STATE,
         )
-    )
 
 
 def render_analysis_bridge_request_helpers_c() -> str:

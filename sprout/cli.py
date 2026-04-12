@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-from .analysis_bridge import default_analysis_service_cmd
+from .analysis_service_config import default_analysis_service_cmd
 from .analysis_cli import cmd_analysis_cli
 from .analysis_bridge_runtime import (
     render_analysis_bridge_helpers_c,

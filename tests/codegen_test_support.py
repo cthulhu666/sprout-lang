@@ -14,7 +14,7 @@ import sys
 
 from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
 from sprout import cli as sprout_cli
-from sprout.analysis_bridge import default_analysis_service_cmd
+from sprout.analysis_service_config import default_analysis_service_cmd
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from tests.integration_support import compiled_native_binary, running_https_server, running_tcp_fixture
 
