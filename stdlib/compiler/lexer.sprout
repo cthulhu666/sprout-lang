@@ -143,48 +143,21 @@ fn scan_string_content(cursor: source.SourceCursor, start_pos: source.SourcePos,
           string.concat(acc, string.string_from_char(ch))
         )
 
-# Tries each multi-char operator in Python-matching priority order.
-# Returns Just(cursor past the operator) on the first match, Nothing if none match.
-fn try_multi_char_symbol(cursor: source.SourceCursor) -> Maybe source.SourceCursor =
-  match source.match_string("->", cursor) with
-  | Just c -> Just(c)
-  | Nothing ->
-      match source.match_string("<-", cursor) with
+# Tries each operator string in order, returning the cursor past the first match.
+fn try_ops(cursor: source.SourceCursor, ops: List String) -> Maybe source.SourceCursor =
+  match ops with
+  | Nil -> Nothing
+  | Cons op rest ->
+      match source.match_string(op, cursor) with
       | Just c -> Just(c)
-      | Nothing ->
-          match source.match_string("==", cursor) with
-          | Just c -> Just(c)
-          | Nothing ->
-              match source.match_string("!=", cursor) with
-              | Just c -> Just(c)
-              | Nothing ->
-                  match source.match_string("<=", cursor) with
-                  | Just c -> Just(c)
-                  | Nothing ->
-                      match source.match_string(">=", cursor) with
-                      | Just c -> Just(c)
-                      | Nothing ->
-                          match source.match_string("&&", cursor) with
-                          | Just c -> Just(c)
-                          | Nothing ->
-                              match source.match_string("||", cursor) with
-                              | Just c -> Just(c)
-                              | Nothing ->
-                                  match source.match_string(">>", cursor) with
-                                  | Just c -> Just(c)
-                                  | Nothing ->
-                                      match source.match_string("<<", cursor) with
-                                      | Just c -> Just(c)
-                                      | Nothing ->
-                                          match source.match_string("|>", cursor) with
-                                          | Just c -> Just(c)
-                                          | Nothing ->
-                                              match source.match_string("++", cursor) with
-                                              | Just c -> Just(c)
-                                              | Nothing ->
-                                                  match source.match_string("..", cursor) with
-                                                  | Just c -> Just(c)
-                                                  | Nothing -> Nothing
+      | Nothing -> try_ops(cursor, rest)
+
+# Tries all multi-char operators in Python-matching priority order.
+fn try_multi_char_symbol(cursor: source.SourceCursor) -> Maybe source.SourceCursor =
+  try_ops(cursor,
+    Cons("->", Cons("<-", Cons("==", Cons("!=", Cons("<=", Cons(">=",
+    Cons("&&", Cons("||", Cons(">>", Cons("<<", Cons("|>", Cons("++",
+    Cons("..", Nil))))))))))))))
 
 fn emit_ident(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
   tokenize_from(raw, end_cursor, vec_append(ident_token(raw, cursor, end_cursor), acc))

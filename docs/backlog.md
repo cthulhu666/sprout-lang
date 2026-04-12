@@ -83,3 +83,7 @@ This file tracks open design, implementation, and tooling follow-up work.
    Completed language follow-up: the experimental `do` surface now supports `IO`, pure local `let` steps, and narrow mixed `IO` plus inner `Maybe`/`Result` sequencing. That narrow mixed shape is now the preferred near-term story for multi-step `IO` and mixed failure-aware flows, with `after(...)` left as a compatibility convenience only.
    Planned next follow-up: prune remaining helper-heavy call sites that still obscure the `do` story, and only revisit broader sequencing abstractions if real code shows the narrow model is insufficient.
    First milestone constraints: keep current `Maybe`/`Result` behavior stable, keep mixed `IO` sequencing intentionally narrow, and prefer explicit `match` over speculative generalization when code needs the whole container value.
+10. Add an `Alternative` typeclass for first-success chaining.
+   Motivation: self-hosted parser combinators (Phase 6 self-hosting) need a principled "try this, else try that" primitive. The current workaround is a list-based `try_ops` helper in `stdlib/compiler/lexer.sprout`.
+   Initial scope: `class Alternative f { fn alt(left: f a, right: f a) -> f a }` with a `Maybe` instance. A `<|>` infix operator would make call sites readable but requires tokenizer and parser changes (new 3-char token not currently in the language).
+   First milestone constraints: `Maybe` instance only to start; decide on `<|>` operator vs named `alt` before widening; no `Applicative`/`Functor` hierarchy requirement in the initial slice.
