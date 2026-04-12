@@ -75,6 +75,139 @@ fn unexpected_char_error(ch: Char, cursor: source.SourceCursor) -> token.Tokeniz
     cursor_position(cursor)
   )
 
+# Maps an escape character (the char after \) to its decoded value.
+# Returns Nothing only for \0 (explicitly rejected per Python tokenizer parity).
+# All other unrecognised escapes fall back to the raw character.
+fn decode_escape(ch: Char) -> Maybe Char =
+  if ch == 'n' then Just('\n')
+  else if ch == 'r' then Just('\r')
+  else if ch == 't' then Just('\t')
+  else if ch == '"' then Just('"')
+  else if ch == '\'' then Just('\'')
+  else if ch == '\\' then Just('\\')
+  else if ch == '0' then Nothing
+  else Just(ch)
+
+# Reads one logical character from a char literal (plain char or \X escape).
+# cursor is positioned at the first character to read.
+# start_pos is the opening-quote position, used for error messages.
+fn scan_one_char(cursor: source.SourceCursor, start_pos: source.SourcePos) -> Result token.TokenizeError (Char, source.SourceCursor) =
+  match source.peek_char(cursor) with
+  | Nothing -> Err(token.TokenizeError("Unterminated char literal", start_pos))
+  | Just ch ->
+      if ch == '\\' then
+        match source.peek_char(source.advance_char(cursor)) with
+        | Nothing -> Err(token.TokenizeError("Unterminated char literal", start_pos))
+        | Just esc ->
+            match decode_escape(esc) with
+            | Nothing -> Err(token.TokenizeError("\\0 escape is not supported in char literals", start_pos))
+            | Just decoded -> Ok((decoded, source.advance_char(source.advance_char(cursor))))
+      else Ok((ch, source.advance_char(cursor)))
+
+# Scans the body of a char literal (cursor is past the opening ').
+# Returns the single decoded Char and the cursor past the closing '.
+fn scan_char_content(cursor: source.SourceCursor, start_pos: source.SourcePos) -> Result token.TokenizeError (Char, source.SourceCursor) =
+  match scan_one_char(cursor, start_pos) with
+  | Err e -> Err(e)
+  | Ok (ch, after_char) ->
+      match source.peek_char(after_char) with
+      | Nothing -> Err(token.TokenizeError("Unterminated char literal", start_pos))
+      | Just close ->
+          if close == '\'' then Ok((ch, source.advance_char(after_char)))
+          else Err(token.TokenizeError("Char literal must contain exactly one character", start_pos))
+
+# Scans a string body (cursor is past the opening ").
+# acc accumulates the decoded characters.
+# Returns the decoded string content and the cursor past the closing ".
+fn scan_string_content(cursor: source.SourceCursor, start_pos: source.SourcePos, acc: String) -> Result token.TokenizeError (String, source.SourceCursor) =
+  match source.peek_char(cursor) with
+  | Nothing -> Err(token.TokenizeError("Unterminated string literal", start_pos))
+  | Just ch ->
+      if ch == '"' then Ok((acc, source.advance_char(cursor)))
+      else if ch == '\\' then
+        match source.peek_char(source.advance_char(cursor)) with
+        | Nothing -> Err(token.TokenizeError("Unterminated string literal", start_pos))
+        | Just esc ->
+            match decode_escape(esc) with
+            | Nothing -> Err(token.TokenizeError("\\0 escape is not supported in string literals", start_pos))
+            | Just decoded ->
+                scan_string_content(
+                  source.advance_char(source.advance_char(cursor)),
+                  start_pos,
+                  string.concat(acc, string.string_from_char(decoded))
+                )
+      else
+        scan_string_content(
+          source.advance_char(cursor),
+          start_pos,
+          string.concat(acc, string.string_from_char(ch))
+        )
+
+# Tries each multi-char operator in Python-matching priority order.
+# Returns Just(cursor past the operator) on the first match, Nothing if none match.
+fn try_multi_char_symbol(cursor: source.SourceCursor) -> Maybe source.SourceCursor =
+  match source.match_string("->", cursor) with
+  | Just c -> Just(c)
+  | Nothing ->
+      match source.match_string("<-", cursor) with
+      | Just c -> Just(c)
+      | Nothing ->
+          match source.match_string("==", cursor) with
+          | Just c -> Just(c)
+          | Nothing ->
+              match source.match_string("!=", cursor) with
+              | Just c -> Just(c)
+              | Nothing ->
+                  match source.match_string("<=", cursor) with
+                  | Just c -> Just(c)
+                  | Nothing ->
+                      match source.match_string(">=", cursor) with
+                      | Just c -> Just(c)
+                      | Nothing ->
+                          match source.match_string("&&", cursor) with
+                          | Just c -> Just(c)
+                          | Nothing ->
+                              match source.match_string("||", cursor) with
+                              | Just c -> Just(c)
+                              | Nothing ->
+                                  match source.match_string(">>", cursor) with
+                                  | Just c -> Just(c)
+                                  | Nothing ->
+                                      match source.match_string("<<", cursor) with
+                                      | Just c -> Just(c)
+                                      | Nothing ->
+                                          match source.match_string("|>", cursor) with
+                                          | Just c -> Just(c)
+                                          | Nothing ->
+                                              match source.match_string("++", cursor) with
+                                              | Just c -> Just(c)
+                                              | Nothing ->
+                                                  match source.match_string("..", cursor) with
+                                                  | Just c -> Just(c)
+                                                  | Nothing -> Nothing
+
+fn emit_ident(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+  tokenize_from(raw, end_cursor, vec_append(ident_token(raw, cursor, end_cursor), acc))
+where
+  end_cursor = scan_ident_end(raw, cursor)
+
+fn emit_int(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+  tokenize_from(raw, end_cursor, vec_append(emit_token(token.TokenIntKind, raw, cursor, end_cursor), acc))
+where
+  end_cursor = scan_int_end(raw, cursor)
+
+fn emit_string(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+  match scan_string_content(source.advance_char(cursor), cursor_position(cursor), "") with
+  | Err e -> Err(e)
+  | Ok (text, next) ->
+      tokenize_from(raw, next, vec_append(token.Token(token.TokenStringKind, text, cursor_position(cursor)), acc))
+
+fn emit_char(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+  match scan_char_content(source.advance_char(cursor), cursor_position(cursor)) with
+  | Err e -> Err(e)
+  | Ok (ch, next) ->
+      tokenize_from(raw, next, vec_append(token.Token(token.TokenCharKind, string.string_from_char(ch), cursor_position(cursor)), acc))
+
 fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
   match source.peek_char(cursor) with
   | Nothing -> Ok(vec_append(token.eof_token(cursor_position(cursor)), acc))
@@ -84,28 +217,16 @@ fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: Vec token.Token)
       else if ch == '#' then
         tokenize_from(raw, skip_comment(raw, source.advance_char(cursor)), acc)
       else
-        match source.match_string("->", cursor) with
+        match try_multi_char_symbol(cursor) with
         | Just next ->
             tokenize_from(raw, next, vec_append(emit_token(token.TokenSymbolKind, raw, cursor, next), acc))
         | Nothing ->
-            if string.is_ident_start(ch) then
-              tokenize_from(
-                raw,
-                scan_ident_end(raw, cursor),
-                vec_append(ident_token(raw, cursor, scan_ident_end(raw, cursor)), acc)
-              )
-            else if string.is_ascii_digit(ch) then
-              tokenize_from(
-                raw,
-                scan_int_end(raw, cursor),
-                vec_append(emit_token(token.TokenIntKind, raw, cursor, scan_int_end(raw, cursor)), acc)
-              )
+            if string.is_ident_start(ch) then emit_ident(raw, cursor, acc)
+            else if string.is_ascii_digit(ch) then emit_int(raw, cursor, acc)
+            else if ch == '"' then emit_string(raw, cursor, acc)
+            else if ch == '\'' then emit_char(raw, cursor, acc)
             else if single_symbol(ch) then
-              tokenize_from(
-                raw,
-                source.advance_char(cursor),
-                vec_append(emit_token(token.TokenSymbolKind, raw, cursor, source.advance_char(cursor)), acc)
-              )
+              tokenize_from(raw, source.advance_char(cursor), vec_append(emit_token(token.TokenSymbolKind, raw, cursor, source.advance_char(cursor)), acc))
             else
               Err(unexpected_char_error(ch, cursor))
 

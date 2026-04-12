@@ -1144,6 +1144,130 @@ class ModuleLoaderTests(unittest.TestCase):
                 "Unexpected character @@1:1",
             )
 
+    def test_import_stdlib_compiler_lexer_tokenize_string_char_and_multi_char_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.collections (Vec, vec_get, vec_length)
+                import stdlib.compiler.lexer as lexer
+                import stdlib.compiler.source as source
+                import stdlib.compiler.token as token
+                import stdlib.string as string
+
+                fn render_kind(value: token.TokenKind) -> String =
+                  match value with
+                  | token.TokenIdentKind -> "ident"
+                  | token.TokenKeywordKind -> "keyword"
+                  | token.TokenIntKind -> "int"
+                  | token.TokenCharKind -> "char"
+                  | token.TokenStringKind -> "string"
+                  | token.TokenSymbolKind -> "symbol"
+                  | token.TokenEofKind -> "eof"
+
+                fn render_pos(pos: source.SourcePos) -> String =
+                  string.concat(
+                    int_to_string(source.position_line(pos)),
+                    string.concat(":", int_to_string(source.position_column(pos)))
+                  )
+
+                fn render_token(value: token.Token) -> String =
+                  string.concat(
+                    render_kind(token.token_kind(value)),
+                    string.concat(
+                      ":",
+                      string.concat(
+                        token.token_text(value),
+                        string.concat("@", render_pos(token.token_position(value)))
+                      )
+                    )
+                  )
+
+                fn append_rendered(acc: String, current: String) -> String =
+                  if acc == "" then current else string.concat(acc, string.concat(",", current))
+
+                fn render_tokens(tokens: Vec token.Token, index: Int, total: Int, acc: String) -> String =
+                  if index >= total then acc
+                  else
+                    match vec_get(index, tokens) with
+                    | Nothing -> acc
+                    | Just value -> render_tokens(tokens, index + 1, total, append_rendered(acc, render_token(value)))
+
+                fn render_result(value: Result token.TokenizeError (Vec token.Token)) -> String =
+                  match value with
+                  | Ok tokens -> render_tokens(tokens, 0, vec_length(tokens), "")
+                  | Err err ->
+                      string.concat(
+                        token.error_message(err),
+                        string.concat("@", render_pos(token.error_position(err)))
+                      )
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    string.concat(
+                      render_result(lexer.tokenize("\\"abc\\"")),
+                      string.concat(
+                        "|",
+                        string.concat(
+                          render_result(lexer.tokenize("'a'")),
+                          string.concat(
+                            "|",
+                            string.concat(
+                              render_result(lexer.tokenize("x <- y")),
+                              string.concat(
+                                "|",
+                                string.concat(
+                                  render_result(lexer.tokenize("a |> b")),
+                                  string.concat(
+                                    "|",
+                                    string.concat(
+                                      render_result(lexer.tokenize("a == b && c")),
+                                      string.concat(
+                                        "|",
+                                        string.concat(
+                                          render_result(lexer.tokenize("\\"hello")),
+                                          string.concat(
+                                            "|",
+                                            string.concat(
+                                              render_result(lexer.tokenize("'ab'")),
+                                              string.concat("|", render_result(lexer.tokenize("'")))
+                                            )
+                                          )
+                                        )
+                                      )
+                                    )
+                                  )
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                    )
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "string:abc@1:1,eof:@1:6"
+                "|char:a@1:1,eof:@1:4"
+                "|ident:x@1:1,symbol:<-@1:3,ident:y@1:6,eof:@1:7"
+                "|ident:a@1:1,symbol:|>@1:3,ident:b@1:6,eof:@1:7"
+                "|ident:a@1:1,symbol:==@1:3,ident:b@1:6,symbol:&&@1:8,ident:c@1:11,eof:@1:12"
+                "|Unterminated string literal@1:1"
+                "|Char literal must contain exactly one character@1:1"
+                "|Unterminated char literal@1:1",
+            )
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
