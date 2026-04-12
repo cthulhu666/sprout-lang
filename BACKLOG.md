@@ -82,6 +82,7 @@ Definition of done:
 - [x] `P1` Add better diagnostics for module/import/export errors with source context.
 - [x] `P2` Add formatter/linter baseline.
 - [ ] `P2` Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
+- [ ] `P1` Execute the staged self-hosting plan in [docs/self-hosting-eliminate-python-backlog.md](./docs/self-hosting-eliminate-python-backlog.md), with the end goal that compiler/tooling ownership moves from Python into Sprout and the Python path becomes compatibility-only before removal.
 
 ### 7.5) Type Classes (Collections First)
 

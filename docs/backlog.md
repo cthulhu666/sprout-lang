@@ -18,6 +18,7 @@ This file tracks open design, implementation, and tooling follow-up work.
    Planned stop-point work:
    - choose the first post-pause backend-replacement target
    Deferred scope: the self-hosted session-engine work in `repl-self-hosting-v1-draft.md` and the broader compiler direction in `compiler-self-hosting-roadmap.md` are no longer the active milestone; treat them as post-native-REPL directions.
+   Long-term execution backlog: [self-hosting-eliminate-python-backlog.md](./self-hosting-eliminate-python-backlog.md) tracks the concrete staged work required to remove Python from compiler/tooling ownership entirely.
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
    Native-performance follow-up:
    - make tight Sprout string-processing loops competitive with host builtins so moderate stdin/text workloads do not require dedicated host helpers just to be practical
