@@ -8,7 +8,11 @@ class TypeclassLoweringError(ValueError):
 
 
 def _clone_with_loc(node, src):
-    return ast.attach_loc(node, getattr(src, "line", 0), getattr(src, "column", 0))
+    out = ast.attach_loc(node, getattr(src, "line", 0), getattr(src, "column", 0))
+    inferred = getattr(src, "inferred_type", None)
+    if inferred is not None:
+        setattr(out, "inferred_type", inferred)
+    return out
 
 
 def _copy_type_expr(node: ast.TypeExpr) -> ast.TypeExpr:

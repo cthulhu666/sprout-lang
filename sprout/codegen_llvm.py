@@ -97,6 +97,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "vector_get": FnSig(name="vector_get", params=[I64, I64], ret=I64),
     "vector_set": FnSig(name="vector_set", params=[I64, I64, I64], ret=I64),
     "vector_append": FnSig(name="vector_append", params=[I64, I64], ret=I64),
+    "vector_from_list": FnSig(name="vector_from_list", params=[I64], ret=I64),
     "vector_sort_by_int": FnSig(name="vector_sort_by_int", params=[I64], ret=I64),
     "map_empty": FnSig(name="map_empty", params=[], ret=I64),
     "map_get": FnSig(name="map_get", params=[I64, I8_PTR], ret=I64),
@@ -159,6 +160,10 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_make1": FnSig(name="sprout_make1", params=[I64, I64], ret=I64),
     "sprout_make2": FnSig(name="sprout_make2", params=[I64, I64, I64], ret=I64),
     "sprout_make3": FnSig(name="sprout_make3", params=[I64, I64, I64, I64], ret=I64),
+    "sprout_make4": FnSig(name="sprout_make4", params=[I64, I64, I64, I64, I64], ret=I64),
+    "sprout_make5": FnSig(name="sprout_make5", params=[I64, I64, I64, I64, I64, I64], ret=I64),
+    "sprout_make6": FnSig(name="sprout_make6", params=[I64, I64, I64, I64, I64, I64, I64], ret=I64),
+    "sprout_make7": FnSig(name="sprout_make7", params=[I64, I64, I64, I64, I64, I64, I64, I64], ret=I64),
     "sprout_alloc_closure_env": FnSig(name="sprout_alloc_closure_env", params=[I64], ret=I8_PTR),
     "sprout_alloc_tuple_blob": FnSig(name="sprout_alloc_tuple_blob", params=[I64], ret=I8_PTR),
     "sprout_gc_register_i64_root": FnSig(name="sprout_gc_register_i64_root", params=[I8_PTR], ret=I64),
@@ -498,6 +503,34 @@ def _call_sig_from_type_expr(node: ast.TypeExpr | None, adt_names: set[str]) -> 
     return call_sig
 
 
+def _lambda_body_type(expr: ast.LambdaExpr) -> ast.TypeExpr | None:
+    """Return the inferred return type of a lambda, using the body's annotation if present,
+    falling back to peeling the lambda's own TypeArrow inferred_type."""
+    body_type = getattr(expr.body, "inferred_type", None)
+    if body_type is not None:
+        return body_type
+    lam_type = getattr(expr, "inferred_type", None)
+    if lam_type is None:
+        return None
+    # Peel one TypeArrow per parameter to reach the return type.
+    t = lam_type
+    for _ in expr.params:
+        if isinstance(t, ast.TypeArrow):
+            t = t.right
+        elif isinstance(t, ast.TypeEffect):
+            inner = t.base
+            if isinstance(inner, ast.TypeArrow):
+                t = inner.right
+            else:
+                return None
+        else:
+            return None
+    # Strip a trailing TypeEffect wrapper if present (effects annotation on the return).
+    if isinstance(t, ast.TypeEffect):
+        t = t.base
+    return t
+
+
 def _call_sig_from_lambda_expr(
     expr: ast.LambdaExpr,
     sigs: dict[str, FnSig],
@@ -509,7 +542,7 @@ def _call_sig_from_lambda_expr(
         if param.type_expr is None:
             raise CodegenError("Lambda parameter type was not finalized before codegen")
         params.append(_type_from_ast(param.type_expr, adt_names))
-    body_type = getattr(expr.body, "inferred_type", None)
+    body_type = _lambda_body_type(expr)
     if body_type is None:
         raise CodegenError("Lambda body is missing inferred type")
     ret = _type_from_ast(body_type, adt_names)
@@ -532,7 +565,7 @@ def _expr_callable_sig(
             if param.type_expr is None:
                 raise CodegenError("Lambda parameter type was not finalized before codegen")
             params.append(_type_from_ast(param.type_expr, adt_names))
-        body_type = getattr(expr.body, "inferred_type", None)
+        body_type = _lambda_body_type(expr)
         if body_type is None:
             raise CodegenError("Lambda body is missing inferred type")
         return CallSig(
@@ -951,9 +984,9 @@ def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> s
             if ctor.name in ctor_sigs:
                 raise CodegenError(f"Duplicate constructor name in backend: {ctor.name}")
             arg_types = [_type_from_ast(arg, adt_names) for arg in ctor.args]
-            if len(arg_types) > 3:
+            if len(arg_types) > 7:
                 raise CodegenError(
-                    f"Constructor {ctor.name} has {len(arg_types)} args; backend currently supports up to 3"
+                    f"Constructor {ctor.name} has {len(arg_types)} args; backend currently supports up to 7"
                 )
             ctor_sigs[ctor.name] = CtorSig(name=ctor.name, tag=next_tag, arg_types=arg_types)
             next_tag += 1
@@ -1995,17 +2028,9 @@ def _emit_ctor_value(ctor: CtorSig, payloads: list[Value], emitter: Emitter) -> 
     rooted_packed = 0
     for packed in packed_payloads:
         rooted_packed += _emit_push_temp_root(Value(I64, packed), emitter)
-    if len(packed_payloads) == 1:
-        emitter.emit(f"  {tmp} = call i64 @sprout_make1(i64 {ctor.tag}, i64 {packed_payloads[0]})")
-    elif len(packed_payloads) == 2:
-        emitter.emit(
-            f"  {tmp} = call i64 @sprout_make2(i64 {ctor.tag}, i64 {packed_payloads[0]}, i64 {packed_payloads[1]})"
-        )
-    else:
-        emitter.emit(
-            "  "
-            + f"{tmp} = call i64 @sprout_make3(i64 {ctor.tag}, i64 {packed_payloads[0]}, i64 {packed_payloads[1]}, i64 {packed_payloads[2]})"
-        )
+    n = len(packed_payloads)
+    args_ir = ", ".join(f"i64 {p}" for p in packed_payloads)
+    emitter.emit(f"  {tmp} = call i64 @sprout_make{n}(i64 {ctor.tag}, {args_ir})")
     _emit_pop_temp_roots(rooted_packed, emitter)
     return Value(I64, tmp)
 
@@ -2040,6 +2065,21 @@ def _emit_tuple_field(value: Value, idx: int, emitter: Emitter) -> Value:
     out = emitter.tmp()
     emitter.emit(f"  {out} = extractvalue {value.typ.text} {value.ir}, {idx}")
     return Value(item_typ, out, tuple_items=_tuple_item_types_from_lltype(item_typ))
+
+
+def _emit_packed_tuple_field(packed_ir: str, idx: int, emitter: Emitter) -> Value:
+    """Load field `idx` from an I64-packed tuple blob pointer.
+
+    When a generic-typed constructor field (type variable → I64) holds a tuple,
+    the I64 is a ptrtoint of an array of i64 slots.  Use GEP + load to extract.
+    """
+    ptr = emitter.tmp()
+    emitter.emit(f"  {ptr} = inttoptr i64 {packed_ir} to ptr")
+    gep = emitter.tmp()
+    emitter.emit(f"  {gep} = getelementptr i64, ptr {ptr}, i64 {idx}")
+    out = emitter.tmp()
+    emitter.emit(f"  {out} = load i64, ptr {gep}")
+    return Value(I64, out)
 
 
 def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, CtorSig], emitter: Emitter) -> Value:
@@ -2080,6 +2120,17 @@ def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, 
         return Value(I1, tmp)
     if isinstance(pattern, ast.TuplePattern):
         tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
+        if tuple_items is None and value.typ == I64:
+            # Generic-typed constructor field: I64 is a packed blob pointer.
+            # All sub-fields are treated as I64 (type variables carry no type info).
+            acc = Value(I1, "1")
+            for idx, item_pattern in enumerate(pattern.items):
+                field = _emit_packed_tuple_field(value.ir, idx, emitter)
+                test = _emit_pattern_test(item_pattern, field, ctor_sigs, emitter)
+                and_tmp = emitter.tmp()
+                emitter.emit(f"  {and_tmp} = and i1 {acc.ir}, {test.ir}")
+                acc = Value(I1, and_tmp)
+            return acc
         if tuple_items is None:
             raise CodegenError("Tuple pattern expects tuple scrutinee")
         if len(pattern.items) != len(tuple_items):
@@ -2167,6 +2218,13 @@ def _emit_pattern_bind(
         return 0
     if isinstance(pattern, ast.TuplePattern):
         tuple_items = value.tuple_items or _tuple_item_types_from_lltype(value.typ)
+        if tuple_items is None and value.typ == I64:
+            # Generic-typed constructor field: I64 is a packed blob pointer.
+            rooted = 0
+            for idx, sub in enumerate(pattern.items):
+                field = _emit_packed_tuple_field(value.ir, idx, emitter)
+                rooted += _emit_pattern_bind(sub, field, locals_, ctor_sigs, emitter)
+            return rooted
         if tuple_items is None:
             raise CodegenError("Tuple pattern bind expects tuple scrutinee")
         rooted = 0
@@ -2363,17 +2421,9 @@ def _emit_call(
         for packed in packed_args:
             rooted_packed += _emit_push_temp_root(Value(I64, packed), emitter)
         tmp = emitter.tmp()
-        if len(packed_args) == 1:
-            emitter.emit(f"  {tmp} = call i64 @sprout_make1(i64 {ctor.tag}, i64 {packed_args[0]})")
-        elif len(packed_args) == 2:
-            emitter.emit(
-                f"  {tmp} = call i64 @sprout_make2(i64 {ctor.tag}, i64 {packed_args[0]}, i64 {packed_args[1]})"
-            )
-        else:
-            emitter.emit(
-                "  "
-                + f"{tmp} = call i64 @sprout_make3(i64 {ctor.tag}, i64 {packed_args[0]}, i64 {packed_args[1]}, i64 {packed_args[2]})"
-            )
+        n = len(packed_args)
+        args_ir = ", ".join(f"i64 {p}" for p in packed_args)
+        emitter.emit(f"  {tmp} = call i64 @sprout_make{n}(i64 {ctor.tag}, {args_ir})")
         _emit_pop_temp_roots(rooted_packed, emitter)
         return Value(I64, tmp)
 
