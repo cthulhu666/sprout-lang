@@ -156,31 +156,31 @@ fn try_ops(cursor: source.SourceCursor, ops: List String) -> Maybe source.Source
 fn try_multi_char_symbol(cursor: source.SourceCursor) -> Maybe source.SourceCursor =
   try_ops(cursor, ["->", "<-", "==", "!=", "<=", ">=", "&&", "||", ">>", "<<", "|>", "++", ".."])
 
-fn emit_ident(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
-  tokenize_from(raw, end_cursor, vec_append(ident_token(raw, cursor, end_cursor), acc))
+fn emit_ident(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
+  tokenize_from(raw, end_cursor, Cons(ident_token(raw, cursor, end_cursor), acc))
 where
   end_cursor = scan_ident_end(raw, cursor)
 
-fn emit_int(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
-  tokenize_from(raw, end_cursor, vec_append(emit_token(token.TokenIntKind, raw, cursor, end_cursor), acc))
+fn emit_int(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
+  tokenize_from(raw, end_cursor, Cons(emit_token(token.TokenIntKind, raw, cursor, end_cursor), acc))
 where
   end_cursor = scan_int_end(raw, cursor)
 
-fn emit_string(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+fn emit_string(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
   match scan_string_content(source.advance_char(cursor), cursor_position(cursor), "") with
   | Err e -> Err(e)
   | Ok (text, next) ->
-      tokenize_from(raw, next, vec_append(token.Token(token.TokenStringKind, text, cursor_position(cursor)), acc))
+      tokenize_from(raw, next, Cons(token.Token(token.TokenStringKind, text, cursor_position(cursor)), acc))
 
-fn emit_char(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+fn emit_char(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
   match scan_char_content(source.advance_char(cursor), cursor_position(cursor)) with
   | Err e -> Err(e)
   | Ok (ch, next) ->
-      tokenize_from(raw, next, vec_append(token.Token(token.TokenCharKind, string.string_from_char(ch), cursor_position(cursor)), acc))
+      tokenize_from(raw, next, Cons(token.Token(token.TokenCharKind, string.string_from_char(ch), cursor_position(cursor)), acc))
 
-fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: Vec token.Token) -> Result token.TokenizeError (Vec token.Token) =
+fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
   match source.peek_char(cursor) with
-  | Nothing -> Ok(vec_append(token.eof_token(cursor_position(cursor)), acc))
+  | Nothing -> Ok(Cons(token.eof_token(cursor_position(cursor)), acc))
   | Just ch ->
       if string.is_ascii_whitespace(ch) then
         tokenize_from(raw, source.advance_char(cursor), acc)
@@ -189,16 +189,18 @@ fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: Vec token.Token)
       else
         match try_multi_char_symbol(cursor) with
         | Just next ->
-            tokenize_from(raw, next, vec_append(emit_token(token.TokenSymbolKind, raw, cursor, next), acc))
+            tokenize_from(raw, next, Cons(emit_token(token.TokenSymbolKind, raw, cursor, next), acc))
         | Nothing ->
             if string.is_ident_start(ch) then emit_ident(raw, cursor, acc)
             else if string.is_ascii_digit(ch) then emit_int(raw, cursor, acc)
             else if ch == '"' then emit_string(raw, cursor, acc)
             else if ch == '\'' then emit_char(raw, cursor, acc)
             else if single_symbol(ch) then
-              tokenize_from(raw, source.advance_char(cursor), vec_append(emit_token(token.TokenSymbolKind, raw, cursor, source.advance_char(cursor)), acc))
+              tokenize_from(raw, source.advance_char(cursor), Cons(emit_token(token.TokenSymbolKind, raw, cursor, source.advance_char(cursor)), acc))
             else
               Err(unexpected_char_error(ch, cursor))
 
 export fn tokenize(raw: String) -> Result token.TokenizeError (Vec token.Token) =
-  tokenize_from(raw, source.cursor_from_string(raw), vec_empty())
+  match tokenize_from(raw, source.cursor_from_string(raw), Nil) with
+  | Err e -> Err(e)
+  | Ok lst -> Ok(vec_from_list(list_reverse(lst)))

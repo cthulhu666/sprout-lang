@@ -286,7 +286,7 @@ fn list_reverse_go(xs: List a, acc: List a) -> List a =
   | Nil -> acc
   | Cons item rest -> list_reverse_go(rest, Cons(item, acc))
 
-fn list_reverse(xs: List a) -> List a =
+export fn list_reverse(xs: List a) -> List a =
   list_reverse_go(xs, Nil)
 
 fn list_take(xs: List a, count: Int) -> List a =
@@ -328,13 +328,8 @@ fn decorated_sort(xs: List (k, Int, a)) -> List (k, Int, a) where Ord k =
         decorated_sort(list_drop(xs, list_length(xs) / 2))
       )
 
-fn vec_from_list_go(xs: List a, acc: Vec a) -> Vec a =
-  match xs with
-  | Nil -> acc
-  | Cons item rest -> vec_from_list_go(rest, vec_append(item, acc))
-
-fn vec_from_list(xs: List a) -> Vec a =
-  vec_from_list_go(xs, vec_empty())
+export fn vec_from_list(xs: List a) -> Vec a =
+  Vec(vector_from_list(xs))
 
 fn decorated_values_to_vec(xs: List (k, Int, a), acc: Vec a) -> Vec a =
   match xs with

@@ -1675,6 +1675,10 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "vector_get": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(INT, maybe_vector_var))),
         "vector_set": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(INT, TFunc(vector_var, vector_t)))),
         "vector_append": Scheme(vars=(vector_var.name,), type=TFunc(vector_t, TFunc(vector_var, vector_t))),
+        "vector_from_list": Scheme(
+            vars=(vector_var.name,),
+            type=TFunc(TApp(TConst("List"), vector_var), vector_t),
+        ),
         "vector_sort_by_int": Scheme(
             vars=(sort_key_var.name,),
             type=TFunc(sort_decorated_t, sort_result_t),

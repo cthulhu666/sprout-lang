@@ -1096,6 +1096,15 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("vector_append expects Vector")
         return VectorValue(items=vec.items + (value,))
 
+    def builtin_vector_from_list(args: list[object]) -> object:
+        # Walk the Sprout List (ADTValue with Cons/Nil), collect elements in order
+        items: list[object] = []
+        cur = args[0]
+        while isinstance(cur, ADTValue) and cur.constructor == "Cons":
+            items.append(cur.args[0])
+            cur = cur.args[1]
+        return VectorValue(items=tuple(items))
+
     def builtin_vector_sort_by_int(args: list[object]) -> object:
         return _vector_sort_by_int_from_decorated_list(args[0])
 
@@ -1971,6 +1980,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("vector_get", BuiltinFunction(name="vector_get", arity=2, fn=builtin_vector_get))
     env.set("vector_set", BuiltinFunction(name="vector_set", arity=3, fn=builtin_vector_set))
     env.set("vector_append", BuiltinFunction(name="vector_append", arity=2, fn=builtin_vector_append))
+    env.set("vector_from_list", BuiltinFunction(name="vector_from_list", arity=1, fn=builtin_vector_from_list))
     env.set("vector_sort_by_int", BuiltinFunction(name="vector_sort_by_int", arity=1, fn=builtin_vector_sort_by_int))
     env.set("map_empty", BuiltinFunction(name="map_empty", arity=0, fn=builtin_map_empty))
     env.set("map_get", BuiltinFunction(name="map_get", arity=2, fn=builtin_map_get))

@@ -16,6 +16,7 @@ RAW_VECTOR_BUILTINS = {
     "vector_get",
     "vector_set",
     "vector_append",
+    "vector_from_list",
     "vector_sort_by_int",
 }
 

@@ -839,6 +839,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "vector_get",
         "vector_set",
         "vector_append",
+        "vector_from_list",
         "vector_sort_by_int",
         "map_empty",
         "map_get",
