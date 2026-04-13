@@ -1,0 +1,920 @@
+module stdlib.compiler.parser
+import stdlib.collections (Vec, vec_get, vec_length)
+import stdlib.string as string
+import stdlib.compiler.token as token
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+
+# ---------------------------------------------------------------------------
+# Parse error
+
+export type ParseError (..) =
+  | ParseError String source.SourcePos
+
+# ---------------------------------------------------------------------------
+# Token stream helpers
+#
+# Convention: (Vec token.Token, Int) -> Result ParseError (T, Int)
+
+fn tok_at(tokens: Vec token.Token, i: Int) -> token.Token =
+  match vec_get(i, tokens) with
+  | Just t -> t
+  | Nothing -> token.eof_token(source.SourcePos(0, 0, 0))
+
+fn tok_pos(t: token.Token) -> source.SourcePos =
+  token.token_position(t)
+
+fn cur_pos(tokens: Vec token.Token, i: Int) -> source.SourcePos =
+  tok_pos(tok_at(tokens, i))
+
+fn tok_is_eof(t: token.Token) -> Bool =
+  token.is_eof_token(t)
+
+fn tok_is_keyword(t: token.Token, kw: String) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenKeywordKind -> token.token_text(t) == kw
+  | _ -> false
+
+fn tok_is_symbol(t: token.Token, sym: String) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenSymbolKind -> token.token_text(t) == sym
+  | _ -> false
+
+fn tok_is_ident(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenIdentKind -> true
+  | _ -> false
+
+fn tok_is_int(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenIntKind -> true
+  | _ -> false
+
+fn tok_is_string(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenStringKind -> true
+  | _ -> false
+
+fn tok_is_char(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenCharKind -> true
+  | _ -> false
+
+fn match_keyword(tokens: Vec token.Token, i: Int, kw: String) -> Maybe (token.Token, Int) =
+  if tok_is_keyword(tok_at(tokens, i), kw) then Just((tok_at(tokens, i), i + 1))
+  else Nothing
+
+fn match_symbol(tokens: Vec token.Token, i: Int, sym: String) -> Maybe (token.Token, Int) =
+  if tok_is_symbol(tok_at(tokens, i), sym) then Just((tok_at(tokens, i), i + 1))
+  else Nothing
+
+fn match_ident(tokens: Vec token.Token, i: Int) -> Maybe (token.Token, Int) =
+  if tok_is_ident(tok_at(tokens, i)) then Just((tok_at(tokens, i), i + 1))
+  else Nothing
+
+fn pos_str(pos: source.SourcePos) -> String =
+  string.concat(int_to_string(source.position_line(pos)),
+  string.concat(":", int_to_string(source.position_column(pos))))
+
+fn make_error(msg: String, tokens: Vec token.Token, i: Int) -> ParseError =
+  ParseError(msg, cur_pos(tokens, i))
+
+fn expected_keyword(kw: String, tokens: Vec token.Token, i: Int) -> Result ParseError (token.Token, Int) =
+  match match_keyword(tokens, i, kw) with
+  | Just r -> Ok(r)
+  | Nothing ->
+      Err(ParseError(
+        string.concat("Expected keyword ", string.concat(kw, string.concat(" at ", pos_str(cur_pos(tokens, i))))),
+        cur_pos(tokens, i)
+      ))
+
+fn expected_symbol(sym: String, tokens: Vec token.Token, i: Int) -> Result ParseError (token.Token, Int) =
+  match match_symbol(tokens, i, sym) with
+  | Just r -> Ok(r)
+  | Nothing ->
+      Err(ParseError(
+        string.concat("Expected ", string.concat(sym, string.concat(" at ", pos_str(cur_pos(tokens, i))))),
+        cur_pos(tokens, i)
+      ))
+
+fn expected_ident(label: String, tokens: Vec token.Token, i: Int) -> Result ParseError (token.Token, Int) =
+  match match_ident(tokens, i) with
+  | Just r -> Ok(r)
+  | Nothing ->
+      Err(ParseError(
+        string.concat("Expected ", string.concat(label, string.concat(" at ", pos_str(cur_pos(tokens, i))))),
+        cur_pos(tokens, i)
+      ))
+
+fn is_constructor_name(name: String) -> Bool =
+  match string.char_at(name, 0) with
+  | Nothing -> false
+  | Just ch -> string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch))
+
+# ---------------------------------------------------------------------------
+# Type expression parsing
+
+export fn parse_type_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =
+  do
+    (left, i2) <- parse_type_apply(tokens, i)
+    parse_type_expr_cont(tokens, i2, left)
+
+fn parse_type_expr_cont(tokens: Vec token.Token, i: Int, left: ast.TypeExpr) -> Result ParseError (ast.TypeExpr, Int) =
+  match match_symbol(tokens, i, "->") with
+  | Just (_, i2) ->
+      do
+        (right_raw, i3) <- parse_type_expr(tokens, i2)
+        Ok((make_type_arrow(left, right_raw, tokens, i3), i3))
+  | Nothing ->
+      match parse_effect_annotation(tokens, i) with
+      | (Nothing, i2) -> Ok((left, i2))
+      | (Just effs, i2) -> Ok((ast.TypeEffect(left, effs), i2))
+
+fn make_type_arrow(left: ast.TypeExpr, right_raw: ast.TypeExpr, tokens: Vec token.Token, i: Int) -> ast.TypeExpr =
+  match right_raw with
+  | ast.TypeEffect base effs -> ast.TypeArrow(left, base, Just(effs))
+  | _ ->
+      match parse_effect_annotation(tokens, i) with
+      | (Nothing, _) -> ast.TypeArrow(left, right_raw, Nothing)
+      | (Just effs, _) -> ast.TypeArrow(left, right_raw, Just(effs))
+
+fn parse_effect_annotation(tokens: Vec token.Token, i: Int) -> (Maybe (List String), Int) =
+  match match_symbol(tokens, i, "!") with
+  | Nothing -> (Nothing, i)
+  | Just (_, i2) ->
+      match match_symbol(tokens, i2, "{") with
+      | Nothing -> (Nothing, i)
+      | Just (_, i3) ->
+          match match_symbol(tokens, i3, "}") with
+          | Just (_, i4) -> (Just(Nil), i4)
+          | Nothing ->
+              match collect_effect_names(tokens, i3) with
+              | (names, i4) ->
+                  match match_symbol(tokens, i4, "}") with
+                  | Just (_, i5) -> (Just(names), i5)
+                  | Nothing -> (Nothing, i)
+
+fn collect_effect_names(tokens: Vec token.Token, i: Int) -> (List String, Int) =
+  match match_ident(tokens, i) with
+  | Nothing -> (Nil, i)
+  | Just (t, i2) ->
+      match match_symbol(tokens, i2, ",") with
+      | Nothing -> (Cons(token.token_text(t), Nil), i2)
+      | Just (_, i3) ->
+          match collect_effect_names(tokens, i3) with
+          | (rest, i4) -> (Cons(token.token_text(t), rest), i4)
+
+fn parse_type_apply(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =
+  do
+    (base, i2) <- parse_type_atom(tokens, i)
+    parse_type_apply_rest(tokens, i2, base)
+
+fn parse_type_apply_rest(tokens: Vec token.Token, i: Int, base: ast.TypeExpr) -> Result ParseError (ast.TypeExpr, Int) =
+  if starts_type_atom(tokens, i) then
+    do
+      (arg, i2) <- parse_type_atom(tokens, i)
+      parse_type_apply_rest(tokens, i2, ast.TypeApply(base, arg))
+  else
+    Ok((base, i))
+
+fn starts_type_atom(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_ident(tok_at(tokens, i)) || tok_is_symbol(tok_at(tokens, i), "(")
+
+fn parse_type_atom(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =
+  match match_ident(tokens, i) with
+  | Just (t, i2) -> Ok((ast.TypeName(token.token_text(t)), i2))
+  | Nothing ->
+      match match_symbol(tokens, i, "(") with
+      | Nothing ->
+          Err(ParseError(string.concat("Expected type at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+      | Just (_, i2) ->
+          do
+            (first, i3) <- parse_type_expr(tokens, i2)
+            parse_type_atom_after_first(tokens, i3, first)
+
+fn parse_type_atom_after_first(tokens: Vec token.Token, i: Int, first: ast.TypeExpr) -> Result ParseError (ast.TypeExpr, Int) =
+  match match_symbol(tokens, i, ",") with
+  | Nothing ->
+      do
+        (_, i2) <- expected_symbol(")", tokens, i)
+        Ok((first, i2))
+  | Just (_, i2) ->
+      do
+        (items, i3) <- collect_type_items(tokens, i2, Cons(first, Nil))
+        (_, i4) <- expected_symbol(")", tokens, i3)
+        Ok((ast.TupleType(list_reverse(items)), i4))
+
+fn collect_type_items(tokens: Vec token.Token, i: Int, acc: List ast.TypeExpr) -> Result ParseError (List ast.TypeExpr, Int) =
+  do
+    (t, i2) <- parse_type_expr(tokens, i)
+    match match_symbol(tokens, i2, ",") with
+    | Nothing -> Ok((Cons(t, acc), i2))
+    | Just (_, i3) -> collect_type_items(tokens, i3, Cons(t, acc))
+
+# ---------------------------------------------------------------------------
+# Pattern parsing
+
+export fn parse_pattern(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Pattern, Int) =
+  match match_symbol(tokens, i, "(") with
+  | Just (_, i2) -> parse_pattern_after_lparen(tokens, i2, cur_pos(tokens, i))
+  | Nothing -> parse_pattern_non_paren(tokens, i)
+
+fn parse_pattern_after_lparen(tokens: Vec token.Token, i: Int, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
+  match match_symbol(tokens, i, ")") with
+  | Just (_, i2) -> Ok((ast.UnitPattern(pos), i2))
+  | Nothing ->
+      do
+        (first, i2) <- parse_pattern(tokens, i)
+        parse_pattern_after_first(tokens, i2, first, pos)
+
+fn parse_pattern_after_first(tokens: Vec token.Token, i: Int, first: ast.Pattern, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
+  match match_symbol(tokens, i, ",") with
+  | Nothing ->
+      do
+        (_, i2) <- expected_symbol(")", tokens, i)
+        Ok((first, i2))
+  | Just (_, i2) ->
+      do
+        (items, i3) <- collect_pattern_items(tokens, i2, Cons(first, Nil))
+        (_, i4) <- expected_symbol(")", tokens, i3)
+        Ok((ast.TuplePattern(list_reverse(items), pos), i4))
+
+fn parse_pattern_non_paren(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Pattern, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolPattern(true, cur_pos(tokens, i)), i + 1))
+  else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolPattern(false, cur_pos(tokens, i)), i + 1))
+  else if tok_is_int(tok_at(tokens, i)) then
+    Ok((ast.IntPattern(parse_int(token.token_text(tok_at(tokens, i))), cur_pos(tokens, i)), i + 1))
+  else if tok_is_char(tok_at(tokens, i)) then
+    Ok((ast.CharPattern(string.char_at_or(token.token_text(tok_at(tokens, i)), 0, '?'), cur_pos(tokens, i)), i + 1))
+  else if tok_is_string(tok_at(tokens, i)) then
+    Ok((ast.StringPattern(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
+  else if tok_is_ident(tok_at(tokens, i)) then
+    parse_ident_pattern(tokens, i, token.token_text(tok_at(tokens, i)), cur_pos(tokens, i))
+  else
+    Err(ParseError(string.concat("Expected pattern at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+
+fn parse_ident_pattern(tokens: Vec token.Token, i: Int, name: String, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
+  if name == "_" then Ok((ast.WildcardPattern(pos), i + 1))
+  else if is_constructor_name(name) then
+    do
+      (args, i2) <- collect_pattern_atoms(tokens, i + 1, Nil)
+      Ok((ast.ConstructorPattern(name, list_reverse(args), pos), i2))
+  else
+    Ok((ast.VarPattern(name, pos), i + 1))
+
+fn collect_pattern_items(tokens: Vec token.Token, i: Int, acc: List ast.Pattern) -> Result ParseError (List ast.Pattern, Int) =
+  do
+    (p, i2) <- parse_pattern(tokens, i)
+    match match_symbol(tokens, i2, ",") with
+    | Nothing -> Ok((Cons(p, acc), i2))
+    | Just (_, i3) -> collect_pattern_items(tokens, i3, Cons(p, acc))
+
+fn starts_pattern_atom(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_int(tok_at(tokens, i)) || tok_is_string(tok_at(tokens, i)) || tok_is_char(tok_at(tokens, i)) ||
+  tok_is_ident(tok_at(tokens, i)) || tok_is_symbol(tok_at(tokens, i), "(") ||
+  tok_is_keyword(tok_at(tokens, i), "true") || tok_is_keyword(tok_at(tokens, i), "false")
+
+fn collect_pattern_atoms(tokens: Vec token.Token, i: Int, acc: List ast.Pattern) -> Result ParseError (List ast.Pattern, Int) =
+  if starts_pattern_atom(tokens, i) then
+    do
+      (p, i2) <- parse_pattern_atom(tokens, i)
+      collect_pattern_atoms(tokens, i2, Cons(p, acc))
+  else
+    Ok((acc, i))
+
+fn parse_pattern_atom(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Pattern, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolPattern(true, cur_pos(tokens, i)), i + 1))
+  else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolPattern(false, cur_pos(tokens, i)), i + 1))
+  else if tok_is_int(tok_at(tokens, i)) then
+    Ok((ast.IntPattern(parse_int(token.token_text(tok_at(tokens, i))), cur_pos(tokens, i)), i + 1))
+  else if tok_is_char(tok_at(tokens, i)) then
+    Ok((ast.CharPattern(string.char_at_or(token.token_text(tok_at(tokens, i)), 0, '?'), cur_pos(tokens, i)), i + 1))
+  else if tok_is_string(tok_at(tokens, i)) then
+    Ok((ast.StringPattern(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
+  else if tok_is_ident(tok_at(tokens, i)) then
+    parse_ident_pattern_atom(tokens, i, token.token_text(tok_at(tokens, i)), cur_pos(tokens, i))
+  else if tok_is_symbol(tok_at(tokens, i), "(") then
+    parse_pattern_after_lparen(tokens, i + 1, cur_pos(tokens, i))
+  else
+    Err(ParseError(string.concat("Expected pattern atom at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+
+fn parse_ident_pattern_atom(tokens: Vec token.Token, i: Int, name: String, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
+  if name == "_" then Ok((ast.WildcardPattern(pos), i + 1))
+  else if is_constructor_name(name) then Ok((ast.ConstructorPattern(name, Nil, pos), i + 1))
+  else Ok((ast.VarPattern(name, pos), i + 1))
+
+# ---------------------------------------------------------------------------
+# Expression parsing
+
+export fn parse_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "if") then parse_if_expr(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "match") then parse_match_expr(tokens, i)
+  else parse_pipe(tokens, i)
+
+fn parse_if_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_keyword("if", tokens, i)
+    (cond, i3) <- parse_expr(tokens, i2)
+    (_, i4) <- expected_keyword("then", tokens, i3)
+    (then_b, i5) <- parse_expr(tokens, i4)
+    (_, i6) <- expected_keyword("else", tokens, i5)
+    (else_b, i7) <- parse_expr(tokens, i6)
+    Ok((ast.IfExpr(cond, then_b, else_b, cur_pos(tokens, i)), i7))
+
+fn parse_match_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_keyword("match", tokens, i)
+    (scrutinee, i3) <- parse_expr(tokens, i2)
+    (_, i4) <- expected_keyword("with", tokens, i3)
+    (branches, i5) <- collect_match_branches(tokens, i4, Nil)
+    if list_length(branches) == 0 then
+      Err(ParseError(string.concat("Expected match branch at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+    else
+      Ok((ast.MatchExpr(scrutinee, list_reverse(branches), cur_pos(tokens, i)), i5))
+
+fn collect_match_branches(tokens: Vec token.Token, i: Int, acc: List ast.MatchBranch) -> Result ParseError (List ast.MatchBranch, Int) =
+  match match_symbol(tokens, i, "|") with
+  | Nothing -> Ok((acc, i))
+  | Just (_, i2) ->
+      do
+        (pattern, i3) <- parse_pattern(tokens, i2)
+        (_, i4) <- expected_symbol("->", tokens, i3)
+        (value, i5) <- parse_expr(tokens, i4)
+        collect_match_branches(tokens, i5, Cons(ast.MatchBranch(pattern, value), acc))
+
+fn parse_pipe(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_logical_or(tokens, i)
+    parse_pipe_rest(tokens, i2, expr)
+
+fn parse_pipe_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  match match_symbol(tokens, i, "|>") with
+  | Nothing -> Ok((left, i))
+  | Just (_, i2) ->
+      do
+        (rhs, i3) <- parse_logical_or(tokens, i2)
+        parse_pipe_rest(tokens, i3, pipe_into_call(left, rhs, cur_pos(tokens, i)))
+
+fn pipe_into_call(left: ast.Expr, rhs: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match rhs with
+  | ast.CallExpr callee args _ -> ast.CallExpr(callee, list_append(args, Cons(left, Nil)), pos)
+  | _ -> ast.CallExpr(rhs, Cons(left, Nil), pos)
+
+fn parse_logical_or(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_logical_and(tokens, i)
+    parse_logical_or_rest(tokens, i2, expr)
+
+fn parse_logical_or_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  match match_symbol(tokens, i, "||") with
+  | Nothing -> Ok((left, i))
+  | Just (_, i2) ->
+      do
+        (right, i3) <- parse_logical_and(tokens, i2)
+        parse_logical_or_rest(tokens, i3, ast.BinaryExpr("||", left, right, cur_pos(tokens, i)))
+
+fn parse_logical_and(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_equality(tokens, i)
+    parse_logical_and_rest(tokens, i2, expr)
+
+fn parse_logical_and_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  match match_symbol(tokens, i, "&&") with
+  | Nothing -> Ok((left, i))
+  | Just (_, i2) ->
+      do
+        (right, i3) <- parse_equality(tokens, i2)
+        parse_logical_and_rest(tokens, i3, ast.BinaryExpr("&&", left, right, cur_pos(tokens, i)))
+
+fn parse_equality(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_range(tokens, i)
+    parse_equality_rest(tokens, i2, expr)
+
+fn parse_equality_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "==") || tok_is_symbol(tok_at(tokens, i), "!=") then
+    do
+      (right, i2) <- parse_range(tokens, i + 1)
+      parse_equality_rest(tokens, i2, ast.BinaryExpr(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)))
+  else
+    Ok((left, i))
+
+fn parse_range(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_comparison(tokens, i)
+    match match_symbol(tokens, i2, "..") with
+    | Nothing -> Ok((expr, i2))
+    | Just (_, i3) ->
+        do
+          (end_expr, i4) <- parse_comparison(tokens, i3)
+          Ok((ast.IntRangeExpr(expr, end_expr, cur_pos(tokens, i2)), i4))
+
+fn parse_comparison(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_term(tokens, i)
+    parse_comparison_rest(tokens, i2, expr)
+
+fn parse_comparison_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "<") || tok_is_symbol(tok_at(tokens, i), ">") ||
+     tok_is_symbol(tok_at(tokens, i), "<=") || tok_is_symbol(tok_at(tokens, i), ">=") then
+    do
+      (right, i2) <- parse_term(tokens, i + 1)
+      parse_comparison_rest(tokens, i2, ast.BinaryExpr(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)))
+  else
+    Ok((left, i))
+
+fn parse_term(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_factor(tokens, i)
+    parse_term_rest(tokens, i2, expr)
+
+fn parse_term_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "+") || tok_is_symbol(tok_at(tokens, i), "-") then
+    do
+      (right, i2) <- parse_factor(tokens, i + 1)
+      parse_term_rest(tokens, i2, ast.BinaryExpr(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)))
+  else if tok_is_symbol(tok_at(tokens, i), "++") then
+    do
+      (right, i2) <- parse_factor(tokens, i + 1)
+      parse_term_rest(tokens, i2, ast.CallExpr(ast.VarExpr("list_append", cur_pos(tokens, i)), Cons(left, Cons(right, Nil)), cur_pos(tokens, i)))
+  else
+    Ok((left, i))
+
+fn parse_factor(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_composition(tokens, i)
+    parse_factor_rest(tokens, i2, expr)
+
+fn parse_factor_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "*") || tok_is_symbol(tok_at(tokens, i), "/") then
+    do
+      (right, i2) <- parse_composition(tokens, i + 1)
+      parse_factor_rest(tokens, i2, ast.BinaryExpr(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)))
+  else
+    Ok((left, i))
+
+fn parse_composition(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_unary(tokens, i)
+    parse_composition_cont(tokens, i2, expr)
+
+fn parse_composition_cont(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "<<") || tok_is_symbol(tok_at(tokens, i), ">>") then
+    do
+      (right, i2) <- parse_composition(tokens, i + 1)
+      Ok((ast.BinaryExpr(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)), i2))
+  else
+    Ok((left, i))
+
+fn parse_unary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "-") then
+    do
+      (operand, i2) <- parse_call(tokens, i + 1)
+      Ok((ast.UnaryExpr("-", operand, cur_pos(tokens, i)), i2))
+  else if tok_is_symbol(tok_at(tokens, i), "!") then
+    do
+      (operand, i2) <- parse_call(tokens, i + 1)
+      Ok((ast.UnaryExpr("!", operand, cur_pos(tokens, i)), i2))
+  else
+    parse_call(tokens, i)
+
+fn parse_call(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (expr, i2) <- parse_primary(tokens, i)
+    parse_call_rest(tokens, i2, expr)
+
+fn parse_call_rest(tokens: Vec token.Token, i: Int, callee: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  match match_symbol(tokens, i, "(") with
+  | Nothing -> Ok((callee, i))
+  | Just (_, i2) ->
+      do
+        (args, i3) <- collect_call_args(tokens, i2, Nil)
+        (_, i4) <- expected_symbol(")", tokens, i3)
+        parse_call_rest(tokens, i4, ast.CallExpr(callee, list_reverse(args), cur_pos(tokens, i)))
+
+fn collect_call_args(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), ")") then Ok((acc, i))
+  else
+    do
+      (e, i2) <- parse_expr(tokens, i)
+      match match_symbol(tokens, i2, ",") with
+      | Nothing -> Ok((Cons(e, acc), i2))
+      | Just (_, i3) -> collect_call_args(tokens, i3, Cons(e, acc))
+
+fn parse_primary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolExpr(true, cur_pos(tokens, i)), i + 1))
+  else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolExpr(false, cur_pos(tokens, i)), i + 1))
+  else if tok_is_int(tok_at(tokens, i)) then
+    Ok((ast.IntExpr(parse_int(token.token_text(tok_at(tokens, i))), cur_pos(tokens, i)), i + 1))
+  else if tok_is_char(tok_at(tokens, i)) then
+    Ok((ast.CharExpr(string.char_at_or(token.token_text(tok_at(tokens, i)), 0, '?'), cur_pos(tokens, i)), i + 1))
+  else if tok_is_string(tok_at(tokens, i)) then
+    Ok((ast.StringExpr(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
+  else if tok_is_symbol(tok_at(tokens, i), "\\") then parse_lambda(tokens, i)
+  else if tok_is_symbol(tok_at(tokens, i), "[") then parse_list_literal(tokens, i)
+  else if tok_is_symbol(tok_at(tokens, i), "(") then parse_paren_expr(tokens, i)
+  else if tok_is_ident(tok_at(tokens, i)) then
+    Ok((ast.VarExpr(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
+  else
+    Err(ParseError(
+      string.concat("Expected expression at ", string.concat(pos_str(cur_pos(tokens, i)), string.concat(", got ", token.token_text(tok_at(tokens, i))))),
+      cur_pos(tokens, i)
+    ))
+
+fn parse_lambda(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_symbol("\\", tokens, i)
+    (params, i3) <- parse_lambda_params(tokens, i2)
+    (_, i4) <- expected_symbol("->", tokens, i3)
+    (body, i5) <- parse_expr(tokens, i4)
+    Ok((ast.LambdaExpr(params, body, cur_pos(tokens, i)), i5))
+
+fn parse_lambda_params(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.Param, Int) =
+  match match_symbol(tokens, i, "(") with
+  | Just (_, i2) ->
+      do
+        (params, i3) <- collect_params(tokens, i2, Nil)
+        (_, i4) <- expected_symbol(")", tokens, i3)
+        Ok((list_reverse(params), i4))
+  | Nothing ->
+      do
+        (t, i2) <- expected_ident("lambda parameter", tokens, i)
+        Ok((Cons(ast.Param(token.token_text(t), Nothing), Nil), i2))
+
+fn parse_list_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_symbol("[", tokens, i)
+    match match_symbol(tokens, i2, "]") with
+    | Just (_, i3) -> Ok((ast.VarExpr("Nil", cur_pos(tokens, i)), i3))
+    | Nothing ->
+        do
+          (items, i3) <- collect_expr_list(tokens, i2, Nil)
+          (_, i4) <- expected_symbol("]", tokens, i3)
+          Ok((desugar_list_literal(list_reverse(items), cur_pos(tokens, i)), i4))
+
+fn desugar_list_literal(items: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match items with
+  | Nil -> ast.VarExpr("Nil", pos)
+  | Cons head tail ->
+      ast.CallExpr(ast.VarExpr("Cons", pos), Cons(head, Cons(desugar_list_literal(tail, pos), Nil)), pos)
+
+fn collect_expr_list(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
+  do
+    (e, i2) <- parse_expr(tokens, i)
+    match match_symbol(tokens, i2, ",") with
+    | Nothing -> Ok((Cons(e, acc), i2))
+    | Just (_, i3) -> collect_expr_list(tokens, i3, Cons(e, acc))
+
+fn parse_paren_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_symbol("(", tokens, i)
+    match match_symbol(tokens, i2, ")") with
+    | Just (_, i3) -> Ok((ast.UnitExpr(cur_pos(tokens, i)), i3))
+    | Nothing ->
+        do
+          (first, i3) <- parse_expr(tokens, i2)
+          parse_paren_expr_cont(tokens, i3, first, cur_pos(tokens, i))
+
+fn parse_paren_expr_cont(tokens: Vec token.Token, i: Int, first: ast.Expr, pos: source.SourcePos) -> Result ParseError (ast.Expr, Int) =
+  match match_symbol(tokens, i, ",") with
+  | Nothing ->
+      do
+        (_, i2) <- expected_symbol(")", tokens, i)
+        Ok((first, i2))
+  | Just (_, i2) ->
+      do
+        (items, i3) <- collect_expr_list(tokens, i2, Cons(first, Nil))
+        (_, i4) <- expected_symbol(")", tokens, i3)
+        Ok((ast.TupleExpr(list_reverse(items), pos), i4))
+
+# ---------------------------------------------------------------------------
+# Parameter parsing
+
+fn parse_param(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Param, Int) =
+  do
+    (t, i2) <- expected_ident("parameter name", tokens, i)
+    parse_param_cont(tokens, i2, token.token_text(t))
+
+fn parse_param_cont(tokens: Vec token.Token, i: Int, name: String) -> Result ParseError (ast.Param, Int) =
+  match match_symbol(tokens, i, ":") with
+  | Nothing -> Ok((ast.Param(name, Nothing), i))
+  | Just (_, i2) ->
+      do
+        (ty, i3) <- parse_type_expr(tokens, i2)
+        Ok((ast.Param(name, Just(ty)), i3))
+
+fn collect_params(tokens: Vec token.Token, i: Int, acc: List ast.Param) -> Result ParseError (List ast.Param, Int) =
+  if tok_is_symbol(tok_at(tokens, i), ")") then Ok((acc, i))
+  else
+    do
+      (p, i2) <- parse_param(tokens, i)
+      match match_symbol(tokens, i2, ",") with
+      | Nothing -> Ok((Cons(p, acc), i2))
+      | Just (_, i3) -> collect_params(tokens, i3, Cons(p, acc))
+
+# ---------------------------------------------------------------------------
+# Type constraint parsing
+
+fn parse_type_constraint(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeConstraint, Int) =
+  do
+    (t, i2) <- expected_ident("class name", tokens, i)
+    (args, i3) <- collect_type_atoms(tokens, i2, Nil)
+    Ok((ast.TypeConstraint(token.token_text(t), list_reverse(args)), i3))
+
+fn collect_type_atoms(tokens: Vec token.Token, i: Int, acc: List ast.TypeExpr) -> Result ParseError (List ast.TypeExpr, Int) =
+  if starts_type_atom(tokens, i) then
+    do
+      (ty, i2) <- parse_type_atom(tokens, i)
+      collect_type_atoms(tokens, i2, Cons(ty, acc))
+  else
+    Ok((acc, i))
+
+fn collect_constraints(tokens: Vec token.Token, i: Int, acc: List ast.TypeConstraint) -> Result ParseError (List ast.TypeConstraint, Int) =
+  do
+    (c, i2) <- parse_type_constraint(tokens, i)
+    match match_symbol(tokens, i2, ",") with
+    | Nothing -> Ok((Cons(c, acc), i2))
+    | Just (_, i3) ->
+        if starts_type_atom(tokens, i3) then
+          collect_constraints(tokens, i3, Cons(c, acc))
+        else
+          Ok((Cons(c, acc), i2))
+
+# ---------------------------------------------------------------------------
+# Where clause desugaring
+
+fn starts_where_binding(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_ident(tok_at(tokens, i)) && tok_is_symbol(tok_at(tokens, i + 1), "=")
+
+fn collect_where_bindings(tokens: Vec token.Token, i: Int, acc: List (ast.Pattern, ast.Expr)) -> Result ParseError (List (ast.Pattern, ast.Expr), Int) =
+  if starts_where_binding(tokens, i) then
+    do
+      (pattern, i2) <- parse_pattern(tokens, i)
+      (_, i3) <- expected_symbol("=", tokens, i2)
+      (value, i4) <- parse_expr(tokens, i3)
+      collect_where_bindings(tokens, i4, Cons((pattern, value), acc))
+  else
+    Ok((acc, i))
+
+fn desugar_where(body: ast.Expr, bindings: List (ast.Pattern, ast.Expr)) -> ast.Expr =
+  list_fold(wrap_where_binding, body, list_reverse(bindings))
+
+fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.Expr =
+  match binding with
+  | (pattern, value) ->
+      match pattern with
+      | ast.VarPattern name pos ->
+          ast.CallExpr(ast.LambdaExpr(Cons(ast.Param(name, Nothing), Nil), inner, pos), Cons(value, Nil), pos)
+      | ast.WildcardPattern pos ->
+          ast.CallExpr(ast.LambdaExpr(Cons(ast.Param("_w", Nothing), Nil), inner, pos), Cons(value, Nil), pos)
+      | _ -> inner
+
+# ---------------------------------------------------------------------------
+# Type constructor parsing
+
+fn parse_type_constructor_def(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeConstructor, Int) =
+  do
+    (t, i2) <- expected_ident("constructor name", tokens, i)
+    (args, i3) <- collect_type_atoms(tokens, i2, Nil)
+    Ok((ast.TypeConstructor(token.token_text(t), list_reverse(args)), i3))
+
+fn collect_type_constructors(tokens: Vec token.Token, i: Int, acc: List ast.TypeConstructor) -> Result ParseError (List ast.TypeConstructor, Int) =
+  match match_symbol(tokens, i, "|") with
+  | Nothing -> Ok((acc, i))
+  | Just (_, i2) ->
+      do
+        (ctor, i3) <- parse_type_constructor_def(tokens, i2)
+        collect_type_constructors(tokens, i3, Cons(ctor, acc))
+
+# ---------------------------------------------------------------------------
+# Declaration parsing
+
+fn parse_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("type", tokens, i)
+    (name_tok, i3) <- expected_ident("type name", tokens, i2)
+    (params, i4) <- collect_ident_list(tokens, i3, Nil)
+    (_, i5) <- expected_symbol("=", tokens, skip_visibility(tokens, i4))
+    (ctors, i6) <- collect_type_constructors(tokens, i5, Nil)
+    Ok((ast.TypeDecl(token.token_text(name_tok), list_reverse(params), list_reverse(ctors), cur_pos(tokens, i)), i6))
+
+fn skip_visibility(tokens: Vec token.Token, i: Int) -> Int =
+  match match_symbol(tokens, i, "(") with
+  | Nothing -> i
+  | Just (_, i2) ->
+      match match_symbol(tokens, i2, "..") with
+      | Nothing -> i
+      | Just (_, i3) ->
+          match match_symbol(tokens, i3, ")") with
+          | Nothing -> i
+          | Just (_, i4) -> i4
+
+fn collect_ident_list(tokens: Vec token.Token, i: Int, acc: List String) -> Result ParseError (List String, Int) =
+  match match_ident(tokens, i) with
+  | Nothing -> Ok((list_reverse(acc), i))
+  | Just (t, i2) -> collect_ident_list(tokens, i2, Cons(token.token_text(t), acc))
+
+fn parse_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("fn", tokens, i)
+    (name_tok, i3) <- expected_ident("function name", tokens, i2)
+    (_, i4) <- expected_symbol("(", tokens, i3)
+    (params, i5) <- collect_params(tokens, i4, Nil)
+    (_, i6) <- expected_symbol(")", tokens, i5)
+    (return_type, effects, i7) <- parse_optional_return_type(tokens, i6)
+    (constraints, i8) <- parse_optional_constraints(tokens, i7)
+    (_, i9) <- expected_symbol("=", tokens, i8)
+    (body, i10) <- parse_expr(tokens, i9)
+    (final_body, i11) <- parse_optional_where_body(tokens, i10, body)
+    Ok((ast.FnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, list_reverse(constraints), final_body, cur_pos(tokens, i)), i11))
+
+fn parse_optional_return_type(tokens: Vec token.Token, i: Int) -> Result ParseError (Maybe ast.TypeExpr, Maybe (List String), Int) =
+  match match_symbol(tokens, i, "->") with
+  | Nothing -> Ok((Nothing, Nothing, i))
+  | Just (_, i2) ->
+      do
+        (ty_raw, i3) <- parse_type_expr(tokens, i2)
+        parse_return_type_cont(tokens, i3, ty_raw)
+
+fn parse_return_type_cont(tokens: Vec token.Token, i: Int, ty_raw: ast.TypeExpr) -> Result ParseError (Maybe ast.TypeExpr, Maybe (List String), Int) =
+  match ty_raw with
+  | ast.TypeEffect base effs -> Ok((Just(base), Just(effs), i))
+  | _ ->
+      match parse_effect_annotation(tokens, i) with
+      | (Nothing, i2) -> Ok((Just(ty_raw), Nothing, i2))
+      | (Just effs, i2) -> Ok((Just(ty_raw), Just(effs), i2))
+
+fn parse_optional_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
+  match match_keyword(tokens, i, "where") with
+  | Nothing -> Ok((Nil, i))
+  | Just (_, i2) ->
+      do
+        (cs, i3) <- collect_constraints(tokens, i2, Nil)
+        Ok((list_reverse(cs), i3))
+
+fn parse_optional_where_body(tokens: Vec token.Token, i: Int, body: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  match match_keyword(tokens, i, "where") with
+  | Nothing -> Ok((body, i))
+  | Just (_, i2) ->
+      do
+        (bindings, i3) <- collect_where_bindings(tokens, i2, Nil)
+        Ok((desugar_where(body, list_reverse(bindings)), i3))
+
+fn parse_let_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("let", tokens, i)
+    (name_tok, i3) <- expected_ident("let binding name", tokens, i2)
+    (_, i4) <- expected_symbol("=", tokens, i3)
+    (body, i5) <- parse_expr(tokens, i4)
+    Ok((ast.LetDecl(token.token_text(name_tok), body, cur_pos(tokens, i)), i5))
+
+fn parse_record_field_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.RecordFieldDecl, Int) =
+  do
+    (name_tok, i2) <- expected_ident("field name", tokens, i)
+    (_, i3) <- expected_symbol(":", tokens, i2)
+    (ty, i4) <- parse_type_expr(tokens, i3)
+    Ok((ast.RecordFieldDecl(token.token_text(name_tok), ty), i4))
+
+fn collect_record_field_decls(tokens: Vec token.Token, i: Int, acc: List ast.RecordFieldDecl) -> Result ParseError (List ast.RecordFieldDecl, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "}") then Ok((list_reverse(acc), i))
+  else
+    do
+      (fd, i2) <- parse_record_field_decl(tokens, i)
+      match match_symbol(tokens, i2, ",") with
+      | Nothing -> Ok((list_reverse(Cons(fd, acc)), i2))
+      | Just (_, i3) -> collect_record_field_decls(tokens, i3, Cons(fd, acc))
+
+fn parse_record_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("type", tokens, i)
+    (name_tok, i3) <- expected_ident("type name", tokens, i2)
+    (params, i4) <- collect_ident_list(tokens, i3, Nil)
+    (_, i5) <- expected_symbol("=", tokens, skip_visibility(tokens, i4))
+    (_, i6) <- expected_symbol("{", tokens, i5)
+    (fields, i7) <- collect_record_field_decls(tokens, i6, Nil)
+    (_, i8) <- expected_symbol("}", tokens, i7)
+    Ok((ast.RecordDecl(token.token_text(name_tok), list_reverse(params), fields, cur_pos(tokens, i)), i8))
+
+fn parse_class_method_sig(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.ClassMethodSig, Int) =
+  do
+    (_, i2) <- expected_keyword("fn", tokens, i)
+    (name_tok, i3) <- expected_ident("method name", tokens, i2)
+    (_, i4) <- expected_symbol("(", tokens, i3)
+    (params, i5) <- collect_params(tokens, i4, Nil)
+    (_, i6) <- expected_symbol(")", tokens, i5)
+    (_, i7) <- expected_symbol("->", tokens, i6)
+    (ret_raw, i8) <- parse_type_expr(tokens, i7)
+    Ok((make_class_method_sig(token.token_text(name_tok), list_reverse(params), ret_raw, tokens, i8), i8))
+
+fn make_class_method_sig(name: String, params: List ast.Param, ret_raw: ast.TypeExpr, tokens: Vec token.Token, i: Int) -> ast.ClassMethodSig =
+  match ret_raw with
+  | ast.TypeEffect base effs -> ast.ClassMethodSig(name, params, base, Just(effs))
+  | _ ->
+      match parse_effect_annotation(tokens, i) with
+      | (Nothing, _) -> ast.ClassMethodSig(name, params, ret_raw, Nothing)
+      | (Just effs, _) -> ast.ClassMethodSig(name, params, ret_raw, Just(effs))
+
+fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "fn") then
+    do
+      (sig, i2) <- parse_class_method_sig(tokens, i)
+      collect_class_method_sigs(tokens, i2, Cons(sig, acc))
+  else
+    Ok((list_reverse(acc), i))
+
+fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("class", tokens, i)
+    (name_tok, i3) <- expected_ident("class name", tokens, i2)
+    (params, i4) <- collect_ident_list(tokens, i3, Nil)
+    (_, i5) <- expected_symbol("{", tokens, i4)
+    (methods, i6) <- collect_class_method_sigs(tokens, i5, Nil)
+    (_, i7) <- expected_symbol("}", tokens, i6)
+    Ok((ast.ClassDecl(token.token_text(name_tok), list_reverse(params), methods, cur_pos(tokens, i)), i7))
+
+fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.InstanceMethodImpl, Int) =
+  do
+    (_, i2) <- expected_keyword("fn", tokens, i)
+    (name_tok, i3) <- expected_ident("method name", tokens, i2)
+    (_, i4) <- expected_symbol("(", tokens, i3)
+    (params, i5) <- collect_params(tokens, i4, Nil)
+    (_, i6) <- expected_symbol(")", tokens, i5)
+    (return_type, effects, i7) <- parse_optional_return_type(tokens, i6)
+    (_, i8) <- expected_symbol("=", tokens, i7)
+    (body, i9) <- parse_expr(tokens, i8)
+    (final_body, i10) <- parse_optional_where_body(tokens, i9, body)
+    Ok((ast.InstanceMethodImpl(token.token_text(name_tok), list_reverse(params), return_type, effects, final_body), i10))
+
+fn collect_instance_methods(tokens: Vec token.Token, i: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "fn") then
+    do
+      (m, i2) <- parse_instance_method(tokens, i)
+      collect_instance_methods(tokens, i2, Cons(m, acc))
+  else
+    Ok((list_reverse(acc), i))
+
+fn parse_instance_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("instance", tokens, i)
+    (constraint, i3) <- parse_type_constraint(tokens, i2)
+    (_, i4) <- expected_symbol("{", tokens, i3)
+    (methods, i5) <- collect_instance_methods(tokens, i4, Nil)
+    (_, i6) <- expected_symbol("}", tokens, i5)
+    Ok((ast.InstanceDecl(constraint, methods, cur_pos(tokens, i)), i6))
+
+fn parse_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  parse_decl_body(tokens, skip_export(tokens, i))
+
+fn skip_export(tokens: Vec token.Token, i: Int) -> Int =
+  match match_keyword(tokens, i, "export") with
+  | Just (_, i2) -> i2
+  | Nothing -> i
+
+fn parse_decl_body(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "fn") then parse_fn_decl(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "let") then parse_let_decl(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "class") then parse_class_decl(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "instance") then parse_instance_decl(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "type") then parse_type_decl_or_record(tokens, i)
+  else
+    Err(ParseError(
+      string.concat("Expected declaration at ", pos_str(cur_pos(tokens, i))),
+      cur_pos(tokens, i)
+    ))
+
+fn parse_type_decl_or_record(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  if is_record_type_decl(tokens, i) then parse_record_type_decl(tokens, i)
+  else parse_type_decl(tokens, i)
+
+fn is_record_type_decl(tokens: Vec token.Token, i: Int) -> Bool =
+  is_record_scan(tokens, i + 1)
+
+fn is_record_scan(tokens: Vec token.Token, i: Int) -> Bool =
+  if tok_is_eof(tok_at(tokens, i)) then false
+  else if tok_is_symbol(tok_at(tokens, i), "{") then true
+  else if tok_is_symbol(tok_at(tokens, i), "|") then false
+  else if tok_is_symbol(tok_at(tokens, i), "=") then is_record_scan(tokens, i + 1)
+  else if tok_is_symbol(tok_at(tokens, i), "(") then is_record_scan(tokens, i + 1)
+  else if tok_is_symbol(tok_at(tokens, i), "..") then is_record_scan(tokens, i + 1)
+  else if tok_is_symbol(tok_at(tokens, i), ")") then is_record_scan(tokens, i + 1)
+  else if tok_is_ident(tok_at(tokens, i)) then is_record_scan(tokens, i + 1)
+  else false
+
+fn collect_decls(tokens: Vec token.Token, i: Int, acc: List ast.Decl) -> Result ParseError (List ast.Decl, Int) =
+  if tok_is_eof(tok_at(tokens, i)) then Ok((list_reverse(acc), i))
+  else
+    do
+      (decl, i2) <- parse_decl(tokens, i)
+      collect_decls(tokens, i2, Cons(decl, acc))
+
+# ---------------------------------------------------------------------------
+# Top-level entry point
+
+export fn parse_program(tokens: Vec token.Token) -> Result ParseError ast.Program =
+  do
+    (decls, _) <- collect_decls(tokens, 0, Nil)
+    Ok(ast.Program(decls, first_pos))
+where
+  first_pos = match vec_get(0, tokens) with
+    | Just t -> tok_pos(t)
+    | Nothing -> source.SourcePos(0, 0, 0)

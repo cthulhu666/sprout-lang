@@ -1350,6 +1350,69 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "x,int,bool,_,y,Just,call")
 
+    def test_import_stdlib_compiler_parser_parses_fn_decl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler.lexer as lexer
+                import stdlib.compiler.parser as parser
+                import stdlib.compiler.ast as ast
+
+                fn describe_decl(d: ast.Decl) -> String =
+                  match d with
+                  | ast.FnDecl name _ _ _ _ _ _ -> str_concat("fn:", name)
+                  | ast.TypeDecl name _ _ _ -> str_concat("type:", name)
+                  | ast.LetDecl name _ _ -> str_concat("let:", name)
+                  | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
+                  | ast.InstanceDecl _ _ _ -> "instance"
+                  | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
+
+                fn describe_program(p: ast.Program) -> String =
+                  match p with
+                  | ast.Program decls _ -> describe_decls(decls, "")
+
+                fn describe_decls(decls: List ast.Decl, acc: String) -> String =
+                  match decls with
+                  | Nil -> acc
+                  | Cons d rest ->
+                      if str_len(acc) == 0 then describe_decls(rest, describe_decl(d))
+                      else describe_decls(rest, str_concat(acc, str_concat(",", describe_decl(d))))
+
+                fn run_parse(src: String) -> String =
+                  match lexer.tokenize(src) with
+                  | Err e -> "lex-error"
+                  | Ok tokens ->
+                      match parser.parse_program(tokens) with
+                      | Err e -> "parse-error"
+                      | Ok prog -> describe_program(prog)
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    str_concat(run_parse("fn foo(x: Int) -> Int = x"),
+                    str_concat("|",
+                    str_concat(run_parse("fn f() -> Bool = true"),
+                    str_concat("|",
+                    str_concat(run_parse("type Color (..) = | Red | Green | Blue"),
+                    str_concat("|",
+                    run_parse("fn add(a: Int, b: Int) -> Int = a + b")))))))
+                  )
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "fn:foo|fn:f|type:Color|fn:add",
+            )
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

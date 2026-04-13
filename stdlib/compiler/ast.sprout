@@ -9,6 +9,7 @@ export type TypeExpr (..) =
   | TypeName String
   | TypeApply TypeExpr TypeExpr
   | TypeArrow TypeExpr TypeExpr (Maybe (List String))
+  | TypeEffect TypeExpr (List String)
   | TupleType (List TypeExpr)
 
 # --- Patterns ---
