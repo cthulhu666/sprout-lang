@@ -1268,6 +1268,88 @@ class ModuleLoaderTests(unittest.TestCase):
                 "|Unterminated char literal@1:1",
             )
 
+    def test_import_stdlib_compiler_ast_constructors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler.ast as ast
+                import stdlib.compiler.source as source
+
+                fn dummy_pos() -> source.SourcePos =
+                  source.SourcePos(1, 1, 0)
+
+                fn describe_expr(e: ast.Expr) -> String =
+                  match e with
+                  | ast.VarExpr name _ -> name
+                  | ast.IntExpr n _ -> "int"
+                  | ast.BoolExpr _ _ -> "bool"
+                  | ast.StringExpr _ _ -> "str"
+                  | ast.CharExpr _ _ -> "char"
+                  | ast.IfExpr _ _ _ _ -> "if"
+                  | ast.CallExpr _ _ _ -> "call"
+                  | ast.MatchExpr _ _ _ -> "match"
+                  | ast.LambdaExpr _ _ _ -> "lambda"
+                  | ast.TupleExpr _ _ -> "tuple"
+                  | ast.UnitExpr _ -> "unit"
+                  | ast.BinaryExpr _ _ _ _ -> "binary"
+                  | ast.UnaryExpr _ _ _ -> "unary"
+                  | ast.IntRangeExpr _ _ _ -> "range"
+                  | ast.DoExpr _ _ -> "do"
+                  | ast.RecordExpr _ _ _ -> "record"
+                  | ast.GetFieldExpr _ _ _ -> "getfield"
+
+                fn describe_pattern(p: ast.Pattern) -> String =
+                  match p with
+                  | ast.WildcardPattern _ -> "_"
+                  | ast.VarPattern name _ -> name
+                  | ast.IntPattern _ _ -> "int"
+                  | ast.BoolPattern _ _ -> "bool"
+                  | ast.StringPattern _ _ -> "str"
+                  | ast.CharPattern _ _ -> "char"
+                  | ast.UnitPattern _ -> "unit"
+                  | ast.TuplePattern _ _ -> "tuple"
+                  | ast.ConstructorPattern name _ _ -> name
+
+                fn main() -> Unit !{IO} =
+                  print(
+                    str_concat(describe_expr(e1),
+                    str_concat(",",
+                    str_concat(describe_expr(e2),
+                    str_concat(",",
+                    str_concat(describe_expr(e3),
+                    str_concat(",",
+                    str_concat(describe_pattern(p1),
+                    str_concat(",",
+                    str_concat(describe_pattern(p2),
+                    str_concat(",",
+                    str_concat(describe_pattern(p3),
+                    str_concat(",",
+                    describe_expr(call)
+                    ))))))))))))
+                  )
+                where
+                  pos = dummy_pos()
+                  e1 = ast.VarExpr("x", pos)
+                  e2 = ast.IntExpr(42, pos)
+                  e3 = ast.BoolExpr(true, pos)
+                  p1 = ast.WildcardPattern(pos)
+                  p2 = ast.VarPattern("y", pos)
+                  p3 = ast.ConstructorPattern("Just", [p2], pos)
+                  call = ast.CallExpr(e1, [e2, e3], pos)
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "x,int,bool,_,y,Just,call")
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

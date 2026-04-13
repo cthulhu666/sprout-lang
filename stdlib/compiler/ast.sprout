@@ -1,0 +1,106 @@
+module stdlib.compiler.ast
+import stdlib.compiler.source as source
+
+# --- Type Expressions ---
+# No source positions: type exprs are always sub-components of larger nodes
+# whose positions carry the error context.
+
+export type TypeExpr (..) =
+  | TypeName String
+  | TypeApply TypeExpr TypeExpr
+  | TypeArrow TypeExpr TypeExpr (Maybe (List String))
+  | TupleType (List TypeExpr)
+
+# --- Patterns ---
+
+export type Pattern (..) =
+  | WildcardPattern source.SourcePos
+  | VarPattern String source.SourcePos
+  | IntPattern Int source.SourcePos
+  | BoolPattern Bool source.SourcePos
+  | StringPattern String source.SourcePos
+  | CharPattern Char source.SourcePos
+  | UnitPattern source.SourcePos
+  | TuplePattern (List Pattern) source.SourcePos
+  | ConstructorPattern String (List Pattern) source.SourcePos
+
+# --- Function parameters ---
+
+export type Param (..) =
+  | Param String (Maybe TypeExpr)
+
+# --- Match branches and do steps (forward-reference Expr defined below) ---
+
+export type MatchBranch (..) =
+  | MatchBranch Pattern Expr
+
+export type DoStep (..) =
+  | DoBindStep Pattern Expr
+  | DoLetStep String Expr
+  | DoExprStep Expr
+
+# A name=value field in a record literal: RecordField "x" expr
+export type RecordField (..) =
+  | RecordField String Expr
+
+# --- Expressions ---
+
+export type Expr (..) =
+  | VarExpr String source.SourcePos
+  | IntExpr Int source.SourcePos
+  | BoolExpr Bool source.SourcePos
+  | StringExpr String source.SourcePos
+  | CharExpr Char source.SourcePos
+  | UnitExpr source.SourcePos
+  | TupleExpr (List Expr) source.SourcePos
+  | IfExpr Expr Expr Expr source.SourcePos
+  | MatchExpr Expr (List MatchBranch) source.SourcePos
+  | CallExpr Expr (List Expr) source.SourcePos
+  | LambdaExpr (List Param) Expr source.SourcePos
+  | BinaryExpr String Expr Expr source.SourcePos
+  | UnaryExpr String Expr source.SourcePos
+  | IntRangeExpr Expr Expr source.SourcePos
+  | DoExpr (List DoStep) source.SourcePos
+  | RecordExpr String (List RecordField) source.SourcePos
+  | GetFieldExpr Expr String source.SourcePos
+
+# --- Shared helpers used in declarations ---
+
+export type TypeConstraint (..) =
+  | TypeConstraint String (List TypeExpr)
+
+export type TypeConstructor (..) =
+  | TypeConstructor String (List TypeExpr)
+
+export type RecordFieldDecl (..) =
+  | RecordFieldDecl String TypeExpr
+
+# fn signature inside a class declaration
+export type ClassMethodSig (..) =
+  | ClassMethodSig String (List Param) TypeExpr (Maybe (List String))
+
+# fn implementation inside an instance declaration
+export type InstanceMethodImpl (..) =
+  | InstanceMethodImpl String (List Param) (Maybe TypeExpr) (Maybe (List String)) Expr
+
+# --- Top-level declarations ---
+#
+# FnDecl name params return_type effects constraints body pos
+# TypeDecl name type_params constructors pos
+# RecordDecl name type_params fields pos
+# LetDecl name body pos
+# ClassDecl name type_params methods pos
+# InstanceDecl constraint methods pos
+
+export type Decl (..) =
+  | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr source.SourcePos
+  | TypeDecl String (List String) (List TypeConstructor) source.SourcePos
+  | RecordDecl String (List String) (List RecordFieldDecl) source.SourcePos
+  | LetDecl String Expr source.SourcePos
+  | ClassDecl String (List String) (List ClassMethodSig) source.SourcePos
+  | InstanceDecl TypeConstraint (List InstanceMethodImpl) source.SourcePos
+
+# --- Program ---
+
+export type Program (..) =
+  | Program (List Decl) source.SourcePos
