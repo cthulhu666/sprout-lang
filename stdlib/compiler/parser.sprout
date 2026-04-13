@@ -1,5 +1,5 @@
 module stdlib.compiler.parser
-import stdlib.collections (Vec, vec_get, vec_length)
+import stdlib.collections (Vec, vec_get, vec_length, vec_slice)
 import stdlib.string as string
 import stdlib.compiler.token as token
 import stdlib.compiler.source as source
@@ -106,8 +106,21 @@ fn expected_ident(label: String, tokens: Vec token.Token, i: Int) -> Result Pars
         cur_pos(tokens, i)
       ))
 
+# Finds the start index of the last dot-separated component.
+# E.g., "ast.TypeEffect" → 4 (index of 'T'), "Foo" → 0.
+fn last_component_start(name: String, i: Int, last: Int) -> Int =
+  if i >= str_len(name) then last
+  else
+    match string.char_at(name, i) with
+    | Nothing -> last
+    | Just ch ->
+        if ch == '.' then last_component_start(name, i + 1, i + 1)
+        else last_component_start(name, i + 1, last)
+
+# A name is a constructor (or qualified constructor) if its last component starts uppercase.
+# Handles both "Foo" and "ast.Foo" forms.
 fn is_constructor_name(name: String) -> Bool =
-  match string.char_at(name, 0) with
+  match string.char_at(name, last_component_start(name, 0, 0)) with
   | Nothing -> false
   | Just ch -> string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch))
 
@@ -304,10 +317,113 @@ fn parse_ident_pattern_atom(tokens: Vec token.Token, i: Int, name: String, pos: 
   else Ok((ast.VarPattern(name, pos), i + 1))
 
 # ---------------------------------------------------------------------------
+# Do expression helpers
+
+fn looks_like_do_step_start(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_keyword(tok_at(tokens, i), "let") ||
+  tok_is_keyword(tok_at(tokens, i), "if") ||
+  tok_is_keyword(tok_at(tokens, i), "match") ||
+  tok_is_keyword(tok_at(tokens, i), "do") ||
+  tok_is_keyword(tok_at(tokens, i), "true") ||
+  tok_is_keyword(tok_at(tokens, i), "false") ||
+  tok_is_ident(tok_at(tokens, i)) ||
+  tok_is_int(tok_at(tokens, i)) ||
+  tok_is_string(tok_at(tokens, i)) ||
+  tok_is_char(tok_at(tokens, i)) ||
+  tok_is_symbol(tok_at(tokens, i), "\\") ||
+  tok_is_symbol(tok_at(tokens, i), "[") ||
+  tok_is_symbol(tok_at(tokens, i), "{") ||
+  tok_is_symbol(tok_at(tokens, i), "(") ||
+  tok_is_symbol(tok_at(tokens, i), "-")
+
+fn update_bracket_depth(t: token.Token, depth: Int) -> Int =
+  if tok_is_symbol(t, "(") || tok_is_symbol(t, "[") || tok_is_symbol(t, "{") then depth + 1
+  else if tok_is_symbol(t, ")") || tok_is_symbol(t, "]") || tok_is_symbol(t, "}") then
+    if depth > 0 then depth - 1 else 0
+  else depth
+
+# Scans forward to find the exclusive end index of the current do step.
+# start_i: the first index of this step (used to skip initial same-line check).
+# prev_line: line of the previous token (initially the 'do' keyword line).
+# depth: current bracket nesting depth (initially 0).
+# block_col: the expected column for step starts.
+fn scan_do_step_end(tokens: Vec token.Token, i: Int, start_i: Int, prev_line: Int, depth: Int, block_col: Int) -> Int =
+  if tok_is_eof(t) then i
+  else if i > start_i && this_line > prev_line && depth == 0 && this_col < block_col then i
+  else if i > start_i && this_line > prev_line && depth == 0 && this_col == block_col && looks_like_do_step_start(tokens, i) then i
+  else scan_do_step_end(tokens, i + 1, start_i, this_line, update_bracket_depth(t, depth), block_col)
+where
+  t = tok_at(tokens, i)
+  this_line = source.position_line(tok_pos(t))
+  this_col = source.position_column(tok_pos(t))
+
+# Returns true if the token list has a '<-' at bracket depth 0 BEFORE any
+# match/if/do keyword at depth 0 (which cannot appear in a pattern, so they
+# signal an expression step rather than a bind step).
+fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
+  if tok_is_eof(tok_at(tokens, i)) then false
+  else if depth == 0 && (tok_is_keyword(tok_at(tokens, i), "match") || tok_is_keyword(tok_at(tokens, i), "if") || tok_is_keyword(tok_at(tokens, i), "do")) then false
+  else if depth == 0 && tok_is_symbol(tok_at(tokens, i), "<-") then true
+  else step_has_bind_arrow(tokens, i + 1, update_bracket_depth(tok_at(tokens, i), depth))
+
+# Parses one do step from a sub-slice of tokens (step_tokens is the exact tokens for this step).
+fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (ast.DoStep, Int) =
+  if tok_is_keyword(tok_at(step_tokens, 0), "let") then
+    do
+      (_, i2) <- expected_keyword("let", step_tokens, 0)
+      (name_tok, i3) <- expected_ident("do let binding name", step_tokens, i2)
+      (_, i4) <- expected_symbol("=", step_tokens, i3)
+      (value, _) <- parse_expr(step_tokens, i4)
+      Ok((ast.DoLetStep(token.token_text(name_tok), value), 0))
+  else if step_has_bind_arrow(step_tokens, 0, 0) then
+    do
+      (pattern, i2) <- parse_pattern(step_tokens, 0)
+      (_, i3) <- expected_symbol("<-", step_tokens, i2)
+      (value, _) <- parse_expr(step_tokens, i3)
+      Ok((ast.DoBindStep(pattern, value), 0))
+  else
+    do
+      (value, _) <- parse_expr(step_tokens, 0)
+      Ok((ast.DoExprStep(value), 0))
+
+# Parses one do step from tokens[i..end_i) and returns (step, end_i).
+fn parse_do_step(tokens: Vec token.Token, i: Int, end_i: Int) -> Result ParseError (ast.DoStep, Int) =
+  match parse_do_step_sub(vec_slice(i, end_i - i, tokens)) with
+  | Err e -> Err(e)
+  | Ok (step, _) -> Ok((step, end_i))
+
+# Collects all do steps at the established block column.
+fn collect_do_steps(tokens: Vec token.Token, i: Int, do_line: Int, block_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
+  if tok_is_eof(tok_at(tokens, i)) then Ok((list_reverse(acc), i))
+  else if source.position_line(tok_pos(tok_at(tokens, i))) == do_line then Ok((list_reverse(acc), i))
+  else if block_col == -1 then
+    collect_do_steps_at(tokens, i, do_line, source.position_column(tok_pos(tok_at(tokens, i))), acc)
+  else if source.position_column(tok_pos(tok_at(tokens, i))) < block_col then Ok((list_reverse(acc), i))
+  else if source.position_column(tok_pos(tok_at(tokens, i))) > block_col then
+    Err(ParseError(string.concat("Unexpected indentation in do block at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+  else
+    collect_do_steps_at(tokens, i, do_line, block_col, acc)
+
+fn collect_do_steps_at(tokens: Vec token.Token, i: Int, do_line: Int, block_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
+  do
+    (step, i2) <- parse_do_step(tokens, i, scan_do_step_end(tokens, i, i, do_line, 0, block_col))
+    collect_do_steps(tokens, i2, do_line, block_col, Cons(step, acc))
+
+fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (do_tok, i2) <- expected_keyword("do", tokens, i)
+    (steps, i3) <- collect_do_steps(tokens, i2, source.position_line(tok_pos(do_tok)), -1, Nil)
+    if list_length(steps) == 0 then
+      Err(ParseError(string.concat("Expected at least one do step at ", pos_str(tok_pos(do_tok))), tok_pos(do_tok)))
+    else
+      Ok((ast.DoExpr(steps, tok_pos(do_tok)), i3))
+
+# ---------------------------------------------------------------------------
 # Expression parsing
 
 export fn parse_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "if") then parse_if_expr(tokens, i)
+  if tok_is_keyword(tok_at(tokens, i), "do") then parse_do_expr(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "if") then parse_if_expr(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "match") then parse_match_expr(tokens, i)
   else parse_pipe(tokens, i)
 
@@ -512,9 +628,18 @@ fn parse_primary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
     Ok((ast.StringExpr(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
   else if tok_is_symbol(tok_at(tokens, i), "\\") then parse_lambda(tokens, i)
   else if tok_is_symbol(tok_at(tokens, i), "[") then parse_list_literal(tokens, i)
+  else if tok_is_symbol(tok_at(tokens, i), "{") then parse_dict_literal(tokens, i)
   else if tok_is_symbol(tok_at(tokens, i), "(") then parse_paren_expr(tokens, i)
+  else if tok_is_ident(tok_at(tokens, i)) && token.token_text(tok_at(tokens, i)) == "get" && tok_is_symbol(tok_at(tokens, i + 1), "(") == false then
+    do
+      (rec_expr, i2) <- parse_primary(tokens, i + 1)
+      (field_tok, i3) <- expected_ident("field name", tokens, i2)
+      Ok((ast.GetFieldExpr(rec_expr, token.token_text(field_tok), cur_pos(tokens, i)), i3))
   else if tok_is_ident(tok_at(tokens, i)) then
-    Ok((ast.VarExpr(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
+    if tok_is_symbol(tok_at(tokens, i + 1), "{") then
+      parse_record_literal(tokens, i + 1, token.token_text(tok_at(tokens, i)), cur_pos(tokens, i))
+    else
+      Ok((ast.VarExpr(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
   else
     Err(ParseError(
       string.concat("Expected expression at ", string.concat(pos_str(cur_pos(tokens, i)), string.concat(", got ", token.token_text(tok_at(tokens, i))))),
@@ -557,6 +682,71 @@ fn desugar_list_literal(items: List ast.Expr, pos: source.SourcePos) -> ast.Expr
   | Nil -> ast.VarExpr("Nil", pos)
   | Cons head tail ->
       ast.CallExpr(ast.VarExpr("Cons", pos), Cons(head, Cons(desugar_list_literal(tail, pos), Nil)), pos)
+
+fn parse_dict_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_symbol("{", tokens, i)
+    match match_symbol(tokens, i2, "}") with
+    | Just (_, i3) ->
+        Ok((ast.CallExpr(ast.VarExpr("dict_empty", cur_pos(tokens, i)), Nil, cur_pos(tokens, i)), i3))
+    | Nothing ->
+        do
+          (entries, i3) <- collect_dict_entries(tokens, i2, Nil)
+          (_, i4) <- expected_symbol("}", tokens, i3)
+          Ok((desugar_dict_entries(list_reverse(entries), ast.CallExpr(ast.VarExpr("dict_empty", cur_pos(tokens, i)), Nil, cur_pos(tokens, i)), cur_pos(tokens, i)), i4))
+
+fn collect_dict_entries(tokens: Vec token.Token, i: Int, acc: List (String, ast.Expr)) -> Result ParseError (List (String, ast.Expr), Int) =
+  do
+    (key_tok, i2) <- expected_ident("dict key", tokens, i)
+    (_, i3) <- expected_symbol(":", tokens, i2)
+    (value, i4) <- parse_expr(tokens, i3)
+    match match_symbol(tokens, i4, ",") with
+    | Nothing -> Ok((Cons((token.token_text(key_tok), value), acc), i4))
+    | Just (_, i5) ->
+        if tok_is_symbol(tok_at(tokens, i5), "}") then
+          Ok((Cons((token.token_text(key_tok), value), acc), i5))
+        else
+          collect_dict_entries(tokens, i5, Cons((token.token_text(key_tok), value), acc))
+
+fn desugar_dict_entries(entries: List (String, ast.Expr), acc: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match entries with
+  | Nil -> acc
+  | Cons entry rest ->
+      match entry with
+      | (key, value) ->
+          desugar_dict_entries(
+            rest,
+            ast.CallExpr(
+              ast.VarExpr("dict_set", pos),
+              Cons(ast.StringExpr(key, pos), Cons(value, Cons(acc, Nil))),
+              pos
+            ),
+            pos
+          )
+
+fn parse_record_literal(tokens: Vec token.Token, i: Int, type_name: String, pos: source.SourcePos) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_symbol("{", tokens, i)
+    match match_symbol(tokens, i2, "}") with
+    | Just (_, i3) -> Ok((ast.RecordExpr(type_name, Nil, pos), i3))
+    | Nothing ->
+        do
+          (fields, i3) <- collect_record_literal_fields(tokens, i2, Nil)
+          (_, i4) <- expected_symbol("}", tokens, i3)
+          Ok((ast.RecordExpr(type_name, list_reverse(fields), pos), i4))
+
+fn collect_record_literal_fields(tokens: Vec token.Token, i: Int, acc: List ast.RecordField) -> Result ParseError (List ast.RecordField, Int) =
+  do
+    (name_tok, i2) <- expected_ident("record field name", tokens, i)
+    (_, i3) <- expected_symbol("=", tokens, i2)
+    (value, i4) <- parse_expr(tokens, i3)
+    match match_symbol(tokens, i4, ",") with
+    | Nothing -> Ok((Cons(ast.RecordField(token.token_text(name_tok), value), acc), i4))
+    | Just (_, i5) ->
+        if tok_is_symbol(tok_at(tokens, i5), "}") then
+          Ok((Cons(ast.RecordField(token.token_text(name_tok), value), acc), i5))
+        else
+          collect_record_literal_fields(tokens, i5, Cons(ast.RecordField(token.token_text(name_tok), value), acc))
 
 fn collect_expr_list(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
   do

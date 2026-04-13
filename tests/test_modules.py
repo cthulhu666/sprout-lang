@@ -1566,6 +1566,92 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), expected)
 
+    def test_bootstrap_parser_parses_do_expr(self) -> None:
+        """Bootstrap parser handles do notation with bind, let, and expr steps."""
+        src = (
+            "fn add_one(x: Maybe Int) -> Maybe Int =\\n"
+            "  do\\n"
+            "    v <- x\\n"
+            "    Just(v + 1)"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                self._sprout_decl_summary_program(src),
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "fn:add_one")
+
+    def test_bootstrap_parser_parses_dict_literal(self) -> None:
+        """Bootstrap parser handles {key: expr} dict literals desugared to dict_set calls."""
+        src = "fn mk() -> Int =\\n  match {x: 1} with\\n  | _ -> 0"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                self._sprout_decl_summary_program(src),
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "fn:mk")
+
+    def test_bootstrap_parser_parses_record_literal(self) -> None:
+        """Bootstrap parser handles TypeName { field = expr } record literals."""
+        src = (
+            "type Point (..) = { x: Int, y: Int }\\n"
+            "fn make() -> Point = Point { x = 1, y = 2 }"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                self._sprout_decl_summary_program(src),
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "record:Point,fn:make")
+    def test_bootstrap_parser_conforms_on_parser_sprout(self) -> None:
+        """Bootstrap parser declaration names match Python parser on parser.sprout itself."""
+        repo_root = Path(__file__).parent.parent
+        raw = (repo_root / "stdlib/compiler/parser.sprout").read_text(encoding="utf-8")
+        body = self._strip_headers(raw)
+
+        expected = self._py_decl_summary(body)
+
+        source_escaped = body.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                self._sprout_decl_summary_program(source_escaped),
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), expected)
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
