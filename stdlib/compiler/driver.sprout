@@ -1,0 +1,48 @@
+module main
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+fn describe_decl(d: ast.Decl) -> String =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ -> str_concat("fn:", name)
+  | ast.TypeDecl name _ _ _ -> str_concat("type:", name)
+  | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
+  | ast.LetDecl name _ _ -> str_concat("let:", name)
+  | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
+  | ast.InstanceDecl _ _ _ -> "instance"
+
+fn print_decls(ds: List ast.Decl) -> Unit !{IO} =
+  match ds with
+  | Nil -> ()
+  | Cons d rest ->
+      do
+        print(describe_decl(d))
+        print_decls(rest)
+
+fn lex_err_msg(e: token.TokenizeError) -> String =
+  match e with
+  | token.TokenizeError msg _ -> str_concat("ERROR: lex error: ", msg)
+
+fn parse_err_msg(e: parser.ParseError) -> String =
+  match e with
+  | parser.ParseError msg _ -> str_concat("ERROR: parse error: ", msg)
+
+fn run_parse_result(r: Result parser.ParseError ast.Program) -> Unit !{IO} =
+  match r with
+  | Err e -> print(parse_err_msg(e))
+  | Ok prog ->
+      match prog with
+      | ast.Program decls _ -> print_decls(decls)
+
+fn run_file(path: String) -> Unit !{IO} =
+  match lexer.tokenize(read_file(path)) with
+  | Err e -> print(lex_err_msg(e))
+  | Ok tokens -> run_parse_result(parser.parse_program(tokens))
+
+fn main() -> Unit !{IO} =
+  match argv_get(1) with
+  | Nothing -> print("ERROR: usage: bootstrap-parse <file>")
+  | Just path -> run_file(path)

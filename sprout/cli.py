@@ -98,6 +98,41 @@ def cmd_parse(path: Path) -> int:
     return 0
 
 
+def _strip_sprout_headers(source: str) -> str:
+    """Strip module/import/export-type(..) lines so the bootstrap parser can handle the body."""
+    import re
+    out = []
+    for line in source.splitlines():
+        s = line.strip()
+        if s.startswith("module ") or s.startswith("import "):
+            continue
+        line = re.sub(r"\bexport\s+type\s+(\w+)\s*\(\.\.\)", r"type \1", line)
+        line = re.sub(r"^\s*export\s+", lambda m: m.group(0).replace("export ", ""), line)
+        out.append(line)
+    return "\n".join(out)
+
+
+def cmd_bootstrap_parse(path: Path) -> int:
+    driver = Path(__file__).parent.parent / "stdlib" / "compiler" / "driver.sprout"
+    bundle = load_module_bundle(driver)
+    source = bundle.source
+    tree = parse(source)
+    _print_warnings(resolve_program_names(tree, bundle))
+    validate_public_surface(tree, bundle)
+    typecheck_program(tree)
+    validate_public_surface(tree, bundle)
+    lowered = lower_typeclasses(tree)
+    stripped = _strip_sprout_headers(path.read_text(encoding="utf-8"))
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".spr", delete=False, encoding="utf-8") as f:
+        f.write(stripped)
+        tmp_path = f.name
+    try:
+        run_program(lowered, argv=["bootstrap-parse", tmp_path])
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    return 0
+
+
 def cmd_fmt(path: Path, check: bool = False) -> int:
     source = path.read_text(encoding="utf-8")
     formatted = format_source(source)
@@ -4866,6 +4901,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit native binary with clang (default writes LLVM .ll text)",
     )
+    p_bootstrap_parse = sub.add_parser("bootstrap-parse", help="parse a Sprout file using the bootstrap (self-hosted) parser")
+    p_bootstrap_parse.add_argument("file", type=Path)
     sub.add_parser("analysis-service", help=argparse.SUPPRESS)
     sub.add_parser("analysis-stdio", help=argparse.SUPPRESS)
     p_repl = sub.add_parser("repl", help="start a simple interactive Sprout REPL")
@@ -4907,6 +4944,8 @@ def main(argv: list[str] | None = None) -> int:
                 with_stdlib=args.with_stdlib,
                 native=args.native,
             )
+        if args.command == "bootstrap-parse":
+            return cmd_bootstrap_parse(args.file)
         if args.command == "analysis-service":
             return cmd_analysis_cli(args.command)
         if args.command == "analysis-stdio":
