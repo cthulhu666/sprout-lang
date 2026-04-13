@@ -1413,6 +1413,159 @@ class ModuleLoaderTests(unittest.TestCase):
                 "fn:foo|fn:f|type:Color|fn:add",
             )
 
+    # ------------------------------------------------------------------
+    # Conformance tests: bootstrap lexer + parser vs Python parser
+    # ------------------------------------------------------------------
+
+    def _strip_headers(self, source: str) -> str:
+        """Strip module/import lines and normalize export/visibility markers
+        so the source is parseable by both the Python parser and the bootstrap
+        Sprout parser in the same way."""
+        import re
+        out = []
+        for line in source.splitlines():
+            s = line.strip()
+            if s.startswith("module ") or s.startswith("import "):
+                continue
+            # Strip (..) visibility annotation: "export type Foo (..)" → "type Foo"
+            line = re.sub(r"\bexport\s+type\s+(\w+)\s*\(\.\.\)", r"type \1", line)
+            # Strip plain "export " prefix from other decls
+            line = re.sub(r"^\s*export\s+", lambda m: m.group(0).replace("export ", ""), line)
+            out.append(line)
+        return "\n".join(out)
+
+    def _py_decl_summary(self, source: str) -> str:
+        """Parse source with the Python parser and return a canonical decl summary."""
+        from sprout import ast as py_ast
+        prog = parse(source)
+        parts = []
+        for d in prog.declarations:
+            if isinstance(d, py_ast.FnDecl):
+                parts.append(f"fn:{d.name}")
+            elif isinstance(d, py_ast.TypeDecl):
+                parts.append(f"type:{d.name}")
+            elif isinstance(d, py_ast.RecordDecl):
+                parts.append(f"record:{d.name}")
+            elif isinstance(d, py_ast.LetDecl):
+                parts.append(f"let:{d.name}")
+            elif isinstance(d, py_ast.ClassDecl):
+                parts.append(f"class:{d.name}")
+            elif isinstance(d, py_ast.InstanceDecl):
+                parts.append(f"instance")
+        return ",".join(parts)
+
+    def _sprout_decl_summary_program(self, source_escaped: str) -> str:
+        """Return a Sprout program that parses source_escaped and prints decl summary."""
+        return f"""
+                module main
+                import stdlib.compiler.lexer as lexer
+                import stdlib.compiler.parser as parser
+                import stdlib.compiler.ast as ast
+
+                fn decl_tag(d: ast.Decl) -> String =
+                  match d with
+                  | ast.FnDecl name _ _ _ _ _ _ -> str_concat("fn:", name)
+                  | ast.TypeDecl name _ _ _ -> str_concat("type:", name)
+                  | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
+                  | ast.LetDecl name _ _ -> str_concat("let:", name)
+                  | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
+                  | ast.InstanceDecl _ _ _ -> "instance"
+
+                fn join_decls(decls: List ast.Decl, acc: String) -> String =
+                  match decls with
+                  | Nil -> acc
+                  | Cons d rest ->
+                      if str_len(acc) == 0 then join_decls(rest, decl_tag(d))
+                      else join_decls(rest, str_concat(acc, str_concat(",", decl_tag(d))))
+
+                fn run(src: String) -> String =
+                  match lexer.tokenize(src) with
+                  | Err _ -> "lex-error"
+                  | Ok tokens ->
+                      match parser.parse_program(tokens) with
+                      | Err e -> "parse-error"
+                      | Ok prog ->
+                          match prog with
+                          | ast.Program decls _ -> join_decls(decls, "")
+
+                fn main() -> Unit !{{IO}} =
+                  print(run(src))
+                where
+                  src = "{source_escaped}"
+                """
+
+    def test_bootstrap_parser_conforms_on_token_sprout(self) -> None:
+        repo_root = Path(__file__).parent.parent
+        raw = (repo_root / "stdlib/compiler/token.sprout").read_text(encoding="utf-8")
+        body = self._strip_headers(raw)
+
+        expected = self._py_decl_summary(body)
+
+        source_escaped = body.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                self._sprout_decl_summary_program(source_escaped),
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), expected)
+
+    def test_bootstrap_parser_conforms_on_source_sprout(self) -> None:
+        repo_root = Path(__file__).parent.parent
+        raw = (repo_root / "stdlib/compiler/source.sprout").read_text(encoding="utf-8")
+        body = self._strip_headers(raw)
+
+        expected = self._py_decl_summary(body)
+
+        source_escaped = body.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                self._sprout_decl_summary_program(source_escaped),
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), expected)
+
+    def test_bootstrap_parser_conforms_on_lexer_sprout(self) -> None:
+        repo_root = Path(__file__).parent.parent
+        raw = (repo_root / "stdlib/compiler/lexer.sprout").read_text(encoding="utf-8")
+        body = self._strip_headers(raw)
+
+        expected = self._py_decl_summary(body)
+
+        source_escaped = body.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                self._sprout_decl_summary_program(source_escaped),
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(out.getvalue().strip(), expected)
+
     def test_import_stdlib_dict_entries_and_json_object_from_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
