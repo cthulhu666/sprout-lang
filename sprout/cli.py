@@ -127,7 +127,7 @@ def cmd_bootstrap_parse(path: Path) -> int:
         f.write(stripped)
         tmp_path = f.name
     try:
-        run_program(lowered, argv=["bootstrap-parse", tmp_path])
+        run_program(lowered, argv=[tmp_path])
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     return 0
@@ -276,6 +276,10 @@ typedef struct {
   long long f0;
   long long f1;
   long long f2;
+  long long f3;
+  long long f4;
+  long long f5;
+  long long f6;
 } SproutObj;
 
 typedef enum {
@@ -411,6 +415,12 @@ static long long g_gc_marked_count = 0;
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
+long long sprout_make2(long long tag, long long a0, long long a1);
+long long sprout_make3(long long tag, long long a0, long long a1, long long a2);
+long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3);
+long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4);
+long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5);
+long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6);
 long long sprout_tag(long long h);
 long long sprout_field(long long h, long long idx);
 static CtorMeta* find_ctor(long long tag);
@@ -646,6 +656,10 @@ static SproutObj* sprout_init_obj(SproutObj* obj, long long tag, long long f0, l
   obj->f0 = f0;
   obj->f1 = f1;
   obj->f2 = f2;
+  obj->f3 = 0;
+  obj->f4 = 0;
+  obj->f5 = 0;
+  obj->f6 = 0;
   return obj;
 }
 
@@ -834,6 +848,10 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
       if (index == 0) return obj->f0;
       if (index == 1) return obj->f1;
       if (index == 2) return obj->f2;
+      if (index == 3) return obj->f3;
+      if (index == 4) return obj->f4;
+      if (index == 5) return obj->f5;
+      if (index == 6) return obj->f6;
       break;
     }
     case SPROUT_HEAP_CLOSURE: {
@@ -1036,14 +1054,12 @@ static void print_inline_obj(SproutObj* o) {
   if (m->arity <= 0) return;
   printf("(");
   print_inline_value(o->f0);
-  if (m->arity > 1) {
-    printf(", ");
-    print_inline_value(o->f1);
-  }
-  if (m->arity > 2) {
-    printf(", ");
-    print_inline_value(o->f2);
-  }
+  if (m->arity > 1) { printf(", "); print_inline_value(o->f1); }
+  if (m->arity > 2) { printf(", "); print_inline_value(o->f2); }
+  if (m->arity > 3) { printf(", "); print_inline_value(o->f3); }
+  if (m->arity > 4) { printf(", "); print_inline_value(o->f4); }
+  if (m->arity > 5) { printf(", "); print_inline_value(o->f5); }
+  if (m->arity > 6) { printf(", "); print_inline_value(o->f6); }
   printf(")");
 }
 
@@ -2001,7 +2017,37 @@ long long sprout_field(long long h, long long idx) {
   SproutObj* o = unbox_ptr(h);
   if (idx == 0) return o->f0;
   if (idx == 1) return o->f1;
-  return o->f2;
+  if (idx == 2) return o->f2;
+  if (idx == 3) return o->f3;
+  if (idx == 4) return o->f4;
+  if (idx == 5) return o->f5;
+  return o->f6;
+}
+long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make4: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make5: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make6: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make7: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  obj->f6 = a6;
+  return sprout_box_registered_obj(obj);
 }
 
 static void tcp_fail(const char* msg) {
@@ -3701,6 +3747,38 @@ long long vector_append(long long vec, long long value) {
   return (long long)(uintptr_t)out;
 }
 
+long long vector_from_list(long long list_handle) {
+  /* Build a Vec<a> from a forward-ordered List<a> in O(n) time and space. */
+  long long nil_tag = find_ctor_tag_by_name("Nil");
+  /* First pass: count elements (no allocation, no GC risk). */
+  long long count = 0;
+  long long cur = list_handle;
+  while (sprout_tag(cur) != nil_tag) {
+    count++;
+    cur = sprout_field(cur, 1);
+  }
+  /* Root the list while we allocate. */
+  long long rooted_list = list_handle;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
+  VectorVal* v = sprout_alloc_vector_val("vector_from_list: out of memory");
+  v->len = count;
+  v->cap = count;
+  if (count == 0) {
+    v->data = NULL;
+    SPROUT_GC_POP_LOCALS(1);
+    return (long long)(uintptr_t)v;
+  }
+  v->data = sprout_alloc_vector_data((size_t)count, "vector_from_list: out of memory");
+  /* Second pass: fill Vec front-to-back (list head → index 0). */
+  cur = rooted_list;
+  for (long long i = 0; i < count; i++) {
+    v->data[i] = sprout_field(cur, 0);
+    cur = sprout_field(cur, 1);
+  }
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)v;
+}
+
 typedef struct {
   long long key;
   long long index;
@@ -4864,6 +4942,8 @@ long long tcp_echo_serve(long long port, long long max_connections) {
         clang_cmd = [clang, str(ll_path), str(c_path), "-O2"]
         if sys.platform == "darwin":
             clang_cmd.extend(["-framework", "Security", "-framework", "CoreFoundation"])
+            # Bootstrap parser needs deep recursion; set stack to 64 MB
+            clang_cmd.extend(["-Wl,-stack_size,0x4000000"])
         clang_cmd.extend(["-o", str(out)])
         subprocess.run(clang_cmd, check=True)
     finally:
