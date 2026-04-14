@@ -1593,6 +1593,24 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
             vars=(),
             type=TFunc(INT, TApp(maybe_type, STRING), IO_EFFECT),
         ),
+        "ref_new": builtin_scheme(
+            [TVar("ref.a")],
+            TApp(TConst("Ref"), TVar("ref.a")),
+            vars=("ref.a",),
+            effects=IO_EFFECT,
+        ),
+        "ref_read": builtin_scheme(
+            [TApp(TConst("Ref"), TVar("ref.a"))],
+            TVar("ref.a"),
+            vars=("ref.a",),
+            effects=IO_EFFECT,
+        ),
+        "ref_write": builtin_scheme(
+            [TApp(TConst("Ref"), TVar("ref.a")), TVar("ref.a")],
+            UNIT,
+            vars=("ref.a",),
+            effects=IO_EFFECT,
+        ),
         "parse_int": Scheme(vars=(), type=TFunc(TConst("String"), INT)),
         "char_to_string": Scheme(vars=(), type=TFunc(CHAR, STRING)),
         "split_words": Scheme(

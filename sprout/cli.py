@@ -290,7 +290,8 @@ typedef enum {
   SPROUT_HEAP_BYTES = 5,
   SPROUT_HEAP_BUILDER = 6,
   SPROUT_HEAP_TUPLE = 7,
-  SPROUT_HEAP_RANGE = 8
+  SPROUT_HEAP_RANGE = 8,
+  SPROUT_HEAP_REF = 9
 } SproutHeapKind;
 
 typedef struct ManagedNode {
@@ -359,6 +360,10 @@ typedef struct {
   long long start;
   long long end;
 } IntRangeVal;
+
+typedef struct {
+  long long value;
+} RefVal;
 
 typedef struct {
   char* host;
@@ -810,6 +815,27 @@ static IntRangeVal* sprout_alloc_range_val(const char* ctx) {
   return out;
 }
 
+long long ref_new(long long value) {
+  sprout_gc_maybe_collect_threshold();
+  RefVal* r = (RefVal*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(RefVal), "ref_new: out of memory");
+  r->value = value;
+  register_managed_ptr(r, SPROUT_HEAP_REF, 0);
+  return box_ptr((SproutObj*)r);
+}
+
+long long ref_read(long long ref) {
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)ref);
+  if (node == NULL || node->kind != SPROUT_HEAP_REF) tcp_fail("ref_read: not a Ref");
+  return ((RefVal*)node->ptr)->value;
+}
+
+long long ref_write(long long ref, long long value) {
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)ref);
+  if (node == NULL || node->kind != SPROUT_HEAP_REF) tcp_fail("ref_write: not a Ref");
+  ((RefVal*)node->ptr)->value = value;
+  return 0;
+}
+
 static int is_obj_handle(long long h) {
   ManagedNode* node = find_managed_ptr((void*)(uintptr_t)h);
   return node != NULL && node->kind == SPROUT_HEAP_OBJ;
@@ -836,6 +862,8 @@ static size_t sprout_heap_child_count(ManagedNode* node) {
       return node->aux_slots;
     case SPROUT_HEAP_RANGE:
       return 0;
+    case SPROUT_HEAP_REF:
+      return 1;
   }
   return 0;
 }
@@ -872,6 +900,9 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
       return (long long)word;
     }
     case SPROUT_HEAP_RANGE:
+      break;
+    case SPROUT_HEAP_REF:
+      if (index == 0) return ((RefVal*)node->ptr)->value;
       break;
   }
   tcp_fail("sprout_heap_child_value: index out of range");
@@ -973,6 +1004,9 @@ static void sprout_gc_free_payload(ManagedNode* node) {
       free(node->ptr);
       return;
     case SPROUT_HEAP_RANGE:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_REF:
       free(node->ptr);
       return;
   }

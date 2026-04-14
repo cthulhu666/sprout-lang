@@ -158,6 +158,13 @@ class RecordValue:
 
 
 @dataclass
+class RefValue:
+    """Mutable reference cell — backing store for ref_new/ref_read/ref_write."""
+
+    value: object
+
+
+@dataclass
 class ConstructorValue:
     name: str
     arity: int
@@ -1885,6 +1892,26 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             raise RuntimeError("tcp_echo_serve max_connections must be >= 1")
         echo_backend.serve_echo(port, max_connections)
         return None
+
+    def builtin_ref_new(args: list[object]) -> object:
+        return RefValue(value=args[0])
+
+    def builtin_ref_read(args: list[object]) -> object:
+        r = args[0]
+        if not isinstance(r, RefValue):
+            raise RuntimeError("ref_read: not a Ref")
+        return r.value
+
+    def builtin_ref_write(args: list[object]) -> object:
+        r, val = args[0], args[1]
+        if not isinstance(r, RefValue):
+            raise RuntimeError("ref_write: not a Ref")
+        r.value = val
+        return None
+
+    env.set("ref_new", BuiltinFunction(name="ref_new", arity=1, fn=builtin_ref_new))
+    env.set("ref_read", BuiltinFunction(name="ref_read", arity=1, fn=builtin_ref_read))
+    env.set("ref_write", BuiltinFunction(name="ref_write", arity=2, fn=builtin_ref_write))
 
     env.set("print", BuiltinFunction(name="print", arity=1, fn=builtin_print))
     env.set("print_int", BuiltinFunction(name="print_int", arity=1, fn=builtin_print_int))

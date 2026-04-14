@@ -2388,5 +2388,55 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(out.getvalue().strip(), "sprout-lang\nCons(1, Cons(2, Cons(3, Cons(4, Nil))))\n2\n9")
 
 
+    def test_ref_mutable_counter_via_recursive_traversal(self) -> None:
+        """Ref used as a mutable accumulator threaded through a recursive list traversal.
+
+        Demonstrates Union-Find-style mutable state: a Ref Int is passed into a
+        recursive function that increments it for each element satisfying a predicate,
+        then the final count is read back.  The same pattern underlies HM unification
+        where type variables are Ref cells that get bound in place.
+        """
+        src = """
+        module main
+
+        fn count_if(xs: List Int, pred: Int -> Bool, counter: Ref Int) -> Unit !{IO} =
+          match xs with
+          | Nil -> ()
+          | Cons h t ->
+              do
+                if pred(h) then
+                  do
+                    old <- ref_read(counter)
+                    ref_write(counter, old + 1)
+                else ()
+                count_if(t, pred, counter)
+
+        fn is_even(n: Int) -> Bool = n - (n / 2 * 2) == 0
+
+        fn make_list(n: Int) -> List Int =
+          if n == 0 then Nil
+          else Cons(n, make_list(n - 1))
+
+        fn main() -> Unit !{IO} =
+          do
+            counter <- ref_new(0)
+            count_if(make_list(10), is_even, counter)
+            result <- ref_read(counter)
+            print(result)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(src, encoding="utf-8")
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(out.getvalue().strip(), "5")
+
+
 if __name__ == "__main__":
     unittest.main()

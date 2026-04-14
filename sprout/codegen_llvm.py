@@ -175,6 +175,9 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_gc_pop_roots": FnSig(name="sprout_gc_pop_roots", params=[I64], ret=I64),
     "sprout_tag": FnSig(name="sprout_tag", params=[I64], ret=I64),
     "sprout_field": FnSig(name="sprout_field", params=[I64, I64], ret=I64),
+    "ref_new": FnSig(name="ref_new", params=[I64], ret=I64),
+    "ref_read": FnSig(name="ref_read", params=[I64], ret=I64),
+    "ref_write": FnSig(name="ref_write", params=[I64, I64], ret=I64),
 }
 
 
@@ -345,7 +348,7 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
         base_leaf = base_name.rsplit(".", 1)[-1] if base_name is not None else None
         if base_name in adt_names or (base_leaf is not None and base_leaf in adt_leaf_names):
             return I64
-        if base_name in {"Vector", "Map", "Bytes"}:
+        if base_name in {"Vector", "Map", "Bytes", "Ref"}:
             return I64
         if base_leaf and base_leaf[0].islower():
             return I64

@@ -1139,5 +1139,66 @@ class CodegenNativeBasicTests(CodegenTestCase):
             self.assertEqual(run.stdout.strip(), "5050")
 
 
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_ref_mutable_counter_via_recursive_traversal(self) -> None:
+        """Ref used as a mutable accumulator in native code.
+
+        Passes a Ref Int into a recursive function that increments it for each
+        even element in a list.  Validates that ref_new/ref_read/ref_write are
+        correctly lowered to sprout_ref_* C functions, that the GC scans Ref
+        cells as single-child managed nodes, and that mutation persists across
+        recursive calls without stack corruption.
+        """
+        src = """
+        type List a = Nil | Cons a (List a)
+
+        fn count_if(xs: List Int, pred: Int -> Bool, counter: Ref Int) -> Unit !{IO} =
+          match xs with
+          | Nil -> ()
+          | Cons h t ->
+              do
+                if pred(h) then
+                  do
+                    old <- ref_read(counter)
+                    ref_write(counter, old + 1)
+                else ()
+                count_if(t, pred, counter)
+
+        fn is_even(n: Int) -> Bool = n - (n / 2 * 2) == 0
+
+        fn make_list(n: Int) -> List Int =
+          if n == 0 then Nil
+          else Cons(n, make_list(n - 1))
+
+        fn main() -> Unit !{IO} =
+          do
+            counter <- ref_new(0)
+            count_if(make_list(10), is_even, counter)
+            result <- ref_read(counter)
+            print(result)
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.spr"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(src, encoding="utf-8")
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stdout.strip(), "5")
+
+
 if __name__ == "__main__":
     unittest.main()
