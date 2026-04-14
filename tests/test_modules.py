@@ -3121,5 +3121,54 @@ class ModuleLoaderTests(unittest.TestCase):
                 lower_typeclasses(program)
 
 
+    def test_import_stdlib_compiler_types(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler.types as types
+                import stdlib.string as string
+
+                fn sep(a: String, b: String) -> String =
+                  string.concat(a, string.concat(",", b))
+
+                fn main() -> Unit !{IO} =
+                  do
+                    print(types.type_to_string(types.type_int()))
+                    print(types.type_to_string(types.type_list(types.type_bool())))
+                    print(types.type_to_string(types.TFunc(types.type_int(), types.type_bool(), types.EffectPure)))
+                    print(types.type_to_string(types.TFunc(types.TFunc(types.type_int(), types.type_int(), types.EffectPure), types.type_bool(), types.EffectIO)))
+                    print(types.type_to_string(types.TVar("a")))
+                    print(types.scheme_to_string(types.mono(types.type_int())))
+                    print(types.effect_to_string(types.EffectPure))
+                    print(types.effect_to_string(types.EffectIO))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join([
+                    "Int",
+                    "List Bool",
+                    "Int -> Bool",
+                    "(Int -> Int) -> Bool !{IO}",
+                    "a",
+                    "Int",
+                    "pure",
+                    "!{IO}",
+                ]),
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

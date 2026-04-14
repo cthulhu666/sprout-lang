@@ -1,0 +1,214 @@
+module stdlib.compiler.types
+import stdlib.string as string
+
+# ---------------------------------------------------------------------------
+# Effect rows
+# ---------------------------------------------------------------------------
+#
+# An effect row describes what side-effects a function may perform.
+#   EffectPure        — no effects (the function is pure)
+#   EffectIO          — concrete !{IO} label
+#   EffectRow labels  — closed row with arbitrary named labels (future use)
+#   EffectVar name    — open effect variable (e.g. from "fn f !{e}")
+
+export type Effect (..) =
+  | EffectPure
+  | EffectIO
+  | EffectRow (List String)
+  | EffectVar String
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+#
+# The five forms mirror the Python typechecker exactly:
+#   TVar  — an inference variable, identified by a generated name ("t0", "t1"…)
+#   TConst — a type constant ("Int", "Bool", "Maybe", …)
+#   TApp  — type application: TApp (TConst "Maybe") (TConst "Int") = Maybe Int
+#   TFunc — function type with associated effect row
+#   TTuple — tuple type (Int, Bool, …)
+
+export type Type (..) =
+  | TVar String
+  | TConst String
+  | TApp Type Type
+  | TFunc Type Type Effect
+  | TTuple (List Type)
+
+# ---------------------------------------------------------------------------
+# Schemes  (∀ type_vars effect_vars. body_type !body_effects)
+# ---------------------------------------------------------------------------
+#
+# A monomorphic type is Scheme(Nil, Nil, t, EffectPure).
+# A polymorphic type binds quantified variables so they can be freshly
+# instantiated at each use site.
+
+export type Scheme (..) =
+  | Scheme (List String) (List String) Type Effect
+  # Scheme type_vars effect_vars body effects
+
+# ---------------------------------------------------------------------------
+# Commonly-used type constants
+# ---------------------------------------------------------------------------
+
+export fn type_int()      -> Type = TConst("Int")
+export fn type_bool()     -> Type = TConst("Bool")
+export fn type_string()   -> Type = TConst("String")
+export fn type_char()     -> Type = TConst("Char")
+export fn type_unit()     -> Type = TConst("Unit")
+export fn type_list(a: Type)  -> Type = TApp(TConst("List"), a)
+export fn type_maybe(a: Type) -> Type = TApp(TConst("Maybe"), a)
+
+export fn effect_pure() -> Effect = EffectPure
+export fn effect_io()   -> Effect = EffectIO
+
+# ---------------------------------------------------------------------------
+# Scheme accessors / constructors
+# ---------------------------------------------------------------------------
+
+export fn mono(t: Type) -> Scheme =
+  Scheme(Nil, Nil, t, EffectPure)
+
+export fn scheme_vars(s: Scheme) -> List String =
+  match s with | Scheme vs _ _ _ -> vs
+
+export fn scheme_effect_vars(s: Scheme) -> List String =
+  match s with | Scheme _ evs _ _ -> evs
+
+export fn scheme_type(s: Scheme) -> Type =
+  match s with | Scheme _ _ t _ -> t
+
+export fn scheme_effects(s: Scheme) -> Effect =
+  match s with | Scheme _ _ _ e -> e
+
+# ---------------------------------------------------------------------------
+# Free type variables
+# ---------------------------------------------------------------------------
+#
+# ftv collects every TVar name reachable from a type, with duplicates.
+# Callers that need a set should pass the result through list_dedup.
+
+fn ftv_acc(t: Type, acc: List String) -> List String =
+  match t with
+  | TVar name -> Cons(name, acc)
+  | TConst _ -> acc
+  | TApp base arg -> ftv_acc(base, ftv_acc(arg, acc))
+  | TFunc param ret _ -> ftv_acc(param, ftv_acc(ret, acc))
+  | TTuple items -> ftv_list_acc(items, acc)
+
+fn ftv_list_acc(items: List Type, acc: List String) -> List String =
+  match items with
+  | Nil -> acc
+  | Cons h t -> ftv_list_acc(t, ftv_acc(h, acc))
+
+export fn ftv(t: Type) -> List String =
+  list_dedup(ftv_acc(t, Nil))
+
+export fn ftv_effect(e: Effect) -> List String =
+  match e with
+  | EffectVar name -> Cons(name, Nil)
+  | _ -> Nil
+
+export fn ftv_scheme(s: Scheme) -> List String =
+  list_diff(
+    list_union(ftv(scheme_type(s)), ftv_effect(scheme_effects(s))),
+    list_union(scheme_vars(s), scheme_effect_vars(s))
+  )
+
+# ---------------------------------------------------------------------------
+# List-as-set helpers
+# (Sprout has no built-in set; these are O(n²) but fine for the bootstrap.)
+# ---------------------------------------------------------------------------
+
+export fn list_member(x: String, xs: List String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons h t -> if h == x then true else list_member(x, t)
+
+export fn list_union(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> ys
+  | Cons h t ->
+      if list_member(h, ys) then list_union(t, ys)
+      else Cons(h, list_union(t, ys))
+
+export fn list_diff(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | Cons h t ->
+      if list_member(h, ys) then list_diff(t, ys)
+      else Cons(h, list_diff(t, ys))
+
+fn list_dedup_acc(xs: List String, seen: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | Cons h t ->
+      if list_member(h, seen) then list_dedup_acc(t, seen)
+      else Cons(h, list_dedup_acc(t, Cons(h, seen)))
+
+export fn list_dedup(xs: List String) -> List String =
+  list_dedup_acc(xs, Nil)
+
+# ---------------------------------------------------------------------------
+# Pretty-printing
+# ---------------------------------------------------------------------------
+
+fn join_list(sep: String, xs: List String) -> String =
+  match xs with
+  | Nil -> ""
+  | Cons h t ->
+      match t with
+      | Nil -> h
+      | _ -> h ++ sep ++ join_list(sep, t)
+
+fn effect_suffix(e: Effect) -> String =
+  match e with
+  | EffectPure -> ""
+  | EffectIO -> " !{IO}"
+  | EffectVar name -> " !{" ++ name ++ "}"
+  | EffectRow labels -> " !{" ++ join_list(", ", labels) ++ "}"
+
+fn wrap_parens(s: String) -> String =
+  "(" ++ s ++ ")"
+
+# as_arg = true when this type appears as a constructor or function argument,
+# requiring parentheses if it has lower precedence than application.
+fn type_to_string_aux(t: Type, as_arg: Bool) -> String =
+  match t with
+  | TVar name -> name
+  | TConst name -> name
+  | TApp base arg ->
+      if as_arg
+      then wrap_parens(type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true))
+      else type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true)
+  | TFunc param ret eff ->
+      if as_arg
+      then wrap_parens(type_to_string_aux(param, true) ++ " -> " ++ type_to_string_aux(ret, false) ++ effect_suffix(eff))
+      else type_to_string_aux(param, true) ++ " -> " ++ type_to_string_aux(ret, false) ++ effect_suffix(eff)
+  | TTuple items -> "(" ++ join_types(items) ++ ")"
+
+fn join_types(items: List Type) -> String =
+  match items with
+  | Nil -> ""
+  | Cons h t ->
+      match t with
+      | Nil -> type_to_string_aux(h, false)
+      | _ -> type_to_string_aux(h, false) ++ ", " ++ join_types(t)
+
+export fn type_to_string(t: Type) -> String =
+  type_to_string_aux(t, false)
+
+export fn effect_to_string(e: Effect) -> String =
+  match e with
+  | EffectPure -> "pure"
+  | EffectIO -> "!{IO}"
+  | EffectVar name -> "!{" ++ name ++ "}"
+  | EffectRow labels -> "!{" ++ join_list(", ", labels) ++ "}"
+
+fn scheme_body(s: Scheme) -> String =
+  type_to_string(scheme_type(s)) ++ effect_suffix(scheme_effects(s))
+
+export fn scheme_to_string(s: Scheme) -> String =
+  match scheme_vars(s) with
+  | Nil -> scheme_body(s)
+  | vars -> "forall " ++ join_list(" ", vars) ++ ". " ++ scheme_body(s)
