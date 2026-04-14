@@ -4942,8 +4942,6 @@ long long tcp_echo_serve(long long port, long long max_connections) {
         clang_cmd = [clang, str(ll_path), str(c_path), "-O2"]
         if sys.platform == "darwin":
             clang_cmd.extend(["-framework", "Security", "-framework", "CoreFoundation"])
-            # Bootstrap parser needs deep recursion; set stack to 64 MB
-            clang_cmd.extend(["-Wl,-stack_size,0x4000000"])
         clang_cmd.extend(["-o", str(out)])
         subprocess.run(clang_cmd, check=True)
     finally:

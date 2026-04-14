@@ -2659,6 +2659,14 @@ def _emit_call(
         assert sig is not None
         if len(expr.args) > len(sig.params):
             raise CodegenError(f"Function {fn_name} expects {len(sig.params)} args, got {len(expr.args)}")
+        if tco_ctx is not None and fn_name == tco_ctx.fn_name and len(expr.args) == len(sig.params):
+            # TCO self-call: compute args WITHOUT temp roots (no GC allocation between
+            # here and the back-edge stores, so no alloca needed — avoids stack growth
+            # in the loop body on AArch64).
+            raw_args = [_emit_expr(arg, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=None)
+                        for arg in expr.args]
+            coerced_args = [_coerce_value(av, st, emitter) for av, (_, st) in zip(raw_args, tco_ctx.param_slots)]
+            return Value(sig.ret, "undef", tco_args=coerced_args)
         args, rooted_args = _emit_exprs_with_temp_roots(
             expr.args, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter
         )
@@ -2674,11 +2682,6 @@ def _emit_call(
                 ret_callable_sig=sig.ret_callable_sig,
             )
             out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
-        elif tco_ctx is not None and fn_name == tco_ctx.fn_name:
-            # Self-tail-call: coerce args to slot types, pop temp roots, return TCO sentinel.
-            coerced_args = [_coerce_value(av, st, emitter) for av, (_, st) in zip(args, tco_ctx.param_slots)]
-            _emit_pop_temp_roots(rooted_args, emitter)
-            return Value(sig.ret, "undef", tco_args=coerced_args)
         else:
             args_ir: list[str] = []
             for arg_val, param_type in zip(args, sig.params):
