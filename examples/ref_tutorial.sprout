@@ -1,0 +1,237 @@
+module examples.ref_tutorial
+
+# --- Ref a: mutable cells in a pure language ---
+#
+# Sprout is pure by default: functions have no side effects and values are
+# immutable.  But some algorithms genuinely need mutation — in particular,
+# Hindley-Milner type inference uses mutable cells to bind type variables
+# in place during unification.
+#
+# Ref a is a heap-allocated cell that holds a value of type a.
+# Reading or writing it is an IO effect, so purity is preserved everywhere
+# that doesn't need mutation.
+#
+#   ref_new  : a         -> Ref a  !{IO}   allocate a new cell
+#   ref_read : Ref a     -> a      !{IO}   read the current value
+#   ref_write: Ref a, a  -> Unit   !{IO}   overwrite the value
+#
+# Run:
+#   python3 -m sprout.cli run examples/ref_tutorial.sprout
+
+# ---------------------------------------------------------------------------
+# Part 1: the basics
+# ---------------------------------------------------------------------------
+#
+# A Ref Int behaves like a single mutable variable.
+# The do-notation sequences the IO effects in order.
+
+fn part1() -> Unit !{IO} =
+  do
+    print("--- part 1: basic read / write ---")
+    counter <- ref_new(0)
+
+    ref_write(counter, 1)
+    a <- ref_read(counter)
+    print(a)                      # 1
+
+    old <- ref_read(counter)
+    ref_write(counter, old + 41)
+    b <- ref_read(counter)
+    print(b)                      # 42
+
+# ---------------------------------------------------------------------------
+# Part 2: sharing a cell across recursive calls
+# ---------------------------------------------------------------------------
+#
+# The key insight: a Ref can be passed into a recursive function and updated
+# at any point in the recursion without threading a return value back up.
+#
+# Compare the two approaches for summing a list:
+#
+#   Pure:     fn sum_pure(xs) -> Int — must return the accumulator
+#   With Ref: fn sum_ref(xs, acc: Ref Int) -> Unit — mutates acc in place
+#
+# The Ref version shines when multiple independent pieces of state must be
+# updated in the same traversal.
+
+fn sum_ref(xs: List Int, acc: Ref Int) -> Unit !{IO} =
+  match xs with
+  | Nil -> ()
+  | Cons h t ->
+      do
+        old <- ref_read(acc)
+        ref_write(acc, old + h)
+        sum_ref(t, acc)
+
+fn part2() -> Unit !{IO} =
+  do
+    print("--- part 2: shared cell across recursion ---")
+    total <- ref_new(0)
+    sum_ref(Cons(10, Cons(20, Cons(30, Nil))), total)
+    result <- ref_read(total)
+    print(result)                 # 60
+
+# ---------------------------------------------------------------------------
+# Part 3: two independent cells in one traversal
+# ---------------------------------------------------------------------------
+#
+# With pure functions you'd return a tuple (total, max) from every recursive
+# call and combine them at each node.  With Ref you pass two cells and
+# update whichever is relevant — the call sites stay flat.
+
+fn track_list(xs: List Int, total: Ref Int, maximum: Ref Int) -> Unit !{IO} =
+  match xs with
+  | Nil -> ()
+  | Cons h t ->
+      do
+        old_total <- ref_read(total)
+        ref_write(total, old_total + h)
+        cur_max <- ref_read(maximum)
+        if h > cur_max then ref_write(maximum, h) else ()
+        track_list(t, total, maximum)
+
+fn part3() -> Unit !{IO} =
+  do
+    print("--- part 3: two cells, one traversal ---")
+    total   <- ref_new(0)
+    maximum <- ref_new(0)
+    track_list(Cons(3, Cons(7, Cons(2, Cons(9, Cons(4, Nil))))), total, maximum)
+    t <- ref_read(total)
+    m <- ref_read(maximum)
+    print(t)                      # 25
+    print(m)                      # 9
+
+# ---------------------------------------------------------------------------
+# Part 4: Ref holds any type — including heap values
+# ---------------------------------------------------------------------------
+#
+# The cell can hold anything: not just Int, but lists, ADTs, even other Refs.
+# The GC treats the stored value as a live reference and keeps it alive.
+#
+# Here a Ref (List Int) acts as a mutable stack with push / pop.
+
+fn stack_push(stack: Ref (List Int), value: Int) -> Unit !{IO} =
+  do
+    xs <- ref_read(stack)
+    ref_write(stack, Cons(value, xs))
+
+# Returns the top element (or -1 if empty) and removes it.
+# Returning a plain Int avoids mixing the Maybe and IO monads in one do block.
+fn stack_pop(stack: Ref (List Int)) -> Int !{IO} =
+  do
+    xs <- ref_read(stack)
+    match xs with
+    | Nil -> -1
+    | Cons h t ->
+        do
+          ref_write(stack, t)
+          h
+
+fn part4() -> Unit !{IO} =
+  do
+    print("--- part 4: Ref (List Int) as a mutable stack ---")
+    stack <- ref_new(Nil)
+
+    stack_push(stack, 10)
+    stack_push(stack, 20)
+    stack_push(stack, 30)
+
+    a <- stack_pop(stack)   # 30 (LIFO)
+    b <- stack_pop(stack)   # 20
+    stack_push(stack, 99)
+    c <- stack_pop(stack)   # 99
+    d <- stack_pop(stack)   # 10
+
+    print(a)
+    print(b)
+    print(c)
+    print(d)
+
+# ---------------------------------------------------------------------------
+# Part 5: the HM unification pattern
+# ---------------------------------------------------------------------------
+#
+# In Hindley-Milner type inference, every type variable is a mutable cell
+# holding its binding state.  We represent this with a custom ADT rather
+# than Maybe so the do-notation classifier doesn't confuse the IO bind with
+# a Maybe short-circuit:
+#
+#   type Binding = Unbound        -- free variable, is its own root
+#                | BoundTo Int    -- points to another variable's index
+#
+# Each variable gets one Ref Binding cell.  find_root follows BoundTo
+# pointers to the root, then writes the root back (path compression) so
+# future lookups skip intermediate nodes.  unify_vars makes one root point
+# to the other.
+#
+# This is the exact pattern the self-hosted HM typechecker in
+# stdlib.compiler will use — type variables will be Ref Binding cells.
+
+type Binding = Unbound | BoundTo Int
+
+fn make_vars(n: Int, i: Int, acc: Vec (Ref Binding)) -> Vec (Ref Binding) !{IO} =
+  if i >= n then acc
+  else
+    do
+      cell <- ref_new(Unbound)
+      make_vars(n, i + 1, vec_append(cell, acc))
+
+fn find_root(vars: Vec (Ref Binding), i: Int) -> Int !{IO} =
+  match vec_get(i, vars) with
+  | Nothing -> i
+  | Just cell ->
+      do
+        b <- ref_read(cell)
+        match b with
+        | Unbound -> i
+        | BoundTo j ->
+            do
+              root <- find_root(vars, j)
+              ref_write(cell, BoundTo(root))  # path compression
+              root
+
+fn unify_vars(vars: Vec (Ref Binding), i: Int, j: Int) -> Unit !{IO} =
+  do
+    ri <- find_root(vars, i)
+    rj <- find_root(vars, j)
+    if ri == rj then ()
+    else
+      match vec_get(ri, vars) with
+      | Nothing -> ()
+      | Just cell -> ref_write(cell, BoundTo(rj))
+
+fn same_var(vars: Vec (Ref Binding), i: Int, j: Int) -> Bool !{IO} =
+  do
+    ri <- find_root(vars, i)
+    rj <- find_root(vars, j)
+    ri == rj
+
+fn part5() -> Unit !{IO} =
+  do
+    print("--- part 5: HM unification pattern ---")
+    # Three unbound type variables: t0, t1, t2
+    vars <- make_vars(3, 0, vec_empty())
+
+    # Before any unification: each variable is distinct
+    eq_01_before <- same_var(vars, 0, 1)
+    print(eq_01_before)           # False
+
+    # Unify t0 = t1, then t1 = t2
+    unify_vars(vars, 0, 1)
+    unify_vars(vars, 1, 2)
+
+    # Now all three share the same root
+    eq_01 <- same_var(vars, 0, 1)
+    eq_02 <- same_var(vars, 0, 2)
+    eq_12 <- same_var(vars, 1, 2)
+    print(eq_01)                  # True
+    print(eq_02)                  # True
+    print(eq_12)                  # True
+
+fn main() -> Unit !{IO} =
+  do
+    part1()
+    part2()
+    part3()
+    part4()
+    part5()
