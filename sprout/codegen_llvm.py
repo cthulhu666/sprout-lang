@@ -206,6 +206,18 @@ class Value:
     ir: str
     callable_sig: "CallSig | None" = None
     tuple_items: list[LLType] | None = None
+    # Non-None signals a pending TCO back-edge: list of coerced new argument values.
+    tco_args: "list[Value] | None" = None
+
+
+@dataclass
+class TcoCtx:
+    """Context threaded through expression emission for tail-call optimisation."""
+    fn_name: str
+    loop_label: str
+    param_slots: list[tuple[str, LLType]]  # (alloca_ir, slot_type)
+    ret: LLType
+    outer_roots: int = 0  # accumulated pattern-bind roots from enclosing scopes
 
 
 @dataclass
@@ -256,6 +268,18 @@ class Emitter:
     def label(self, name: str) -> None:
         self.lines.append(f"{name}:")
         self.current_block = name
+
+    def is_block_terminated(self) -> bool:
+        """Return True if the current block already ends with a terminator."""
+        for line in reversed(self.lines):
+            if not line.strip():
+                continue
+            # A label (no leading whitespace, ends with ':') starts a fresh block
+            if not line.startswith("  ") and line.strip().endswith(":"):
+                return False
+            stripped = line.strip()
+            return stripped.startswith("br ") or stripped.startswith("ret ") or stripped == "unreachable"
+        return False
 
     def tmp(self) -> str:
         name = f"%t{self.next_tmp}"
@@ -1240,6 +1264,21 @@ def _eval_const_expr(expr: ast.Expr, globals_: dict[str, GlobalConst]) -> Global
     raise CodegenError("Top-level let in LLVM backend must be compile-time constant expression")
 
 
+def _has_self_tail_calls(expr: ast.Expr, fn_name: str) -> bool:
+    """Return True if *expr* contains a direct self-tail-call to *fn_name*.
+
+    Only descends into syntactic tail positions (if/match branches).
+    Does NOT descend into lambda bodies or call arguments.
+    """
+    if isinstance(expr, ast.CallExpr):
+        return isinstance(expr.callee, ast.VarExpr) and expr.callee.name == fn_name
+    if isinstance(expr, ast.IfExpr):
+        return _has_self_tail_calls(expr.then_branch, fn_name) or _has_self_tail_calls(expr.else_branch, fn_name)
+    if isinstance(expr, ast.MatchExpr):
+        return any(_has_self_tail_calls(branch.value, fn_name) for branch in expr.branches)
+    return False
+
+
 def _emit_fn(
     fn: ast.FnDecl,
     sigs: dict[str, FnSig],
@@ -1266,6 +1305,11 @@ def _emit_fn(
         )
 
     is_entry_main = fn.name == entry_main_name
+    # Apply TCO for non-entry self-recursive functions.
+    if not is_entry_main and _has_self_tail_calls(fn.body, fn.name):
+        _emit_fn_tco(fn, sigs, ctor_sigs, globals_info, adt_names, emitter)
+        return
+
     emitted_name = "main" if is_entry_main else fn.name
     if is_entry_main:
         emitted_params = ["i32 %argc", "ptr %argv"]
@@ -1299,6 +1343,93 @@ def _emit_fn(
     if is_entry_main and _is_effectful_unit(fn.return_type, fn.effects):
         emitter.emit("  ret i64 0")
     else:
+        emitter.emit(f"  ret {ret.typ.text} {ret.ir}")
+    emitter.emit("}")
+
+
+def _emit_fn_tco(
+    fn: ast.FnDecl,
+    sigs: dict[str, FnSig],
+    ctor_sigs: dict[str, CtorSig],
+    globals_info: dict[str, GlobalInfo],
+    adt_names: set[str],
+    emitter: Emitter,
+) -> None:
+    """Emit a self-recursive function using an explicit loop (TCO Option C).
+
+    The entry block allocates one alloca slot per parameter, stores the initial
+    argument values, registers the slots as GC roots (once), then jumps to a loop
+    header.  The loop header loads the current parameter values, emits the body
+    normally.  Self-tail-calls store new argument values back into the slots and
+    branch to the loop header instead of calling recursively.  Non-tail returns
+    pop the GC roots and execute a normal ``ret``.
+    """
+    sig = sigs[fn.name]
+    params_ir = ", ".join(f"{typ.text} %{p.name}" for p, typ in zip(fn.params, sig.params))
+    emitter.emit(f"define {sig.ret.text} @{fn.name}({params_ir}) {{")
+    emitter.label("entry")
+
+    loop_label = emitter.block("tco_loop")
+    param_slots: list[tuple[str, LLType]] = []
+    n_roots = 0
+    for p, typ in zip(fn.params, sig.params):
+        slot = emitter.tmp()
+        emitter.emit(f"  {slot} = alloca {typ.text}")
+        emitter.emit(f"  store {typ.text} %{p.name}, ptr {slot}")
+        if typ == I64:
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_push_i64_root(ptr {slot})")
+            n_roots += 1
+        elif typ == I8_PTR:
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_push_ptr_root(ptr {slot})")
+            n_roots += 1
+        elif _tuple_item_types_from_lltype(typ) is not None:
+            size = _sizeof_struct(typ.text, emitter)
+            reg = emitter.tmp()
+            emitter.emit(f"  {reg} = call i64 @sprout_gc_push_scan_root(ptr {slot}, i64 {size})")
+            n_roots += 1
+        # I1 (Bool): alloca slot for loop state but no GC root needed
+        param_slots.append((slot, typ))
+    emitter.emit(f"  br label %{loop_label}")
+
+    emitter.label(loop_label)
+    locals_: dict[str, Value] = {}
+    for (slot, typ), p in zip(param_slots, fn.params):
+        loaded = emitter.tmp()
+        emitter.emit(f"  {loaded} = load {typ.text}, ptr {slot}")
+        _, call_sig = _lower_value_type(p.type_expr, adt_names)
+        locals_[p.name] = Value(
+            typ=typ,
+            ir=loaded,
+            callable_sig=call_sig,
+            tuple_items=_tuple_item_types_from_type_expr(p.type_expr, adt_names),
+        )
+
+    tco_ctx = TcoCtx(
+        fn_name=fn.name,
+        loop_label=loop_label,
+        param_slots=param_slots,
+        ret=sig.ret,
+        outer_roots=0,
+    )
+    ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
+
+    if ret.tco_args is not None:
+        # Body was itself a direct self-tail-call (degenerate: fn f(n) = f(n-1))
+        _emit_pop_temp_roots(n_roots, emitter)
+        for (slot, typ), new_arg in zip(param_slots, ret.tco_args):
+            emitter.emit(f"  store {typ.text} {new_arg.ir}, ptr {slot}")
+        emitter.emit(f"  br label %{loop_label}")
+    elif emitter.is_block_terminated():
+        # All branches ended with TCO back-edges; roots already balanced.
+        pass
+    else:
+        if ret.typ != sig.ret:
+            raise CodegenError(
+                f"Function {fn.name} body type mismatch in TCO backend: {ret.typ.text} vs {sig.ret.text}"
+            )
+        _emit_pop_temp_roots(n_roots, emitter)
         emitter.emit(f"  ret {ret.typ.text} {ret.ir}")
     emitter.emit("}")
 
@@ -1349,6 +1480,7 @@ def _emit_expr(
     ctor_sigs: dict[str, CtorSig],
     adt_names: set[str],
     emitter: Emitter,
+    tco_ctx: TcoCtx | None = None,
 ) -> Value:
     if isinstance(expr, ast.IntExpr):
         return Value(I64, str(expr.value))
@@ -1459,11 +1591,11 @@ def _emit_expr(
     if isinstance(expr, ast.BinaryExpr):
         return _emit_binary(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if isinstance(expr, ast.IfExpr):
-        return _emit_if(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        return _emit_if(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
     if isinstance(expr, ast.CallExpr):
-        return _emit_call(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        return _emit_call(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
     if isinstance(expr, ast.MatchExpr):
-        return _emit_match(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        return _emit_match(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
 
     raise CodegenError(f"Unsupported expression in LLVM backend: {expr.__class__.__name__}")
 
@@ -1591,6 +1723,15 @@ def _emit_short_circuit(
     return Value(I1, phi)
 
 
+def _emit_tco_back_edge(tco_ctx: TcoCtx, new_args: list[Value], extra_roots: int, emitter: Emitter) -> None:
+    """Pop `extra_roots` + outer roots, store new args into param slots, branch to loop."""
+    _emit_pop_temp_roots(extra_roots + tco_ctx.outer_roots, emitter)
+    for (slot, typ), new_arg in zip(tco_ctx.param_slots, new_args):
+        coerced = _coerce_value(new_arg, typ, emitter)
+        emitter.emit(f"  store {typ.text} {coerced.ir}, ptr {slot}")
+    emitter.emit(f"  br label %{tco_ctx.loop_label}")
+
+
 def _emit_if(
     expr: ast.IfExpr,
     locals_: dict[str, Value],
@@ -1599,6 +1740,7 @@ def _emit_if(
     ctor_sigs: dict[str, CtorSig],
     adt_names: set[str],
     emitter: Emitter,
+    tco_ctx: TcoCtx | None = None,
 ) -> Value:
     cond = _emit_expr(expr.condition, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     if cond.typ != I1:
@@ -1610,30 +1752,57 @@ def _emit_if(
     emitter.emit(f"  br i1 {cond.ir}, label %{then_label}, label %{else_label}")
 
     emitter.label(then_label)
-    then_val = _emit_expr(expr.then_branch, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+    then_val = _emit_expr(expr.then_branch, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
     then_end = emitter.current_block
-    if then_end is None:
-        raise CodegenError("Internal backend error: missing then block")
-    emitter.emit(f"  br label %{done_label}")
+    if tco_ctx is not None and then_val.tco_args is not None:
+        _emit_tco_back_edge(tco_ctx, then_val.tco_args, 0, emitter)
+    then_reaches_done = not emitter.is_block_terminated()
+    if then_reaches_done:
+        if then_end is None:
+            raise CodegenError("Internal backend error: missing then block")
+        emitter.emit(f"  br label %{done_label}")
 
     emitter.label(else_label)
-    else_val = _emit_expr(expr.else_branch, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+    else_val = _emit_expr(expr.else_branch, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
     else_end = emitter.current_block
-    if else_end is None:
-        raise CodegenError("Internal backend error: missing else block")
-    emitter.emit(f"  br label %{done_label}")
+    if tco_ctx is not None and else_val.tco_args is not None:
+        _emit_tco_back_edge(tco_ctx, else_val.tco_args, 0, emitter)
+    else_reaches_done = not emitter.is_block_terminated()
+    if else_reaches_done:
+        if else_end is None:
+            raise CodegenError("Internal backend error: missing else block")
+        emitter.emit(f"  br label %{done_label}")
 
-    if then_val.typ != else_val.typ:
-        raise CodegenError("if branches must have same type")
+    # All branches terminated via TCO or deeply-nested all-TCO sub-expressions
+    if not then_reaches_done and not else_reaches_done:
+        return Value(tco_ctx.ret if tco_ctx is not None else I64, "undef")
+
+    # Collect branches that reach done_label
+    reaching: list[tuple[Value, str]] = []
+    if then_reaches_done:
+        assert then_end is not None
+        reaching.append((then_val, then_end))
+    if else_reaches_done:
+        assert else_end is not None
+        reaching.append((else_val, else_end))
+
+    out_type = reaching[0][0].typ
+    for v, _ in reaching[1:]:
+        if v.typ != out_type:
+            raise CodegenError("if branches must have same type")
 
     emitter.label(done_label)
     phi = emitter.tmp()
-    emitter.emit(
-        f"  {phi} = phi {then_val.typ.text} [ {then_val.ir}, %{then_end} ], [ {else_val.ir}, %{else_end} ]"
-    )
-    callable_sig = then_val.callable_sig if then_val.callable_sig == else_val.callable_sig else None
-    tuple_items = then_val.tuple_items if then_val.tuple_items == else_val.tuple_items else None
-    return Value(then_val.typ, phi, callable_sig=callable_sig, tuple_items=tuple_items)
+    parts = ", ".join(f"[ {v.ir}, %{blk} ]" for v, blk in reaching)
+    emitter.emit(f"  {phi} = phi {out_type.text} {parts}")
+    if len(reaching) == 2:
+        v0, v1 = reaching[0][0], reaching[1][0]
+        callable_sig = v0.callable_sig if v0.callable_sig == v1.callable_sig else None
+        tuple_items = v0.tuple_items if v0.tuple_items == v1.tuple_items else None
+    else:
+        callable_sig = reaching[0][0].callable_sig
+        tuple_items = reaching[0][0].tuple_items
+    return Value(out_type, phi, callable_sig=callable_sig, tuple_items=tuple_items)
 
 
 def _emit_match(
@@ -1644,10 +1813,14 @@ def _emit_match(
     ctor_sigs: dict[str, CtorSig],
     adt_names: set[str],
     emitter: Emitter,
+    tco_ctx: TcoCtx | None = None,
 ) -> Value:
-    direct = _try_emit_direct_ctor_match(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
-    if direct is not None:
-        return direct
+    # Skip the direct-ctor optimisation when TCO is active to avoid having to
+    # propagate tco_ctx through the entire direct-ctor match helper tree.
+    if tco_ctx is None:
+        direct = _try_emit_direct_ctor_match(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        if direct is not None:
+            return direct
     scrut = _emit_expr(expr.scrutinee, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     done_label = emitter.block("match_done")
     next_label = emitter.block("match_next")
@@ -1673,8 +1846,33 @@ def _emit_match(
         emitter.label(branch_label)
         branch_locals = dict(locals_)
         rooted = _emit_pattern_bind(branch.pattern, scrut, branch_locals, ctor_sigs, emitter)
-        value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, adt_names, emitter)
+
+        # Build a tco_ctx with accumulated outer roots for the branch body.
+        branch_tco_ctx = (
+            TcoCtx(
+                fn_name=tco_ctx.fn_name,
+                loop_label=tco_ctx.loop_label,
+                param_slots=tco_ctx.param_slots,
+                ret=tco_ctx.ret,
+                outer_roots=tco_ctx.outer_roots + rooted,
+            )
+            if tco_ctx is not None
+            else None
+        )
+        value = _emit_expr(branch.value, branch_locals, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=branch_tco_ctx)
         end_block = emitter.current_block
+
+        if tco_ctx is not None and value.tco_args is not None:
+            # Direct self-tail-call: pop this branch's roots + all outer roots, loop back.
+            _emit_tco_back_edge(tco_ctx, value.tco_args, rooted, emitter)
+            current_fail = fail_label
+            continue
+        elif emitter.is_block_terminated():
+            # All paths through the branch body were TCO back-edges (nested match/if).
+            # Outer roots were already popped inside those back-edges.
+            current_fail = fail_label
+            continue
+
         if end_block is None:
             raise CodegenError("Internal backend error: missing match branch block")
         _emit_pop_temp_roots(rooted, emitter)
@@ -1687,7 +1885,10 @@ def _emit_match(
     emitter.emit("  unreachable")
 
     if not branch_vals:
-        raise CodegenError("Match expression has no branches")
+        # All branches were TCO back-edges; done_label is never reached.
+        if tco_ctx is None:
+            raise CodegenError("Match expression has no branches")
+        return Value(tco_ctx.ret, "undef")
 
     out_type = branch_vals[0][0].typ
     for val, _ in branch_vals[1:]:
@@ -2364,6 +2565,7 @@ def _emit_call(
     ctor_sigs: dict[str, CtorSig],
     adt_names: set[str],
     emitter: Emitter,
+    tco_ctx: TcoCtx | None = None,
 ) -> Value:
     if isinstance(expr.callee, ast.VarExpr) and expr.callee.name == "print":
         if len(expr.args) != 1:
@@ -2472,6 +2674,11 @@ def _emit_call(
                 ret_callable_sig=sig.ret_callable_sig,
             )
             out = Value(closure.typ, closure.ir, callable_sig=remaining_sig)
+        elif tco_ctx is not None and fn_name == tco_ctx.fn_name:
+            # Self-tail-call: coerce args to slot types, pop temp roots, return TCO sentinel.
+            coerced_args = [_coerce_value(av, st, emitter) for av, (_, st) in zip(args, tco_ctx.param_slots)]
+            _emit_pop_temp_roots(rooted_args, emitter)
+            return Value(sig.ret, "undef", tco_args=coerced_args)
         else:
             args_ir: list[str] = []
             for arg_val, param_type in zip(args, sig.params):
