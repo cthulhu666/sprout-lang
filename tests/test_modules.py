@@ -1268,6 +1268,87 @@ class ModuleLoaderTests(unittest.TestCase):
                 "|Unterminated char literal@1:1",
             )
 
+    def test_import_stdlib_compiler_lexer_escape_decoding_and_remaining_operators(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                r"""
+                module main
+                import stdlib.compiler.lexer as lexer
+                import stdlib.compiler.source as source
+                import stdlib.compiler.token as token
+                import stdlib.string as string
+                import stdlib.collections (Vec, vec_get, vec_length)
+
+                fn first_token_text(src: String) -> String =
+                  match lexer.tokenize(src) with
+                  | Err _ -> "Err"
+                  | Ok tokens ->
+                      match vec_get(0, tokens) with
+                      | Nothing -> "empty"
+                      | Just t -> token.token_text(t)
+
+                fn first_token_kind(src: String) -> String =
+                  match lexer.tokenize(src) with
+                  | Err _ -> "Err"
+                  | Ok tokens ->
+                      match vec_get(0, tokens) with
+                      | Nothing -> "empty"
+                      | Just t ->
+                          match token.token_kind(t) with
+                          | token.TokenStringKind -> "string"
+                          | token.TokenCharKind -> "char"
+                          | token.TokenSymbolKind -> "symbol"
+                          | token.TokenIdentKind -> "ident"
+                          | _ -> "other"
+
+                fn main() -> Unit !{IO} =
+                  do
+                    # Escape sequences in string literals: "hello\nworld" decodes to 11 chars
+                    print(first_token_kind("\"hello\\nworld\""))
+                    print(int_to_string(string.length(first_token_text("\"hello\\nworld\""))))
+
+                    # Escape sequence in char literal: '\n' decodes to single newline
+                    print(first_token_kind("'\\n'"))
+                    print(int_to_string(string.length(first_token_text("'\\n'"))))
+
+                    # Remaining multi-char operators
+                    print(first_token_text("!= x"))
+                    print(first_token_text("<= x"))
+                    print(first_token_text(">= x"))
+                    print(first_token_text("|| x"))
+                    print(first_token_text(">> x"))
+                    print(first_token_text("<< x"))
+                    print(first_token_text("++ x"))
+                    print(first_token_text(".. x"))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            out = io.StringIO()
+            run_program(program, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join([
+                    "string",
+                    "11",   # "hello" + newline + "world" = 5+1+5 = 11
+                    "char",
+                    "1",    # decoded newline is 1 char
+                    "!=",
+                    "<=",
+                    ">=",
+                    "||",
+                    ">>",
+                    "<<",
+                    "++",
+                    "..",
+                ]),
+            )
+
     def test_import_stdlib_compiler_ast_constructors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
