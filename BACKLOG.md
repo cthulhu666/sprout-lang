@@ -83,7 +83,11 @@ Definition of done:
 - [x] `P1` Add better diagnostics for module/import/export errors with source context.
 - [x] `P2` Add formatter/linter baseline.
 - [ ] `P2` Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
-- [ ] `P1` Execute the staged self-hosting plan in [docs/self-hosting-eliminate-python-backlog.md](./docs/self-hosting-eliminate-python-backlog.md), with the end goal that compiler/tooling ownership moves from Python into Sprout and the Python path becomes compatibility-only before removal.
+- [~] `P1` Execute the staged self-hosting plan in [docs/self-hosting-eliminate-python-backlog.md](./docs/self-hosting-eliminate-python-backlog.md), with the end goal that compiler/tooling ownership moves from Python into Sprout and the Python path becomes compatibility-only before removal.
+  - bootstrap lexer (`stdlib/compiler/source`, `token`, `lexer`) is at Python tokenizer parity
+  - bootstrap parser AST types and parser exist in `stdlib/compiler/ast`, `parser`
+  - bootstrap HM typechecker stack exists in `stdlib/compiler/types`, `unifier`, `infer`
+  - no Python compiler path has been replaced yet; integration wiring is next
 
 ### 7.5) Type Classes (Collections First)
 
@@ -153,9 +157,10 @@ Definition of done:
 - [x] Integration-style IO tests now have a dedicated harness (`tests/integration_support.py`) and focused suite (`tests/test_integration_io.py`).
 - [x] The builtin surface is now explicitly audited in the docs as `IO`-annotated, pure, or runtime-bound-but-non-`IO` in v0.
 - [x] There is now an explicit design plan for promoting a minimal real effect system into v0: [docs/effect-system-v0-plan.md](./docs/effect-system-v0-plan.md).
+- [x] Bootstrap self-hosting compiler modules exist in `stdlib/compiler/`: `source`, `token`, `lexer` (Python tokenizer parity), `ast`, `parser`, `types`, `unifier`, `infer` (HM constraint generation/solving).
 
 ## Next 3 Tasks (Execution Order)
 
-1. Keep the docs/examples aligned with the narrow `do` story as new user-facing sequencing cases land.
-2. Gather concrete examples of any remaining awkward effectful control flow, especially cases where users need to preserve whole `Maybe`/`Result` containers while continuing `IO`, before reconsidering richer effect rows or finer-grained effect labels.
-3. Continue builtin-surface cleanup by preferring stdlib package entrypoints over raw compatibility hooks in ordinary user-facing examples and docs.
+1. Wire the bootstrap parser (`stdlib/compiler/parser`) into a parity harness against the Python parser on a representative corpus, exposing any remaining surface gaps.
+2. Define the first integration seam: a Sprout-owned checker path that accepts a parsed AST and produces typed names, threaded through `types`/`unifier`/`infer`, with parity tests against the hosted checker.
+3. Begin Phase 2 driver work: expand `stdlib/compiler` into a real compiler-request entrypoint so at least one CLI check path runs through Sprout-owned control flow.

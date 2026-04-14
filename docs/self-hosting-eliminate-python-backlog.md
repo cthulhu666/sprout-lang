@@ -171,10 +171,14 @@ Definition of done:
 
 ### Phase 6: Self-Hosted Parser
 
-- [ ] Specify the parser migration boundary:
+- [~] Specify the parser migration boundary:
   full surface syntax vs staged parser for a restricted bootstrap subset.
-- [ ] Implement parser infrastructure in Sprout with strong error recovery and
+  *(decided: bootstrap subset first; full-surface parity follows)*
+- [~] Implement parser infrastructure in Sprout with strong error recovery and
   stable diagnostics requirements.
+  *(`stdlib/compiler/source`, `token`, `lexer` at Python tokenizer parity;
+  `stdlib/compiler/ast` defines the full surface AST; `stdlib/compiler/parser`
+  exists — parity and error-recovery gaps remain)*
 - [ ] Produce a structured AST artifact that can be consumed by the existing
   hosted checker during transition.
 - [ ] Run parser conformance suites against both implementations.
@@ -202,11 +206,16 @@ Definition of done:
 
 ### Phase 8: Self-Hosted Typechecking and Elaboration
 
-- [ ] Decide the migration shape:
+- [~] Decide the migration shape:
   restricted-subset checker first or full-surface checker behind a typed-core
   boundary.
-- [ ] Implement inference, constraint solving, instance resolution, and
+  *(decided: restricted-subset bootstrap checker first)*
+- [~] Implement inference, constraint solving, instance resolution, and
   diagnostic shaping in Sprout incrementally.
+  *(`stdlib/compiler/types` — Effect/Type/Scheme ADTs; `stdlib/compiler/unifier`
+  — pure HM substitution/unification; `stdlib/compiler/infer` — constraint
+  generation/solving for expressions, patterns, and declarations; instance
+  resolution and diagnostic shaping are not yet started)*
 - [ ] Keep typechecker diagnostics stable and non-cascading throughout the
   migration.
 - [ ] Add success/failure parity suites for the hosted and self-hosted
