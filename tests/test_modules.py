@@ -3241,5 +3241,84 @@ class ModuleLoaderTests(unittest.TestCase):
             )
 
 
+    def test_import_stdlib_compiler_infer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler.source as source
+                import stdlib.compiler.ast as ast
+                import stdlib.compiler.types as types
+                import stdlib.compiler.unifier as unifier
+                import stdlib.compiler.infer as infer
+
+                fn show_infer(r: infer.InferResult) -> String =
+                  match r with
+                  | infer.InferErr msg -> "Err:" ++ msg
+                  | infer.InferOk t _ _ _ -> types.type_to_string(t)
+
+                fn main() -> Unit !{IO} =
+                  do
+                    state <- unifier.new_state()
+                    let env = dict_empty()
+                    let subst = dict_empty()
+                    let eff_subst = dict_empty()
+                    let pos = source.SourcePos(1, 1, 0)
+
+                    # Literal expressions infer their base types
+                    r_int <- infer.infer_expr(state, env, subst, eff_subst, ast.IntExpr(42, pos))
+                    print(show_infer(r_int))
+
+                    r_bool <- infer.infer_expr(state, env, subst, eff_subst, ast.BoolExpr(true, pos))
+                    print(show_infer(r_bool))
+
+                    r_str <- infer.infer_expr(state, env, subst, eff_subst, ast.StringExpr("hi", pos))
+                    print(show_infer(r_str))
+
+                    # Unknown variable produces an error
+                    r_unk <- infer.infer_expr(state, env, subst, eff_subst, ast.VarExpr("x", pos))
+                    match r_unk with
+                    | infer.InferErr _ -> print("unknown-var-err")
+                    | infer.InferOk _ _ _ _ -> print("FAIL: should error")
+
+                    # Known variable resolves via environment
+                    let env2 = dict_set("x", types.mono(types.type_int()), dict_empty())
+                    r_known <- infer.infer_expr(state, env2, subst, eff_subst, ast.VarExpr("x", pos))
+                    print(show_infer(r_known))
+
+                    # type_from_ast
+                    print(types.type_to_string(infer.type_from_ast(ast.TypeName("Int"), dict_empty())))
+
+                    # effect_from_maybe_labels
+                    print(types.effect_to_string(infer.effect_from_maybe_labels(Nothing)))
+                    print(types.effect_to_string(infer.effect_from_maybe_labels(Just(Cons("IO", Nil)))))
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join([
+                    "Int",
+                    "Bool",
+                    "String",
+                    "unknown-var-err",
+                    "Int",
+                    "Int",
+                    "pure",
+                    "!{IO}",
+                ]),
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
