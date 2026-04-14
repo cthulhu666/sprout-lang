@@ -3170,5 +3170,76 @@ class ModuleLoaderTests(unittest.TestCase):
             )
 
 
+    def test_import_stdlib_compiler_unifier(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            main = root / "main.sprout"
+            main.write_text(
+                """
+                module main
+                import stdlib.compiler.types as types
+                import stdlib.compiler.unifier as unifier
+
+                fn show_result(r: Result String (Dict types.Type)) -> String =
+                  match r with
+                  | Err msg -> "Err:" ++ msg
+                  | Ok _ -> "Ok"
+
+                fn main() -> Unit !{IO} =
+                  do
+                    # fresh variables
+                    state <- unifier.new_state()
+                    t0 <- unifier.fresh(state)
+                    t1 <- unifier.fresh(state)
+                    print(t0)
+                    print(t1)
+
+                    # apply_subst on a TVar — nothing bound yet
+                    let s0 = dict_empty()
+                    let resolved = unifier.apply_subst(s0, types.TVar("t0"))
+                    print(types.type_to_string(resolved))
+
+                    # unify TVar with Int
+                    match unifier.unify_types(s0, types.TVar("a"), types.type_int()) with
+                    | Err msg -> print("FAIL:" ++ msg)
+                    | Ok s1 ->
+                        print(types.type_to_string(unifier.apply_subst(s1, types.TVar("a"))))
+
+                    # unify Int with Int — should succeed
+                    print(show_result(unifier.unify_types(s0, types.type_int(), types.type_int())))
+
+                    # unify Int with Bool — should fail
+                    match unifier.unify_types(s0, types.type_int(), types.type_bool()) with
+                    | Ok _ -> print("FAIL: should not unify")
+                    | Err _ -> print("ok: mismatch detected")
+
+                    # occurs check: TVar "a" with List a — should fail
+                    match unifier.unify_types(s0, types.TVar("a"), types.type_list(types.TVar("a"))) with
+                    | Ok _ -> print("FAIL: should not unify infinite type")
+                    | Err _ -> print("ok: occurs check triggered")
+                """,
+                encoding="utf-8",
+            )
+            bundle = load_module_bundle(main)
+            program = parse(bundle.source)
+            resolve_program_names(program, bundle)
+            typecheck_program(program)
+            lowered = lower_typeclasses(program)
+            typecheck_program(lowered)
+            out = io.StringIO()
+            run_program(lowered, stdout=out)
+            self.assertEqual(
+                out.getvalue().strip(),
+                "\n".join([
+                    "t0", "t1",
+                    "t0",
+                    "Int",
+                    "Ok",
+                    "ok: mismatch detected",
+                    "ok: occurs check triggered",
+                ]),
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

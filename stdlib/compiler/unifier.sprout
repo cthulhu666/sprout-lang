@@ -1,0 +1,290 @@
+module stdlib.compiler.unifier
+import stdlib.compiler.types as types
+
+# ---------------------------------------------------------------------------
+# InferState — mutable counter for fresh type/effect variables
+# ---------------------------------------------------------------------------
+#
+# The substitution is NOT stored here; callers thread it as a pure Dict.
+# Only the fresh-variable counters need mutation.
+
+export type InferState (..) =
+  | InferState (Ref Int) (Ref Int)
+  # InferState next_type_id  next_effect_id
+
+export fn new_state() -> InferState !{IO} =
+  do
+    t_id <- ref_new(0)
+    e_id <- ref_new(0)
+    InferState(t_id, e_id)
+
+export fn fresh(state: InferState) -> String !{IO} =
+  match state with
+  | InferState t_ref _ ->
+      do
+        n <- ref_read(t_ref)
+        ref_write(t_ref, n + 1)
+        "t" ++ int_to_string(n)
+
+export fn fresh_effect(state: InferState) -> String !{IO} =
+  match state with
+  | InferState _ e_ref ->
+      do
+        n <- ref_read(e_ref)
+        ref_write(e_ref, n + 1)
+        "e" ++ int_to_string(n)
+
+# ---------------------------------------------------------------------------
+# apply_subst — walk a Type, replacing bound TVars
+# ---------------------------------------------------------------------------
+
+fn apply_subst_lookup(subst: Dict types.Type, t: types.Type, name: String) -> types.Type =
+  match dict_get(name, subst) with
+  | Nothing -> t
+  | Just bound -> apply_subst(subst, bound)
+
+export fn apply_subst(subst: Dict types.Type, t: types.Type) -> types.Type =
+  match t with
+  | types.TVar name -> apply_subst_lookup(subst, t, name)
+  | types.TConst _ -> t
+  | types.TApp base arg ->
+      types.TApp(apply_subst(subst, base), apply_subst(subst, arg))
+  | types.TFunc param ret eff ->
+      types.TFunc(apply_subst(subst, param), apply_subst(subst, ret), eff)
+  | types.TTuple items ->
+      types.TTuple(apply_subst_list(subst, items))
+
+fn apply_subst_list(subst: Dict types.Type, items: List types.Type) -> List types.Type =
+  match items with
+  | Nil -> Nil
+  | Cons h t -> Cons(apply_subst(subst, h), apply_subst_list(subst, t))
+
+# ---------------------------------------------------------------------------
+# apply_effect_subst — walk an Effect, replacing bound EVars
+# ---------------------------------------------------------------------------
+
+fn apply_effect_subst_lookup(eff_subst: Dict types.Effect, e: types.Effect, name: String) -> types.Effect =
+  match dict_get(name, eff_subst) with
+  | Nothing -> e
+  | Just bound -> apply_effect_subst(eff_subst, bound)
+
+export fn apply_effect_subst(eff_subst: Dict types.Effect, e: types.Effect) -> types.Effect =
+  match e with
+  | types.EffectVar name -> apply_effect_subst_lookup(eff_subst, e, name)
+  | _ -> e
+
+# Resolve both type and effect substitutions together
+fn apply_full_subst_lookup(subst: Dict types.Type, eff_subst: Dict types.Effect, t: types.Type, name: String) -> types.Type =
+  match dict_get(name, subst) with
+  | Nothing -> t
+  | Just bound -> apply_full_subst(subst, eff_subst, bound)
+
+export fn apply_full_subst(subst: Dict types.Type, eff_subst: Dict types.Effect, t: types.Type) -> types.Type =
+  match t with
+  | types.TVar name -> apply_full_subst_lookup(subst, eff_subst, t, name)
+  | types.TConst _ -> t
+  | types.TApp base arg ->
+      types.TApp(apply_full_subst(subst, eff_subst, base), apply_full_subst(subst, eff_subst, arg))
+  | types.TFunc param ret eff ->
+      types.TFunc(
+        apply_full_subst(subst, eff_subst, param),
+        apply_full_subst(subst, eff_subst, ret),
+        apply_effect_subst(eff_subst, eff)
+      )
+  | types.TTuple items ->
+      types.TTuple(apply_full_subst_list(subst, eff_subst, items))
+
+fn apply_full_subst_list(subst: Dict types.Type, eff_subst: Dict types.Effect, items: List types.Type) -> List types.Type =
+  match items with
+  | Nil -> Nil
+  | Cons h t -> Cons(apply_full_subst(subst, eff_subst, h), apply_full_subst_list(subst, eff_subst, t))
+
+# ---------------------------------------------------------------------------
+# occurs — prevent infinite types
+# ---------------------------------------------------------------------------
+
+fn occurs(name: String, subst: Dict types.Type, t: types.Type) -> Bool =
+  match apply_subst(subst, t) with
+  | types.TVar n -> n == name
+  | types.TConst _ -> false
+  | types.TApp base arg -> occurs(name, subst, base) || occurs(name, subst, arg)
+  | types.TFunc param ret _ -> occurs(name, subst, param) || occurs(name, subst, ret)
+  | types.TTuple items -> occurs_list(name, subst, items)
+
+fn occurs_list(name: String, subst: Dict types.Type, items: List types.Type) -> Bool =
+  match items with
+  | Nil -> false
+  | Cons h t -> if occurs(name, subst, h) then true else occurs_list(name, subst, t)
+
+# ---------------------------------------------------------------------------
+# bind_var — extend substitution, with occurs check
+# ---------------------------------------------------------------------------
+
+fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result String (Dict types.Type) =
+  match t with
+  | types.TVar n ->
+      if n == name then Ok(subst)
+      else Ok(dict_set(name, t, subst))
+  | _ ->
+      if occurs(name, subst, t)
+      then Err("Infinite type: " ++ name ++ " occurs in " ++ types.type_to_string(t))
+      else Ok(dict_set(name, t, subst))
+
+# ---------------------------------------------------------------------------
+# unify_types — pure structural unification
+# ---------------------------------------------------------------------------
+#
+# Returns an extended substitution, or an error message.
+# Callers that need to thread state must pass the updated subst to the next
+# unify_types call — this function is IO-free.
+
+export fn unify_types(
+  subst: Dict types.Type,
+  left: types.Type,
+  right: types.Type
+) -> Result String (Dict types.Type) =
+  unify_applied(subst, apply_subst(subst, left), apply_subst(subst, right))
+
+# Helpers to avoid nested-match-in-arm pattern (Sprout typechecker limitation)
+fn unify_tapp(subst: Dict types.Type, bl: types.Type, al: types.Type, br: types.Type, ar: types.Type) -> Result String (Dict types.Type) =
+  match unify_applied(subst, bl, br) with
+  | Err e -> Err(e)
+  | Ok s1 -> unify_applied(s1, apply_subst(s1, al), apply_subst(s1, ar))
+
+fn unify_tfunc(subst: Dict types.Type, p1: types.Type, r1: types.Type, p2: types.Type, r2: types.Type) -> Result String (Dict types.Type) =
+  match unify_applied(subst, p1, p2) with
+  | Err e -> Err(e)
+  | Ok s1 -> unify_applied(s1, apply_subst(s1, r1), apply_subst(s1, r2))
+
+fn unify_applied(
+  subst: Dict types.Type,
+  l: types.Type,
+  r: types.Type
+) -> Result String (Dict types.Type) =
+  match (l, r) with
+  | (types.TVar a, types.TVar b) ->
+      if a == b then Ok(subst) else bind_var(a, r, subst)
+  | (types.TVar a, _) -> bind_var(a, r, subst)
+  | (_, types.TVar b) -> bind_var(b, l, subst)
+  | (types.TConst a, types.TConst b) ->
+      if a == b then Ok(subst) else Err("Type mismatch: " ++ a ++ " vs " ++ b)
+  | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, bl, al, br, ar)
+  | (types.TFunc p1 r1 _, types.TFunc p2 r2 _) -> unify_tfunc(subst, p1, r1, p2, r2)
+  | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, xs, ys)
+  | _ ->
+      Err("Type mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r))
+
+fn unify_list_step(subst: Dict types.Type, x: types.Type, y: types.Type, xr: List types.Type, yr: List types.Type) -> Result String (Dict types.Type) =
+  match unify_applied(subst, apply_subst(subst, x), apply_subst(subst, y)) with
+  | Err e -> Err(e)
+  | Ok s1 -> unify_list(s1, xr, yr)
+
+fn unify_list(
+  subst: Dict types.Type,
+  xs: List types.Type,
+  ys: List types.Type
+) -> Result String (Dict types.Type) =
+  match (xs, ys) with
+  | (Nil, Nil) -> Ok(subst)
+  | (Nil, _) -> Err("Tuple arity mismatch")
+  | (_, Nil) -> Err("Tuple arity mismatch")
+  | (Cons x xr, Cons y yr) -> unify_list_step(subst, x, y, xr, yr)
+
+# ---------------------------------------------------------------------------
+# unify_effects — pure effect-row unification
+# ---------------------------------------------------------------------------
+#
+# Conservative: IO and Pure unify as IO (callee decides if it can accept it).
+
+export fn unify_effects(
+  eff_subst: Dict types.Effect,
+  left: types.Effect,
+  right: types.Effect
+) -> Result String (Dict types.Effect) =
+  unify_effects_applied(
+    eff_subst,
+    apply_effect_subst(eff_subst, left),
+    apply_effect_subst(eff_subst, right)
+  )
+
+fn unify_effects_applied(
+  eff_subst: Dict types.Effect,
+  l: types.Effect,
+  r: types.Effect
+) -> Result String (Dict types.Effect) =
+  match (l, r) with
+  | (types.EffectVar a, types.EffectVar b) ->
+      if a == b then Ok(eff_subst) else Ok(dict_set(a, r, eff_subst))
+  | (types.EffectVar a, _) -> Ok(dict_set(a, r, eff_subst))
+  | (_, types.EffectVar b) -> Ok(dict_set(b, l, eff_subst))
+  | (types.EffectPure, types.EffectPure) -> Ok(eff_subst)
+  | (types.EffectIO, types.EffectIO) -> Ok(eff_subst)
+  | (types.EffectPure, types.EffectIO) -> Ok(eff_subst)
+  | (types.EffectIO, types.EffectPure) -> Ok(eff_subst)
+  | _ ->
+      Err("Effect mismatch: " ++ types.effect_to_string(l) ++ " vs " ++ types.effect_to_string(r))
+
+# ---------------------------------------------------------------------------
+# instantiate — replace quantified variables with fresh ones
+# ---------------------------------------------------------------------------
+
+export fn instantiate(state: InferState, scheme: types.Scheme) -> types.Type !{IO} =
+  do
+    type_repl <- build_type_repl(state, types.scheme_vars(scheme), dict_empty())
+    effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
+    apply_full_subst(type_repl, effect_repl, types.scheme_type(scheme))
+
+fn build_type_repl(state: InferState, vars: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
+  match vars with
+  | Nil -> acc
+  | Cons v rest ->
+      do
+        name <- fresh(state)
+        build_type_repl(state, rest, dict_set(v, types.TVar(name), acc))
+
+fn build_effect_repl(state: InferState, vars: List String, acc: Dict types.Effect) -> Dict types.Effect !{IO} =
+  match vars with
+  | Nil -> acc
+  | Cons v rest ->
+      do
+        name <- fresh_effect(state)
+        build_effect_repl(state, rest, dict_set(v, types.EffectVar(name), acc))
+
+# ---------------------------------------------------------------------------
+# generalize — universally quantify type variables free in t but not in env
+# ---------------------------------------------------------------------------
+
+export fn generalize(
+  env_ftv: List String,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  t: types.Type,
+  e: types.Effect
+) -> types.Scheme =
+  generalize_resolved(
+    env_ftv,
+    apply_full_subst(subst, eff_subst, t),
+    apply_effect_subst(eff_subst, e)
+  )
+
+fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff: types.Effect) -> types.Scheme =
+  types.Scheme(
+    types.list_diff(types.ftv(resolved), env_ftv),
+    types.list_diff(types.ftv_effect(resolved_eff), env_ftv),
+    resolved,
+    resolved_eff
+  )
+
+# ---------------------------------------------------------------------------
+# ftv_env — union of free type variables across all schemes in an environment
+# ---------------------------------------------------------------------------
+
+export fn ftv_env(env: Dict types.Scheme) -> List String =
+  ftv_scheme_vec(dict_values(env), 0, vec_length(dict_values(env)), Nil)
+
+fn ftv_scheme_vec(schemes: Vec types.Scheme, i: Int, total: Int, acc: List String) -> List String =
+  if i >= total then acc
+  else
+    match vec_get(i, schemes) with
+    | Nothing -> acc
+    | Just s -> ftv_scheme_vec(schemes, i + 1, total, types.list_union(types.ftv_scheme(s), acc))
