@@ -1,0 +1,81 @@
+module examples.ref_union_find
+
+# Union-Find over integers 0..n-1 using mutable Ref Int cells.
+#
+# Each node starts as its own root: parent[i] = i.
+# union(i, j) merges the sets containing i and j.
+# find(i) returns the canonical root, compressing the path as it goes.
+#
+# This is the exact data structure used inside Hindley-Milner type unification:
+# type variables become Ref cells; binding a variable is a ref_write to its root.
+# The self-hosted typechecker planned for stdlib.compiler will use this pattern.
+#
+# Run:
+#   python3 -m sprout.cli run examples/ref_union_find.sprout
+
+# Build a Vec of n Ref Int cells, each initialised to its own index (= root).
+fn make_parents(n: Int, i: Int, acc: Vec (Ref Int)) -> Vec (Ref Int) !{IO} =
+  if i >= n then acc
+  else
+    do
+      cell <- ref_new(i)
+      make_parents(n, i + 1, vec_append(cell, acc))
+
+# Follow parent pointers to the root, compressing the path on the way back.
+fn find(parent: Vec (Ref Int), i: Int) -> Int !{IO} =
+  match vec_get(i, parent) with
+  | Nothing -> i
+  | Just cell ->
+      do
+        p <- ref_read(cell)
+        if p == i then i
+        else
+          do
+            root <- find(parent, p)
+            ref_write(cell, root)
+            root
+
+# Merge the sets containing i and j.
+fn union(parent: Vec (Ref Int), i: Int, j: Int) -> Unit !{IO} =
+  do
+    ri <- find(parent, i)
+    rj <- find(parent, j)
+    if ri == rj then ()
+    else
+      match vec_get(ri, parent) with
+      | Nothing -> ()
+      | Just cell -> ref_write(cell, rj)
+
+# True iff i and j are in the same set.
+fn connected(parent: Vec (Ref Int), i: Int, j: Int) -> Bool !{IO} =
+  do
+    ri <- find(parent, i)
+    rj <- find(parent, j)
+    ri == rj
+
+fn main() -> Unit !{IO} =
+  do
+    # Six nodes: 0 1 2 3 4 5  (each its own root initially)
+    parent <- make_parents(6, 0, vec_empty())
+
+    # Step 1: build three disjoint pairs
+    union(parent, 0, 1)   # {0,1}  {2}  {3}  {4}  {5}
+    union(parent, 2, 3)   # {0,1}  {2,3}  {4}  {5}
+    union(parent, 4, 5)   # {0,1}  {2,3}  {4,5}
+
+    # Step 2: bridge two components
+    union(parent, 1, 2)   # {0,1,2,3}  {4,5}
+
+    # Connectivity checks
+    c03 <- connected(parent, 0, 3)   # true  — same component after bridging
+    c04 <- connected(parent, 0, 4)   # false — different components
+    c45 <- connected(parent, 4, 5)   # true  — direct pair
+
+    print(c03)
+    print(c04)
+    print(c45)
+
+    # Path compression: after find(0) the root chain 0->1->... is flattened
+    r0 <- find(parent, 0)
+    r3 <- find(parent, 3)
+    print(r0 == r3)   # true — same root confirms compression worked
