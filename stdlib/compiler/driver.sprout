@@ -5,37 +5,289 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 
-fn describe_decl(d: ast.Decl) -> String =
-  match d with
-  | ast.FnDecl name _ _ _ _ _ _ -> str_concat("fn:", name)
-  | ast.TypeDecl name _ _ _ -> str_concat("type:", name)
-  | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
-  | ast.LetDecl name _ _ -> str_concat("let:", name)
-  | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
-  | ast.InstanceDecl _ _ _ -> "instance"
+# ---------------------------------------------------------------------------
+# String helpers
 
-fn print_decls(ds: List ast.Decl) -> Unit !{IO} =
+fn escape_char(ch: Char, acc: String) -> String =
+  if ch == '"' then str_concat(acc, "\\\"")
+  else if ch == '\\' then str_concat(acc, "\\\\")
+  else if ch == '\n' then str_concat(acc, "\\n")
+  else if ch == '\t' then str_concat(acc, "\\t")
+  else if ch == '\r' then str_concat(acc, "\\r")
+  else str_concat(acc, char_to_string(ch))
+
+fn escape_loop(s: String, i: Int, len: Int, acc: String) -> String =
+  if i >= len then acc
+  else
+    match str_char_at(s, i) with
+    | Nothing -> acc
+    | Just ch -> escape_loop(s, i + 1, len, escape_char(ch, acc))
+
+# Produce a double-quoted s-expression atom with internal escaping.
+fn q(s: String) -> String =
+  str_concat("\"", str_concat(escape_loop(s, 0, str_len(s), ""), "\""))
+
+fn bool_str(b: Bool) -> String =
+  if b then "true" else "false"
+
+fn join_go(sep: String, items: List String, acc: String, first: Bool) -> String =
+  match items with
+  | Nil -> acc
+  | Cons x rest ->
+      if first then join_go(sep, rest, x, false)
+      else join_go(sep, rest, str_concat(acc, str_concat(sep, x)), false)
+
+fn join(sep: String, items: List String) -> String =
+  join_go(sep, items, "", true)
+
+# Build an s-expression: "(tag)" when items is empty, "(tag a b ...)" otherwise.
+fn sexp(tag: String, items: List String) -> String =
+  match items with
+  | Nil -> str_concat("(", str_concat(tag, ")"))
+  | _ -> str_concat("(", str_concat(tag, str_concat(" ", str_concat(join(" ", items), ")"))))
+
+fn q_list(items: List String) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons x rest -> Cons(q(x), q_list(rest))
+
+# ---------------------------------------------------------------------------
+# TypeExpr
+
+fn dump_type_arrow(left: ast.TypeExpr, right: ast.TypeExpr, maybe_effs: Maybe (List String)) -> String =
+  match maybe_effs with
+  | Nothing ->
+      sexp("type-arrow", Cons(dump_type(left), Cons(dump_type(right), Nil)))
+  | Just effs ->
+      sexp("type-arrow", Cons(dump_type(left), Cons(dump_type(right), Cons(dump_effects_list(effs), Nil))))
+
+fn dump_type(t: ast.TypeExpr) -> String =
+  match t with
+  | ast.TypeName name ->
+      sexp("type-name", Cons(q(name), Nil))
+  | ast.TypeApply base arg ->
+      sexp("type-apply", Cons(dump_type(base), Cons(dump_type(arg), Nil)))
+  | ast.TypeArrow left right maybe_effs ->
+      dump_type_arrow(left, right, maybe_effs)
+  | ast.TypeEffect base effs ->
+      sexp("type-effect", Cons(dump_type(base), q_list(effs)))
+  | ast.TupleType items ->
+      sexp("tuple-type", dump_types(items))
+
+fn dump_types(items: List ast.TypeExpr) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons x rest -> Cons(dump_type(x), dump_types(rest))
+
+fn dump_effects_list(effs: List String) -> String =
+  sexp("effects", q_list(effs))
+
+fn dump_maybe_effects(effs: Maybe (List String)) -> String =
+  match effs with
+  | Nothing -> "(effects)"
+  | Just eff_list -> dump_effects_list(eff_list)
+
+# ---------------------------------------------------------------------------
+# Pattern
+
+fn dump_pat(p: ast.Pattern) -> String =
+  match p with
+  | ast.WildcardPattern _ -> "(wildcard)"
+  | ast.VarPattern name _ -> sexp("var-pat", Cons(q(name), Nil))
+  | ast.IntPattern n _ -> sexp("int-pat", Cons(int_to_string(n), Nil))
+  | ast.BoolPattern b _ -> sexp("bool-pat", Cons(bool_str(b), Nil))
+  | ast.StringPattern s _ -> sexp("string-pat", Cons(q(s), Nil))
+  | ast.CharPattern ch _ -> sexp("char-pat", Cons(q(char_to_string(ch)), Nil))
+  | ast.UnitPattern _ -> "(unit-pat)"
+  | ast.TuplePattern items _ -> sexp("tuple-pat", dump_pats(items))
+  | ast.ConstructorPattern name args _ -> sexp("ctor-pat", Cons(q(name), dump_pats(args)))
+
+fn dump_pats(items: List ast.Pattern) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons x rest -> Cons(dump_pat(x), dump_pats(rest))
+
+# ---------------------------------------------------------------------------
+# Param
+
+fn dump_param(p: ast.Param) -> String =
+  match p with
+  | ast.Param name maybe_type ->
+      match maybe_type with
+      | Nothing -> sexp("param", Cons(q(name), Nil))
+      | Just t -> sexp("param", Cons(q(name), Cons(dump_type(t), Nil)))
+
+fn dump_params(params: List ast.Param) -> String =
+  sexp("params", dump_param_list(params))
+
+fn dump_param_list(params: List ast.Param) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons x rest -> Cons(dump_param(x), dump_param_list(rest))
+
+# ---------------------------------------------------------------------------
+# Expressions
+
+fn dump_expr(e: ast.Expr) -> String =
+  match e with
+  | ast.VarExpr name _ -> sexp("var", Cons(q(name), Nil))
+  | ast.IntExpr n _ -> sexp("int", Cons(int_to_string(n), Nil))
+  | ast.BoolExpr b _ -> sexp("bool", Cons(bool_str(b), Nil))
+  | ast.StringExpr s _ -> sexp("string", Cons(q(s), Nil))
+  | ast.CharExpr ch _ -> sexp("char", Cons(q(char_to_string(ch)), Nil))
+  | ast.UnitExpr _ -> "(unit)"
+  | ast.TupleExpr items _ -> sexp("tuple", dump_exprs(items))
+  | ast.IfExpr cond then_ else_ _ ->
+      sexp("if", Cons(dump_expr(cond), Cons(dump_expr(then_), Cons(dump_expr(else_), Nil))))
+  | ast.MatchExpr scrutinee branches _ ->
+      sexp("match", Cons(dump_expr(scrutinee), dump_branches(branches)))
+  | ast.CallExpr callee args _ ->
+      sexp("call", Cons(dump_expr(callee), dump_exprs(args)))
+  | ast.LambdaExpr params body _ ->
+      sexp("lambda", Cons(dump_params(params), Cons(dump_expr(body), Nil)))
+  | ast.BinaryExpr op left right _ ->
+      sexp("binary", Cons(q(op), Cons(dump_expr(left), Cons(dump_expr(right), Nil))))
+  | ast.UnaryExpr op expr _ ->
+      sexp("unary", Cons(q(op), Cons(dump_expr(expr), Nil)))
+  | ast.IntRangeExpr from_ to_ _ ->
+      sexp("range", Cons(dump_expr(from_), Cons(dump_expr(to_), Nil)))
+  | ast.DoExpr steps _ ->
+      sexp("do", dump_steps(steps))
+  | ast.RecordExpr type_name fields _ ->
+      sexp("record", Cons(q(type_name), dump_record_fields(fields)))
+  | ast.GetFieldExpr record field_name _ ->
+      sexp("get-field", Cons(dump_expr(record), Cons(q(field_name), Nil)))
+
+fn dump_exprs(items: List ast.Expr) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons x rest -> Cons(dump_expr(x), dump_exprs(rest))
+
+fn dump_branches(items: List ast.MatchBranch) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          Cons(sexp("branch", Cons(dump_pat(pat), Cons(dump_expr(body), Nil))), dump_branches(rest))
+
+fn dump_steps(items: List ast.DoStep) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons s rest -> Cons(dump_step(s), dump_steps(rest))
+
+fn dump_step(s: ast.DoStep) -> String =
+  match s with
+  | ast.DoBindStep pat value ->
+      sexp("bind", Cons(dump_pat(pat), Cons(dump_expr(value), Nil)))
+  | ast.DoLetStep name value ->
+      sexp("do-let", Cons(q(name), Cons(dump_expr(value), Nil)))
+  | ast.DoExprStep value ->
+      sexp("do-expr", Cons(dump_expr(value), Nil))
+
+fn dump_record_fields(items: List ast.RecordField) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordField name value ->
+          Cons(sexp("field", Cons(q(name), Cons(dump_expr(value), Nil))), dump_record_fields(rest))
+
+# ---------------------------------------------------------------------------
+# Declarations
+
+fn dump_constraint(c: ast.TypeConstraint) -> String =
+  match c with
+  | ast.TypeConstraint name args -> sexp("constraint", Cons(q(name), dump_types(args)))
+
+fn dump_constraints(cs: List ast.TypeConstraint) -> List String =
+  match cs with
+  | Nil -> Nil
+  | Cons c rest -> Cons(dump_constraint(c), dump_constraints(rest))
+
+fn dump_method_sig(m: ast.ClassMethodSig) -> String =
+  match m with
+  | ast.ClassMethodSig name params ret effs ->
+      sexp("method-sig", Cons(q(name), Cons(dump_params(params), Cons(dump_type(ret), Cons(dump_maybe_effects(effs), Nil)))))
+
+fn dump_method_sigs(items: List ast.ClassMethodSig) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons m rest -> Cons(dump_method_sig(m), dump_method_sigs(rest))
+
+fn dump_maybe_ret(t: Maybe ast.TypeExpr) -> String =
+  match t with
+  | Nothing -> "(ret)"
+  | Just te -> sexp("ret", Cons(dump_type(te), Nil))
+
+fn dump_method_impl(m: ast.InstanceMethodImpl) -> String =
+  match m with
+  | ast.InstanceMethodImpl name params maybe_ret effs body ->
+      sexp("method-impl", Cons(q(name), Cons(dump_params(params), Cons(dump_maybe_ret(maybe_ret), Cons(dump_maybe_effects(effs), Cons(dump_expr(body), Nil))))))
+
+fn dump_method_impls(items: List ast.InstanceMethodImpl) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons m rest -> Cons(dump_method_impl(m), dump_method_impls(rest))
+
+fn dump_ctor(c: ast.TypeConstructor) -> String =
+  match c with
+  | ast.TypeConstructor name args -> sexp("ctor", Cons(q(name), dump_types(args)))
+
+fn dump_ctors(items: List ast.TypeConstructor) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons c rest -> Cons(dump_ctor(c), dump_ctors(rest))
+
+fn dump_field_decl(f: ast.RecordFieldDecl) -> String =
+  match f with
+  | ast.RecordFieldDecl name t ->
+      sexp("field-decl", Cons(q(name), Cons(dump_type(t), Nil)))
+
+fn dump_field_decls(items: List ast.RecordFieldDecl) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons f rest -> Cons(dump_field_decl(f), dump_field_decls(rest))
+
+fn dump_decl(d: ast.Decl) -> String =
+  match d with
+  | ast.FnDecl name params maybe_ret maybe_effs constraints body _ ->
+      sexp("fn", Cons(q(name), Cons(dump_params(params), Cons(dump_maybe_ret(maybe_ret), Cons(dump_maybe_effects(maybe_effs), Cons(sexp("constraints", dump_constraints(constraints)), Cons(dump_expr(body), Nil)))))))
+  | ast.TypeDecl name type_params ctors _ ->
+      sexp("type", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_ctors(ctors))))
+  | ast.RecordDecl name type_params fields _ ->
+      sexp("record", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_field_decls(fields))))
+  | ast.LetDecl name body _ ->
+      sexp("let", Cons(q(name), Cons(dump_expr(body), Nil)))
+  | ast.ClassDecl name type_params methods _ ->
+      sexp("class", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_method_sigs(methods))))
+  | ast.InstanceDecl constraint methods _ ->
+      sexp("instance", Cons(dump_constraint(constraint), dump_method_impls(methods)))
+
+fn dump_decls(ds: List ast.Decl) -> Unit !{IO} =
   match ds with
   | Nil -> ()
   | Cons d rest ->
       do
-        print(describe_decl(d))
-        print_decls(rest)
+        print(dump_decl(d))
+        dump_decls(rest)
+
+# ---------------------------------------------------------------------------
+# Lex/parse error reporting
 
 fn lex_err_msg(e: token.TokenizeError) -> String =
   match e with
-  | token.TokenizeError msg _ -> str_concat("ERROR: lex error: ", msg)
+  | token.TokenizeError msg _ -> str_concat("ERROR: lex: ", msg)
 
 fn parse_err_msg(e: parser.ParseError) -> String =
   match e with
-  | parser.ParseError msg _ -> str_concat("ERROR: parse error: ", msg)
+  | parser.ParseError msg _ -> str_concat("ERROR: parse: ", msg)
 
-fn run_parse_result(r: Result parser.ParseError ast.Program) -> Unit !{IO} =
-  match r with
-  | Err e -> print(parse_err_msg(e))
-  | Ok prog ->
-      match prog with
-      | ast.Program decls _ -> print_decls(decls)
+# ---------------------------------------------------------------------------
+# Header stripping
+#
+# Skips leading lines that are module declarations, import statements, or blank.
+# This matches the Python parse() function which expects a bare declaration body.
 
 fn is_header_line(s: String, pos: Int) -> Bool =
   str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
@@ -52,12 +304,20 @@ fn strip_headers(s: String, pos: Int) -> String =
   else if is_header_line(s, pos) then strip_headers(s, next_line(s, pos))
   else str_slice(s, pos, str_len(s))
 
+# ---------------------------------------------------------------------------
+# Entry point
+
 fn run_file(path: String) -> Unit !{IO} =
   match lexer.tokenize(strip_headers(read_file(path), 0)) with
   | Err e -> print(lex_err_msg(e))
-  | Ok tokens -> run_parse_result(parser.parse_program(tokens))
+  | Ok tokens ->
+      match parser.parse_program(tokens) with
+      | Err e -> print(parse_err_msg(e))
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ -> dump_decls(decls)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing -> print("ERROR: usage: bootstrap-parse <file>")
+  | Nothing -> print("ERROR: usage: dump-ast <file>")
   | Just path -> run_file(path)

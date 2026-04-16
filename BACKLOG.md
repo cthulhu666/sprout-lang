@@ -87,7 +87,10 @@ Definition of done:
   - bootstrap lexer (`stdlib/compiler/source`, `token`, `lexer`) is at Python tokenizer parity
   - bootstrap parser AST types and parser exist in `stdlib/compiler/ast`, `parser`
   - bootstrap HM typechecker stack exists in `stdlib/compiler/types`, `unifier`, `infer`
-  - no Python compiler path has been replaced yet; integration wiring is next
+  - `stdlib/compiler/driver.sprout` emits a flat s-expression AST dump (one decl per line)
+  - `tools/dump_ast.py` emits the same format via the Python parser
+  - `tests/test_parser_parity.py` runs both on the conformance corpus and diffs output; 7/7 pass (one known divergence: `++` desugars to `append` in Python, `list_append` in Sprout)
+  - no Python compiler path has been replaced yet; integration seam is next
 
 ### 7.5) Type Classes (Collections First)
 
@@ -158,9 +161,10 @@ Definition of done:
 - [x] The builtin surface is now explicitly audited in the docs as `IO`-annotated, pure, or runtime-bound-but-non-`IO` in v0.
 - [x] There is now an explicit design plan for promoting a minimal real effect system into v0: [docs/effect-system-v0-plan.md](./docs/effect-system-v0-plan.md).
 - [x] Bootstrap self-hosting compiler modules exist in `stdlib/compiler/`: `source`, `token`, `lexer` (Python tokenizer parity), `ast`, `parser`, `types`, `unifier`, `infer` (HM constraint generation/solving).
+- [x] Bootstrap parser parity harness: `driver.sprout` dumps AST as flat s-exprs; `tools/dump_ast.py` does the same via Python parser; `tests/test_parser_parity.py` confirms 7/7 corpus files match (one known `++`-desugaring divergence documented).
 
 ## Next 3 Tasks (Execution Order)
 
-1. Wire the bootstrap parser (`stdlib/compiler/parser`) into a parity harness against the Python parser on a representative corpus, exposing any remaining surface gaps.
-2. Define the first integration seam: a Sprout-owned checker path that accepts a parsed AST and produces typed names, threaded through `types`/`unifier`/`infer`, with parity tests against the hosted checker.
+1. Define the first integration seam: a Sprout-owned checker path that accepts a parsed AST and produces typed names, threaded through `types`/`unifier`/`infer`, with parity tests against the hosted checker.
+2. Expand the parity corpus to cover type classes, record types, instance declarations, and where-clause desugaring — surfacing any remaining parser gaps before the checker seam lands.
 3. Begin Phase 2 driver work: expand `stdlib/compiler` into a real compiler-request entrypoint so at least one CLI check path runs through Sprout-owned control flow.
