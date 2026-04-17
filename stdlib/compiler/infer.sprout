@@ -893,7 +893,11 @@ fn typecheck_decl(
   | ast.TypeDecl _ _ _ _ -> DeclOk(register_type_decl(decl, env))
   | ast.RecordDecl _ _ _ _ -> DeclOk(env)
   | ast.FnDecl name _ _ _ _ _ _ ->
-      DeclOk(dict_set(name, scheme_from_fn_decl(decl), env))
+      do
+        r <- check_fn_body(state, decl, env, subst, eff_subst)
+        match r with
+        | DeclErr e -> DeclErr(e)
+        | DeclOk _ -> DeclOk(dict_set(name, scheme_from_fn_decl(decl), env))
   | ast.LetDecl name expr _ ->
       do
         r <- infer_expr(state, env, subst, eff_subst, expr)
@@ -903,3 +907,58 @@ fn typecheck_decl(
             DeclOk(dict_set(name, unifier.generalize(unifier.ftv_env(env), s1, eff_subst, t, types.EffectPure), env))
   | ast.ClassDecl _ _ _ _ -> DeclOk(env)
   | ast.InstanceDecl _ _ _ -> DeclOk(env)
+
+# ---------------------------------------------------------------------------
+# FnDecl body inference
+# ---------------------------------------------------------------------------
+#
+# check_fn_body infers the body of a function declaration and checks it
+# against the annotation-derived type.  The public scheme (for callers) is
+# still determined by scheme_from_fn_decl; body inference is an additional
+# consistency check that does not change the exported type.
+#
+# Leniency rule: "Unknown variable" / "Unknown constructor" errors are
+# silently accepted.  These arise when a function calls a builtin that is
+# not in the bootstrap env (print, read_file, dict_get, ...).  We cannot
+# enumerate all builtins without pre-seeding the env, so we tolerate the
+# gap and still catch real type mismatches in the parts we can check.
+
+fn check_fn_body(
+  state: unifier.InferState,
+  decl: ast.Decl,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect
+) -> DeclResult !{IO} =
+  match decl with
+  | ast.FnDecl name params _ _ _ body _ ->
+      do
+        inst_type <- unifier.instantiate(state, scheme_from_fn_decl(decl))
+        br <- infer_expr(state, fn_body_env(name, params, inst_type, env), subst, eff_subst, body)
+        match br with
+        | InferErr msg -> fn_body_err(name, msg)
+        | InferOk body_type s1 _ _ ->
+            match unifier.unify_types(s1, body_type, ctor_result_type(inst_type)) with
+            | Err e -> DeclErr("Return type mismatch in " ++ name ++ ": " ++ e)
+            | Ok _ -> DeclOk(env)
+  | _ -> DeclOk(env)
+
+# Build the local env for body inference: add the function itself (for
+# recursion) and its params (from the instantiated annotation type).
+fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  extend_env_with_params(
+    params,
+    ctor_param_types(inst_type),
+    dict_set(name, types.mono(inst_type), env)
+  )
+
+# Classify an inference error: if it is due to an unknown name (a builtin
+# not in the bootstrap env), treat as success.  Otherwise propagate.
+fn fn_body_err(name: String, msg: String) -> DeclResult =
+  if is_unknown_ref(msg)
+  then DeclOk(dict_empty())
+  else DeclErr(msg ++ " in function " ++ name)
+
+fn is_unknown_ref(msg: String) -> Bool =
+  str_starts_with(msg, "Unknown variable: ") ||
+  str_starts_with(msg, "Unknown constructor: ")
