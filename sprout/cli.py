@@ -133,6 +133,30 @@ def cmd_bootstrap_parse(path: Path) -> int:
     return 0
 
 
+def cmd_bootstrap_check(path: Path) -> int:
+    """Typecheck a Sprout file using the bootstrap (self-hosted) checker.
+
+    Routes through stdlib/compiler/compile_driver.sprout instead of the
+    Python typechecker.  The driver strips module/import headers itself,
+    runs the full lex → parse → HM-check pipeline, and prints:
+      OK
+      <name> : <scheme>
+      ...
+    on success, or ERROR: <msg> on failure.
+    """
+    driver = Path(__file__).parent.parent / "stdlib" / "compiler" / "compile_driver.sprout"
+    bundle = load_module_bundle(driver)
+    source = bundle.source
+    tree = parse(source)
+    _print_warnings(resolve_program_names(tree, bundle))
+    validate_public_surface(tree, bundle)
+    typecheck_program(tree)
+    validate_public_surface(tree, bundle)
+    lowered = lower_typeclasses(tree)
+    run_program(lowered, argv=[str(path.resolve())])
+    return 0
+
+
 def cmd_fmt(path: Path, check: bool = False) -> int:
     source = path.read_text(encoding="utf-8")
     formatted = format_source(source)
@@ -5015,6 +5039,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_bootstrap_parse = sub.add_parser("bootstrap-parse", help="parse a Sprout file using the bootstrap (self-hosted) parser")
     p_bootstrap_parse.add_argument("file", type=Path)
+    p_bootstrap_check = sub.add_parser("bootstrap-check", help="typecheck a Sprout file using the bootstrap (self-hosted) checker")
+    p_bootstrap_check.add_argument("file", type=Path)
     sub.add_parser("analysis-service", help=argparse.SUPPRESS)
     sub.add_parser("analysis-stdio", help=argparse.SUPPRESS)
     p_repl = sub.add_parser("repl", help="start a simple interactive Sprout REPL")
@@ -5058,6 +5084,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "bootstrap-parse":
             return cmd_bootstrap_parse(args.file)
+        if args.command == "bootstrap-check":
+            return cmd_bootstrap_check(args.file)
         if args.command == "analysis-service":
             return cmd_analysis_cli(args.command)
         if args.command == "analysis-stdio":
