@@ -218,8 +218,13 @@ Definition of done:
   resolution and diagnostic shaping are not yet started)*
 - [ ] Keep typechecker diagnostics stable and non-cascading throughout the
   migration.
-- [ ] Add success/failure parity suites for the hosted and self-hosted
+- [~] Add success/failure parity suites for the hosted and self-hosted
   checkers.
+  *(`stdlib/compiler/checker.sprout` wraps `infer.typecheck_decls` with a `CheckResult`
+  ADT; `stdlib/compiler/type_driver.sprout` is the Sprout-side executable;
+  `tools/dump_types.py` is the Python-side comparison tool;
+  `tests/test_checker_parity.py` confirms 4/4 corpus files match with one known
+  forall-generalization divergence documented)*
 - [ ] Make the self-hosted checker authoritative on at least one bootstrap
   path before deleting the Python checker.
 

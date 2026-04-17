@@ -820,6 +820,14 @@ fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, 
 # ---------------------------------------------------------------------------
 # Program-level typechecking
 # ---------------------------------------------------------------------------
+#
+# DeclResult is a custom ADT rather than Result so that the Python
+# typechecker does not misclassify do-blocks that bind it with <- as
+# "Result-sequencing" do-blocks.  The same pattern is used for InferResult.
+
+export type DeclResult (..) =
+  | DeclOk (Dict types.Scheme)
+  | DeclErr String
 
 export fn typecheck_decls(
   state: unifier.InferState,
@@ -827,13 +835,15 @@ export fn typecheck_decls(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
-) -> Result String (Dict types.Scheme) !{IO} =
+) -> DeclResult !{IO} =
   match decls with
-  | Nil -> Ok(env)
+  | Nil -> DeclOk(env)
   | Cons decl rest ->
       do
-        new_env <- typecheck_decl(state, decl, env, subst, eff_subst)
-        typecheck_decls(state, rest, new_env, subst, eff_subst)
+        r <- typecheck_decl(state, decl, env, subst, eff_subst)
+        match r with
+        | DeclErr e -> DeclErr(e)
+        | DeclOk new_env -> typecheck_decls(state, rest, new_env, subst, eff_subst)
 
 fn typecheck_decl(
   state: unifier.InferState,
@@ -841,18 +851,18 @@ fn typecheck_decl(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
-) -> Result String (Dict types.Scheme) !{IO} =
+) -> DeclResult !{IO} =
   match decl with
-  | ast.TypeDecl _ _ _ _ -> Ok(register_type_decl(decl, env))
-  | ast.RecordDecl _ _ _ _ -> Ok(env)
+  | ast.TypeDecl _ _ _ _ -> DeclOk(register_type_decl(decl, env))
+  | ast.RecordDecl _ _ _ _ -> DeclOk(env)
   | ast.FnDecl name _ _ _ _ _ _ ->
-      Ok(dict_set(name, scheme_from_fn_decl(decl), env))
+      DeclOk(dict_set(name, scheme_from_fn_decl(decl), env))
   | ast.LetDecl name expr _ ->
       do
         r <- infer_expr(state, env, subst, eff_subst, expr)
         match r with
-        | InferErr e -> Err(e)
+        | InferErr e -> DeclErr(e)
         | InferOk t s1 _ _ ->
-            Ok(dict_set(name, unifier.generalize(unifier.ftv_env(env), s1, eff_subst, t, types.EffectPure), env))
-  | ast.ClassDecl _ _ _ _ -> Ok(env)
-  | ast.InstanceDecl _ _ _ -> Ok(env)
+            DeclOk(dict_set(name, unifier.generalize(unifier.ftv_env(env), s1, eff_subst, t, types.EffectPure), env))
+  | ast.ClassDecl _ _ _ _ -> DeclOk(env)
+  | ast.InstanceDecl _ _ _ -> DeclOk(env)

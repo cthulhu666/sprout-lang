@@ -178,9 +178,7 @@ fn type_to_string_aux(t: Type, as_arg: Bool) -> String =
   | TVar name -> name
   | TConst name -> name
   | TApp base arg ->
-      if as_arg
-      then wrap_parens(type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true))
-      else type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true)
+      type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true)
   | TFunc param ret eff ->
       if as_arg
       then wrap_parens(type_to_string_aux(param, true) ++ " -> " ++ type_to_string_aux(ret, false) ++ effect_suffix(eff))

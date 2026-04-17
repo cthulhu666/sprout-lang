@@ -1,0 +1,93 @@
+module stdlib.compiler.checker
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.unifier as unifier
+import stdlib.compiler.infer as infer
+
+# ---------------------------------------------------------------------------
+# CheckResult — the output of the Sprout-owned checker seam
+# ---------------------------------------------------------------------------
+#
+# CheckOk carries the final typing environment (a Dict mapping every
+# user-declared name to its inferred or annotation-derived Scheme).
+# CheckErr carries a human-readable error message.
+
+export type CheckResult (..) =
+  | CheckOk (Dict types.Scheme)
+  | CheckErr String
+
+# ---------------------------------------------------------------------------
+# check_program — the integration seam entry point
+# ---------------------------------------------------------------------------
+#
+# Accepts a parsed ast.Program and runs the bootstrap HM typechecker stack
+# (infer.typecheck_decls, which threads through types/unifier/infer).
+# Returns CheckOk with the final env on success, CheckErr on first error.
+#
+# Bootstrap-level behaviour (current limitations):
+#   - FnDecl schemes are read from explicit annotations (bodies not inferred).
+#   - TypeDecl constructors are fully registered with correct polymorphism.
+#   - LetDecl values are inferred from their expression bodies.
+#   - ClassDecl/InstanceDecl are registered as no-ops (not yet supported).
+#
+# The initial environment is empty: all names must be declared in the source
+# or pre-seeded by the caller.  The corpus files satisfy this because they
+# declare every type and constructor they use.
+
+export fn check_program(prog: ast.Program) -> CheckResult !{IO} =
+  do
+    state <- unifier.new_state()
+    match prog with
+    | ast.Program decls _ ->
+        do
+          r <- infer.typecheck_decls(state, decls, dict_empty(), dict_empty(), dict_empty())
+          match r with
+          | infer.DeclErr msg -> CheckErr(msg)
+          | infer.DeclOk env  -> CheckOk(env)
+
+# ---------------------------------------------------------------------------
+# dump_typed_names — parity-test output renderer
+# ---------------------------------------------------------------------------
+#
+# Walks the declaration list in source order and prints one line per
+# user-declared name:
+#
+#   <name> : <scheme_string>
+#
+# Printed names:
+#   FnDecl    -> the function name
+#   LetDecl   -> the binding name
+#   TypeDecl  -> each constructor name
+#   others    -> nothing (ClassDecl, InstanceDecl, RecordDecl skipped)
+#
+# This matches what tools/dump_types.py emits from the Python typechecker,
+# enabling line-by-line diffing in tests/test_checker_parity.py.
+
+export fn dump_typed_names(decls: List ast.Decl, env: Dict types.Scheme) -> Unit !{IO} =
+  match decls with
+  | Nil -> ()
+  | Cons d rest ->
+      do
+        dump_decl_name(d, env)
+        dump_typed_names(rest, env)
+
+fn dump_decl_name(d: ast.Decl, env: Dict types.Scheme) -> Unit !{IO} =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ -> print_name_scheme(name, env)
+  | ast.LetDecl name _ _        -> print_name_scheme(name, env)
+  | ast.TypeDecl _ _ ctors _    -> dump_ctor_names(ctors, env)
+  | _                           -> ()
+
+fn dump_ctor_names(ctors: List ast.TypeConstructor, env: Dict types.Scheme) -> Unit !{IO} =
+  match ctors with
+  | Nil -> ()
+  | Cons ctor rest ->
+      do
+        match ctor with
+        | ast.TypeConstructor ctor_name _ -> print_name_scheme(ctor_name, env)
+        dump_ctor_names(rest, env)
+
+fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
+  match dict_get(name, env) with
+  | Nothing     -> print(name ++ " : <not found>")
+  | Just scheme -> print(name ++ " : " ++ types.scheme_to_string(scheme))
