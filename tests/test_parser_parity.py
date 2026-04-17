@@ -32,6 +32,11 @@ CORPUS = [
     "stdlib_mixed_io_result_do.spr",
     "aoc2025_day1_sample.spr",
     "aoc2025_day2_sample.spr",
+    # New: language-feature coverage
+    "record_types.spr",
+    "type_classes.spr",
+    "where_clauses.spr",
+    "poly_types.spr",
 ]
 
 # Known divergences between the Python and Sprout parsers.

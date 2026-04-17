@@ -1,0 +1,25 @@
+# Conformance file: ADTs with multiple type parameters
+# Covers: TypeDecl with multiple type params, polymorphic constructors
+
+type Either a b =
+  | Left a
+  | Right b
+
+type Pair a b =
+  | MkPair a b
+
+fn swap_pair(p: Pair a b) -> Pair b a =
+  match p with
+  | MkPair x y -> MkPair(y, x)
+
+fn either_map(f: a -> c, e: Either a b) -> Either c b =
+  match e with
+  | Left x -> Left(f(x))
+  | Right y -> Right(y)
+
+fn from_either(default: a, e: Either a b) -> a =
+  match e with
+  | Left x -> x
+  | Right _ -> default
+
+let p = MkPair(1, true)

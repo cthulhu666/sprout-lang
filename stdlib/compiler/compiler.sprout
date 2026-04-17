@@ -1,0 +1,90 @@
+module stdlib.compiler.compiler
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+import stdlib.compiler.checker as checker
+import stdlib.compiler.types as types
+
+# ---------------------------------------------------------------------------
+# Public API types
+# ---------------------------------------------------------------------------
+
+# A request to compile/check a source string
+export type CompileRequest (..) =
+  | CheckRequest String
+
+# A diagnostic: error or warning with optional location
+export type Diagnostic (..) =
+  | DiagError String
+  | DiagWarning String
+
+# The result of a compile/check request
+export type CompileResult (..) =
+  | CompileOk (Dict types.Scheme)
+  | CompileFail (List Diagnostic)
+
+# ---------------------------------------------------------------------------
+# Header stripping (private)
+# ---------------------------------------------------------------------------
+#
+# Skips leading module/import/blank lines so the bootstrap parser receives
+# only the declaration body — matching tools/dump_types.py's behaviour.
+
+fn is_header_line(s: String, pos: Int) -> Bool =
+  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
+
+fn next_line(s: String, pos: Int) -> Int =
+  if nl == -1 then str_len(s)
+  else pos + nl + 1
+  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+
+fn strip_headers(s: String, pos: Int) -> String =
+  if pos >= str_len(s) then ""
+  else if is_header_line(s, pos) then strip_headers(s, next_line(s, pos))
+  else str_slice(s, pos, str_len(s))
+
+# ---------------------------------------------------------------------------
+# Core pipeline
+# ---------------------------------------------------------------------------
+#
+# LexParseResult is a custom ADT (not Result) so that the Python typechecker
+# does not apply Result-sequencing to the Err/Ok match inside an IO function.
+# Same pattern as DeclResult / InferResult in infer.sprout.
+
+type LexParseResult =
+  | LexParseOk ast.Program
+  | LexParseFail (List Diagnostic)
+
+fn lex_err_diag(e: token.TokenizeError) -> Diagnostic =
+  match e with
+  | token.TokenizeError msg _ -> DiagError("lex: " ++ msg)
+
+fn parse_err_diag(e: parser.ParseError) -> Diagnostic =
+  match e with
+  | parser.ParseError msg _ -> DiagError("parse: " ++ msg)
+
+fn lex_parse(src: String) -> LexParseResult =
+  match lexer.tokenize(src) with
+  | Err e    -> LexParseFail(Cons(lex_err_diag(e), Nil))
+  | Ok tokens ->
+      match parser.parse_program(tokens) with
+      | Err e   -> LexParseFail(Cons(parse_err_diag(e), Nil))
+      | Ok prog -> LexParseOk(prog)
+
+# compile_source: run full lex -> parse -> check pipeline on raw source text.
+export fn compile_source(src: String) -> CompileResult !{IO} =
+  match lex_parse(src) with
+  | LexParseFail diags -> CompileFail(diags)
+  | LexParseOk prog ->
+      do
+        result <- checker.check_program(prog)
+        match result with
+        | checker.CheckErr msg -> CompileFail(Cons(DiagError("check: " ++ msg), Nil))
+        | checker.CheckOk env  -> CompileOk(env)
+
+# compile_file: read a file, strip headers, then call compile_source.
+export fn compile_file(path: String) -> CompileResult !{IO} =
+  compile_source(strip_headers(read_file(path), 0))

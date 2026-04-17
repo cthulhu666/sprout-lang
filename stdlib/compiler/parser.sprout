@@ -886,7 +886,7 @@ fn parse_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     (_, i5) <- expected_symbol("=", tokens, skip_visibility(tokens, i4))
     (ctors, i6) <- collect_type_constructors(tokens, i5, Nil)
-    Ok((ast.TypeDecl(token.token_text(name_tok), list_reverse(params), list_reverse(ctors), cur_pos(tokens, i)), i6))
+    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), cur_pos(tokens, i)), i6))
 
 fn skip_visibility(tokens: Vec token.Token, i: Int) -> Int =
   match match_symbol(tokens, i, "(") with

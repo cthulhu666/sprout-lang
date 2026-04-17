@@ -47,6 +47,17 @@ CORPUS = [
     "maybe_map.spr",
     "aoc2025_day1_sample.spr",
     "aoc2025_day2_sample.spr",
+    # New: language-feature coverage
+    # type_classes.spr excluded: bootstrap checker treats ClassDecl/InstanceDecl
+    # as no-ops, so typeclass methods (e.g. eq) are not in the bootstrap env,
+    # causing FnDecls that call them to fail.  Parser-only corpus.
+    # record_types.spr excluded: Python typechecker does not support record-type
+    # syntax (RecordDecl); typecheck_program fails with empty output.  Parser-only.
+    # poly_types.spr excluded: multi-param type constructor schemes are
+    # alpha-equivalent between Python and Sprout but variable names differ
+    # (Python renames in order of first appearance in the type body; Sprout
+    # preserves TypeDecl parameter order).  Parser-only corpus.
+    "where_clauses.spr",
 ]
 
 # Regex that matches a Python-emitted line with a forall prefix.

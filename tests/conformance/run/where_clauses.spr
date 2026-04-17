@@ -1,0 +1,19 @@
+# Conformance file: where clause desugaring in function bodies
+# Covers: local `where` bindings (desugared to lambda application by both parsers)
+
+fn circle_area(r: Int) -> Int =
+  pi * r * r
+  where
+    pi = 3
+
+fn hypotenuse_sq(a: Int, b: Int) -> Int =
+  a_sq + b_sq
+  where
+    a_sq = a * a
+    b_sq = b * b
+
+fn clamp(lo: Int, hi: Int, x: Int) -> Int =
+  result
+  where
+    clamped_lo = if x < lo then lo else x
+    result = if clamped_lo > hi then hi else clamped_lo

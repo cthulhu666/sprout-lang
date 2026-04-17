@@ -1,0 +1,34 @@
+# Conformance file: type classes and instances
+# Covers: ClassDecl, InstanceDecl
+
+class Eq a {
+  fn eq(x: a, y: a) -> Bool
+}
+
+class Describable a {
+  fn describe(x: a) -> String
+}
+
+type Color =
+  | Red
+  | Green
+  | Blue
+
+instance Eq Int {
+  fn eq(x: Int, y: Int) -> Bool = x == y
+}
+
+instance Eq Bool {
+  fn eq(x: Bool, y: Bool) -> Bool =
+    if x then y else if y then false else true
+}
+
+instance Describable Color {
+  fn describe(x: Color) -> String =
+    match x with
+    | Red -> "red"
+    | Green -> "green"
+    | Blue -> "blue"
+}
+
+fn same_int(a: Int, b: Int) -> Bool = eq(a, b)

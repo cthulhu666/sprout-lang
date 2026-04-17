@@ -86,7 +86,7 @@ fn scheme_from_fn_parts(
   effects_maybe: Maybe (List String)
 ) -> types.Scheme =
   scheme_from_fn_parts_inner(
-    collect_param_type_vars(params, Nil),
+    collect_ret_type_vars(ret_type_maybe, collect_param_type_vars(params, Nil)),
     params,
     ret_type_maybe,
     effects_maybe
@@ -105,7 +105,44 @@ fn ast_param_type(p: ast.Param) -> Maybe ast.TypeExpr =
 fn collect_type_expr_vars(maybe_te: Maybe ast.TypeExpr, acc: List String) -> List String =
   match maybe_te with
   | Nothing -> acc
-  | Just te -> acc  # simplified: skip implicit var collection for now
+  | Just te -> collect_te_vars(te, acc)
+
+fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
+  match te with
+  | ast.TypeName name ->
+      if is_lowercase_name(name) then list_add_unique(name, acc) else acc
+  | ast.TypeApply base arg ->
+      collect_te_vars(base, collect_te_vars(arg, acc))
+  | ast.TypeArrow param ret _ ->
+      collect_te_vars(param, collect_te_vars(ret, acc))
+  | ast.TypeEffect inner _ -> collect_te_vars(inner, acc)
+  | ast.TupleType parts -> collect_te_vars_list(parts, acc)
+
+fn collect_te_vars_list(parts: List ast.TypeExpr, acc: List String) -> List String =
+  match parts with
+  | Nil -> acc
+  | Cons h t -> collect_te_vars_list(t, collect_te_vars(h, acc))
+
+fn is_lowercase_name(name: String) -> Bool =
+  c == "a" || c == "b" || c == "c" || c == "d" || c == "e" ||
+  c == "f" || c == "g" || c == "h" || c == "i" || c == "j" ||
+  c == "k" || c == "l" || c == "m" || c == "n" || c == "o" ||
+  c == "p" || c == "q" || c == "r" || c == "s" || c == "t" ||
+  c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z"
+  where c = str_slice(name, 0, 1)
+
+fn list_add_unique(x: String, xs: List String) -> List String =
+  if types.list_member(x, xs) then xs else Cons(x, xs)
+
+fn collect_ret_type_vars(ret_type_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
+  match ret_type_maybe with
+  | Nothing -> acc
+  | Just te -> collect_te_vars(te, acc)
+
+fn build_type_var_dict(vars: List String, acc: Dict types.Type) -> Dict types.Type =
+  match vars with
+  | Nil -> acc
+  | Cons name rest -> build_type_var_dict(rest, dict_set(name, types.TVar(name), acc))
 
 fn scheme_from_fn_parts_inner(
   type_params: List String,
@@ -116,9 +153,10 @@ fn scheme_from_fn_parts_inner(
   types.Scheme(
     type_params,
     Nil,
-    build_fn_type(param_types_from_decl(params, dict_empty()), ret_from_maybe(ret_type_maybe)),
+    build_fn_type(param_types_from_decl(params, local_vars), ret_from_maybe_with_vars(ret_type_maybe, local_vars)),
     effect_from_maybe_labels(effects_maybe)
   )
+  where local_vars = build_type_var_dict(type_params, dict_empty())
 
 fn param_types_from_decl(params: List ast.Param, local_vars: Dict types.Type) -> List types.Type =
   match params with
@@ -128,10 +166,10 @@ fn param_types_from_decl(params: List ast.Param, local_vars: Dict types.Type) ->
       | Nothing -> Cons(types.TVar("_unann"), param_types_from_decl(rest, local_vars))
       | Just te -> Cons(type_from_ast(te, local_vars), param_types_from_decl(rest, local_vars))
 
-fn ret_from_maybe(maybe_te: Maybe ast.TypeExpr) -> types.Type =
+fn ret_from_maybe_with_vars(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with
   | Nothing -> types.TConst("Unit")
-  | Just te -> type_from_ast(te, dict_empty())
+  | Just te -> type_from_ast(te, local_vars)
 
 fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
   match params with
@@ -793,8 +831,7 @@ fn infer_lambda(
 ) -> InferResult !{IO} =
   do
     fresh_params <- make_fresh_param_types(state, params)
-    let body_env = extend_env_with_params(params, fresh_params, env)
-    br <- infer_expr(state, body_env, subst, eff_subst, body)
+    br <- infer_expr(state, extend_env_with_params(params, fresh_params, env), subst, eff_subst, body)
     match br with
     | InferErr e -> InferErr(e)
     | InferOk body_type s1 es1 body_eff ->
