@@ -905,8 +905,14 @@ fn typecheck_decl(
         | InferErr e -> DeclErr(e)
         | InferOk t s1 _ _ ->
             DeclOk(dict_set(name, unifier.generalize(unifier.ftv_env(env), s1, eff_subst, t, types.EffectPure), env))
-  | ast.ClassDecl _ _ _ _ -> DeclOk(env)
-  | ast.InstanceDecl _ _ _ -> DeclOk(env)
+  | ast.ClassDecl _ type_params methods _ ->
+      DeclOk(register_class_methods(type_params, methods, env))
+  | ast.InstanceDecl _ methods _ ->
+      do
+        r <- check_instance_methods(state, methods, env, subst, eff_subst)
+        match r with
+        | DeclErr e -> DeclErr(e)
+        | DeclOk _ -> DeclOk(env)
 
 # ---------------------------------------------------------------------------
 # FnDecl body inference
@@ -962,3 +968,76 @@ fn fn_body_err(name: String, msg: String) -> DeclResult =
 fn is_unknown_ref(msg: String) -> Bool =
   str_starts_with(msg, "Unknown variable: ") ||
   str_starts_with(msg, "Unknown constructor: ")
+
+# ---------------------------------------------------------------------------
+# ClassDecl: method registration
+# ---------------------------------------------------------------------------
+#
+# Each class method is added to the global env as a polymorphic scheme whose
+# quantified type variables are the class's type parameters.  This lets body
+# inference resolve calls like eq(a, b) without the leniency fallback.
+#
+# Constraint-satisfaction checking (ensuring a matching instance exists for
+# the concrete argument types) is not yet implemented; methods are accepted
+# as globally callable for any type.
+
+fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
+  match methods with
+  | Nil -> env
+  | Cons sig rest ->
+      register_class_methods(type_params, rest, register_class_method(type_params, sig, env))
+
+fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
+  match sig with
+  | ast.ClassMethodSig name params ret_type effects_maybe ->
+      dict_set(name, scheme_from_fn_parts_inner(type_params, params, Just(ret_type), effects_maybe), env)
+
+# ---------------------------------------------------------------------------
+# InstanceDecl: instance method body checking
+# ---------------------------------------------------------------------------
+#
+# Each instance method is treated like a FnDecl body: build a (potentially
+# monomorphic) scheme from the method's own annotations, instantiate it,
+# build a body env from the params, infer the body, and unify against the
+# annotation return type.  The same leniency rule applies: unknown-ref errors
+# are silently accepted; real type mismatches propagate.
+
+fn check_instance_methods(
+  state: unifier.InferState,
+  methods: List ast.InstanceMethodImpl,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect
+) -> DeclResult !{IO} =
+  match methods with
+  | Nil -> DeclOk(env)
+  | Cons method rest ->
+      do
+        r <- check_instance_method(state, method, env, subst, eff_subst)
+        match r with
+        | DeclErr e -> DeclErr(e)
+        | DeclOk _ -> check_instance_methods(state, rest, env, subst, eff_subst)
+
+fn check_instance_method(
+  state: unifier.InferState,
+  method: ast.InstanceMethodImpl,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect
+) -> DeclResult !{IO} =
+  match method with
+  | ast.InstanceMethodImpl name params ret_maybe eff_maybe body ->
+      do
+        inst_type <- unifier.instantiate(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe))
+        br <- infer_expr(state, extend_env_with_params(params, ctor_param_types(inst_type), env), subst, eff_subst, body)
+        match br with
+        | InferErr msg -> instance_method_err(name, msg)
+        | InferOk body_type s1 _ _ ->
+            match unifier.unify_types(s1, body_type, ctor_result_type(inst_type)) with
+            | Err e -> DeclErr("Return type mismatch in instance method " ++ name ++ ": " ++ e)
+            | Ok _ -> DeclOk(env)
+
+fn instance_method_err(name: String, msg: String) -> DeclResult =
+  if is_unknown_ref(msg)
+  then DeclOk(dict_empty())
+  else DeclErr(msg ++ " in instance method " ++ name)

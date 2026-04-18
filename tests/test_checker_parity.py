@@ -48,9 +48,7 @@ CORPUS = [
     "aoc2025_day1_sample.spr",
     "aoc2025_day2_sample.spr",
     # New: language-feature coverage
-    # type_classes.spr excluded: bootstrap checker treats ClassDecl/InstanceDecl
-    # as no-ops, so typeclass methods (e.g. eq) are not in the bootstrap env,
-    # causing FnDecls that call them to fail.  Parser-only corpus.
+    "type_classes.spr",
     # record_types.spr excluded: Python typechecker does not support record-type
     # syntax (RecordDecl); typecheck_program fails with empty output.  Parser-only.
     # poly_types.spr excluded: multi-param type constructor schemes are
