@@ -109,10 +109,11 @@ fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
 # env by typecheck_decls, so source definitions always take precedence.
 
 fn builtin_env() -> Dict types.Scheme =
-  seed_dict_builtins(
-    seed_list_builtins(
-      seed_str_builtins(
-        seed_ctor_builtins(dict_empty()))))
+  seed_set_builtins(
+    seed_dict_builtins(
+      seed_list_builtins(
+        seed_str_builtins(
+          seed_ctor_builtins(dict_empty())))))
 
 # -- Type shortcuts ----------------------------------------------------------
 
@@ -130,6 +131,7 @@ fn bt_maybe(t: types.Type)  -> types.Type = types.TApp(types.TConst("Maybe"), t)
 fn bt_list(t: types.Type)   -> types.Type = types.TApp(types.TConst("List"), t)
 fn bt_dict(t: types.Type)   -> types.Type = types.TApp(types.TConst("Dict"), t)
 fn bt_vec(t: types.Type)    -> types.Type = types.TApp(types.TConst("Vec"), t)
+fn bt_set()                 -> types.Type = types.TConst("Set")
 fn bt_result(e: types.Type, a: types.Type) -> types.Type =
   types.TApp(types.TApp(types.TConst("Result"), e), a)
 
@@ -192,3 +194,11 @@ fn seed_dict_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
   dict_set("dict_keys",   bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_str()))),
   dict_set("dict_values", bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_v()))),
   env))))))
+
+fn seed_set_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
+  dict_set("set_empty",   bt_mono(bt_set()),
+  dict_set("set_insert",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_set())),
+  dict_set("set_member",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_bool())),
+  dict_set("set_to_list", bt_mono(bt_fn(bt_set(), bt_list(bt_str()))),
+  dict_set("set_size",    bt_mono(bt_fn(bt_set(), bt_int())),
+  env)))))

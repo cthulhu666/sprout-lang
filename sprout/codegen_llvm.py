@@ -106,6 +106,11 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "map_size": FnSig(name="map_size", params=[I64], ret=I64),
     "map_nth_key": FnSig(name="map_nth_key", params=[I64, I64], ret=I64),
     "map_nth_value": FnSig(name="map_nth_value", params=[I64, I64], ret=I64),
+    "native_set_empty": FnSig(name="native_set_empty", params=[], ret=I64),
+    "native_set_insert": FnSig(name="native_set_insert", params=[I8_PTR, I64], ret=I64),
+    "native_set_member": FnSig(name="native_set_member", params=[I8_PTR, I64], ret=I1),
+    "native_set_to_list": FnSig(name="native_set_to_list", params=[I64], ret=I64),
+    "native_set_size": FnSig(name="native_set_size", params=[I64], ret=I64),
     "tcp_listen": FnSig(name="tcp_listen", params=[I64], ret=I64),
     "tcp_accept": FnSig(name="tcp_accept", params=[I64], ret=I64),
     "tcp_read": FnSig(name="tcp_read", params=[I64], ret=I8_PTR),
@@ -338,6 +343,8 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
         if node.name == "IntRange":
             return I64
         if node.name == "Unit":
+            return I64
+        if node.name == "NativeSet":
             return I64
         if node.name in adt_names or leaf in adt_leaf_names:
             return I64

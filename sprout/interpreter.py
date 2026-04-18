@@ -66,6 +66,11 @@ class MapValue:
 
 
 @dataclass(frozen=True)
+class SetValue:
+    items: frozenset[str]
+
+
+@dataclass(frozen=True)
 class BytesValue:
     items: bytes
 
@@ -1184,6 +1189,42 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             return ADTValue(constructor="Nothing", args=())
         return ADTValue(constructor="Just", args=(values[index],))
 
+    def builtin_native_set_empty(args: list[object]) -> object:
+        return SetValue(items=frozenset())
+
+    def builtin_native_set_insert(args: list[object]) -> object:
+        item = args[0]
+        set_value = args[1]
+        if not isinstance(set_value, SetValue):
+            raise RuntimeError("native_set_insert expects NativeSet")
+        if not isinstance(item, str):
+            raise RuntimeError("native_set_insert expects String item")
+        return SetValue(items=set_value.items | {item})
+
+    def builtin_native_set_member(args: list[object]) -> object:
+        item = args[0]
+        set_value = args[1]
+        if not isinstance(set_value, SetValue):
+            raise RuntimeError("native_set_member expects NativeSet")
+        if not isinstance(item, str):
+            raise RuntimeError("native_set_member expects String item")
+        return item in set_value.items
+
+    def builtin_native_set_to_list(args: list[object]) -> object:
+        set_value = args[0]
+        if not isinstance(set_value, SetValue):
+            raise RuntimeError("native_set_to_list expects NativeSet")
+        result: object = ADTValue(constructor="Nil", args=())
+        for item in sorted(set_value.items):
+            result = ADTValue(constructor="Cons", args=(item, result))
+        return result
+
+    def builtin_native_set_size(args: list[object]) -> object:
+        set_value = args[0]
+        if not isinstance(set_value, SetValue):
+            raise RuntimeError("native_set_size expects NativeSet")
+        return len(set_value.items)
+
     def _parse_header_block(raw: str) -> list[tuple[str, str]]:
         headers: list[tuple[str, str]] = []
         lines = raw.replace("\r\n", "\n").split("\n")
@@ -2016,6 +2057,11 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("map_size", BuiltinFunction(name="map_size", arity=1, fn=builtin_map_size))
     env.set("map_nth_key", BuiltinFunction(name="map_nth_key", arity=2, fn=builtin_map_nth_key))
     env.set("map_nth_value", BuiltinFunction(name="map_nth_value", arity=2, fn=builtin_map_nth_value))
+    env.set("native_set_empty", BuiltinFunction(name="native_set_empty", arity=0, fn=builtin_native_set_empty))
+    env.set("native_set_insert", BuiltinFunction(name="native_set_insert", arity=2, fn=builtin_native_set_insert))
+    env.set("native_set_member", BuiltinFunction(name="native_set_member", arity=2, fn=builtin_native_set_member))
+    env.set("native_set_to_list", BuiltinFunction(name="native_set_to_list", arity=1, fn=builtin_native_set_to_list))
+    env.set("native_set_size", BuiltinFunction(name="native_set_size", arity=1, fn=builtin_native_set_size))
     env.set("http_request", BuiltinFunction(name="http_request", arity=5, fn=builtin_http_request))
     env.set("json_parse", BuiltinFunction(name="json_parse", arity=1, fn=builtin_json_parse))
     env.set("json_stringify", BuiltinFunction(name="json_stringify", arity=1, fn=builtin_json_stringify))

@@ -19,6 +19,9 @@ export type Vec a =
 export type Dict v =
   | Dict (Map v)
 
+export type Set =
+  | Set NativeSet
+
 export fn range(lo: Int, hi: Int) -> IntRange =
   int_range(lo, hi)
 
@@ -397,6 +400,25 @@ fn dict_entries_from(raw: Map v, index: Int, total: Int, acc: Vec (String, v)) -
 export fn dict_entries(dict: Dict v) -> Vec (String, v) =
   match dict with
   | Dict raw -> dict_entries_from(raw, 0, map_size(raw), vec_empty())
+
+export fn set_empty() -> Set =
+  Set(native_set_empty())
+
+export fn set_insert(item: String, s: Set) -> Set =
+  match s with
+  | Set raw -> Set(native_set_insert(item, raw))
+
+export fn set_member(item: String, s: Set) -> Bool =
+  match s with
+  | Set raw -> native_set_member(item, raw)
+
+export fn set_to_list(s: Set) -> List String =
+  match s with
+  | Set raw -> native_set_to_list(raw)
+
+export fn set_size(s: Set) -> Int =
+  match s with
+  | Set raw -> native_set_size(raw)
 
 export class Semigroup t {
   fn append(left: t, right: t) -> t

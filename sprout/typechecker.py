@@ -1559,6 +1559,7 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
     map_var = TVar("prelude.map.a")
     maybe_map_var = TApp(maybe_type, map_var)
     map_t = TApp(TConst("Map"), map_var)
+    native_set_t = TConst("NativeSet")
 
     def builtin_scheme(
         params: list[Type],
@@ -1708,6 +1709,11 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "map_size": Scheme(vars=(map_var.name,), type=TFunc(map_t, INT)),
         "map_nth_key": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, TApp(maybe_type, STRING)))),
         "map_nth_value": Scheme(vars=(map_var.name,), type=TFunc(map_t, TFunc(INT, maybe_map_var))),
+        "native_set_empty": Scheme(vars=(), type=native_set_t),
+        "native_set_insert": Scheme(vars=(), type=TFunc(STRING, TFunc(native_set_t, native_set_t))),
+        "native_set_member": Scheme(vars=(), type=TFunc(STRING, TFunc(native_set_t, BOOL))),
+        "native_set_to_list": Scheme(vars=(), type=TFunc(native_set_t, TApp(TConst("List"), STRING))),
+        "native_set_size": Scheme(vars=(), type=TFunc(native_set_t, INT)),
         "tcp_listen": builtin_scheme([INT], INT, effects=IO_EFFECT),
         "tcp_accept": builtin_scheme([INT], INT, effects=IO_EFFECT),
         "tcp_read": builtin_scheme([INT], STRING, effects=IO_EFFECT),
