@@ -25,14 +25,16 @@ export type CheckResult (..) =
 # Returns CheckOk with the final env on success, CheckErr on first error.
 #
 # Bootstrap-level behaviour (current limitations):
-#   - FnDecl schemes are read from explicit annotations (bodies not inferred).
+#   - FnDecl schemes are read from explicit annotations; bodies are inferred
+#     and type-checked against the annotation (lenient on unknown names).
 #   - TypeDecl constructors are fully registered with correct polymorphism.
 #   - LetDecl values are inferred from their expression bodies.
 #   - ClassDecl/InstanceDecl are registered as no-ops (not yet supported).
 #
-# The initial environment is empty: all names must be declared in the source
-# or pre-seeded by the caller.  The corpus files satisfy this because they
-# declare every type and constructor they use.
+# The initial environment is pre-seeded with built-in and prelude schemes so
+# that body inference can type-check calls to common functions without
+# falling back to the "unknown variable" leniency rule.  Source-level
+# declarations overwrite built-in entries for the same name.
 
 export fn check_program(prog: ast.Program) -> CheckResult !{IO} =
   do
@@ -40,7 +42,7 @@ export fn check_program(prog: ast.Program) -> CheckResult !{IO} =
     match prog with
     | ast.Program decls _ ->
         do
-          r <- infer.typecheck_decls(state, decls, dict_empty(), dict_empty(), dict_empty())
+          r <- infer.typecheck_decls(state, decls, builtin_env(), dict_empty(), dict_empty())
           match r with
           | infer.DeclErr msg -> CheckErr(msg)
           | infer.DeclOk env  -> CheckOk(env)
@@ -91,3 +93,102 @@ fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
   match dict_get(name, env) with
   | Nothing     -> print(name ++ " : <not found>")
   | Just scheme -> print(name ++ " : " ++ types.scheme_to_string(scheme))
+
+# ---------------------------------------------------------------------------
+# Built-in typing environment
+# ---------------------------------------------------------------------------
+#
+# Pre-populates the initial env with schemes for built-in functions and
+# common prelude helpers.  This allows body inference to type-check calls to
+# these functions rather than silently accepting them via the leniency rule.
+#
+# Type variable names ("a", "b", "v", "e") match conventional Sprout/Haskell
+# usage; they are freshly instantiated at each call site by unifier.instantiate.
+#
+# Source-level TypeDecl/FnDecl/LetDecl declarations are added on top of this
+# env by typecheck_decls, so source definitions always take precedence.
+
+fn builtin_env() -> Dict types.Scheme =
+  seed_dict_builtins(
+    seed_list_builtins(
+      seed_str_builtins(
+        seed_ctor_builtins(dict_empty()))))
+
+# -- Type shortcuts ----------------------------------------------------------
+
+fn bt_str()  -> types.Type = types.TConst("String")
+fn bt_int()  -> types.Type = types.TConst("Int")
+fn bt_bool() -> types.Type = types.TConst("Bool")
+fn bt_unit() -> types.Type = types.TConst("Unit")
+fn bt_char() -> types.Type = types.TConst("Char")
+fn bt_a()    -> types.Type = types.TVar("a")
+fn bt_b()    -> types.Type = types.TVar("b")
+fn bt_e()    -> types.Type = types.TVar("e")
+fn bt_v()    -> types.Type = types.TVar("v")
+
+fn bt_maybe(t: types.Type)  -> types.Type = types.TApp(types.TConst("Maybe"), t)
+fn bt_list(t: types.Type)   -> types.Type = types.TApp(types.TConst("List"), t)
+fn bt_dict(t: types.Type)   -> types.Type = types.TApp(types.TConst("Dict"), t)
+fn bt_vec(t: types.Type)    -> types.Type = types.TApp(types.TConst("Vec"), t)
+fn bt_result(e: types.Type, a: types.Type) -> types.Type =
+  types.TApp(types.TApp(types.TConst("Result"), e), a)
+
+fn bt_fn(a: types.Type, b: types.Type) -> types.Type =
+  types.TFunc(a, b, types.EffectPure)
+fn bt_io(a: types.Type, b: types.Type) -> types.Type =
+  types.TFunc(a, b, types.EffectIO)
+fn bt_fn2(a: types.Type, b: types.Type, c: types.Type) -> types.Type =
+  bt_fn(a, bt_fn(b, c))
+fn bt_fn3(a: types.Type, b: types.Type, c: types.Type, d: types.Type) -> types.Type =
+  bt_fn(a, bt_fn2(b, c, d))
+
+# -- Scheme shortcuts --------------------------------------------------------
+
+fn bt_mono(t: types.Type) -> types.Scheme =
+  types.Scheme(Nil, Nil, t, types.EffectPure)
+fn bt_poly1(v: String, t: types.Type) -> types.Scheme =
+  types.Scheme(Cons(v, Nil), Nil, t, types.EffectPure)
+fn bt_poly2(v1: String, v2: String, t: types.Type) -> types.Scheme =
+  types.Scheme(Cons(v1, Cons(v2, Nil)), Nil, t, types.EffectPure)
+
+# -- Seeding helpers ---------------------------------------------------------
+
+fn seed_ctor_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
+  dict_set("Just",    bt_poly1("a", bt_fn(bt_a(), bt_maybe(bt_a()))),
+  dict_set("Nothing", bt_poly1("a", bt_maybe(bt_a())),
+  dict_set("Cons",    bt_poly1("a", bt_fn(bt_a(), bt_fn(bt_list(bt_a()), bt_list(bt_a())))),
+  dict_set("Nil",     bt_poly1("a", bt_list(bt_a())),
+  dict_set("Ok",      bt_poly2("e", "a", bt_fn(bt_a(), bt_result(bt_e(), bt_a()))),
+  dict_set("Err",     bt_poly2("e", "a", bt_fn(bt_e(), bt_result(bt_e(), bt_a()))),
+  env))))))
+
+fn seed_str_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
+  dict_set("print",           bt_poly1("a", bt_io(bt_a(), bt_unit())),
+  dict_set("str_len",         bt_mono(bt_fn(bt_str(), bt_int())),
+  dict_set("str_slice",       bt_mono(bt_fn3(bt_str(), bt_int(), bt_int(), bt_str())),
+  dict_set("str_find",        bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())),
+  dict_set("str_starts_with", bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())),
+  dict_set("str_compare",     bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())),
+  dict_set("int_to_string",   bt_mono(bt_fn(bt_int(), bt_str())),
+  dict_set("parse_int",       bt_mono(bt_fn(bt_str(), bt_int())),
+  dict_set("char_to_string",  bt_mono(bt_fn(bt_char(), bt_str())),
+  dict_set("read_file",       bt_mono(bt_io(bt_str(), bt_str())),
+  dict_set("argv_get",        bt_mono(bt_io(bt_int(), bt_maybe(bt_str()))),
+  env)))))))))))
+
+fn seed_list_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
+  dict_set("list_reverse", bt_poly1("a", bt_fn(bt_list(bt_a()), bt_list(bt_a()))),
+  dict_set("list_append",  bt_poly1("a", bt_fn2(bt_list(bt_a()), bt_list(bt_a()), bt_list(bt_a()))),
+  dict_set("list_map",     bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_list(bt_a()), bt_list(bt_b()))),
+  dict_set("list_fold",    bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_list(bt_a()), bt_b())),
+  dict_set("filter",       bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_list(bt_a()), bt_list(bt_a()))),
+  env)))))
+
+fn seed_dict_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
+  dict_set("dict_empty",  bt_poly1("v", bt_dict(bt_v())),
+  dict_set("dict_get",    bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_maybe(bt_v()))),
+  dict_set("dict_set",    bt_poly1("v", bt_fn3(bt_str(), bt_v(), bt_dict(bt_v()), bt_dict(bt_v()))),
+  dict_set("dict_remove", bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_dict(bt_v()))),
+  dict_set("dict_keys",   bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_str()))),
+  dict_set("dict_values", bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_v()))),
+  env))))))
