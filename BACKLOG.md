@@ -69,7 +69,7 @@ Definition of done:
 - [x] `P1` Add stdlib digit helpers: `string_digits(String) -> Vec Int`.
 - [x] `P2` Extend collections helpers (`vec_slice`, `vec_reverse`, `dict_keys`, `dict_values`).
 - [~] `P2` Add vector utility combinators (for example `vec_sum_by`; `vec_max_subsequence_by_count` is now a maybe/later item).
-- [ ] `P2` Add set type and common ops.
+- [x] `P2` Add set type and common ops.
 
 ### 6) Modules and Packaging
 
