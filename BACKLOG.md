@@ -90,8 +90,11 @@ Definition of done:
   - `stdlib/compiler/driver.sprout` emits a flat s-expression AST dump (one decl per line)
   - `tools/dump_ast.py` emits the same format via the Python parser
   - `tests/test_parser_parity.py` runs both on the conformance corpus and diffs output; 7/7 pass (one known divergence: `++` desugars to `append` in Python, `list_append` in Sprout)
-  - **integration seam landed**: `stdlib/compiler/checker.sprout` wraps `infer.typecheck_decls` behind a `CheckResult` ADT; `stdlib/compiler/type_driver.sprout` is an executable that lex→parse→check→dumps typed names; `tools/dump_types.py` does the same via the Python typechecker; `tests/test_checker_parity.py` confirms 5/5 corpus files match (no known divergences — forall generalization fully implemented)
+  - **integration seam landed**: `stdlib/compiler/checker.sprout` wraps `infer.typecheck_decls` behind a `CheckResult` ADT; `stdlib/compiler/type_driver.sprout` is an executable that lex→parse→check→dumps typed names; `tools/dump_types.py` does the same via the Python typechecker; `tests/test_checker_parity.py` confirms 6/6 corpus files match (no known divergences — forall generalization fully implemented)
   - **Phase 2 driver landed**: `stdlib/compiler/compiler.sprout` exposes `compile_source`/`compile_file` API; `stdlib/compiler/compile_driver.sprout` is an end-to-end executable; `sprout.cli bootstrap-check` routes at least one real CLI check path through Sprout-owned control flow
+  - **FnDecl body inference landed**: `check_fn_body` instantiates the annotation scheme and checks the body against it; unknown-variable/constructor errors silently accepted (builtin leniency), real type mismatches propagate; checker corpus expanded to 6 files
+  - **builtin env seeded**: `checker.check_program` starts from a pre-populated env (~25 entries: ADT constructors, string/IO ops, dict/list ops) so body inference resolves calls to common functions without leniency fallback
+  - **ClassDecl/InstanceDecl landed**: class methods registered as globally polymorphic schemes; instance method bodies type-checked against method annotations; `type_classes.spr` added to checker parity corpus (now 6/6)
 
 ### 7.5) Type Classes (Collections First)
 
@@ -163,11 +166,14 @@ Definition of done:
 - [x] There is now an explicit design plan for promoting a minimal real effect system into v0: [docs/effect-system-v0-plan.md](./docs/effect-system-v0-plan.md).
 - [x] Bootstrap self-hosting compiler modules exist in `stdlib/compiler/`: `source`, `token`, `lexer` (Python tokenizer parity), `ast`, `parser`, `types`, `unifier`, `infer` (HM constraint generation/solving).
 - [x] Bootstrap parser parity harness: `driver.sprout` dumps AST as flat s-exprs; `tools/dump_ast.py` does the same via Python parser; `tests/test_parser_parity.py` confirms 7/7 corpus files match (one known `++`-desugaring divergence documented).
-- [x] Bootstrap checker integration seam: `checker.sprout` + `type_driver.sprout` + `tools/dump_types.py` + `tests/test_checker_parity.py`; 5/5 corpus files match, no known divergences.
+- [x] Bootstrap checker integration seam: `checker.sprout` + `type_driver.sprout` + `tools/dump_types.py` + `tests/test_checker_parity.py`; 6/6 corpus files match, no known divergences.
 - [x] Phase 2 compiler driver: `compiler.sprout` (API) + `compile_driver.sprout` (executable) + `sprout.cli bootstrap-check` subcommand; at least one CLI check path now runs through Sprout-owned control flow end-to-end.
+- [x] FnDecl body inference: `check_fn_body` in `infer.sprout` checks bodies against annotation schemes; unknown-ref leniency for builtins; real type mismatches propagate.
+- [x] Builtin env seeded: ~25 common functions/constructors pre-populated in `checker.check_program` initial env so body inference resolves them without leniency.
+- [x] ClassDecl/InstanceDecl: class methods registered globally as polymorphic schemes; instance method bodies checked against method annotations; checker corpus now 6/6.
 
-## Next 3 Tasks (Execution Order)
+## Next Steps
 
-1. Make `unifier` pure (state-threading): eliminate `!{IO}` from `compile_source`/`check_program` by threading the fresh-variable counter as a pure value; this lets the bootstrap checker work in pure contexts (REPL, library use without IO).
-2. FnDecl body inference: implement expression-level type inference for function bodies in the bootstrap checker; currently annotation-only — inferring bodies would expand parity corpus coverage and close the gap with the Python typechecker.
-3. Implement `ClassDecl`/`InstanceDecl` in the bootstrap checker: currently no-ops; adding constructor registration and instance method lookup would allow type-class-heavy corpus files to enter checker parity.
+- Make `unifier` pure (state-threading): eliminate `!{IO}` from `compile_source`/`check_program` by threading the fresh-variable counter as a pure value; lets the bootstrap checker work in pure contexts.
+- Constraint-satisfaction checking: verify that a matching instance exists for the concrete types at each call site (currently class methods are globally callable for any type).
+- Expand checker parity corpus: add more conformance files once the Python typechecker can handle them (the 3 excluded stdlib files call prelude functions not in Python's initial env).
