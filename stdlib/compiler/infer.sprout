@@ -379,7 +379,11 @@ fn infer_call(
           | InferOk arg_types s2 es2 args_eff ->
               do
                 v <- unifier.fresh(state)
-                infer_call_resolve(s2, es2, callee_type, arg_types, types.TVar(v), merge_effects(callee_eff, args_eff))
+                r <- infer_call_resolve(s2, es2, callee_type, arg_types, types.TVar(v), merge_effects(callee_eff, args_eff))
+                match r with
+                | InferErr e -> InferErr(e)
+                | InferOk ret_t s3 es3 call_eff ->
+                    check_call_constraint(callee, arg_types, s3, env, ret_t, s3, es3, call_eff)
 
 fn infer_call_resolve(
   subst: Dict types.Type,
@@ -392,6 +396,122 @@ fn infer_call_resolve(
   match unifier.unify_types(subst, callee_type, build_fn_type(extract_ttuple(arg_types), ret_type)) with
   | Err e -> InferErr("Call type mismatch: " ++ e)
   | Ok s3 -> InferOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
+
+# --- Constraint checking ---
+#
+# Class methods are registered in the env under "@class:{method_name}" →
+# mono(TConst(class_name)).  Instance head types are registered under
+# "@inst:{class_name}:{head_type_str}" → mono(TConst("Unit")).
+# Both are stored in the ordinary env, avoiding a separate ClassEnv parameter.
+#
+# At call sites: if the callee is a named class method AND the first argument
+# type is concrete (not a TVar), we verify that a matching instance exists.
+# Polymorphic call sites (TVar first argument) are not checked — constraint
+# resolution for those is deferred to dictionary-passing lowering.
+
+fn check_call_constraint(
+  callee: ast.Expr,
+  arg_types: types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect
+) -> InferResult !{IO} =
+  match callee with
+  | ast.VarExpr method_name _ ->
+      check_named_call_constraint(method_name, arg_types, subst, env, ret_t, s3, es3, call_eff)
+  | _ -> InferOk(ret_t, s3, es3, call_eff)
+
+# Extracted from check_call_constraint to avoid the inner match on dict_get
+# result being greedily parsed as an additional branch of the outer match.
+fn check_named_call_constraint(
+  method_name: String,
+  arg_types: types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect
+) -> InferResult !{IO} =
+  match dict_get("@class:" ++ method_name, env) with
+  | Nothing -> InferOk(ret_t, s3, es3, call_eff)
+  | Just class_marker ->
+      check_instance_for_marker(class_marker, arg_types, subst, env, ret_t, s3, es3, call_eff)
+
+fn check_instance_for_marker(
+  class_marker: types.Scheme,
+  arg_types: types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect
+) -> InferResult !{IO} =
+  match class_marker with
+  | types.Scheme _ _ class_type _ ->
+      check_for_class_type(class_type, arg_types, subst, env, ret_t, s3, es3, call_eff)
+
+fn check_for_class_type(
+  class_type: types.Type,
+  arg_types: types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect
+) -> InferResult !{IO} =
+  match class_type with
+  | types.TConst class_name ->
+      check_class_instance_exists(class_name, arg_types, subst, env, ret_t, s3, es3, call_eff)
+  | _ -> InferOk(ret_t, s3, es3, call_eff)
+
+fn check_class_instance_exists(
+  class_name: String,
+  arg_types: types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect
+) -> InferResult !{IO} =
+  match first_concrete_arg_str(arg_types, subst) with
+  | Nothing -> InferOk(ret_t, s3, es3, call_eff)
+  | Just head_str ->
+      check_instance_key(class_name, head_str, env, ret_t, s3, es3, call_eff)
+
+fn check_instance_key(
+  class_name: String,
+  head_str: String,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect
+) -> InferResult !{IO} =
+  match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+  | Nothing -> InferErr("No instance of " ++ class_name ++ " for " ++ head_str)
+  | Just _ -> InferOk(ret_t, s3, es3, call_eff)
+
+fn first_concrete_arg_str(arg_types: types.Type, subst: Dict types.Type) -> Maybe String =
+  match arg_types with
+  | types.TTuple items -> first_concrete_from_list(items, subst)
+  | _ -> concrete_type_str(unifier.apply_subst(subst, arg_types))
+
+fn first_concrete_from_list(items: List types.Type, subst: Dict types.Type) -> Maybe String =
+  match items with
+  | Nil -> Nothing
+  | Cons first_t _ -> concrete_type_str(unifier.apply_subst(subst, first_t))
+
+fn concrete_type_str(t: types.Type) -> Maybe String =
+  match t with
+  | types.TVar _ -> Nothing
+  | _ -> Just(types.type_to_string(t))
 
 fn extract_ttuple(ts: types.Type) -> List types.Type =
   match ts with
@@ -906,14 +1026,15 @@ fn typecheck_decl(
         | InferOk t s1 _ _ ->
             DeclOk(dict_set(name, unifier.generalize(unifier.ftv_env(env), s1, eff_subst, t, types.EffectPure), env))
   | ast.AliasDecl _ _ _ _ -> DeclOk(env)
-  | ast.ClassDecl _ type_params methods _ ->
-      DeclOk(register_class_methods(type_params, methods, env))
-  | ast.InstanceDecl _ methods _ ->
+  | ast.ClassDecl class_name type_params methods _ ->
+      DeclOk(register_class_methods(type_params, methods,
+             register_class_method_markers(class_name, methods, env)))
+  | ast.InstanceDecl constraint methods _ ->
       do
         r <- check_instance_methods(state, methods, env, subst, eff_subst)
         match r with
         | DeclErr e -> DeclErr(e)
-        | DeclOk _ -> DeclOk(env)
+        | DeclOk _ -> DeclOk(register_instance_marker(constraint, env))
 
 # ---------------------------------------------------------------------------
 # FnDecl body inference
@@ -971,16 +1092,16 @@ fn is_unknown_ref(msg: String) -> Bool =
   str_starts_with(msg, "Unknown constructor: ")
 
 # ---------------------------------------------------------------------------
-# ClassDecl: method registration
+# ClassDecl: method registration + constraint markers
 # ---------------------------------------------------------------------------
 #
 # Each class method is added to the global env as a polymorphic scheme whose
 # quantified type variables are the class's type parameters.  This lets body
 # inference resolve calls like eq(a, b) without the leniency fallback.
 #
-# Constraint-satisfaction checking (ensuring a matching instance exists for
-# the concrete argument types) is not yet implemented; methods are accepted
-# as globally callable for any type.
+# Additionally, a marker entry "@class:{method_name}" → mono(TConst(class_name))
+# is stored so that infer_call can look up the class name for a method call and
+# verify that a matching instance exists for the first argument's concrete type.
 
 fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -992,6 +1113,34 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env:
   match sig with
   | ast.ClassMethodSig name params ret_type effects_maybe ->
       dict_set(name, scheme_from_fn_parts_inner(type_params, params, Just(ret_type), effects_maybe), env)
+
+fn register_class_method_markers(class_name: String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
+  match methods with
+  | Nil -> env
+  | Cons sig rest ->
+      match sig with
+      | ast.ClassMethodSig name _ _ _ ->
+          register_class_method_markers(class_name, rest,
+            dict_set("@class:" ++ name, types.mono(types.TConst(class_name)), env))
+
+# ---------------------------------------------------------------------------
+# InstanceDecl: instance registration marker
+# ---------------------------------------------------------------------------
+#
+# For each instance declaration, register "@inst:{class_name}:{head_type}"
+# in the env so infer_call can verify that a matching instance exists.
+
+fn register_instance_marker(constraint: ast.TypeConstraint, env: Dict types.Scheme) -> Dict types.Scheme =
+  match constraint with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> env
+      | Cons head_te _ ->
+          dict_set(
+            "@inst:" ++ class_name ++ ":" ++ types.type_to_string(type_from_ast(head_te, dict_empty())),
+            types.mono(types.TConst("Unit")),
+            env
+          )
 
 # ---------------------------------------------------------------------------
 # InstanceDecl: instance method body checking

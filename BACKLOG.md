@@ -97,6 +97,7 @@ Definition of done:
   - **ClassDecl/InstanceDecl landed**: class methods registered as globally polymorphic schemes; instance method bodies type-checked against method annotations; `type_classes.spr` added to checker parity corpus (now 6/6)
   - **type aliases landed**: `type alias Name = TypeExpr` parsed in Python + Sprout parsers; Python typechecker expands aliases as a pre-desugar pass; bootstrap checker skips `AliasDecl` (transparent to inference); `Set` type added for constraint-satisfaction work pre-work
   - **checker parity corpus expanded 6→8**: `stdlib_fold_filter_map.spr` and `stdlib_mixed_io_result_do.spr` added; `tools/dump_types.py` now seeds prelude ADT constructors + list/dict helpers so corpus files that call them can be type-checked without full module loading
+  - **constraint-satisfaction checking landed**: at concrete call sites the bootstrap checker looks up `@class:<method>` markers in env to identify class methods, then verifies a matching `@inst:<class>:<type>` marker exists; missing instances produce a typed error "No instance of X for T in function f"; `tests/conformance/run/instance_check.spr` added to conformance corpus and passes
 
 ### 7.5) Type Classes (Collections First)
 
@@ -177,5 +178,5 @@ Definition of done:
 ## Next Steps
 
 - Make `unifier` pure (state-threading): eliminate `!{IO}` from `compile_source`/`check_program` by threading the fresh-variable counter as a pure value; lets the bootstrap checker work in pure contexts.
-- Constraint-satisfaction checking: verify that a matching instance exists for the concrete types at each call site (currently class methods are globally callable for any type).
-- Expand checker parity corpus: add more conformance files once the Python typechecker can handle them (the 3 excluded stdlib files call prelude functions not in Python's initial env).
+- Record field access in bootstrap checker: implement `RecordDecl`/`RecordExpr`/`GetFieldExpr` inference in `infer.sprout` (using env-encoding for rec_env; same pattern as class/instance markers).
+- Expand checker parity corpus further: `stdlib_mixed_io_maybe_do.spr` still excluded due to do-bind monadic unwrapping gap in bootstrap checker.

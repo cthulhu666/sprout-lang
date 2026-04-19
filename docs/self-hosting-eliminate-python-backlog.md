@@ -214,8 +214,9 @@ Definition of done:
   diagnostic shaping in Sprout incrementally.
   *(`stdlib/compiler/types` — Effect/Type/Scheme ADTs; `stdlib/compiler/unifier`
   — pure HM substitution/unification; `stdlib/compiler/infer` — constraint
-  generation/solving for expressions, patterns, and declarations; instance
-  resolution and diagnostic shaping are not yet started)*
+  generation/solving for expressions, patterns, and declarations; constraint-
+  satisfaction checking implemented via env-encoding of `@class:`/`@inst:` markers;
+  missing-instance errors produced at concrete call sites)*
 - [ ] Keep typechecker diagnostics stable and non-cascading throughout the
   migration.
 - [~] Add success/failure parity suites for the hosted and self-hosted
@@ -227,9 +228,10 @@ Definition of done:
   generalization fully implemented, ClassDecl/InstanceDecl handled, builtin env
   seeded; type aliases (`AliasDecl`) parsed and transparently expanded as a
   pre-desugar pass in the Python typechecker and skipped in the bootstrap
-  checker; Set type added for upcoming constraint-satisfaction work; corpus
-  expanded from 6→8 via dump_types.py prelude seed env injecting ADT
-  constructors and list/dict helpers)*
+  checker; Set type added for constraint-satisfaction work; corpus expanded from
+  6→8 via dump_types.py prelude seed env injecting ADT constructors and list/dict
+  helpers; constraint-satisfaction checking landed — `instance_check.spr`
+  added to conformance corpus and parity corpus is 8/8)*
 - [ ] Make the self-hosted checker authoritative on at least one bootstrap
   path before deleting the Python checker.
 

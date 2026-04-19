@@ -1,0 +1,18 @@
+class Eq a {
+  fn eq(x: a, y: a) -> Bool
+}
+
+instance Eq Int {
+  fn eq(x: Int, y: Int) -> Bool = x == y
+}
+
+instance Eq String {
+  fn eq(x: String, y: String) -> Bool = x == y
+}
+
+fn check_ints() -> Bool = eq(1, 2)
+
+fn check_strings() -> Bool = eq("hello", "world")
+
+fn main() -> Unit !{IO} =
+  if check_ints() then print("equal") else print("not-equal")
