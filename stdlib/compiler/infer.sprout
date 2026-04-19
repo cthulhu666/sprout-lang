@@ -269,7 +269,10 @@ export fn infer_expr(
   | ast.UnitExpr _ -> InferOk(types.TConst("Unit"), subst, eff_subst, types.EffectPure)
   | ast.VarExpr name _ -> infer_var(state, env, subst, eff_subst, name)
   | ast.IfExpr cond then_ else_ _ -> infer_if(state, env, subst, eff_subst, cond, then_, else_)
-  | ast.CallExpr callee args _ -> infer_call(state, env, subst, eff_subst, callee, args)
+  | ast.CallExpr callee args _ ->
+      match callee with
+      | ast.VarExpr "__append" pos -> infer_semigroup_append(state, env, subst, eff_subst, args, pos)
+      | _ -> infer_call(state, env, subst, eff_subst, callee, args)
   | ast.MatchExpr scrut branches _ -> infer_match(state, env, subst, eff_subst, scrut, branches)
   | ast.TupleExpr elems _ -> infer_tuple(state, env, subst, eff_subst, elems)
   | ast.BinaryExpr op left right _ -> infer_binary(state, env, subst, eff_subst, op, left, right)
@@ -362,6 +365,50 @@ fn infer_if_merge(
       )
 
 # --- Call ---
+
+# --- Semigroup ++ dispatch ---
+#
+# `x ++ y` is desugared by the parser to `__append(x, y)`.
+# We infer the type of the left argument and dispatch to the concrete
+# implementation: "append" for String, "list_append" for List a.
+# This mirrors the Semigroup typeclass without requiring typeclass machinery.
+
+fn is_string_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name -> name == "String"
+  | _ -> false
+
+fn is_list_type(t: types.Type) -> Bool =
+  match t with
+  | types.TApp outer _ ->
+      match outer with
+      | types.TConst name -> name == "List"
+      | _ -> false
+  | _ -> false
+
+fn semigroup_name_for(t: types.Type) -> String =
+  if is_string_type(t) then "append"
+  else "list_append"
+
+fn infer_semigroup_append(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  args: List ast.Expr,
+  pos
+) -> InferResult !{IO} =
+  match args with
+  | Cons left_expr _ ->
+      do
+        lr <- infer_expr(state, env, subst, eff_subst, left_expr)
+        match lr with
+        | InferErr e -> InferErr(e)
+        | InferOk left_type s1 es1 _ ->
+            infer_call(state, env, s1, es1,
+              ast.VarExpr(semigroup_name_for(unifier.apply_subst(s1, left_type)), pos),
+              args)
+  | Nil -> InferErr("++ requires two arguments")
 
 fn infer_call(
   state: unifier.InferState,

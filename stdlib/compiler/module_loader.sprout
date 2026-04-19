@@ -1,0 +1,275 @@
+module stdlib.compiler.module_loader
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+
+# ---------------------------------------------------------------------------
+# ImportSpec — parsed representation of one import line
+# ---------------------------------------------------------------------------
+#
+# ImportAlias module_name alias
+#   e.g. "import stdlib.compiler.ast as ast" -> ImportAlias "stdlib.compiler.ast" "ast"
+#   All names from the module are exposed prefixed with "alias."
+#
+# ImportSelective module_name names
+#   e.g. "import stdlib.collections (Vec, vec_get)" -> ImportSelective "stdlib.collections" ["Vec", "vec_get"]
+#   Only the listed names are exposed, unqualified.
+
+export type ImportSpec =
+  | ImportAlias String String
+  | ImportSelective String (List String)
+
+# ---------------------------------------------------------------------------
+# Import header parsing
+# ---------------------------------------------------------------------------
+
+fn is_word_char(ch: Char) -> Bool =
+  (ch != ' ') && (ch != '\t') && (ch != '(') && (ch != ')') && (ch != ',') && (ch != '\n') && (ch != '\r')
+
+fn skip_spaces(s: String, i: Int) -> Int =
+  if i >= str_len(s) then i
+  else
+    match str_char_at(s, i) with
+    | Nothing -> i
+    | Just ch -> if ch == ' ' || ch == '\t' then skip_spaces(s, i + 1) else i
+
+fn read_word_acc(s: String, i: Int, acc: String) -> (String, Int) =
+  if i >= str_len(s) then (acc, i)
+  else
+    match str_char_at(s, i) with
+    | Nothing -> (acc, i)
+    | Just ch ->
+        if is_word_char(ch) then read_word_acc(s, i + 1, str_concat(acc, char_to_string(ch)))
+        else (acc, i)
+
+fn read_word(s: String, i: Int) -> (String, Int) =
+  read_word_acc(s, skip_spaces(s, i), "")
+
+fn parse_selective_names_acc(s: String, i: Int, acc: List String) -> List String =
+  match read_word(s, i) with
+  | ("", _) -> list_reverse(acc)
+  | (name, i2) ->
+      parse_selective_names_acc(s, skip_after_comma(s, i2), Cons(name, acc))
+
+fn skip_after_comma(s: String, i: Int) -> Int =
+  if i >= str_len(s) then i
+  else
+    match str_char_at(s, i) with
+    | Nothing -> i
+    | Just ch ->
+        if ch == ')' then str_len(s)
+        else if ch == ',' then i + 1
+        else skip_after_comma(s, i + 1)
+
+fn parse_import_after_module(rest: String, module_name: String, i: Int) -> Maybe ImportSpec =
+  match read_word(rest, i) with
+  | ("as", i2) ->
+      match read_word(rest, i2) with
+      | ("", _) -> Nothing
+      | (alias, _) -> Just(ImportAlias(module_name, alias))
+  | _ ->
+      if str_starts_with(str_slice(rest, skip_spaces(rest, i), str_len(rest)), "(") then
+        Just(ImportSelective(module_name, parse_selective_names_acc(rest, skip_spaces(rest, i) + 1, Nil)))
+      else Nothing
+
+export fn parse_import_line(line: String) -> Maybe ImportSpec =
+  if str_starts_with(line, "import ") then
+    match read_word(line, 7) with
+    | ("", _) -> Nothing
+    | (module_name, i2) -> parse_import_after_module(line, module_name, i2)
+  else Nothing
+
+fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List ImportSpec =
+  match lines with
+  | Nil -> list_reverse(acc)
+  | Cons line rest ->
+      if str_starts_with(line, "module ") || line == "" then
+        collect_imports_from_lines(rest, acc)
+      else if str_starts_with(line, "import ") then
+        match parse_import_line(line) with
+        | Nothing    -> collect_imports_from_lines(rest, acc)
+        | Just spec  -> collect_imports_from_lines(rest, Cons(spec, acc))
+      else
+        list_reverse(acc)
+
+fn split_lines_at(s: String, i: Int, line_start: Int, acc: List String) -> List String =
+  if i >= str_len(s) then
+    list_reverse(Cons(str_slice(s, line_start, str_len(s)), acc))
+  else
+    match str_char_at(s, i) with
+    | Nothing -> list_reverse(acc)
+    | Just ch ->
+        if ch == '\n' then
+          split_lines_at(s, i + 1, i + 1, Cons(str_slice(s, line_start, i), acc))
+        else
+          split_lines_at(s, i + 1, line_start, acc)
+
+export fn collect_imports(src: String) -> List ImportSpec =
+  collect_imports_from_lines(split_lines_at(src, 0, 0, Nil), Nil)
+
+# ---------------------------------------------------------------------------
+# Module path resolution
+# ---------------------------------------------------------------------------
+#
+# Converts a module name like "stdlib.compiler.ast" to a file path.
+# Only handles "stdlib.*" modules — strips the "stdlib." prefix and maps
+# dots to slashes.  Non-stdlib modules return Nothing.
+#
+# Example: "stdlib.compiler.ast" + "/proj/stdlib" -> "/proj/stdlib/compiler/ast.sprout"
+
+fn replace_dots_with_slash(s: String, i: Int, acc: String) -> String =
+  if i >= str_len(s) then acc
+  else
+    match str_char_at(s, i) with
+    | Nothing -> acc
+    | Just ch ->
+        if ch == '.' then replace_dots_with_slash(s, i + 1, str_concat(acc, "/"))
+        else replace_dots_with_slash(s, i + 1, str_concat(acc, char_to_string(ch)))
+
+export fn module_name_to_path(name: String, stdlib_root: String) -> Maybe String =
+  if str_starts_with(name, "stdlib.") then
+    Just(str_concat(stdlib_root, str_concat("/", str_concat(replace_dots_with_slash(str_slice(name, 7, str_len(name)), 0, ""), ".sprout"))))
+  else Nothing
+
+# ---------------------------------------------------------------------------
+# Dict → pairs list (needed to extract env after checking)
+# ---------------------------------------------------------------------------
+
+fn vec_str_to_list(v: Vec String, i: Int) -> List String =
+  if i >= vec_length(v) then Nil
+  else
+    match vec_get(i, v) with
+    | Nothing -> vec_str_to_list(v, i + 1)
+    | Just k  -> Cons(k, vec_str_to_list(v, i + 1))
+
+fn dict_to_pairs(d: Dict types.Scheme) -> List (String, types.Scheme) =
+  keys_to_pairs(d, vec_str_to_list(dict_keys(d), 0))
+
+fn keys_to_pairs(d: Dict types.Scheme, keys: List String) -> List (String, types.Scheme) =
+  match keys with
+  | Nil -> Nil
+  | Cons k rest ->
+      match dict_get(k, d) with
+      | Nothing -> keys_to_pairs(d, rest)
+      | Just v  -> Cons((k, v), keys_to_pairs(d, rest))
+
+# ---------------------------------------------------------------------------
+# Env prefixing / selective filtering
+# ---------------------------------------------------------------------------
+
+fn prefix_pairs(pairs: List (String, types.Scheme), pfx: String) -> List (String, types.Scheme) =
+  match pairs with
+  | Nil -> Nil
+  | Cons (k, v) rest -> Cons((str_concat(pfx, str_concat(".", k)), v), prefix_pairs(rest, pfx))
+
+fn select_pairs(pairs: List (String, types.Scheme), names: List String) -> List (String, types.Scheme) =
+  match names with
+  | Nil -> Nil
+  | Cons name rest ->
+      match find_pair(pairs, name) with
+      | Nothing      -> select_pairs(pairs, rest)
+      | Just scheme  -> Cons((name, scheme), select_pairs(pairs, rest))
+
+fn find_pair(pairs: List (String, types.Scheme), name: String) -> Maybe types.Scheme =
+  match pairs with
+  | Nil -> Nothing
+  | Cons (k, v) rest ->
+      if k == name then Just(v)
+      else find_pair(rest, name)
+
+# ---------------------------------------------------------------------------
+# Header stripping (bootstrap parser can't parse module/import declarations)
+# ---------------------------------------------------------------------------
+
+fn is_header_line_ml(s: String, pos: Int) -> Bool =
+  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
+
+fn next_line_ml(s: String, pos: Int) -> Int =
+  if nl == -1 then str_len(s)
+  else pos + nl + 1
+  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+
+fn strip_headers_ml(s: String, pos: Int) -> String =
+  if pos >= str_len(s) then ""
+  else if is_header_line_ml(s, pos) then strip_headers_ml(s, next_line_ml(s, pos))
+  else str_slice(s, pos, str_len(s))
+
+# ---------------------------------------------------------------------------
+# Memoized recursive module loading
+# ---------------------------------------------------------------------------
+#
+# The cache maps module_name → pairs from that module's check result.
+# Modules not in "stdlib.*" are skipped (they're pre-seeded in builtin_env).
+
+type alias ModuleCache = Ref (Dict (List (String, types.Scheme)))
+
+export fn new_cache() -> ModuleCache !{IO} =
+  ref_new(dict_empty())
+
+fn cache_put(cache: ModuleCache, name: String, pairs: List (String, types.Scheme)) -> Unit !{IO} =
+  do
+    d <- ref_read(cache)
+    ref_write(cache, dict_set(name, pairs, d))
+
+# Load a module by name, returning all its top-level name→scheme pairs.
+# Recursively loads imports first, using the cache to avoid re-checking.
+# Non-stdlib or unresolvable modules return Nil (silently skipped).
+#
+# Note: the cache lookup is done via ref_read + dict_get in a plain match (not
+# a do-bind) to avoid the typechecker treating Maybe as the do-sequence family.
+fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
+  do
+    d <- ref_read(cache)
+    match dict_get(name, d) with
+    | Just pairs -> pairs
+    | Nothing ->
+        do
+          cache_put(cache, name, Nil)
+          match module_name_to_path(name, stdlib_root) with
+          | Nothing -> Nil
+          | Just path ->
+              do
+                src <- read_file(path)
+                import_pairs <- build_import_pairs(collect_imports(src), stdlib_root, cache)
+                match lexer.tokenize(strip_headers_ml(src, 0)) with
+                | Err _ -> Nil
+                | Ok tokens ->
+                    match parser.parse_program(tokens) with
+                    | Err _ -> Nil
+                    | Ok prog ->
+                        do
+                          result <- checker.check_program_with_env(prog, import_pairs)
+                          match result with
+                          | checker.CheckErr _ -> Nil
+                          | checker.CheckOk env ->
+                              do
+                                let loaded_pairs = dict_to_pairs(env)
+                                cache_put(cache, name, loaded_pairs)
+                                loaded_pairs
+
+# Apply a single import spec: load the module and namespace/filter its pairs.
+fn apply_import_spec(spec: ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
+  match spec with
+  | ImportAlias module_name alias ->
+      do
+        pairs <- load_module(module_name, stdlib_root, cache)
+        prefix_pairs(pairs, alias)
+  | ImportSelective module_name names ->
+      do
+        pairs <- load_module(module_name, stdlib_root, cache)
+        select_pairs(pairs, names)
+
+fn build_import_pairs_acc(specs: List ImportSpec, stdlib_root: String, cache: ModuleCache, acc: List (String, types.Scheme)) -> List (String, types.Scheme) !{IO} =
+  match specs with
+  | Nil -> acc
+  | Cons spec rest ->
+      do
+        pairs <- apply_import_spec(spec, stdlib_root, cache)
+        build_import_pairs_acc(rest, stdlib_root, cache, acc ++ pairs)
+
+export fn build_import_pairs(specs: List ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
+  build_import_pairs_acc(specs, stdlib_root, cache, Nil)

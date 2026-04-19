@@ -1634,6 +1634,96 @@ def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
     return out
 
 
+def _constraint_arg_to_type(arg_expr: ast.TypeExpr) -> "Type":
+    """Convert a constraint arg TypeExpr back to a Type (lowercase names → TVar)."""
+    if isinstance(arg_expr, ast.TypeName):
+        leaf = arg_expr.name.rsplit(".", 1)[-1]
+        if leaf and leaf[0].islower():
+            return TVar(arg_expr.name)
+        return TConst(arg_expr.name)
+    if isinstance(arg_expr, ast.TypeApply):
+        return TApp(
+            _constraint_arg_to_type(arg_expr.base),
+            _constraint_arg_to_type(arg_expr.arg),
+        )
+    return TConst(str(arg_expr))
+
+
+def _collect_body_constraints(
+    expr: ast.Expr,
+    state: "InferState",
+    generalized_vars: set[str],
+) -> "list[ast.TypeConstraint]":
+    """Walk the inferred expression tree and collect Semigroup/typeclass constraints
+    whose type arguments contain generalized type variables.  These become inferred
+    ``where`` clauses on the enclosing function declaration."""
+    seen: set[tuple[str, ...]] = set()
+    out: list[ast.TypeConstraint] = []
+
+    def walk(e: ast.Expr) -> None:
+        if e is None:
+            return
+        rc = getattr(e, "resolved_constraint", None)
+        if isinstance(rc, ast.TypeConstraint):
+            resolved_args = []
+            involves_gen = False
+            for a in rc.args:
+                t = _constraint_arg_to_type(a)
+                rt = apply(state.subst, t, state.effect_subst)
+                resolved_args.append(type_to_ast_expr(rt))
+                if ftv(rt) & generalized_vars:
+                    involves_gen = True
+            if involves_gen:
+                key = (rc.class_name,) + tuple(
+                    type_to_string(apply(state.subst, _constraint_arg_to_type(a), state.effect_subst))
+                    for a in rc.args
+                )
+                if key not in seen:
+                    seen.add(key)
+                    out.append(ast.TypeConstraint(class_name=rc.class_name, args=resolved_args))
+
+        if isinstance(e, ast.IfExpr):
+            walk(e.condition)
+            walk(e.then_branch)
+            walk(e.else_branch)
+        elif isinstance(e, ast.TupleExpr):
+            for item in e.items:
+                walk(item)
+        elif isinstance(e, ast.RecordExpr):
+            for field in e.fields:
+                walk(field.value)
+        elif isinstance(e, ast.GetFieldExpr):
+            walk(e.record)
+        elif isinstance(e, ast.MatchExpr):
+            walk(e.scrutinee)
+            for branch in e.branches:
+                walk(branch.value)
+        elif isinstance(e, ast.CallExpr):
+            walk(e.callee)
+            for arg in e.args:
+                walk(arg)
+        elif isinstance(e, ast.BinaryExpr):
+            walk(e.left)
+            walk(e.right)
+        elif isinstance(e, ast.UnaryExpr):
+            walk(e.operand)
+        else:
+            do_expr = getattr(ast, "DoExpr", None)
+            do_bind = getattr(ast, "DoBindStep", None)
+            do_xpr = getattr(ast, "DoExprStep", None)
+            do_let = getattr(ast, "DoLetStep", None)
+            lambda_e = getattr(ast, "LambdaExpr", None)
+            if do_expr is not None and isinstance(e, do_expr):
+                for step in e.steps:
+                    if isinstance(step, (do_bind, do_xpr, do_let)):  # type: ignore[arg-type]
+                        walk(step.value)
+            elif lambda_e is not None and isinstance(e, lambda_e):
+                walk(e.body)
+
+    walk(expr)
+    return out
+
+
 def typecheck_program(
     program: ast.Program,
     seed_env: "dict[str, Scheme] | None" = None,
@@ -2090,6 +2180,28 @@ def typecheck_program(
             fn_decl.return_type = _apply_inferred_fn_signature(fn_decl.params, fn_decl.return_type, solved_fn)
             generalized_env = dict(env)
             generalized_env.pop(fn_decl.name, None)
+
+            # Infer typeclass constraints from body call sites (for implicitly
+            # polymorphic parameters that had no explicit ``where`` clause).
+            inferred_vars = ftv(solved_fn) - ftv_env(generalized_env)
+            if inferred_vars:
+                inferred_constraints = _collect_body_constraints(fn_decl.body, state, inferred_vars)
+                existing_keys = {
+                    (c.class_name,) + tuple(
+                        type_to_string(apply(state.subst, _constraint_arg_to_type(a), state.effect_subst))
+                        for a in c.args
+                    )
+                    for c in fn_decl.constraints
+                }
+                for c in inferred_constraints:
+                    key = (c.class_name,) + tuple(
+                        type_to_string(apply(state.subst, _constraint_arg_to_type(a), state.effect_subst))
+                        for a in c.args
+                    )
+                    if key not in existing_keys:
+                        fn_decl.constraints.append(c)
+                        existing_keys.add(key)
+
             env[fn_decl.name] = generalize(generalized_env, solved_fn, state, fn_decl_effects[fn_decl.name])
 
         elif isinstance(decl, ast.LetDecl):

@@ -5,6 +5,7 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
 import stdlib.compiler.types as types
+import stdlib.compiler.module_loader as module_loader
 
 # ---------------------------------------------------------------------------
 # Public API types
@@ -84,6 +85,23 @@ export fn compile_source(src: String) -> CompileResult !{IO} =
         match result with
         | checker.CheckErr msg -> CompileFail(Cons(DiagError("check: " ++ msg), Nil))
         | checker.CheckOk env  -> CompileOk(env)
+
+# compile_source_with_root: like compile_source but also resolves imports.
+# Accepts raw source (with module/import header); strips headers internally
+# before parsing so the bootstrap parser only sees declaration bodies.
+# stdlib_root is the filesystem root for stdlib.* module resolution.
+export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileResult !{IO} =
+  do
+    cache <- module_loader.new_cache()
+    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
+    match lex_parse(strip_headers(src, 0)) with
+    | LexParseFail diags -> CompileFail(diags)
+    | LexParseOk prog ->
+        do
+          result <- checker.check_program_with_env(prog, import_pairs)
+          match result with
+          | checker.CheckErr msg -> CompileFail(Cons(DiagError("check: " ++ msg), Nil))
+          | checker.CheckOk env  -> CompileOk(env)
 
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: String) -> CompileResult !{IO} =

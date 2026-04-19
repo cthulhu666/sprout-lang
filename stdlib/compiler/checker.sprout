@@ -37,12 +37,18 @@ export type CheckResult (..) =
 # declarations overwrite built-in entries for the same name.
 
 export fn check_program(prog: ast.Program) -> CheckResult !{IO} =
+  check_program_with_env(prog, Nil)
+
+# check_program_with_env: like check_program but merges caller-supplied
+# name→scheme pairs (e.g., from imported modules) into the initial env.
+# Builtin entries are always included; extra entries are added on top.
+export fn check_program_with_env(prog: ast.Program, extra: List (String, types.Scheme)) -> CheckResult !{IO} =
   do
     state <- unifier.new_state()
     match prog with
     | ast.Program decls _ ->
         do
-          r <- infer.typecheck_decls(state, decls, builtin_env(), dict_empty(), dict_empty())
+          r <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
           match r with
           | infer.DeclErr msg -> CheckErr(msg)
           | infer.DeclOk env  -> CheckOk(env)
@@ -108,13 +114,18 @@ fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
 # Source-level TypeDecl/FnDecl/LetDecl declarations are added on top of this
 # env by typecheck_decls, so source definitions always take precedence.
 
+fn builtin_entries() -> List (String, types.Scheme) =
+  ctor_entries() ++
+  str_entries() ++
+  list_entries() ++
+  dict_builtin_entries() ++
+  set_entries() ++
+  vec_entries() ++
+  ref_entries() ++
+  string_module_entries()
+
 fn builtin_env() -> Dict types.Scheme =
-  dict_from_list(
-    ctor_entries() ++
-    str_entries() ++
-    list_entries() ++
-    dict_builtin_entries() ++
-    set_entries())
+  dict_from_list(builtin_entries())
 
 # -- Type shortcuts ----------------------------------------------------------
 
@@ -203,4 +214,41 @@ fn set_entries() -> List (String, types.Scheme) =
   , ("set_member",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_bool())))
   , ("set_to_list", bt_mono(bt_fn(bt_set(), bt_list(bt_str()))))
   , ("set_size",    bt_mono(bt_fn(bt_set(), bt_int())))
+  ]
+
+fn bt_vec_a() -> types.Type = bt_vec(bt_a())
+fn bt_ref(t: types.Type) -> types.Type = types.TApp(types.TConst("Ref"), t)
+
+fn vec_entries() -> List (String, types.Scheme) =
+  [ ("vec_empty",    bt_poly1("a", bt_vec_a()))
+  , ("vec_append",   bt_poly1("a", bt_fn2(bt_a(), bt_vec_a(), bt_vec_a())))
+  , ("vec_get",      bt_poly1("a", bt_fn2(bt_int(), bt_vec_a(), bt_maybe(bt_a()))))
+  , ("vec_length",   bt_poly1("a", bt_fn(bt_vec_a(), bt_int())))
+  , ("vec_slice",    bt_poly1("a", bt_fn3(bt_int(), bt_int(), bt_vec_a(), bt_vec_a())))
+  , ("vec_from_list",bt_poly1("a", bt_fn(bt_list(bt_a()), bt_vec_a())))
+  ]
+
+fn ref_entries() -> List (String, types.Scheme) =
+  [ ("ref_new",   bt_poly1("a", bt_io(bt_a(), bt_ref(bt_a()))))
+  , ("ref_read",  bt_poly1("a", bt_io(bt_ref(bt_a()), bt_a())))
+  , ("ref_write", bt_poly1("a", bt_io(bt_ref(bt_a()), bt_fn(bt_a(), bt_unit()))))
+  ]
+
+# Seeded entries for "import stdlib.string as string" usage.
+# Maps "string.X" → the type of X from stdlib/string.sprout.
+fn string_module_entries() -> List (String, types.Scheme) =
+  [ ("string.concat",            bt_mono(bt_fn2(bt_str(), bt_str(), bt_str())))
+  , ("string.length",            bt_mono(bt_fn(bt_str(), bt_int())))
+  , ("string.slice",             bt_mono(bt_fn3(bt_str(), bt_int(), bt_int(), bt_str())))
+  , ("string.drop",              bt_mono(bt_fn2(bt_str(), bt_int(), bt_str())))
+  , ("string.find",              bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
+  , ("string.starts_with",       bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
+  , ("string.contains",          bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
+  , ("string.char_at",           bt_mono(bt_fn2(bt_str(), bt_int(), bt_maybe(bt_char()))))
+  , ("string.char_at_or",        bt_mono(bt_fn3(bt_str(), bt_int(), bt_char(), bt_char())))
+  , ("string.string_from_char",  bt_mono(bt_fn(bt_char(), bt_str())))
+  , ("string.is_ascii_whitespace", bt_mono(bt_fn(bt_char(), bt_bool())))
+  , ("string.is_ascii_digit",    bt_mono(bt_fn(bt_char(), bt_bool())))
+  , ("string.is_ident_start",    bt_mono(bt_fn(bt_char(), bt_bool())))
+  , ("string.is_ident_continue", bt_mono(bt_fn(bt_char(), bt_bool())))
   ]

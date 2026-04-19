@@ -41,8 +41,10 @@ fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
 # ---------------------------------------------------------------------------
 # Entry point
 
-fn run_file(path: String) -> Unit !{IO} =
-  run_with_src(strip_headers(read_file(path), 0))
+fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    raw <- read_file(path)
+    run_with_src(raw, stdlib_root)
 
 fn parse_for_decls(src: String) -> Maybe (List ast.Decl) =
   match lexer.tokenize(src) with
@@ -54,19 +56,22 @@ fn parse_for_decls(src: String) -> Maybe (List ast.Decl) =
           match prog with
           | ast.Program decls _ -> Just(decls)
 
-fn run_with_src(src: String) -> Unit !{IO} =
+fn run_with_src(src: String, stdlib_root: String) -> Unit !{IO} =
   do
-    result <- compiler.compile_source(src)
+    result <- compiler.compile_source_with_root(src, stdlib_root)
     match result with
     | compiler.CompileFail diags -> print_diags(diags)
     | compiler.CompileOk env     ->
         do
           print("OK")
-          match parse_for_decls(src) with
+          match parse_for_decls(strip_headers(src, 0)) with
           | Nothing    -> ()
           | Just decls -> checker.dump_typed_names(decls, env)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing   -> print("ERROR: usage: compile-driver <file>")
-  | Just path -> run_file(path)
+  | Nothing   -> print("ERROR: usage: compile-driver <file> <stdlib-root>")
+  | Just path ->
+      match argv_get(1) with
+      | Nothing       -> print("ERROR: usage: compile-driver <file> <stdlib-root>")
+      | Just sroot    -> run_file(path, sroot)
