@@ -421,25 +421,11 @@ fn check_call_constraint(
 ) -> InferResult !{IO} =
   match callee with
   | ast.VarExpr method_name _ ->
-      check_named_call_constraint(method_name, arg_types, subst, env, ret_t, s3, es3, call_eff)
+      match dict_get("@class:" ++ method_name, env) with
+      | Nothing -> InferOk(ret_t, s3, es3, call_eff)
+      | Just class_marker ->
+          check_instance_for_marker(class_marker, arg_types, subst, env, ret_t, s3, es3, call_eff)
   | _ -> InferOk(ret_t, s3, es3, call_eff)
-
-# Extracted from check_call_constraint to avoid the inner match on dict_get
-# result being greedily parsed as an additional branch of the outer match.
-fn check_named_call_constraint(
-  method_name: String,
-  arg_types: types.Type,
-  subst: Dict types.Type,
-  env: Dict types.Scheme,
-  ret_t: types.Type,
-  s3: Dict types.Type,
-  es3: Dict types.Effect,
-  call_eff: types.Effect
-) -> InferResult !{IO} =
-  match dict_get("@class:" ++ method_name, env) with
-  | Nothing -> InferOk(ret_t, s3, es3, call_eff)
-  | Just class_marker ->
-      check_instance_for_marker(class_marker, arg_types, subst, env, ret_t, s3, es3, call_eff)
 
 fn check_instance_for_marker(
   class_marker: types.Scheme,
@@ -453,60 +439,24 @@ fn check_instance_for_marker(
 ) -> InferResult !{IO} =
   match class_marker with
   | types.Scheme _ _ class_type _ ->
-      check_for_class_type(class_type, arg_types, subst, env, ret_t, s3, es3, call_eff)
-
-fn check_for_class_type(
-  class_type: types.Type,
-  arg_types: types.Type,
-  subst: Dict types.Type,
-  env: Dict types.Scheme,
-  ret_t: types.Type,
-  s3: Dict types.Type,
-  es3: Dict types.Effect,
-  call_eff: types.Effect
-) -> InferResult !{IO} =
-  match class_type with
-  | types.TConst class_name ->
-      check_class_instance_exists(class_name, arg_types, subst, env, ret_t, s3, es3, call_eff)
-  | _ -> InferOk(ret_t, s3, es3, call_eff)
-
-fn check_class_instance_exists(
-  class_name: String,
-  arg_types: types.Type,
-  subst: Dict types.Type,
-  env: Dict types.Scheme,
-  ret_t: types.Type,
-  s3: Dict types.Type,
-  es3: Dict types.Effect,
-  call_eff: types.Effect
-) -> InferResult !{IO} =
-  match first_concrete_arg_str(arg_types, subst) with
-  | Nothing -> InferOk(ret_t, s3, es3, call_eff)
-  | Just head_str ->
-      check_instance_key(class_name, head_str, env, ret_t, s3, es3, call_eff)
-
-fn check_instance_key(
-  class_name: String,
-  head_str: String,
-  env: Dict types.Scheme,
-  ret_t: types.Type,
-  s3: Dict types.Type,
-  es3: Dict types.Effect,
-  call_eff: types.Effect
-) -> InferResult !{IO} =
-  match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-  | Nothing -> InferErr("No instance of " ++ class_name ++ " for " ++ head_str)
-  | Just _ -> InferOk(ret_t, s3, es3, call_eff)
+      match class_type with
+      | types.TConst class_name ->
+          match first_concrete_arg_str(arg_types, subst) with
+          | Nothing -> InferOk(ret_t, s3, es3, call_eff)
+          | Just head_str ->
+              match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+              | Nothing -> InferErr("No instance of " ++ class_name ++ " for " ++ head_str)
+              | Just _ -> InferOk(ret_t, s3, es3, call_eff)
+      | _ -> InferOk(ret_t, s3, es3, call_eff)
 
 fn first_concrete_arg_str(arg_types: types.Type, subst: Dict types.Type) -> Maybe String =
   match arg_types with
-  | types.TTuple items -> first_concrete_from_list(items, subst)
+  | types.TTuple items ->
+      match items with
+      | Nil -> Nothing
+      | Cons first_t _ ->
+          concrete_type_str(unifier.apply_subst(subst, first_t))
   | _ -> concrete_type_str(unifier.apply_subst(subst, arg_types))
-
-fn first_concrete_from_list(items: List types.Type, subst: Dict types.Type) -> Maybe String =
-  match items with
-  | Nil -> Nothing
-  | Cons first_t _ -> concrete_type_str(unifier.apply_subst(subst, first_t))
 
 fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with

@@ -442,21 +442,25 @@ fn parse_match_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.E
     (_, i2) <- expected_keyword("match", tokens, i)
     (scrutinee, i3) <- parse_expr(tokens, i2)
     (_, i4) <- expected_keyword("with", tokens, i3)
-    (branches, i5) <- collect_match_branches(tokens, i4, Nil)
+    (branches, i5) <- collect_match_branches(tokens, i4, Nil, -1)
     if list_length(branches) == 0 then
       Err(ParseError(string.concat("Expected match branch at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
     else
       Ok((ast.MatchExpr(scrutinee, list_reverse(branches), cur_pos(tokens, i)), i5))
 
-fn collect_match_branches(tokens: Vec token.Token, i: Int, acc: List ast.MatchBranch) -> Result ParseError (List ast.MatchBranch, Int) =
+fn collect_match_branches(tokens: Vec token.Token, i: Int, acc: List ast.MatchBranch, branch_col: Int) -> Result ParseError (List ast.MatchBranch, Int) =
   match match_symbol(tokens, i, "|") with
   | Nothing -> Ok((acc, i))
-  | Just (_, i2) ->
-      do
-        (pattern, i3) <- parse_pattern(tokens, i2)
-        (_, i4) <- expected_symbol("->", tokens, i3)
-        (value, i5) <- parse_expr(tokens, i4)
-        collect_match_branches(tokens, i5, Cons(ast.MatchBranch(pattern, value), acc))
+  | Just (bar_tok, i2) ->
+      if branch_col != -1 && source.position_column(tok_pos(bar_tok)) < branch_col
+      then Ok((acc, i))
+      else
+        do
+          let col = if branch_col == -1 then source.position_column(tok_pos(bar_tok)) else branch_col
+          (pattern, i3) <- parse_pattern(tokens, i2)
+          (_, i4) <- expected_symbol("->", tokens, i3)
+          (value, i5) <- parse_expr(tokens, i4)
+          collect_match_branches(tokens, i5, Cons(ast.MatchBranch(pattern, value), acc), col)
 
 fn parse_pipe(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do

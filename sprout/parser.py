@@ -389,7 +389,14 @@ class Parser:
             scrutinee = self.parse_expr()
             self.expect("KEYWORD", "with")
             branches = []
-            while self.match("SYMBOL", "|"):
+            branch_col: int | None = None
+            while self.check("SYMBOL", "|"):
+                tok = self.current()
+                if branch_col is None:
+                    branch_col = tok.column
+                elif tok.column < branch_col:
+                    break
+                self.advance()
                 pattern = self.parse_pattern()
                 self.expect("SYMBOL", "->")
                 value = self.parse_expr()
