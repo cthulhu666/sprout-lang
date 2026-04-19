@@ -63,10 +63,7 @@ CORPUS = [
     # injects them via PRELUDE_SEED_ENV so both sides can typecheck.
     "stdlib_fold_filter_map.spr",
     "stdlib_mixed_io_result_do.spr",
-    # stdlib_mixed_io_maybe_do.spr excluded: the bootstrap checker infers
-    # value <- Just("ready") as Maybe String (no monadic unwrap), so the body
-    # check fails with a type mismatch; Python succeeds.  No parity possible
-    # until the Sprout checker's do-bind semantics are aligned.
+    "stdlib_mixed_io_maybe_do.spr",
 ]
 
 # Regex that matches a Python-emitted line with a forall prefix.

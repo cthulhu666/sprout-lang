@@ -883,13 +883,39 @@ fn infer_do_step(
   | ast.DoBindStep _ e -> infer_expr(state, env, subst, eff_subst, e)
   | ast.DoLetStep _ e -> infer_expr(state, env, subst, eff_subst, e)
 
+# Unwrap the monadic payload type for do-bind:
+#   Maybe a      → a
+#   Result e a   → a
+#   anything else → as-is (IO expressions: bound var gets the full expression type)
+fn do_unwrap_type(t: types.Type) -> types.Type =
+  match t with
+  | types.TApp outer inner ->
+      match outer with
+      | types.TConst name ->
+          if name == "Maybe" then inner else t
+      | types.TApp outer2 _ ->
+          match outer2 with
+          | types.TConst name ->
+              if name == "Result" then inner else t
+          | _ -> t
+      | _ -> t
+  | _ -> t
+
 fn extend_env_from_do_step(step: ast.DoStep, step_type: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match step with
   | ast.DoBindStep pat _ ->
-      extend_env_from_pattern(pat, subst, env)
+      extend_env_from_pattern_typed(pat, do_unwrap_type(unifier.apply_subst(subst, step_type)), subst, env)
   | ast.DoLetStep name _ ->
       dict_set(name, types.mono(unifier.apply_subst(subst, step_type)), env)
   | ast.DoExprStep _ -> env
+
+# Bind pattern variables to a known type (used for do-bind).
+# VarPattern: bind the name directly to the given type.
+# Other patterns: fall back to subst-lookup (best-effort).
+fn extend_env_from_pattern_typed(pat: ast.Pattern, t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match pat with
+  | ast.VarPattern name _ -> dict_set(name, types.mono(t), env)
+  | _ -> extend_env_from_pattern(pat, subst, env)
 
 # ---------------------------------------------------------------------------
 # Lambda expression

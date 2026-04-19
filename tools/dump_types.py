@@ -78,6 +78,7 @@ PRELUDE_SEED_ENV: "dict[str, Scheme]" = {
     "map":          _poly(_a, _b, _fn(_fn(_a, _b), _fn(_list(_a), _list(_b)))),
     "fold":         _poly(_a, _b, _fn(_fn(_b, _fn(_a, _b)), _fn(_b, _fn(_list(_a), _b)))),
     # String/int helpers used in corpus files
+    "append":       Scheme(vars=(), type=_fn(_str, _fn(_str, _str))),  # type: ignore[arg-type]
     "split_ints":   Scheme(vars=(), type=_fn(_str, _list(_int))),  # type: ignore[arg-type]
     # Dict helpers (high-level wrappers around map_* builtins)
     "dict_empty":  _poly(_a, TApp(TConst("Dict"), _a)),
