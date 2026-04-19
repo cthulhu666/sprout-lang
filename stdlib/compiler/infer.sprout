@@ -275,6 +275,10 @@ export fn infer_expr(
   | ast.BinaryExpr op left right _ -> infer_binary(state, env, subst, eff_subst, op, left, right)
   | ast.DoExpr steps _ -> infer_do(state, env, subst, eff_subst, steps)
   | ast.LambdaExpr params body _ -> infer_lambda(state, env, subst, eff_subst, params, body)
+  | ast.RecordExpr type_name fields _ ->
+      infer_record_expr(state, env, subst, eff_subst, type_name, fields)
+  | ast.GetFieldExpr rec_expr field_name _ ->
+      infer_get_field(state, env, subst, eff_subst, rec_expr, field_name)
   | _ ->
       do
         v <- unifier.fresh(state)
@@ -925,6 +929,180 @@ fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, 
       | ast.Param name _ -> extend_env_with_params(rest_p, rest_t, dict_set(name, types.mono(t), env))
 
 # ---------------------------------------------------------------------------
+# Record inference
+# ---------------------------------------------------------------------------
+#
+# Records are registered in env using @rec:<RecordName>:<FieldName> keys so
+# that field types are accessible without threading a separate rec_env parameter.
+#
+# Polymorphic records (with type params) store their field types using TVar
+# names prefixed with "<RecordName>." to match the naming convention in the
+# Python typechecker.
+
+fn register_record_fields(
+  rec_name: String,
+  type_params: List String,
+  fields: List ast.RecordFieldDecl,
+  env: Dict types.Scheme
+) -> Dict types.Scheme =
+  register_record_fields_loop(rec_name, type_params, fields,
+    build_record_local_vars(rec_name, type_params, dict_empty()), env)
+
+fn build_record_local_vars(rec_name: String, type_params: List String, acc: Dict types.Type) -> Dict types.Type =
+  match type_params with
+  | Nil -> acc
+  | Cons p rest ->
+      build_record_local_vars(rec_name, rest,
+        dict_set(p, types.TVar(str_concat(rec_name, str_concat(".", p))), acc))
+
+fn register_record_fields_loop(
+  rec_name: String,
+  type_params: List String,
+  fields: List ast.RecordFieldDecl,
+  local_vars: Dict types.Type,
+  env: Dict types.Scheme
+) -> Dict types.Scheme =
+  match fields with
+  | Nil -> env
+  | Cons field rest ->
+      match field with
+      | ast.RecordFieldDecl fname ftype ->
+          register_record_fields_loop(rec_name, type_params, rest, local_vars,
+            dict_set(
+              str_concat("@rec:", str_concat(rec_name, str_concat(":", fname))),
+              make_record_field_scheme(rec_name, type_params, type_from_ast(ftype, local_vars)),
+              env))
+
+fn make_record_field_scheme(rec_name: String, type_params: List String, field_t: types.Type) -> types.Scheme =
+  types.Scheme(
+    list_map(\p -> str_concat(rec_name, str_concat(".", p)), type_params),
+    Nil, field_t, types.EffectPure)
+
+fn infer_record_expr(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  type_name: String,
+  fields: List ast.RecordField
+) -> InferResult !{IO} =
+  infer_record_fields(state, env, subst, eff_subst, type_name, fields, types.EffectPure)
+
+fn infer_record_fields(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  type_name: String,
+  fields: List ast.RecordField,
+  acc_eff: types.Effect
+) -> InferResult !{IO} =
+  match fields with
+  | Nil -> InferOk(types.TConst(type_name), subst, eff_subst, acc_eff)
+  | Cons field rest_fields ->
+      match field with
+      | ast.RecordField fname fexpr ->
+          do
+            r <- infer_expr(state, env, subst, eff_subst, fexpr)
+            match r with
+            | InferErr e -> InferErr(e)
+            | InferOk val_type s1 es1 val_eff ->
+                match dict_get(str_concat("@rec:", str_concat(type_name, str_concat(":", fname))), env) with
+                | Nothing -> InferErr("Unknown record type or field: " ++ type_name ++ "." ++ fname)
+                | Just field_scheme ->
+                    do
+                      field_t <- unifier.instantiate(state, field_scheme)
+                      match unifier.unify_types(s1, val_type, field_t) with
+                      | Err e -> InferErr("Record field type mismatch: " ++ e)
+                      | Ok s2 ->
+                          infer_record_fields(state, env, s2, es1, type_name, rest_fields, merge_effects(acc_eff, val_eff))
+
+fn infer_get_field(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  rec_expr: ast.Expr,
+  field_name: String
+) -> InferResult !{IO} =
+  do
+    r <- infer_expr(state, env, subst, eff_subst, rec_expr)
+    match r with
+    | InferErr e -> InferErr(e)
+    | InferOk rec_type s1 es1 rec_eff ->
+        get_field_from_resolved(state, env, s1, es1, unifier.apply_subst(s1, rec_type), field_name, rec_eff)
+
+fn get_field_from_resolved(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  resolved: types.Type,
+  field_name: String,
+  rec_eff: types.Effect
+) -> InferResult !{IO} =
+  match resolved with
+  | types.TConst rec_name ->
+      lookup_record_field(state, env, subst, eff_subst, rec_name, Nil, field_name, rec_eff)
+  | types.TApp _ _ ->
+      lookup_record_field(state, env, subst, eff_subst, extract_tconst_name(resolved), extract_tapp_args(resolved), field_name, rec_eff)
+  | _ ->
+      do
+        v <- unifier.fresh(state)
+        InferOk(types.TVar(v), subst, eff_subst, rec_eff)
+
+fn extract_tconst_name(t: types.Type) -> String =
+  match t with
+  | types.TConst name -> name
+  | types.TApp base _ -> extract_tconst_name(base)
+  | _ -> "Unknown"
+
+fn extract_tapp_args(t: types.Type) -> List types.Type =
+  list_reverse(collect_tapp_args(t, Nil))
+
+fn collect_tapp_args(t: types.Type, acc: List types.Type) -> List types.Type =
+  match t with
+  | types.TApp base arg -> collect_tapp_args(base, Cons(arg, acc))
+  | _ -> acc
+
+fn lookup_record_field(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  rec_name: String,
+  type_args: List types.Type,
+  field_name: String,
+  rec_eff: types.Effect
+) -> InferResult !{IO} =
+  match dict_get(str_concat("@rec:", str_concat(rec_name, str_concat(":", field_name))), env) with
+  | Nothing ->
+      do
+        v <- unifier.fresh(state)
+        InferOk(types.TVar(v), subst, eff_subst, rec_eff)
+  | Just field_scheme ->
+      do
+        field_t <- unifier.instantiate(state, field_scheme)
+        InferOk(apply_type_args_to_field(field_t, field_scheme, rec_name, type_args), subst, eff_subst, rec_eff)
+
+fn apply_type_args_to_field(
+  field_t: types.Type,
+  field_scheme: types.Scheme,
+  rec_name: String,
+  type_args: List types.Type
+) -> types.Type =
+  match field_scheme with
+  | types.Scheme qvars _ _ _ ->
+      unifier.apply_subst(build_tvar_subst(qvars, type_args, dict_empty()), field_t)
+
+fn build_tvar_subst(vars: List String, args: List types.Type, acc: Dict types.Type) -> Dict types.Type =
+  match (vars, args) with
+  | (Nil, _) -> acc
+  | (_, Nil) -> acc
+  | (Cons v rest_v, Cons a rest_a) ->
+      build_tvar_subst(rest_v, rest_a, dict_set(v, a, acc))
+
+# ---------------------------------------------------------------------------
 # Program-level typechecking
 # ---------------------------------------------------------------------------
 #
@@ -961,7 +1139,8 @@ fn typecheck_decl(
 ) -> DeclResult !{IO} =
   match decl with
   | ast.TypeDecl _ _ _ _ -> DeclOk(register_type_decl(decl, env))
-  | ast.RecordDecl _ _ _ _ -> DeclOk(env)
+  | ast.RecordDecl rec_name type_params fields _ ->
+      DeclOk(register_record_fields(rec_name, type_params, fields, env))
   | ast.FnDecl name _ _ _ _ _ _ ->
       do
         r <- check_fn_body(state, decl, env, subst, eff_subst)

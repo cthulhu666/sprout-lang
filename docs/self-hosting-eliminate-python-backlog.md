@@ -229,9 +229,9 @@ Definition of done:
   seeded; type aliases (`AliasDecl`) parsed and transparently expanded as a
   pre-desugar pass in the Python typechecker and skipped in the bootstrap
   checker; Set type added for constraint-satisfaction work; corpus expanded from
-  6→8 via dump_types.py prelude seed env injecting ADT constructors and list/dict
-  helpers; constraint-satisfaction checking landed — `instance_check.spr`
-  added to conformance corpus and parity corpus is 8/8)*
+  6→8; constraint-satisfaction checking landed; record field access landed —
+  `RecordDecl`/`RecordExpr`/`GetFieldExpr` inference via env-encoding;
+  `record_types.spr` fixed and added to conformance corpus; parity corpus 9/9)*
 - [ ] Make the self-hosted checker authoritative on at least one bootstrap
   path before deleting the Python checker.
 

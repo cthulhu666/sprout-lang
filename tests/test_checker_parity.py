@@ -50,8 +50,9 @@ CORPUS = [
     "aoc2025_day2_sample.spr",
     # New: language-feature coverage
     "type_classes.spr",
-    # record_types.spr excluded: Python typechecker does not support record-type
-    # syntax (RecordDecl); typecheck_program fails with empty output.  Parser-only.
+    "record_types.spr",
+    # (record_types.spr now included: fixed to use `get p x` syntax; both checkers
+    # support RecordDecl/RecordExpr/GetFieldExpr)
     # poly_types.spr excluded: multi-param type constructor schemes are
     # alpha-equivalent between Python and Sprout but variable names differ
     # (Python renames in order of first appearance in the type body; Sprout

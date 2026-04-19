@@ -1,22 +1,18 @@
 # Conformance file: record types with field access
-# Covers: RecordDecl, RecordExpr (parser only), GetFieldExpr (parser only)
-#
-# Note: RecordExpr and GetFieldExpr bodies in FnDecl are not checked by the
-# bootstrap checker (it reads FnDecl types from annotations only), so these
-# functions are safe for checker parity.  The LetDecl using RecordExpr is
-# omitted here because the bootstrap infer returns a fresh TVar for RecordExpr
-# (unimplemented), diverging from the Python typechecker.
+# Covers: RecordDecl, RecordExpr, GetFieldExpr
 
 type Point = {
   x: Int,
   y: Int
 }
 
-fn get_x(p: Point) -> Int =
-  p.x
+fn make_point(x: Int, y: Int) -> Point = Point { x = x, y = y }
 
-fn get_y(p: Point) -> Int =
-  p.y
+fn get_x(p: Point) -> Int = get p x
 
-fn manhattan(p: Point) -> Int =
-  p.x + p.y
+fn get_y(p: Point) -> Int = get p y
+
+fn manhattan(p: Point) -> Int = (get p x) + (get p y)
+
+fn main() -> Unit !{IO} =
+  print(manhattan(make_point(3, 4)))

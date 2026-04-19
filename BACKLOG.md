@@ -98,6 +98,7 @@ Definition of done:
   - **type aliases landed**: `type alias Name = TypeExpr` parsed in Python + Sprout parsers; Python typechecker expands aliases as a pre-desugar pass; bootstrap checker skips `AliasDecl` (transparent to inference); `Set` type added for constraint-satisfaction work pre-work
   - **checker parity corpus expanded 6→8**: `stdlib_fold_filter_map.spr` and `stdlib_mixed_io_result_do.spr` added; `tools/dump_types.py` now seeds prelude ADT constructors + list/dict helpers so corpus files that call them can be type-checked without full module loading
   - **constraint-satisfaction checking landed**: at concrete call sites the bootstrap checker looks up `@class:<method>` markers in env to identify class methods, then verifies a matching `@inst:<class>:<type>` marker exists; missing instances produce a typed error "No instance of X for T in function f"; `tests/conformance/run/instance_check.spr` added to conformance corpus and passes
+  - **record field access landed**: `RecordDecl` registers `@rec:<Name>:<field>` markers in env; `RecordExpr` and `GetFieldExpr` inference implemented; `record_types.spr` fixed to use `get p x` syntax, added to conformance corpus and parity corpus (now 9/9)
 
 ### 7.5) Type Classes (Collections First)
 
@@ -178,5 +179,5 @@ Definition of done:
 ## Next Steps
 
 - Make `unifier` pure (state-threading): eliminate `!{IO}` from `compile_source`/`check_program` by threading the fresh-variable counter as a pure value; lets the bootstrap checker work in pure contexts.
-- Record field access in bootstrap checker: implement `RecordDecl`/`RecordExpr`/`GetFieldExpr` inference in `infer.sprout` (using env-encoding for rec_env; same pattern as class/instance markers).
+- `stdlib_mixed_io_maybe_do.spr` still excluded from parity corpus: do-bind monadic unwrapping gap in bootstrap checker (binds `Maybe String` instead of unwrapping to `String`).
 - Expand checker parity corpus further: `stdlib_mixed_io_maybe_do.spr` still excluded due to do-bind monadic unwrapping gap in bootstrap checker.
