@@ -110,11 +110,11 @@ fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
 
 fn builtin_env() -> Dict types.Scheme =
   dict_from_list(
-    list_append(ctor_entries(),
-    list_append(str_entries(),
-    list_append(list_entries(),
-    list_append(dict_builtin_entries(),
-    set_entries())))))
+    ctor_entries() ++
+    str_entries() ++
+    list_entries() ++
+    dict_builtin_entries() ++
+    set_entries())
 
 # -- Type shortcuts ----------------------------------------------------------
 
