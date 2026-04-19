@@ -60,6 +60,7 @@ MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
     "dict_keys": "dict_keys",
     "dict_values": "dict_values",
     "dict_entries": "dict_entries",
+    "dict_from_list": "dict_from_list",
     "set_empty": "set_empty",
     "set_insert": "set_insert",
     "set_member": "set_member",

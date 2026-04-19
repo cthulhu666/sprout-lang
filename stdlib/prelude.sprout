@@ -529,6 +529,16 @@ instance Semigroup (Dict v) {
 export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
   fold(vec_append_flip, vec_empty(), xs)
 
+export fn dict_from_list(pairs: List (String, v)) -> Dict v =
+  dict_from_list_loop(pairs, dict_empty())
+
+fn dict_from_list_loop(pairs: List (String, v), acc: Dict v) -> Dict v =
+  match pairs with
+  | Nil -> acc
+  | Cons head rest ->
+      match head with
+      | (k, val) -> dict_from_list_loop(rest, dict_set(k, val, acc))
+
 export fn pipe(f: a -> b, value: a) -> b =
   f(value)
 

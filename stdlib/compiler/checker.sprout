@@ -109,11 +109,12 @@ fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
 # env by typecheck_decls, so source definitions always take precedence.
 
 fn builtin_env() -> Dict types.Scheme =
-  seed_set_builtins(
-    seed_dict_builtins(
-      seed_list_builtins(
-        seed_str_builtins(
-          seed_ctor_builtins(dict_empty())))))
+  dict_from_list(
+    list_append(ctor_entries(),
+    list_append(str_entries(),
+    list_append(list_entries(),
+    list_append(dict_builtin_entries(),
+    set_entries())))))
 
 # -- Type shortcuts ----------------------------------------------------------
 
@@ -155,50 +156,50 @@ fn bt_poly2(v1: String, v2: String, t: types.Type) -> types.Scheme =
 
 # -- Seeding helpers ---------------------------------------------------------
 
-fn seed_ctor_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set("Just",    bt_poly1("a", bt_fn(bt_a(), bt_maybe(bt_a()))),
-  dict_set("Nothing", bt_poly1("a", bt_maybe(bt_a())),
-  dict_set("Cons",    bt_poly1("a", bt_fn(bt_a(), bt_fn(bt_list(bt_a()), bt_list(bt_a())))),
-  dict_set("Nil",     bt_poly1("a", bt_list(bt_a())),
-  dict_set("Ok",      bt_poly2("e", "a", bt_fn(bt_a(), bt_result(bt_e(), bt_a()))),
-  dict_set("Err",     bt_poly2("e", "a", bt_fn(bt_e(), bt_result(bt_e(), bt_a()))),
-  env))))))
+fn ctor_entries() -> List (String, types.Scheme) =
+  [ ("Just",    bt_poly1("a", bt_fn(bt_a(), bt_maybe(bt_a()))))
+  , ("Nothing", bt_poly1("a", bt_maybe(bt_a())))
+  , ("Cons",    bt_poly1("a", bt_fn(bt_a(), bt_fn(bt_list(bt_a()), bt_list(bt_a())))))
+  , ("Nil",     bt_poly1("a", bt_list(bt_a())))
+  , ("Ok",      bt_poly2("e", "a", bt_fn(bt_a(), bt_result(bt_e(), bt_a()))))
+  , ("Err",     bt_poly2("e", "a", bt_fn(bt_e(), bt_result(bt_e(), bt_a()))))
+  ]
 
-fn seed_str_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set("print",           bt_poly1("a", bt_io(bt_a(), bt_unit())),
-  dict_set("str_len",         bt_mono(bt_fn(bt_str(), bt_int())),
-  dict_set("str_slice",       bt_mono(bt_fn3(bt_str(), bt_int(), bt_int(), bt_str())),
-  dict_set("str_find",        bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())),
-  dict_set("str_starts_with", bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())),
-  dict_set("str_compare",     bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())),
-  dict_set("int_to_string",   bt_mono(bt_fn(bt_int(), bt_str())),
-  dict_set("parse_int",       bt_mono(bt_fn(bt_str(), bt_int())),
-  dict_set("char_to_string",  bt_mono(bt_fn(bt_char(), bt_str())),
-  dict_set("read_file",       bt_mono(bt_io(bt_str(), bt_str())),
-  dict_set("argv_get",        bt_mono(bt_io(bt_int(), bt_maybe(bt_str()))),
-  env)))))))))))
+fn str_entries() -> List (String, types.Scheme) =
+  [ ("print",           bt_poly1("a", bt_io(bt_a(), bt_unit())))
+  , ("str_len",         bt_mono(bt_fn(bt_str(), bt_int())))
+  , ("str_slice",       bt_mono(bt_fn3(bt_str(), bt_int(), bt_int(), bt_str())))
+  , ("str_find",        bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
+  , ("str_starts_with", bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
+  , ("str_compare",     bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
+  , ("int_to_string",   bt_mono(bt_fn(bt_int(), bt_str())))
+  , ("parse_int",       bt_mono(bt_fn(bt_str(), bt_int())))
+  , ("char_to_string",  bt_mono(bt_fn(bt_char(), bt_str())))
+  , ("read_file",       bt_mono(bt_io(bt_str(), bt_str())))
+  , ("argv_get",        bt_mono(bt_io(bt_int(), bt_maybe(bt_str()))))
+  ]
 
-fn seed_list_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set("list_reverse", bt_poly1("a", bt_fn(bt_list(bt_a()), bt_list(bt_a()))),
-  dict_set("list_append",  bt_poly1("a", bt_fn2(bt_list(bt_a()), bt_list(bt_a()), bt_list(bt_a()))),
-  dict_set("list_map",     bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_list(bt_a()), bt_list(bt_b()))),
-  dict_set("list_fold",    bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_list(bt_a()), bt_b())),
-  dict_set("filter",       bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_list(bt_a()), bt_list(bt_a()))),
-  env)))))
+fn list_entries() -> List (String, types.Scheme) =
+  [ ("list_reverse", bt_poly1("a", bt_fn(bt_list(bt_a()), bt_list(bt_a()))))
+  , ("list_append",  bt_poly1("a", bt_fn2(bt_list(bt_a()), bt_list(bt_a()), bt_list(bt_a()))))
+  , ("list_map",     bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_list(bt_a()), bt_list(bt_b()))))
+  , ("list_fold",    bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_list(bt_a()), bt_b())))
+  , ("filter",       bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_list(bt_a()), bt_list(bt_a()))))
+  ]
 
-fn seed_dict_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set("dict_empty",  bt_poly1("v", bt_dict(bt_v())),
-  dict_set("dict_get",    bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_maybe(bt_v()))),
-  dict_set("dict_set",    bt_poly1("v", bt_fn3(bt_str(), bt_v(), bt_dict(bt_v()), bt_dict(bt_v()))),
-  dict_set("dict_remove", bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_dict(bt_v()))),
-  dict_set("dict_keys",   bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_str()))),
-  dict_set("dict_values", bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_v()))),
-  env))))))
+fn dict_builtin_entries() -> List (String, types.Scheme) =
+  [ ("dict_empty",  bt_poly1("v", bt_dict(bt_v())))
+  , ("dict_get",    bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_maybe(bt_v()))))
+  , ("dict_set",    bt_poly1("v", bt_fn3(bt_str(), bt_v(), bt_dict(bt_v()), bt_dict(bt_v()))))
+  , ("dict_remove", bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_dict(bt_v()))))
+  , ("dict_keys",   bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_str()))))
+  , ("dict_values", bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_v()))))
+  ]
 
-fn seed_set_builtins(env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set("set_empty",   bt_mono(bt_set()),
-  dict_set("set_insert",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_set())),
-  dict_set("set_member",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_bool())),
-  dict_set("set_to_list", bt_mono(bt_fn(bt_set(), bt_list(bt_str()))),
-  dict_set("set_size",    bt_mono(bt_fn(bt_set(), bt_int())),
-  env)))))
+fn set_entries() -> List (String, types.Scheme) =
+  [ ("set_empty",   bt_mono(bt_set()))
+  , ("set_insert",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_set())))
+  , ("set_member",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_bool())))
+  , ("set_to_list", bt_mono(bt_fn(bt_set(), bt_list(bt_str()))))
+  , ("set_size",    bt_mono(bt_fn(bt_set(), bt_int())))
+  ]
