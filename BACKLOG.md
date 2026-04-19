@@ -96,6 +96,7 @@ Definition of done:
   - **builtin env seeded**: `checker.check_program` starts from a pre-populated env (~25 entries: ADT constructors, string/IO ops, dict/list ops) so body inference resolves calls to common functions without leniency fallback
   - **ClassDecl/InstanceDecl landed**: class methods registered as globally polymorphic schemes; instance method bodies type-checked against method annotations; `type_classes.spr` added to checker parity corpus (now 6/6)
   - **type aliases landed**: `type alias Name = TypeExpr` parsed in Python + Sprout parsers; Python typechecker expands aliases as a pre-desugar pass; bootstrap checker skips `AliasDecl` (transparent to inference); `Set` type added for constraint-satisfaction work pre-work
+  - **checker parity corpus expanded 6→8**: `stdlib_fold_filter_map.spr` and `stdlib_mixed_io_result_do.spr` added; `tools/dump_types.py` now seeds prelude ADT constructors + list/dict helpers so corpus files that call them can be type-checked without full module loading
 
 ### 7.5) Type Classes (Collections First)
 

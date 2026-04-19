@@ -223,11 +223,13 @@ Definition of done:
   *(`stdlib/compiler/checker.sprout` wraps `infer.typecheck_decls` with a `CheckResult`
   ADT; `stdlib/compiler/type_driver.sprout` is the Sprout-side executable;
   `tools/dump_types.py` is the Python-side comparison tool;
-  `tests/test_checker_parity.py` confirms 6/6 corpus files match — forall
+  `tests/test_checker_parity.py` confirms 8/8 corpus files match — forall
   generalization fully implemented, ClassDecl/InstanceDecl handled, builtin env
   seeded; type aliases (`AliasDecl`) parsed and transparently expanded as a
   pre-desugar pass in the Python typechecker and skipped in the bootstrap
-  checker; Set type added for upcoming constraint-satisfaction work)*
+  checker; Set type added for upcoming constraint-satisfaction work; corpus
+  expanded from 6→8 via dump_types.py prelude seed env injecting ADT
+  constructors and list/dict helpers)*
 - [ ] Make the self-hosted checker authoritative on at least one bootstrap
   path before deleting the Python checker.
 

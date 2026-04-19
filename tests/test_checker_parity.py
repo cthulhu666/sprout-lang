@@ -35,13 +35,14 @@ CORPUS_DIR = ROOT / "tests" / "conformance" / "run"
 TYPE_DRIVER = ROOT / "stdlib" / "compiler" / "type_driver.sprout"
 DUMP_TYPES = ROOT / "tools" / "dump_types.py"
 
-# Files from the parser parity corpus that the Python typechecker can handle.
-# Three stdlib files are excluded: stdlib_fold_filter_map, stdlib_mixed_io_maybe_do,
-# and stdlib_mixed_io_result_do call builtins (fold, map, filter, etc.) that
-# are not in the Python typechecker's initial environment, so typecheck_program
-# raises "Unknown variable" when it checks function bodies.  The Sprout bootstrap
-# checker never checks bodies (annotation-only for FnDecl), so it succeeds —
-# but there is nothing to diff against on the Python side.
+# Files from the parser parity corpus that both checkers can handle.
+# tools/dump_types.py injects a PRELUDE_SEED_ENV (ADT constructors + list/dict
+# helpers) so corpus files that call prelude functions can be type-checked
+# without a full module-load step.
+#
+# stdlib_mixed_io_maybe_do.spr is excluded: the bootstrap checker fails on the
+# do-bind with a Maybe value (infers value : Maybe String instead of String),
+# so the Sprout side outputs an ERROR line while the Python side succeeds.
 CORPUS = [
     "factorial.spr",
     "maybe_map.spr",
@@ -56,6 +57,15 @@ CORPUS = [
     # (Python renames in order of first appearance in the type body; Sprout
     # preserves TypeDecl parameter order).  Parser-only corpus.
     "where_clauses.spr",
+    # Prelude-usage corpus: these files call fold/map/filter/split_ints and
+    # Result constructors that are not native builtins; tools/dump_types.py
+    # injects them via PRELUDE_SEED_ENV so both sides can typecheck.
+    "stdlib_fold_filter_map.spr",
+    "stdlib_mixed_io_result_do.spr",
+    # stdlib_mixed_io_maybe_do.spr excluded: the bootstrap checker infers
+    # value <- Just("ready") as Maybe String (no monadic unwrap), so the body
+    # check fails with a type mismatch; Python succeeds.  No parity possible
+    # until the Sprout checker's do-bind semantics are aligned.
 ]
 
 # Regex that matches a Python-emitted line with a forall prefix.

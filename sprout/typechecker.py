@@ -1634,7 +1634,10 @@ def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
     return out
 
 
-def typecheck_program(program: ast.Program) -> dict[str, str]:
+def typecheck_program(
+    program: ast.Program,
+    seed_env: "dict[str, Scheme] | None" = None,
+) -> dict[str, str]:
     _expand_type_aliases_in_program(program)
     state = InferState()
     type_decls = build_type_decls(program)
@@ -2000,6 +2003,9 @@ def typecheck_program(program: ast.Program) -> dict[str, str]:
         "repl_reset_session": builtin_scheme([], UNIT, effects=IO_EFFECT),
         "term_write": builtin_scheme([STRING], UNIT, effects=IO_EFFECT),
     }
+
+    if seed_env:
+        env.update(seed_env)
 
     for info in type_decls.values():
         for ctor_name, ctor_type in info.constructors.items():
