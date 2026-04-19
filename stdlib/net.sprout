@@ -33,25 +33,25 @@ fn tcp_listener_handle(listener: TcpListener) -> Int =
   match listener with
   | TcpListener handle -> handle
 
-export fn connect(host: String, port: Int) -> Result TcpError TcpConnection !{IO} =
+export fn connect(host: String, port: Int) -> TcpResult TcpConnection !{IO} =
   do
     handle <- tcp_connect(host, port)
     Ok(TcpConnection(handle))
 
-export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError Bytes !{IO} =
+export fn read_exact(conn: TcpConnection, count: Int) -> TcpResult Bytes !{IO} =
   tcp_read_exact(tcp_connection_handle(conn), count)
 
-export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
+export fn write_all(conn: TcpConnection, payload: Bytes) -> TcpResult Int !{IO} =
   tcp_write_all(tcp_connection_handle(conn), payload)
 
-export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String !{IO} =
+export fn read_exact_utf8(conn: TcpConnection, count: Int) -> TcpResult String !{IO} =
   do
     payload <- read_exact(conn, count)
     match to_string(payload) with
     | Ok text -> Ok(text)
     | Err utf8_err -> Err(TcpReadFailed(utf8_error_message(utf8_err)))
 
-export fn write_all_utf8(conn: TcpConnection, payload: String) -> Result TcpError Int !{IO} =
+export fn write_all_utf8(conn: TcpConnection, payload: String) -> TcpResult Int !{IO} =
   write_all(conn, from_string(payload))
 
 export fn close(conn: TcpConnection) -> Unit !{IO} =
@@ -65,6 +65,8 @@ export fn accept(listener: TcpListener) -> TcpConnection !{IO} =
 
 export fn close_listener(listener: TcpListener) -> Unit !{IO} =
   tcp_close_listener(tcp_listener_handle(listener))
+
+type alias TcpResult a = Result TcpError a
 
 fn utf8_error_message(err: Utf8Error) -> String =
   match err with

@@ -1,11 +1,13 @@
 module stdlib.http_client
 import stdlib.http (Result, HttpError, HttpResponse)
 
-export fn http_get(url: String, headers: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO} =
+type alias HttpResult = Result HttpError HttpResponse
+
+export fn http_get(url: String, headers: String, timeout_ms: Int) -> HttpResult !{IO} =
   http_request("GET", url, headers, "", timeout_ms)
 
-export fn http_post(url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO} =
+export fn http_post(url: String, headers: String, body: String, timeout_ms: Int) -> HttpResult !{IO} =
   http_request("POST", url, headers, body, timeout_ms)
 
-export fn http_put(url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO} =
+export fn http_put(url: String, headers: String, body: String, timeout_ms: Int) -> HttpResult !{IO} =
   http_request("PUT", url, headers, body, timeout_ms)

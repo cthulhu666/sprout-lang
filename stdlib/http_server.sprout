@@ -16,6 +16,8 @@ export type HttpServerError(..) =
   | HttpInvalidRequest String
   | HttpServerUnsupportedStatus Int
 
+type alias ServerResult a = Result HttpServerError a
+
 fn find_headers_end(raw: String) -> Int =
   string.find(raw, "\r\n\r\n")
 
@@ -61,7 +63,7 @@ fn result_from_maybe(err: e, value: Maybe a) -> Result e a =
   | Nothing -> Err(err)
   | Just unwrapped -> Ok(unwrapped)
 
-fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict String) -> Result HttpServerError (Dict String) =
+fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict String) -> ServerResult (Dict String) =
   if index >= total then Ok(headers)
   else
     match vec_get(index, lines) with
@@ -74,7 +76,7 @@ fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict S
             match pair with
             | (name, value) -> parse_header_lines(lines, index + 1, total, dict_set(name, value, headers))
 
-fn parse_headers(raw: String) -> Result HttpServerError (Dict String) =
+fn parse_headers(raw: String) -> ServerResult (Dict String) =
   parse_header_lines(lines, 0, vec_length(lines), dict_empty())
 where
   lines = split_lines(raw)
@@ -84,7 +86,7 @@ fn all_digits(raw: String, index: Int, total: Int) -> Bool =
   else if string.find("0123456789", string.string_from_char(char_at(raw, index))) < 0 then false
   else all_digits(raw, index + 1, total)
 
-fn parse_content_length(headers: Dict String) -> Result HttpServerError Int =
+fn parse_content_length(headers: Dict String) -> ServerResult Int =
   match dict_get("content-length", headers) with
   | Nothing -> Ok(0)
   | Just raw ->
@@ -95,7 +97,7 @@ fn parse_content_length(headers: Dict String) -> Result HttpServerError Int =
 fn request_body_start(raw: String) -> Int =
   find_headers_end(raw) + 4
 
-fn parse_request_prefix(raw: String) -> Result HttpServerError (RequestLine, Dict String, Int) =
+fn parse_request_prefix(raw: String) -> ServerResult (RequestLine, Dict String, Int) =
   if headers_end < 0 then Err(HttpInvalidRequest("missing header terminator"))
   else if line_end < 0 then Err(HttpInvalidRequest("missing request line terminator"))
   else
@@ -115,23 +117,23 @@ fn build_request(req: RequestLine, headers: Dict String, body: String) -> HttpRe
       match pv with
       | RequestPathVersion path version -> HttpRequest(method, path, HttpRequestMeta(version, headers, body))
 
-export fn parse(raw: String) -> Result HttpServerError HttpRequest =
+export fn parse(raw: String) -> ServerResult HttpRequest =
   do
     prefix <- parse_request_prefix(raw)
     parse_from_prefix(raw, prefix)
 
-fn parse_from_prefix(raw: String, prefix: (RequestLine, Dict String, Int)) -> Result HttpServerError HttpRequest =
+fn parse_from_prefix(raw: String, prefix: (RequestLine, Dict String, Int)) -> ServerResult HttpRequest =
   err_or_request(req, headers, content_length, raw)
 where
   (req, headers, content_length) = prefix
 
-fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, raw: String) -> Result HttpServerError HttpRequest =
+fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, raw: String) -> ServerResult HttpRequest =
   if string.length(string.drop(raw, request_body_start(raw))) < content_length then
     Err(HttpInvalidRequest("request body shorter than Content-Length"))
   else
     Ok(build_request(req, headers, string.take(string.drop(raw, request_body_start(raw)), content_length)))
 
-fn read_until_headers(conn: Int, acc: String) -> Result HttpServerError String !{IO} =
+fn read_until_headers(conn: Int, acc: String) -> ServerResult String !{IO} =
   if find_headers_end(acc) >= 0 then Ok(acc)
   else
     do
@@ -139,7 +141,7 @@ fn read_until_headers(conn: Int, acc: String) -> Result HttpServerError String !
       if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
       else read_until_headers(conn, string.concat(acc, chunk))
 
-fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> Result HttpServerError String !{IO} =
+fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> ServerResult String !{IO} =
   if remaining <= 0 then Ok(acc)
   else
     do
@@ -147,17 +149,17 @@ fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> Result HttpSer
       if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
       else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk))
 
-fn read_request(conn: Int) -> Result HttpServerError HttpRequest !{IO} =
+fn read_request(conn: Int) -> ServerResult HttpRequest !{IO} =
   do
     raw <- read_until_headers(conn, "")
     read_request_from_prefix(conn, raw)
 
-fn read_request_from_prefix(conn: Int, raw: String) -> Result HttpServerError HttpRequest !{IO} =
+fn read_request_from_prefix(conn: Int, raw: String) -> ServerResult HttpRequest !{IO} =
   do
     prefix <- parse_request_prefix(raw)
     continue_read_request(conn, raw, prefix)
 
-fn continue_read_request(conn: Int, raw: String, prefix: (RequestLine, Dict String, Int)) -> Result HttpServerError HttpRequest !{IO} =
+fn continue_read_request(conn: Int, raw: String, prefix: (RequestLine, Dict String, Int)) -> ServerResult HttpRequest !{IO} =
   if string.length(body) >= content_length then parse(raw)
   else
     do
@@ -242,7 +244,7 @@ export fn request_header(name: String, req: HttpRequest) -> Maybe String =
       match meta with
       | HttpRequestMeta _ headers _ -> dict_get(lower_ascii(name), headers)
 
-export fn render(resp: HttpServerResponse) -> Result HttpServerError String =
+export fn render(resp: HttpServerResponse) -> ServerResult String =
   match resp with
   | HttpServerResponse status headers body ->
       do
