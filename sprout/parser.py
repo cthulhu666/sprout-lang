@@ -120,8 +120,17 @@ class Parser:
         t = self.current()
         raise ParseError(f"Expected top-level declaration at {t.line}:{t.column}, got {t.value!r}")
 
-    def parse_type_decl(self) -> ast.TypeDecl:
+    def parse_type_decl(self) -> ast.TypeDecl | ast.AliasDecl:
         start = self.expect("KEYWORD", "type")
+        if self.check("IDENT", "alias"):
+            self.advance()  # consume "alias"
+            name = self.expect("IDENT", label="alias name").value
+            params: list[str] = []
+            while self.check("IDENT"):
+                params.append(self.advance().value)
+            self.expect("SYMBOL", "=")
+            body = self.parse_type_expr()
+            return self.mark(ast.AliasDecl(name=name, type_params=params, body=body), start)
         name = self.expect("IDENT", label="type name").value
         params = []
         while self.check("IDENT"):

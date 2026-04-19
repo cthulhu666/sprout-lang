@@ -1450,6 +1450,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
                   | ast.InstanceDecl _ _ _ -> "instance"
                   | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
+                  | ast.AliasDecl name _ _ _ -> str_concat("alias:", name)
 
                 fn describe_program(p: ast.Program) -> String =
                   match p with
@@ -1551,6 +1552,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | ast.LetDecl name _ _ -> str_concat("let:", name)
                   | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
                   | ast.InstanceDecl _ _ _ -> "instance"
+                  | ast.AliasDecl name _ _ _ -> str_concat("alias:", name)
 
                 fn join_decls(decls: List ast.Decl, acc: String) -> String =
                   match decls with

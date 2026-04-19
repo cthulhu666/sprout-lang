@@ -1073,8 +1073,22 @@ fn parse_decl_body(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     ))
 
 fn parse_type_decl_or_record(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
-  if is_record_type_decl(tokens, i) then parse_record_type_decl(tokens, i)
+  if is_alias_type_decl(tokens, i) then parse_alias_decl(tokens, i)
+  else if is_record_type_decl(tokens, i) then parse_record_type_decl(tokens, i)
   else parse_type_decl(tokens, i)
+
+fn is_alias_type_decl(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_ident(tok_at(tokens, i + 1)) && token.token_text(tok_at(tokens, i + 1)) == "alias"
+
+fn parse_alias_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("type", tokens, i)
+    (_, i3) <- expected_ident("alias", tokens, i2)
+    (name_tok, i4) <- expected_ident("alias name", tokens, i3)
+    (params, i5) <- collect_ident_list(tokens, i4, Nil)
+    (_, i6) <- expected_symbol("=", tokens, i5)
+    (body, i7) <- parse_type_expr(tokens, i6)
+    Ok((ast.AliasDecl(token.token_text(name_tok), list_reverse(params), body, cur_pos(tokens, i)), i7))
 
 fn is_record_type_decl(tokens: Vec token.Token, i: Int) -> Bool =
   is_record_scan(tokens, i + 1)

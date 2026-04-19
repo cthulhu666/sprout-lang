@@ -504,6 +504,101 @@ def scheme_to_string(
     return txt
 
 
+def _expand_aliases_in_type(
+    node: ast.TypeExpr,
+    aliases: dict[str, tuple[list[str], ast.TypeExpr]],
+) -> ast.TypeExpr:
+    """Return a new TypeExpr with all alias references recursively expanded."""
+    if isinstance(node, ast.TypeName):
+        if node.name in aliases:
+            params, body = aliases[node.name]
+            if not params:
+                return _expand_aliases_in_type(body, aliases)
+        return node
+    if isinstance(node, ast.TypeApply):
+        # Collect left-spine args to detect alias applications: Alias a b
+        args: list[ast.TypeExpr] = []
+        cur: ast.TypeExpr = node
+        while isinstance(cur, ast.TypeApply):
+            args.insert(0, cur.arg)
+            cur = cur.base
+        if isinstance(cur, ast.TypeName) and cur.name in aliases:
+            params, body = aliases[cur.name]
+            if len(params) == len(args):
+                expanded_args = [_expand_aliases_in_type(a, aliases) for a in args]
+                subst = dict(zip(params, expanded_args))
+                return _expand_aliases_in_type(_subst_type_params(body, subst), aliases)
+        return ast.TypeApply(
+            _expand_aliases_in_type(node.base, aliases),
+            _expand_aliases_in_type(node.arg, aliases),
+        )
+    if isinstance(node, ast.TypeArrow):
+        return ast.TypeArrow(
+            _expand_aliases_in_type(node.left, aliases),
+            _expand_aliases_in_type(node.right, aliases),
+            node.effects,
+        )
+    if isinstance(node, ast.TypeEffect):
+        return ast.TypeEffect(_expand_aliases_in_type(node.base, aliases), node.effects)
+    if isinstance(node, ast.TupleType):
+        return ast.TupleType([_expand_aliases_in_type(item, aliases) for item in node.items])
+    return node
+
+
+def _subst_type_params(node: ast.TypeExpr, subst: dict[str, ast.TypeExpr]) -> ast.TypeExpr:
+    """Replace TypeName occurrences matching subst keys with their substituted forms."""
+    if isinstance(node, ast.TypeName):
+        return subst.get(node.name, node)
+    if isinstance(node, ast.TypeApply):
+        return ast.TypeApply(_subst_type_params(node.base, subst), _subst_type_params(node.arg, subst))
+    if isinstance(node, ast.TypeArrow):
+        return ast.TypeArrow(
+            _subst_type_params(node.left, subst),
+            _subst_type_params(node.right, subst),
+            node.effects,
+        )
+    if isinstance(node, ast.TypeEffect):
+        return ast.TypeEffect(_subst_type_params(node.base, subst), node.effects)
+    if isinstance(node, ast.TupleType):
+        return ast.TupleType([_subst_type_params(item, subst) for item in node.items])
+    return node
+
+
+def _expand_type_aliases_in_program(program: ast.Program) -> None:
+    """Collect AliasDecls and expand all alias references in the program in place."""
+    aliases: dict[str, tuple[list[str], ast.TypeExpr]] = {}
+    for decl in program.declarations:
+        if isinstance(decl, ast.AliasDecl):
+            aliases[decl.name] = (decl.type_params, decl.body)
+    if not aliases:
+        return
+
+    def expand(node: ast.TypeExpr | None) -> ast.TypeExpr | None:
+        return _expand_aliases_in_type(node, aliases) if node is not None else None
+
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            for param in decl.params:
+                param.type_expr = expand(param.type_expr)
+            decl.return_type = expand(decl.return_type)
+        elif isinstance(decl, ast.TypeDecl):
+            for ctor in decl.constructors:
+                ctor.args = [_expand_aliases_in_type(a, aliases) for a in ctor.args]
+        elif isinstance(decl, ast.RecordDecl):
+            for f in decl.fields:
+                f.type_expr = _expand_aliases_in_type(f.type_expr, aliases)
+        elif isinstance(decl, ast.ClassDecl):
+            for method in decl.methods:
+                for param in method.params:
+                    param.type_expr = expand(param.type_expr)
+                method.return_type = _expand_aliases_in_type(method.return_type, aliases)
+        elif isinstance(decl, ast.InstanceDecl):
+            for method in decl.methods:
+                for param in method.params:
+                    param.type_expr = expand(param.type_expr)
+                method.return_type = expand(method.return_type)
+
+
 def parse_type_expr(
     node: ast.TypeExpr,
     local_vars: dict[str, TVar] | None = None,
@@ -1505,6 +1600,8 @@ def _constructor_pattern_covers_all(pattern: ast.Pattern) -> bool:
 def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
     out: dict[str, TypeDeclInfo] = {}
     for decl in program.declarations:
+        if isinstance(decl, ast.AliasDecl):
+            continue  # expanded in _expand_type_aliases_in_program before type-checking
         if isinstance(decl, ast.TypeDecl):
             if decl.name in out:
                 raise TypeCheckError(f"Duplicate type declaration: {decl.name}")
@@ -1538,6 +1635,7 @@ def build_type_decls(program: ast.Program) -> dict[str, TypeDeclInfo]:
 
 
 def typecheck_program(program: ast.Program) -> dict[str, str]:
+    _expand_type_aliases_in_program(program)
     state = InferState()
     type_decls = build_type_decls(program)
     class_decls = build_class_decls(program)

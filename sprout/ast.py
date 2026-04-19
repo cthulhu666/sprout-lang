@@ -89,6 +89,14 @@ class InstanceDecl:
 
 
 @dataclass
+class AliasDecl:
+    name: str
+    type_params: list[str]
+    body: "TypeExpr"
+    annotations: tuple["DeclAnnotation", ...] = ()
+
+
+@dataclass
 class ClassMethodSig:
     name: str
     params: list["Param"]

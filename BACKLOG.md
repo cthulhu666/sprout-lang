@@ -95,6 +95,7 @@ Definition of done:
   - **FnDecl body inference landed**: `check_fn_body` instantiates the annotation scheme and checks the body against it; unknown-variable/constructor errors silently accepted (builtin leniency), real type mismatches propagate; checker corpus expanded to 6 files
   - **builtin env seeded**: `checker.check_program` starts from a pre-populated env (~25 entries: ADT constructors, string/IO ops, dict/list ops) so body inference resolves calls to common functions without leniency fallback
   - **ClassDecl/InstanceDecl landed**: class methods registered as globally polymorphic schemes; instance method bodies type-checked against method annotations; `type_classes.spr` added to checker parity corpus (now 6/6)
+  - **type aliases landed**: `type alias Name = TypeExpr` parsed in Python + Sprout parsers; Python typechecker expands aliases as a pre-desugar pass; bootstrap checker skips `AliasDecl` (transparent to inference); `Set` type added for constraint-satisfaction work pre-work
 
 ### 7.5) Type Classes (Collections First)
 

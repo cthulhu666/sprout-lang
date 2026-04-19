@@ -100,6 +100,7 @@ export type Decl (..) =
   | LetDecl String Expr source.SourcePos
   | ClassDecl String (List String) (List ClassMethodSig) source.SourcePos
   | InstanceDecl TypeConstraint (List InstanceMethodImpl) source.SourcePos
+  | AliasDecl String (List String) TypeExpr source.SourcePos
 
 # --- Program ---
 

@@ -905,6 +905,7 @@ fn typecheck_decl(
         | InferErr e -> DeclErr(e)
         | InferOk t s1 _ _ ->
             DeclOk(dict_set(name, unifier.generalize(unifier.ftv_env(env), s1, eff_subst, t, types.EffectPure), env))
+  | ast.AliasDecl _ _ _ _ -> DeclOk(env)
   | ast.ClassDecl _ type_params methods _ ->
       DeclOk(register_class_methods(type_params, methods, env))
   | ast.InstanceDecl _ methods _ ->
