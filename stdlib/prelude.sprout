@@ -424,6 +424,10 @@ export class Semigroup t {
   fn append(left: t, right: t) -> t
 }
 
+export class Monoid t where Semigroup t {
+  fn empty() -> t
+}
+
 export class Functor f {
   fn fmap(f: a -> b, xs: f a) -> f b
 }
@@ -437,6 +441,9 @@ export fn map(f: a -> b, xs: c a) -> c b where Functor c =
 
 export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
   fold_values(step, init, xs)
+
+export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
+  fold(\(acc, x) -> acc ++ x, empty(), xs)
 
 instance Semigroup String {
   fn append(left: String, right: String) -> String =
@@ -480,6 +487,14 @@ instance Ord String {
 instance Semigroup (List a) {
   fn append(left: List a, right: List a) -> List a =
     list_append(left, right)
+}
+
+instance Monoid String {
+  fn empty() -> String = ""
+}
+
+instance Monoid (List a) {
+  fn empty() -> List a = Nil
 }
 
 instance Functor List {

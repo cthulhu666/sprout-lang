@@ -273,12 +273,17 @@ class Parser:
         if not type_params:
             t = self.current()
             raise ParseError(f"Expected at least one class type parameter at {t.line}:{t.column}")
+        superclasses: list[ast.TypeConstraint] = []
+        if self.match("KEYWORD", "where"):
+            superclasses.append(self.parse_type_constraint())
+            while self.match("SYMBOL", ","):
+                superclasses.append(self.parse_type_constraint())
         methods: list[ast.ClassMethodSig] = []
         if self.match("SYMBOL", "{"):
             while not self.check("SYMBOL", "}"):
                 methods.append(self.parse_class_method_sig())
             self.expect("SYMBOL", "}")
-        return self.mark(ast.ClassDecl(name=name, type_params=type_params, methods=methods), start)
+        return self.mark(ast.ClassDecl(name=name, type_params=type_params, methods=methods, superclasses=superclasses), start)
 
     def parse_instance_decl(self) -> ast.InstanceDecl:
         start = self.expect("KEYWORD", "instance")

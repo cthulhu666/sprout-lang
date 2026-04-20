@@ -133,8 +133,10 @@ class TypeDeclInfo:
 @dataclass
 class ClassDeclInfo:
     arity: int
+    type_params: tuple[str, ...]
     type_param_vars: tuple[str, ...]
     methods: dict[str, MethodTypeInfo]
+    superclasses: tuple[ast.TypeConstraint, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -761,8 +763,10 @@ def build_class_decls(program: ast.Program) -> dict[str, ClassDeclInfo]:
             )
         out[decl.name] = ClassDeclInfo(
             arity=len(decl.type_params),
+            type_params=tuple(decl.type_params),
             type_param_vars=tuple(f"class.{decl.name}.{p}" for p in decl.type_params),
             methods=method_types,
+            superclasses=tuple(decl.superclasses),
         )
     return out
 
@@ -782,7 +786,20 @@ def _validate_constraint(
         )
 
 
+def _substitute_type_expr(node: ast.TypeExpr, subst: dict[str, ast.TypeExpr]) -> ast.TypeExpr:
+    if isinstance(node, ast.TypeName):
+        return subst.get(node.name, node)
+    if isinstance(node, ast.TypeApply):
+        return ast.TypeApply(base=_substitute_type_expr(node.base, subst), arg=_substitute_type_expr(node.arg, subst))
+    if isinstance(node, ast.TypeArrow):
+        return ast.TypeArrow(left=_substitute_type_expr(node.left, subst), right=_substitute_type_expr(node.right, subst), effects=node.effects)
+    if isinstance(node, ast.TupleType):
+        return ast.TupleType(items=[_substitute_type_expr(item, subst) for item in node.items])
+    return node
+
+
 def validate_class_constraints(program: ast.Program, class_decls: dict[str, ClassDeclInfo]) -> None:
+    # Pass 1: validate constraint arities, collect all instances, check duplicates
     seen_instances: set[tuple[str, tuple[tuple, ...]]] = set()
     for decl in program.declarations:
         if isinstance(decl, ast.FnDecl):
@@ -800,6 +817,26 @@ def validate_class_constraints(program: ast.Program, class_decls: dict[str, Clas
                     decl,
                 )
             seen_instances.add(key)
+    # Pass 2: check superclass instances exist
+    for decl in program.declarations:
+        if not isinstance(decl, ast.InstanceDecl):
+            continue
+        class_name = decl.constraint.class_name
+        class_info = class_decls.get(class_name)
+        if class_info is None or not class_info.superclasses:
+            continue
+        subst = dict(zip(class_info.type_params, decl.constraint.args))
+        for sc in class_info.superclasses:
+            expected_args = [_substitute_type_expr(arg, subst) for arg in sc.args]
+            expected_key = (sc.class_name, tuple(_type_expr_key(arg) for arg in expected_args))
+            if expected_key not in seen_instances:
+                args_str = " ".join(
+                    arg.name if isinstance(arg, ast.TypeName) else "..." for arg in expected_args
+                )
+                raise tc_error(
+                    f"Missing superclass instance: {sc.class_name} {args_str} required by instance {class_name}",
+                    decl,
+                )
 
 
 def substitute_type_vars(typ: Type, subst: dict[str, Type]) -> Type:

@@ -78,6 +78,7 @@ class ClassDecl:
     name: str
     type_params: list[str]
     methods: list["ClassMethodSig"] = field(default_factory=list)
+    superclasses: list["TypeConstraint"] = field(default_factory=list)
     annotations: tuple["DeclAnnotation", ...] = ()
 
 
