@@ -153,7 +153,8 @@ def cmd_bootstrap_check(path: Path) -> int:
     typecheck_program(tree)
     validate_public_surface(tree, bundle)
     lowered = lower_typeclasses(tree)
-    run_program(lowered, argv=[str(path.resolve())])
+    stdlib_root = str(Path(__file__).parent.parent / "stdlib")
+    run_program(lowered, argv=[str(path.resolve()), stdlib_root])
     return 0
 
 

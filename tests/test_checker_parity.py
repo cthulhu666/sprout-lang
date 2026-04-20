@@ -2,8 +2,9 @@
 Checker parity test: bootstrap Sprout checker vs Python typechecker.
 
 Each test file in CORPUS is typechecked by both:
-  - tools/dump_types.py           (Python typechecker via sprout.typechecker)
-  - stdlib/compiler/type_driver.sprout  (bootstrap Sprout checker)
+  - tools/dump_types.py               (Python typechecker via sprout.typechecker)
+  - stdlib/compiler/type_driver.sprout  (bootstrap Sprout type_driver)
+  - sprout.cli bootstrap-check          (bootstrap Sprout compile_driver via CLI)
 
 and their "name : scheme" outputs are compared line by line.
 
@@ -131,6 +132,63 @@ def _make_test(corpus_file: str):
 for _corpus_file in CORPUS:
     _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
     setattr(CheckerParityTests, _test_name, _make_test(_corpus_file))
+
+
+# ---------------------------------------------------------------------------
+# bootstrap-check parity: sprout.cli bootstrap-check vs dump_types.py
+# ---------------------------------------------------------------------------
+# compile_driver.sprout is the backend behind `sprout.cli bootstrap-check`.
+# Its output is "OK\n<name> : <scheme>\n..." — we strip the "OK" header and
+# compare the typed-name lines against dump_types.py output.
+
+def run_bootstrap_check(path: Path) -> list[str]:
+    result = subprocess.run(
+        [sys.executable, "-m", "sprout.cli", "bootstrap-check", str(path)],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"bootstrap-check failed for {path}:\n{result.stderr}")
+    lines = result.stdout.splitlines()
+    # Strip the leading "OK" header emitted by compile_driver.sprout
+    if lines and lines[0] == "OK":
+        lines = lines[1:]
+    return lines
+
+
+class BootstrapCheckParityTests(unittest.TestCase):
+    pass
+
+
+def _make_bootstrap_check_test(corpus_file: str):
+    def test(self: unittest.TestCase) -> None:
+        path = CORPUS_DIR / corpus_file
+        if not path.exists():
+            self.skipTest(f"Corpus file not found: {path}")
+
+        try:
+            py_lines = run_python_dump(path)
+        except RuntimeError as e:
+            self.fail(str(e))
+
+        try:
+            spr_lines = run_bootstrap_check(path)
+        except RuntimeError as e:
+            self.fail(str(e))
+
+        failures = compare_outputs(py_lines, spr_lines, corpus_file)
+        if failures:
+            msg = f"\n{len(failures)} parity failure(s) in {corpus_file}:\n"
+            msg += "\n".join(textwrap.indent(f, "  ") for f in failures)
+            self.fail(msg)
+
+    return test
+
+
+for _corpus_file in CORPUS:
+    _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
+    setattr(BootstrapCheckParityTests, _test_name, _make_bootstrap_check_test(_corpus_file))
 
 
 if __name__ == "__main__":
