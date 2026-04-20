@@ -113,7 +113,7 @@ Definition of done:
 - [x] `P1` Add `Monoid` class with identity law documented.
 - [x] `P1` Add `Eq` class with `==`/`!=` constraint checking; superclass of `Ord`.
 - [ ] `P1` Add `deriving Eq` (and similar) for ADT structural equality — currently ADT `==` uses runtime primitive without typeclass dispatch; tracked as known gap.
-- [ ] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `Show`) for collection-focused workflows.
+- [x] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `ToString`) for collection-focused workflows.
 - [ ] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity).
 - [ ] `P1` Add diagnostics for ambiguous/overlapping instance errors.
 - [ ] `P2` Add deriving/specialization follow-ups once core class system is stable.
