@@ -252,7 +252,7 @@ export class ToString a {
   fn to_string(value: a) -> String
 }
 
-export class Ord a {
+export class Ord a where Eq a {
   fn compare(left: a, right: a) -> Int
 }
 
@@ -420,6 +420,10 @@ export fn set_size(s: Set) -> Int =
   match s with
   | Set raw -> native_set_size(raw)
 
+export class Eq a {
+  fn eq(left: a, right: a) -> Bool
+}
+
 export class Semigroup t {
   fn append(left: t, right: t) -> t
 }
@@ -448,6 +452,18 @@ export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
 instance Semigroup String {
   fn append(left: String, right: String) -> String =
     str_concat(left, right)
+}
+
+instance Eq Int {
+  fn eq(left: Int, right: Int) -> Bool = left == right
+}
+
+instance Eq Bool {
+  fn eq(left: Bool, right: Bool) -> Bool = left == right
+}
+
+instance Eq String {
+  fn eq(left: String, right: String) -> Bool = left == right
 }
 
 instance ToString Int {

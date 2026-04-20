@@ -1245,6 +1245,16 @@ def infer_expr(
             return _mark_expr_type(expr, BOOL), merge_effects(state, left_effects, right_effects)
         if expr.op in {"==", "!="}:
             unify_at(state, left, right, expr)
+            if "eq" in global_methods:
+                resolved_type = apply(state.subst, left, state.effect_subst)
+                setattr(
+                    expr,
+                    "resolved_constraint",
+                    ast.TypeConstraint(
+                        class_name="Eq",
+                        args=[type_to_ast_expr(resolved_type)],
+                    ),
+                )
             return _mark_expr_type(expr, BOOL), merge_effects(state, left_effects, right_effects)
         if expr.op in {"&&", "||"}:
             unify_at(state, left, BOOL, expr.left)

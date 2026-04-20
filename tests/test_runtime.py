@@ -225,6 +225,13 @@ class RuntimeTests(unittest.TestCase):
           match value with
           | Box n -> 0 - n
 
+        instance Eq Box {
+          fn eq(left: Box, right: Box) -> Bool =
+            match left with
+            | Box l -> match right with
+                | Box r -> l == r
+        }
+
         instance Ord Box {
           fn compare(x: Box, y: Box) -> Int =
             compare(key(x), key(y))

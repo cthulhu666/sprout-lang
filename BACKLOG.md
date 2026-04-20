@@ -110,7 +110,9 @@ Definition of done:
 - [x] `P0` Add `Foldable` class and instances for `List` and `Vec`.
 - [x] `P1` Add `Semigroup` class with associativity law documented.
 - [ ] `P1` Replace `++` special-case dispatch with proper infix operator machinery: `++` becomes a fixity alias for `Semigroup.append`; the `__append` sentinel + `infer_semigroup_append` in `infer.sprout` can then be removed. Prerequisite: full typeclass method dispatch (concrete instance resolution at call sites).
-- [ ] `P1` Add `Monoid` class with identity law documented.
+- [x] `P1` Add `Monoid` class with identity law documented.
+- [x] `P1` Add `Eq` class with `==`/`!=` constraint checking; superclass of `Ord`.
+- [ ] `P1` Add `deriving Eq` (and similar) for ADT structural equality — currently ADT `==` uses runtime primitive without typeclass dispatch; tracked as known gap.
 - [ ] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `Show`) for collection-focused workflows.
 - [ ] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity).
 - [ ] `P1` Add diagnostics for ambiguous/overlapping instance errors.
