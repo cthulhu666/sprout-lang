@@ -101,6 +101,7 @@ Definition of done:
   - **record field access landed**: `RecordDecl` registers `@rec:<Name>:<field>` markers in env; `RecordExpr` and `GetFieldExpr` inference implemented; `record_types.spr` fixed to use `get p x` syntax, added to conformance corpus and parity corpus (now 9/9)
   - **do-bind monadic unwrapping landed**: `infer.sprout` now unwraps `Maybe a`/`Result e a` at do-bind sites so the bound variable gets the payload type; `append` seeded in checker env and `dump_types.py`; `stdlib_mixed_io_maybe_do.spr` added to parity corpus (now 10/10)
   - **GHC-style forall variable ordering landed**: both Python and bootstrap Sprout checkers now use left-to-right first-appearance ordering for forall vars; bootstrap `scheme_to_string` now renames bound vars to a, b, c… in that order (matching Python); `poly_types.spr` (multi-param ADTs, `Either`, `Pair`) added to checker parity corpus (now 11/11)
+  - **module loading wired into type_driver + compile_driver**: `type_driver.sprout` and `compile_driver.sprout` now resolve imports via `module_loader.sprout` before typechecking; `sprout.cli bootstrap-check` passes `stdlib_root` so CLI path fully works; `BootstrapCheckParityTests` (11/11) added to `test_checker_parity.py` to verify `bootstrap-check` CLI output matches Python typechecker
 
 ### 7.5) Type Classes (Collections First)
 
