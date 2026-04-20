@@ -708,6 +708,9 @@ def _apply_inferred_fn_signature(
             raise TypeCheckError("Internal error while applying inferred parameter types")
         if param.type_expr is None:
             param.type_expr = type_to_ast_expr(cursor.arg)
+        # Always record the solved param type so typeclass lowering can map
+        # internal TVar names back to programmer-declared type variable names.
+        setattr(param, "_inferred_type_ast", type_to_ast_expr(cursor.arg))
         cursor = cursor.ret
     cursor = apply({}, cursor)
     inferred_return = type_to_ast_expr(cursor)

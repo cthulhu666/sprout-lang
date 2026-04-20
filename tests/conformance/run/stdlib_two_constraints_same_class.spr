@@ -1,0 +1,11 @@
+# Tests that two constraints on the same class (ToString e, ToString a) work correctly.
+# Previously failing with "Ambiguous constraint forwarding" because the typechecker uses
+# internal TVar names (t1223) in resolved_constraint while lowering keyed on programmer
+# names (a, e).
+
+fn make_ok() -> Result String Int = Ok(42)
+fn make_err() -> Result String Int = Err("oops")
+
+fn main() -> Unit !{IO} = do
+  print(to_string(make_ok()))
+  print(to_string(make_err()))

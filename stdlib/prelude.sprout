@@ -632,3 +632,10 @@ instance ToString (List a) where ToString a {
   fn to_string(xs: List a) -> String =
     "[" ++ list_to_string_go(list_map(\(v) -> to_string(v), xs), "") ++ "]"
 }
+
+instance ToString (Result e a) where ToString e, ToString a {
+  fn to_string(x: Result e a) -> String =
+    match x with
+    | Ok v -> "Ok(" ++ to_string(v) ++ ")"
+    | Err e -> "Err(" ++ to_string(e) ++ ")"
+}

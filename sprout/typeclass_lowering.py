@@ -109,6 +109,67 @@ def _constraint_key(constraint: ast.TypeConstraint) -> tuple[str, tuple[str, ...
     return (constraint.class_name, tuple(_type_expr_mangle(arg) for arg in constraint.args))
 
 
+def _extract_tvar_prog_mapping(
+    prog_type: ast.TypeExpr,
+    tvar_type: ast.TypeExpr,
+    prog_vars: set[str],
+    result: dict[str, str],
+) -> None:
+    """Walk prog_type and tvar_type in parallel, recording tvar_name → prog_name mappings.
+
+    prog_type has programmer-declared type variable names (e.g., TypeName("a")).
+    tvar_type has typechecker-internal TVar names (e.g., TypeName("t1223")).
+    Only builds mappings for names in prog_vars.
+    """
+    if isinstance(prog_type, ast.TypeName) and prog_type.name in prog_vars:
+        if isinstance(tvar_type, ast.TypeName):
+            result[tvar_type.name] = prog_type.name
+    elif isinstance(prog_type, ast.TypeApply) and isinstance(tvar_type, ast.TypeApply):
+        _extract_tvar_prog_mapping(prog_type.base, tvar_type.base, prog_vars, result)
+        _extract_tvar_prog_mapping(prog_type.arg, tvar_type.arg, prog_vars, result)
+    elif isinstance(prog_type, ast.TypeArrow) and isinstance(tvar_type, ast.TypeArrow):
+        _extract_tvar_prog_mapping(prog_type.left, tvar_type.left, prog_vars, result)
+        _extract_tvar_prog_mapping(prog_type.right, tvar_type.right, prog_vars, result)
+
+
+def _build_tvar_prog_name_map(
+    params: list[ast.Param],
+    own_cs: list[ast.TypeConstraint],
+) -> dict[str, str]:
+    """Build {internal_tvar_name → programmer_name} from annotated params.
+
+    Requires that _apply_inferred_fn_signature was called on the params (setting
+    param._inferred_type_ast).  Returns an empty dict if no mapping can be derived.
+    """
+    prog_vars: set[str] = set()
+    for constraint in own_cs:
+        for arg in constraint.args:
+            if isinstance(arg, ast.TypeName):
+                prog_vars.add(arg.name)
+    if not prog_vars:
+        return {}
+    result: dict[str, str] = {}
+    for param in params:
+        inferred = getattr(param, "_inferred_type_ast", None)
+        if inferred is not None and param.type_expr is not None:
+            _extract_tvar_prog_mapping(param.type_expr, inferred, prog_vars, result)
+    return result
+
+
+def _translate_resolved_constraint(
+    rc: ast.TypeConstraint,
+    tvar_prog_map: dict[str, str],
+) -> ast.TypeConstraint:
+    """Return a copy of rc with TVar names in args replaced by programmer names."""
+    if not tvar_prog_map:
+        return rc
+    new_args = [
+        ast.TypeName(tvar_prog_map.get(arg.name, arg.name)) if isinstance(arg, ast.TypeName) else arg
+        for arg in rc.args
+    ]
+    return ast.TypeConstraint(class_name=rc.class_name, args=new_args)
+
+
 def _instance_method_name(constraint: ast.TypeConstraint, method_name: str) -> str:
     args = "_".join(_type_expr_mangle(arg) for arg in constraint.args)
     return f"__tc_{constraint.class_name}_{args}_{method_name}"
@@ -659,6 +720,7 @@ def _rewrite_expr(
     instance_constraints: list[tuple[ast.TypeConstraint, dict[str, str], list[ast.TypeConstraint]]],
     instance_fn_own_constraints: dict[str, list[ast.TypeConstraint]],
     class_decls: dict[str, ast.ClassDecl],
+    tvar_prog_map: dict[str, str] | None = None,
 ) -> ast.Expr:
     if isinstance(expr, ast.VarExpr):
         if expr.name in scope:
@@ -687,6 +749,7 @@ def _rewrite_expr(
                     instance_constraints,
                 instance_fn_own_constraints,
                 class_decls,
+                tvar_prog_map,
                 ),
             ),
             expr,
@@ -705,6 +768,7 @@ def _rewrite_expr(
             instance_constraints,
         instance_fn_own_constraints,
         class_decls,
+        tvar_prog_map,
         )), expr)
 
     if isinstance(expr, ast.BinaryExpr):
@@ -723,6 +787,7 @@ def _rewrite_expr(
                     instance_constraints,
                 instance_fn_own_constraints,
                 class_decls,
+                tvar_prog_map,
                 ),
                 right=_rewrite_expr(
                     expr.right,
@@ -736,6 +801,7 @@ def _rewrite_expr(
                     instance_constraints,
                 instance_fn_own_constraints,
                 class_decls,
+                tvar_prog_map,
                 ),
             ),
             expr,
@@ -754,6 +820,7 @@ def _rewrite_expr(
             instance_constraints,
         instance_fn_own_constraints,
         class_decls,
+        tvar_prog_map,
         )
         rewritten_args = [
             _rewrite_expr(
@@ -768,6 +835,7 @@ def _rewrite_expr(
                 instance_constraints,
             instance_fn_own_constraints,
             class_decls,
+            tvar_prog_map,
             )
             for arg in expr.args
         ]
@@ -776,6 +844,7 @@ def _rewrite_expr(
             isinstance(expr.callee, ast.VarExpr)
             and expr.callee.name not in scope
             and expr.callee.name in method_aliases
+            and not isinstance(getattr(expr, "resolved_constraint", None), ast.TypeConstraint)
         ):
             return _clone_with_loc(ast.CallExpr(callee=rewritten_callee, args=rewritten_args), expr)
 
@@ -784,18 +853,44 @@ def _rewrite_expr(
             if isinstance(resolved_constraint, ast.TypeConstraint):
                 method_source: dict[str, str] | None = None
 
-                matches = [
+                # Prefer exact-key matching: when the resolved constraint has type-variable
+                # args (e.g. ToString a inside an instance body), pattern matching is
+                # ambiguous if two constraints share the same class (e.g. ToString e and
+                # ToString a both match via their type-variable patterns).  Exact key lookup
+                # by mangled arg names resolves the correct binding unambiguously.
+                #
+                # resolved_constraint args may use typechecker-internal TVar names (e.g.
+                # "t1223") while binding_by_constraint keys use programmer names (e.g. "a").
+                # tvar_prog_map, when provided, translates from TVar names to programmer names.
+                rc_for_key = (
+                    _translate_resolved_constraint(resolved_constraint, tvar_prog_map)
+                    if tvar_prog_map
+                    else resolved_constraint
+                )
+                resolved_key = _constraint_key(rc_for_key)
+                exact_matches = [
                     binding
-                    for have in current_constraints
                     for key, binding in current_binding_by_constraint.items()
-                    if _constraint_matches_pattern(have, resolved_constraint) and key == _constraint_key(have)
+                    if key == resolved_key
                 ]
-                if len(matches) > 1:
-                    raise TypeclassLoweringError(
-                        f"Ambiguous constraint forwarding for {resolved_constraint.class_name} in direct method call"
-                    )
-                if len(matches) == 1:
-                    method_source = matches[0]
+                if len(exact_matches) == 1:
+                    method_source = exact_matches[0]
+                elif len(exact_matches) == 0:
+                    # Fall back to pattern matching (resolved_constraint has concrete types
+                    # that don't exactly match the abstract constraint keys)
+                    matches = [
+                        binding
+                        for have in current_constraints
+                        for key, binding in current_binding_by_constraint.items()
+                        if _constraint_matches_pattern(have, resolved_constraint) and key == _constraint_key(have)
+                    ]
+                    if len(matches) > 1:
+                        raise TypeclassLoweringError(
+                            f"Ambiguous constraint forwarding for {resolved_constraint.class_name} in direct method call"
+                        )
+                    if len(matches) == 1:
+                        method_source = matches[0]
+                # len(exact_matches) > 1 would mean duplicate constraint keys — ignore, fall through to instance lookup
 
                 matched_subs: dict[str, ast.TypeExpr] = {}
                 if method_source is None:
@@ -932,6 +1027,7 @@ def _rewrite_expr(
                     instance_constraints,
                 instance_fn_own_constraints,
                 class_decls,
+                tvar_prog_map,
                 ),
                 then_branch=_rewrite_expr(
                     expr.then_branch,
@@ -945,6 +1041,7 @@ def _rewrite_expr(
                     instance_constraints,
                 instance_fn_own_constraints,
                 class_decls,
+                tvar_prog_map,
                 ),
                 else_branch=_rewrite_expr(
                     expr.else_branch,
@@ -958,6 +1055,7 @@ def _rewrite_expr(
                     instance_constraints,
                 instance_fn_own_constraints,
                 class_decls,
+                tvar_prog_map,
                 ),
             ),
             expr,
@@ -976,6 +1074,7 @@ def _rewrite_expr(
             instance_constraints,
         instance_fn_own_constraints,
         class_decls,
+        tvar_prog_map,
         )
         rewritten_branches: list[ast.MatchBranch] = []
         for branch in expr.branches:
@@ -995,6 +1094,7 @@ def _rewrite_expr(
                         instance_constraints,
                     instance_fn_own_constraints,
                     class_decls,
+                    tvar_prog_map,
                     ),
                 )
             )
@@ -1020,6 +1120,7 @@ def _rewrite_expr(
                             instance_constraints,
                         instance_fn_own_constraints,
                         class_decls,
+                        tvar_prog_map,
                         ),
                     ),
                     step,
@@ -1046,6 +1147,7 @@ def _rewrite_expr(
                                 instance_constraints,
                             instance_fn_own_constraints,
                             class_decls,
+                            tvar_prog_map,
                             ),
                         ),
                         step,
@@ -1069,6 +1171,7 @@ def _rewrite_expr(
                                 instance_constraints,
                             instance_fn_own_constraints,
                             class_decls,
+                            tvar_prog_map,
                             ),
                         ),
                         step,
@@ -1215,14 +1318,17 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                         _clone_with_loc(ast.Param(name=hidden_name, type_expr=hidden_param_type), method_sig)
                     )
                     methods_for_constraint[method_sig.name] = hidden_name
-                    if method_sig.name in method_aliases and method_aliases[method_sig.name] != hidden_name:
-                        raise TypeclassLoweringError(
-                            f"Ambiguous method {method_sig.name} in constraints for function {decl.name}"
-                        )
+                    # When two constraints on the same class both expose the same method name
+                    # (e.g. ToString e and ToString a both have to_string), the method_aliases
+                    # map can only hold one entry.  We allow this: the alias is set to the last
+                    # constraint's hidden param, but call sites that have a resolved_constraint
+                    # annotation will bypass method_aliases and use exact-key binding lookup
+                    # instead, so the correct hidden param is always selected.
                     method_aliases[method_sig.name] = hidden_name
 
                 binding_by_constraint[_constraint_key(constraint)] = methods_for_constraint
 
+            decl_tvar_prog_map = _build_tvar_prog_name_map(decl.params, decl.constraints)
             rewritten_body = _rewrite_expr(
                 decl.body,
                 scope={p.name for p in decl.params} | {p.name for p in hidden_params},
@@ -1233,8 +1339,9 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                 fn_constraints=fn_constraints,
                 class_method_order=class_method_order,
                 instance_constraints=instance_constraints,
-            instance_fn_own_constraints=instance_fn_own_constraints,
-            class_decls=class_decls,
+                instance_fn_own_constraints=instance_fn_own_constraints,
+                class_decls=class_decls,
+                tvar_prog_map=decl_tvar_prog_map,
             )
 
             decls_for_output.append(
@@ -1389,6 +1496,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                     methods_for_constraint[method_sig.name] = hidden_name
                     method_aliases[method_sig.name] = hidden_name
                 binding_by_constraint[_constraint_key(constraint)] = methods_for_constraint
+            tvar_prog_map = _build_tvar_prog_name_map(fn.params, own_cs)
             rewritten_body = _rewrite_expr(
                 fn.body,
                 scope={p.name for p in fn.params} | {p.name for p in hidden_params},
@@ -1401,6 +1509,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                 instance_constraints=instance_constraints,
                 instance_fn_own_constraints=instance_fn_own_constraints,
                 class_decls=class_decls,
+                tvar_prog_map=tvar_prog_map,
             )
             new_fn = _clone_with_loc(
                 ast.FnDecl(
