@@ -4,6 +4,7 @@ import stdlib.compiler.token as token
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
+import stdlib.compiler.module_loader as module_loader
 
 # ---------------------------------------------------------------------------
 # String helpers (shared with driver.sprout)
@@ -40,22 +41,29 @@ fn strip_headers(s: String, pos: Int) -> String =
 # ---------------------------------------------------------------------------
 # Core: lex → parse → check → dump typed names
 
-fn run_file(path: String) -> Unit !{IO} =
-  match lexer.tokenize(strip_headers(read_file(path), 0)) with
-  | Err e -> print(lex_err_msg(e))
-  | Ok tokens ->
-      match parser.parse_program(tokens) with
-      | Err e -> print(parse_err_msg(e))
-      | Ok prog ->
-          do
-            result <- checker.check_program(prog)
-            match result with
-            | checker.CheckErr msg -> print("ERROR: check: " ++ msg)
-            | checker.CheckOk env  ->
-                match prog with
-                | ast.Program decls _ -> checker.dump_typed_names(decls, env)
+fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    src <- read_file(path)
+    cache <- module_loader.new_cache()
+    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
+    match lexer.tokenize(strip_headers(src, 0)) with
+    | Err e -> print(lex_err_msg(e))
+    | Ok tokens ->
+        match parser.parse_program(tokens) with
+        | Err e -> print(parse_err_msg(e))
+        | Ok prog ->
+            do
+              result <- checker.check_program_with_env(prog, import_pairs)
+              match result with
+              | checker.CheckErr msg -> print("ERROR: check: " ++ msg)
+              | checker.CheckOk env  ->
+                  match prog with
+                  | ast.Program decls _ -> checker.dump_typed_names(decls, env)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing    -> print("ERROR: usage: type-driver <file>")
-  | Just path  -> run_file(path)
+  | Nothing    -> print("ERROR: usage: type-driver <file> [stdlib-root]")
+  | Just path  ->
+      match argv_get(1) with
+      | Nothing          -> run_file(path, "")
+      | Just stdlib_root -> run_file(path, stdlib_root)

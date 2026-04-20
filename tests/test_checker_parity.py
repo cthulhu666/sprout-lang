@@ -63,8 +63,9 @@ def run_python_dump(path: Path) -> list[str]:
 
 
 def run_sprout_dump(path: Path) -> list[str]:
+    stdlib_root = str(ROOT / "stdlib")
     result = subprocess.run(
-        [sys.executable, "-m", "sprout.cli", "run", str(TYPE_DRIVER), str(path)],
+        [sys.executable, "-m", "sprout.cli", "run", str(TYPE_DRIVER), str(path), stdlib_root],
         capture_output=True,
         text=True,
         cwd=str(ROOT),
