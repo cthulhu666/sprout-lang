@@ -100,6 +100,7 @@ Definition of done:
   - **constraint-satisfaction checking landed**: at concrete call sites the bootstrap checker looks up `@class:<method>` markers in env to identify class methods, then verifies a matching `@inst:<class>:<type>` marker exists; missing instances produce a typed error "No instance of X for T in function f"; `tests/conformance/run/instance_check.spr` added to conformance corpus and passes
   - **record field access landed**: `RecordDecl` registers `@rec:<Name>:<field>` markers in env; `RecordExpr` and `GetFieldExpr` inference implemented; `record_types.spr` fixed to use `get p x` syntax, added to conformance corpus and parity corpus (now 9/9)
   - **do-bind monadic unwrapping landed**: `infer.sprout` now unwraps `Maybe a`/`Result e a` at do-bind sites so the bound variable gets the payload type; `append` seeded in checker env and `dump_types.py`; `stdlib_mixed_io_maybe_do.spr` added to parity corpus (now 10/10)
+  - **GHC-style forall variable ordering landed**: both Python and bootstrap Sprout checkers now use left-to-right first-appearance ordering for forall vars; bootstrap `scheme_to_string` now renames bound vars to a, b, c… in that order (matching Python); `poly_types.spr` (multi-param ADTs, `Either`, `Pair`) added to checker parity corpus (now 11/11)
 
 ### 7.5) Type Classes (Collections First)
 

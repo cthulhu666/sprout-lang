@@ -450,7 +450,10 @@ def generalize(
 ) -> Scheme:
     resolved = apply(state.subst, typ, state.effect_subst)
     resolved_effects = apply_effect(state.effect_subst, effects)
-    vars_ = tuple(sorted(ftv(resolved) - ftv_env(env)))
+    free = ftv(resolved) - ftv_env(env)
+    vars_ordered: list[str] = []
+    _collect_type_var_names_in_order(resolved, vars_ordered, set())
+    vars_ = tuple(v for v in vars_ordered if v in free)
     effect_vars = tuple(sorted((ftv_type_effects(resolved) | ftv_effect(resolved_effects)) - ftv_env(env)))
     return Scheme(vars=vars_, effect_vars=effect_vars, type=resolved, effects=resolved_effects)
 
@@ -486,12 +489,8 @@ def scheme_to_string(
     masked = {k: v for k, v in subst.items() if k not in set(scheme.vars)}
     solved = apply(masked, scheme.type, effect_subst)
     solved_effects = apply_effect(effect_subst or {}, scheme.effects)
-    ordered_quantified: list[str] = []
-    _collect_type_var_names_in_order(solved, ordered_quantified, set())
-    ordered_quantified = [name for name in ordered_quantified if name in set(scheme.vars)]
-    for name in scheme.vars:
-        if name not in ordered_quantified:
-            ordered_quantified.append(name)
+    # Use scheme.vars order (declaration/left-to-right order, GHC-style).
+    ordered_quantified = list(scheme.vars)
     mapping = _display_type_var_mapping(ordered_quantified)
     remaining: list[str] = []
     _collect_type_var_names_in_order(solved, remaining, set(mapping))
@@ -2235,9 +2234,12 @@ def typecheck_program(
     if seed_env:
         env.update(seed_env)
 
-    for info in type_decls.values():
+    for type_name, info in type_decls.items():
+        # Type params in declaration order (e.g. ["a","b"] for `type Either a b`)
+        decl_vars = [f"{type_name}.{p}" for p in info.params]
         for ctor_name, ctor_type in info.constructors.items():
-            vars_ = tuple(sorted(ftv(ctor_type)))
+            ctor_ftv = ftv(ctor_type)
+            vars_ = tuple(v for v in decl_vars if v in ctor_ftv)
             env[ctor_name] = Scheme(vars=vars_, type=ctor_type)
 
     fn_types: Dict[str, Type] = {}

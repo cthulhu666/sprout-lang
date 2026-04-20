@@ -206,7 +206,53 @@ export fn effect_to_string(e: Effect) -> String =
 fn scheme_body(s: Scheme) -> String =
   type_to_string(scheme_type(s)) ++ effect_suffix(scheme_effects(s))
 
+# ---------------------------------------------------------------------------
+# GHC-style variable renaming for scheme display
+# ---------------------------------------------------------------------------
+#
+# Rename bound vars to a, b, c, ... in the order they appear in scheme_vars.
+# This matches Python typechecker's scheme_to_string renaming convention.
+
+fn nth_var_name(n: Int) -> String =
+  if n == 0 then "a" else if n == 1 then "b" else if n == 2 then "c" else
+  if n == 3 then "d" else if n == 4 then "e" else if n == 5 then "f" else
+  if n == 6 then "g" else if n == 7 then "h" else if n == 8 then "i" else
+  if n == 9 then "j" else "t" ++ int_to_string(n)
+
+fn build_var_rename(vars: List String, n: Int, acc: Dict String) -> Dict String =
+  match vars with
+  | Nil -> acc
+  | Cons v rest -> build_var_rename(rest, n + 1, dict_set(v, nth_var_name(n), acc))
+
+fn apply_rename_type(rename: Dict String, t: Type) -> Type =
+  match t with
+  | TVar name ->
+      match dict_get(name, rename) with
+      | Just new_name -> TVar(new_name)
+      | Nothing       -> TVar(name)
+  | TConst _ -> t
+  | TApp base arg -> TApp(apply_rename_type(rename, base), apply_rename_type(rename, arg))
+  | TFunc param ret eff -> TFunc(apply_rename_type(rename, param), apply_rename_type(rename, ret), eff)
+  | TTuple items -> TTuple(apply_rename_type_list(rename, items))
+
+fn apply_rename_type_list(rename: Dict String, ts: List Type) -> List Type =
+  match ts with
+  | Nil -> Nil
+  | Cons h t -> Cons(apply_rename_type(rename, h), apply_rename_type_list(rename, t))
+
+fn rename_vars_list(vars: List String, rename: Dict String) -> List String =
+  match vars with
+  | Nil -> Nil
+  | Cons v rest ->
+      match dict_get(v, rename) with
+      | Just new_name -> Cons(new_name, rename_vars_list(rest, rename))
+      | Nothing       -> Cons(v,        rename_vars_list(rest, rename))
+
+fn scheme_to_string_renamed(vars: List String, t: Type, eff: Effect) -> String =
+  "forall " ++ join_list(" ", rename_vars_list(vars, rename)) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ effect_suffix(eff)
+  where rename = build_var_rename(vars, 0, dict_empty())
+
 export fn scheme_to_string(s: Scheme) -> String =
   match scheme_vars(s) with
   | Nil -> scheme_body(s)
-  | vars -> "forall " ++ join_list(" ", vars) ++ ". " ++ scheme_body(s)
+  | vars -> scheme_to_string_renamed(vars, scheme_type(s), scheme_effects(s))
