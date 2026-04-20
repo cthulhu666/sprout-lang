@@ -192,7 +192,7 @@ class TypeclassLoweringTests(unittest.TestCase):
 
     def test_lowering_supports_show_to_string(self) -> None:
         src = """
-        fn render(x: a) -> String where Show a =
+        fn render(x: a) -> String where ToString a =
           to_string(x)
 
         fn main() -> Unit !{IO} =

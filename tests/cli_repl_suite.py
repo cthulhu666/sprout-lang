@@ -532,7 +532,7 @@ class CliReplTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("Instances for Int:", run.stdout)
         self.assertIn("Ord Int", run.stdout)
-        self.assertIn("Show Int", run.stdout)
+        self.assertIn("ToString Int", run.stdout)
 
     def test_repl_help_mentions_type_shorthand(self) -> None:
         run = subprocess.run(

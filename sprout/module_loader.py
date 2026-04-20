@@ -116,7 +116,7 @@ MODULE_COMPAT_TYPES: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 MODULE_COMPAT_CLASSES: dict[str, dict[str, str]] = {
-    "stdlib.collections": {"Show": "Show", "Ord": "Ord", "Semigroup": "Semigroup", "Functor": "Functor", "Foldable": "Foldable"}
+    "stdlib.collections": {"ToString": "ToString", "Ord": "Ord", "Semigroup": "Semigroup", "Functor": "Functor", "Foldable": "Foldable"}
 }
 
 

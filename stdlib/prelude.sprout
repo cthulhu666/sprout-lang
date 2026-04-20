@@ -248,7 +248,7 @@ export fn vec_sum(vec: Vec Int) -> Int =
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_sum(vec_map(f, vec))
 
-export class Show a {
+export class ToString a {
   fn to_string(value: a) -> String
 }
 
@@ -443,17 +443,17 @@ instance Semigroup String {
     str_concat(left, right)
 }
 
-instance Show Int {
+instance ToString Int {
   fn to_string(value: Int) -> String =
     int_to_string(value)
 }
 
-instance Show Bool {
+instance ToString Bool {
   fn to_string(value: Bool) -> String =
     if value then "True" else "False"
 }
 
-instance Show String {
+instance ToString String {
   fn to_string(value: String) -> String =
     value
 }

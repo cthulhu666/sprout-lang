@@ -567,7 +567,7 @@ class ParserTests(unittest.TestCase):
 
     def test_parse_class_method_still_requires_param_type_annotations(self) -> None:
         src = """
-        class Show t {
+        class ToString t {
           fn show(x) -> String
         }
         """

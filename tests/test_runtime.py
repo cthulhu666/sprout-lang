@@ -265,13 +265,13 @@ class RuntimeTests(unittest.TestCase):
         type Box =
           | Box Int
 
-        instance Show Box {
+        instance ToString Box {
           fn to_string(x: Box) -> String =
             match x with
             | Box n -> to_string(n)
         }
 
-        fn render(x: a) -> String where Show a =
+        fn render(x: a) -> String where ToString a =
           to_string(x)
 
         fn main() -> Unit !{IO} =

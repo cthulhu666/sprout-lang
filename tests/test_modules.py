@@ -2558,9 +2558,9 @@ class ModuleLoaderTests(unittest.TestCase):
             main.write_text(
                 """
                 module main
-                import stdlib.collections (Show, to_string)
+                import stdlib.collections (ToString, to_string)
 
-                fn render(x: a) -> String where Show a =
+                fn render(x: a) -> String where ToString a =
                   to_string(x)
 
                 fn main() -> Unit !{IO} =
