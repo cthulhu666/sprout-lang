@@ -742,6 +742,61 @@ def _type_expr_key(node: ast.TypeExpr) -> tuple:
     raise TypeCheckError(f"Unsupported type expression {node}")
 
 
+def _type_expr_is_var(node: "ast.TypeExpr") -> bool:
+    """Return True if node is a type variable (lowercase TypeName)."""
+    if isinstance(node, ast.TypeName):
+        leaf = node.name.rsplit(".", 1)[-1]
+        return bool(leaf) and leaf[0].islower()
+    return False
+
+
+def _type_exprs_overlap(a: "ast.TypeExpr", b: "ast.TypeExpr") -> bool:
+    """Return True if two instance type arguments could match the same concrete type.
+
+    A type variable (lowercase name) is a catch-all and overlaps with anything.
+    Two concrete types overlap only if they have the same head constructor and
+    all argument positions overlap.
+    """
+    if _type_expr_is_var(a) or _type_expr_is_var(b):
+        return True
+    if isinstance(a, ast.TypeName) and isinstance(b, ast.TypeName):
+        return a.name == b.name
+    if isinstance(a, ast.TypeApply) and isinstance(b, ast.TypeApply):
+        return _type_exprs_overlap(a.base, b.base) and _type_exprs_overlap(a.arg, b.arg)
+    if isinstance(a, ast.TypeArrow) and isinstance(b, ast.TypeArrow):
+        return True  # both are function types — same head constructor
+    if isinstance(a, ast.TupleType) and isinstance(b, ast.TupleType):
+        if len(a.items) != len(b.items):
+            return False
+        return all(_type_exprs_overlap(ai, bi) for ai, bi in zip(a.items, b.items))
+    return False
+
+
+def _instance_args_overlap(args_a: "list[ast.TypeExpr]", args_b: "list[ast.TypeExpr]") -> bool:
+    if len(args_a) != len(args_b):
+        return False
+    return all(_type_exprs_overlap(a, b) for a, b in zip(args_a, args_b))
+
+
+def _format_instance_constraint(constraint: "ast.TypeConstraint") -> str:
+    def fmt(node: "ast.TypeExpr") -> str:
+        if isinstance(node, ast.TypeName):
+            return node.name
+        if isinstance(node, ast.TypeApply):
+            base = fmt(node.base)
+            arg = fmt(node.arg)
+            if isinstance(node.arg, ast.TypeApply):
+                arg = f"({arg})"
+            return f"{base} {arg}"
+        if isinstance(node, ast.TypeArrow):
+            return f"{fmt(node.left)} -> {fmt(node.right)}"
+        if isinstance(node, ast.TupleType):
+            return "(" + ", ".join(fmt(i) for i in node.items) + ")"
+        return str(node)
+    parts = " ".join(fmt(arg) for arg in constraint.args)
+    return f"{constraint.class_name} {parts}".strip() if parts else constraint.class_name
+
+
 def build_class_decls(program: ast.Program) -> dict[str, ClassDeclInfo]:
     out: dict[str, ClassDeclInfo] = {}
     for decl in program.declarations:
@@ -802,8 +857,10 @@ def _substitute_type_expr(node: ast.TypeExpr, subst: dict[str, ast.TypeExpr]) ->
 
 
 def validate_class_constraints(program: ast.Program, class_decls: dict[str, ClassDeclInfo]) -> None:
-    # Pass 1: validate constraint arities, collect all instances, check duplicates
-    seen_instances: set[tuple[str, tuple[tuple, ...]]] = set()
+    # Pass 1: validate constraint arities, collect all instances, check for overlap
+    # Use a list (not set) so we can compare each new instance against all prior ones.
+    instances_by_class: dict[str, list[ast.InstanceDecl]] = {}
+    seen_instance_keys: set[tuple[str, tuple[tuple, ...]]] = set()
     for decl in program.declarations:
         if isinstance(decl, ast.FnDecl):
             for constraint in decl.constraints:
@@ -812,22 +869,23 @@ def validate_class_constraints(program: ast.Program, class_decls: dict[str, Clas
             _validate_constraint(decl.constraint, class_decls, decl)
             for ic in decl.constraints:
                 _validate_constraint(ic, class_decls, decl)
+            class_name = decl.constraint.class_name
+            prior = instances_by_class.get(class_name, [])
+            for prior_decl in prior:
+                if _instance_args_overlap(prior_decl.constraint.args, decl.constraint.args):
+                    a_str = _format_instance_constraint(prior_decl.constraint)
+                    b_str = _format_instance_constraint(decl.constraint)
+                    raise tc_error(
+                        f"Overlapping instances for {class_name}: "
+                        f"'instance {a_str}' and 'instance {b_str}' both match the same type",
+                        decl,
+                    )
+            instances_by_class.setdefault(class_name, []).append(decl)
             key = (
-                decl.constraint.class_name,
+                class_name,
                 tuple(_type_expr_key(arg) for arg in decl.constraint.args),
             )
-            if key in seen_instances:
-                args_str = " ".join(
-                    arg.name if isinstance(arg, ast.TypeName) else "(...)"
-                    for arg in decl.constraint.args
-                )
-                inst_str = f"{decl.constraint.class_name} {args_str}".strip()
-                raise tc_error(
-                    f"Overlapping instances for {decl.constraint.class_name}: "
-                    f"'instance {inst_str}' declared more than once",
-                    decl,
-                )
-            seen_instances.add(key)
+            seen_instance_keys.add(key)
     # Pass 2: check superclass instances exist
     for decl in program.declarations:
         if not isinstance(decl, ast.InstanceDecl):
@@ -840,7 +898,7 @@ def validate_class_constraints(program: ast.Program, class_decls: dict[str, Clas
         for sc in class_info.superclasses:
             expected_args = [_substitute_type_expr(arg, subst) for arg in sc.args]
             expected_key = (sc.class_name, tuple(_type_expr_key(arg) for arg in expected_args))
-            if expected_key not in seen_instances:
+            if expected_key not in seen_instance_keys:
                 args_str = " ".join(
                     arg.name if isinstance(arg, ast.TypeName) else "..." for arg in expected_args
                 )
