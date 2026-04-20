@@ -1,0 +1,11 @@
+class Foo a {
+  fn foo(x: a) -> Int
+}
+
+instance Foo Int {
+  fn foo(x: Int) -> Int = x
+}
+
+instance Foo Int {
+  fn foo(x: Int) -> Int = x
+}

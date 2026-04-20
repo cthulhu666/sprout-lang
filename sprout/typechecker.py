@@ -817,8 +817,14 @@ def validate_class_constraints(program: ast.Program, class_decls: dict[str, Clas
                 tuple(_type_expr_key(arg) for arg in decl.constraint.args),
             )
             if key in seen_instances:
+                args_str = " ".join(
+                    arg.name if isinstance(arg, ast.TypeName) else "(...)"
+                    for arg in decl.constraint.args
+                )
+                inst_str = f"{decl.constraint.class_name} {args_str}".strip()
                 raise tc_error(
-                    f"Duplicate instance declaration for {decl.constraint.class_name}",
+                    f"Overlapping instances for {decl.constraint.class_name}: "
+                    f"'instance {inst_str}' declared more than once",
                     decl,
                 )
             seen_instances.add(key)
