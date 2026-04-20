@@ -1,0 +1,6 @@
+str left identity: ok
+str right identity: ok
+str associativity: ok
+list left identity: ok
+list right identity: ok
+list associativity: ok

@@ -1,0 +1,3 @@
+list functor identity: ok
+list functor composition: ok
+list functor identity nil: ok

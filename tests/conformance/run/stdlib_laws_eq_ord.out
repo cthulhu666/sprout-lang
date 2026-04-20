@@ -1,0 +1,9 @@
+int reflexivity: ok
+str reflexivity: ok
+bool reflexivity: ok
+int symmetry eq: ok
+int symmetry ne: ok
+str symmetry: ok
+int trans: ok
+int antisymm: ok
+int totality: ok

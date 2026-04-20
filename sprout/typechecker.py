@@ -932,6 +932,19 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
             visit_expr(expr.callee)
             for arg in expr.args:
                 visit_expr(arg)
+            # Re-apply substitution to resolved_constraint args now that all
+            # unifications are complete (e.g. empty() where the return type
+            # determines the Monoid instance is resolved only after body typing).
+            rc = getattr(expr, "resolved_constraint", None)
+            if isinstance(rc, ast.TypeConstraint):
+                solved_args = [
+                    type_to_ast_expr(apply(state.subst, _constraint_arg_to_type(a), state.effect_subst))
+                    for a in rc.args
+                ]
+                setattr(expr, "resolved_constraint", ast.TypeConstraint(
+                    class_name=rc.class_name,
+                    args=solved_args,
+                ))
             return
         lambda_expr = getattr(ast, "LambdaExpr", None)
         if lambda_expr is not None and isinstance(expr, lambda_expr):
