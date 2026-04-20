@@ -556,7 +556,7 @@ fn parse_term_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result Pa
   else if tok_is_symbol(tok_at(tokens, i), "++") then
     do
       (right, i2) <- parse_factor(tokens, i + 1)
-      parse_term_rest(tokens, i2, ast.CallExpr(ast.VarExpr("__append", cur_pos(tokens, i)), Cons(left, Cons(right, Nil)), cur_pos(tokens, i)))
+      parse_term_rest(tokens, i2, ast.CallExpr(ast.VarExpr("append", cur_pos(tokens, i)), Cons(left, Cons(right, Nil)), cur_pos(tokens, i)))
   else
     Ok((left, i))
 

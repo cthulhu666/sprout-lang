@@ -89,7 +89,7 @@ Definition of done:
   - bootstrap HM typechecker stack exists in `stdlib/compiler/types`, `unifier`, `infer`
   - `stdlib/compiler/driver.sprout` emits a flat s-expression AST dump (one decl per line)
   - `tools/dump_ast.py` emits the same format via the Python parser
-  - `tests/test_parser_parity.py` runs both on the conformance corpus and diffs output; 7/7 pass (one known divergence: `++` desugars to `append` in Python, `list_append` in Sprout)
+  - `tests/test_parser_parity.py` runs both on the conformance corpus and diffs output; 11/11 pass (no known divergences — `++` now desugars to `append` in both parsers)
   - **integration seam landed**: `stdlib/compiler/checker.sprout` wraps `infer.typecheck_decls` behind a `CheckResult` ADT; `stdlib/compiler/type_driver.sprout` is an executable that lex→parse→check→dumps typed names; `tools/dump_types.py` does the same via the Python typechecker; `tests/test_checker_parity.py` confirms 6/6 corpus files match (no known divergences — forall generalization fully implemented)
   - **Phase 2 driver landed**: `stdlib/compiler/compiler.sprout` exposes `compile_source`/`compile_file` API; `stdlib/compiler/compile_driver.sprout` is an end-to-end executable; `sprout.cli bootstrap-check` routes at least one real CLI check path through Sprout-owned control flow
   - **FnDecl body inference landed**: `check_fn_body` instantiates the annotation scheme and checks the body against it; unknown-variable/constructor errors silently accepted (builtin leniency), real type mismatches propagate; checker corpus expanded to 6 files
@@ -109,7 +109,7 @@ Definition of done:
 - [x] `P0` Add `Functor` class and instances for `List` and `Vec`.
 - [x] `P0` Add `Foldable` class and instances for `List` and `Vec`.
 - [x] `P1` Add `Semigroup` class with associativity law documented.
-- [ ] `P1` Replace `++` special-case dispatch with proper infix operator machinery: `++` becomes a fixity alias for `Semigroup.append`; the `__append` sentinel + `infer_semigroup_append` in `infer.sprout` can then be removed. Prerequisite: full typeclass method dispatch (concrete instance resolution at call sites).
+- [x] `P1` Replace `++` special-case dispatch with proper infix operator machinery: `++` desugars to `append` in both Python and Sprout parsers; `__append` sentinel and `infer_semigroup_append` removed from `infer.sprout`; instance resolution uses head-constructor matching so `List Int` matches `instance Semigroup (List a)`; parser parity divergence eliminated.
 - [x] `P1` Add `Monoid` class with identity law documented.
 - [x] `P1` Add `Eq` class with `==`/`!=` constraint checking; superclass of `Ord`.
 - [ ] `P1` Add `deriving Eq` (and similar) for ADT structural equality — currently ADT `==` uses runtime primitive without typeclass dispatch; tracked as known gap.

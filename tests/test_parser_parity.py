@@ -43,13 +43,7 @@ CORPUS = [
 # Each entry is (description, python_fragment, sprout_fragment).
 # A diff line containing python_fragment on the Python side and
 # sprout_fragment on the Sprout side is accepted as a known divergence.
-KNOWN_DIVERGENCES: list[tuple[str, str, str]] = [
-    (
-        "++ desugars to 'append' in Python parser, 'list_append' in Sprout parser",
-        '(var "append")',
-        '(var "list_append")',
-    ),
-]
+KNOWN_DIVERGENCES: list[tuple[str, str, str]] = []
 
 
 def run_python_dump(path: Path) -> list[str]:

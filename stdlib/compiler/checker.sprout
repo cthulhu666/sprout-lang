@@ -122,7 +122,14 @@ fn builtin_entries() -> List (String, types.Scheme) =
   set_entries() ++
   vec_entries() ++
   ref_entries() ++
-  string_module_entries()
+  string_module_entries() ++
+  semigroup_markers()
+
+fn semigroup_markers() -> List (String, types.Scheme) =
+  [ ("@class:append",          types.mono(types.TConst("Semigroup")))
+  , ("@inst:Semigroup:String", types.mono(types.TConst("Unit")))
+  , ("@inst:Semigroup:List",   types.mono(types.TConst("Unit")))
+  ]
 
 fn builtin_env() -> Dict types.Scheme =
   dict_from_list(builtin_entries())
@@ -183,7 +190,7 @@ fn str_entries() -> List (String, types.Scheme) =
   , ("str_find",        bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
   , ("str_starts_with", bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
   , ("str_compare",     bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
-  , ("append",          bt_mono(bt_fn2(bt_str(), bt_str(), bt_str())))
+  , ("append",          bt_poly1("t", bt_fn2(types.TVar("t"), types.TVar("t"), types.TVar("t"))))
   , ("int_to_string",   bt_mono(bt_fn(bt_int(), bt_str())))
   , ("parse_int",       bt_mono(bt_fn(bt_str(), bt_int())))
   , ("char_to_string",  bt_mono(bt_fn(bt_char(), bt_str())))
