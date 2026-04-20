@@ -288,12 +288,17 @@ class Parser:
     def parse_instance_decl(self) -> ast.InstanceDecl:
         start = self.expect("KEYWORD", "instance")
         constraint = self.parse_type_constraint()
+        instance_constraints: list[ast.TypeConstraint] = []
+        if self.match("KEYWORD", "where"):
+            instance_constraints.append(self.parse_type_constraint())
+            while self.match("SYMBOL", ","):
+                instance_constraints.append(self.parse_type_constraint())
         methods: list[ast.InstanceMethodImpl] = []
         if self.match("SYMBOL", "{"):
             while not self.check("SYMBOL", "}"):
                 methods.append(self.parse_instance_method_impl())
             self.expect("SYMBOL", "}")
-        return self.mark(ast.InstanceDecl(constraint=constraint, methods=methods), start)
+        return self.mark(ast.InstanceDecl(constraint=constraint, methods=methods, constraints=instance_constraints), start)
 
     def parse_class_method_sig(self) -> ast.ClassMethodSig:
         start = self.expect("KEYWORD", "fn")

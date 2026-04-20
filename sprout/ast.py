@@ -86,6 +86,7 @@ class ClassDecl:
 class InstanceDecl:
     constraint: TypeConstraint
     methods: list["InstanceMethodImpl"] = field(default_factory=list)
+    constraints: list["TypeConstraint"] = field(default_factory=list)
     annotations: tuple["DeclAnnotation", ...] = ()
 
 

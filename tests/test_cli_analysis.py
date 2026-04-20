@@ -319,7 +319,7 @@ class CliAnalysisTests(unittest.TestCase):
             json.loads(run.stdout),
             response_ok(
                 {
-                    "matches": ["Foldable List", "Functor List", "Semigroup (List a)"],
+                    "matches": ["Foldable List", "Functor List", "Monoid (List a)", "Semigroup (List a)", "ToString (List a)"],
                     "query_type": "List Int",
                 }
             ),

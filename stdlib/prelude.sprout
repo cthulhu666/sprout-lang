@@ -614,3 +614,21 @@ export fn when_error(f: e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   match r with
   | Ok x -> Ok(x)
   | Err e -> after(f(e), r)
+
+instance ToString (Maybe a) where ToString a {
+  fn to_string(x: Maybe a) -> String =
+    match x with
+    | Nothing -> "Nothing"
+    | Just v -> "Just(" ++ to_string(v) ++ ")"
+}
+
+fn list_to_string_go(strs: List String, acc: String) -> String =
+  match strs with
+  | Nil -> acc
+  | Cons s rest ->
+    list_to_string_go(rest, if acc == "" then s else acc ++ ", " ++ s)
+
+instance ToString (List a) where ToString a {
+  fn to_string(xs: List a) -> String =
+    "[" ++ list_to_string_go(list_map(\(v) -> to_string(v), xs), "") ++ "]"
+}

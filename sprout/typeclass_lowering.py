@@ -182,6 +182,21 @@ def _constraint_matches_pattern(pattern: ast.TypeConstraint, candidate: ast.Type
     return True
 
 
+def _constraint_matches_with_subs(
+    pattern: ast.TypeConstraint, candidate: ast.TypeConstraint
+) -> "tuple[bool, dict[str, ast.TypeExpr]]":
+    """Like _constraint_matches_pattern but also returns the type-variable substitution."""
+    if not _class_name_matches(pattern.class_name, candidate.class_name):
+        return False, {}
+    if len(pattern.args) != len(candidate.args):
+        return False, {}
+    env: dict[str, ast.TypeExpr] = {}
+    for p, c in zip(pattern.args, candidate.args):
+        if not _match_type_expr_pattern(p, c, env):
+            return False, {}
+    return True, env
+
+
 def _collect_type_expr_substitution(
     pattern: ast.TypeExpr,
     actual: ast.TypeExpr,
@@ -223,6 +238,67 @@ def _instantiate_constraint(
         class_name=constraint.class_name,
         args=[_substitute_type_expr(arg, subs) for arg in constraint.args],
     )
+
+
+def _resolve_inner_constraint_args(
+    target: str,
+    matched_subs: "dict[str, ast.TypeExpr]",
+    instance_fn_own_constraints: "dict[str, list[ast.TypeConstraint]]",
+    instance_constraints: "list[tuple[ast.TypeConstraint, dict[str, str], list[ast.TypeConstraint]]]",
+    class_method_order: "dict[str, list[str]]",
+    class_decls: "dict[str, ast.ClassDecl] | None" = None,
+) -> "list[ast.Expr]":
+    """Return the extra constraint args needed to call a constrained instance method.
+
+    If an inner instance method is itself constrained, wraps it in a lambda
+    with recursively resolved constraint args applied.
+    """
+    own_cs = instance_fn_own_constraints.get(target, [])
+    if not own_cs:
+        return []
+    inner_args: list[ast.Expr] = []
+    for oc in own_cs:
+        instantiated = _instantiate_constraint(oc, matched_subs)
+        method_source: dict[str, str] | None = None
+        inner_subs: dict[str, ast.TypeExpr] = {}
+        for candidate in _constraint_resolution_candidates(instantiated):
+            for inst_constraint, methods, _ in instance_constraints:
+                ok, subs = _constraint_matches_with_subs(inst_constraint, candidate)
+                if ok:
+                    method_source = methods
+                    inner_subs = subs
+                    break
+            if method_source is not None:
+                break
+        if method_source is None:
+            raise TypeclassLoweringError(
+                f"Cannot resolve inner constraint {instantiated.class_name} for constrained instance method {target}"
+            )
+        class_decl = _lookup_matching_class(class_decls, instantiated.class_name) if class_decls else None
+        for method_name in class_method_order.get(instantiated.class_name, []):
+            inner_target = method_source.get(method_name)
+            if inner_target is None:
+                continue
+            if instance_fn_own_constraints.get(inner_target):
+                # The inner instance method is itself constrained: build a lambda.
+                deeper_extras = _resolve_inner_constraint_args(
+                    inner_target, inner_subs, instance_fn_own_constraints,
+                    instance_constraints, class_method_order, class_decls,
+                )
+                method_sig = next(
+                    (m for m in class_decl.methods if m.name == method_name), None
+                ) if class_decl else None
+                n_params = len(method_sig.params) if method_sig else 0
+                lp_names = [f"__lp_{method_name}_{i}" for i in range(n_params)]
+                lp_params = [ast.Param(name=nm, type_expr=None) for nm in lp_names]
+                lp_arg_exprs: list[ast.Expr] = [ast.VarExpr(nm) for nm in lp_names]
+                lambda_body = ast.CallExpr(
+                    callee=ast.VarExpr(inner_target), args=lp_arg_exprs + list(deeper_extras)
+                )
+                inner_args.append(ast.LambdaExpr(params=lp_params, body=lambda_body))
+            else:
+                inner_args.append(ast.VarExpr(inner_target))
+    return inner_args
 
 
 def _type_expr_outermost_base(node: ast.TypeExpr) -> ast.TypeExpr:
@@ -410,6 +486,11 @@ def _rewrite_expr_with_specialization(
                         specializations[key] = wrapper_name
 
                         user_params = target.params[:user_param_count]
+                        # Strip type annotations from wrapper params: the body fully
+                        # constrains the types, and keeping type variables here causes
+                        # the typechecker to incorrectly propagate outer substitutions
+                        # into the wrapper when it is used as a constraint argument.
+                        wrapper_params = [ast.Param(name=p.name, type_expr=None) for p in user_params]
                         wrapper_call_args = [ast.VarExpr(p.name) for p in user_params] + [
                             ast.VarExpr(name) for name in extra_names
                         ]
@@ -417,8 +498,8 @@ def _rewrite_expr_with_specialization(
                             _clone_with_loc(
                                 ast.FnDecl(
                                     name=wrapper_name,
-                                    params=user_params,
-                                    return_type=target.return_type,
+                                    params=wrapper_params,
+                                    return_type=None,
                                     effects=target.effects,
                                     constraints=[],
                                     body=ast.CallExpr(callee=ast.VarExpr(callee_name), args=wrapper_call_args),
@@ -575,7 +656,9 @@ def _rewrite_expr(
     fn_decls: dict[str, ast.FnDecl],
     fn_constraints: dict[str, list[ast.TypeConstraint]],
     class_method_order: dict[str, list[str]],
-    instance_constraints: list[tuple[ast.TypeConstraint, dict[str, str]]],
+    instance_constraints: list[tuple[ast.TypeConstraint, dict[str, str], list[ast.TypeConstraint]]],
+    instance_fn_own_constraints: dict[str, list[ast.TypeConstraint]],
+    class_decls: dict[str, ast.ClassDecl],
 ) -> ast.Expr:
     if isinstance(expr, ast.VarExpr):
         if expr.name in scope:
@@ -602,6 +685,8 @@ def _rewrite_expr(
                     fn_constraints,
                     class_method_order,
                     instance_constraints,
+                instance_fn_own_constraints,
+                class_decls,
                 ),
             ),
             expr,
@@ -618,6 +703,8 @@ def _rewrite_expr(
             fn_constraints,
             class_method_order,
             instance_constraints,
+        instance_fn_own_constraints,
+        class_decls,
         )), expr)
 
     if isinstance(expr, ast.BinaryExpr):
@@ -634,6 +721,8 @@ def _rewrite_expr(
                     fn_constraints,
                     class_method_order,
                     instance_constraints,
+                instance_fn_own_constraints,
+                class_decls,
                 ),
                 right=_rewrite_expr(
                     expr.right,
@@ -645,6 +734,8 @@ def _rewrite_expr(
                     fn_constraints,
                     class_method_order,
                     instance_constraints,
+                instance_fn_own_constraints,
+                class_decls,
                 ),
             ),
             expr,
@@ -661,6 +752,8 @@ def _rewrite_expr(
             fn_constraints,
             class_method_order,
             instance_constraints,
+        instance_fn_own_constraints,
+        class_decls,
         )
         rewritten_args = [
             _rewrite_expr(
@@ -673,6 +766,8 @@ def _rewrite_expr(
                 fn_constraints,
                 class_method_order,
                 instance_constraints,
+            instance_fn_own_constraints,
+            class_decls,
             )
             for arg in expr.args
         ]
@@ -702,24 +797,26 @@ def _rewrite_expr(
                 if len(matches) == 1:
                     method_source = matches[0]
 
+                matched_subs: dict[str, ast.TypeExpr] = {}
                 if method_source is None:
-                    inst_matches: list[dict[str, str]] = []
+                    inst_matches_ws: list[tuple[dict[str, str], dict[str, ast.TypeExpr]]] = []
                     seen_method_sources: set[tuple[tuple[str, str], ...]] = set()
                     for candidate in _constraint_resolution_candidates(resolved_constraint):
-                        for inst_constraint, methods in instance_constraints:
-                            if not _constraint_matches_pattern(inst_constraint, candidate):
+                        for inst_constraint, methods, _inst_own in instance_constraints:
+                            ok, subs = _constraint_matches_with_subs(inst_constraint, candidate)
+                            if not ok:
                                 continue
                             key = tuple(sorted(methods.items()))
                             if key in seen_method_sources:
                                 continue
                             seen_method_sources.add(key)
-                            inst_matches.append(methods)
-                    if len(inst_matches) > 1:
+                            inst_matches_ws.append((methods, subs))
+                    if len(inst_matches_ws) > 1:
                         raise TypeclassLoweringError(
                             f"Ambiguous instance resolution for {resolved_constraint.class_name} in direct method call"
                         )
-                    if len(inst_matches) == 1:
-                        method_source = inst_matches[0]
+                    if len(inst_matches_ws) == 1:
+                        method_source, matched_subs = inst_matches_ws[0]
 
                 if method_source is None:
                     raise TypeclassLoweringError(
@@ -730,7 +827,12 @@ def _rewrite_expr(
                     raise TypeclassLoweringError(
                         f"Resolved direct method call missing method {expr.callee.name}"
                     )
-                return _clone_with_loc(ast.CallExpr(callee=ast.VarExpr(target), args=rewritten_args), expr)
+                inner_extras = _resolve_inner_constraint_args(
+                    target, matched_subs, instance_fn_own_constraints, instance_constraints, class_method_order, class_decls
+                )
+                return _clone_with_loc(
+                    ast.CallExpr(callee=ast.VarExpr(target), args=rewritten_args + inner_extras), expr
+                )
 
             callee_constraints = _concretize_call_constraints(
                 expr,
@@ -757,37 +859,59 @@ def _rewrite_expr(
                         method_source = matches[0]
 
                     # Otherwise, try concrete instance methods.
+                    needed_matched_subs: dict[str, ast.TypeExpr] = {}
                     if method_source is None:
-                        inst_matches: list[dict[str, str]] = []
+                        inst_matches_ws2: list[tuple[dict[str, str], dict[str, ast.TypeExpr]]] = []
                         seen_method_sources: set[tuple[tuple[str, str], ...]] = set()
                         for candidate in _constraint_resolution_candidates(needed):
-                            for inst_constraint, methods in instance_constraints:
-                                if not _constraint_matches_pattern(inst_constraint, candidate):
+                            for inst_constraint, methods, _inst_own in instance_constraints:
+                                ok, subs = _constraint_matches_with_subs(inst_constraint, candidate)
+                                if not ok:
                                     continue
                                 key = tuple(sorted(methods.items()))
                                 if key in seen_method_sources:
                                     continue
                                 seen_method_sources.add(key)
-                                inst_matches.append(methods)
-                        if len(inst_matches) > 1:
+                                inst_matches_ws2.append((methods, subs))
+                        if len(inst_matches_ws2) > 1:
                             raise TypeclassLoweringError(
                                 f"Ambiguous instance resolution for {needed.class_name} in call to {expr.callee.name}"
                             )
-                        if len(inst_matches) == 1:
-                            method_source = inst_matches[0]
+                        if len(inst_matches_ws2) == 1:
+                            method_source, needed_matched_subs = inst_matches_ws2[0]
 
                     if method_source is None:
                         raise TypeclassLoweringError(
                             f"Cannot resolve constraint {needed.class_name} for call to {expr.callee.name}"
                         )
 
+                    class_decl_for_needed = _lookup_matching_class(class_decls, needed.class_name)
                     for method_name in _lookup_matching_class(class_method_order, needed.class_name) or []:
                         target = method_source.get(method_name)
                         if target is None:
                             raise TypeclassLoweringError(
                                 f"Resolved constraint for {needed.class_name} missing method {method_name}"
                             )
-                        extra_args.append(_clone_with_loc(ast.VarExpr(target), expr))
+                        own_cs = instance_fn_own_constraints.get(target, [])
+                        if own_cs:
+                            inner_extras = _resolve_inner_constraint_args(
+                                target, needed_matched_subs, instance_fn_own_constraints, instance_constraints, class_method_order, class_decls
+                            )
+                            method_sig = next(
+                                (m for m in class_decl_for_needed.methods if m.name == method_name), None
+                            ) if class_decl_for_needed else None
+                            n_params = len(method_sig.params) if method_sig else 0
+                            lp_names = [f"__lp_{i}" for i in range(n_params)]
+                            lp_params = [ast.Param(name=nm, type_expr=None) for nm in lp_names]
+                            lp_args: list[ast.Expr] = [ast.VarExpr(nm) for nm in lp_names]
+                            lambda_body = ast.CallExpr(
+                                callee=ast.VarExpr(target), args=lp_args + list(inner_extras)
+                            )
+                            extra_args.append(
+                                _clone_with_loc(ast.LambdaExpr(params=lp_params, body=lambda_body), expr)
+                            )
+                        else:
+                            extra_args.append(_clone_with_loc(ast.VarExpr(target), expr))
 
                 rewritten_args = rewritten_args + extra_args
 
@@ -806,6 +930,8 @@ def _rewrite_expr(
                     fn_constraints,
                     class_method_order,
                     instance_constraints,
+                instance_fn_own_constraints,
+                class_decls,
                 ),
                 then_branch=_rewrite_expr(
                     expr.then_branch,
@@ -817,6 +943,8 @@ def _rewrite_expr(
                     fn_constraints,
                     class_method_order,
                     instance_constraints,
+                instance_fn_own_constraints,
+                class_decls,
                 ),
                 else_branch=_rewrite_expr(
                     expr.else_branch,
@@ -828,6 +956,8 @@ def _rewrite_expr(
                     fn_constraints,
                     class_method_order,
                     instance_constraints,
+                instance_fn_own_constraints,
+                class_decls,
                 ),
             ),
             expr,
@@ -844,6 +974,8 @@ def _rewrite_expr(
             fn_constraints,
             class_method_order,
             instance_constraints,
+        instance_fn_own_constraints,
+        class_decls,
         )
         rewritten_branches: list[ast.MatchBranch] = []
         for branch in expr.branches:
@@ -861,6 +993,8 @@ def _rewrite_expr(
                         fn_constraints,
                         class_method_order,
                         instance_constraints,
+                    instance_fn_own_constraints,
+                    class_decls,
                     ),
                 )
             )
@@ -884,6 +1018,8 @@ def _rewrite_expr(
                             fn_constraints,
                             class_method_order,
                             instance_constraints,
+                        instance_fn_own_constraints,
+                        class_decls,
                         ),
                     ),
                     step,
@@ -908,6 +1044,8 @@ def _rewrite_expr(
                                 fn_constraints,
                                 class_method_order,
                                 instance_constraints,
+                            instance_fn_own_constraints,
+                            class_decls,
                             ),
                         ),
                         step,
@@ -929,6 +1067,8 @@ def _rewrite_expr(
                                 fn_constraints,
                                 class_method_order,
                                 instance_constraints,
+                            instance_fn_own_constraints,
+                            class_decls,
                             ),
                         ),
                         step,
@@ -992,8 +1132,11 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
             fn_constraints[wrapper.name] = list(wrapper.constraints)
 
     # Materialize instance methods as ordinary top-level functions.
+    # instance_constraints entries: (constraint, method_map, own_constraints)
     instance_method_table: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
-    instance_constraints: list[tuple[ast.TypeConstraint, dict[str, str]]] = []
+    instance_constraints: list[tuple[ast.TypeConstraint, dict[str, str], list[ast.TypeConstraint]]] = []
+    # Maps generated instance fn name -> its own constraints (for constrained instances)
+    instance_fn_own_constraints: dict[str, list[ast.TypeConstraint]] = {}
     generated_instance_fns: list[ast.FnDecl] = []
     for decl in program.declarations:
         if not isinstance(decl, ast.InstanceDecl):
@@ -1015,14 +1158,16 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                         params=method.params,
                         return_type=method.return_type,
                         effects=method.effects,
-                        constraints=[],
+                        constraints=list(decl.constraints),
                         body=method.body,
                     ),
                     method,
                 )
             )
+            if decl.constraints:
+                instance_fn_own_constraints[generated_name] = list(decl.constraints)
         instance_method_table[key] = method_map
-        instance_constraints.append((decl.constraint, method_map))
+        instance_constraints.append((decl.constraint, method_map, list(decl.constraints)))
 
     decls_for_output: list[object] = []
     for decl in program.declarations:
@@ -1088,6 +1233,8 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                 fn_constraints=fn_constraints,
                 class_method_order=class_method_order,
                 instance_constraints=instance_constraints,
+            instance_fn_own_constraints=instance_fn_own_constraints,
+            class_decls=class_decls,
             )
 
             decls_for_output.append(
@@ -1120,6 +1267,8 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                             fn_constraints=fn_constraints,
                             class_method_order=class_method_order,
                             instance_constraints=instance_constraints,
+                            instance_fn_own_constraints=instance_fn_own_constraints,
+                            class_decls=class_decls,
                         ),
                     ),
                     decl,
@@ -1187,6 +1336,8 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
             fn_constraints=fn_constraints,
             class_method_order=class_method_order,
             instance_constraints=instance_constraints,
+            instance_fn_own_constraints=instance_fn_own_constraints,
+            class_decls=class_decls,
         )
 
         decls_for_output.append(
@@ -1205,19 +1356,80 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
 
     # Rewrite generated instance fns too (they can call constrained functions).
     for fn in generated_instance_fns:
-        rewritten_body = _rewrite_expr(
-            fn.body,
-            scope={p.name for p in fn.params},
-            method_aliases={},
-            current_constraints=[],
-            current_binding_by_constraint={},
-            fn_decls=fn_decls,
-            fn_constraints=fn_constraints,
-            class_method_order=class_method_order,
-            instance_constraints=instance_constraints,
-        )
-        decls_for_output.append(
-            _clone_with_loc(
+        own_cs = instance_fn_own_constraints.get(fn.name, [])
+        if own_cs:
+            # Constrained instance method: add hidden params for its own constraints,
+            # rewrite body the same way as a FnDecl with constraints.
+            hidden_params: list[ast.Param] = []
+            method_aliases: dict[str, str] = {}
+            binding_by_constraint: dict[tuple[str, tuple[str, ...]], dict[str, str]] = {}
+            for idx, constraint in enumerate(own_cs):
+                class_decl = _lookup_matching_class(class_decls, constraint.class_name)
+                if class_decl is None:
+                    continue
+                subs = {name: arg for name, arg in zip(class_decl.type_params, constraint.args)}
+                methods_for_constraint: dict[str, str] = {}
+                for method_sig in class_decl.methods:
+                    hidden_name = f"__tc_{constraint.class_name}_{idx}_{method_sig.name}"
+                    used = {p.name for p in fn.params} | set(method_aliases.values()) | {p.name for p in hidden_params}
+                    while hidden_name in used:
+                        hidden_name += "_"
+                    if method_sig.params:
+                        t = _substitute_type_expr(method_sig.return_type, subs)
+                        for p in reversed(method_sig.params):
+                            t = ast.TypeArrow(
+                                left=_substitute_type_expr(p.type_expr, subs),
+                                right=t,
+                                effects=None if p is not method_sig.params[-1] else method_sig.effects,
+                            )
+                        hidden_param_type = t
+                    else:
+                        hidden_param_type = _substitute_type_expr(method_sig.return_type, subs)
+                    hidden_params.append(_clone_with_loc(ast.Param(name=hidden_name, type_expr=hidden_param_type), method_sig))
+                    methods_for_constraint[method_sig.name] = hidden_name
+                    method_aliases[method_sig.name] = hidden_name
+                binding_by_constraint[_constraint_key(constraint)] = methods_for_constraint
+            rewritten_body = _rewrite_expr(
+                fn.body,
+                scope={p.name for p in fn.params} | {p.name for p in hidden_params},
+                method_aliases=method_aliases,
+                current_constraints=own_cs,
+                current_binding_by_constraint=binding_by_constraint,
+                fn_decls=fn_decls,
+                fn_constraints=fn_constraints,
+                class_method_order=class_method_order,
+                instance_constraints=instance_constraints,
+                instance_fn_own_constraints=instance_fn_own_constraints,
+                class_decls=class_decls,
+            )
+            new_fn = _clone_with_loc(
+                ast.FnDecl(
+                    name=fn.name,
+                    params=fn.params + hidden_params,
+                    return_type=fn.return_type,
+                    effects=fn.effects,
+                    constraints=[],
+                    body=rewritten_body,
+                ),
+                fn,
+            )
+            fn_constraints[fn.name] = own_cs
+            fn_decls[fn.name] = new_fn
+        else:
+            rewritten_body = _rewrite_expr(
+                fn.body,
+                scope={p.name for p in fn.params},
+                method_aliases={},
+                current_constraints=[],
+                current_binding_by_constraint={},
+                fn_decls=fn_decls,
+                fn_constraints=fn_constraints,
+                class_method_order=class_method_order,
+                instance_constraints=instance_constraints,
+                instance_fn_own_constraints=instance_fn_own_constraints,
+                class_decls=class_decls,
+            )
+            new_fn = _clone_with_loc(
                 ast.FnDecl(
                     name=fn.name,
                     params=fn.params,
@@ -1228,7 +1440,7 @@ def lower_typeclasses(program: ast.Program) -> ast.Program:
                 ),
                 fn,
             )
-        )
+        decls_for_output.append(new_fn)
 
     out = ast.Program(declarations=decls_for_output)
 

@@ -807,6 +807,8 @@ def validate_class_constraints(program: ast.Program, class_decls: dict[str, Clas
                 _validate_constraint(constraint, class_decls, decl)
         elif isinstance(decl, ast.InstanceDecl):
             _validate_constraint(decl.constraint, class_decls, decl)
+            for ic in decl.constraints:
+                _validate_constraint(ic, class_decls, decl)
             key = (
                 decl.constraint.class_name,
                 tuple(_type_expr_key(arg) for arg in decl.constraint.args),
@@ -2174,6 +2176,23 @@ def typecheck_program(
         fn_types[fn_decl.name] = fn_t
         fn_decl_effects[fn_decl.name] = fn_effects
         env[fn_decl.name] = Scheme(vars=(), type=fn_t, effects=fn_effects)
+
+    # Pre-generalize generated typeclass instance methods (__tc_*).  These fns
+    # are emitted by the typeclass lowerer with fully-declared param types and
+    # their type variables are unique (fresh per-fn).  Without this step, a user
+    # fn that appears *before* a __tc_* fn in declaration order (which is common
+    # since lowered instance fns are appended after user decls) can unify the
+    # __tc_* fn's type variables in-place, causing the fn to be monomorphized
+    # when it is later generalized — breaking polymorphic call sites (e.g. nested
+    # instance constraints like Positive (Maybe (Maybe Int))).
+    for fn_name, fn_t in fn_types.items():
+        if fn_name.startswith("__tc_"):
+            pre_gen_vars = tuple(sorted(ftv(fn_t)))
+            env[fn_name] = Scheme(
+                vars=pre_gen_vars,
+                type=fn_t,
+                effects=fn_decl_effects[fn_name],
+            )
 
     for decl in program.declarations:
         if isinstance(decl, ast.FnDecl):
