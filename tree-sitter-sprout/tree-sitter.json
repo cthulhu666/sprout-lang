@@ -1,0 +1,11 @@
+{
+  "grammars": [
+    {
+      "name": "sprout",
+      "file-types": [
+        "sprout"
+      ],
+      "scope": "source.sprout"
+    }
+  ]
+}
