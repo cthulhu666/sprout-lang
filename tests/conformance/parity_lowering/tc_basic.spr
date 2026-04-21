@@ -1,0 +1,18 @@
+# Parity lowering corpus: basic typeclass with two concrete instances.
+# Expected __tc_* names: __tc_Eq_Int_eq, __tc_Eq_Bool_eq
+
+class Eq t {
+  fn eq(x: t, y: t) -> Bool
+}
+
+instance Eq Int {
+  fn eq(x: Int, y: Int) -> Bool = x == y
+}
+
+instance Eq Bool {
+  fn eq(x: Bool, y: Bool) -> Bool =
+    if x then y else if y then false else true
+}
+
+fn int_eq(a: Int, b: Int) -> Bool where Eq Int =
+  eq(a, b)

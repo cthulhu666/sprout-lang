@@ -54,6 +54,15 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
           | typed_ast.TypedErr msg -> CheckErr(msg)
           | typed_ast.TypedOk _ env -> CheckOk(env)
 
+# Like check_program_with_env but returns the full TypedResult (TypedProgram + env).
+# Used by lower_driver to feed the lowering pass.
+export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
+  do
+    state <- unifier.new_state()
+    match prog with
+    | ast.Program decls _ ->
+        infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+
 # ---------------------------------------------------------------------------
 # dump_typed_names — parity-test output renderer
 # ---------------------------------------------------------------------------

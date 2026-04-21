@@ -44,14 +44,14 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl) -> LowerResult =
 # LowerEnv: global information collected from the typed program.
 #   class_order  – class_name → [method_names in declaration order]
 #   inst_table   – constraint_key → { method_name → instance_fn_name }
-type LowerEnv (..) =
+type LowerEnv =
   | LowerEnv (Dict (List String)) (Dict (Dict String))
 
 # LowerCtx: per-function context passed during expression lowering.
 #   class_order – inherited from LowerEnv
 #   fwd_methods – constraint_key → { method_name → hidden_param_name }  (forwarded)
 #   inst_table  – constraint_key → { method_name → instance_fn_name }   (concrete)
-type LowerCtx (..) =
+type LowerCtx =
   | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String))
 
 fn env_class_order(env: LowerEnv) -> Dict (List String) =

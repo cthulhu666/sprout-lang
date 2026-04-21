@@ -1,0 +1,96 @@
+module main
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+import stdlib.compiler.checker as checker
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.lowering as lowering
+
+# ---------------------------------------------------------------------------
+# String helpers
+
+fn lex_err_msg(e: token.TokenizeError) -> String =
+  match e with
+  | token.TokenizeError msg _ -> "ERROR: lex: " ++ msg
+
+fn parse_err_msg(e: parser.ParseError) -> String =
+  match e with
+  | parser.ParseError msg _ -> "ERROR: parse: " ++ msg
+
+# ---------------------------------------------------------------------------
+# Header stripping (same as type_driver / compile_driver)
+
+fn is_header_line(s: String, pos: Int) -> Bool =
+  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
+
+fn next_line(s: String, pos: Int) -> Int =
+  if nl == -1 then str_len(s)
+  else pos + nl + 1
+  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+
+fn strip_headers(s: String, pos: Int) -> String =
+  if pos >= str_len(s) then ""
+  else if is_header_line(s, pos) then strip_headers(s, next_line(s, pos))
+  else str_slice(s, pos, str_len(s))
+
+# ---------------------------------------------------------------------------
+# Print __tc_* function names from a lowered ast.Program
+
+fn print_tc_names(decls: List ast.Decl) -> Unit !{IO} =
+  match decls with
+  | Nil -> ()
+  | Cons d rest ->
+      do
+        match d with
+        | ast.FnDecl name _ _ _ _ _ _ ->
+            if str_starts_with(name, "__tc_") then print(name) else ()
+        | _ -> ()
+        print_tc_names(rest)
+
+# ---------------------------------------------------------------------------
+# Core pipeline: read → lex → parse → typecheck → lower → print
+
+fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    src <- read_file(path)
+    cache <- module_loader.new_cache()
+    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
+    match lexer.tokenize(strip_headers(src, 0)) with
+    | Err e -> print(lex_err_msg(e))
+    | Ok tokens ->
+        match parser.parse_program(tokens) with
+        | Err e -> print(parse_err_msg(e))
+        | Ok prog ->
+            do
+              tc_result <- checker.typecheck_typed(prog, import_pairs)
+              match tc_result with
+              | typed_ast.TypedErr msg -> print("ERROR: check: " ++ msg)
+              | typed_ast.TypedOk typed_prog _ ->
+                  match lowering.lower_program(typed_prog) with
+                  | lowering.LowerErr msg -> print("ERROR: lower: " ++ msg)
+                  | lowering.LowerOk lowered ->
+                      do
+                        print("OK")
+                        match lowered with
+                        | ast.Program decls _ -> print_tc_names(decls)
+
+# ---------------------------------------------------------------------------
+# Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
+
+fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
+  match argv_get(idx) with
+  | Nothing   -> ()
+  | Just path ->
+      do
+        print("=== " ++ path ++ " ===")
+        run_file(path, stdlib_root)
+        run_batch(stdlib_root, idx + 1)
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing          -> print("ERROR: usage: lower-driver <stdlib-root> <file>...")
+  | Just stdlib_root -> run_batch(stdlib_root, 1)
