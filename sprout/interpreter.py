@@ -463,15 +463,20 @@ def eval_expr(expr: ast.Expr, env: Env, in_tail_position: bool = False) -> objec
             return left // right
 
         if expr.op in {"<", "<=", ">", ">="}:
-            if not isinstance(left, int) or not isinstance(right, int):
-                raise rt_error(f"Operator '{expr.op}' expects Int operands", expr)
+            if isinstance(left, str) and isinstance(right, str):
+                # Char comparisons — compare by Unicode code point
+                lv, rv = ord(left), ord(right)
+            elif isinstance(left, int) and isinstance(right, int):
+                lv, rv = left, right
+            else:
+                raise rt_error(f"Operator '{expr.op}' expects Int or Char operands", expr)
             if expr.op == "<":
-                return left < right
+                return lv < rv
             if expr.op == "<=":
-                return left <= right
+                return lv <= rv
             if expr.op == ">":
-                return left > right
-            return left >= right
+                return lv > rv
+            return lv >= rv
 
         if expr.op == "==":
             return left == right

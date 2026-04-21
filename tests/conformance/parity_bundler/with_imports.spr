@@ -1,0 +1,8 @@
+module main
+import stdlib.string as string
+
+fn greet(name: String) -> String =
+  string.concat("Hello, ", name)
+
+fn main() -> Unit !{IO} =
+  print(greet("world"))

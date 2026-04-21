@@ -17,7 +17,7 @@ import stdlib.compiler.checker as checker
 #   e.g. "import stdlib.collections (Vec, vec_get)" -> ImportSelective "stdlib.collections" ["Vec", "vec_get"]
 #   Only the listed names are exposed, unqualified.
 
-export type ImportSpec =
+export type ImportSpec (..) =
   | ImportAlias String String
   | ImportSelective String (List String)
 

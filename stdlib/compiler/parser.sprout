@@ -889,8 +889,10 @@ fn parse_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     (name_tok, i3) <- expected_ident("type name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     (_, i5) <- expected_symbol("=", tokens, skip_visibility(tokens, i4))
-    (ctors, i6) <- collect_type_constructors(tokens, i5, Nil)
-    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), cur_pos(tokens, i)), i6))
+    let i5b = skip_optional_bar(tokens, i5)
+    (first_ctor, i6) <- parse_type_constructor_def(tokens, i5b)
+    (ctors, i7) <- collect_type_constructors(tokens, i6, Cons(first_ctor, Nil))
+    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), cur_pos(tokens, i)), i7))
 
 fn skip_visibility(tokens: Vec token.Token, i: Int) -> Int =
   match match_symbol(tokens, i, "(") with
@@ -902,6 +904,12 @@ fn skip_visibility(tokens: Vec token.Token, i: Int) -> Int =
           match match_symbol(tokens, i3, ")") with
           | Nothing -> i
           | Just (_, i4) -> i4
+
+# Consume a leading '|' if present (Python parser does this too).
+fn skip_optional_bar(tokens: Vec token.Token, i: Int) -> Int =
+  match match_symbol(tokens, i, "|") with
+  | Nothing -> i
+  | Just (_, i2) -> i2
 
 fn collect_ident_list(tokens: Vec token.Token, i: Int, acc: List String) -> Result ParseError (List String, Int) =
   match match_ident(tokens, i) with
@@ -1021,10 +1029,11 @@ fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.D
     (_, i2) <- expected_keyword("class", tokens, i)
     (name_tok, i3) <- expected_ident("class name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
-    (_, i5) <- expected_symbol("{", tokens, i4)
-    (methods, i6) <- collect_class_method_sigs(tokens, i5, Nil)
-    (_, i7) <- expected_symbol("}", tokens, i6)
-    Ok((ast.ClassDecl(token.token_text(name_tok), list_reverse(params), methods, cur_pos(tokens, i)), i7))
+    (superclasses, i5) <- parse_optional_instance_constraints(tokens, i4)
+    (_, i6) <- expected_symbol("{", tokens, i5)
+    (methods, i7) <- collect_class_method_sigs(tokens, i6, Nil)
+    (_, i8) <- expected_symbol("}", tokens, i7)
+    Ok((ast.ClassDecl(token.token_text(name_tok), list_reverse(params), methods, superclasses, cur_pos(tokens, i)), i8))
 
 fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.InstanceMethodImpl, Int) =
   do

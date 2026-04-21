@@ -1,0 +1,45 @@
+module main
+import stdlib.compiler.ast as ast
+import stdlib.compiler.bundler as bundler
+
+# ---------------------------------------------------------------------------
+# Print top-level FnDecl names from a bundled ast.Program
+
+fn print_fn_names(decls: List ast.Decl) -> Unit !{IO} =
+  match decls with
+  | Nil -> ()
+  | Cons d rest ->
+      do
+        match d with
+        | ast.FnDecl name _ _ _ _ _ _ -> print(name)
+        | _ -> ()
+        print_fn_names(rest)
+
+# ---------------------------------------------------------------------------
+# Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
+
+fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- bundler.bundle_file(path, stdlib_root)
+    match result with
+    | bundler.BundleErr msg -> print("ERROR: " ++ msg)
+    | bundler.BundleOk prog ->
+        match prog with
+        | ast.Program decls _ ->
+            do
+              print("OK")
+              print_fn_names(decls)
+
+fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
+  match argv_get(idx) with
+  | Nothing   -> ()
+  | Just path ->
+      do
+        print("=== " ++ path ++ " ===")
+        run_file(path, stdlib_root)
+        run_batch(stdlib_root, idx + 1)
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing          -> print("ERROR: usage: bundle-driver <stdlib-root> <file>...")
+  | Just stdlib_root -> run_batch(stdlib_root, 1)

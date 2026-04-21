@@ -1,0 +1,930 @@
+module stdlib.compiler.bundler
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+import stdlib.compiler.parser as parser
+import stdlib.compiler.module_loader as module_loader
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+export type BundleResult (..) =
+  | BundleOk ast.Program
+  | BundleErr String
+
+# ---------------------------------------------------------------------------
+# Internal types
+# ---------------------------------------------------------------------------
+
+# A single loaded+parsed module file.
+#   ParsedModule module_name path specs exported ctor_types decls
+#   module_name : "" for prelude (no module header)
+#   exported    : names declared with `export` (fn / type / let / class)
+#   ctor_types  : subset of exported – type names whose ctors are exported (export type X(..))
+type ParsedModule =
+  | ParsedModule String String (List module_loader.ImportSpec) (List String) (List String) (List ast.Decl)
+
+# Per-module name tables.
+#   ModuleSymbols value_locals type_locals class_locals
+#                 exported_vals exported_types exported_cls
+#                 method_names ctor_exports
+type ModuleSymbols =
+  | ModuleSymbols
+      (Dict String) (Dict String) (Dict String)
+      (Dict String) (Dict String) (Dict String)
+      (List String) (Dict (Dict String))
+
+# Name-resolution context for qualifying one module's declarations.
+#   ResolveCtx value_locals type_locals class_locals
+#              method_names
+#              unqual_values unqual_types unqual_classes
+#              alias_val_exports alias_type_exports
+type ResolveCtx =
+  | ResolveCtx
+      (Dict String) (Dict String) (Dict String)
+      (List String)
+      (Dict String) (Dict String) (Dict String)
+      (Dict (Dict String)) (Dict (Dict String))
+
+# ---------------------------------------------------------------------------
+# ModuleSymbols accessors
+# ---------------------------------------------------------------------------
+
+fn sym_value_locals(s: ModuleSymbols) -> Dict String =
+  match s with | ModuleSymbols v _ _ _ _ _ _ _ -> v
+
+fn sym_type_locals(s: ModuleSymbols) -> Dict String =
+  match s with | ModuleSymbols _ t _ _ _ _ _ _ -> t
+
+fn sym_class_locals(s: ModuleSymbols) -> Dict String =
+  match s with | ModuleSymbols _ _ c _ _ _ _ _ -> c
+
+fn sym_exported_vals(s: ModuleSymbols) -> Dict String =
+  match s with | ModuleSymbols _ _ _ ev _ _ _ _ -> ev
+
+fn sym_exported_types(s: ModuleSymbols) -> Dict String =
+  match s with | ModuleSymbols _ _ _ _ et _ _ _ -> et
+
+fn sym_exported_cls(s: ModuleSymbols) -> Dict String =
+  match s with | ModuleSymbols _ _ _ _ _ ec _ _ -> ec
+
+fn sym_method_names(s: ModuleSymbols) -> List String =
+  match s with | ModuleSymbols _ _ _ _ _ _ mn _ -> mn
+
+fn sym_ctor_exports(s: ModuleSymbols) -> Dict (Dict String) =
+  match s with | ModuleSymbols _ _ _ _ _ _ _ ce -> ce
+
+# ---------------------------------------------------------------------------
+# ResolveCtx accessors
+# ---------------------------------------------------------------------------
+
+fn ctx_value_locals(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx v _ _ _ _ _ _ _ _ -> v
+
+fn ctx_type_locals(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx _ t _ _ _ _ _ _ _ -> t
+
+fn ctx_class_locals(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx _ _ cl _ _ _ _ _ _ -> cl
+
+fn ctx_method_names(c: ResolveCtx) -> List String =
+  match c with | ResolveCtx _ _ _ mn _ _ _ _ _ -> mn
+
+fn ctx_unqual_values(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx _ _ _ _ uv _ _ _ _ -> uv
+
+fn ctx_unqual_types(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx _ _ _ _ _ ut _ _ _ -> ut
+
+fn ctx_unqual_classes(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx _ _ _ _ _ _ uc _ _ -> uc
+
+fn ctx_alias_val_exports(c: ResolveCtx) -> Dict (Dict String) =
+  match c with | ResolveCtx _ _ _ _ _ _ _ ave _ -> ave
+
+fn ctx_alias_type_exports(c: ResolveCtx) -> Dict (Dict String) =
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ ate -> ate
+
+fn ctx_with_methods(c: ResolveCtx, extra: List String) -> ResolveCtx =
+  match c with
+  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
+      ResolveCtx(vl, tl, cl, list_append(mn, extra), uv, ut, uc, ave, ate)
+
+fn ctx_with_alias_val(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
+  match c with
+  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, dict_set(alias, exports, ave), ate)
+
+fn ctx_with_alias_type(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
+  match c with
+  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, ave, dict_set(alias, exports, ate))
+
+fn ctx_with_unqual_value(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
+  match c with
+  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
+      ResolveCtx(vl, tl, cl, mn, dict_set(name, canonical, uv), ut, uc, ave, ate)
+
+fn ctx_with_unqual_type(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
+  match c with
+  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
+      ResolveCtx(vl, tl, cl, mn, uv, dict_set(name, canonical, ut), uc, ave, ate)
+
+fn ctx_with_unqual_class(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
+  match c with
+  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, dict_set(name, canonical, uc), ave, ate)
+
+fn empty_resolve_ctx() -> ResolveCtx =
+  ResolveCtx(dict_empty(), dict_empty(), dict_empty(), Nil,
+             dict_empty(), dict_empty(), dict_empty(),
+             dict_empty(), dict_empty())
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+
+fn qualified_name(module_name: String, name: String) -> String =
+  if module_name == "" then name else module_name ++ "." ++ name
+
+fn str_list_member(name: String, lst: List String) -> Bool =
+  match lst with
+  | Nil -> false
+  | Cons h t -> if h == name then true else str_list_member(name, t)
+
+fn dict_get_or(key: String, d: Dict String, default: String) -> String =
+  match dict_get(key, d) with
+  | Nothing -> default
+  | Just v -> v
+
+fn split_at_dot(name: String) -> (String, String) =
+  if dot_pos == -1 then ("", name)
+  else (str_slice(name, 0, dot_pos), str_slice(name, dot_pos + 1, str_len(name)))
+  where dot_pos = str_find(name, ".")
+
+fn vec_to_str_list(v: Vec String, i: Int) -> List String =
+  if i >= vec_length(v) then Nil
+  else
+    match vec_get(i, v) with
+    | Nothing -> vec_to_str_list(v, i + 1)
+    | Just k -> Cons(k, vec_to_str_list(v, i + 1))
+
+fn dict_keys_list(d: Dict String) -> List String =
+  vec_to_str_list(dict_keys(d), 0)
+
+fn dict_keys_list_of_dicts(d: Dict (Dict String)) -> List String =
+  vec_to_str_list_of_dicts(dict_keys(d), 0)
+
+fn vec_to_str_list_of_dicts(v: Vec String, i: Int) -> List String =
+  if i >= vec_length(v) then Nil
+  else
+    match vec_get(i, v) with
+    | Nothing -> vec_to_str_list_of_dicts(v, i + 1)
+    | Just k -> Cons(k, vec_to_str_list_of_dicts(v, i + 1))
+
+fn dict_merge(d1: Dict String, d2: Dict String) -> Dict String =
+  dict_merge_keys(d1, dict_keys_list(d2), d2)
+
+fn dict_merge_keys(acc: Dict String, keys: List String, src: Dict String) -> Dict String =
+  match keys with
+  | Nil -> acc
+  | Cons k rest ->
+      match dict_get(k, src) with
+      | Nothing -> dict_merge_keys(acc, rest, src)
+      | Just v -> dict_merge_keys(dict_set(k, v, acc), rest, src)
+
+# ---------------------------------------------------------------------------
+# Source scanning: module name and export names from raw source text
+# ---------------------------------------------------------------------------
+
+fn find_newline(s: String, i: Int) -> Int =
+  if i >= str_len(s) then str_len(s)
+  else
+    match str_char_at(s, i) with
+    | Nothing -> str_len(s)
+    | Just ch -> if ch == '\n' then i else find_newline(s, i + 1)
+
+fn skip_spaces_in(s: String, i: Int) -> Int =
+  if i >= str_len(s) then i
+  else
+    match str_char_at(s, i) with
+    | Nothing -> i
+    | Just ch -> if ch == ' ' || ch == '\t' then skip_spaces_in(s, i + 1) else i
+
+fn is_ident_char(ch: Char) -> Bool =
+  (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+  (ch >= '0' && ch <= '9') || ch == '_'
+
+fn read_ident_chars(s: String, i: Int, acc: String) -> (String, Int) =
+  if i >= str_len(s) then (acc, i)
+  else
+    match str_char_at(s, i) with
+    | Nothing -> (acc, i)
+    | Just ch ->
+        if is_ident_char(ch) then read_ident_chars(s, i + 1, str_concat(acc, char_to_string(ch)))
+        else (acc, i)
+
+fn read_ident_at(s: String, i: Int) -> (String, Int) =
+  read_ident_chars(s, skip_spaces_in(s, i), "")
+
+# Read a dotted identifier like "stdlib.compiler.ast".
+fn read_dotted_ident_chars(s: String, i: Int, acc: String) -> (String, Int) =
+  if i >= str_len(s) then (acc, i)
+  else
+    match str_char_at(s, i) with
+    | Nothing -> (acc, i)
+    | Just ch ->
+        if is_ident_char(ch) then read_dotted_ident_chars(s, i + 1, str_concat(acc, char_to_string(ch)))
+        else if ch == '.' then
+          match str_char_at(s, i + 1) with
+          | Nothing -> (acc, i)
+          | Just next ->
+              if is_ident_char(next) then
+                read_dotted_ident_chars(s, i + 1, str_concat(acc, char_to_string(ch)))
+              else (acc, i)
+        else (acc, i)
+
+fn read_dotted_ident_at(s: String, i: Int) -> (String, Int) =
+  read_dotted_ident_chars(s, skip_spaces_in(s, i), "")
+
+fn has_ctor_export(s: String, i: Int) -> Bool =
+  str_starts_with(str_slice(s, skip_spaces_in(s, i), str_len(s)), "(..)")
+
+# Returns (module_name, exported_names, ctor_export_type_names).
+# Scans all lines for `module`, `export fn`, `export type`, `export let`, `export class`.
+export fn scan_source_info(src: String) -> (String, List String, List String) =
+  scan_lines(src, 0, "", Nil, Nil)
+
+fn scan_lines(src: String, i: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
+  if i >= str_len(src) then (mod_name, list_reverse(exported), list_reverse(ctor_types))
+  else
+    match process_line(src, i, find_newline(src, i), mod_name, exported, ctor_types) with
+    | (new_mod, new_exp, new_ctor) ->
+        scan_lines(src, find_newline(src, i) + 1, new_mod, new_exp, new_ctor)
+
+fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
+  if str_starts_with(str_slice(src, i, nl), "module ") then
+    match read_dotted_ident_at(src, i + 7) with
+    | (name, _) -> (name, exported, ctor_types)
+  else if str_starts_with(str_slice(src, i, nl), "export type ") then
+    match read_ident_at(src, i + 12) with
+    | ("", _) -> (mod_name, exported, ctor_types)
+    | (name, i2) ->
+        if has_ctor_export(src, i2) then
+          (mod_name, Cons(name, exported), Cons(name, ctor_types))
+        else
+          (mod_name, Cons(name, exported), ctor_types)
+  else if str_starts_with(str_slice(src, i, nl), "export fn ") then
+    match read_ident_at(src, i + 10) with
+    | ("", _) -> (mod_name, exported, ctor_types)
+    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
+  else if str_starts_with(str_slice(src, i, nl), "export let ") then
+    match read_ident_at(src, i + 11) with
+    | ("", _) -> (mod_name, exported, ctor_types)
+    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
+  else if str_starts_with(str_slice(src, i, nl), "export class ") then
+    match read_ident_at(src, i + 13) with
+    | ("", _) -> (mod_name, exported, ctor_types)
+    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
+  else
+    (mod_name, exported, ctor_types)
+
+# ---------------------------------------------------------------------------
+# Header stripping (strips module + import lines before parsing)
+# ---------------------------------------------------------------------------
+
+fn is_header_line_b(s: String, pos: Int) -> Bool =
+  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
+
+fn next_line_b(s: String, pos: Int) -> Int =
+  if nl == -1 then str_len(s)
+  else pos + nl + 1
+  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+
+fn strip_headers_b(s: String, pos: Int) -> String =
+  if pos >= str_len(s) then ""
+  else if is_header_line_b(s, pos) then strip_headers_b(s, next_line_b(s, pos))
+  else str_slice(s, pos, str_len(s))
+
+# ---------------------------------------------------------------------------
+# Topological DFS collection
+# ---------------------------------------------------------------------------
+
+fn prelude_path(stdlib_root: String) -> String =
+  stdlib_root ++ "/prelude.sprout"
+
+# visit_* functions return List String (Nil = success, Cons msg Nil = error).
+# We cannot use Maybe String !{IO} here because the typechecker's do-sequence
+# logic would treat Maybe String as a Maybe-monad bind (extracting String rather
+# than Maybe String) when used with <-.  List String avoids that.
+fn visit_imports(specs: List module_loader.ImportSpec, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
+  match specs with
+  | Nil -> Nil
+  | Cons spec rest ->
+      do
+        errs <- visit_one_import(spec, stdlib_root, visiting, seen, ordered)
+        match errs with
+        | Cons _ _ -> errs
+        | Nil -> visit_imports(rest, stdlib_root, visiting, seen, ordered)
+
+fn visit_one_import(spec: module_loader.ImportSpec, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
+  match spec with
+  | module_loader.ImportAlias mod_name _ ->
+      visit_by_name(mod_name, stdlib_root, visiting, seen, ordered)
+  | module_loader.ImportSelective mod_name _ ->
+      visit_by_name(mod_name, stdlib_root, visiting, seen, ordered)
+
+fn visit_by_name(mod_name: String, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
+  match module_loader.module_name_to_path(mod_name, stdlib_root) with
+  | Nothing -> Nil
+  | Just path -> visit_module(path, stdlib_root, visiting, seen, ordered)
+
+fn visit_module(path: String, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
+  do
+    seen_list <- ref_read(seen)
+    if str_list_member(path, seen_list) then Nil
+    else if str_list_member(path, visiting) then
+      Cons("Import cycle detected involving: " ++ path, Nil)
+    else
+      do
+        src <- read_file(path)
+        let specs = module_loader.collect_imports(src)
+        errs <- visit_imports(specs, stdlib_root, Cons(path, visiting), seen, ordered)
+        match errs with
+        | Cons _ _ -> errs
+        | Nil ->
+            do
+              match scan_source_info(src) with
+              | (mod_name, exported_names, ctor_type_names) ->
+                  match lexer.tokenize(strip_headers_b(src, 0)) with
+                  | Err e ->
+                      match e with
+                      | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
+                  | Ok tokens ->
+                      match parser.parse_program(tokens) with
+                      | Err e ->
+                          match e with
+                          | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
+                      | Ok prog ->
+                          do
+                            match prog with
+                            | ast.Program decls _ ->
+                                do
+                                  seen_now <- ref_read(seen)
+                                  ref_write(seen, Cons(path, seen_now))
+                                  ordered_now <- ref_read(ordered)
+                                  ref_write(ordered, Cons(ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
+                                  Nil
+
+# Collect all modules in topological order, optionally prepending the prelude.
+fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, List ParsedModule) !{IO} =
+  do
+    seen <- ref_new(Nil)
+    ordered <- ref_new(Nil)
+    errs <- visit_module(entry_path, stdlib_root, Nil, seen, ordered)
+    match errs with
+    | Cons e _ -> (Just(e), Nil)
+    | Nil ->
+        do
+          mods <- ref_read(ordered)
+          let rev_mods = list_reverse(mods)
+          if any_has_module_name(rev_mods) then
+            do
+              prelude_src <- read_file(prelude_path(stdlib_root))
+              match scan_source_info(prelude_src) with
+              | (_, prelude_exported, prelude_ctor_types) ->
+                  match lexer.tokenize(strip_headers_b(prelude_src, 0)) with
+                  | Err e ->
+                      match e with
+                      | token.TokenizeError msg _ -> (Just(str_concat("Lex error in prelude: ", msg)), Nil)
+                  | Ok tokens ->
+                      match parser.parse_program(tokens) with
+                      | Err e ->
+                          match e with
+                          | parser.ParseError msg _ -> (Just(str_concat("Parse error in prelude: ", msg)), Nil)
+                      | Ok prog ->
+                          match prog with
+                          | ast.Program decls _ ->
+                              (Nothing, Cons(ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
+          else
+            (Nothing, rev_mods)
+
+fn any_has_module_name(mods: List ParsedModule) -> Bool =
+  match mods with
+  | Nil -> false
+  | Cons mod rest ->
+      match mod with
+      | ParsedModule mod_name _ _ _ _ _ ->
+          if mod_name != "" then true else any_has_module_name(rest)
+
+# ---------------------------------------------------------------------------
+# Symbol table building
+# ---------------------------------------------------------------------------
+
+fn build_all_symbols(modules: List ParsedModule) -> Dict ModuleSymbols =
+  build_symbols_acc(modules, dict_empty())
+
+fn build_symbols_acc(modules: List ParsedModule, acc: Dict ModuleSymbols) -> Dict ModuleSymbols =
+  match modules with
+  | Nil -> acc
+  | Cons mod rest ->
+      match mod with
+      | ParsedModule mod_name path _ exported ctor_types decls ->
+          build_symbols_acc(rest, dict_set(path, build_module_symbols(mod_name, exported, ctor_types, decls), acc))
+
+fn build_module_symbols(mod_name: String, exported: List String, ctor_types: List String, decls: List ast.Decl) -> ModuleSymbols =
+  build_symbols_from_decls(mod_name, exported, ctor_types, decls,
+    ModuleSymbols(dict_empty(), dict_empty(), dict_empty(),
+                  dict_empty(), dict_empty(), dict_empty(),
+                  Nil, dict_empty()))
+
+fn build_symbols_from_decls(mod_name: String, exported: List String, ctor_types: List String, decls: List ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      build_symbols_from_decls(mod_name, exported, ctor_types, rest,
+        add_decl_to_symbols(mod_name, exported, ctor_types, d, acc))
+
+fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List String, decl: ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
+  match decl with
+  | ast.FnDecl name _ _ _ _ _ _ ->
+      add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+  | ast.LetDecl name _ _ ->
+      add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+  | ast.TypeDecl name _ ctors _ ->
+      add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
+  | ast.RecordDecl name _ _ _ ->
+      add_record_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+  | ast.ClassDecl name _ methods _ _ ->
+      add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
+  | ast.InstanceDecl _ _ _ _ -> acc
+  | ast.AliasDecl _ _ _ _ -> acc
+
+fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
+  match acc with
+  | ModuleSymbols vl tl cl ev et ec mn ce ->
+      ModuleSymbols(dict_set(name, canonical, vl), tl, cl,
+                    if is_exported then dict_set(name, canonical, ev) else ev,
+                    et, ec, mn, ce)
+  where canonical = qualified_name(mod_name, name)
+
+fn add_record_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
+  match acc with
+  | ModuleSymbols vl tl cl ev et ec mn ce ->
+      ModuleSymbols(vl, dict_set(name, canonical, tl), cl, ev,
+                    if is_exported then dict_set(name, canonical, et) else et,
+                    ec, mn, ce)
+  where canonical = qualified_name(mod_name, name)
+
+fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassMethodSig, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
+  match acc with
+  | ModuleSymbols vl tl cl ev et ec mn ce ->
+      ModuleSymbols(vl, tl, dict_set(name, canonical, cl), ev, et,
+                    if is_exported then dict_set(name, canonical, ec) else ec,
+                    list_append(mn, extract_method_names(methods)), ce)
+  where canonical = qualified_name(mod_name, name)
+
+fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
+  match methods with
+  | Nil -> Nil
+  | Cons sig rest ->
+      match sig with
+      | ast.ClassMethodSig name _ _ _ -> Cons(name, extract_method_names(rest))
+
+fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.TypeConstructor, exported: List String, ctor_types: List String, acc: ModuleSymbols) -> ModuleSymbols =
+  match acc with
+  | ModuleSymbols vl tl cl ev et ec mn ce ->
+      match add_ctors(mod_name, ctors, export_ctors, vl, ev, dict_empty()) with
+      | (new_vl, new_ev, ctor_map) ->
+          ModuleSymbols(new_vl,
+                        dict_set(type_name, canonical, tl),
+                        cl,
+                        new_ev,
+                        if is_type_exported then dict_set(type_name, canonical, et) else et,
+                        ec, mn,
+                        if export_ctors then dict_set(type_name, ctor_map, ce) else ce)
+  where canonical = qualified_name(mod_name, type_name)
+        is_type_exported = str_list_member(type_name, exported)
+        export_ctors = str_list_member(type_name, ctor_types)
+
+fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bool, vl: Dict String, ev: Dict String, ctor_map: Dict String) -> (Dict String, Dict String, Dict String) =
+  match ctors with
+  | Nil -> (vl, ev, ctor_map)
+  | Cons ctor rest ->
+      match ctor with
+      | ast.TypeConstructor ctor_name _ ->
+          add_ctors(mod_name, rest, export_ctors,
+            dict_set(ctor_name, qualified_name(mod_name, ctor_name), vl),
+            if export_ctors then dict_set(ctor_name, qualified_name(mod_name, ctor_name), ev) else ev,
+            if export_ctors then dict_set(ctor_name, qualified_name(mod_name, ctor_name), ctor_map) else ctor_map)
+
+# ---------------------------------------------------------------------------
+# Resolution context from imports
+# ---------------------------------------------------------------------------
+
+fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> ResolveCtx =
+  match mod with
+  | ParsedModule _ path specs _ _ _ ->
+      match dict_get(path, all_symbols) with
+      | Nothing -> empty_resolve_ctx()
+      | Just own_syms ->
+          apply_imports_to_ctx(specs, all_symbols, stdlib_root,
+            ResolveCtx(sym_value_locals(own_syms),
+                       sym_type_locals(own_syms),
+                       sym_class_locals(own_syms),
+                       sym_method_names(own_syms),
+                       dict_empty(), dict_empty(), dict_empty(),
+                       dict_empty(), dict_empty()))
+
+fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, ctx: ResolveCtx) -> ResolveCtx =
+  match specs with
+  | Nil -> ctx
+  | Cons spec rest ->
+      apply_imports_to_ctx(rest, all_symbols, stdlib_root,
+        apply_one_import(spec, all_symbols, stdlib_root, ctx))
+
+fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, ctx: ResolveCtx) -> ResolveCtx =
+  match spec with
+  | module_loader.ImportAlias mod_name alias ->
+      match module_loader.module_name_to_path(mod_name, stdlib_root) with
+      | Nothing -> ctx
+      | Just mod_path ->
+          match dict_get(mod_path, all_symbols) with
+          | Nothing -> ctx
+          | Just symbols ->
+              ctx_with_methods(
+                ctx_with_alias_type(
+                  ctx_with_alias_val(ctx, alias, sym_exported_vals(symbols)),
+                  alias, merge_type_exports(symbols)),
+                sym_method_names(symbols))
+  | module_loader.ImportSelective mod_name names ->
+      match module_loader.module_name_to_path(mod_name, stdlib_root) with
+      | Nothing -> ctx
+      | Just mod_path ->
+          match dict_get(mod_path, all_symbols) with
+          | Nothing -> ctx
+          | Just symbols ->
+              apply_selective_names(names, symbols, ctx)
+
+fn merge_type_exports(symbols: ModuleSymbols) -> Dict String =
+  dict_merge(sym_exported_types(symbols), sym_exported_cls(symbols))
+
+fn apply_selective_names(names: List String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+  match names with
+  | Nil -> ctx
+  | Cons name rest ->
+      apply_selective_names(rest, symbols, apply_selective_name(name, symbols, ctx))
+
+fn apply_selective_name(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+  try_add_method(name, symbols,
+    try_add_class(name, symbols,
+      try_add_type_with_ctors(name, symbols,
+        try_add_value(name, symbols, ctx))))
+
+fn try_add_value(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+  match dict_get(name, sym_exported_vals(symbols)) with
+  | Nothing -> ctx
+  | Just canonical -> ctx_with_unqual_value(ctx, name, canonical)
+
+fn try_add_type_with_ctors(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+  match dict_get(name, sym_exported_types(symbols)) with
+  | Nothing -> ctx
+  | Just canonical ->
+      match dict_get(name, sym_ctor_exports(symbols)) with
+      | Nothing -> ctx_with_unqual_type(ctx, name, canonical)
+      | Just ctor_map ->
+          add_ctor_map_to_ctx(ctor_map, dict_keys_list(ctor_map),
+            ctx_with_unqual_type(ctx, name, canonical))
+
+fn add_ctor_map_to_ctx(ctor_map: Dict String, ctor_names: List String, ctx: ResolveCtx) -> ResolveCtx =
+  match ctor_names with
+  | Nil -> ctx
+  | Cons ctor_name rest ->
+      match dict_get(ctor_name, ctor_map) with
+      | Nothing -> add_ctor_map_to_ctx(ctor_map, rest, ctx)
+      | Just canonical -> add_ctor_map_to_ctx(ctor_map, rest, ctx_with_unqual_value(ctx, ctor_name, canonical))
+
+fn try_add_class(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+  match dict_get(name, sym_exported_cls(symbols)) with
+  | Nothing -> ctx
+  | Just canonical -> ctx_with_unqual_class(ctx, name, canonical)
+
+fn try_add_method(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+  if str_list_member(name, sym_method_names(symbols)) then
+    ctx_with_methods(ctx, Cons(name, Nil))
+  else ctx
+
+# ---------------------------------------------------------------------------
+# AST qualification
+# ---------------------------------------------------------------------------
+
+fn param_names(params: List ast.Param) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.Param name _ -> Cons(name, param_names(rest))
+
+fn pattern_bindings(p: ast.Pattern) -> List String =
+  match p with
+  | ast.VarPattern name _ -> Cons(name, Nil)
+  | ast.TuplePattern items _ -> collect_pattern_bindings(items)
+  | ast.ConstructorPattern _ args _ -> collect_pattern_bindings(args)
+  | _ -> Nil
+
+fn collect_pattern_bindings(pats: List ast.Pattern) -> List String =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest -> list_append(pattern_bindings(p), collect_pattern_bindings(rest))
+
+fn qualify_params(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
+  match params with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.Param name Nothing -> Cons(ast.Param(name, Nothing), qualify_params(ctx, rest))
+      | ast.Param name (Just t) -> Cons(ast.Param(name, Just(qualify_type_expr(ctx, t))), qualify_params(ctx, rest))
+
+fn qualify_constraints(ctx: ResolveCtx, cs: List ast.TypeConstraint) -> List ast.TypeConstraint =
+  match cs with
+  | Nil -> Nil
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name args ->
+          Cons(ast.TypeConstraint(qualify_type_name(ctx, class_name), qualify_type_list(ctx, args)),
+               qualify_constraints(ctx, rest))
+
+fn qualify_type_list(ctx: ResolveCtx, ts: List ast.TypeExpr) -> List ast.TypeExpr =
+  match ts with
+  | Nil -> Nil
+  | Cons t rest -> Cons(qualify_type_expr(ctx, t), qualify_type_list(ctx, rest))
+
+fn qualify_type_expr(ctx: ResolveCtx, t: ast.TypeExpr) -> ast.TypeExpr =
+  match t with
+  | ast.TypeName name -> ast.TypeName(qualify_type_name(ctx, name))
+  | ast.TypeApply base arg -> ast.TypeApply(qualify_type_expr(ctx, base), qualify_type_expr(ctx, arg))
+  | ast.TypeArrow left right effects -> ast.TypeArrow(qualify_type_expr(ctx, left), qualify_type_expr(ctx, right), effects)
+  | ast.TypeEffect base effects -> ast.TypeEffect(qualify_type_expr(ctx, base), effects)
+  | ast.TupleType items -> ast.TupleType(qualify_type_list(ctx, items))
+
+fn qualify_type_name(ctx: ResolveCtx, name: String) -> String =
+  if str_find(name, ".") != -1 then qualify_qualified_type(ctx, name)
+  else
+    match dict_get(name, ctx_type_locals(ctx)) with
+    | Just canonical -> canonical
+    | Nothing ->
+        match dict_get(name, ctx_class_locals(ctx)) with
+        | Just canonical -> canonical
+        | Nothing ->
+            match dict_get(name, ctx_unqual_types(ctx)) with
+            | Just canonical -> canonical
+            | Nothing ->
+                match dict_get(name, ctx_unqual_classes(ctx)) with
+                | Just canonical -> canonical
+                | Nothing -> name
+
+fn qualify_qualified_type(ctx: ResolveCtx, name: String) -> String =
+  match split_at_dot(name) with
+  | ("", _) -> name
+  | (alias, symbol) ->
+      match dict_get(alias, ctx_alias_type_exports(ctx)) with
+      | Nothing -> name
+      | Just exports ->
+          match dict_get(symbol, exports) with
+          | Nothing -> name
+          | Just canonical -> canonical
+
+fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> String =
+  if str_list_member(name, scope) then name
+  else if str_find(name, ".") != -1 then qualify_qualified_value(ctx, name)
+  else
+    match dict_get(name, ctx_value_locals(ctx)) with
+    | Just canonical -> canonical
+    | Nothing ->
+        if str_list_member(name, ctx_method_names(ctx)) then name
+        else
+          match dict_get(name, ctx_unqual_values(ctx)) with
+          | Just canonical -> canonical
+          | Nothing -> name
+
+fn qualify_qualified_value(ctx: ResolveCtx, name: String) -> String =
+  match split_at_dot(name) with
+  | ("", _) -> name
+  | (alias, symbol) ->
+      match dict_get(alias, ctx_alias_val_exports(ctx)) with
+      | Nothing -> name
+      | Just exports ->
+          match dict_get(symbol, exports) with
+          | Nothing -> name
+          | Just canonical -> canonical
+
+fn qualify_pattern(ctx: ResolveCtx, p: ast.Pattern) -> ast.Pattern =
+  match p with
+  | ast.ConstructorPattern name args pos ->
+      ast.ConstructorPattern(qualify_value_name(ctx, Nil, name),
+                             qualify_pattern_list(ctx, args), pos)
+  | ast.TuplePattern items pos ->
+      ast.TuplePattern(qualify_pattern_list(ctx, items), pos)
+  | _ -> p
+
+fn qualify_pattern_list(ctx: ResolveCtx, ps: List ast.Pattern) -> List ast.Pattern =
+  match ps with
+  | Nil -> Nil
+  | Cons p rest -> Cons(qualify_pattern(ctx, p), qualify_pattern_list(ctx, rest))
+
+fn qualify_record_fields(ctx: ResolveCtx, scope: List String, fields: List ast.RecordField) -> List ast.RecordField =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordField fname expr ->
+          Cons(ast.RecordField(fname, qualify_expr(ctx, scope, expr)),
+               qualify_record_fields(ctx, scope, rest))
+
+fn qualify_match_branches(ctx: ResolveCtx, scope: List String, branches: List ast.MatchBranch) -> List ast.MatchBranch =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          Cons(ast.MatchBranch(qualify_pattern(ctx, pat),
+                               qualify_expr(ctx, list_append(scope, pattern_bindings(pat)), body)),
+               qualify_match_branches(ctx, scope, rest))
+
+fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep) -> List ast.DoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons step rest ->
+      match step with
+      | ast.DoBindStep pat expr ->
+          Cons(ast.DoBindStep(qualify_pattern(ctx, pat), qualify_expr(ctx, scope, expr)),
+               qualify_do_steps(ctx, list_append(scope, pattern_bindings(pat)), rest))
+      | ast.DoLetStep name expr ->
+          Cons(ast.DoLetStep(name, qualify_expr(ctx, scope, expr)),
+               qualify_do_steps(ctx, Cons(name, scope), rest))
+      | ast.DoExprStep expr ->
+          Cons(ast.DoExprStep(qualify_expr(ctx, scope, expr)),
+               qualify_do_steps(ctx, scope, rest))
+
+fn qualify_expr_list(ctx: ResolveCtx, scope: List String, exprs: List ast.Expr) -> List ast.Expr =
+  match exprs with
+  | Nil -> Nil
+  | Cons e rest -> Cons(qualify_expr(ctx, scope, e), qualify_expr_list(ctx, scope, rest))
+
+fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr =
+  match expr with
+  | ast.VarExpr name pos ->
+      ast.VarExpr(qualify_value_name(ctx, scope, name), pos)
+  | ast.IntExpr _ _ -> expr
+  | ast.BoolExpr _ _ -> expr
+  | ast.StringExpr _ _ -> expr
+  | ast.CharExpr _ _ -> expr
+  | ast.UnitExpr _ -> expr
+  | ast.TupleExpr items pos ->
+      ast.TupleExpr(qualify_expr_list(ctx, scope, items), pos)
+  | ast.IfExpr cond th el pos ->
+      ast.IfExpr(qualify_expr(ctx, scope, cond), qualify_expr(ctx, scope, th), qualify_expr(ctx, scope, el), pos)
+  | ast.MatchExpr scrutinee branches pos ->
+      ast.MatchExpr(qualify_expr(ctx, scope, scrutinee), qualify_match_branches(ctx, scope, branches), pos)
+  | ast.CallExpr callee args pos ->
+      ast.CallExpr(qualify_expr(ctx, scope, callee), qualify_expr_list(ctx, scope, args), pos)
+  | ast.LambdaExpr params body pos ->
+      ast.LambdaExpr(qualify_params(ctx, params), qualify_expr(ctx, list_append(scope, param_names(params)), body), pos)
+  | ast.BinaryExpr op left right pos ->
+      ast.BinaryExpr(op, qualify_expr(ctx, scope, left), qualify_expr(ctx, scope, right), pos)
+  | ast.UnaryExpr op operand pos ->
+      ast.UnaryExpr(op, qualify_expr(ctx, scope, operand), pos)
+  | ast.IntRangeExpr lo hi pos ->
+      ast.IntRangeExpr(qualify_expr(ctx, scope, lo), qualify_expr(ctx, scope, hi), pos)
+  | ast.DoExpr steps pos ->
+      ast.DoExpr(qualify_do_steps(ctx, scope, steps), pos)
+  | ast.RecordExpr type_name fields pos ->
+      ast.RecordExpr(qualify_type_name(ctx, type_name), qualify_record_fields(ctx, scope, fields), pos)
+  | ast.GetFieldExpr record field_name pos ->
+      ast.GetFieldExpr(qualify_expr(ctx, scope, record), field_name, pos)
+
+fn qualify_class_methods(ctx: ResolveCtx, methods: List ast.ClassMethodSig) -> List ast.ClassMethodSig =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | ast.ClassMethodSig name params ret_type effects ->
+          Cons(ast.ClassMethodSig(name, qualify_params(ctx, params), qualify_type_expr(ctx, ret_type), effects),
+               qualify_class_methods(ctx, rest))
+
+fn qualify_instance_methods(ctx: ResolveCtx, methods: List ast.InstanceMethodImpl) -> List ast.InstanceMethodImpl =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | ast.InstanceMethodImpl name params ret_type effects body ->
+          Cons(ast.InstanceMethodImpl(name,
+                                      qualify_params(ctx, params),
+                                      qualify_maybe_type(ctx, ret_type),
+                                      effects,
+                                      qualify_expr(ctx, param_names(params), body)),
+               qualify_instance_methods(ctx, rest))
+
+fn qualify_maybe_type(ctx: ResolveCtx, mt: Maybe ast.TypeExpr) -> Maybe ast.TypeExpr =
+  match mt with
+  | Nothing -> Nothing
+  | Just t -> Just(qualify_type_expr(ctx, t))
+
+fn qualify_ctor_args(ctx: ResolveCtx, ctors: List ast.TypeConstructor) -> List ast.TypeConstructor =
+  match ctors with
+  | Nil -> Nil
+  | Cons ctor rest ->
+      match ctor with
+      | ast.TypeConstructor name args ->
+          Cons(ast.TypeConstructor(name, qualify_type_list(ctx, args)),
+               qualify_ctor_args(ctx, rest))
+
+fn qualify_record_field_decls(ctx: ResolveCtx, fields: List ast.RecordFieldDecl) -> List ast.RecordFieldDecl =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordFieldDecl fname t ->
+          Cons(ast.RecordFieldDecl(fname, qualify_type_expr(ctx, t)),
+               qualify_record_field_decls(ctx, rest))
+
+fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
+  match decl with
+  | ast.FnDecl name params ret_type effects constraints body pos ->
+      ast.FnDecl(
+        dict_get_or(name, ctx_value_locals(ctx), name),
+        qualify_params(ctx, params),
+        qualify_maybe_type(ctx, ret_type),
+        effects,
+        qualify_constraints(ctx, constraints),
+        qualify_expr(ctx, param_names(params), body),
+        pos)
+  | ast.TypeDecl name type_params ctors pos ->
+      ast.TypeDecl(
+        dict_get_or(name, ctx_type_locals(ctx), name),
+        type_params,
+        qualify_ctor_args(ctx, ctors),
+        pos)
+  | ast.RecordDecl name type_params fields pos ->
+      ast.RecordDecl(
+        dict_get_or(name, ctx_type_locals(ctx), name),
+        type_params,
+        qualify_record_field_decls(ctx, fields),
+        pos)
+  | ast.LetDecl name body pos ->
+      ast.LetDecl(
+        dict_get_or(name, ctx_value_locals(ctx), name),
+        qualify_expr(ctx, Nil, body),
+        pos)
+  | ast.ClassDecl name type_params methods superclasses pos ->
+      ast.ClassDecl(
+        dict_get_or(name, ctx_class_locals(ctx), name),
+        type_params,
+        qualify_class_methods(ctx, methods),
+        qualify_constraints(ctx, superclasses),
+        pos)
+  | ast.InstanceDecl constraint instance_constraints methods pos ->
+      match constraint with
+      | ast.TypeConstraint class_name args ->
+          ast.InstanceDecl(
+            ast.TypeConstraint(qualify_type_name(ctx, class_name), qualify_type_list(ctx, args)),
+            qualify_constraints(ctx, instance_constraints),
+            qualify_instance_methods(ctx, methods),
+            pos)
+  | ast.AliasDecl name type_params rhs pos ->
+      ast.AliasDecl(name, type_params, qualify_type_expr(ctx, rhs), pos)
+
+fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> Cons(qualify_decl(ctx, d), qualify_decls(ctx, rest))
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+
+fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List ast.Decl =
+  match modules with
+  | Nil -> Nil
+  | Cons mod rest ->
+      match mod with
+      | ParsedModule _ _ _ _ _ decls ->
+          list_append(
+            qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root), decls),
+            qualify_all_modules(rest, all_symbols, stdlib_root))
+
+export fn bundle_file(path: String, stdlib_root: String) -> BundleResult !{IO} =
+  do
+    (err, modules) <- collect_modules(path, stdlib_root)
+    match err with
+    | Just msg -> BundleErr(msg)
+    | Nothing ->
+        BundleOk(ast.Program(
+          qualify_all_modules(modules, build_all_symbols(modules), stdlib_root),
+          dummy_pos()))

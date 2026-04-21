@@ -82,7 +82,7 @@ fn collect_class_order(decls: List typed_ast.TypedDecl, acc: Dict (List String))
       match d with
       | typed_ast.TPassThrough inner_decl ->
           match inner_decl with
-          | ast.ClassDecl class_name _ methods _ ->
+          | ast.ClassDecl class_name _ methods _ _ ->
               collect_class_order(rest, dict_set(class_name, extract_method_names(methods), acc))
           | _ -> collect_class_order(rest, acc)
       | _ -> collect_class_order(rest, acc)
@@ -159,7 +159,7 @@ fn lower_one_decl(
   | typed_ast.TPassThrough inner ->
       match inner with
       # Generate class method dispatch wrappers; drop ClassDecl from output.
-      | ast.ClassDecl class_name _ methods _ ->
+      | ast.ClassDecl class_name _ methods _ _ ->
           (user_rev,
            prepend_decls(generate_class_wrappers(class_name, methods, env_class_order(env)), wrapper_rev),
            inst_rev)

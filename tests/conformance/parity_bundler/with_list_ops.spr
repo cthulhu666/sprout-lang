@@ -1,0 +1,14 @@
+module main
+
+fn sum_list(xs: List Int) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons x rest -> x + sum_list(rest)
+
+fn map_add1(xs: List Int) -> List Int =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest -> Cons(x + 1, map_add1(rest))
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(sum_list(Cons(1, Cons(2, Cons(3, Nil))))))

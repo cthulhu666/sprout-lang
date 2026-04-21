@@ -104,6 +104,7 @@ Definition of done:
   - **module loading wired into type_driver + compile_driver**: `type_driver.sprout` and `compile_driver.sprout` now resolve imports via `module_loader.sprout` before typechecking; `sprout.cli bootstrap-check` passes `stdlib_root` so CLI path fully works; `BootstrapCheckParityTests` (11/11) added to `test_checker_parity.py` to verify `bootstrap-check` CLI output matches Python typechecker
   - **batch mode + import corpus landed**: both drivers now accept `<stdlib_root> <file>...` batch mode with `=== path ===` separators; `test_checker_parity.py` runs each driver once for all 13 files (7.6x speedup: 610s → 80s); `is_lowercase_name` fixed to reject qualified type names (e.g. `json.Json`); `dump_types.py` extended with `load_module_bundle` for import-using files; new `tests/conformance/parity_import/` corpus with 2 import-using files; parity corpus now 13/13 on both checkers
   - **M1 complete (14/14)**: `strip_module_prefix` in `lookup_type_var` fixes qualified annotation mismatch; `alias_env` threading through `typecheck_decls_inner` expands type aliases inline; `VarPattern` fix prevents cross-branch type leakage; all 14 `stdlib/compiler/*.sprout` modules pass `bootstrap-check`; Python recursion limit bumped to 20000
+  - **M3 complete**: `stdlib/compiler/bundler.sprout` implements full topological module loading, cycle detection, prelude injection, symbol table building, and name qualification; `bundle_driver.sprout` is a batch-mode executable; `test_bundler_parity.py` confirms 3/3 parity corpus files match Python's bundler output; interpreter extended with Char ordering support; self-hosted parser extended for single-constructor types + class superclasses; `ClassDecl` gains `superclasses` field; module name dotted-ident scanning fixed
 
 ### 7.5) Type Classes (Collections First)
 
@@ -171,12 +172,12 @@ The Python pipeline runs `lower_typeclasses` (1619-line Python pass) before eval
 - [x] `P0` Implement `stdlib/compiler/lowering.sprout`: dictionary-passing lowering that transforms `class`/`instance` declarations and constrained function calls into explicit dictionary parameters. `lower_program : TypedProgram -> LowerResult` typechecks clean (bootstrap-check green).
 - [x] `P0` Add parity tests: lowering output from `lowering.sprout` matches `sprout.typeclass_lowering` on a corpus of class-using files. `lower_driver.sprout` + `test_lowering_parity.py` cover concrete, polymorphic, and two-method cases; `__tc_*` instance-fn names agree on all 3 corpus files.
 
-### M3 — Module bundling + name qualification in Sprout
+### M3 — Module bundling + name qualification in Sprout ✓ DONE
 
 Python's `load_module_bundle` + `resolve_program_names` produces a flat, single-namespace source from multi-module programs. The bootstrap module loader only builds a type env — it doesn't produce a unified runnable AST.
 
-- [ ] `P0` Implement `stdlib/compiler/bundler.sprout`: given a file path and stdlib root, produce a bundled `ast.Program` with all imports inlined and names fully qualified.
-- [ ] `P0` Add parity tests: bundled AST matches Python's bundled source on the conformance corpus.
+- [x] `P0` Implement `stdlib/compiler/bundler.sprout`: given a file path and stdlib root, produce a bundled `ast.Program` with all imports inlined and names fully qualified.
+- [x] `P0` Add parity tests: bundled FnDecl names match Python's bundled source on the conformance corpus. `bundle_driver.sprout` + `test_bundler_parity.py` cover simple, import, and list-ops cases; all 3 pass. Runtime fixes: Char ordering comparisons (`>=` etc.) now work in the interpreter; self-hosted parser extended to handle single-constructor types (no leading `|`) and class superclass constraints (`where` clauses); `ClassDecl` gains a `superclasses: List TypeConstraint` field (5-field, was 4); module name scanning fixed to read dotted identifiers (`stdlib.string` not `stdlib`).
 
 ### M4 — End-to-end Sprout pipeline (wire M1–M3)
 

@@ -1447,7 +1447,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | ast.FnDecl name _ _ _ _ _ _ -> str_concat("fn:", name)
                   | ast.TypeDecl name _ _ _ -> str_concat("type:", name)
                   | ast.LetDecl name _ _ -> str_concat("let:", name)
-                  | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
+                  | ast.ClassDecl name _ _ _ _ -> str_concat("class:", name)
                   | ast.InstanceDecl _ _ _ _ -> "instance"
                   | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
                   | ast.AliasDecl name _ _ _ -> str_concat("alias:", name)
@@ -1550,7 +1550,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | ast.TypeDecl name _ _ _ -> str_concat("type:", name)
                   | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
                   | ast.LetDecl name _ _ -> str_concat("let:", name)
-                  | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
+                  | ast.ClassDecl name _ _ _ _ -> str_concat("class:", name)
                   | ast.InstanceDecl _ _ _ _ -> "instance"
                   | ast.AliasDecl name _ _ _ -> str_concat("alias:", name)
 

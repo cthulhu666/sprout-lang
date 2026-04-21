@@ -1496,7 +1496,7 @@ fn typecheck_decl(
                 env))
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env)
-  | ast.ClassDecl class_name type_params methods _ ->
+  | ast.ClassDecl class_name type_params methods _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         register_class_methods(type_params, methods,
           register_class_method_markers(class_name, methods, env)))
