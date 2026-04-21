@@ -1,4 +1,17 @@
 {
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar scaffold for the Sprout language",
+    "authors": [
+      {
+        "name": "OpenAI Codex"
+      }
+    ],
+    "links": {
+      "repository": "https://example.com/sprout-lang/tree-sitter-sprout"
+    }
+  },
   "grammars": [
     {
       "name": "sprout",

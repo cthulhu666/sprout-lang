@@ -14,9 +14,20 @@ module.exports = grammar({
   extras: ($) => [/\s/, $.comment],
 
   conflicts: ($) => [
-    [$.type_tuple, $.type_expression],
+    [$.type_expression, $.type_atom],
     [$.tuple_expression, $.parenthesized_expression],
-    [$.constructor_pattern, $.pattern],
+    [$.type_atom, $.qualified_identifier],
+    [$.type_constructor, $.type_atom, $.qualified_identifier],
+    [$.expression, $.qualified_identifier],
+    [$.expression, $.expression_atom],
+    [$.expression_atom, $.qualified_identifier],
+    [$.expression, $.expression_atom, $.qualified_identifier],
+    [$.pattern, $.qualified_identifier],
+    [$.expression, $.expression_atom, $.constructor_pattern],
+    [$.expression, $.constructor_pattern],
+    [$.literal, $.literal_pattern],
+    [$.expression, $.pattern, $.qualified_identifier],
+    [$.expression_atom, $.constructor_pattern],
   ],
 
   externals: ($) => [
@@ -46,7 +57,6 @@ module.exports = grammar({
     module_declaration: ($) => seq(
       "module",
       field("name", $.qualified_identifier),
-      optional($.newline),
     ),
 
     import_declaration: ($) => seq(
@@ -54,7 +64,6 @@ module.exports = grammar({
       field("module", $.qualified_identifier),
       optional(seq("as", $.identifier)),
       optional(seq("(", optional(commaSep($.identifier)), ")")),
-      optional($.newline),
     ),
 
     export_declaration: ($) => seq(
@@ -75,25 +84,22 @@ module.exports = grammar({
       repeat($.identifier),
       "=",
       choice($.record_type, $.type_expression, $.sum_type),
-      optional($.newline),
     ),
 
-    exported_class_declaration: ($) => seq(
+    exported_class_declaration: ($) => prec.right(seq(
       "class",
       field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
       optional($.class_body),
-      optional($.newline),
-    ),
+    )),
 
-    exported_instance_declaration: ($) => seq(
+    exported_instance_declaration: ($) => prec.right(seq(
       "instance",
       field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
       optional($.instance_body),
-      optional($.newline),
-    ),
+    )),
 
     exported_function_declaration: ($) => seq(
       "fn",
@@ -125,7 +131,6 @@ module.exports = grammar({
         $.type_expression,
         $.sum_type,
       ),
-      optional($.newline),
     ),
 
     sum_type: ($) => seq(
@@ -151,14 +156,13 @@ module.exports = grammar({
       repeat($.type_atom),
     ),
 
-    class_declaration: ($) => seq(
+    class_declaration: ($) => prec.right(seq(
       "class",
       field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
       optional($.class_body),
-      optional($.newline),
-    ),
+    )),
 
     class_body: ($) => seq(
       $.newline,
@@ -177,13 +181,12 @@ module.exports = grammar({
       $.type_expression,
     ),
 
-    instance_declaration: ($) => seq(
+    instance_declaration: ($) => prec.right(seq(
       "instance",
       field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
       optional($.instance_body),
-      optional($.newline),
-    ),
+    )),
 
     instance_body: ($) => seq(
       $.newline,
@@ -454,10 +457,10 @@ module.exports = grammar({
       ")",
     ),
 
-    constructor_pattern: ($) => seq(
+    constructor_pattern: ($) => prec.right(seq(
       $.qualified_identifier,
       repeat($.pattern),
-    ),
+    )),
 
     qualified_identifier: ($) => seq(
       $.identifier,
