@@ -71,3 +71,16 @@ match x with
           (qualified_identifier
             (identifier))))
       (int_literal))))
+
+==================
+do
+  let x = 1
+  x
+---
+(source_file
+  (do_expression
+    (do_let_step
+      (identifier)
+      (int_literal))
+    (do_expr_step
+      (identifier))))

@@ -161,9 +161,10 @@ module.exports = grammar({
     ),
 
     class_body: ($) => seq(
-      "{",
-      repeat($.class_method_signature),
-      "}",
+      $.newline,
+      $.indent,
+      repeat1($.class_method_signature),
+      $.dedent,
     ),
 
     class_method_signature: ($) => seq(
@@ -185,9 +186,10 @@ module.exports = grammar({
     ),
 
     instance_body: ($) => seq(
-      "{",
-      repeat($.instance_method),
-      "}",
+      $.newline,
+      $.indent,
+      repeat1($.instance_method),
+      $.dedent,
     ),
 
     instance_method: ($) => seq(
@@ -292,7 +294,10 @@ module.exports = grammar({
       "match",
       $.expression,
       "with",
+      $.newline,
+      $.indent,
       repeat1($.match_branch),
+      $.dedent,
     ),
 
     match_branch: ($) => seq(
@@ -304,7 +309,10 @@ module.exports = grammar({
 
     do_expression: ($) => seq(
       "do",
+      $.newline,
+      $.indent,
       repeat1($.do_step),
+      $.dedent,
     ),
 
     do_step: ($) => choice(

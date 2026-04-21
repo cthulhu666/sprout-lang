@@ -9,7 +9,7 @@ Current status:
 
 1. grammar shape is sketched in `grammar.js`
 2. layout-sensitive tokens are represented as external scanner hooks
-3. the scanner implementation is not finished yet
+3. the scanner implementation emits newline/indent/dedent tokens
 
 Sprout is indentation-sensitive in places, so a production grammar will need an
 external scanner or an equivalent layout-token strategy.
