@@ -45,13 +45,13 @@ module.exports = grammar({
 
     module_declaration: ($) => seq(
       "module",
-      $.qualified_identifier,
+      field("name", $.qualified_identifier),
       optional($.newline),
     ),
 
     import_declaration: ($) => seq(
       "import",
-      $.qualified_identifier,
+      field("module", $.qualified_identifier),
       optional(seq("as", $.identifier)),
       optional(seq("(", optional(commaSep($.identifier)), ")")),
       optional($.newline),
@@ -71,7 +71,7 @@ module.exports = grammar({
     exported_type_declaration: ($) => seq(
       "type",
       optional("alias"),
-      $.identifier,
+      field("name", $.identifier),
       repeat($.identifier),
       "=",
       choice($.record_type, $.type_expression, $.sum_type),
@@ -80,7 +80,7 @@ module.exports = grammar({
 
     exported_class_declaration: ($) => seq(
       "class",
-      $.identifier,
+      field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
       optional($.class_body),
@@ -89,7 +89,7 @@ module.exports = grammar({
 
     exported_instance_declaration: ($) => seq(
       "instance",
-      $.constraint,
+      field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
       optional($.instance_body),
       optional($.newline),
@@ -97,7 +97,7 @@ module.exports = grammar({
 
     exported_function_declaration: ($) => seq(
       "fn",
-      $.identifier,
+      field("name", $.identifier),
       "(",
       optional(commaSep($.param)),
       ")",
@@ -109,7 +109,7 @@ module.exports = grammar({
 
     exported_let_declaration: ($) => seq(
       "let",
-      $.identifier,
+      field("name", $.identifier),
       "=",
       $.expression,
     ),
@@ -117,7 +117,7 @@ module.exports = grammar({
     type_declaration: ($) => seq(
       "type",
       optional("alias"),
-      $.identifier,
+      field("name", $.identifier),
       repeat($.identifier),
       "=",
       choice(
@@ -147,13 +147,13 @@ module.exports = grammar({
     ),
 
     type_constructor: ($) => seq(
-      $.identifier,
+      field("name", $.identifier),
       repeat($.type_atom),
     ),
 
     class_declaration: ($) => seq(
       "class",
-      $.identifier,
+      field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
       optional($.class_body),
@@ -179,7 +179,7 @@ module.exports = grammar({
 
     instance_declaration: ($) => seq(
       "instance",
-      $.constraint,
+      field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
       optional($.instance_body),
       optional($.newline),
@@ -205,7 +205,7 @@ module.exports = grammar({
 
     function_declaration: ($) => seq(
       "fn",
-      $.identifier,
+      field("name", $.identifier),
       "(",
       optional(commaSep($.param)),
       ")",
@@ -217,7 +217,7 @@ module.exports = grammar({
 
     let_declaration: ($) => seq(
       "let",
-      $.identifier,
+      field("name", $.identifier),
       "=",
       $.expression,
     ),
@@ -225,12 +225,12 @@ module.exports = grammar({
     constraint_list: ($) => seq($.constraint, repeat(seq(",", $.constraint))),
 
     constraint: ($) => seq(
-      $.identifier,
+      field("class", $.identifier),
       repeat($.type_atom),
     ),
 
     param: ($) => seq(
-      $.identifier,
+      field("name", $.identifier),
       optional(seq(":", $.type_expression)),
     ),
 
