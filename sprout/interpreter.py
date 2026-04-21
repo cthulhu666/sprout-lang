@@ -629,8 +629,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     import sys as _sys
     # The bootstrap typechecker is deeply recursive when interpreted; give it
     # more headroom than the default 1000 frames.
-    if _sys.getrecursionlimit() < 10000:
-        _sys.setrecursionlimit(10000)
+    if _sys.getrecursionlimit() < 20000:
+        _sys.setrecursionlimit(20000)
     elaborate_program(program)
     out = stdout
     runtime_in = sys.stdin

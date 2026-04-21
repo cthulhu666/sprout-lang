@@ -103,6 +103,7 @@ Definition of done:
   - **GHC-style forall variable ordering landed**: both Python and bootstrap Sprout checkers now use left-to-right first-appearance ordering for forall vars; bootstrap `scheme_to_string` now renames bound vars to a, b, c… in that order (matching Python); `poly_types.spr` (multi-param ADTs, `Either`, `Pair`) added to checker parity corpus (now 11/11)
   - **module loading wired into type_driver + compile_driver**: `type_driver.sprout` and `compile_driver.sprout` now resolve imports via `module_loader.sprout` before typechecking; `sprout.cli bootstrap-check` passes `stdlib_root` so CLI path fully works; `BootstrapCheckParityTests` (11/11) added to `test_checker_parity.py` to verify `bootstrap-check` CLI output matches Python typechecker
   - **batch mode + import corpus landed**: both drivers now accept `<stdlib_root> <file>...` batch mode with `=== path ===` separators; `test_checker_parity.py` runs each driver once for all 13 files (7.6x speedup: 610s → 80s); `is_lowercase_name` fixed to reject qualified type names (e.g. `json.Json`); `dump_types.py` extended with `load_module_bundle` for import-using files; new `tests/conformance/parity_import/` corpus with 2 import-using files; parity corpus now 13/13 on both checkers
+  - **M1 complete (14/14)**: `strip_module_prefix` in `lookup_type_var` fixes qualified annotation mismatch; `alias_env` threading through `typecheck_decls_inner` expands type aliases inline; `VarPattern` fix prevents cross-branch type leakage; all 14 `stdlib/compiler/*.sprout` modules pass `bootstrap-check`; Python recursion limit bumped to 20000
 
 ### 7.5) Type Classes (Collections First)
 
@@ -154,17 +155,14 @@ Goal: a native binary produced by `sprout compile stdlib/compiler/compile_driver
 
 Five ordered milestones. Each is a prerequisite for the next.
 
-### M1 — Bootstrap self-typecheck (blocker: qualified types + type aliases)
+### M1 — Bootstrap self-typecheck ✓ DONE
 
-The bootstrap checker must successfully typecheck all `stdlib/compiler/*.sprout` modules.
-Current state: 5/14 pass; 9 fail on two root causes:
+The bootstrap checker successfully typechecks all `stdlib/compiler/*.sprout` modules (14/14).
 
-- **Qualified type name mismatch**: `ast.TypeExpr` (TConst from user annotation) ≠ `TypeExpr` (TConst from imported module env). Affects checker, compiler, driver, infer, lexer, parser, type_driver.
-- **Type alias non-expansion**: `ModuleCache` (TConst) ≠ `Ref Dict ...` (concrete type). Affects module_loader. The bootstrap checker skips `AliasDecl` but never substitutes aliases in type expressions.
-
-- [ ] `P0` Fix qualified type name resolution in bootstrap checker: when a type annotation contains a qualified name `alias.X`, strip the alias prefix (or map to fully-qualified canonical) so it unifies with `TConst("X")` from the imported module's env.
-- [ ] `P0` Implement type alias expansion in bootstrap checker: track `AliasDecl` entries in the checker env and substitute them in `type_from_ast` so `ModuleCache` expands to its definition before unification.
-- [ ] `P0` Add a self-typecheck test: `bootstrap-check` on all `stdlib/compiler/*.sprout` modules passes (14/14 green).
+- [x] `P0` Fix qualified type name resolution in bootstrap checker: `strip_module_prefix` in `lookup_type_var` normalises `ast.TypeExpr` → `TypeExpr` so annotations unify with the imported module env.
+- [x] `P0` Implement type alias expansion in bootstrap checker: `alias_env: Dict types.Type` threaded through `typecheck_decls_inner` → `typecheck_decl` → `check_fn_body` → `scheme_from_fn_parts`; aliases collected inline as `AliasDecl` nodes are processed (in order, no pre-scan).
+- [x] `P0` VarPattern cross-branch type leakage fixed: `infer_pattern` for `VarPattern` now records `name → expected` in the substitution so each match branch starts with the correct binding rather than leaking from a sibling branch.
+- [x] `P0` Add a self-typecheck test: `bootstrap-check` on all `stdlib/compiler/*.sprout` modules passes (14/14 green).
 
 ### M2 — Type class lowering in Sprout
 

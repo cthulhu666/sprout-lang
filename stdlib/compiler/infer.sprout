@@ -44,15 +44,24 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
   | ast.TypeEffect inner _ -> type_from_ast(inner, local_vars)
   | ast.TupleType parts -> types.TTuple(type_list_from_ast(parts, local_vars))
 
+# Strip module prefix from a qualified type name, e.g. "ast.TypeExpr" -> "TypeExpr".
+# Recurses to handle multi-segment paths like "stdlib.compiler.ast.TypeExpr".
+# Plain names (no dot) are returned as-is.
+fn strip_module_prefix(name: String) -> String =
+  if dot == -1 then name
+  else strip_module_prefix(str_slice(name, dot + 1, str_len(name)))
+  where dot = str_find(name, ".")
+
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   match dict_get(name, local_vars) with
   | Just t -> t
-  | Nothing -> types.TConst(name)
+  | Nothing -> types.TConst(strip_module_prefix(name))
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
   | Nil -> Nil
   | Cons h t -> Cons(type_from_ast(h, local_vars), type_list_from_ast(t, local_vars))
+
 
 export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
   match labels with
@@ -77,19 +86,21 @@ export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect 
 export fn scheme_from_fn_decl(decl: ast.Decl) -> types.Scheme =
   match decl with
   | ast.FnDecl _ params ret_type_maybe effects_maybe _ _ _ ->
-      scheme_from_fn_parts(params, ret_type_maybe, effects_maybe)
+      scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, dict_empty())
   | _ -> types.mono(types.TConst("Unit"))
 
 fn scheme_from_fn_parts(
   params: List ast.Param,
   ret_type_maybe: Maybe ast.TypeExpr,
-  effects_maybe: Maybe (List String)
+  effects_maybe: Maybe (List String),
+  alias_env: Dict types.Type
 ) -> types.Scheme =
   scheme_from_fn_parts_inner(
     collect_ret_type_vars(ret_type_maybe, collect_param_type_vars(params, Nil)),
     params,
     ret_type_maybe,
-    effects_maybe
+    effects_maybe,
+    alias_env
   )
 
 fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List String =
@@ -152,7 +163,8 @@ fn scheme_from_fn_parts_inner(
   type_params: List String,
   params: List ast.Param,
   ret_type_maybe: Maybe ast.TypeExpr,
-  effects_maybe: Maybe (List String)
+  effects_maybe: Maybe (List String),
+  alias_env: Dict types.Type
 ) -> types.Scheme =
   types.Scheme(
     type_params,
@@ -160,7 +172,7 @@ fn scheme_from_fn_parts_inner(
     build_fn_type(param_types_from_decl(params, local_vars), ret_from_maybe_with_vars(ret_type_maybe, local_vars)),
     effect_from_maybe_labels(effects_maybe)
   )
-  where local_vars = build_type_var_dict(type_params, dict_empty())
+  where local_vars = build_type_var_dict(type_params, alias_env)
 
 fn param_types_from_decl(params: List ast.Param, local_vars: Dict types.Type) -> List types.Type =
   match params with
@@ -711,7 +723,7 @@ export fn infer_pattern(
 ) -> InferResult !{IO} =
   match pat with
   | ast.WildcardPattern _ -> InferOk(expected, subst, eff_subst, types.EffectPure)
-  | ast.VarPattern _ _ -> InferOk(expected, subst, eff_subst, types.EffectPure)
+  | ast.VarPattern name _ -> InferOk(expected, dict_set(name, expected, subst), eff_subst, types.EffectPure)
   | ast.IntPattern _ _ ->
       check_pattern_type(subst, eff_subst, expected, types.type_int(), "Int")
   | ast.BoolPattern _ _ ->
@@ -1159,32 +1171,48 @@ export fn typecheck_decls(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> DeclResult !{IO} =
+  typecheck_decls_inner(state, decls, env, subst, eff_subst, dict_empty())
+
+fn typecheck_decls_inner(
+  state: unifier.InferState,
+  decls: List ast.Decl,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type
+) -> DeclResult !{IO} =
   match decls with
   | Nil -> DeclOk(env)
   | Cons decl rest ->
-      do
-        r <- typecheck_decl(state, decl, env, subst, eff_subst)
-        match r with
-        | DeclErr e -> DeclErr(e)
-        | DeclOk new_env -> typecheck_decls(state, rest, new_env, subst, eff_subst)
+      match decl with
+      | ast.AliasDecl name Nil rhs_te _ ->
+          typecheck_decls_inner(state, rest, env, subst, eff_subst,
+            dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
+      | _ ->
+          do
+            r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env)
+            match r with
+            | DeclErr e -> DeclErr(e)
+            | DeclOk new_env -> typecheck_decls_inner(state, rest, new_env, subst, eff_subst, alias_env)
 
 fn typecheck_decl(
   state: unifier.InferState,
   decl: ast.Decl,
   env: Dict types.Scheme,
   subst: Dict types.Type,
-  eff_subst: Dict types.Effect
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type
 ) -> DeclResult !{IO} =
   match decl with
   | ast.TypeDecl _ _ _ _ -> DeclOk(register_type_decl(decl, env))
   | ast.RecordDecl rec_name type_params fields _ ->
       DeclOk(register_record_fields(rec_name, type_params, fields, env))
-  | ast.FnDecl name _ _ _ _ _ _ ->
+  | ast.FnDecl name params ret_type_maybe effects_maybe _ _ _ ->
       do
-        r <- check_fn_body(state, decl, env, subst, eff_subst)
+        r <- check_fn_body(state, decl, env, subst, eff_subst, alias_env)
         match r with
         | DeclErr e -> DeclErr(e)
-        | DeclOk _ -> DeclOk(dict_set(name, scheme_from_fn_decl(decl), env))
+        | DeclOk _ -> DeclOk(dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
   | ast.LetDecl name expr _ ->
       do
         r <- infer_expr(state, env, subst, eff_subst, expr)
@@ -1223,12 +1251,13 @@ fn check_fn_body(
   decl: ast.Decl,
   env: Dict types.Scheme,
   subst: Dict types.Type,
-  eff_subst: Dict types.Effect
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type
 ) -> DeclResult !{IO} =
   match decl with
-  | ast.FnDecl name params _ _ _ body _ ->
+  | ast.FnDecl name params ret_type_maybe effects_maybe _ body _ ->
       do
-        inst_type <- unifier.instantiate(state, scheme_from_fn_decl(decl))
+        inst_type <- unifier.instantiate(state, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env))
         br <- infer_expr(state, fn_body_env(name, params, inst_type, env), subst, eff_subst, body)
         match br with
         | InferErr msg -> fn_body_err(name, msg)
@@ -1279,7 +1308,7 @@ fn register_class_methods(type_params: List String, methods: List ast.ClassMetho
 fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match sig with
   | ast.ClassMethodSig name params ret_type effects_maybe ->
-      dict_set(name, scheme_from_fn_parts_inner(type_params, params, Just(ret_type), effects_maybe), env)
+      dict_set(name, scheme_from_fn_parts_inner(type_params, params, Just(ret_type), effects_maybe, dict_empty()), env)
 
 fn register_class_method_markers(class_name: String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -1345,7 +1374,7 @@ fn check_instance_method(
   match method with
   | ast.InstanceMethodImpl name params ret_maybe eff_maybe body ->
       do
-        inst_type <- unifier.instantiate(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe))
+        inst_type <- unifier.instantiate(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty()))
         br <- infer_expr(state, extend_env_with_params(params, ctor_param_types(inst_type), env), subst, eff_subst, body)
         match br with
         | InferErr msg -> instance_method_err(name, msg)
