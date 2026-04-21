@@ -148,6 +148,51 @@ Definition of done:
 - [ ] `P1` Add filtering/sorting controls.
 - [ ] `P2` Add search and pagination UI.
 
+## Minimum Viable Path to Escape Python
+
+Goal: a native binary produced by `sprout compile stdlib/compiler/compile_driver.sprout` that can compile itself without Python involvement.
+
+Five ordered milestones. Each is a prerequisite for the next.
+
+### M1 — Bootstrap self-typecheck (blocker: qualified types + type aliases)
+
+The bootstrap checker must successfully typecheck all `stdlib/compiler/*.sprout` modules.
+Current state: 5/14 pass; 9 fail on two root causes:
+
+- **Qualified type name mismatch**: `ast.TypeExpr` (TConst from user annotation) ≠ `TypeExpr` (TConst from imported module env). Affects checker, compiler, driver, infer, lexer, parser, type_driver.
+- **Type alias non-expansion**: `ModuleCache` (TConst) ≠ `Ref Dict ...` (concrete type). Affects module_loader. The bootstrap checker skips `AliasDecl` but never substitutes aliases in type expressions.
+
+- [ ] `P0` Fix qualified type name resolution in bootstrap checker: when a type annotation contains a qualified name `alias.X`, strip the alias prefix (or map to fully-qualified canonical) so it unifies with `TConst("X")` from the imported module's env.
+- [ ] `P0` Implement type alias expansion in bootstrap checker: track `AliasDecl` entries in the checker env and substitute them in `type_from_ast` so `ModuleCache` expands to its definition before unification.
+- [ ] `P0` Add a self-typecheck test: `bootstrap-check` on all `stdlib/compiler/*.sprout` modules passes (14/14 green).
+
+### M2 — Type class lowering in Sprout
+
+The Python pipeline runs `lower_typeclasses` (1619-line Python pass) before evaluation/codegen. Without a Sprout equivalent, the self-hosted pipeline can only handle class-free programs.
+
+- [ ] `P0` Implement `stdlib/compiler/lowering.sprout`: dictionary-passing lowering that transforms `class`/`instance` declarations and constrained function calls into explicit dictionary parameters.
+- [ ] `P0` Add parity tests: lowering output from `lowering.sprout` matches `sprout.typeclass_lowering` on a corpus of class-using files.
+
+### M3 — Module bundling + name qualification in Sprout
+
+Python's `load_module_bundle` + `resolve_program_names` produces a flat, single-namespace source from multi-module programs. The bootstrap module loader only builds a type env — it doesn't produce a unified runnable AST.
+
+- [ ] `P0` Implement `stdlib/compiler/bundler.sprout`: given a file path and stdlib root, produce a bundled `ast.Program` with all imports inlined and names fully qualified.
+- [ ] `P0` Add parity tests: bundled AST matches Python's bundled source on the conformance corpus.
+
+### M4 — End-to-end Sprout pipeline (wire M1–M3)
+
+- [ ] `P0` Add `compile_full` to `stdlib/compiler/compiler.sprout`: runs bundle → lex/parse → name-qualify → typecheck → lower in sequence, entirely in Sprout.
+- [ ] `P0` Route `sprout.cli bootstrap-check` through `compile_full` for at least one real program end-to-end.
+
+### M5 — Stage-0 bootstrap compile + self-compilation check
+
+- [ ] `P0` `sprout compile stdlib/compiler/compile_driver.sprout` produces a working native binary (uses existing LLVM codegen — Python-hosted, one-time).
+- [ ] `P0` Run that binary to compile itself (`stage-1`); verify output is bit-for-bit identical to stage-0 (`bootstrap-check`).
+- [ ] `P0` Add CI step: stage-0 → stage-1 reproducibility check.
+
+---
+
 ## Current Snapshot
 
 - [x] Modules with explicit exports (`export`) are implemented.
