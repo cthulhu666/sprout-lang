@@ -60,10 +60,21 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
                   match prog with
                   | ast.Program decls _ -> checker.dump_typed_names(decls, env)
 
+# ---------------------------------------------------------------------------
+# Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
+# Prints "=== <path> ===" before each file's typed-name output so the caller
+# can split results by file without a separate subprocess per file.
+
+fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
+  match argv_get(idx) with
+  | Nothing    -> ()
+  | Just path  ->
+      do
+        print("=== " ++ path ++ " ===")
+        run_file(path, stdlib_root)
+        run_batch(stdlib_root, idx + 1)
+
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing    -> print("ERROR: usage: type-driver <file> [stdlib-root]")
-  | Just path  ->
-      match argv_get(1) with
-      | Nothing          -> run_file(path, "")
-      | Just stdlib_root -> run_file(path, stdlib_root)
+  | Nothing          -> print("ERROR: usage: type-driver <stdlib-root> <file>...")
+  | Just stdlib_root -> run_batch(stdlib_root, 1)

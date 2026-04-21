@@ -68,10 +68,20 @@ fn run_with_src(src: String, stdlib_root: String) -> Unit !{IO} =
           | Nothing    -> ()
           | Just decls -> checker.dump_typed_names(decls, env)
 
+# ---------------------------------------------------------------------------
+# Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
+# Prints "=== <path> ===" before each file's output.
+
+fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
+  match argv_get(idx) with
+  | Nothing    -> ()
+  | Just path  ->
+      do
+        print("=== " ++ path ++ " ===")
+        run_file(path, stdlib_root)
+        run_batch(stdlib_root, idx + 1)
+
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing   -> print("ERROR: usage: compile-driver <file> <stdlib-root>")
-  | Just path ->
-      match argv_get(1) with
-      | Nothing       -> print("ERROR: usage: compile-driver <file> <stdlib-root>")
-      | Just sroot    -> run_file(path, sroot)
+  | Nothing          -> print("ERROR: usage: compile-driver <stdlib-root> <file>...")
+  | Just stdlib_root -> run_batch(stdlib_root, 1)

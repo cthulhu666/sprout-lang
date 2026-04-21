@@ -9,6 +9,9 @@ Output format (one line per user-declared name, in declaration order):
 Used for parity testing against stdlib/compiler/type_driver.sprout in
 tests/test_checker_parity.py.
 
+For files with import headers (import stdlib.X as alias), load_module_bundle
+is used to resolve imports and build the full type env before typechecking.
+
 Usage:
     python tools/dump_types.py <file.spr>
 """
@@ -16,12 +19,14 @@ from __future__ import annotations
 
 import sys
 import os
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sprout import parse
 import sprout.ast as ast
 from sprout.typechecker import typecheck_program, Scheme, TFunc, TApp, TConst, TVar, PURE_EFFECT
+from sprout.module_loader import load_module_bundle, resolve_program_names
 
 _a = TVar("a")
 _b = TVar("b")
@@ -101,6 +106,31 @@ def user_declared_names(prog: ast.Program):
         # ClassDecl, InstanceDecl, RecordDecl: skipped (matches Sprout side)
 
 
+def _strip_headers(src: str) -> str:
+    """Strip leading module/import/blank lines (mirrors strip_headers in bootstrap compiler)."""
+    lines = src.split("\n")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("module ") or stripped.startswith("import "):
+            i += 1
+        else:
+            break
+    return "\n".join(lines[i:])
+
+
+def _has_import_headers(src: str) -> bool:
+    """Return True if the source starts with import lines."""
+    for line in src.split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("module "):
+            continue
+        if stripped.startswith("import "):
+            return True
+        break
+    return False
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("usage: dump_types.py <file.spr>", file=sys.stderr)
@@ -113,17 +143,34 @@ def main() -> None:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        prog = parse(src)
-    except Exception as e:
-        print(f"ERROR: parse: {e}")
-        sys.exit(1)
-
-    try:
-        type_map = typecheck_program(prog, seed_env=PRELUDE_SEED_ENV)
-    except Exception as e:
-        print(f"ERROR: check: {e}")
-        sys.exit(1)
+    if _has_import_headers(src):
+        # File has imports: use load_module_bundle for full type env.
+        # Parse only the stripped body to get user-declared names.
+        try:
+            body = _strip_headers(src)
+            prog = parse(body)
+        except Exception as e:
+            print(f"ERROR: parse: {e}")
+            sys.exit(1)
+        try:
+            bundle = load_module_bundle(Path(path))
+            bundled_tree = parse(bundle.source)
+            resolve_program_names(bundled_tree, bundle)
+            type_map = typecheck_program(bundled_tree)
+        except Exception as e:
+            print(f"ERROR: check: {e}")
+            sys.exit(1)
+    else:
+        try:
+            prog = parse(src)
+        except Exception as e:
+            print(f"ERROR: parse: {e}")
+            sys.exit(1)
+        try:
+            type_map = typecheck_program(prog, seed_env=PRELUDE_SEED_ENV)
+        except Exception as e:
+            print(f"ERROR: check: {e}")
+            sys.exit(1)
 
     for name in user_declared_names(prog):
         val = type_map.get(name, "<not found>")
