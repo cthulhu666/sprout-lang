@@ -1448,7 +1448,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | ast.TypeDecl name _ _ _ -> str_concat("type:", name)
                   | ast.LetDecl name _ _ -> str_concat("let:", name)
                   | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
-                  | ast.InstanceDecl _ _ _ -> "instance"
+                  | ast.InstanceDecl _ _ _ _ -> "instance"
                   | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
                   | ast.AliasDecl name _ _ _ -> str_concat("alias:", name)
 
@@ -1551,7 +1551,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | ast.RecordDecl name _ _ _ -> str_concat("record:", name)
                   | ast.LetDecl name _ _ -> str_concat("let:", name)
                   | ast.ClassDecl name _ _ _ -> str_concat("class:", name)
-                  | ast.InstanceDecl _ _ _ -> "instance"
+                  | ast.InstanceDecl _ _ _ _ -> "instance"
                   | ast.AliasDecl name _ _ _ -> str_concat("alias:", name)
 
                 fn join_decls(decls: List ast.Decl, acc: String) -> String =
@@ -3334,13 +3334,14 @@ class ModuleLoaderTests(unittest.TestCase):
                 import stdlib.compiler.source as source
                 import stdlib.compiler.ast as ast
                 import stdlib.compiler.types as types
+                import stdlib.compiler.typed_ast as typed_ast
                 import stdlib.compiler.unifier as unifier
                 import stdlib.compiler.infer as infer
 
                 fn show_infer(r: infer.InferResult) -> String =
                   match r with
                   | infer.InferErr msg -> "Err:" ++ msg
-                  | infer.InferOk t _ _ _ -> types.type_to_string(t)
+                  | infer.InferOk te _ _ _ -> types.type_to_string(typed_ast.typed_expr_type(te))
 
                 fn main() -> Unit !{IO} =
                   do

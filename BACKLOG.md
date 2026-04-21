@@ -168,7 +168,7 @@ The bootstrap checker successfully typechecks all `stdlib/compiler/*.sprout` mod
 
 The Python pipeline runs `lower_typeclasses` (1619-line Python pass) before evaluation/codegen. Without a Sprout equivalent, the self-hosted pipeline can only handle class-free programs.
 
-- [ ] `P0` Implement `stdlib/compiler/lowering.sprout`: dictionary-passing lowering that transforms `class`/`instance` declarations and constrained function calls into explicit dictionary parameters.
+- [x] `P0` Implement `stdlib/compiler/lowering.sprout`: dictionary-passing lowering that transforms `class`/`instance` declarations and constrained function calls into explicit dictionary parameters. `lower_program : TypedProgram -> LowerResult` typechecks clean (bootstrap-check green).
 - [ ] `P0` Add parity tests: lowering output from `lowering.sprout` matches `sprout.typeclass_lowering` on a corpus of class-using files.
 
 ### M3 — Module bundling + name qualification in Sprout

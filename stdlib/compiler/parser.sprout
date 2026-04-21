@@ -1051,10 +1051,19 @@ fn parse_instance_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (as
   do
     (_, i2) <- expected_keyword("instance", tokens, i)
     (constraint, i3) <- parse_type_constraint(tokens, i2)
-    (_, i4) <- expected_symbol("{", tokens, i3)
-    (methods, i5) <- collect_instance_methods(tokens, i4, Nil)
-    (_, i6) <- expected_symbol("}", tokens, i5)
-    Ok((ast.InstanceDecl(constraint, methods, cur_pos(tokens, i)), i6))
+    (inst_constraints, i4) <- parse_optional_instance_constraints(tokens, i3)
+    (_, i5) <- expected_symbol("{", tokens, i4)
+    (methods, i6) <- collect_instance_methods(tokens, i5, Nil)
+    (_, i7) <- expected_symbol("}", tokens, i6)
+    Ok((ast.InstanceDecl(constraint, inst_constraints, methods, cur_pos(tokens, i)), i7))
+
+fn parse_optional_instance_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
+  match match_keyword(tokens, i, "where") with
+  | Nothing -> Ok((Nil, i))
+  | Just (_, i2) ->
+      do
+        (cs, i3) <- collect_constraints(tokens, i2, Nil)
+        Ok((list_reverse(cs), i3))
 
 fn parse_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   parse_decl_body(tokens, skip_export(tokens, i))

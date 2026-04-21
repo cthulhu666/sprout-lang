@@ -2,37 +2,38 @@ module stdlib.compiler.infer
 import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
-# Inference result
+# Inference result types
 # ---------------------------------------------------------------------------
-#
-# infer_expr returns:
-#   type       — the inferred type
-#   subst      — the extended substitution
-#   eff_subst  — the extended effect substitution
-#   effect     — the effect of evaluating this expression
-#
-# We use a custom ADT rather than Result to avoid do-notation classifier
-# confusion when mixing IO and Result monad in the same do block.
 
 export type InferResult (..) =
-  | InferOk types.Type (Dict types.Type) (Dict types.Effect) types.Effect
+  | InferOk typed_ast.TypedExpr (Dict types.Type) (Dict types.Effect) types.Effect
   | InferErr String
+
+type InferArgsResult =
+  | ArgsOk (List typed_ast.TypedExpr) (Dict types.Type) (Dict types.Effect) types.Effect
+  | ArgsErr String
+
+type CallResult =
+  | CallOk types.Type (Dict types.Type) (Dict types.Effect) types.Effect
+  | CallErr String
+
+# Internal per-decl result (not exported; callers see TypedResult).
+type TypedDeclResult =
+  | TypedDeclOk typed_ast.TypedDecl (Dict types.Scheme)
+  | TypedDeclErr String
+
+# Internal single-method result.
+type InstanceMethodResult =
+  | InstanceMethodOk typed_ast.TypedInstanceMethod
+  | InstanceMethodErr String
 
 # ---------------------------------------------------------------------------
 # Type-expression → Type
 # ---------------------------------------------------------------------------
-#
-# Converts a parsed AST TypeExpr into a runtime types.Type.
-# local_vars maps named type parameters in scope to their TVar.
-#
-# AST constructors (from ast.sprout):
-#   TypeName String
-#   TypeApply TypeExpr TypeExpr
-#   TypeArrow TypeExpr TypeExpr (Maybe (List String))   -- param -> ret !{eff}
-#   TypeEffect TypeExpr (List String)                   -- type !{eff}
-#   TupleType (List TypeExpr)
 
 export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match te with
@@ -44,9 +45,6 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
   | ast.TypeEffect inner _ -> type_from_ast(inner, local_vars)
   | ast.TupleType parts -> types.TTuple(type_list_from_ast(parts, local_vars))
 
-# Strip module prefix from a qualified type name, e.g. "ast.TypeExpr" -> "TypeExpr".
-# Recurses to handle multi-segment paths like "stdlib.compiler.ast.TypeExpr".
-# Plain names (no dot) are returned as-is.
 fn strip_module_prefix(name: String) -> String =
   if dot == -1 then name
   else strip_module_prefix(str_slice(name, dot + 1, str_len(name)))
@@ -61,7 +59,6 @@ fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> 
   match parts with
   | Nil -> Nil
   | Cons h t -> Cons(type_from_ast(h, local_vars), type_list_from_ast(t, local_vars))
-
 
 export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
   match labels with
@@ -79,9 +76,6 @@ export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect 
 # ---------------------------------------------------------------------------
 # Build a Scheme from a FnDecl
 # ---------------------------------------------------------------------------
-#
-# FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr SourcePos
-#         name   params       ret_type          effects               constraints            body  pos
 
 export fn scheme_from_fn_decl(decl: ast.Decl) -> types.Scheme =
   match decl with
@@ -123,11 +117,8 @@ fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
   | ast.TypeName name ->
       if is_lowercase_name(name) then list_add_unique(name, acc) else acc
   | ast.TypeApply base arg ->
-      # Left-to-right order: process base first, then arg.
-      # Use append-based list_add_unique so new vars go to the end of the list.
       collect_te_vars(arg, collect_te_vars(base, acc))
   | ast.TypeArrow param ret _ ->
-      # Left-to-right order: process param first, then ret.
       collect_te_vars(ret, collect_te_vars(param, acc))
   | ast.TypeEffect inner _ -> collect_te_vars(inner, acc)
   | ast.TupleType parts -> collect_te_vars_list(parts, acc)
@@ -193,11 +184,8 @@ fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
   | Cons p rest -> types.TFunc(p, build_fn_type(rest, ret), types.EffectPure)
 
 # ---------------------------------------------------------------------------
-# Constructor registration from TypeDecl / TypeConstructor
+# Constructor registration
 # ---------------------------------------------------------------------------
-#
-# TypeDecl String (List String) (List TypeConstructor) SourcePos
-# TypeConstructor String (List TypeExpr)   -- name, field types
 
 export fn register_type_decl(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
@@ -267,6 +255,71 @@ fn merge_effects(a: types.Effect, b: types.Effect) -> types.Effect =
   | _ -> a
 
 # ---------------------------------------------------------------------------
+# List helpers (type-specific reverse functions)
+# ---------------------------------------------------------------------------
+
+fn list_reverse(xs: List types.Type) -> List types.Type =
+  list_rev_acc(xs, Nil)
+
+fn list_rev_acc(xs: List types.Type, acc: List types.Type) -> List types.Type =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> list_rev_acc(t, Cons(h, acc))
+
+fn typed_expr_list_reverse(xs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  typed_expr_rev_acc(xs, Nil)
+
+fn typed_expr_rev_acc(xs: List typed_ast.TypedExpr, acc: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> typed_expr_rev_acc(t, Cons(h, acc))
+
+fn typed_branch_list_reverse(xs: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
+  typed_branch_rev_acc(xs, Nil)
+
+fn typed_branch_rev_acc(xs: List typed_ast.TypedMatchBranch, acc: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> typed_branch_rev_acc(t, Cons(h, acc))
+
+fn typed_do_step_list_reverse(xs: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
+  typed_do_step_rev_acc(xs, Nil)
+
+fn typed_do_step_rev_acc(xs: List typed_ast.TypedDoStep, acc: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> typed_do_step_rev_acc(t, Cons(h, acc))
+
+fn typed_record_field_list_reverse(xs: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
+  typed_record_field_rev_acc(xs, Nil)
+
+fn typed_record_field_rev_acc(xs: List typed_ast.TypedRecordField, acc: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> typed_record_field_rev_acc(t, Cons(h, acc))
+
+fn typed_decl_list_reverse(xs: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
+  typed_decl_rev_acc(xs, Nil)
+
+fn typed_decl_rev_acc(xs: List typed_ast.TypedDecl, acc: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> typed_decl_rev_acc(t, Cons(h, acc))
+
+fn typed_method_list_reverse(xs: List typed_ast.TypedInstanceMethod) -> List typed_ast.TypedInstanceMethod =
+  typed_method_rev_acc(xs, Nil)
+
+fn typed_method_rev_acc(xs: List typed_ast.TypedInstanceMethod, acc: List typed_ast.TypedInstanceMethod) -> List typed_ast.TypedInstanceMethod =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> typed_method_rev_acc(t, Cons(h, acc))
+
+fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+
+fn dummy_unit() -> typed_ast.TypedExpr =
+  typed_ast.TUnit(types.TConst("Unit"), dummy_pos())
+
+# ---------------------------------------------------------------------------
 # Expression inference
 # ---------------------------------------------------------------------------
 
@@ -278,28 +331,25 @@ export fn infer_expr(
   expr: ast.Expr
 ) -> InferResult !{IO} =
   match expr with
-  | ast.IntExpr _ _ -> InferOk(types.type_int(), subst, eff_subst, types.EffectPure)
-  | ast.BoolExpr _ _ -> InferOk(types.type_bool(), subst, eff_subst, types.EffectPure)
-  | ast.StringExpr _ _ -> InferOk(types.type_string(), subst, eff_subst, types.EffectPure)
-  | ast.CharExpr _ _ -> InferOk(types.type_char(), subst, eff_subst, types.EffectPure)
-  | ast.UnitExpr _ -> InferOk(types.TConst("Unit"), subst, eff_subst, types.EffectPure)
-  | ast.VarExpr name _ -> infer_var(state, env, subst, eff_subst, name)
-  | ast.IfExpr cond then_ else_ _ -> infer_if(state, env, subst, eff_subst, cond, then_, else_)
-  | ast.CallExpr callee args _ ->
-      infer_call(state, env, subst, eff_subst, callee, args)
-  | ast.MatchExpr scrut branches _ -> infer_match(state, env, subst, eff_subst, scrut, branches)
-  | ast.TupleExpr elems _ -> infer_tuple(state, env, subst, eff_subst, elems)
-  | ast.BinaryExpr op left right _ -> infer_binary(state, env, subst, eff_subst, op, left, right)
-  | ast.DoExpr steps _ -> infer_do(state, env, subst, eff_subst, steps)
-  | ast.LambdaExpr params body _ -> infer_lambda(state, env, subst, eff_subst, params, body)
-  | ast.RecordExpr type_name fields _ ->
-      infer_record_expr(state, env, subst, eff_subst, type_name, fields)
-  | ast.GetFieldExpr rec_expr field_name _ ->
-      infer_get_field(state, env, subst, eff_subst, rec_expr, field_name)
-  | _ ->
-      do
-        v <- unifier.fresh(state)
-        InferOk(types.TVar(v), subst, eff_subst, types.EffectPure)
+  | ast.IntExpr v pos -> InferOk(typed_ast.TInt(v, types.type_int(), pos), subst, eff_subst, types.EffectPure)
+  | ast.BoolExpr v pos -> InferOk(typed_ast.TBool(v, types.type_bool(), pos), subst, eff_subst, types.EffectPure)
+  | ast.StringExpr v pos -> InferOk(typed_ast.TString(v, types.type_string(), pos), subst, eff_subst, types.EffectPure)
+  | ast.CharExpr v pos -> InferOk(typed_ast.TChar(v, types.type_char(), pos), subst, eff_subst, types.EffectPure)
+  | ast.UnitExpr pos -> InferOk(typed_ast.TUnit(types.TConst("Unit"), pos), subst, eff_subst, types.EffectPure)
+  | ast.VarExpr name pos -> infer_var(state, env, subst, eff_subst, name, pos)
+  | ast.IfExpr cond then_ else_ pos -> infer_if(state, env, subst, eff_subst, cond, then_, else_, pos)
+  | ast.CallExpr callee args pos -> infer_call(state, env, subst, eff_subst, callee, args, pos)
+  | ast.MatchExpr scrut branches pos -> infer_match(state, env, subst, eff_subst, scrut, branches, pos)
+  | ast.TupleExpr elems pos -> infer_tuple(state, env, subst, eff_subst, elems, pos)
+  | ast.BinaryExpr op left right pos -> infer_binary(state, env, subst, eff_subst, op, left, right, pos)
+  | ast.UnaryExpr op operand pos -> infer_unary(state, env, subst, eff_subst, op, operand, pos)
+  | ast.DoExpr steps pos -> infer_do(state, env, subst, eff_subst, steps, pos)
+  | ast.LambdaExpr params body pos -> infer_lambda(state, env, subst, eff_subst, params, body, pos)
+  | ast.RecordExpr type_name fields pos ->
+      infer_record_expr(state, env, subst, eff_subst, type_name, fields, pos)
+  | ast.GetFieldExpr rec_expr field_name pos ->
+      infer_get_field(state, env, subst, eff_subst, rec_expr, field_name, pos)
+  | ast.IntRangeExpr lo hi pos -> infer_range(state, env, subst, eff_subst, lo, hi, pos)
 
 # --- Variable ---
 
@@ -308,14 +358,15 @@ fn infer_var(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  name: String
+  name: String,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
   | Nothing -> InferErr("Unknown variable: " ++ name)
   | Just scheme ->
       do
         t <- unifier.instantiate(state, scheme)
-        InferOk(t, subst, eff_subst, types.EffectPure)
+        InferOk(typed_ast.TVar(name, t, pos), subst, eff_subst, types.EffectPure)
 
 # --- If ---
 
@@ -326,54 +377,60 @@ fn infer_if(
   eff_subst: Dict types.Effect,
   cond: ast.Expr,
   then_: ast.Expr,
-  else_: ast.Expr
+  else_: ast.Expr,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
     cr <- infer_expr(state, env, subst, eff_subst, cond)
     match cr with
     | InferErr e -> InferErr(e)
-    | InferOk cond_type s1 es1 cond_eff ->
-        infer_if_checked(state, env, s1, es1, cond_type, cond_eff, then_, else_)
+    | InferOk typed_cond s1 es1 cond_eff ->
+        infer_if_checked(state, env, s1, es1, typed_cond, cond_eff, then_, else_, pos)
 
 fn infer_if_checked(
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  cond_type: types.Type,
+  typed_cond: typed_ast.TypedExpr,
   cond_eff: types.Effect,
   then_: ast.Expr,
-  else_: ast.Expr
+  else_: ast.Expr,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, cond_type, types.type_bool()) with
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_cond), types.type_bool()) with
   | Err e -> InferErr("If condition must be Bool: " ++ e)
   | Ok s2 ->
       do
         tr <- infer_expr(state, env, s2, eff_subst, then_)
         match tr with
         | InferErr e -> InferErr(e)
-        | InferOk then_type s3 es3 then_eff ->
+        | InferOk typed_then s3 es3 then_eff ->
             do
               er <- infer_expr(state, env, s3, es3, else_)
               match er with
               | InferErr e -> InferErr(e)
-              | InferOk else_type s4 es4 else_eff ->
-                  infer_if_merge(s4, es4, then_type, else_type, cond_eff, then_eff, else_eff)
+              | InferOk typed_else s4 es4 else_eff ->
+                  infer_if_merge(s4, es4, typed_cond, typed_then, typed_else,
+                                 cond_eff, then_eff, else_eff, pos)
 
 fn infer_if_merge(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  then_type: types.Type,
-  else_type: types.Type,
+  typed_cond: typed_ast.TypedExpr,
+  typed_then: typed_ast.TypedExpr,
+  typed_else: typed_ast.TypedExpr,
   cond_eff: types.Effect,
   then_eff: types.Effect,
-  else_eff: types.Effect
+  else_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, then_type, else_type) with
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_then), typed_ast.typed_expr_type(typed_else)) with
   | Err e -> InferErr("If branches must have same type: " ++ e)
   | Ok s5 ->
       InferOk(
-        unifier.apply_subst(s5, then_type),
+        typed_ast.TIf(typed_cond, typed_then, typed_else,
+                      unifier.apply_subst(s5, typed_ast.typed_expr_type(typed_then)), pos),
         s5, eff_subst,
         merge_effects(cond_eff, merge_effects(then_eff, else_eff))
       )
@@ -386,98 +443,146 @@ fn infer_call(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   callee: ast.Expr,
-  args: List ast.Expr
+  args: List ast.Expr,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
     cr <- infer_expr(state, env, subst, eff_subst, callee)
     match cr with
     | InferErr e -> InferErr(e)
-    | InferOk callee_type s1 es1 callee_eff ->
+    | InferOk typed_callee s1 es1 callee_eff ->
         do
           ar <- infer_args_acc(state, env, s1, es1, args, Nil, types.EffectPure)
           match ar with
-          | InferErr e -> InferErr(e)
-          | InferOk arg_types s2 es2 args_eff ->
+          | ArgsErr e -> InferErr(e)
+          | ArgsOk typed_args s2 es2 args_eff ->
               do
                 v <- unifier.fresh(state)
-                r <- infer_call_resolve(s2, es2, callee_type, arg_types, types.TVar(v), merge_effects(callee_eff, args_eff))
+                r <- infer_call_resolve(
+                  s2, es2,
+                  typed_ast.typed_expr_type(typed_callee),
+                  list_map(\e -> typed_ast.typed_expr_type(e), typed_args),
+                  types.TVar(v),
+                  merge_effects(callee_eff, args_eff))
                 match r with
-                | InferErr e -> InferErr(e)
-                | InferOk ret_t s3 es3 call_eff ->
-                    check_call_constraint(callee, arg_types, s3, env, ret_t, s3, es3, call_eff)
+                | CallErr e -> InferErr(e)
+                | CallOk ret_t s3 es3 call_eff ->
+                    check_call_constraint(callee, typed_callee, typed_args, s3, env, ret_t, s3, es3, call_eff, pos)
 
 fn infer_call_resolve(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   callee_type: types.Type,
-  arg_types: types.Type,
+  arg_types: List types.Type,
   ret_type: types.Type,
   eff: types.Effect
-) -> InferResult !{IO} =
-  match unifier.unify_types(subst, callee_type, build_fn_type(extract_ttuple(arg_types), ret_type)) with
-  | Err e -> InferErr("Call type mismatch: " ++ e)
-  | Ok s3 -> InferOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
+) -> CallResult !{IO} =
+  match unifier.unify_types(subst, callee_type, build_fn_type(arg_types, ret_type)) with
+  | Err e -> CallErr("Call type mismatch: " ++ e)
+  | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
 
 # --- Constraint checking ---
 #
-# Class methods are registered in the env under "@class:{method_name}" →
-# mono(TConst(class_name)).  Instance head types are registered under
-# "@inst:{class_name}:{head_type_str}" → mono(TConst("Unit")).
-# Both are stored in the ordinary env, avoiding a separate ClassEnv parameter.
+# Class methods are registered under "@class:{method_name}" and instances
+# under "@inst:{class_name}:{head_type_str}".  At concrete call sites a
+# TDict evidence node is prepended to the argument list.
 #
-# At call sites: if the callee is a named class method AND the first argument
-# type is concrete (not a TVar), we verify that a matching instance exists.
-# Polymorphic call sites (TVar first argument) are not checked — constraint
-# resolution for those is deferred to dictionary-passing lowering.
+# At polymorphic call sites (first arg is a type variable) the typechecker
+# uses forward markers seeded into the env by check_fn_body /
+# check_instance_method.  A marker has key "@fwd:{fresh_var}:{class_name}"
+# and stores the programmer's type-variable name as TConst in the scheme.
+# When the marker is found, a TDict with the programmer-name constraint is
+# emitted so the lowering pass can forward the appropriate hidden parameter.
 
 fn check_call_constraint(
   callee: ast.Expr,
-  arg_types: types.Type,
+  typed_callee: typed_ast.TypedExpr,
+  typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme,
   ret_t: types.Type,
   s3: Dict types.Type,
   es3: Dict types.Effect,
-  call_eff: types.Effect
+  call_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match callee with
   | ast.VarExpr method_name _ ->
       match dict_get("@class:" ++ method_name, env) with
-      | Nothing -> InferOk(ret_t, s3, es3, call_eff)
+      | Nothing -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
       | Just class_marker ->
-          check_instance_for_marker(class_marker, arg_types, subst, env, ret_t, s3, es3, call_eff)
-  | _ -> InferOk(ret_t, s3, es3, call_eff)
+          check_instance_for_marker(class_marker, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
+  | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
 fn check_instance_for_marker(
   class_marker: types.Scheme,
-  arg_types: types.Type,
+  typed_callee: typed_ast.TypedExpr,
+  typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme,
   ret_t: types.Type,
   s3: Dict types.Type,
   es3: Dict types.Effect,
-  call_eff: types.Effect
+  call_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match class_marker with
   | types.Scheme _ _ class_type _ ->
       match class_type with
       | types.TConst class_name ->
-          match first_concrete_arg_str(arg_types, subst) with
-          | Nothing -> InferOk(ret_t, s3, es3, call_eff)
+          match first_concrete_typed_arg_str(typed_args, subst) with
           | Just head_str ->
               match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
               | Nothing -> InferErr("No instance of " ++ class_name ++ " for " ++ head_str)
-              | Just _ -> InferOk(ret_t, s3, es3, call_eff)
-      | _ -> InferOk(ret_t, s3, es3, call_eff)
+              | Just _ ->
+                  InferOk(
+                    typed_ast.TCall(typed_callee,
+                      Cons(typed_ast.TDict(
+                        ast.TypeConstraint(class_name, Cons(ast.TypeName(head_str), Nil)),
+                        types.TConst(class_name), pos),
+                        typed_args),
+                      ret_t, pos),
+                    s3, es3, call_eff)
+          | Nothing ->
+              # Polymorphic call — try to forward from a @fwd marker in env.
+              match first_tvar_head_after_subst(typed_args, subst) with
+              | Nothing -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+              | Just tvar_name ->
+                  match dict_get("@fwd:" ++ tvar_name ++ ":" ++ class_name, env) with
+                  | Nothing -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+                  | Just fwd_scheme ->
+                      match fwd_scheme with
+                      | types.Scheme _ _ (types.TConst prog_var) _ ->
+                          InferOk(
+                            typed_ast.TCall(typed_callee,
+                              Cons(typed_ast.TDict(
+                                ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
+                                types.TConst(class_name), pos),
+                                typed_args),
+                              ret_t, pos),
+                            s3, es3, call_eff)
+                      | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+      | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
-fn first_concrete_arg_str(arg_types: types.Type, subst: Dict types.Type) -> Maybe String =
-  match arg_types with
-  | types.TTuple items ->
-      match items with
-      | Nil -> Nothing
-      | Cons first_t _ ->
-          concrete_type_str(unifier.apply_subst(subst, first_t))
-  | _ -> concrete_type_str(unifier.apply_subst(subst, arg_types))
+fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe String =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg _ ->
+      concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)))
+
+# Returns the outermost TVar name of the first arg after substitution.
+# Used to look up @fwd:{tvar}:{class} forward markers for polymorphic dispatch.
+fn first_tvar_head_after_subst(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe String =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg _ ->
+      tvar_head_of_type(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)))
+
+fn tvar_head_of_type(t: types.Type) -> Maybe String =
+  match t with
+  | types.TVar name -> Just(name)
+  | types.TApp base _ -> tvar_head_of_type(base)
+  | _ -> Nothing
 
 fn type_head_str(t: types.Type) -> String =
   match t with
@@ -491,10 +596,39 @@ fn concrete_type_str(t: types.Type) -> Maybe String =
   | types.TVar _ -> Nothing
   | _ -> Just(type_head_str(t))
 
-fn extract_ttuple(ts: types.Type) -> List types.Type =
-  match ts with
-  | types.TTuple items -> items
-  | _ -> Cons(ts, Nil)
+# --- Forward marker helpers ---
+#
+# seed_forward_markers adds "@fwd:{fresh_var}:{class_name}" entries to env
+# for each constraint, enabling polymorphic dispatch in check_instance_for_marker.
+# prog_to_fresh maps programmer type-var names (e.g., "a") to their fresh
+# instantiation TVars (e.g., TVar("a42")).
+
+fn seed_forward_markers(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match constraints with
+  | Nil -> env
+  | Cons c rest ->
+      seed_forward_markers(rest, prog_to_fresh, seed_one_constraint_marker(c, prog_to_fresh, env))
+
+fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> env
+      | Cons head_te _ ->
+          match head_te with
+          | ast.TypeName prog_var ->
+              match dict_get(prog_var, prog_to_fresh) with
+              | Nothing -> env
+              | Just fresh_t ->
+                  match fresh_t with
+                  | types.TVar fresh_name ->
+                      # Store prog_var name in the scheme value for retrieval in check_instance_for_marker.
+                      dict_set("@fwd:" ++ fresh_name ++ ":" ++ class_name,
+                               types.mono(types.TConst(prog_var)), env)
+                  | _ -> env
+          | _ -> env
+
+# --- Args accumulator ---
 
 fn infer_args_acc(
   state: unifier.InferState,
@@ -502,26 +636,18 @@ fn infer_args_acc(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   args: List ast.Expr,
-  acc: List types.Type,
+  acc: List typed_ast.TypedExpr,
   acc_eff: types.Effect
-) -> InferResult !{IO} =
+) -> InferArgsResult !{IO} =
   match args with
-  | Nil -> InferOk(types.TTuple(list_reverse(acc)), subst, eff_subst, acc_eff)
+  | Nil -> ArgsOk(typed_expr_list_reverse(acc), subst, eff_subst, acc_eff)
   | Cons arg rest ->
       do
         r <- infer_expr(state, env, subst, eff_subst, arg)
         match r with
-        | InferErr e -> InferErr(e)
-        | InferOk t s1 es1 arg_eff ->
-            infer_args_acc(state, env, s1, es1, rest, Cons(t, acc), merge_effects(acc_eff, arg_eff))
-
-fn list_reverse(xs: List types.Type) -> List types.Type =
-  list_rev_acc(xs, Nil)
-
-fn list_rev_acc(xs: List types.Type, acc: List types.Type) -> List types.Type =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> list_rev_acc(t, Cons(h, acc))
+        | InferErr e -> ArgsErr(e)
+        | InferOk typed_arg s1 es1 arg_eff ->
+            infer_args_acc(state, env, s1, es1, rest, Cons(typed_arg, acc), merge_effects(acc_eff, arg_eff))
 
 # --- Tuple ---
 
@@ -530,16 +656,18 @@ fn infer_tuple(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  elems: List ast.Expr
+  elems: List ast.Expr,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
     r <- infer_args_acc(state, env, subst, eff_subst, elems, Nil, types.EffectPure)
     match r with
-    | InferErr e -> InferErr(e)
-    | InferOk ts s1 es1 eff ->
-        match ts with
-        | types.TTuple items -> InferOk(types.TTuple(items), s1, es1, eff)
-        | _ -> InferOk(ts, s1, es1, eff)
+    | ArgsErr e -> InferErr(e)
+    | ArgsOk typed_elems s1 es1 eff ->
+        InferOk(
+          typed_ast.TTuple(typed_elems,
+            types.TTuple(list_map(\e -> typed_ast.typed_expr_type(e), typed_elems)), pos),
+          s1, es1, eff)
 
 # --- Binary ---
 
@@ -550,67 +678,131 @@ fn infer_binary(
   eff_subst: Dict types.Effect,
   op: String,
   left: ast.Expr,
-  right: ast.Expr
+  right: ast.Expr,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
     lr <- infer_expr(state, env, subst, eff_subst, left)
     match lr with
     | InferErr e -> InferErr(e)
-    | InferOk lt s1 es1 l_eff ->
+    | InferOk typed_left s1 es1 l_eff ->
         do
           rr <- infer_expr(state, env, s1, es1, right)
           match rr with
           | InferErr e -> InferErr(e)
-          | InferOk rt s2 es2 r_eff ->
-              infer_binary_op(s2, es2, op, lt, rt, merge_effects(l_eff, r_eff))
+          | InferOk typed_right s2 es2 r_eff ->
+              infer_binary_op(s2, es2, op, typed_left, typed_right, merge_effects(l_eff, r_eff), pos)
 
 fn infer_binary_op(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   op: String,
-  lt: types.Type,
-  rt: types.Type,
-  eff: types.Effect
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   if op == "+" || op == "-" || op == "*" || op == "/" then
-    check_arith(subst, eff_subst, op, lt, rt, eff)
+    check_arith(subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else if op == "<" || op == "<=" || op == ">" || op == ">=" then
-    check_compare(subst, eff_subst, op, lt, rt, eff)
+    check_compare(subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else if op == "==" || op == "!=" then
-    check_eq(subst, eff_subst, op, lt, rt, eff)
+    check_eq(subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else if op == "&&" || op == "||" then
-    check_bool(subst, eff_subst, op, lt, rt, eff)
+    check_bool(subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else
-    InferOk(lt, subst, eff_subst, eff)
+    InferOk(typed_ast.TBinary(op, typed_left, typed_right,
+                              typed_ast.typed_expr_type(typed_left), pos),
+            subst, eff_subst, eff)
 
-fn check_arith(subst: Dict types.Type, eff_subst: Dict types.Effect, op: String, lt: types.Type, rt: types.Type, eff: types.Effect) -> InferResult !{IO} =
-  match unifier.unify_types(subst, lt, types.type_int()) with
+fn check_arith(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  op: String,
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), types.type_int()) with
   | Err e -> InferErr(op ++ " needs Int: " ++ e)
   | Ok s1 ->
-      match unifier.unify_types(s1, rt, types.type_int()) with
+      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_right), types.type_int()) with
       | Err e -> InferErr(op ++ " needs Int: " ++ e)
-      | Ok s2 -> InferOk(types.type_int(), s2, eff_subst, eff)
+      | Ok s2 ->
+          InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_int(), pos),
+                  s2, eff_subst, eff)
 
-fn check_compare(subst: Dict types.Type, eff_subst: Dict types.Effect, op: String, lt: types.Type, rt: types.Type, eff: types.Effect) -> InferResult !{IO} =
-  match unifier.unify_types(subst, lt, types.type_int()) with
+fn check_compare(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  op: String,
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), types.type_int()) with
   | Err e -> InferErr(op ++ " needs Int: " ++ e)
   | Ok s1 ->
-      match unifier.unify_types(s1, rt, types.type_int()) with
+      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_right), types.type_int()) with
       | Err e -> InferErr(op ++ " needs Int: " ++ e)
-      | Ok s2 -> InferOk(types.type_bool(), s2, eff_subst, eff)
+      | Ok s2 ->
+          InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
+                  s2, eff_subst, eff)
 
-fn check_eq(subst: Dict types.Type, eff_subst: Dict types.Effect, op: String, lt: types.Type, rt: types.Type, eff: types.Effect) -> InferResult !{IO} =
-  match unifier.unify_types(subst, lt, rt) with
+fn check_eq(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  op: String,
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
   | Err e -> InferErr(op ++ " needs same types: " ++ e)
-  | Ok s1 -> InferOk(types.type_bool(), s1, eff_subst, eff)
+  | Ok s1 ->
+      InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
+              s1, eff_subst, eff)
 
-fn check_bool(subst: Dict types.Type, eff_subst: Dict types.Effect, op: String, lt: types.Type, rt: types.Type, eff: types.Effect) -> InferResult !{IO} =
-  match unifier.unify_types(subst, lt, types.type_bool()) with
+fn check_bool(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  op: String,
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), types.type_bool()) with
   | Err e -> InferErr(op ++ " needs Bool: " ++ e)
   | Ok s1 ->
-      match unifier.unify_types(s1, rt, types.type_bool()) with
+      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_right), types.type_bool()) with
       | Err e -> InferErr(op ++ " needs Bool: " ++ e)
-      | Ok s2 -> InferOk(types.type_bool(), s2, eff_subst, eff)
+      | Ok s2 ->
+          InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
+                  s2, eff_subst, eff)
+
+# --- Unary ---
+
+fn infer_unary(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  op: String,
+  operand: ast.Expr,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  do
+    r <- infer_expr(state, env, subst, eff_subst, operand)
+    match r with
+    | InferErr e -> InferErr(e)
+    | InferOk typed_operand s1 es1 eff ->
+        InferOk(
+          typed_ast.TUnary(op, typed_operand, typed_ast.typed_expr_type(typed_operand), pos),
+          s1, es1, eff)
 
 # --- Match ---
 
@@ -620,36 +812,51 @@ fn infer_match(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   scrutinee: ast.Expr,
-  branches: List ast.MatchBranch
+  branches: List ast.MatchBranch,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
     sr <- infer_expr(state, env, subst, eff_subst, scrutinee)
     match sr with
     | InferErr e -> InferErr(e)
-    | InferOk scrut_type s1 es1 scrut_eff ->
+    | InferOk typed_scrut s1 es1 scrut_eff ->
         do
           v <- unifier.fresh(state)
-          infer_branches(state, env, s1, es1, scrut_type, types.TVar(v), branches, scrut_eff)
+          infer_branches(state, env, s1, es1, typed_scrut, types.TVar(v), branches, Nil, scrut_eff, pos)
 
 fn infer_branches(
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  scrut_type: types.Type,
+  typed_scrut: typed_ast.TypedExpr,
   ret_type: types.Type,
   branches: List ast.MatchBranch,
-  acc_eff: types.Effect
+  acc_branches: List typed_ast.TypedMatchBranch,
+  acc_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match branches with
-  | Nil -> InferOk(unifier.apply_subst(subst, ret_type), subst, eff_subst, acc_eff)
+  | Nil ->
+      InferOk(
+        typed_ast.TMatch(typed_scrut,
+                         typed_branch_list_reverse(acc_branches),
+                         unifier.apply_subst(subst, ret_type), pos),
+        subst, eff_subst, acc_eff)
   | Cons branch rest ->
-      do
-        br <- infer_branch(state, env, subst, eff_subst, scrut_type, ret_type, branch)
-        match br with
-        | InferErr e -> InferErr(e)
-        | InferOk new_ret s1 es1 branch_eff ->
-            infer_branches(state, env, s1, es1, scrut_type, new_ret, rest, merge_effects(acc_eff, branch_eff))
+      match branch with
+      | ast.MatchBranch pat _ ->
+          do
+            br <- infer_branch(state, env, subst, eff_subst,
+                               typed_ast.typed_expr_type(typed_scrut), ret_type, branch)
+            match br with
+            | InferErr e -> InferErr(e)
+            | InferOk typed_body s1 es1 branch_eff ->
+                infer_branches(state, env, s1, es1, typed_scrut,
+                               unifier.apply_subst(s1, ret_type),
+                               rest,
+                               Cons(typed_ast.TypedMatchBranch(pat, typed_body), acc_branches),
+                               merge_effects(acc_eff, branch_eff), pos)
 
 fn infer_branch(
   state: unifier.InferState,
@@ -681,37 +888,24 @@ fn infer_branch_body(
     br <- infer_expr(state, env, subst, eff_subst, body)
     match br with
     | InferErr e -> InferErr(e)
-    | InferOk body_type s2 es2 body_eff ->
-        infer_branch_unify(s2, es2, body_type, ret_type, body_eff)
+    | InferOk typed_body s2 es2 body_eff ->
+        infer_branch_unify(s2, es2, typed_body, ret_type, body_eff)
 
 fn infer_branch_unify(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  body_type: types.Type,
+  typed_body: typed_ast.TypedExpr,
   ret_type: types.Type,
   body_eff: types.Effect
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, body_type, ret_type) with
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_body), ret_type) with
   | Err e -> InferErr("Match branch type mismatch: " ++ e)
-  | Ok s3 -> InferOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, body_eff)
+  | Ok s3 -> InferOk(typed_body, s3, eff_subst, body_eff)
 
 # --- Pattern inference ---
 #
-# DoStep constructors (from ast.sprout):
-#   DoBindStep Pattern Expr
-#   DoLetStep String Expr
-#   DoExprStep Expr
-#
-# Pattern constructors:
-#   WildcardPattern SourcePos
-#   VarPattern String SourcePos
-#   IntPattern Int SourcePos
-#   BoolPattern Bool SourcePos
-#   StringPattern String SourcePos
-#   CharPattern Char SourcePos
-#   UnitPattern SourcePos
-#   TuplePattern (List Pattern) SourcePos
-#   ConstructorPattern String (List Pattern) SourcePos
+# Patterns do not produce meaningful TypedExprs; callers always discard the
+# first field of InferOk.  We return a dummy TUnit carrying the pattern type.
 
 export fn infer_pattern(
   state: unifier.InferState,
@@ -722,8 +916,10 @@ export fn infer_pattern(
   pat: ast.Pattern
 ) -> InferResult !{IO} =
   match pat with
-  | ast.WildcardPattern _ -> InferOk(expected, subst, eff_subst, types.EffectPure)
-  | ast.VarPattern name _ -> InferOk(expected, dict_set(name, expected, subst), eff_subst, types.EffectPure)
+  | ast.WildcardPattern _ ->
+      InferOk(typed_ast.TUnit(expected, dummy_pos()), subst, eff_subst, types.EffectPure)
+  | ast.VarPattern name _ ->
+      InferOk(typed_ast.TUnit(expected, dummy_pos()), dict_set(name, expected, subst), eff_subst, types.EffectPure)
   | ast.IntPattern _ _ ->
       check_pattern_type(subst, eff_subst, expected, types.type_int(), "Int")
   | ast.BoolPattern _ _ ->
@@ -739,10 +935,17 @@ export fn infer_pattern(
   | ast.ConstructorPattern name fields _ ->
       infer_ctor_pattern(state, env, subst, eff_subst, expected, name, fields)
 
-fn check_pattern_type(subst: Dict types.Type, eff_subst: Dict types.Effect, expected: types.Type, expected_type: types.Type, label: String) -> InferResult !{IO} =
+fn check_pattern_type(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  expected: types.Type,
+  expected_type: types.Type,
+  label: String
+) -> InferResult !{IO} =
   match unifier.unify_types(subst, expected, expected_type) with
   | Err e -> InferErr(label ++ " pattern: " ++ e)
-  | Ok s1 -> InferOk(expected_type, s1, eff_subst, types.EffectPure)
+  | Ok s1 ->
+      InferOk(typed_ast.TUnit(expected_type, dummy_pos()), s1, eff_subst, types.EffectPure)
 
 fn infer_tuple_pattern(
   state: unifier.InferState,
@@ -788,7 +991,8 @@ fn check_pattern_list(
   pats: List ast.Pattern
 ) -> InferResult !{IO} =
   match (expected_list, pats) with
-  | (Nil, Nil) -> InferOk(types.TConst("Unit"), subst, eff_subst, types.EffectPure)
+  | (Nil, Nil) ->
+      InferOk(typed_ast.TUnit(types.TConst("Unit"), dummy_pos()), subst, eff_subst, types.EffectPure)
   | (Cons exp_h exp_rest, Cons pat_h pat_rest) ->
       do
         r <- infer_pattern(state, env, subst, eff_subst, exp_h, pat_h)
@@ -859,17 +1063,16 @@ fn extend_env_from_pattern_list(pats: List ast.Pattern, subst: Dict types.Type, 
 # ---------------------------------------------------------------------------
 # Do expression
 # ---------------------------------------------------------------------------
-#
-# DoStep constructors: DoBindStep Pattern Expr | DoLetStep String Expr | DoExprStep Expr
 
 fn infer_do(
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  steps: List ast.DoStep
+  steps: List ast.DoStep,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
-  infer_do_steps(state, env, subst, eff_subst, steps, types.TConst("Unit"), types.EffectPure)
+  infer_do_steps(state, env, subst, eff_subst, steps, dummy_unit(), Nil, types.EffectPure, pos)
 
 fn infer_do_steps(
   state: unifier.InferState,
@@ -877,23 +1080,29 @@ fn infer_do_steps(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   steps: List ast.DoStep,
-  last_type: types.Type,
-  acc_eff: types.Effect
+  last_typed: typed_ast.TypedExpr,
+  acc_steps: List typed_ast.TypedDoStep,
+  acc_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match steps with
-  | Nil -> InferOk(last_type, subst, eff_subst, acc_eff)
+  | Nil ->
+      InferOk(
+        typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
+                      typed_ast.typed_expr_type(last_typed), pos),
+        subst, eff_subst, acc_eff)
   | Cons step rest ->
       do
         sr <- infer_do_step(state, env, subst, eff_subst, step)
         match sr with
         | InferErr e -> InferErr(e)
-        | InferOk step_type s1 es1 step_eff ->
+        | InferOk typed_step_expr s1 es1 step_eff ->
             infer_do_steps(
               state,
-              extend_env_from_do_step(step, step_type, s1, env),
-              s1, es1, rest, step_type,
-              merge_effects(acc_eff, step_eff)
-            )
+              extend_env_from_do_step(step, typed_ast.typed_expr_type(typed_step_expr), s1, env),
+              s1, es1, rest, typed_step_expr,
+              Cons(do_step_to_typed(step, typed_step_expr), acc_steps),
+              merge_effects(acc_eff, step_eff), pos)
 
 fn infer_do_step(
   state: unifier.InferState,
@@ -907,10 +1116,12 @@ fn infer_do_step(
   | ast.DoBindStep _ e -> infer_expr(state, env, subst, eff_subst, e)
   | ast.DoLetStep _ e -> infer_expr(state, env, subst, eff_subst, e)
 
-# Unwrap the monadic payload type for do-bind:
-#   Maybe a      → a
-#   Result e a   → a
-#   anything else → as-is (IO expressions: bound var gets the full expression type)
+fn do_step_to_typed(step: ast.DoStep, typed_expr: typed_ast.TypedExpr) -> typed_ast.TypedDoStep =
+  match step with
+  | ast.DoExprStep _ -> typed_ast.TDoExprStep(typed_expr)
+  | ast.DoBindStep pat _ -> typed_ast.TDoBindStep(pat, typed_expr)
+  | ast.DoLetStep name _ -> typed_ast.TDoLetStep(name, typed_expr)
+
 fn do_unwrap_type(t: types.Type) -> types.Type =
   match t with
   | types.TApp outer inner ->
@@ -933,9 +1144,6 @@ fn extend_env_from_do_step(step: ast.DoStep, step_type: types.Type, subst: Dict 
       dict_set(name, types.mono(unifier.apply_subst(subst, step_type)), env)
   | ast.DoExprStep _ -> env
 
-# Bind pattern variables to a known type (used for do-bind).
-# VarPattern: bind the name directly to the given type.
-# Other patterns: fall back to subst-lookup (best-effort).
 fn extend_env_from_pattern_typed(pat: ast.Pattern, t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match pat with
   | ast.VarPattern name _ -> dict_set(name, types.mono(t), env)
@@ -951,15 +1159,19 @@ fn infer_lambda(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   params: List ast.Param,
-  body: ast.Expr
+  body: ast.Expr,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
     fresh_params <- make_fresh_param_types(state, params)
     br <- infer_expr(state, extend_env_with_params(params, fresh_params, env), subst, eff_subst, body)
     match br with
     | InferErr e -> InferErr(e)
-    | InferOk body_type s1 es1 body_eff ->
-        InferOk(build_fn_type(fresh_params, body_type), s1, es1, body_eff)
+    | InferOk typed_body s1 es1 body_eff ->
+        InferOk(
+          typed_ast.TLambda(params, typed_body,
+            build_fn_type(fresh_params, typed_ast.typed_expr_type(typed_body)), pos),
+          s1, es1, body_eff)
 
 fn make_fresh_param_types(state: unifier.InferState, params: List ast.Param) -> List types.Type !{IO} =
   match params with
@@ -981,13 +1193,6 @@ fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, 
 # ---------------------------------------------------------------------------
 # Record inference
 # ---------------------------------------------------------------------------
-#
-# Records are registered in env using @rec:<RecordName>:<FieldName> keys so
-# that field types are accessible without threading a separate rec_env parameter.
-#
-# Polymorphic records (with type params) store their field types using TVar
-# names prefixed with "<RecordName>." to match the naming convention in the
-# Python typechecker.
 
 fn register_record_fields(
   rec_name: String,
@@ -1034,9 +1239,10 @@ fn infer_record_expr(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   type_name: String,
-  fields: List ast.RecordField
+  fields: List ast.RecordField,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
-  infer_record_fields(state, env, subst, eff_subst, type_name, fields, types.EffectPure)
+  infer_record_fields(state, env, subst, eff_subst, type_name, fields, Nil, types.EffectPure, pos)
 
 fn infer_record_fields(
   state: unifier.InferState,
@@ -1045,10 +1251,17 @@ fn infer_record_fields(
   eff_subst: Dict types.Effect,
   type_name: String,
   fields: List ast.RecordField,
-  acc_eff: types.Effect
+  acc_fields: List typed_ast.TypedRecordField,
+  acc_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match fields with
-  | Nil -> InferOk(types.TConst(type_name), subst, eff_subst, acc_eff)
+  | Nil ->
+      InferOk(
+        typed_ast.TRecord(type_name,
+                          typed_record_field_list_reverse(acc_fields),
+                          types.TConst(type_name), pos),
+        subst, eff_subst, acc_eff)
   | Cons field rest_fields ->
       match field with
       | ast.RecordField fname fexpr ->
@@ -1056,16 +1269,18 @@ fn infer_record_fields(
             r <- infer_expr(state, env, subst, eff_subst, fexpr)
             match r with
             | InferErr e -> InferErr(e)
-            | InferOk val_type s1 es1 val_eff ->
+            | InferOk typed_val s1 es1 val_eff ->
                 match dict_get(str_concat("@rec:", str_concat(type_name, str_concat(":", fname))), env) with
                 | Nothing -> InferErr("Unknown record type or field: " ++ type_name ++ "." ++ fname)
                 | Just field_scheme ->
                     do
                       field_t <- unifier.instantiate(state, field_scheme)
-                      match unifier.unify_types(s1, val_type, field_t) with
+                      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_val), field_t) with
                       | Err e -> InferErr("Record field type mismatch: " ++ e)
                       | Ok s2 ->
-                          infer_record_fields(state, env, s2, es1, type_name, rest_fields, merge_effects(acc_eff, val_eff))
+                          infer_record_fields(state, env, s2, es1, type_name, rest_fields,
+                            Cons(typed_ast.TypedRecordField(fname, typed_val), acc_fields),
+                            merge_effects(acc_eff, val_eff), pos)
 
 fn infer_get_field(
   state: unifier.InferState,
@@ -1073,14 +1288,17 @@ fn infer_get_field(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   rec_expr: ast.Expr,
-  field_name: String
+  field_name: String,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
     r <- infer_expr(state, env, subst, eff_subst, rec_expr)
     match r with
     | InferErr e -> InferErr(e)
-    | InferOk rec_type s1 es1 rec_eff ->
-        get_field_from_resolved(state, env, s1, es1, unifier.apply_subst(s1, rec_type), field_name, rec_eff)
+    | InferOk typed_rec s1 es1 rec_eff ->
+        get_field_from_resolved(state, env, s1, es1,
+          unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_rec)),
+          typed_rec, field_name, rec_eff, pos)
 
 fn get_field_from_resolved(
   state: unifier.InferState,
@@ -1088,18 +1306,22 @@ fn get_field_from_resolved(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   resolved: types.Type,
+  typed_rec: typed_ast.TypedExpr,
   field_name: String,
-  rec_eff: types.Effect
+  rec_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match resolved with
   | types.TConst rec_name ->
-      lookup_record_field(state, env, subst, eff_subst, rec_name, Nil, field_name, rec_eff)
+      lookup_record_field_typed(state, env, subst, eff_subst, rec_name, Nil, typed_rec, field_name, rec_eff, pos)
   | types.TApp _ _ ->
-      lookup_record_field(state, env, subst, eff_subst, extract_tconst_name(resolved), extract_tapp_args(resolved), field_name, rec_eff)
+      lookup_record_field_typed(state, env, subst, eff_subst,
+        extract_tconst_name(resolved), extract_tapp_args(resolved),
+        typed_rec, field_name, rec_eff, pos)
   | _ ->
       do
         v <- unifier.fresh(state)
-        InferOk(types.TVar(v), subst, eff_subst, rec_eff)
+        InferOk(typed_ast.TGetField(typed_rec, field_name, types.TVar(v), pos), subst, eff_subst, rec_eff)
 
 fn extract_tconst_name(t: types.Type) -> String =
   match t with
@@ -1115,25 +1337,30 @@ fn collect_tapp_args(t: types.Type, acc: List types.Type) -> List types.Type =
   | types.TApp base arg -> collect_tapp_args(base, Cons(arg, acc))
   | _ -> acc
 
-fn lookup_record_field(
+fn lookup_record_field_typed(
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   rec_name: String,
   type_args: List types.Type,
+  typed_rec: typed_ast.TypedExpr,
   field_name: String,
-  rec_eff: types.Effect
+  rec_eff: types.Effect,
+  pos: source.SourcePos
 ) -> InferResult !{IO} =
   match dict_get(str_concat("@rec:", str_concat(rec_name, str_concat(":", field_name))), env) with
   | Nothing ->
       do
         v <- unifier.fresh(state)
-        InferOk(types.TVar(v), subst, eff_subst, rec_eff)
+        InferOk(typed_ast.TGetField(typed_rec, field_name, types.TVar(v), pos), subst, eff_subst, rec_eff)
   | Just field_scheme ->
       do
         field_t <- unifier.instantiate(state, field_scheme)
-        InferOk(apply_type_args_to_field(field_t, field_scheme, rec_name, type_args), subst, eff_subst, rec_eff)
+        InferOk(
+          typed_ast.TGetField(typed_rec, field_name,
+            apply_type_args_to_field(field_t, field_scheme, rec_name, type_args), pos),
+          subst, eff_subst, rec_eff)
 
 fn apply_type_args_to_field(
   field_t: types.Type,
@@ -1153,16 +1380,42 @@ fn build_tvar_subst(vars: List String, args: List types.Type, acc: Dict types.Ty
       build_tvar_subst(rest_v, rest_a, dict_set(v, a, acc))
 
 # ---------------------------------------------------------------------------
+# Range expression (new)
+# ---------------------------------------------------------------------------
+
+fn infer_range(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  lo: ast.Expr,
+  hi: ast.Expr,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  do
+    lr <- infer_expr(state, env, subst, eff_subst, lo)
+    match lr with
+    | InferErr e -> InferErr(e)
+    | InferOk typed_lo s1 es1 lo_eff ->
+        do
+          hr <- infer_expr(state, env, s1, es1, hi)
+          match hr with
+          | InferErr e -> InferErr(e)
+          | InferOk typed_hi s2 es2 hi_eff ->
+              match unifier.unify_types(s2, typed_ast.typed_expr_type(typed_lo), types.type_int()) with
+              | Err e -> InferErr("Range needs Int: " ++ e)
+              | Ok s3 ->
+                  match unifier.unify_types(s3, typed_ast.typed_expr_type(typed_hi), types.type_int()) with
+                  | Err e -> InferErr("Range needs Int: " ++ e)
+                  | Ok s4 ->
+                      InferOk(
+                        typed_ast.TRange(typed_lo, typed_hi,
+                          types.TApp(types.TConst("List"), types.type_int()), pos),
+                        s4, es2, merge_effects(lo_eff, hi_eff))
+
+# ---------------------------------------------------------------------------
 # Program-level typechecking
 # ---------------------------------------------------------------------------
-#
-# DeclResult is a custom ADT rather than Result so that the Python
-# typechecker does not misclassify do-blocks that bind it with <- as
-# "Result-sequencing" do-blocks.  The same pattern is used for InferResult.
-
-export type DeclResult (..) =
-  | DeclOk (Dict types.Scheme)
-  | DeclErr String
 
 export fn typecheck_decls(
   state: unifier.InferState,
@@ -1170,8 +1423,8 @@ export fn typecheck_decls(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
-) -> DeclResult !{IO} =
-  typecheck_decls_inner(state, decls, env, subst, eff_subst, dict_empty())
+) -> typed_ast.TypedResult !{IO} =
+  typecheck_decls_inner(state, decls, env, subst, eff_subst, dict_empty(), Nil)
 
 fn typecheck_decls_inner(
   state: unifier.InferState,
@@ -1179,21 +1432,28 @@ fn typecheck_decls_inner(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  alias_env: Dict types.Type
-) -> DeclResult !{IO} =
+  alias_env: Dict types.Type,
+  acc: List typed_ast.TypedDecl
+) -> typed_ast.TypedResult !{IO} =
   match decls with
-  | Nil -> DeclOk(env)
+  | Nil ->
+      typed_ast.TypedOk(
+        typed_ast.TypedProgram(typed_decl_list_reverse(acc)),
+        env)
   | Cons decl rest ->
       match decl with
       | ast.AliasDecl name Nil rhs_te _ ->
           typecheck_decls_inner(state, rest, env, subst, eff_subst,
-            dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
+            dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env),
+            Cons(typed_ast.TPassThrough(decl), acc))
       | _ ->
           do
             r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env)
             match r with
-            | DeclErr e -> DeclErr(e)
-            | DeclOk new_env -> typecheck_decls_inner(state, rest, new_env, subst, eff_subst, alias_env)
+            | TypedDeclErr e -> typed_ast.TypedErr(e)
+            | TypedDeclOk typed_decl new_env ->
+                typecheck_decls_inner(state, rest, new_env, subst, eff_subst, alias_env,
+                  Cons(typed_decl, acc))
 
 fn typecheck_decl(
   state: unifier.InferState,
@@ -1202,49 +1462,57 @@ fn typecheck_decl(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type
-) -> DeclResult !{IO} =
+) -> TypedDeclResult !{IO} =
   match decl with
-  | ast.TypeDecl _ _ _ _ -> DeclOk(register_type_decl(decl, env))
+  | ast.TypeDecl _ _ _ _ ->
+      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env))
   | ast.RecordDecl rec_name type_params fields _ ->
-      DeclOk(register_record_fields(rec_name, type_params, fields, env))
-  | ast.FnDecl name params ret_type_maybe effects_maybe _ _ _ ->
+      TypedDeclOk(typed_ast.TPassThrough(decl), register_record_fields(rec_name, type_params, fields, env))
+  | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
       do
         r <- check_fn_body(state, decl, env, subst, eff_subst, alias_env)
         match r with
-        | DeclErr e -> DeclErr(e)
-        | DeclOk _ -> DeclOk(dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
+        | typed_ast.BodyErr e -> TypedDeclErr(e)
+        | typed_ast.BodyLenient ->
+            TypedDeclOk(
+              typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints,
+                                dummy_unit()),
+              dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
+        | typed_ast.BodyOk typed_body ->
+            TypedDeclOk(
+              typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
+              dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
   | ast.LetDecl name expr _ ->
       do
         r <- infer_expr(state, env, subst, eff_subst, expr)
         match r with
-        | InferErr e -> DeclErr(e)
-        | InferOk t s1 _ _ ->
-            DeclOk(dict_set(name, unifier.generalize(unifier.ftv_env(env), s1, eff_subst, t, types.EffectPure), env))
-  | ast.AliasDecl _ _ _ _ -> DeclOk(env)
+        | InferErr e -> TypedDeclErr(e)
+        | InferOk typed_expr s1 _ _ ->
+            TypedDeclOk(
+              typed_ast.TLetDecl(name, typed_expr),
+              dict_set(name,
+                unifier.generalize(unifier.ftv_env(env), s1, eff_subst,
+                  typed_ast.typed_expr_type(typed_expr), types.EffectPure),
+                env))
+  | ast.AliasDecl _ _ _ _ ->
+      TypedDeclOk(typed_ast.TPassThrough(decl), env)
   | ast.ClassDecl class_name type_params methods _ ->
-      DeclOk(register_class_methods(type_params, methods,
-             register_class_method_markers(class_name, methods, env)))
-  | ast.InstanceDecl constraint methods _ ->
+      TypedDeclOk(typed_ast.TPassThrough(decl),
+        register_class_methods(type_params, methods,
+          register_class_method_markers(class_name, methods, env)))
+  | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
-        r <- check_instance_methods(state, methods, env, subst, eff_subst)
+        r <- check_instance_methods(state, inst_constraints, methods, env, subst, eff_subst)
         match r with
-        | DeclErr e -> DeclErr(e)
-        | DeclOk _ -> DeclOk(register_instance_marker(constraint, env))
+        | typed_ast.InstanceMethodsErr e -> TypedDeclErr(e)
+        | typed_ast.InstanceMethodsOk typed_methods ->
+            TypedDeclOk(
+              typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods),
+              register_instance_marker(constraint, env))
 
 # ---------------------------------------------------------------------------
 # FnDecl body inference
 # ---------------------------------------------------------------------------
-#
-# check_fn_body infers the body of a function declaration and checks it
-# against the annotation-derived type.  The public scheme (for callers) is
-# still determined by scheme_from_fn_decl; body inference is an additional
-# consistency check that does not change the exported type.
-#
-# Leniency rule: "Unknown variable" / "Unknown constructor" errors are
-# silently accepted.  These arise when a function calls a builtin that is
-# not in the bootstrap env (print, read_file, dict_get, ...).  We cannot
-# enumerate all builtins without pre-seeding the env, so we tolerate the
-# gap and still catch real type mismatches in the parts we can check.
 
 fn check_fn_body(
   state: unifier.InferState,
@@ -1253,22 +1521,21 @@ fn check_fn_body(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type
-) -> DeclResult !{IO} =
+) -> typed_ast.BodyResult !{IO} =
   match decl with
-  | ast.FnDecl name params ret_type_maybe effects_maybe _ body _ ->
+  | ast.FnDecl name params ret_type_maybe effects_maybe constraints body _ ->
       do
-        inst_type <- unifier.instantiate(state, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env))
-        br <- infer_expr(state, fn_body_env(name, params, inst_type, env), subst, eff_subst, body)
+        (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env))
+        let fwd_env = seed_forward_markers(constraints, prog_to_fresh, env)
+        br <- infer_expr(state, fn_body_env(name, params, inst_type, fwd_env), subst, eff_subst, body)
         match br with
         | InferErr msg -> fn_body_err(name, msg)
-        | InferOk body_type s1 _ _ ->
-            match unifier.unify_types(s1, body_type, ctor_result_type(inst_type)) with
-            | Err e -> DeclErr("Return type mismatch in " ++ name ++ ": " ++ e)
-            | Ok _ -> DeclOk(env)
-  | _ -> DeclOk(env)
+        | InferOk typed_body s1 _ _ ->
+            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
+            | Err e -> typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e)
+            | Ok _ -> typed_ast.BodyOk(typed_body)
+  | _ -> typed_ast.BodyOk(dummy_unit())
 
-# Build the local env for body inference: add the function itself (for
-# recursion) and its params (from the instantiated annotation type).
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(
     params,
@@ -1276,12 +1543,10 @@ fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env:
     dict_set(name, types.mono(inst_type), env)
   )
 
-# Classify an inference error: if it is due to an unknown name (a builtin
-# not in the bootstrap env), treat as success.  Otherwise propagate.
-fn fn_body_err(name: String, msg: String) -> DeclResult =
+fn fn_body_err(name: String, msg: String) -> typed_ast.BodyResult =
   if is_unknown_ref(msg)
-  then DeclOk(dict_empty())
-  else DeclErr(msg ++ " in function " ++ name)
+  then typed_ast.BodyLenient
+  else typed_ast.BodyErr(msg ++ " in function " ++ name)
 
 fn is_unknown_ref(msg: String) -> Bool =
   str_starts_with(msg, "Unknown variable: ") ||
@@ -1290,14 +1555,6 @@ fn is_unknown_ref(msg: String) -> Bool =
 # ---------------------------------------------------------------------------
 # ClassDecl: method registration + constraint markers
 # ---------------------------------------------------------------------------
-#
-# Each class method is added to the global env as a polymorphic scheme whose
-# quantified type variables are the class's type parameters.  This lets body
-# inference resolve calls like eq(a, b) without the leniency fallback.
-#
-# Additionally, a marker entry "@class:{method_name}" → mono(TConst(class_name))
-# is stored so that infer_call can look up the class name for a method call and
-# verify that a matching instance exists for the first argument's concrete type.
 
 fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -1320,11 +1577,8 @@ fn register_class_method_markers(class_name: String, methods: List ast.ClassMeth
             dict_set("@class:" ++ name, types.mono(types.TConst(class_name)), env))
 
 # ---------------------------------------------------------------------------
-# InstanceDecl: instance registration marker
+# InstanceDecl: instance marker registration
 # ---------------------------------------------------------------------------
-#
-# For each instance declaration, register "@inst:{class_name}:{head_type}"
-# in the env so infer_call can verify that a matching instance exists.
 
 fn register_instance_marker(constraint: ast.TypeConstraint, env: Dict types.Scheme) -> Dict types.Scheme =
   match constraint with
@@ -1341,49 +1595,61 @@ fn register_instance_marker(constraint: ast.TypeConstraint, env: Dict types.Sche
 # ---------------------------------------------------------------------------
 # InstanceDecl: instance method body checking
 # ---------------------------------------------------------------------------
-#
-# Each instance method is treated like a FnDecl body: build a (potentially
-# monomorphic) scheme from the method's own annotations, instantiate it,
-# build a body env from the params, infer the body, and unify against the
-# annotation return type.  The same leniency rule applies: unknown-ref errors
-# are silently accepted; real type mismatches propagate.
 
 fn check_instance_methods(
   state: unifier.InferState,
+  inst_constraints: List ast.TypeConstraint,
   methods: List ast.InstanceMethodImpl,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
-) -> DeclResult !{IO} =
+) -> typed_ast.InstanceMethodsResult !{IO} =
+  check_instance_methods_acc(state, inst_constraints, methods, env, subst, eff_subst, Nil)
+
+fn check_instance_methods_acc(
+  state: unifier.InferState,
+  inst_constraints: List ast.TypeConstraint,
+  methods: List ast.InstanceMethodImpl,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  acc: List typed_ast.TypedInstanceMethod
+) -> typed_ast.InstanceMethodsResult !{IO} =
   match methods with
-  | Nil -> DeclOk(env)
+  | Nil -> typed_ast.InstanceMethodsOk(typed_method_list_reverse(acc))
   | Cons method rest ->
       do
-        r <- check_instance_method(state, method, env, subst, eff_subst)
+        r <- check_instance_method(state, inst_constraints, method, env, subst, eff_subst)
         match r with
-        | DeclErr e -> DeclErr(e)
-        | DeclOk _ -> check_instance_methods(state, rest, env, subst, eff_subst)
+        | InstanceMethodErr e -> typed_ast.InstanceMethodsErr(e)
+        | InstanceMethodOk typed_method ->
+            check_instance_methods_acc(state, inst_constraints, rest, env, subst, eff_subst, Cons(typed_method, acc))
 
 fn check_instance_method(
   state: unifier.InferState,
+  inst_constraints: List ast.TypeConstraint,
   method: ast.InstanceMethodImpl,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
-) -> DeclResult !{IO} =
+) -> InstanceMethodResult !{IO} =
   match method with
   | ast.InstanceMethodImpl name params ret_maybe eff_maybe body ->
       do
-        inst_type <- unifier.instantiate(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty()))
-        br <- infer_expr(state, extend_env_with_params(params, ctor_param_types(inst_type), env), subst, eff_subst, body)
+        (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty()))
+        let fwd_env = seed_forward_markers(inst_constraints, prog_to_fresh, env)
+        br <- infer_expr(state, extend_env_with_params(params, ctor_param_types(inst_type), fwd_env), subst, eff_subst, body)
         match br with
         | InferErr msg -> instance_method_err(name, msg)
-        | InferOk body_type s1 _ _ ->
-            match unifier.unify_types(s1, body_type, ctor_result_type(inst_type)) with
-            | Err e -> DeclErr("Return type mismatch in instance method " ++ name ++ ": " ++ e)
-            | Ok _ -> DeclOk(env)
+        | InferOk typed_body s1 _ _ ->
+            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
+            | Err e -> InstanceMethodErr("Return type mismatch in instance method " ++ name ++ ": " ++ e)
+            | Ok _ ->
+                InstanceMethodOk(
+                  typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, typed_body))
 
-fn instance_method_err(name: String, msg: String) -> DeclResult =
+fn instance_method_err(name: String, msg: String) -> InstanceMethodResult =
   if is_unknown_ref(msg)
-  then DeclOk(dict_empty())
-  else DeclErr(msg ++ " in instance method " ++ name)
+  then InstanceMethodOk(
+    typed_ast.TypedInstanceMethod(name, Nil, Nothing, Nothing, dummy_unit()))
+  else InstanceMethodErr(msg ++ " in instance method " ++ name)

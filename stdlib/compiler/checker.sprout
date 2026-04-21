@@ -3,6 +3,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
 import stdlib.compiler.infer as infer
+import stdlib.compiler.typed_ast as typed_ast
 
 # ---------------------------------------------------------------------------
 # CheckResult — the output of the Sprout-owned checker seam
@@ -50,8 +51,8 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
         do
           r <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
           match r with
-          | infer.DeclErr msg -> CheckErr(msg)
-          | infer.DeclOk env  -> CheckOk(env)
+          | typed_ast.TypedErr msg -> CheckErr(msg)
+          | typed_ast.TypedOk _ env -> CheckOk(env)
 
 # ---------------------------------------------------------------------------
 # dump_typed_names — parity-test output renderer

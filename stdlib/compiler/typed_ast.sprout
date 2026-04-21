@@ -1,0 +1,143 @@
+module stdlib.compiler.typed_ast
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+# ---------------------------------------------------------------------------
+# Typed expression IR
+# ---------------------------------------------------------------------------
+#
+# TypedExpr is the output of the typechecker.  Every node carries its inferred
+# type as a `types.Type` field and its source position for LSP queries (hover,
+# go-to-definition).
+#
+# TCall nodes additionally carry explicit TDict constraint-witness arguments
+# (analogous to GHC's HsWrapper evidence).  When the typechecker resolves a
+# call to a class method it prepends a TDict node representing the required
+# dictionary.  The lowering pass replaces TDict nodes with concrete instance
+# function references (or hidden parameters for polymorphic call sites).
+#
+# This design follows the "Trees That Grow" principle: the IR carries exactly
+# the information each downstream pass needs without ad-hoc attribute mutation.
+
+export type TypedMatchBranch (..) = TypedMatchBranch ast.Pattern TypedExpr
+
+export type TypedDoStep (..) =
+  | TDoBindStep ast.Pattern TypedExpr
+  | TDoLetStep String TypedExpr
+  | TDoExprStep TypedExpr
+
+export type TypedRecordField (..) = TypedRecordField String TypedExpr
+
+export type TypedExpr (..) =
+  | TVar String types.Type source.SourcePos
+  | TInt Int types.Type source.SourcePos
+  | TBool Bool types.Type source.SourcePos
+  | TString String types.Type source.SourcePos
+  | TChar Char types.Type source.SourcePos
+  | TUnit types.Type source.SourcePos
+  | TTuple (List TypedExpr) types.Type source.SourcePos
+  | TIf TypedExpr TypedExpr TypedExpr types.Type source.SourcePos
+  | TMatch TypedExpr (List TypedMatchBranch) types.Type source.SourcePos
+  | TCall TypedExpr (List TypedExpr) types.Type source.SourcePos
+  | TDict ast.TypeConstraint types.Type source.SourcePos
+  | TLambda (List ast.Param) TypedExpr types.Type source.SourcePos
+  | TBinary String TypedExpr TypedExpr types.Type source.SourcePos
+  | TUnary String TypedExpr types.Type source.SourcePos
+  | TRange TypedExpr TypedExpr types.Type source.SourcePos
+  | TDo (List TypedDoStep) types.Type source.SourcePos
+  | TRecord String (List TypedRecordField) types.Type source.SourcePos
+  | TGetField TypedExpr String types.Type source.SourcePos
+
+export fn typed_expr_type(e: TypedExpr) -> types.Type =
+  match e with
+  | TVar _ t _ -> t
+  | TInt _ t _ -> t
+  | TBool _ t _ -> t
+  | TString _ t _ -> t
+  | TChar _ t _ -> t
+  | TUnit t _ -> t
+  | TTuple _ t _ -> t
+  | TIf _ _ _ t _ -> t
+  | TMatch _ _ t _ -> t
+  | TCall _ _ t _ -> t
+  | TDict _ t _ -> t
+  | TLambda _ _ t _ -> t
+  | TBinary _ _ _ t _ -> t
+  | TUnary _ _ t _ -> t
+  | TRange _ _ t _ -> t
+  | TDo _ t _ -> t
+  | TRecord _ _ t _ -> t
+  | TGetField _ _ t _ -> t
+
+export fn typed_expr_pos(e: TypedExpr) -> source.SourcePos =
+  match e with
+  | TVar _ _ p -> p
+  | TInt _ _ p -> p
+  | TBool _ _ p -> p
+  | TString _ _ p -> p
+  | TChar _ _ p -> p
+  | TUnit _ p -> p
+  | TTuple _ _ p -> p
+  | TIf _ _ _ _ p -> p
+  | TMatch _ _ _ p -> p
+  | TCall _ _ _ p -> p
+  | TDict _ _ p -> p
+  | TLambda _ _ _ p -> p
+  | TBinary _ _ _ _ p -> p
+  | TUnary _ _ _ p -> p
+  | TRange _ _ _ p -> p
+  | TDo _ _ p -> p
+  | TRecord _ _ _ p -> p
+  | TGetField _ _ _ p -> p
+
+# ---------------------------------------------------------------------------
+# Typed declarations
+# ---------------------------------------------------------------------------
+
+# A typed instance method: same shape as InstanceMethodImpl but body is TypedExpr.
+export type TypedInstanceMethod (..) =
+  TypedInstanceMethod String (List ast.Param) (Maybe ast.TypeExpr) (Maybe (List String)) TypedExpr
+
+export type TypedDecl (..) =
+  | TFnDecl String (List ast.Param) (Maybe ast.TypeExpr) (Maybe (List String)) (List ast.TypeConstraint) TypedExpr
+  | TLetDecl String TypedExpr
+  | TInstanceDecl ast.TypeConstraint (List ast.TypeConstraint) (List TypedInstanceMethod)
+  | TPassThrough ast.Decl
+
+export type TypedProgram (..) = TypedProgram (List TypedDecl)
+
+# ---------------------------------------------------------------------------
+# Result types for the typed pipeline
+# ---------------------------------------------------------------------------
+
+export type TypedResult (..) =
+  | TypedOk TypedProgram (Dict types.Scheme)
+  | TypedErr String
+
+# Result of inferring a single function/method body.
+# BodyLenient: an unknown-variable error was silently accepted (builtin gap).
+export type BodyResult (..) =
+  | BodyOk TypedExpr
+  | BodyLenient
+  | BodyErr String
+
+export type InstanceMethodsResult (..) =
+  | InstanceMethodsOk (List TypedInstanceMethod)
+  | InstanceMethodsErr String
+
+# ---------------------------------------------------------------------------
+# Type → TypeExpr conversion (used when constructing TDict constraint nodes)
+# ---------------------------------------------------------------------------
+#
+# Converts an inferred types.Type back to a surface ast.TypeExpr.  This is
+# used to store the constraint argument in TDict nodes so the lowering pass
+# can reconstruct constraint keys without needing the full type-inference state.
+
+export fn type_to_type_expr(t: types.Type) -> ast.TypeExpr =
+  match t with
+  | types.TVar name -> ast.TypeName(name)
+  | types.TConst name -> ast.TypeName(name)
+  | types.TApp f x -> ast.TypeApply(type_to_type_expr(f), type_to_type_expr(x))
+  | types.TFunc a b _ -> ast.TypeArrow(type_to_type_expr(a), type_to_type_expr(b), Nothing)
+  | types.TTuple items -> ast.TupleType(list_map(\i -> type_to_type_expr(i), items))

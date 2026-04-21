@@ -261,7 +261,7 @@ fn dump_decl(d: ast.Decl) -> String =
       sexp("let", Cons(q(name), Cons(dump_expr(body), Nil)))
   | ast.ClassDecl name type_params methods _ ->
       sexp("class", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_method_sigs(methods))))
-  | ast.InstanceDecl constraint methods _ ->
+  | ast.InstanceDecl constraint _ methods _ ->
       sexp("instance", Cons(dump_constraint(constraint), dump_method_impls(methods)))
   | ast.AliasDecl name type_params _ _ ->
       sexp("alias", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), Nil)))

@@ -234,6 +234,15 @@ export fn instantiate(state: InferState, scheme: types.Scheme) -> types.Type !{I
     effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
     apply_full_subst(type_repl, effect_repl, types.scheme_type(scheme))
 
+# Like instantiate but also returns the prog-var → fresh-TVar substitution.
+# Used by infer.check_fn_body to build constraint-forwarding markers.
+export fn instantiate_with_vars(state: InferState, scheme: types.Scheme) -> (types.Type, Dict types.Type) !{IO} =
+  do
+    type_repl <- build_type_repl(state, types.scheme_vars(scheme), dict_empty())
+    effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
+    let t = apply_full_subst(type_repl, effect_repl, types.scheme_type(scheme))
+    (t, type_repl)
+
 fn build_type_repl(state: InferState, vars: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
   match vars with
   | Nil -> acc

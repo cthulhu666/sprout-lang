@@ -91,7 +91,8 @@ export type InstanceMethodImpl (..) =
 # RecordDecl name type_params fields pos
 # LetDecl name body pos
 # ClassDecl name type_params methods pos
-# InstanceDecl constraint methods pos
+# InstanceDecl constraint instance_constraints methods pos
+# AliasDecl name type_params rhs pos
 
 export type Decl (..) =
   | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr source.SourcePos
@@ -99,7 +100,7 @@ export type Decl (..) =
   | RecordDecl String (List String) (List RecordFieldDecl) source.SourcePos
   | LetDecl String Expr source.SourcePos
   | ClassDecl String (List String) (List ClassMethodSig) source.SourcePos
-  | InstanceDecl TypeConstraint (List InstanceMethodImpl) source.SourcePos
+  | InstanceDecl TypeConstraint (List TypeConstraint) (List InstanceMethodImpl) source.SourcePos
   | AliasDecl String (List String) TypeExpr source.SourcePos
 
 # --- Program ---
