@@ -57,10 +57,6 @@
         {
           "type": "indent",
           "named": true
-        },
-        {
-          "type": "newline",
-          "named": true
         }
       ]
     }
@@ -94,6 +90,10 @@
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "newline",
           "named": true
         }
       ]
@@ -389,6 +389,10 @@
         {
           "type": "identifier",
           "named": true
+        },
+        {
+          "type": "newline",
+          "named": true
         }
       ]
     }
@@ -448,7 +452,7 @@
     },
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "constraint_list",
@@ -456,6 +460,10 @@
         },
         {
           "type": "instance_body",
+          "named": true
+        },
+        {
+          "type": "newline",
           "named": true
         }
       ]
@@ -752,10 +760,6 @@
         {
           "type": "instance_method",
           "named": true
-        },
-        {
-          "type": "newline",
-          "named": true
         }
       ]
     }
@@ -777,7 +781,7 @@
     },
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "constraint_list",
@@ -785,6 +789,10 @@
         },
         {
           "type": "instance_body",
+          "named": true
+        },
+        {
+          "type": "newline",
           "named": true
         }
       ]

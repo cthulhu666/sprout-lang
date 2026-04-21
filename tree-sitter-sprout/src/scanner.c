@@ -109,10 +109,25 @@ bool tree_sitter_sprout_external_scanner_scan(void *payload, TSLexer *lexer, con
     return true;
   }
 
-  if (lexer->lookahead == '\n' && valid_symbols[NEWLINE]) {
-    lexer->advance(lexer, true);
-    lexer->result_symbol = NEWLINE;
+  if (lexer->lookahead == '\0' && scanner->depth > 1 && valid_symbols[DEDENT]) {
+    pop_indent(scanner);
+    lexer->result_symbol = DEDENT;
     return true;
+  }
+
+  if (lexer->lookahead == '\n') {
+    if (scanner->depth == 1 && valid_symbols[NEWLINE]) {
+      lexer->advance(lexer, true);
+      lexer->result_symbol = NEWLINE;
+      return true;
+    }
+    lexer->advance(lexer, true);
+    if (scanner->depth > 1 && lexer->eof(lexer) && valid_symbols[DEDENT]) {
+      pop_indent(scanner);
+      lexer->result_symbol = DEDENT;
+      return true;
+    }
+    return false;
   }
 
   if (!(valid_symbols[INDENT] || valid_symbols[DEDENT])) {

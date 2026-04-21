@@ -44,5 +44,3 @@
 (tuple_expression ["," "(" ")"] @punctuation.delimiter)
 (list_expression ["[" "]" ","] @punctuation.delimiter)
 (record_expression ["{" "}"] @punctuation.bracket)
-(class_body ["{" "}"] @punctuation.bracket)
-(instance_body ["{" "}"] @punctuation.bracket)

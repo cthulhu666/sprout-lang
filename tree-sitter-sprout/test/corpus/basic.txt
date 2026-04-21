@@ -1,0 +1,93 @@
+==================
+fn sample() -> Int = do
+  let x = 1
+  x
+---
+(source_file
+  (declaration
+    (function_declaration
+      name: (identifier)
+      (type_expression
+        (type_atom
+          (identifier)))
+      (expression
+        (do_expression
+          (newline)
+          (indent)
+          (do_step
+            (do_let_step
+              (identifier)
+              (expression
+                (literal
+                  (int_literal)))))
+          (do_step
+            (do_expr_step
+              (expression
+                (identifier))))
+          (dedent)))))
+
+==================
+fn sample(x: Maybe Int) -> Int = match x with
+  | Just y -> y
+  | Nothing -> 0
+---
+(source_file
+  (declaration
+    (function_declaration
+      name: (identifier)
+      (param
+        name: (identifier)
+        (type_expression
+          (type_apply
+            (type_atom
+              (identifier))
+            (type_atom
+              (identifier)))))
+      (type_expression
+        (type_atom
+          (identifier)))
+      (expression
+        (match_expression
+          (expression
+            (identifier))
+          (newline)
+          (indent)
+          (match_branch
+            (pattern
+              (constructor_pattern
+                (qualified_identifier
+                  (identifier))
+                (pattern
+                  (identifier))))
+            (expression
+              (identifier)))
+          (match_branch
+            (pattern
+              (identifier))
+            (expression
+              (literal
+                (int_literal))))
+          (dedent)))))
+
+==================
+class Eq a where Eq a
+instance Eq Int
+---
+(source_file
+  (declaration
+    (class_declaration
+      name: (identifier)
+      (identifier)
+      (constraint_list
+        (constraint
+          class: (identifier)
+          (type_atom
+            (identifier))))
+      (newline)))
+  (declaration
+    (instance_declaration
+      constraint: (constraint
+        class: (identifier)
+        (type_atom
+          (identifier)))
+      (newline))))

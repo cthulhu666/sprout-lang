@@ -91,6 +91,7 @@ module.exports = grammar({
       field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
+      $.newline,
       optional($.class_body),
     )),
 
@@ -98,6 +99,7 @@ module.exports = grammar({
       "instance",
       field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
+      $.newline,
       optional($.instance_body),
     )),
 
@@ -161,11 +163,11 @@ module.exports = grammar({
       field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
+      $.newline,
       optional($.class_body),
     )),
 
     class_body: ($) => seq(
-      $.newline,
       $.indent,
       repeat1($.class_method_signature),
       $.dedent,
@@ -185,11 +187,11 @@ module.exports = grammar({
       "instance",
       field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
+      $.newline,
       optional($.instance_body),
     )),
 
     instance_body: ($) => seq(
-      $.newline,
       $.indent,
       repeat1($.instance_method),
       $.dedent,
