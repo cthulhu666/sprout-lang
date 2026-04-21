@@ -1,0 +1,73 @@
+==================
+module stdlib.core
+import stdlib.collections (map, fold)
+fn add(a: Int, b: Int) -> Int = a + b
+---
+(source_file
+  (module_declaration
+    (qualified_identifier
+      (identifier)
+      (identifier)))
+  (import_declaration
+    (qualified_identifier
+      (identifier)
+      (identifier))
+    (identifier)
+    (identifier))
+  (function_declaration
+    (identifier)
+    (param (identifier) (type_expression (identifier)))
+    (param (identifier) (type_expression (identifier)))
+    (type_expression (identifier))
+    (binary_expression
+      (identifier)
+      (identifier))))
+
+==================
+type Maybe a = | Just a | Nothing
+class Eq a where Eq a
+instance Eq Int
+---
+(source_file
+  (type_declaration
+    (identifier)
+    (identifier)
+    (sum_type
+      (type_constructor
+        (identifier)
+        (type_atom (identifier)))
+      (type_constructor
+        (identifier))))
+  (class_declaration
+    (identifier)
+    (identifier)
+    (constraint_list
+      (constraint
+        (identifier)
+        (type_atom (identifier)))))
+  (instance_declaration
+    (constraint
+      (identifier)
+      (type_atom (identifier)))))
+
+==================
+match x with
+| Just y -> y
+| Nothing -> 0
+---
+(source_file
+  (match_expression
+    (identifier)
+    (match_branch
+      (pattern
+        (constructor_pattern
+          (qualified_identifier
+            (identifier))
+          (pattern (identifier))))
+      (identifier))
+    (match_branch
+      (pattern
+        (constructor_pattern
+          (qualified_identifier
+            (identifier))))
+      (int_literal))))

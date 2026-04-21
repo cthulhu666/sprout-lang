@@ -1,0 +1,12 @@
+{
+  "name": "tree-sitter-sprout",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar scaffold for the Sprout language",
+  "main": "grammar.js",
+  "keywords": [
+    "tree-sitter",
+    "grammar",
+    "sprout"
+  ],
+  "license": "MIT"
+}

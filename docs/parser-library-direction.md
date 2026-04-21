@@ -77,3 +77,10 @@ stable subset can be promoted into a more general parsing library.
 4. build the bootstrap lexer against those utilities,
 5. only then decide whether broader combinators should be promoted or kept
    compiler-local.
+
+## CBM Support Note
+
+If Sprout is to be indexed by `codebase-memory-mcp`, a separate tree-sitter
+grammar or equivalent parser bridge is required. See
+[`docs/tree-sitter-sprout-support.md`](/Users/cthulhu/Dev/lang/sprout_lang/docs/tree-sitter-sprout-support.md)
+for the minimum surface area that grammar needs to cover.
