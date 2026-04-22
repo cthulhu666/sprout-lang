@@ -303,6 +303,8 @@ typedef struct {
   long long f4;
   long long f5;
   long long f6;
+  long long f7;
+  long long f8;
 } SproutObj;
 
 typedef enum {
@@ -449,6 +451,8 @@ long long sprout_make4(long long tag, long long a0, long long a1, long long a2, 
 long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4);
 long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5);
 long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6);
+long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7);
+long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8);
 long long sprout_tag(long long h);
 long long sprout_field(long long h, long long idx);
 static CtorMeta* find_ctor(long long tag);
@@ -688,6 +692,8 @@ static SproutObj* sprout_init_obj(SproutObj* obj, long long tag, long long f0, l
   obj->f4 = 0;
   obj->f5 = 0;
   obj->f6 = 0;
+  obj->f7 = 0;
+  obj->f8 = 0;
   return obj;
 }
 
@@ -903,6 +909,8 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
       if (index == 4) return obj->f4;
       if (index == 5) return obj->f5;
       if (index == 6) return obj->f6;
+      if (index == 7) return obj->f7;
+      if (index == 8) return obj->f8;
       break;
     }
     case SPROUT_HEAP_CLOSURE: {
@@ -2078,7 +2086,9 @@ long long sprout_field(long long h, long long idx) {
   if (idx == 3) return o->f3;
   if (idx == 4) return o->f4;
   if (idx == 5) return o->f5;
-  return o->f6;
+  if (idx == 6) return o->f6;
+  if (idx == 7) return o->f7;
+  return o->f8;
 }
 long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3) {
   SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make4: out of memory"), tag, a0, a1, a2);
@@ -2104,6 +2114,25 @@ long long sprout_make7(long long tag, long long a0, long long a1, long long a2, 
   obj->f4 = a4;
   obj->f5 = a5;
   obj->f6 = a6;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make8: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  obj->f6 = a6;
+  obj->f7 = a7;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make9: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  obj->f6 = a6;
+  obj->f7 = a7;
+  obj->f8 = a8;
   return sprout_box_registered_obj(obj);
 }
 

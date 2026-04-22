@@ -169,6 +169,8 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_make5": FnSig(name="sprout_make5", params=[I64, I64, I64, I64, I64, I64], ret=I64),
     "sprout_make6": FnSig(name="sprout_make6", params=[I64, I64, I64, I64, I64, I64, I64], ret=I64),
     "sprout_make7": FnSig(name="sprout_make7", params=[I64, I64, I64, I64, I64, I64, I64, I64], ret=I64),
+    "sprout_make8": FnSig(name="sprout_make8", params=[I64, I64, I64, I64, I64, I64, I64, I64, I64], ret=I64),
+    "sprout_make9": FnSig(name="sprout_make9", params=[I64, I64, I64, I64, I64, I64, I64, I64, I64, I64], ret=I64),
     "sprout_alloc_closure_env": FnSig(name="sprout_alloc_closure_env", params=[I64], ret=I8_PTR),
     "sprout_alloc_tuple_blob": FnSig(name="sprout_alloc_tuple_blob", params=[I64], ret=I8_PTR),
     "sprout_gc_register_i64_root": FnSig(name="sprout_gc_register_i64_root", params=[I8_PTR], ret=I64),
@@ -1019,9 +1021,9 @@ def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> s
             if ctor.name in ctor_sigs:
                 raise CodegenError(f"Duplicate constructor name in backend: {ctor.name}")
             arg_types = [_type_from_ast(arg, adt_names) for arg in ctor.args]
-            if len(arg_types) > 7:
+            if len(arg_types) > 9:
                 raise CodegenError(
-                    f"Constructor {ctor.name} has {len(arg_types)} args; backend currently supports up to 7"
+                    f"Constructor {ctor.name} has {len(arg_types)} args; backend currently supports up to 9"
                 )
             ctor_sigs[ctor.name] = CtorSig(name=ctor.name, tag=next_tag, arg_types=arg_types)
             next_tag += 1
