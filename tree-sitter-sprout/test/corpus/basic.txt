@@ -91,3 +91,55 @@ instance Eq Int
         (type_atom
           (identifier)))
       (newline))))
+
+==================
+fn sample() -> Int = do
+  let x = 1
+  x
+fn next() -> Int = 2
+---
+(source_file
+  (declaration
+    (function_declaration
+      name: (identifier)
+      (type_expression
+        (type_atom
+          (identifier)))
+      (expression
+        (do_expression
+          (newline)
+          (indent)
+          (do_step
+            (do_let_step
+              (identifier)
+              (expression
+                (literal
+                  (int_literal)))))
+          (do_step
+            (do_expr_step
+              (expression
+                (identifier))))
+          (dedent)))))
+  (declaration
+    (function_declaration
+      name: (identifier)
+      (type_expression
+        (type_atom
+          (identifier)))
+      (expression
+        (literal
+          (int_literal))))))
+
+==================
+class Eq a where Eq a
+---
+(source_file
+  (declaration
+    (class_declaration
+      name: (identifier)
+      (identifier)
+      (constraint_list
+        (constraint
+          class: (identifier)
+          (type_atom
+            (identifier)))))))

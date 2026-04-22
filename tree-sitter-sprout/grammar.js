@@ -91,16 +91,14 @@ module.exports = grammar({
       field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
-      $.newline,
-      optional($.class_body),
+      optional(seq($.newline, $.class_body)),
     )),
 
     exported_instance_declaration: ($) => prec.right(seq(
       "instance",
       field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
-      $.newline,
-      optional($.instance_body),
+      optional(seq($.newline, $.instance_body)),
     )),
 
     exported_function_declaration: ($) => seq(
@@ -163,8 +161,7 @@ module.exports = grammar({
       field("name", $.identifier),
       repeat1($.identifier),
       optional(seq("where", $.constraint_list)),
-      $.newline,
-      optional($.class_body),
+      optional(seq($.newline, $.class_body)),
     )),
 
     class_body: ($) => seq(
@@ -187,8 +184,7 @@ module.exports = grammar({
       "instance",
       field("constraint", $.constraint),
       optional(seq("where", $.constraint_list)),
-      $.newline,
-      optional($.instance_body),
+      optional(seq($.newline, $.instance_body)),
     )),
 
     instance_body: ($) => seq(

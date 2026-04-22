@@ -116,16 +116,44 @@ bool tree_sitter_sprout_external_scanner_scan(void *payload, TSLexer *lexer, con
   }
 
   if (lexer->lookahead == '\n') {
-    if (scanner->depth == 1 && valid_symbols[NEWLINE]) {
-      lexer->advance(lexer, true);
+    lexer->advance(lexer, true);
+    if (valid_symbols[NEWLINE]) {
       lexer->result_symbol = NEWLINE;
       return true;
     }
-    lexer->advance(lexer, true);
+
+    uint16_t indent = 0;
+    uint16_t start_indent = current_indent(scanner);
+    skip_horizontal_whitespace(lexer, &indent);
+
     if (scanner->depth > 1 && lexer->eof(lexer) && valid_symbols[DEDENT]) {
       pop_indent(scanner);
       lexer->result_symbol = DEDENT;
       return true;
+    }
+
+    if (lexer->lookahead == '\n') {
+      return false;
+    }
+
+    if (indent > start_indent && valid_symbols[INDENT]) {
+      push_indent(scanner, indent);
+      lexer->result_symbol = INDENT;
+      return true;
+    }
+
+    if (indent < start_indent && valid_symbols[DEDENT]) {
+      uint8_t target_depth = scanner->depth;
+      while (target_depth > 1 && scanner->stack[target_depth - 1] > indent) {
+        target_depth--;
+      }
+      if (target_depth < scanner->depth && scanner->stack[target_depth - 1] == indent) {
+        uint8_t pops_needed = (uint8_t)(scanner->depth - target_depth);
+        scanner->pending_dedents = (uint8_t)(pops_needed - 1);
+        pop_indent(scanner);
+        lexer->result_symbol = DEDENT;
+        return true;
+      }
     }
     return false;
   }
@@ -134,12 +162,12 @@ bool tree_sitter_sprout_external_scanner_scan(void *payload, TSLexer *lexer, con
     return false;
   }
 
-  uint16_t indent = 0;
-  uint16_t start_indent = current_indent(scanner);
-
-  if (lexer->lookahead != ' ' && lexer->lookahead != '\t') {
+  if (lexer->get_column(lexer) != 0) {
     return false;
   }
+
+  uint16_t indent = 0;
+  uint16_t start_indent = current_indent(scanner);
 
   skip_horizontal_whitespace(lexer, &indent);
 
