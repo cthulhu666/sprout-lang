@@ -87,3 +87,6 @@ This file tracks open design, implementation, and tooling follow-up work.
    Motivation: self-hosted parser combinators (Phase 6 self-hosting) need a principled "try this, else try that" primitive. The current workaround is a list-based `try_ops` helper in `stdlib/compiler/lexer.sprout`.
    Initial scope: `class Alternative f { fn alt(left: f a, right: f a) -> f a }` with a `Maybe` instance. A `<|>` infix operator would make call sites readable but requires tokenizer and parser changes (new 3-char token not currently in the language).
    First milestone constraints: `Maybe` instance only to start; decide on `<|>` operator vs named `alt` before widening; no `Applicative`/`Functor` hierarchy requirement in the initial slice.
+11. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
+   Design doc: [observability-guard-rails.md](./observability-guard-rails.md).
+   These features are not scheduled, but the design constraints in that doc must be respected in all Stage 2+ self-hosted compiler code so they remain practical to add. The six constraints — source locations first-class, explicit typed passes, explicit capability passing, no premature pass fusion, type survival into typed core, accurate effect annotations — are active guard rails, not future work items.

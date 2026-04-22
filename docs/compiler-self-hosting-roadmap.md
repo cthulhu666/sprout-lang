@@ -281,6 +281,17 @@ prefer:
 5. tests that can later compare host and self-hosted implementations on the
    same inputs.
 
+### Observability Design Constraints
+
+All self-hosted Sprout compiler code written from Stage 2 onward must also
+respect the constraints in [observability-guard-rails.md](./observability-guard-rails.md).
+That document records what must not be closed off to keep logging, debugging,
+profiling, and introspection practical to add later. The six constraints are:
+source locations first-class in all IR types, pipeline stages as named typed
+functions, effectful capabilities passed explicitly, no premature pass fusion,
+type information surviving into the typed core, and accurate effect annotations
+on all pipeline functions.
+
 ## Definition of Success
 
 This roadmap succeeds if it gives the project a clear progression from:
