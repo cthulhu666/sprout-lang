@@ -134,17 +134,15 @@ def cmd_bootstrap_parse(path: Path) -> int:
 
 
 def cmd_bootstrap_check(path: Path) -> int:
-    """Typecheck a Sprout file using the bootstrap (self-hosted) checker.
+    """Typecheck a Sprout file using the bootstrap (self-hosted) full pipeline.
 
-    Routes through stdlib/compiler/compile_driver.sprout instead of the
-    Python typechecker.  The driver strips module/import headers itself,
-    runs the full lex → parse → HM-check pipeline, and prints:
-      OK
-      <name> : <scheme>
-      ...
-    on success, or ERROR: <msg> on failure.
+    Routes through stdlib/compiler/full_driver.sprout, which runs the
+    complete Sprout-native pipeline on the target file:
+      bundle → typecheck → lower
+    Prints "OK" and a decl count on success, or "ERROR: <stage>: <msg>" on
+    the first failing stage.
     """
-    driver = Path(__file__).parent.parent / "stdlib" / "compiler" / "compile_driver.sprout"
+    driver = Path(__file__).parent.parent / "stdlib" / "compiler" / "full_driver.sprout"
     bundle = load_module_bundle(driver)
     source = bundle.source
     tree = parse(source)

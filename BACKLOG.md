@@ -179,10 +179,11 @@ Python's `load_module_bundle` + `resolve_program_names` produces a flat, single-
 - [x] `P0` Implement `stdlib/compiler/bundler.sprout`: given a file path and stdlib root, produce a bundled `ast.Program` with all imports inlined and names fully qualified.
 - [x] `P0` Add parity tests: bundled FnDecl names match Python's bundled source on the conformance corpus. `bundle_driver.sprout` + `test_bundler_parity.py` cover simple, import, and list-ops cases; all 3 pass. Runtime fixes: Char ordering comparisons (`>=` etc.) now work in the interpreter; self-hosted parser extended to handle single-constructor types (no leading `|`) and class superclass constraints (`where` clauses); `ClassDecl` gains a `superclasses: List TypeConstraint` field (5-field, was 4); module name scanning fixed to read dotted identifiers (`stdlib.string` not `stdlib`).
 
-### M4 — End-to-end Sprout pipeline (wire M1–M3)
+### M4 — End-to-end Sprout pipeline (wire M1–M3) ✓ DONE
 
-- [ ] `P0` Add `compile_full` to `stdlib/compiler/compiler.sprout`: runs bundle → lex/parse → name-qualify → typecheck → lower in sequence, entirely in Sprout.
-- [ ] `P0` Route `sprout.cli bootstrap-check` through `compile_full` for at least one real program end-to-end.
+- [x] `P0` Add `compile_full` to `stdlib/compiler/compiler.sprout`: runs bundle → lex/parse → name-qualify → typecheck → lower in sequence, entirely in Sprout.
+- [x] `P0` Route `sprout.cli bootstrap-check` through `compile_full` for at least one real program end-to-end.
+- [x] `P0` `full_driver.sprout` batch driver runs compile_full over a list of files; `test_compile_full.py` verifies 5 corpus files (3 plain + 2 stdlib-import) all pass. Two `infer.sprout` bugs fixed: instance-resolution arg scanning now covers all args (not just first), and class method scheme registration now collects all method-specific type vars.
 
 ### M5 — Stage-0 bootstrap compile + self-compilation check
 

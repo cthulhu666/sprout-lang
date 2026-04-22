@@ -6,6 +6,9 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
 import stdlib.compiler.types as types
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.lowering as lowering
 
 # ---------------------------------------------------------------------------
 # Public API types
@@ -106,3 +109,36 @@ export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileR
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: String) -> CompileResult !{IO} =
   compile_source(strip_headers(read_file(path), 0))
+
+# ---------------------------------------------------------------------------
+# Full pipeline: bundle → typecheck → lower (M4)
+# ---------------------------------------------------------------------------
+#
+# compile_full is the Sprout-native end-to-end compiler entry point.
+# It chains all three passes that M1-M3 individually verified:
+#
+#   1. bundler.bundle_file    — load entry file + imports, qualify names  (M3)
+#   2. checker.typecheck_typed — HM type inference + typed IR production  (M1)
+#   3. lowering.lower_program  — dictionary-passing typeclass lowering     (M2)
+#
+# Returns the lowered ast.Program plus the final type env on success, or a
+# diagnostic list on the first failing stage.
+
+export type FullResult (..) =
+  | FullOk ast.Program (Dict types.Scheme)
+  | FullFail (List Diagnostic)
+
+export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
+  do
+    bundle_result <- bundler.bundle_file(path, stdlib_root)
+    match bundle_result with
+    | bundler.BundleErr msg -> FullFail(Cons(DiagError("bundle: " ++ msg), Nil))
+    | bundler.BundleOk prog ->
+        do
+          tc_result <- checker.typecheck_typed(prog, Nil)
+          match tc_result with
+          | typed_ast.TypedErr msg -> FullFail(Cons(DiagError("check: " ++ msg), Nil))
+          | typed_ast.TypedOk typed_prog env ->
+              match lowering.lower_program(typed_prog) with
+              | lowering.LowerErr msg -> FullFail(Cons(DiagError("lower: " ++ msg), Nil))
+              | lowering.LowerOk lowered -> FullOk(lowered, env)

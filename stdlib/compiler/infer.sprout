@@ -564,19 +564,29 @@ fn check_instance_for_marker(
                       | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
       | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
+# Scan all args for the first whose head type is a concrete constructor (TConst).
+# Skips function-typed args (TFunc) and type-variable-headed containers, which
+# cannot host a typeclass instance.  This allows class methods whose concrete
+# container argument is not the first parameter (e.g. fmap(fn, container)) to
+# resolve correctly.
 fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe String =
   match typed_args with
   | Nil -> Nothing
-  | Cons first_arg _ ->
-      concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)))
+  | Cons first_arg rest ->
+      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Nothing -> first_concrete_typed_arg_str(rest, subst)
+      | Just s  -> Just(s)
 
-# Returns the outermost TVar name of the first arg after substitution.
-# Used to look up @fwd:{tvar}:{class} forward markers for polymorphic dispatch.
+# Returns the outermost TVar name from the first arg whose head is a TVar after
+# substitution.  Scans all args so that function-typed leading arguments (e.g.
+# the fn-arg in fmap(fn, xs)) do not shadow the actual container argument.
 fn first_tvar_head_after_subst(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe String =
   match typed_args with
   | Nil -> Nothing
-  | Cons first_arg _ ->
-      tvar_head_of_type(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)))
+  | Cons first_arg rest ->
+      match tvar_head_of_type(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Just name -> Just(name)
+      | Nothing   -> first_tvar_head_after_subst(rest, subst)
 
 fn tvar_head_of_type(t: types.Type) -> Maybe String =
   match t with
@@ -591,10 +601,14 @@ fn type_head_str(t: types.Type) -> String =
   | types.TVar name -> name
   | _ -> types.type_to_string(t)
 
+# Returns the concrete constructor name (TConst head) of a type, or Nothing if
+# the outermost head is a type variable, a function type, or any non-concrete
+# form.  Used to look up @inst:{Class}:{head} instance markers.
 fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TVar _ -> Nothing
-  | _ -> Just(type_head_str(t))
+  | types.TConst name -> Just(name)
+  | types.TApp base _ -> concrete_type_str(base)
+  | _ -> Nothing
 
 # --- Forward marker helpers ---
 #
@@ -1565,7 +1579,14 @@ fn register_class_methods(type_params: List String, methods: List ast.ClassMetho
 fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match sig with
   | ast.ClassMethodSig name params ret_type effects_maybe ->
-      dict_set(name, scheme_from_fn_parts_inner(type_params, params, Just(ret_type), effects_maybe, dict_empty()), env)
+      # Extend the class type params with any additional lowercase type variables
+      # appearing in the method signature (e.g. `a` and `b` in
+      # `fmap(f: a -> b, xs: f a) -> f b`).  Without this, method-specific
+      # vars become TConst instead of TVar, corrupting the inferred substitution
+      # at call sites and producing spurious "No instance of X for Y" errors.
+      dict_set(name, scheme_from_fn_parts_inner(
+        collect_ret_type_vars(Just(ret_type), collect_param_type_vars(params, type_params)),
+        params, Just(ret_type), effects_maybe, dict_empty()), env)
 
 fn register_class_method_markers(class_name: String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with

@@ -1,0 +1,57 @@
+module main
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.ast as ast
+
+# ---------------------------------------------------------------------------
+# Diagnostic printing
+
+fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
+  match diags with
+  | Nil -> ()
+  | Cons d rest ->
+      do
+        match d with
+        | compiler.DiagError msg   -> print("ERROR: " ++ msg)
+        | compiler.DiagWarning msg -> print("WARNING: " ++ msg)
+        print_diags(rest)
+
+# ---------------------------------------------------------------------------
+# Decl counting for the summary line
+
+fn count_decls(decls: List ast.Decl) -> Int =
+  match decls with
+  | Nil -> 0
+  | Cons _ rest -> 1 + count_decls(rest)
+
+# ---------------------------------------------------------------------------
+# Per-file pipeline: bundle → typecheck → lower
+
+fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- compiler.compile_full(path, stdlib_root)
+    match result with
+    | compiler.FullFail diags -> print_diags(diags)
+    | compiler.FullOk lowered _ ->
+        do
+          print("OK")
+          match lowered with
+          | ast.Program decls _ ->
+              print("decls: " ++ int_to_string(count_decls(decls)))
+
+# ---------------------------------------------------------------------------
+# Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
+# Prints "=== <path> ===" before each file's output.
+
+fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
+  match argv_get(idx) with
+  | Nothing   -> ()
+  | Just path ->
+      do
+        print("=== " ++ path ++ " ===")
+        run_file(path, stdlib_root)
+        run_batch(stdlib_root, idx + 1)
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing          -> print("ERROR: usage: full-driver <stdlib-root> <file>...")
+  | Just stdlib_root -> run_batch(stdlib_root, 1)
