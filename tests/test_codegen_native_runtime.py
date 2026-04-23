@@ -713,6 +713,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env = os.environ.copy()
             env["SPROUT_DEBUG_GC"] = "1"
             env["SPROUT_GC_THRESHOLD"] = "1"
+            env["SPROUT_GC_ADAPT_RATIO"] = "0"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "3")
             self.assertEqual(run.returncode, 0)
@@ -842,6 +843,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env = os.environ.copy()
             env["SPROUT_DEBUG_GC"] = "1"
             env["SPROUT_GC_THRESHOLD"] = "1"
+            env["SPROUT_GC_ADAPT_RATIO"] = "0"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "400")
             self.assertEqual(run.returncode, 0)
@@ -881,6 +883,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env = os.environ.copy()
             env["SPROUT_DEBUG_GC"] = "1"
             env["SPROUT_GC_THRESHOLD"] = "1"
+            env["SPROUT_GC_ADAPT_RATIO"] = "0"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
             self.assertEqual(run.stdout.strip(), "64")
             self.assertEqual(run.returncode, 0)
@@ -910,6 +913,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env = os.environ.copy()
             env["SPROUT_DEBUG_GC"] = "1"
             env["SPROUT_GC_THRESHOLD"] = "1"
+            env["SPROUT_GC_ADAPT_RATIO"] = "0"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "10")
         self.assertEqual(run.returncode, 0)
@@ -942,6 +946,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             env = os.environ.copy()
             env["SPROUT_DEBUG_GC"] = "1"
             env["SPROUT_GC_THRESHOLD"] = "1"
+            env["SPROUT_GC_ADAPT_RATIO"] = "0"
             run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "10")
         self.assertEqual(run.returncode, 0)
@@ -988,6 +993,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
                 env = os.environ.copy()
                 env["SPROUT_DEBUG_GC"] = "1"
                 env["SPROUT_GC_THRESHOLD"] = "1"
+                env["SPROUT_GC_ADAPT_RATIO"] = "0"
                 run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
         self.assertEqual(run.stdout.strip(), "eof")
         self.assertEqual(run.returncode, 0, msg=run.stderr)

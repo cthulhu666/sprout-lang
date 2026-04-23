@@ -441,7 +441,7 @@ static long long g_managed_heap_count = 0;
 static long long g_managed_alloc_since_gc = 0;
 static long long g_gc_threshold = 4096;
 static long long g_gc_marked_count = 0;
-static double g_gc_adapt_ratio = 0.0;   /* 0 = disabled; fraction of heap swept below which threshold grows */
+static double g_gc_adapt_ratio = 0.2;   /* fraction of heap swept below which threshold grows; 0 disables */
 static double g_gc_adapt_factor = 2.0;  /* multiplier applied to threshold when adapting */
 static long long g_gc_adapt_cap = 0;    /* 0 = no cap on threshold growth */
 
@@ -537,8 +537,8 @@ static void sprout_gc_threshold_maybe_enable(void) {
 
 static void sprout_gc_adapt_maybe_enable(void) {
   /* SPROUT_GC_ADAPT_RATIO: swept/heap fraction below which threshold is grown.
-     Set to a value in (0, 1] to enable adaptive GC (e.g. 0.2 means "if GC
-     freed less than 20%% of the heap, grow the threshold"). */
+     Default is 0.2 (grow when less than 20%% of the heap was freed).
+     Set to 0 to disable adaptive GC entirely. */
   const char* ratio_raw = getenv("SPROUT_GC_ADAPT_RATIO");
   if (ratio_raw != NULL && ratio_raw[0] != '\\0') {
     char* end = NULL;
