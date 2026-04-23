@@ -190,7 +190,7 @@ Python's `load_module_bundle` + `resolve_program_names` produces a flat, single-
 - [x] `P0` `python -m sprout.cli compile -o compile_driver_bin --with-stdlib --native stdlib/compiler/compile_driver.sprout` produces a working native binary (uses existing LLVM codegen — Python-hosted, one-time). Runtime extended to support 8- and 9-field constructors (`ModuleSymbols`, `ResolveCtx`) required by the bundler module that is transitively compiled in.
 - [x] `P0` Run that binary to compile itself (`stage-1`); verify output is bit-for-bit identical to stage-0 (`bootstrap-check`). `test_bootstrap_stage1.py` runs the native binary on 5 corpus files (3 plain + 2 stdlib-import) and confirms output matches the Python-hosted `compile_driver.sprout` line-for-line.
 - [x] `P0` Add CI step: stage-0 → stage-1 reproducibility check via `test_bootstrap_stage1.py`.
-- Known issue: native binary GC (threshold 4096) has a rooting gap in the LLVM codegen that causes non-deterministic crashes during stdlib import processing. Workaround: tests run with `SPROUT_GC_THRESHOLD=0`; the codegen rooting bug is tracked for M6.
+- [x] `P0` Fixed GC rooting bug in `TupleExpr` codegen: tuple items were evaluated without rooting intermediates; if item N+1 triggered GC (e.g. first `sprout_nothing` call allocating the Nothing singleton), item N's heap object was freed. Fix: root each tuple item as it is evaluated before proceeding to the next. Removed `SPROUT_GC_THRESHOLD=0` workaround; tests now run with GC enabled at default threshold.
 
 ---
 

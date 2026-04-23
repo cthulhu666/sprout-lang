@@ -2076,7 +2076,8 @@ long long sprout_make3(long long tag, long long a0, long long a1, long long a2) 
   return sprout_make_registered_obj(tag, a0, a1, a2, "sprout_make3: out of memory");
 }
 long long sprout_tag(long long h) {
-  return unbox_ptr(h)->tag;
+  SproutObj* obj = unbox_ptr(h);
+  return obj->tag;
 }
 long long sprout_field(long long h, long long idx) {
   SproutObj* o = unbox_ptr(h);

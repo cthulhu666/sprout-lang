@@ -10,8 +10,6 @@ The comparison establishes M5's reproducibility invariant:
 
 Notes:
   - The binary must exist at ROOT/compile_driver_bin (built by `sprout compile --native`).
-  - SPROUT_GC_THRESHOLD=0 disables the GC in the native binary to work around a known
-    rooting gap in the LLVM codegen; the test marks this as xfail with GC enabled.
   - Tests are skipped if compile_driver_bin is absent.
 """
 from __future__ import annotations
@@ -110,7 +108,6 @@ def _ensure_native_cache() -> dict[str, list[str]] | None:
     stdlib_root = str(ROOT / "stdlib")
     paths = [str(p) for p in _all_paths() if p.exists()]
     env = os.environ.copy()
-    env["SPROUT_GC_THRESHOLD"] = "0"  # disable GC; see module docstring
     result = subprocess.run(
         [str(NATIVE_BINARY), stdlib_root, *paths],
         capture_output=True, text=True, cwd=str(ROOT), env=env,

@@ -493,6 +493,11 @@ def _emit_pop_temp_roots(count: int, emitter: Emitter) -> None:
     emitter.emit(f"  {reg} = call i64 @sprout_gc_pop_roots(i64 {count})")
 
 
+def _sprout_type_is_plain_int(typ: "ast.TypeExpr | None") -> bool:
+    """Return True for the Sprout Int type — a plain unboxed integer, never a GC heap pointer."""
+    return isinstance(typ, ast.TypeName) and typ.name == "Int"
+
+
 def _emit_exprs_with_temp_roots(
     exprs: list[ast.Expr],
     locals_: dict[str, Value],
@@ -924,6 +929,7 @@ def _emit_lambda_helper(
         raw = helper.tmp()
         helper.emit(f"  {raw} = load i64, ptr {slot}")
         locals_[capture] = Value(I64, raw)
+        rooted += _emit_push_temp_root(Value(I64, raw), helper)
     for idx, param in enumerate(info.expr.params):
         value = Value(info.call_sig.params[idx], f"%a{idx}", _call_sig_from_type_expr(param.type_expr, adt_names))
         rooted += _emit_push_temp_root(value, helper)
@@ -1512,7 +1518,15 @@ def _emit_expr(
     if isinstance(expr, ast.UnitExpr):
         return Value(I64, "0")
     if isinstance(expr, ast.TupleExpr):
-        items = [_emit_expr(item, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter) for item in expr.items]
+        # Root each item after evaluation before computing the next — any item
+        # may allocate (e.g. a constructor argument) which can trigger GC and
+        # would collect unrooted earlier items.
+        items: list[Value] = []
+        total_rooted = 0
+        for item_expr in expr.items:
+            item = _emit_expr(item_expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+            total_rooted += _emit_push_temp_root(item, emitter)
+            items.append(item)
         tuple_items = [item.typ for item in items]
         tuple_typ = _tuple_lltype(tuple_items)
         current = "undef"
@@ -1522,6 +1536,7 @@ def _emit_expr(
                 f"  {next_val} = insertvalue {tuple_typ.text} {current}, {item.typ.text} {item.ir}, {idx}"
             )
             current = next_val
+        _emit_pop_temp_roots(total_rooted, emitter)
         return Value(tuple_typ, current, tuple_items=tuple_items)
     if isinstance(expr, ast.VarExpr):
         val = locals_.get(expr.name)
@@ -2673,12 +2688,22 @@ def _emit_call(
         if len(expr.args) > len(sig.params):
             raise CodegenError(f"Function {fn_name} expects {len(sig.params)} args, got {len(expr.args)}")
         if tco_ctx is not None and fn_name == tco_ctx.fn_name and len(expr.args) == len(sig.params):
-            # TCO self-call: compute args WITHOUT temp roots (no GC allocation between
-            # here and the back-edge stores, so no alloca needed — avoids stack growth
-            # in the loop body on AArch64).
-            raw_args = [_emit_expr(arg, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=None)
-                        for arg in expr.args]
+            # TCO self-call: evaluate args with selective temp roots.
+            # After arg[i], push a temp root if the Sprout type could be a GC-managed
+            # heap pointer AND there are subsequent args that might trigger collection.
+            # Plain Int args (unboxed integers) are never heap pointers and are skipped
+            # to avoid alloca-per-iteration stack growth on AArch64.
+            raw_args: list[Value] = []
+            tco_rooted = 0
+            for i, tco_arg in enumerate(expr.args):
+                val = _emit_expr(tco_arg, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=None)
+                raw_args.append(val)
+                if i < len(expr.args) - 1:
+                    arg_type = getattr(tco_arg, "inferred_type", None)
+                    if not _sprout_type_is_plain_int(arg_type):
+                        tco_rooted += _emit_push_temp_root(val, emitter)
             coerced_args = [_coerce_value(av, st, emitter) for av, (_, st) in zip(raw_args, tco_ctx.param_slots)]
+            _emit_pop_temp_roots(tco_rooted, emitter)
             return Value(sig.ret, "undef", tco_args=coerced_args)
         args, rooted_args = _emit_exprs_with_temp_roots(
             expr.args, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter
