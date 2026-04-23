@@ -154,7 +154,7 @@ Definition of done:
 
 Goal: a native binary produced by `sprout compile stdlib/compiler/compile_driver.sprout` that can compile itself without Python involvement.
 
-Five ordered milestones. Each is a prerequisite for the next.
+Six ordered milestones. Each is a prerequisite for the next.
 
 ### M1 — Bootstrap self-typecheck ✓ DONE
 
@@ -185,12 +185,24 @@ Python's `load_module_bundle` + `resolve_program_names` produces a flat, single-
 - [x] `P0` Route `sprout.cli bootstrap-check` through `compile_full` for at least one real program end-to-end.
 - [x] `P0` `full_driver.sprout` batch driver runs compile_full over a list of files; `test_compile_full.py` verifies 5 corpus files (3 plain + 2 stdlib-import) all pass. Two `infer.sprout` bugs fixed: instance-resolution arg scanning now covers all args (not just first), and class method scheme registration now collects all method-specific type vars.
 
-### M5 — Stage-0 bootstrap compile + self-compilation check ✓ DONE
+### M5 — Stage-0 bootstrap compile + self-check ✓ DONE
+
+Note: "self-compilation" here means the native binary runs its own pipeline (bundle → typecheck → lower) over its own source and produces output that matches the Python-hosted run line-for-line. It does **not** mean the binary can produce a new native binary — LLVM IR emission is still Python-owned. That gap is M6.
 
 - [x] `P0` `python -m sprout.cli compile -o compile_driver_bin --with-stdlib --native stdlib/compiler/compile_driver.sprout` produces a working native binary (uses existing LLVM codegen — Python-hosted, one-time). Runtime extended to support 8- and 9-field constructors (`ModuleSymbols`, `ResolveCtx`) required by the bundler module that is transitively compiled in.
-- [x] `P0` Run that binary to compile itself (`stage-1`); verify output is bit-for-bit identical to stage-0 (`bootstrap-check`). `test_bootstrap_stage1.py` runs the native binary on 5 corpus files (3 plain + 2 stdlib-import) and confirms output matches the Python-hosted `compile_driver.sprout` line-for-line.
+- [x] `P0` Run that binary to self-check (`stage-1`): `compile_driver_bin` runs the Sprout pipeline over 5 corpus files and prints type-check output; `test_bootstrap_stage1.py` confirms output matches the Python-hosted `compile_driver.sprout` line-for-line.
 - [x] `P0` Add CI step: stage-0 → stage-1 reproducibility check via `test_bootstrap_stage1.py`.
 - [x] `P0` Fixed GC rooting bug in `TupleExpr` codegen: tuple items were evaluated without rooting intermediates; if item N+1 triggered GC (e.g. first `sprout_nothing` call allocating the Nothing singleton), item N's heap object was freed. Fix: root each tuple item as it is evaluated before proceeding to the next. Removed `SPROUT_GC_THRESHOLD=0` workaround; tests now run with GC enabled at default threshold.
+
+### M6 — LLVM IR emission in Sprout
+
+Python's LLVM IR emitter (~3 000 lines in `sprout/cli.py`) is the last Python-owned compiler pass. Until it is replaced, producing a native binary requires Python even though every upstream pass (bundle → typecheck → lower) is Sprout-owned. M6 closes the loop: `compile_driver_bin` must be able to emit `.ll` text and invoke `clang` without Python involvement.
+
+- [ ] `P0` Implement `stdlib/compiler/codegen.sprout`: walk the lowered `ast.Program` and emit LLVM IR text. Key concerns: value representation (tagged integers, heap-allocated ADT objects), GC root push/pop discipline around allocating calls, calling convention (curried functions as closures vs. direct calls), and string/bytes literal emission.
+- [ ] `P0` Add parity tests: IR emitted by `codegen.sprout` compiles and runs correctly on the existing conformance corpus (output matches interpreter reference).
+- [ ] `P0` Wire codegen into `compile_driver.sprout`: when given a `--emit-ir` flag (or similar), run the full pipeline through IR emission and write the `.ll` file.
+- [ ] `P0` Verify stage-2: use `compile_driver_bin` (stage-0, Python-produced) to compile `compile_driver.sprout` to a new native binary (stage-1, Sprout-IR-produced) and confirm stage-1 output matches stage-0 on the conformance corpus.
+- [ ] `P0` Update `test_bootstrap_stage1.py` to run the stage-2 binary and verify end-to-end parity without Python involvement in the compile step.
 
 ---
 
