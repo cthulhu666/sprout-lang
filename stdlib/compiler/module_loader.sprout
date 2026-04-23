@@ -180,6 +180,34 @@ fn find_pair(pairs: List (String, types.Scheme), name: String) -> Maybe types.Sc
       else find_pair(rest, name)
 
 # ---------------------------------------------------------------------------
+# Own-entry extraction
+# ---------------------------------------------------------------------------
+#
+# After check_program_with_env returns an env that includes builtins + imports
+# + the module's own declarations, we strip the pre-existing entries so the
+# cache only stores what this module itself defined.  This keeps the cached
+# pairs small and avoids inflating every consumer's typing environment with
+# duplicated builtin schemes.
+
+fn key_in_pairs(k: String, pairs: List (String, types.Scheme)) -> Bool =
+  match pairs with
+  | Nil -> false
+  | Cons (h, _) rest -> if h == k then true else key_in_pairs(k, rest)
+
+fn filter_own_pairs(
+  all_pairs: List (String, types.Scheme),
+  builtins: List (String, types.Scheme),
+  imports: List (String, types.Scheme)
+) -> List (String, types.Scheme) =
+  match all_pairs with
+  | Nil -> Nil
+  | Cons (k, v) rest ->
+      if key_in_pairs(k, builtins) || key_in_pairs(k, imports) then
+        filter_own_pairs(rest, builtins, imports)
+      else
+        Cons((k, v), filter_own_pairs(rest, builtins, imports))
+
+# ---------------------------------------------------------------------------
 # Header stripping (bootstrap parser can't parse module/import declarations)
 # ---------------------------------------------------------------------------
 
@@ -247,9 +275,9 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
                           | checker.CheckErr _ -> Nil
                           | checker.CheckOk env ->
                               do
-                                let loaded_pairs = dict_to_pairs(env)
-                                cache_put(cache, name, loaded_pairs)
-                                loaded_pairs
+                                let own_pairs = filter_own_pairs(dict_to_pairs(env), checker.builtin_entries(), import_pairs)
+                                cache_put(cache, name, own_pairs)
+                                own_pairs
 
 # Apply a single import spec: load the module and namespace/filter its pairs.
 fn apply_import_spec(spec: ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =

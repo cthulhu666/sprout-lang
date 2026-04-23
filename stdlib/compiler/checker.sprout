@@ -124,7 +124,7 @@ fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
 # Source-level TypeDecl/FnDecl/LetDecl declarations are added on top of this
 # env by typecheck_decls, so source definitions always take precedence.
 
-fn builtin_entries() -> List (String, types.Scheme) =
+export fn builtin_entries() -> List (String, types.Scheme) =
   ctor_entries() ++
   str_entries() ++
   list_entries() ++

@@ -441,6 +441,9 @@ static long long g_managed_heap_count = 0;
 static long long g_managed_alloc_since_gc = 0;
 static long long g_gc_threshold = 4096;
 static long long g_gc_marked_count = 0;
+static double g_gc_adapt_ratio = 0.0;   /* 0 = disabled; fraction of heap swept below which threshold grows */
+static double g_gc_adapt_factor = 2.0;  /* multiplier applied to threshold when adapting */
+static long long g_gc_adapt_cap = 0;    /* 0 = no cap on threshold growth */
 
 static void tcp_fail(const char* msg);
 long long sprout_make0(long long tag);
@@ -530,6 +533,40 @@ static void sprout_gc_threshold_maybe_enable(void) {
     tcp_fail("SPROUT_GC_THRESHOLD: expected positive integer");
   }
   g_gc_threshold = parsed;
+}
+
+static void sprout_gc_adapt_maybe_enable(void) {
+  /* SPROUT_GC_ADAPT_RATIO: swept/heap fraction below which threshold is grown.
+     Set to a value in (0, 1] to enable adaptive GC (e.g. 0.2 means "if GC
+     freed less than 20%% of the heap, grow the threshold"). */
+  const char* ratio_raw = getenv("SPROUT_GC_ADAPT_RATIO");
+  if (ratio_raw != NULL && ratio_raw[0] != '\\0') {
+    char* end = NULL;
+    double parsed = strtod(ratio_raw, &end);
+    if (end == ratio_raw || *end != '\\0' || parsed < 0.0 || parsed > 1.0)
+      tcp_fail("SPROUT_GC_ADAPT_RATIO: expected float in [0, 1]");
+    g_gc_adapt_ratio = parsed;
+  }
+  /* SPROUT_GC_ADAPT_FACTOR: factor by which threshold is multiplied when the
+     swept fraction is below SPROUT_GC_ADAPT_RATIO. Must be > 1. Default 2.0. */
+  const char* factor_raw = getenv("SPROUT_GC_ADAPT_FACTOR");
+  if (factor_raw != NULL && factor_raw[0] != '\\0') {
+    char* end = NULL;
+    double parsed = strtod(factor_raw, &end);
+    if (end == factor_raw || *end != '\\0' || parsed <= 1.0)
+      tcp_fail("SPROUT_GC_ADAPT_FACTOR: expected float > 1");
+    g_gc_adapt_factor = parsed;
+  }
+  /* SPROUT_GC_ADAPT_CAP: maximum value the threshold may grow to.
+     0 (the default) means no cap. */
+  const char* cap_raw = getenv("SPROUT_GC_ADAPT_CAP");
+  if (cap_raw != NULL && cap_raw[0] != '\\0') {
+    char* end = NULL;
+    long long parsed = strtoll(cap_raw, &end, 10);
+    if (end == cap_raw || *end != '\\0' || parsed < 0)
+      tcp_fail("SPROUT_GC_ADAPT_CAP: expected non-negative integer");
+    g_gc_adapt_cap = parsed;
+  }
 }
 
 static void sprout_gc_maybe_register(void) {
@@ -1088,6 +1125,16 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
+  /* Adaptive threshold: if the swept fraction is below the configured ratio,
+     multiply the threshold to avoid repeated near-useless GC cycles. */
+  if (g_gc_adapt_ratio > 0.0 && heap_before > 0) {
+    double swept_fraction = (double)(heap_before - g_managed_heap_count) / (double)heap_before;
+    if (swept_fraction < g_gc_adapt_ratio) {
+      long long new_threshold = (long long)((double)g_gc_threshold * g_gc_adapt_factor);
+      if (g_gc_adapt_cap > 0 && new_threshold > g_gc_adapt_cap) new_threshold = g_gc_adapt_cap;
+      if (new_threshold > g_gc_threshold) g_gc_threshold = new_threshold;
+    }
+  }
   g_managed_alloc_since_gc = 0;
   g_gc_active = 0;
 }
@@ -1212,6 +1259,7 @@ long long sprout_set_argv(int argc, char** argv) {
   sprout_debug_alloc_maybe_enable();
   sprout_debug_gc_maybe_enable();
   sprout_gc_threshold_maybe_enable();
+  sprout_gc_adapt_maybe_enable();
   sprout_gc_maybe_register();
   return 0;
 }
