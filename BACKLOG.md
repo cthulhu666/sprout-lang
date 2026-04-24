@@ -198,9 +198,9 @@ Note: "self-compilation" here means the native binary runs its own pipeline (bun
 
 Python's LLVM IR emitter (~3 000 lines in `sprout/cli.py`) is the last Python-owned compiler pass. Until it is replaced, producing a native binary requires Python even though every upstream pass (bundle → typecheck → lower) is Sprout-owned. M6 closes the loop: `compile_driver_bin` must be able to emit `.ll` text and invoke `clang` without Python involvement.
 
-- [ ] `P0` Implement `stdlib/compiler/codegen.sprout`: walk the lowered `ast.Program` and emit LLVM IR text. Key concerns: value representation (tagged integers, heap-allocated ADT objects), GC root push/pop discipline around allocating calls, calling convention (curried functions as closures vs. direct calls), and string/bytes literal emission.
-- [ ] `P0` Add parity tests: IR emitted by `codegen.sprout` compiles and runs correctly on the existing conformance corpus (output matches interpreter reference).
-- [ ] `P0` Wire codegen into `compile_driver.sprout`: when given a `--emit-ir` flag (or similar), run the full pipeline through IR emission and write the `.ll` file.
+- [x] `P0` Implement `stdlib/compiler/codegen.sprout`: walk the lowered `ast.Program` and emit LLVM IR text. Key concerns: value representation (tagged integers, heap-allocated ADT objects), GC root push/pop discipline around allocating calls, calling convention (curried functions as closures vs. direct calls), and string/bytes literal emission.
+- [x] `P0` Add parity tests: IR emitted by `codegen.sprout` compiles and runs correctly on the existing conformance corpus (`factorial.spr` → `720`, `maybe_map.spr` → `Just(3)`). Correctness bugs fixed: constructor arity in `sprout_register_ctor`, constructor tag in registration, callee-type threading for closure-typed function parameters.
+- [x] `P0` Wire codegen into `compile_driver.sprout`: `--emit-ir` flag runs the full pipeline (bundle → typecheck → lower → re-typecheck → codegen) and prints LLVM IR. `compiler.sprout` exports `compile_full_ir` and `IrFullResult`.
 - [ ] `P0` Verify stage-2: use `compile_driver_bin` (stage-0, Python-produced) to compile `compile_driver.sprout` to a new native binary (stage-1, Sprout-IR-produced) and confirm stage-1 output matches stage-0 on the conformance corpus.
 - [ ] `P0` Update `test_bootstrap_stage1.py` to run the stage-2 binary and verify end-to-end parity without Python involvement in the compile step.
 

@@ -6,6 +6,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.types as types
+import stdlib.compiler.codegen as codegen
 
 # ---------------------------------------------------------------------------
 # Header stripping (mirrors compiler.sprout / type_driver.sprout)
@@ -69,19 +70,36 @@ fn run_with_src(src: String, stdlib_root: String) -> Unit !{IO} =
           | Just decls -> checker.dump_typed_names(decls, env)
 
 # ---------------------------------------------------------------------------
+# IR emission entry point
+
+fn run_file_ir(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- compiler.compile_full_ir(path, stdlib_root)
+    match result with
+    | compiler.IrFullFail diags -> print_diags(diags)
+    | compiler.IrFullOk ir      -> print(ir)
+
+# ---------------------------------------------------------------------------
 # Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
 # Prints "=== <path> ===" before each file's output.
 
-fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
+fn run_batch(stdlib_root: String, idx: Int, emit_ir: Bool) -> Unit !{IO} =
   match argv_get(idx) with
   | Nothing    -> ()
   | Just path  ->
       do
         print("=== " ++ path ++ " ===")
-        run_file(path, stdlib_root)
-        run_batch(stdlib_root, idx + 1)
+        if emit_ir then run_file_ir(path, stdlib_root)
+        else run_file(path, stdlib_root)
+        run_batch(stdlib_root, idx + 1, emit_ir)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing          -> print("ERROR: usage: compile-driver <stdlib-root> <file>...")
-  | Just stdlib_root -> run_batch(stdlib_root, 1)
+  | Nothing          -> print("ERROR: usage: compile-driver [--emit-ir] <stdlib-root> <file>...")
+  | Just first_arg   ->
+      if first_arg == "--emit-ir" then
+        match argv_get(1) with
+        | Nothing          -> print("ERROR: usage: compile-driver --emit-ir <stdlib-root> <file>...")
+        | Just stdlib_root -> run_batch(stdlib_root, 2, true)
+      else
+        run_batch(first_arg, 1, false)

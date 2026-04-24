@@ -9,6 +9,7 @@ import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.lowering as lowering
+import stdlib.compiler.codegen as codegen
 
 # ---------------------------------------------------------------------------
 # Public API types
@@ -142,3 +143,44 @@ export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
               match lowering.lower_program(typed_prog) with
               | lowering.LowerErr msg -> FullFail(Cons(DiagError("lower: " ++ msg), Nil))
               | lowering.LowerOk lowered -> FullOk(lowered, env)
+
+# ---------------------------------------------------------------------------
+# Full IR pipeline: bundle → typecheck → lower → typecheck(lowered) → codegen
+# ---------------------------------------------------------------------------
+#
+# compile_full_ir is the M6 entry point.  It extends compile_full by:
+#   4. checker.typecheck_typed(lowered) — re-typecheck the lowered AST so that
+#      every TypedExpr node carries a fully-resolved types.Type
+#   5. codegen.compile_to_ir           — emit LLVM IR text (M6)
+#
+# The second typecheck is necessary because lowering rewrites the AST and the
+# typed nodes in the lowered tree do not carry the re-inferred types yet.
+
+export type IrFullResult (..) =
+  | IrFullOk String
+  | IrFullFail (List Diagnostic)
+
+export fn compile_full_ir(path: String, stdlib_root: String) -> IrFullResult !{IO} =
+  do
+    bundle_result <- bundler.bundle_file(path, stdlib_root)
+    match bundle_result with
+    | bundler.BundleErr msg -> IrFullFail(Cons(DiagError("bundle: " ++ msg), Nil))
+    | bundler.BundleOk prog ->
+        do
+          tc_result <- checker.typecheck_typed(prog, Nil)
+          match tc_result with
+          | typed_ast.TypedErr msg -> IrFullFail(Cons(DiagError("check: " ++ msg), Nil))
+          | typed_ast.TypedOk typed_prog _ ->
+              match lowering.lower_program(typed_prog) with
+              | lowering.LowerErr msg -> IrFullFail(Cons(DiagError("lower: " ++ msg), Nil))
+              | lowering.LowerOk lowered ->
+                  do
+                    tc2_result <- checker.typecheck_typed(lowered, Nil)
+                    match tc2_result with
+                    | typed_ast.TypedErr msg -> IrFullFail(Cons(DiagError("check2: " ++ msg), Nil))
+                    | typed_ast.TypedOk typed_lowered env ->
+                        do
+                          ir_result <- codegen.compile_to_ir(typed_lowered, env)
+                          match ir_result with
+                          | codegen.IrOk ir   -> IrFullOk(ir)
+                          | codegen.IrErr msg -> IrFullFail(Cons(DiagError("codegen: " ++ msg), Nil))
