@@ -62,6 +62,11 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
     "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
     "str_char_at": FnSig(name="str_char_at", params=[I8_PTR, I64], ret=I64),
+    "str_split_lines": FnSig(name="str_split_lines", params=[I8_PTR], ret=I64),
+    "str_char_at_byte": FnSig(name="str_char_at_byte", params=[I8_PTR, I64], ret=I64),
+    "str_char_width_at_byte": FnSig(name="str_char_width_at_byte", params=[I8_PTR, I64], ret=I64),
+    "str_byte_len": FnSig(name="str_byte_len", params=[I8_PTR], ret=I64),
+    "str_starts_with_at_byte": FnSig(name="str_starts_with_at_byte", params=[I8_PTR, I64, I8_PTR], ret=I1),
     "str_eq": FnSig(name="str_eq", params=[I8_PTR, I8_PTR], ret=I1),
     "str_find": FnSig(name="str_find", params=[I8_PTR, I8_PTR], ret=I64),
     "str_starts_with": FnSig(name="str_starts_with", params=[I8_PTR, I8_PTR], ret=I1),
@@ -228,6 +233,7 @@ class TcoCtx:
     param_slots: list[tuple[str, LLType]]  # (alloca_ir, slot_type)
     ret: LLType
     outer_roots: int = 0  # accumulated pattern-bind roots from enclosing scopes
+    sp_save: str = ""    # llvm.stacksave result; restored at each TCO back-edge
 
 
 @dataclass
@@ -572,6 +578,22 @@ def _lambda_body_type(expr: ast.LambdaExpr) -> ast.TypeExpr | None:
     return t
 
 
+def _lambda_param_ll_type(type_expr: "ast.TypeExpr", adt_names: set[str]) -> LLType:
+    """Return the LLVM calling-convention type for a lambda parameter.
+
+    Lambdas use the universal closure convention: all arguments are passed as
+    i64 (or ptr for ptr-typed values).  Tuple-typed parameters are no exception
+    — the caller packs the tuple as an i64 blob pointer; the lambda body then
+    loads the struct from that pointer when it needs field access.
+    """
+    ll = _type_from_ast(type_expr, adt_names)
+    # Tuple types are stack-allocated structs in named-function signatures, but
+    # closures receive them as i64 (packed blob pointer), so normalise here.
+    if _tuple_item_types_from_lltype(ll) is not None:
+        return I64
+    return ll
+
+
 def _call_sig_from_lambda_expr(
     expr: ast.LambdaExpr,
     sigs: dict[str, FnSig],
@@ -582,7 +604,7 @@ def _call_sig_from_lambda_expr(
     for param in expr.params:
         if param.type_expr is None:
             raise CodegenError("Lambda parameter type was not finalized before codegen")
-        params.append(_type_from_ast(param.type_expr, adt_names))
+        params.append(_lambda_param_ll_type(param.type_expr, adt_names))
     body_type = _lambda_body_type(expr)
     if body_type is None:
         raise CodegenError("Lambda body is missing inferred type")
@@ -605,7 +627,7 @@ def _expr_callable_sig(
         for param in expr.params:
             if param.type_expr is None:
                 raise CodegenError("Lambda parameter type was not finalized before codegen")
-            params.append(_type_from_ast(param.type_expr, adt_names))
+            params.append(_lambda_param_ll_type(param.type_expr, adt_names))
         body_type = _lambda_body_type(expr)
         if body_type is None:
             raise CodegenError("Lambda body is missing inferred type")
@@ -931,7 +953,19 @@ def _emit_lambda_helper(
         locals_[capture] = Value(I64, raw)
         rooted += _emit_push_temp_root(Value(I64, raw), helper)
     for idx, param in enumerate(info.expr.params):
-        value = Value(info.call_sig.params[idx], f"%a{idx}", _call_sig_from_type_expr(param.type_expr, adt_names))
+        raw_ll = info.call_sig.params[idx]
+        raw_value = Value(raw_ll, f"%a{idx}", _call_sig_from_type_expr(param.type_expr, adt_names))
+        # If the logical type is a tuple but the closure convention passed it as
+        # I64 (packed blob pointer), coerce it to the struct type now so that
+        # pattern-bind code (extractvalue) works correctly inside the lambda body.
+        logical_ll = _type_from_ast(param.type_expr, adt_names) if param.type_expr is not None else raw_ll
+        if raw_ll == I64 and _tuple_item_types_from_lltype(logical_ll) is not None:
+            value = _coerce_value(raw_value, logical_ll, helper)
+            value = Value(logical_ll, value.ir,
+                          callable_sig=raw_value.callable_sig,
+                          tuple_items=_tuple_item_types_from_lltype(logical_ll))
+        else:
+            value = raw_value
         rooted += _emit_push_temp_root(value, helper)
         locals_[param.name] = value
     ret = _emit_expr(info.expr.body, locals_, globals_info, sigs, ctor_sigs, adt_names, helper)
@@ -1410,6 +1444,10 @@ def _emit_fn_tco(
             n_roots += 1
         # I1 (Bool): alloca slot for loop state but no GC root needed
         param_slots.append((slot, typ))
+    # Save the stack pointer so each TCO back-edge can restore it, freeing any
+    # alloca-in-loop dynamic stack growth (see llvm.stacksave / llvm.stackrestore).
+    sp_save = emitter.tmp()
+    emitter.emit(f"  {sp_save} = call ptr @llvm.stacksave()")
     emitter.emit(f"  br label %{loop_label}")
 
     emitter.label(loop_label)
@@ -1431,6 +1469,7 @@ def _emit_fn_tco(
         param_slots=param_slots,
         ret=sig.ret,
         outer_roots=0,
+        sp_save=sp_save,
     )
     ret = _emit_expr(fn.body, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
 
@@ -1439,6 +1478,7 @@ def _emit_fn_tco(
         _emit_pop_temp_roots(n_roots, emitter)
         for (slot, typ), new_arg in zip(param_slots, ret.tco_args):
             emitter.emit(f"  store {typ.text} {new_arg.ir}, ptr {slot}")
+        emitter.emit(f"  call void @llvm.stackrestore(ptr {sp_save})")
         emitter.emit(f"  br label %{loop_label}")
     elif emitter.is_block_terminated():
         # All branches ended with TCO back-edges; roots already balanced.
@@ -1684,9 +1724,7 @@ def _emit_binary(
             not_tmp = emitter.tmp()
             emitter.emit(f"  {not_tmp} = xor i1 {out}, true")
             return Value(I1, not_tmp)
-        if left.typ == I8_PTR and expr.op not in {"==", "!="}:
-            raise CodegenError("String comparison only supports == and !=")
-        if left.typ == I8_PTR:
+        if left.typ == I8_PTR and expr.op in {"==", "!="}:
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {left.ir}, ptr {right.ir})")
             if expr.op == "==":
@@ -1694,6 +1732,14 @@ def _emit_binary(
             not_tmp = emitter.tmp()
             emitter.emit(f"  {not_tmp} = xor i1 {tmp}, true")
             return Value(I1, not_tmp)
+        if left.typ == I8_PTR:
+            # Ordering comparison on String/Char via str_compare (returns i64 <0/0/>0)
+            cmp_tmp = emitter.tmp()
+            emitter.emit(f"  {cmp_tmp} = call i64 @str_compare(ptr {left.ir}, ptr {right.ir})")
+            pred = {"<": "slt", "<=": "sle", ">": "sgt", ">=": "sge"}[expr.op]
+            tmp = emitter.tmp()
+            emitter.emit(f"  {tmp} = icmp {pred} i64 {cmp_tmp}, 0")
+            return Value(I1, tmp)
         tmp = emitter.tmp()
         pred = {
             "<": "slt",
@@ -1757,6 +1803,11 @@ def _emit_tco_back_edge(tco_ctx: TcoCtx, new_args: list[Value], extra_roots: int
     for (slot, typ), new_arg in zip(tco_ctx.param_slots, new_args):
         coerced = _coerce_value(new_arg, typ, emitter)
         emitter.emit(f"  store {typ.text} {coerced.ir}, ptr {slot}")
+    # Restore the stack pointer to free any alloca-in-loop dynamic stack growth.
+    # Without this, each loop iteration permanently grows the stack by the number
+    # of bytes consumed by alloca instructions in the loop body.
+    if tco_ctx.sp_save:
+        emitter.emit(f"  call void @llvm.stackrestore(ptr {tco_ctx.sp_save})")
     emitter.emit(f"  br label %{tco_ctx.loop_label}")
 
 
@@ -1883,6 +1934,7 @@ def _emit_match(
                 param_slots=tco_ctx.param_slots,
                 ret=tco_ctx.ret,
                 outer_roots=tco_ctx.outer_roots + rooted,
+                sp_save=tco_ctx.sp_save,
             )
             if tco_ctx is not None
             else None

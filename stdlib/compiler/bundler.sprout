@@ -313,81 +313,168 @@ fn strip_headers_b(s: String, pos: Int) -> String =
   else str_slice(s, pos, str_len(s))
 
 # ---------------------------------------------------------------------------
-# Topological DFS collection
+# Topological DFS collection (iterative, using an explicit work stack)
 # ---------------------------------------------------------------------------
+#
+# The original recursive visit_module → visit_imports → visit_one_import →
+# visit_by_name → visit_module chain is 4-way mutual recursion that the
+# code generator cannot TCO.  For compile_driver.sprout (18 transitive stdlib
+# deps) this easily overflows the 8 MB default stack.
+#
+# We replace it with an iterative DFS driven by a Ref (List WorkItem) stack.
+# process_work is self-tail-recursive, so the code generator emits a single
+# tco_loop for it — O(1) native stack depth regardless of import graph size.
+#
+# Three work-item variants preserve the original semantics:
+#   WIVisit path      — check seen/visiting; enqueue deps then WIFinalize + WILeave
+#   WILeave path      — pop path from the visiting (ancestor) set after its subtree
+#   WIFinalize path src specs — lex/parse/record the module; add to seen
 
 fn prelude_path(stdlib_root: String) -> String =
   stdlib_root ++ "/prelude.sprout"
 
-# visit_* functions return List String (Nil = success, Cons msg Nil = error).
-# We cannot use Maybe String !{IO} here because the typechecker's do-sequence
-# logic would treat Maybe String as a Maybe-monad bind (extracting String rather
-# than Maybe String) when used with <-.  List String avoids that.
-fn visit_imports(specs: List module_loader.ImportSpec, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
+type WorkItem =
+  | WIVisit String
+  | WILeave String
+  | WIFinalize String String (List module_loader.ImportSpec)
+
+fn spec_to_path(spec: module_loader.ImportSpec, stdlib_root: String) -> Maybe String =
+  match spec with
+  | module_loader.ImportAlias mod_name _ -> module_loader.module_name_to_path(mod_name, stdlib_root)
+  | module_loader.ImportSelective mod_name _ -> module_loader.module_name_to_path(mod_name, stdlib_root)
+
+fn specs_to_paths(specs: List module_loader.ImportSpec, stdlib_root: String) -> List String =
   match specs with
   | Nil -> Nil
   | Cons spec rest ->
-      do
-        errs <- visit_one_import(spec, stdlib_root, visiting, seen, ordered)
-        match errs with
-        | Cons _ _ -> errs
-        | Nil -> visit_imports(rest, stdlib_root, visiting, seen, ordered)
+      match spec_to_path(spec, stdlib_root) with
+      | Nothing -> specs_to_paths(rest, stdlib_root)
+      | Just path -> Cons(path, specs_to_paths(rest, stdlib_root))
 
-fn visit_one_import(spec: module_loader.ImportSpec, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
-  match spec with
-  | module_loader.ImportAlias mod_name _ ->
-      visit_by_name(mod_name, stdlib_root, visiting, seen, ordered)
-  | module_loader.ImportSelective mod_name _ ->
-      visit_by_name(mod_name, stdlib_root, visiting, seen, ordered)
+# Push a WIVisit item for each path onto stack.
+# Called with list_reverse(dep_paths) so the first import ends up on top.
+fn push_visit_items(paths: List String, stack: List WorkItem) -> List WorkItem =
+  match paths with
+  | Nil -> stack
+  | Cons path rest -> push_visit_items(rest, Cons(WIVisit(path), stack))
 
-fn visit_by_name(mod_name: String, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
-  match module_loader.module_name_to_path(mod_name, stdlib_root) with
-  | Nothing -> Nil
-  | Just path -> visit_module(path, stdlib_root, visiting, seen, ordered)
+fn remove_str_from_list(s: String, lst: List String) -> List String =
+  match lst with
+  | Nil -> Nil
+  | Cons h t -> if h == s then t else Cons(h, remove_str_from_list(s, t))
 
-fn visit_module(path: String, stdlib_root: String, visiting: List String, seen: Ref (List String), ordered: Ref (List ParsedModule)) -> List String !{IO} =
+# Main iterative DFS loop.  Self-tail-recursive → TCO'd by the code generator.
+fn process_work(
+  work: Ref (List WorkItem),
+  visiting: Ref (List String),
+  seen: Ref (List String),
+  ordered: Ref (List ParsedModule),
+  stdlib_root: String
+) -> List String !{IO} =
+  do
+    stack <- ref_read(work)
+    match stack with
+    | Nil -> Nil
+    | Cons item rest ->
+        do
+          ref_write(work, rest)
+          errs <- process_item(item, work, visiting, seen, ordered, stdlib_root)
+          match errs with
+          | Cons _ _ -> errs
+          | Nil -> process_work(work, visiting, seen, ordered, stdlib_root)
+
+fn process_item(
+  item: WorkItem,
+  work: Ref (List WorkItem),
+  visiting: Ref (List String),
+  seen: Ref (List String),
+  ordered: Ref (List ParsedModule),
+  stdlib_root: String
+) -> List String !{IO} =
+  match item with
+  | WIVisit path -> process_wi_visit(path, work, visiting, seen, ordered, stdlib_root)
+  | WILeave path -> process_wi_leave(path, visiting)
+  | WIFinalize path src specs -> process_wi_finalize(path, src, specs, seen, ordered)
+
+fn process_wi_visit(
+  path: String,
+  work: Ref (List WorkItem),
+  visiting: Ref (List String),
+  seen: Ref (List String),
+  ordered: Ref (List ParsedModule),
+  stdlib_root: String
+) -> List String !{IO} =
   do
     seen_list <- ref_read(seen)
     if str_list_member(path, seen_list) then Nil
-    else if str_list_member(path, visiting) then
-      Cons("Import cycle detected involving: " ++ path, Nil)
     else
       do
-        src <- read_file(path)
-        let specs = module_loader.collect_imports(src)
-        errs <- visit_imports(specs, stdlib_root, Cons(path, visiting), seen, ordered)
-        match errs with
-        | Cons _ _ -> errs
-        | Nil ->
-            do
-              match scan_source_info(src) with
-              | (mod_name, exported_names, ctor_type_names) ->
-                  match lexer.tokenize(strip_headers_b(src, 0)) with
-                  | Err e ->
-                      match e with
-                      | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
-                  | Ok tokens ->
-                      match parser.parse_program(tokens) with
-                      | Err e ->
-                          match e with
-                          | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
-                      | Ok prog ->
-                          do
-                            match prog with
-                            | ast.Program decls _ ->
-                                do
-                                  seen_now <- ref_read(seen)
-                                  ref_write(seen, Cons(path, seen_now))
-                                  ordered_now <- ref_read(ordered)
-                                  ref_write(ordered, Cons(ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
-                                  Nil
+        visiting_list <- ref_read(visiting)
+        if str_list_member(path, visiting_list) then
+          Cons("Import cycle detected involving: " ++ path, Nil)
+        else
+          do
+            src <- read_file(path)
+            let specs = module_loader.collect_imports(src)
+            let dep_paths = specs_to_paths(specs, stdlib_root)
+            ref_write(visiting, Cons(path, visiting_list))
+            stack_now <- ref_read(work)
+            ref_write(work, push_visit_items(list_reverse(dep_paths), Cons(WIFinalize(path, src, specs), Cons(WILeave(path), stack_now))))
+            Nil
+
+fn process_wi_leave(path: String, visiting: Ref (List String)) -> List String !{IO} =
+  do
+    visiting_list <- ref_read(visiting)
+    ref_write(visiting, remove_str_from_list(path, visiting_list))
+    Nil
+
+fn process_wi_finalize(
+  path: String,
+  src: String,
+  specs: List module_loader.ImportSpec,
+  seen: Ref (List String),
+  ordered: Ref (List ParsedModule)
+) -> List String !{IO} =
+  do
+    match scan_source_info(src) with
+    | (mod_name, exported_names, ctor_type_names) ->
+        match lexer.tokenize(strip_headers_b(src, 0)) with
+        | Err e ->
+            match e with
+            | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
+        | Ok tokens ->
+            match parser.parse_program(tokens) with
+            | Err e ->
+                match e with
+                | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
+            | Ok prog ->
+                do
+                  match prog with
+                  | ast.Program decls _ ->
+                      do
+                        ordered_now <- ref_read(ordered)
+                        ref_write(ordered, Cons(ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
+                        seen_now <- ref_read(seen)
+                        ref_write(seen, Cons(path, seen_now))
+                        Nil
+
+fn visit_module_iter(
+  entry_path: String,
+  stdlib_root: String,
+  seen: Ref (List String),
+  ordered: Ref (List ParsedModule)
+) -> List String !{IO} =
+  do
+    work <- ref_new(Cons(WIVisit(entry_path), Nil))
+    visiting <- ref_new(Nil)
+    process_work(work, visiting, seen, ordered, stdlib_root)
 
 # Collect all modules in topological order, optionally prepending the prelude.
 fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, List ParsedModule) !{IO} =
   do
     seen <- ref_new(Nil)
     ordered <- ref_new(Nil)
-    errs <- visit_module(entry_path, stdlib_root, Nil, seen, ordered)
+    errs <- visit_module_iter(entry_path, stdlib_root, seen, ordered)
     match errs with
     | Cons e _ -> (Just(e), Nil)
     | Nil ->

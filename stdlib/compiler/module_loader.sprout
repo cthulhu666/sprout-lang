@@ -107,7 +107,7 @@ fn split_lines_at(s: String, i: Int, line_start: Int, acc: List String) -> List 
           split_lines_at(s, i + 1, line_start, acc)
 
 export fn collect_imports(src: String) -> List ImportSpec =
-  collect_imports_from_lines(split_lines_at(src, 0, 0, Nil), Nil)
+  collect_imports_from_lines(str_split_lines(src), Nil)
 
 # ---------------------------------------------------------------------------
 # Module path resolution

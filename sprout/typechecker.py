@@ -977,11 +977,14 @@ def _finalize_inferred_expr_types(program: ast.Program, state: InferState) -> No
         do_expr = getattr(ast, "DoExpr", None)
         do_bind_step = getattr(ast, "DoBindStep", None)
         do_expr_step = getattr(ast, "DoExprStep", None)
+        do_let_step = getattr(ast, "DoLetStep", None)
         if do_expr is not None and isinstance(expr, do_expr):
             for step in expr.steps:
                 if do_bind_step is not None and isinstance(step, do_bind_step):
                     visit_expr(step.value)
                 elif do_expr_step is not None and isinstance(step, do_expr_step):
+                    visit_expr(step.value)
+                elif do_let_step is not None and isinstance(step, do_let_step):
                     visit_expr(step.value)
             return
         if isinstance(expr, ast.BinaryExpr):
@@ -1954,6 +1957,11 @@ def typecheck_program(
         "str_len": Scheme(vars=(), type=TFunc(STRING, INT)),
         "str_slice": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(INT, STRING)))),
         "str_char_at": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TApp(maybe_type, CHAR)))),
+        "str_split_lines": Scheme(vars=(), type=TFunc(STRING, TApp(TConst("List"), STRING))),
+        "str_char_at_byte": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TApp(maybe_type, CHAR)))),
+        "str_char_width_at_byte": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, INT))),
+        "str_byte_len": Scheme(vars=(), type=TFunc(STRING, INT)),
+        "str_starts_with_at_byte": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(STRING, BOOL)))),
         "str_find": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),
         "str_starts_with": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, BOOL))),
         "str_compare": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, INT))),

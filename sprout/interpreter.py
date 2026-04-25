@@ -782,6 +782,56 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             return ""
         return raw[start : start + length]
 
+    def builtin_str_char_at_byte(args: list[object]) -> object:
+        raw, byte_pos = args[0], args[1]
+        if not isinstance(raw, str) or not isinstance(byte_pos, int):
+            raise RuntimeError("str_char_at_byte expects String, Int")
+        b = raw.encode("utf-8")
+        if byte_pos < 0 or byte_pos >= len(b):
+            return ADTValue(constructor="Nothing", args=())
+        # Decode one codepoint at the byte position
+        try:
+            ch = b[byte_pos:].decode("utf-8")[0]
+        except Exception:
+            return ADTValue(constructor="Nothing", args=())
+        return ADTValue(constructor="Just", args=(ch,))
+
+    def builtin_str_char_width_at_byte(args: list[object]) -> object:
+        raw, byte_pos = args[0], args[1]
+        if not isinstance(raw, str) or not isinstance(byte_pos, int):
+            raise RuntimeError("str_char_width_at_byte expects String, Int")
+        b = raw.encode("utf-8")
+        if byte_pos < 0 or byte_pos >= len(b):
+            return 0
+        lead = b[byte_pos]
+        if lead < 0x80: return 1
+        if lead < 0xE0: return 2
+        if lead < 0xF0: return 3
+        return 4
+
+    def builtin_str_byte_len(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("str_byte_len expects String")
+        return len(raw.encode("utf-8"))
+
+    def builtin_str_starts_with_at_byte(args: list[object]) -> object:
+        raw, byte_pos, prefix = args[0], args[1], args[2]
+        if not isinstance(raw, str) or not isinstance(byte_pos, int) or not isinstance(prefix, str):
+            raise RuntimeError("str_starts_with_at_byte expects String, Int, String")
+        b = raw.encode("utf-8")
+        pb = prefix.encode("utf-8")
+        if byte_pos < 0 or byte_pos + len(pb) > len(b):
+            return False
+        return b[byte_pos:byte_pos + len(pb)] == pb
+
+    def builtin_str_split_lines(args: list[object]) -> object:
+        raw = args[0]
+        if not isinstance(raw, str):
+            raise RuntimeError("str_split_lines expects String")
+        lines = raw.split("\n")
+        return py_to_adt_list(lines)
+
     def builtin_str_char_at(args: list[object]) -> object:
         raw = args[0]
         index = args[1]
@@ -1981,6 +2031,11 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("str_concat", BuiltinFunction(name="str_concat", arity=2, fn=builtin_str_concat))
     env.set("str_len", BuiltinFunction(name="str_len", arity=1, fn=builtin_str_len))
     env.set("str_slice", BuiltinFunction(name="str_slice", arity=3, fn=builtin_str_slice))
+    env.set("str_char_at_byte", BuiltinFunction(name="str_char_at_byte", arity=2, fn=builtin_str_char_at_byte))
+    env.set("str_char_width_at_byte", BuiltinFunction(name="str_char_width_at_byte", arity=2, fn=builtin_str_char_width_at_byte))
+    env.set("str_byte_len", BuiltinFunction(name="str_byte_len", arity=1, fn=builtin_str_byte_len))
+    env.set("str_starts_with_at_byte", BuiltinFunction(name="str_starts_with_at_byte", arity=3, fn=builtin_str_starts_with_at_byte))
+    env.set("str_split_lines", BuiltinFunction(name="str_split_lines", arity=1, fn=builtin_str_split_lines))
     env.set("str_char_at", BuiltinFunction(name="str_char_at", arity=2, fn=builtin_str_char_at))
     env.set("str_find", BuiltinFunction(name="str_find", arity=2, fn=builtin_str_find))
     env.set(

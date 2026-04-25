@@ -768,9 +768,18 @@ long long sprout_gc_register_scan_root(void* slot, long long size_bytes) {
   return 0;
 }
 
+/* GC temp-root pool: push/pop is always LIFO (stack discipline enforced by
+ * codegen), so a static pool with a stack pointer is sufficient and avoids
+ * malloc on every sprout_gc_push_i64_root call in the lexer hot path.
+ * 65536 slots = 2 MiB BSS; more than enough for the deepest call chains. */
+#define SPROUT_ROOT_POOL_SIZE 65536
+static RootNode g_root_pool[SPROUT_ROOT_POOL_SIZE];
+static size_t   g_root_pool_top = 0;
+
 static long long sprout_gc_push_root(void* slot, SproutRootKind kind, size_t aux_words) {
-  RootNode* node = (RootNode*)malloc(sizeof(RootNode));
-  if (node == NULL) tcp_fail("sprout_gc_push_root: out of memory");
+  if (g_root_pool_top >= SPROUT_ROOT_POOL_SIZE)
+    tcp_fail("sprout_gc_push_root: GC root pool exhausted");
+  RootNode* node = &g_root_pool[g_root_pool_top++];
   node->slot = slot;
   node->kind = kind;
   node->aux_words = aux_words;
@@ -796,8 +805,9 @@ long long sprout_gc_pop_roots(long long count) {
   if (count < 0) tcp_fail("sprout_gc_pop_roots: count must be >= 0");
   for (long long i = 0; i < count; i++) {
     if (g_temp_root_nodes == NULL) tcp_fail("sprout_gc_pop_roots: root stack underflow");
+    if (g_root_pool_top == 0) tcp_fail("sprout_gc_pop_roots: root pool underflow");
     RootNode* next = g_temp_root_nodes->next;
-    free(g_temp_root_nodes);
+    g_root_pool_top--;
     g_temp_root_nodes = next;
   }
   return 0;
@@ -977,26 +987,59 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
   return 0;
 }
 
-static void sprout_gc_mark_ptr(void* ptr);
+/* ── Iterative GC mark (replaces recursive sprout_gc_mark_node) ──────────
+ * The old design called sprout_gc_mark_node recursively for each heap child,
+ * which overflows the C stack for large heaps (long linked-list chains from
+ * import-pair lists, type substitution dicts, etc.).  This version maintains
+ * an explicit grey-set worklist on the C heap so mark depth is O(1) stack
+ * regardless of heap graph depth.
+ */
+static ManagedNode** g_gc_mark_worklist = NULL;
+static size_t g_gc_mark_wl_len = 0;
+static size_t g_gc_mark_wl_cap = 0;
 
-static void sprout_gc_mark_value(long long value) {
-  sprout_gc_mark_ptr((void*)(uintptr_t)value);
-}
-
-static void sprout_gc_mark_node(ManagedNode* node) {
+static void gc_mark_enqueue(ManagedNode* node) {
   if (node == NULL || node->marked) return;
   node->marked = 1;
   g_gc_marked_count++;
-  size_t child_count = sprout_heap_child_count(node);
-  for (size_t i = 0; i < child_count; i++) {
-    long long child = sprout_heap_child_value(node, i);
-    sprout_gc_mark_value(child);
+  if (g_gc_mark_wl_len >= g_gc_mark_wl_cap) {
+    size_t new_cap = g_gc_mark_wl_cap < 1024 ? 1024 : g_gc_mark_wl_cap * 2;
+    ManagedNode** new_wl = (ManagedNode**)realloc(g_gc_mark_worklist, new_cap * sizeof(ManagedNode*));
+    if (!new_wl) tcp_fail("GC mark: out of memory for worklist");
+    g_gc_mark_worklist = new_wl;
+    g_gc_mark_wl_cap = new_cap;
   }
+  g_gc_mark_worklist[g_gc_mark_wl_len++] = node;
+}
+
+static void sprout_gc_mark_node(ManagedNode* node) {
+  gc_mark_enqueue(node);
+}
+
+static void sprout_gc_mark_value(long long value) {
+  gc_mark_enqueue(find_managed_ptr((void*)(uintptr_t)value));
 }
 
 static void sprout_gc_mark_ptr(void* ptr) {
-  ManagedNode* node = find_managed_ptr(ptr);
-  if (node != NULL) sprout_gc_mark_node(node);
+  gc_mark_enqueue(find_managed_ptr(ptr));
+}
+
+/* Drain the grey-set worklist: expand each grey node (marked but children
+ * not yet processed) into its children until all reachable nodes are black.
+ * Must be called after sprout_gc_mark_roots() and before sprout_gc_sweep(). */
+static void sprout_gc_drain_marks(void) {
+  while (g_gc_mark_wl_len > 0) {
+    ManagedNode* node = g_gc_mark_worklist[--g_gc_mark_wl_len];
+    size_t child_count = sprout_heap_child_count(node);
+    for (size_t i = 0; i < child_count; i++) {
+      long long child_val = sprout_heap_child_value(node, i);
+      gc_mark_enqueue(find_managed_ptr((void*)(uintptr_t)child_val));
+    }
+  }
+  free(g_gc_mark_worklist);
+  g_gc_mark_worklist = NULL;
+  g_gc_mark_wl_len = 0;
+  g_gc_mark_wl_cap = 0;
 }
 
 static long long sprout_gc_root_count(void) {
@@ -1120,6 +1163,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   g_gc_cycle_count++;
   g_gc_marked_count = 0;
   sprout_gc_mark_roots();
+  sprout_gc_drain_marks();
   sprout_gc_sweep();
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
@@ -2271,13 +2315,135 @@ const char* str_slice(const char* s, long long start, long long length) {
   return out;
 }
 
+/* Pre-allocated one-byte C strings for each ASCII codepoint (0-127).
+ * str_char_at returns a pointer into this table for ASCII characters,
+ * completely avoiding malloc for the common case in Sprout source files. */
+static char g_ascii_char_strs[128][2];
+static int  g_ascii_char_strs_init = 0;
+
+static void init_ascii_char_strs(void) {
+  for (int i = 0; i < 128; i++) {
+    g_ascii_char_strs[i][0] = (char)i;
+    g_ascii_char_strs[i][1] = '\\0';
+  }
+  g_ascii_char_strs_init = 1;
+}
+
 long long str_char_at(const char* s, long long index) {
   if (s == NULL) tcp_fail("str_char_at: null input");
   if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  size_t total = sprout_utf8_codepoint_count(s);
-  if ((size_t)index >= total) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  const char* out = str_slice(s, index, 1);
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)out);
+  /* Scan forward to the index-th UTF-8 codepoint.  This avoids both the
+   * separate sprout_utf8_codepoint_count() pass (O(N) just for bounds) and
+   * the str_slice() call (O(N) + malloc).  For ASCII the returned char string
+   * comes from a static table so no allocation occurs at all. */
+  size_t byte_pos = 0;
+  long long cp_idx = 0;
+  while (s[byte_pos] != '\\0') {
+    if (cp_idx == index) {
+      size_t width = sprout_utf8_char_width((unsigned char)s[byte_pos]);
+      const char* char_str;
+      if (width == 1) {
+        if (!g_ascii_char_strs_init) init_ascii_char_strs();
+        char_str = g_ascii_char_strs[(unsigned char)s[byte_pos]];
+      } else {
+        /* Multi-byte codepoint: rare in Sprout source files. */
+        char* tmp = (char*)malloc(width + 1);
+        if (!tmp) tcp_fail("str_char_at: out of memory");
+        memcpy(tmp, s + byte_pos, width);
+        tmp[width] = '\\0';
+        char_str = tmp;
+      }
+      return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
+    }
+    byte_pos += sprout_utf8_char_width((unsigned char)s[byte_pos]);
+    cp_idx++;
+  }
+  return sprout_make0(find_ctor_tag_by_name("Nothing"));
+}
+
+/* str_split_lines: O(N) line splitting, replacing the O(N^2) split_lines_at
+ * loop that called str_char_at + str_slice for each codepoint in the source.
+ * Returns a Sprout List String; each line excludes the trailing newline. */
+long long str_split_lines(const char* s) {
+  if (s == NULL) tcp_fail("str_split_lines: null input");
+  size_t total = strlen(s);
+
+  /* One forward pass to collect (start_byte, end_byte) spans. */
+  typedef struct { size_t start; size_t end; } Span;
+  Span* spans = NULL;
+  size_t nspans = 0, cap = 0;
+  size_t line_start = 0;
+  for (size_t i = 0; i <= total; i++) {
+    if (s[i] == '\\n' || s[i] == '\\0') {
+      if (nspans >= cap) {
+        cap = (cap < 64) ? 64 : cap * 2;
+        Span* tmp = (Span*)realloc(spans, cap * sizeof(Span));
+        if (!tmp) { free(spans); tcp_fail("str_split_lines: out of memory"); }
+        spans = tmp;
+      }
+      spans[nspans++] = (Span){ line_start, i };
+      line_start = i + 1;
+    }
+  }
+
+  /* Build Cons list from back to front (last span prepended first, head at front). */
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  long long list = sprout_make0(nil_tag);
+  for (size_t k = nspans; k-- > 0;) {
+    size_t slen = spans[k].end - spans[k].start;
+    char* line = (char*)malloc(slen + 1);
+    if (!line) { free(spans); tcp_fail("str_split_lines: out of memory"); }
+    memcpy(line, s + spans[k].start, slen);
+    line[slen] = '\\0';
+    list = sprout_make2(cons_tag, (long long)(uintptr_t)line, list);
+  }
+
+  free(spans);
+  return list;
+}
+
+/* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
+ * Avoids the O(index) codepoint scan of str_char_at. */
+long long str_char_at_byte(const char* s, long long byte_pos) {
+  if (s == NULL) tcp_fail("str_char_at_byte: null input");
+  if (byte_pos < 0 || s[(size_t)byte_pos] == '\\0')
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  size_t pos = (size_t)byte_pos;
+  size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
+  const char* char_str;
+  if (width == 1) {
+    if (!g_ascii_char_strs_init) init_ascii_char_strs();
+    char_str = g_ascii_char_strs[(unsigned char)s[pos]];
+  } else {
+    char* tmp = (char*)malloc(width + 1);
+    if (!tmp) tcp_fail("str_char_at_byte: out of memory");
+    memcpy(tmp, s + pos, width);
+    tmp[width] = '\\0';
+    char_str = tmp;
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
+}
+
+/* str_char_width_at_byte: UTF-8 byte width of the char at byte_pos; 0 at end. O(1). */
+long long str_char_width_at_byte(const char* s, long long byte_pos) {
+  if (s == NULL) tcp_fail("str_char_width_at_byte: null input");
+  if (byte_pos < 0 || s[(size_t)byte_pos] == '\\0') return 0;
+  return (long long)sprout_utf8_char_width((unsigned char)s[(size_t)byte_pos]);
+}
+
+/* str_byte_len: byte length of the string (strlen). */
+long long str_byte_len(const char* s) {
+  if (s == NULL) tcp_fail("str_byte_len: null input");
+  return (long long)strlen(s);
+}
+
+/* str_starts_with_at_byte: O(|prefix|) starts-with check from a byte offset.
+ * Avoids the O(N) remaining-text allocation of match_string's old approach. */
+_Bool str_starts_with_at_byte(const char* s, long long byte_pos, const char* prefix) {
+  if (s == NULL || prefix == NULL) tcp_fail("str_starts_with_at_byte: null input");
+  if (byte_pos < 0) return 0;
+  return strncmp(s + (size_t)byte_pos, prefix, strlen(prefix)) == 0;
 }
 
 long long str_find(const char* haystack, const char* needle) {
@@ -4119,6 +4285,84 @@ long long map_nth_value(long long map_h, long long index) {
   long long out = sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
   SPROUT_GC_POP_LOCALS(1);
   return out;
+}
+
+/* ── NativeSet ─────────────────────────────────────────────────────────────
+   Backed by MapVal with dummy values (0). Keys are malloc-owned strings.
+   Registered as SPROUT_HEAP_MAP so the GC manages the MapVal lifetime;
+   the dummy values (0) are not heap pointers so GC child tracing is a no-op.
+*/
+
+long long native_set_empty() {
+  MapVal* m = sprout_alloc_map_val("native_set_empty: out of memory");
+  m->len = 0;
+  m->cap = 0;
+  m->entries = NULL;
+  return (long long)(uintptr_t)m;
+}
+
+long long native_set_insert(const char* item, long long set_h) {
+  long long rooted_set = set_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_set);
+  MapVal* src = (MapVal*)(uintptr_t)rooted_set;
+  if (src == NULL) tcp_fail("native_set_insert: null set");
+  if (item == NULL) tcp_fail("native_set_insert: null item");
+  /* Check if already present */
+  for (long long i = 0; i < src->len; i++) {
+    if (strcmp(src->entries[i].key, item) == 0) {
+      SPROUT_GC_POP_LOCALS(1);
+      return rooted_set;
+    }
+  }
+  long long out_len = src->len + 1;
+  MapVal* out = sprout_alloc_map_val("native_set_insert: out of memory");
+  src = (MapVal*)(uintptr_t)rooted_set; /* re-read after alloc (GC may move) */
+  out->len = out_len;
+  out->cap = out_len;
+  out->entries = sprout_alloc_map_entries((size_t)out_len, "native_set_insert: out of memory");
+  for (long long i = 0; i < src->len; i++) {
+    out->entries[i].key = sprout_strdup_counted(&g_debug_alloc_map, src->entries[i].key, "native_set_insert: out of memory");
+    out->entries[i].value = 0;
+  }
+  out->entries[src->len].key = sprout_strdup_counted(&g_debug_alloc_map, item, "native_set_insert: out of memory");
+  out->entries[src->len].value = 0;
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long native_set_member(const char* item, long long set_h) {
+  MapVal* m = (MapVal*)(uintptr_t)set_h;
+  if (m == NULL) tcp_fail("native_set_member: null set");
+  if (item == NULL) return 0;
+  for (long long i = 0; i < m->len; i++) {
+    if (strcmp(m->entries[i].key, item) == 0) return 1;
+  }
+  return 0;
+}
+
+long long native_set_to_list(long long set_h) {
+  long long rooted_set = set_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_set);
+  MapVal* m = (MapVal*)(uintptr_t)rooted_set;
+  if (m == NULL) tcp_fail("native_set_to_list: null set");
+  long long result = sprout_make0(find_ctor_tag_by_name("Nil"));
+  for (long long i = m->len - 1; i >= 0; i--) {
+    SPROUT_GC_PUSH_I64_LOCAL(result);
+    char* key = sprout_strdup_counted(&g_debug_alloc_map, m->entries[i].key, "native_set_to_list: out of memory");
+    long long key_val = (long long)(uintptr_t)key;
+    long long cons = sprout_make2(find_ctor_tag_by_name("Cons"), key_val, result);
+    SPROUT_GC_POP_LOCALS(1);
+    result = cons;
+    m = (MapVal*)(uintptr_t)rooted_set; /* re-read after alloc */
+  }
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long native_set_size(long long set_h) {
+  MapVal* m = (MapVal*)(uintptr_t)set_h;
+  if (m == NULL) tcp_fail("native_set_size: null set");
+  return m->len;
 }
 
 long long bytes_empty() {

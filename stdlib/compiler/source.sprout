@@ -30,18 +30,19 @@ fn cursor_source(cursor: SourceCursor) -> String =
   match cursor with
   | SourceCursor raw _ _ -> raw
 
-fn cursor_index(cursor: SourceCursor) -> Int =
+# cursor_byte_offset: the SourceCursor's Int field is now a BYTE offset into the
+# raw source string.  SourcePos.index still tracks the codepoint index for
+# diagnostics (line/column info) — these two indices are intentionally separate.
+fn cursor_byte_offset(cursor: SourceCursor) -> Int =
   match cursor with
-  | SourceCursor _ index _ -> index
-
-fn remaining_text(cursor: SourceCursor) -> String =
-  string.drop(cursor_source(cursor), cursor_index(cursor))
+  | SourceCursor _ byte_offset _ -> byte_offset
 
 export fn at_end(cursor: SourceCursor) -> Bool =
-  cursor_index(cursor) >= string.length(cursor_source(cursor))
+  cursor_byte_offset(cursor) >= str_byte_len(cursor_source(cursor))
 
+# peek_char: O(1) — reads one UTF-8 codepoint from the byte position.
 export fn peek_char(cursor: SourceCursor) -> Maybe Char =
-  string.char_at(cursor_source(cursor), cursor_index(cursor))
+  str_char_at_byte(cursor_source(cursor), cursor_byte_offset(cursor))
 
 fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
   match pos with
@@ -51,12 +52,14 @@ fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
       else
         SourcePos(index + 1, line, column + 1)
 
+# advance_char: O(1) — advances by the UTF-8 character width at the current byte offset.
 export fn advance_char(cursor: SourceCursor) -> SourceCursor =
   match cursor with
-  | SourceCursor raw index pos ->
-      match string.char_at(raw, index) with
+  | SourceCursor raw byte_offset pos ->
+      match str_char_at_byte(raw, byte_offset) with
       | Nothing -> cursor
-      | Just ch -> SourceCursor(raw, index + 1, advance_position(pos, ch))
+      | Just ch ->
+          SourceCursor(raw, byte_offset + str_char_width_at_byte(raw, byte_offset), advance_position(pos, ch))
 
 export fn match_char(expected: Char, cursor: SourceCursor) -> Maybe SourceCursor =
   match peek_char(cursor) with
@@ -73,8 +76,10 @@ fn advance_expected(cursor: SourceCursor, expected: String, index: Int, total: I
     | Just _ -> advance_expected(advance_char(cursor), expected, index + 1, total)
     | Nothing -> cursor
 
+# match_string: O(|expected|) — uses str_starts_with_at_byte to avoid the
+# old O(N) remaining_text allocation that caused O(N^2) behaviour in the lexer.
 export fn match_string(expected: String, cursor: SourceCursor) -> Maybe SourceCursor =
-  if string.starts_with(remaining_text(cursor), expected) then
+  if str_starts_with_at_byte(cursor_source(cursor), cursor_byte_offset(cursor), expected) then
     Just(advance_expected(cursor, expected, 0, string.length(expected)))
   else
     Nothing

@@ -156,27 +156,25 @@ fn try_ops(cursor: source.SourceCursor, ops: List String) -> Maybe source.Source
 fn try_multi_char_symbol(cursor: source.SourceCursor) -> Maybe source.SourceCursor =
   try_ops(cursor, ["->", "<-", "==", "!=", "<=", ">=", "&&", "||", ">>", "<<", "|>", "++", ".."])
 
-fn emit_ident(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
-  tokenize_from(raw, end_cursor, Cons(ident_token(raw, cursor, end_cursor), acc))
+fn scan_ident_next(raw: String, cursor: source.SourceCursor) -> (source.SourceCursor, token.Token) =
+  (end_cursor, ident_token(raw, cursor, end_cursor))
 where
   end_cursor = scan_ident_end(raw, cursor)
 
-fn emit_int(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
-  tokenize_from(raw, end_cursor, Cons(emit_token(token.TokenIntKind, raw, cursor, end_cursor), acc))
+fn scan_int_next(raw: String, cursor: source.SourceCursor) -> (source.SourceCursor, token.Token) =
+  (end_cursor, emit_token(token.TokenIntKind, raw, cursor, end_cursor))
 where
   end_cursor = scan_int_end(raw, cursor)
 
-fn emit_string(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
-  match scan_string_content(source.advance_char(cursor), cursor_position(cursor), "") with
+fn scan_string_next(cursor: source.SourceCursor, start_pos: source.SourcePos) -> Result token.TokenizeError (source.SourceCursor, token.Token) =
+  match scan_string_content(source.advance_char(cursor), start_pos, "") with
   | Err e -> Err(e)
-  | Ok (text, next) ->
-      tokenize_from(raw, next, Cons(token.Token(token.TokenStringKind, text, cursor_position(cursor)), acc))
+  | Ok (text, next) -> Ok((next, token.Token(token.TokenStringKind, text, start_pos)))
 
-fn emit_char(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
-  match scan_char_content(source.advance_char(cursor), cursor_position(cursor)) with
+fn scan_char_next(cursor: source.SourceCursor, start_pos: source.SourcePos) -> Result token.TokenizeError (source.SourceCursor, token.Token) =
+  match scan_char_content(source.advance_char(cursor), start_pos) with
   | Err e -> Err(e)
-  | Ok (ch, next) ->
-      tokenize_from(raw, next, Cons(token.Token(token.TokenCharKind, string.string_from_char(ch), cursor_position(cursor)), acc))
+  | Ok (lit_ch, next) -> Ok((next, token.Token(token.TokenCharKind, string.string_from_char(lit_ch), start_pos)))
 
 fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
   match source.peek_char(cursor) with
@@ -191,10 +189,20 @@ fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: List token.Token
         | Just next ->
             tokenize_from(raw, next, Cons(emit_token(token.TokenSymbolKind, raw, cursor, next), acc))
         | Nothing ->
-            if string.is_ident_start(ch) then emit_ident(raw, cursor, acc)
-            else if string.is_ascii_digit(ch) then emit_int(raw, cursor, acc)
-            else if ch == '"' then emit_string(raw, cursor, acc)
-            else if ch == '\'' then emit_char(raw, cursor, acc)
+            if string.is_ident_start(ch) then
+              match scan_ident_next(raw, cursor) with
+              | (next, tok) -> tokenize_from(raw, next, Cons(tok, acc))
+            else if string.is_ascii_digit(ch) then
+              match scan_int_next(raw, cursor) with
+              | (next, tok) -> tokenize_from(raw, next, Cons(tok, acc))
+            else if ch == '"' then
+              match scan_string_next(cursor, cursor_position(cursor)) with
+              | Err e -> Err(e)
+              | Ok (next, tok) -> tokenize_from(raw, next, Cons(tok, acc))
+            else if ch == '\'' then
+              match scan_char_next(cursor, cursor_position(cursor)) with
+              | Err e -> Err(e)
+              | Ok (next, tok) -> tokenize_from(raw, next, Cons(tok, acc))
             else if single_symbol(ch) then
               tokenize_from(raw, source.advance_char(cursor), Cons(emit_token(token.TokenSymbolKind, raw, cursor, source.advance_char(cursor)), acc))
             else
