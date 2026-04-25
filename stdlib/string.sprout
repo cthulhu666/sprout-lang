@@ -4,12 +4,15 @@ import stdlib.collections (List, Vec, vec_empty, vec_append, vec_get)
 export fn words(raw: String) -> List String =
   split_words(raw)
 
+# O(|left| + |right|): allocates and copies both inputs.
 export fn concat(left: String, right: String) -> String =
   str_concat(left, right)
 
+# O(codepoints): UTF-8 length counts codepoints by scanning the string.
 export fn length(raw: String) -> Int =
   str_len(raw)
 
+# O(codepoints in `raw` + `count`): the builtin finds UTF-8 boundaries, then copies the slice.
 export fn slice(raw: String, start: Int, count: Int) -> String =
   str_slice(raw, start, count)
 
@@ -23,19 +26,23 @@ export fn drop(raw: String, count: Int) -> String =
   else if count >= length(raw) then ""
   else slice(raw, count, length(raw) - count)
 
+# O(|raw| * |needle|) in the worst case: delegates to the native substring search.
 export fn find(raw: String, needle: String) -> Int =
   str_find(raw, needle)
 
+# O(|prefix|): compares only the prefix region.
 export fn starts_with(raw: String, prefix: String) -> Bool =
   str_starts_with(raw, prefix)
 
 export fn contains(raw: String, needle: String) -> Bool =
   find(raw, needle) >= 0
 
+# O(|raw| + |suffix|): pays for repeated length checks plus the copied suffix slice.
 export fn ends_with(raw: String, suffix: String) -> Bool =
   if length(suffix) > length(raw) then false
   else slice(raw, length(raw) - length(suffix), length(suffix)) == suffix
 
+# O(index): scans UTF-8 codepoints up to the requested position.
 export fn char_at(raw: String, index: Int) -> Maybe Char =
   str_char_at(raw, index)
 
@@ -112,6 +119,7 @@ export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
   else if find(raw, sep) < 0 then Nothing
   else Just((take(raw, find(raw, sep)), drop(raw, find(raw, sep) + length(sep))))
 
+# O(total output bytes): repeated `str_concat` grows the accumulated result.
 export fn join_with(separator: String, lines: Vec String) -> String =
   join_with_from(separator, lines, 0, "")
 
@@ -149,6 +157,7 @@ fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec Str
     else
       lines_loop(raw, index + 1, line_start, total, acc)
 
+# O(n^2) in the number of codepoints: repeated `char_at`/`slice` on persistent strings.
 export fn string_lines(raw: String) -> Vec String =
   lines_loop(raw, 0, 0, length(raw), vec_empty())
 
@@ -163,6 +172,7 @@ fn digits_loop(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
     else
       digits_loop(raw, index + 1, total, acc)
 
+# O(n^2) in the number of codepoints: each step re-reads one character and may copy the output vector.
 export fn string_digits(raw: String) -> Vec Int =
   digits_loop(raw, 0, length(raw), vec_empty())
 
@@ -170,5 +180,6 @@ fn chars_loop(raw: String, index: Int, total: Int, acc: Vec Char) -> Vec Char =
   if index >= total then acc
   else chars_loop(raw, index + 1, total, vec_append(char_at_or(raw, index, '?'), acc))
 
+# O(n^2) in the number of codepoints: repeated `char_at` plus persistent `vec_append`.
 export fn string_chars(raw: String) -> Vec Char =
   chars_loop(raw, 0, length(raw), vec_empty())

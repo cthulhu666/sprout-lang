@@ -9,27 +9,35 @@ export fn empty() -> Bytes =
 export fn singleton(value: Int) -> Bytes =
   bytes_singleton(value)
 
+# O(1): length is stored on the native bytes object.
 export fn length(value: Bytes) -> Int =
   bytes_length(value)
 
+# O(1): direct indexed lookup on the native bytes object.
 export fn get(value: Bytes, index: Int) -> Maybe Int =
   bytes_get(value, index)
 
+# O(count): allocates and copies the requested byte window.
 export fn slice(value: Bytes, start: Int, count: Int) -> Bytes =
   bytes_slice(value, start, count)
 
+# O(|left| + |right|): allocates one output buffer and copies both inputs.
 export fn append(left: Bytes, right: Bytes) -> Bytes =
   bytes_append(left, right)
 
+# O(|raw|): copies the UTF-8 bytes into a fresh bytes object.
 export fn from_string(raw: String) -> Bytes =
   bytes_from_utf8(raw)
 
+# O(|value|): validates UTF-8 and copies the decoded bytes into a fresh string.
 export fn to_string(value: Bytes) -> Result Utf8Error String =
   bytes_to_utf8(value)
 
+# O(1): the builder stores chunk references and the total length.
 export fn builder_empty() -> Builder =
   bytes_builder_empty()
 
+# O(1): wraps the existing bytes chunk without flattening.
 export fn builder_bytes(value: Bytes) -> Builder =
   bytes_builder_bytes(value)
 
@@ -42,9 +50,11 @@ export fn builder_u16_be(value: Int) -> Builder =
 export fn builder_u32_be(value: Int) -> Builder =
   bytes_builder_u32_be(value)
 
+# O(chunks_left + chunks_right): concatenates chunk tables without flattening bytes yet.
 export fn builder_append(left: Builder, right: Builder) -> Builder =
   bytes_builder_append(left, right)
 
+# O(total_bytes): flattens all builder chunks into one contiguous bytes value.
 export fn builder_build(value: Builder) -> Bytes =
   bytes_builder_build(value)
 
@@ -86,8 +96,10 @@ fn c_string_len_from(value: Bytes, index: Int, total: Int) -> Int =
         if b == 0 then index
         else c_string_len_from(value, index + 1, total)
 
+# O(|raw|): appends a trailing NUL after copying the string bytes.
 export fn c_string(raw: String) -> Bytes =
   append(from_string(raw), singleton(0))
 
+# O(n): scans for the first NUL, slices, then validates/copies the substring.
 export fn read_c_string(value: Bytes) -> Result Utf8Error String =
   to_string(slice(value, 0, c_string_len_from(value, 0, length(value))))

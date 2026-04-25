@@ -3,11 +3,14 @@ import stdlib.http (Result, HttpError, HttpResponse)
 
 type alias HttpResult = Result HttpError HttpResponse
 
+# Cost is dominated by `http_request`: request/response size and network latency.
 export fn http_get(url: String, headers: String, timeout_ms: Int) -> HttpResult !{IO} =
   http_request("GET", url, headers, "", timeout_ms)
 
+# Cost is dominated by `http_request`: request/response size and network latency.
 export fn http_post(url: String, headers: String, body: String, timeout_ms: Int) -> HttpResult !{IO} =
   http_request("POST", url, headers, body, timeout_ms)
 
+# Cost is dominated by `http_request`: request/response size and network latency.
 export fn http_put(url: String, headers: String, body: String, timeout_ms: Int) -> HttpResult !{IO} =
   http_request("PUT", url, headers, body, timeout_ms)

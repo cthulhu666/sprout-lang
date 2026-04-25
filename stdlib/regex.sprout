@@ -26,14 +26,17 @@ fn classify_compile_error(msg: String) -> RegexError =
 fn match_from_range(range: IntRange) -> Match =
   Match(int_range_start(range), int_range_end(range))
 
+# Cost follows regex compilation in the native runtime and is at least linear in the pattern size.
 export fn compile(pattern: String) -> Result RegexError Regex =
   match regex_validate(pattern) with
   | Ok _ -> Ok(Regex(pattern))
   | Err msg -> Err(classify_compile_error(msg))
 
+# Cost depends on the regex engine and input text; treat it as data-dependent, not O(1).
 export fn is_match(re: Regex, text: String) -> Bool =
   regex_is_match(raw_pattern(re), text)
 
+# Cost depends on the regex engine and input text; result conversion itself is O(1).
 export fn find_first(re: Regex, text: String) -> Maybe Match =
   match regex_find_range(raw_pattern(re), text) with
   | Just range -> Just(match_from_range(range))
@@ -45,8 +48,10 @@ export fn split_first(re: Regex, text: String) -> Maybe (String, String) =
       Just((str_slice(text, 0, start), str_slice(text, end, str_len(text) - end)))
   | Nothing -> Nothing
 
+# Cost depends on regex matching plus the copied prefix/suffix slices.
 export fn replace_all_literal(re: Regex, replacement: String, text: String) -> String =
   regex_replace_all_literal(raw_pattern(re), replacement, text)
 
+# O(|raw|): escapes the pattern into a fresh string.
 export fn escape(raw: String) -> String =
   regex_escape(raw)

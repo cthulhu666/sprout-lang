@@ -44,9 +44,11 @@ export fn string(value: String) -> Json =
 export fn encode(value: a) -> Json where JsonEncode a =
   encode_json(value)
 
+# O(|raw|): parsing scales with the JSON input size.
 export fn parse(raw: String) -> Result JsonError Json =
   json_parse(raw)
 
+# O(size of JSON tree): walks the whole value and builds a fresh string.
 export fn stringify(value: Json) -> String =
   json_stringify(value)
 
@@ -55,6 +57,7 @@ fn json_array_from_list(items: List Json) -> JsonArray =
   | Nil -> JsonArrayNil
   | Cons item rest -> JsonArrayCons(item, json_array_from_list(rest))
 
+# O(n): builds a linked JsonArray by traversing the source list once.
 export fn array_from_list(items: List Json) -> Json =
   JsonArray(json_array_from_list(items))
 
@@ -65,6 +68,7 @@ fn json_object_from_pairs(items: List (String, a)) -> JsonObject where JsonEncod
       match pair with
       | (key, value) -> JsonObjectCons(key, encode(value), json_object_from_pairs(rest))
 
+# O(n): traverses the input list once and encodes each value once.
 export fn object_from_pairs(items: List (String, a)) -> Json where JsonEncode a =
   JsonObject(json_object_from_pairs(items))
 
@@ -76,6 +80,7 @@ fn json_object_from_dict_entries(entries: Vec (String, a), index: Int, total: In
     | Just (key, value) ->
         json_object_from_dict_entries(entries, index + 1, total, JsonObjectCons(key, encode(value), obj))
 
+# O(n^2): `dict_entries` itself is quadratic on persistent vectors, then this pass walks the entries again.
 export fn object_from_dict(items: Dict a) -> Json where JsonEncode a =
   JsonObject(json_object_from_dict_entries(dict_entries(items), 0, vec_length(dict_entries(items)), JsonObjectNil))
 
@@ -105,6 +110,7 @@ fn json_object_find(obj: JsonObject, key: String) -> Maybe Json =
   | JsonObjectCons k v rest ->
       if k == key then Just(v) else json_object_find(rest, key)
 
+# O(n): linear scan through object fields.
 export fn json_get_field(value: Json, key: String) -> Maybe Json =
   match value with
   | JsonObject obj -> json_object_find(obj, key)

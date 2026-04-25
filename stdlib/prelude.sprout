@@ -94,6 +94,7 @@ export fn list_append(left: List a, right: List a) -> List a =
 export fn vec_empty() -> Vec a =
   Vec(vector_empty())
 
+# O(n): the native/vector builtin returns a fresh vector and copies existing items.
 export fn vec_singleton(value: a) -> Vec a =
   vec_append(value, vec_empty())
 
@@ -111,6 +112,7 @@ export fn vec_prepend(value: a, vec: Vec a) -> Vec a =
   | Vec raw ->
       Vec(vec_prepend_into(vector_empty(), value, raw, 0, vector_length(raw)))
 
+# O(n): `vector_append` is persistent and copies the input vector.
 export fn vec_append(value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_append(raw, value))
@@ -125,6 +127,7 @@ export fn vec_length(vec: Vec a) -> Int =
   match vec with
   | Vec raw -> vector_length(raw)
 
+# O(1): indexed lookup in the native vector representation.
 export fn vec_get(index: Int, vec: Vec a) -> Maybe a =
   match vec with
   | Vec raw -> vector_get(raw, index)
@@ -331,6 +334,7 @@ fn decorated_sort(xs: List (k, Int, a)) -> List (k, Int, a) where Ord k =
         decorated_sort(list_drop(xs, list_length(xs) / 2))
       )
 
+# O(n): one pass over the list plus one native allocation/copy into the vector.
 export fn vec_from_list(xs: List a) -> Vec a =
   Vec(vector_from_list(xs))
 
@@ -341,6 +345,7 @@ fn decorated_values_to_vec(xs: List (k, Int, a), acc: Vec a) -> Vec a =
       match entry with
       | (_, _, value) -> decorated_values_to_vec(rest, vec_append(value, acc))
 
+# O(n log n): stable merge sort in Sprout space, plus O(n) decoration and rebuild passes.
 export fn vec_sort_by(f: a -> k, vec: Vec a) -> Vec a where Ord k =
   decorated_values_to_vec(
     decorated_sort(list_reverse(vec_sort_by_collect(f, vec, 0, vec_length(vec), Nil))),
@@ -353,14 +358,17 @@ export fn vec_sort(vec: Vec a) -> Vec a where Ord a =
 export fn dict_empty() -> Dict v =
   Dict(map_empty())
 
+# O(n): the native map is a linear key/value array, so lookup scans keys.
 export fn dict_get(key: String, dict: Dict v) -> Maybe v =
   match dict with
   | Dict raw -> map_get(raw, key)
 
+# O(n): persistent update copies entries, with an O(n) key search first.
 export fn dict_set(key: String, value: v, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_set(raw, key, value))
 
+# O(n): remove scans for the key and copies the surviving entries.
 export fn dict_remove(key: String, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_remove(raw, key))
@@ -372,6 +380,7 @@ fn dict_keys_from(raw: Map v, index: Int, total: Int, acc: Vec String) -> Vec St
     | Nothing -> acc
     | Just key -> dict_keys_from(raw, index + 1, total, vec_append(key, acc))
 
+# O(n^2): iterates by index, and each `vec_append` copies the accumulated vector.
 export fn dict_keys(dict: Dict v) -> Vec String =
   match dict with
   | Dict raw -> dict_keys_from(raw, 0, map_size(raw), vec_empty())
@@ -383,6 +392,7 @@ fn dict_values_from(raw: Map v, index: Int, total: Int, acc: Vec v) -> Vec v =
     | Nothing -> acc
     | Just value -> dict_values_from(raw, index + 1, total, vec_append(value, acc))
 
+# O(n^2): iterates by index, and each `vec_append` copies the accumulated vector.
 export fn dict_values(dict: Dict v) -> Vec v =
   match dict with
   | Dict raw -> dict_values_from(raw, 0, map_size(raw), vec_empty())
@@ -397,6 +407,7 @@ fn dict_entries_from(raw: Map v, index: Int, total: Int, acc: Vec (String, v)) -
         | Nothing -> acc
         | Just value -> dict_entries_from(raw, index + 1, total, vec_append((key, value), acc))
 
+# O(n^2): iterates by index, and each `vec_append` copies the accumulated vector.
 export fn dict_entries(dict: Dict v) -> Vec (String, v) =
   match dict with
   | Dict raw -> dict_entries_from(raw, 0, map_size(raw), vec_empty())
@@ -404,14 +415,17 @@ export fn dict_entries(dict: Dict v) -> Vec (String, v) =
 export fn set_empty() -> Set =
   Set(native_set_empty())
 
+# O(n): the native set is backed by a linear map and insert copies on growth.
 export fn set_insert(item: String, s: Set) -> Set =
   match s with
   | Set raw -> Set(native_set_insert(item, raw))
 
+# O(n): membership is a linear scan over stored keys.
 export fn set_member(item: String, s: Set) -> Bool =
   match s with
   | Set raw -> native_set_member(item, raw)
 
+# O(n): materializes a fresh list of all stored keys.
 export fn set_to_list(s: Set) -> List String =
   match s with
   | Set raw -> native_set_to_list(raw)
