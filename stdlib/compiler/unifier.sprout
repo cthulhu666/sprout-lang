@@ -288,8 +288,11 @@ fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff:
 # ftv_env — union of free type variables across all schemes in an environment
 # ---------------------------------------------------------------------------
 
+fn ftv_env_schemes(schemes: Vec types.Scheme) -> List String =
+  ftv_scheme_vec(schemes, 0, vec_length(schemes), Nil)
+
 export fn ftv_env(env: Dict types.Scheme) -> List String =
-  ftv_scheme_vec(dict_values(env), 0, vec_length(dict_values(env)), Nil)
+  ftv_env_schemes(dict_values(env))
 
 fn ftv_scheme_vec(schemes: Vec types.Scheme, i: Int, total: Int, acc: List String) -> List String =
   if i >= total then acc

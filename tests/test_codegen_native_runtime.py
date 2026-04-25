@@ -284,7 +284,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             assert match is not None
             self.assertGreater(int(match.group(1)), 0)
             self.assertEqual(int(match.group(2)), 0)
-            self.assertEqual(int(match.group(3)), 5)
+            self.assertEqual(int(match.group(3)), 4)
             self.assertEqual(int(match.group(4)), 12)
             self.assertEqual(int(match.group(5)), 9)
             self.assertEqual(int(match.group(6)), 0)

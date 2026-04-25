@@ -243,13 +243,24 @@ fn vec_reverse_from(vec: Vec a, index: Int, acc: Vec a) -> Vec a =
 export fn vec_reverse(vec: Vec a) -> Vec a =
   vec_reverse_from(vec, vec_length(vec) - 1, vec_empty())
 
+fn vec_to_list_go(vec: Vec a, index: Int, acc: List a) -> List a =
+  if index < 0 then acc
+  else
+    match vec_get(index, vec) with
+    | Nothing -> acc
+    | Just value -> vec_to_list_go(vec, index - 1, Cons(value, acc))
+
+# O(n): walks the vector backwards, building a forward-order list in one pass.
+export fn vec_to_list(vec: Vec a) -> List a =
+  vec_to_list_go(vec, vec_length(vec) - 1, Nil)
+
 fn add_ints(left: Int, right: Int) -> Int = left + right
 
 export fn vec_sum(vec: Vec Int) -> Int =
   vec_fold(add_ints, 0, vec)
 
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
-  vec_sum(vec_map(f, vec))
+  vec_fold(\(acc, x) -> acc + f(x), 0, vec)
 
 export class ToString a {
   fn to_string(value: a) -> String
@@ -309,10 +320,13 @@ fn list_drop(xs: List a, count: Int) -> List a =
     | Nil -> Nil
     | Cons _ rest -> list_drop(rest, count - 1)
 
-fn list_length(xs: List a) -> Int =
+fn list_length_go(xs: List a, acc: Int) -> Int =
   match xs with
-  | Nil -> 0
-  | Cons _ rest -> 1 + list_length(rest)
+  | Nil -> acc
+  | Cons _ rest -> list_length_go(rest, acc + 1)
+
+fn list_length(xs: List a) -> Int =
+  list_length_go(xs, 0)
 
 fn decorated_merge_sorted(left: List (k, Int, a), right: List (k, Int, a)) -> List (k, Int, a) where Ord k =
   match left with
@@ -324,15 +338,17 @@ fn decorated_merge_sorted(left: List (k, Int, a), right: List (k, Int, a)) -> Li
           if decorated_key_lt(right_item, left_item) then Cons(right_item, decorated_merge_sorted(left, right_rest))
           else Cons(left_item, decorated_merge_sorted(left_rest, right))
 
+fn decorated_sort_split(xs: List (k, Int, a), mid: Int) -> List (k, Int, a) where Ord k =
+  decorated_merge_sorted(
+    decorated_sort(list_take(xs, mid)),
+    decorated_sort(list_drop(xs, mid))
+  )
+
 fn decorated_sort(xs: List (k, Int, a)) -> List (k, Int, a) where Ord k =
   match xs with
   | Nil -> Nil
   | Cons _ Nil -> xs
-  | _ ->
-      decorated_merge_sorted(
-        decorated_sort(list_take(xs, list_length(xs) / 2)),
-        decorated_sort(list_drop(xs, list_length(xs) / 2))
-      )
+  | _ -> decorated_sort_split(xs, list_length(xs) / 2)
 
 # O(n): one pass over the list plus one native allocation/copy into the vector.
 export fn vec_from_list(xs: List a) -> Vec a =
@@ -373,31 +389,31 @@ export fn dict_remove(key: String, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_remove(raw, key))
 
-fn dict_keys_from(raw: Map v, index: Int, total: Int, acc: Vec String) -> Vec String =
+fn dict_keys_from(raw: Map v, index: Int, total: Int, acc: List String) -> List String =
   if index >= total then acc
   else
     match map_nth_key(raw, index) with
     | Nothing -> acc
-    | Just key -> dict_keys_from(raw, index + 1, total, vec_append(key, acc))
+    | Just key -> dict_keys_from(raw, index + 1, total, Cons(key, acc))
 
-# O(n^2): iterates by index, and each `vec_append` copies the accumulated vector.
+# O(n): accumulates keys into a reversed list then converts in one allocation.
 export fn dict_keys(dict: Dict v) -> Vec String =
   match dict with
-  | Dict raw -> dict_keys_from(raw, 0, map_size(raw), vec_empty())
+  | Dict raw -> vec_from_list(list_reverse_go(dict_keys_from(raw, 0, map_size(raw), Nil), Nil))
 
-fn dict_values_from(raw: Map v, index: Int, total: Int, acc: Vec v) -> Vec v =
+fn dict_values_from(raw: Map v, index: Int, total: Int, acc: List v) -> List v =
   if index >= total then acc
   else
     match map_nth_value(raw, index) with
     | Nothing -> acc
-    | Just value -> dict_values_from(raw, index + 1, total, vec_append(value, acc))
+    | Just value -> dict_values_from(raw, index + 1, total, Cons(value, acc))
 
-# O(n^2): iterates by index, and each `vec_append` copies the accumulated vector.
+# O(n): accumulates values into a reversed list then converts in one allocation.
 export fn dict_values(dict: Dict v) -> Vec v =
   match dict with
-  | Dict raw -> dict_values_from(raw, 0, map_size(raw), vec_empty())
+  | Dict raw -> vec_from_list(list_reverse_go(dict_values_from(raw, 0, map_size(raw), Nil), Nil))
 
-fn dict_entries_from(raw: Map v, index: Int, total: Int, acc: Vec (String, v)) -> Vec (String, v) =
+fn dict_entries_from(raw: Map v, index: Int, total: Int, acc: List (String, v)) -> List (String, v) =
   if index >= total then acc
   else
     match map_nth_key(raw, index) with
@@ -405,12 +421,12 @@ fn dict_entries_from(raw: Map v, index: Int, total: Int, acc: Vec (String, v)) -
     | Just key ->
         match map_nth_value(raw, index) with
         | Nothing -> acc
-        | Just value -> dict_entries_from(raw, index + 1, total, vec_append((key, value), acc))
+        | Just value -> dict_entries_from(raw, index + 1, total, Cons((key, value), acc))
 
-# O(n^2): iterates by index, and each `vec_append` copies the accumulated vector.
+# O(n): accumulates entries into a reversed list then converts in one allocation.
 export fn dict_entries(dict: Dict v) -> Vec (String, v) =
   match dict with
-  | Dict raw -> dict_entries_from(raw, 0, map_size(raw), vec_empty())
+  | Dict raw -> vec_from_list(list_reverse_go(dict_entries_from(raw, 0, map_size(raw), Nil), Nil))
 
 export fn set_empty() -> Set =
   Set(native_set_empty())
@@ -552,7 +568,7 @@ fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
 
 instance Semigroup (Vec a) {
   fn append(left: Vec a, right: Vec a) -> Vec a =
-    vec_fold(vec_append_flip, left, right)
+    vec_from_list(list_append(vec_to_list(left), vec_to_list(right)))
 }
 
 fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict v =
@@ -572,7 +588,7 @@ instance Semigroup (Dict v) {
 }
 
 export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
-  fold(vec_append_flip, vec_empty(), xs)
+  vec_from_list(list_reverse_go(fold(\(acc, x) -> Cons(x, acc), Nil, xs), Nil))
 
 export fn dict_from_list(pairs: List (String, v)) -> Dict v =
   dict_from_list_loop(pairs, dict_empty())

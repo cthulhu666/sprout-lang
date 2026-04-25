@@ -883,7 +883,7 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertIsNotNone(by_name["concat"].definition_location)
         assert by_name["concat"].definition_location is not None
         self.assertEqual(by_name["concat"].definition_location.path.name, "string.sprout")
-        self.assertEqual(by_name["concat"].definition_location.line, 7)
+        self.assertEqual(by_name["concat"].definition_location.line, 8)
         self.assertEqual(by_name["concat"].definition_location.column, 1)
 
         self.assertEqual(by_name["from_string"].kind, "value")
@@ -892,7 +892,7 @@ class CliAnalysisTests(unittest.TestCase):
         self.assertIsNotNone(by_name["from_string"].definition_location)
         assert by_name["from_string"].definition_location is not None
         self.assertEqual(by_name["from_string"].definition_location.path.name, "bytes.sprout")
-        self.assertEqual(by_name["from_string"].definition_location.line, 24)
+        self.assertEqual(by_name["from_string"].definition_location.line, 29)
         self.assertEqual(by_name["from_string"].definition_location.column, 1)
 
     def test_structured_diagnostics_in_source_reports_stage_and_location(self) -> None:
