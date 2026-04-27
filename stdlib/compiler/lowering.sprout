@@ -500,14 +500,27 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> ast.Expr =
   | typed_ast.TGetField e fname _ pos ->
       ast.GetFieldExpr(lower_expr(e, ctx), fname, pos)
 
-# expand_call_args: walk args; for each leading TDict, expand to witness VarExprs.
+# expand_call_args: lower user args first (in order), then append expanded TDict
+# witness args at the end.  This matches Python typeclass_lowering.py which also
+# appends the extra dict args after the user-visible args.  TDict nodes in the
+# TypedExpr arg list are evidence prepended by infer.sprout at call sites; they
+# must land AFTER the user args to match the hidden params that lower_fn_decl
+# appends to the parameter list.
 fn expand_call_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List ast.Expr =
+  list_append(expand_user_args(args, ctx), expand_dict_witness_args(args, ctx))
+
+fn expand_user_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List ast.Expr =
+  match args with
+  | Nil -> Nil
+  | Cons (typed_ast.TDict _ _ _) rest -> expand_user_args(rest, ctx)
+  | Cons e rest -> Cons(lower_expr(e, ctx), expand_user_args(rest, ctx))
+
+fn expand_dict_witness_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List ast.Expr =
   match args with
   | Nil -> Nil
   | Cons (typed_ast.TDict c _ pos) rest ->
-      list_append(resolve_tdict(c, pos, ctx), expand_call_args(rest, ctx))
-  | Cons e rest ->
-      Cons(lower_expr(e, ctx), expand_call_args(rest, ctx))
+      list_append(resolve_tdict(c, pos, ctx), expand_dict_witness_args(rest, ctx))
+  | Cons _ rest -> expand_dict_witness_args(rest, ctx)
 
 # resolve_tdict: expand one TDict witness into a list of VarExprs, one per
 # class method.  Resolution order:

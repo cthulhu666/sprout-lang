@@ -133,7 +133,55 @@ export fn builtin_entries() -> List (String, types.Scheme) =
   vec_entries() ++
   ref_entries() ++
   string_module_entries() ++
+  raw_range_entries() ++
+  raw_vector_entries() ++
+  raw_map_entries() ++
+  raw_native_set_entries() ++
+  raw_str_entries() ++
   semigroup_markers()
+
+fn raw_range_entries() -> List (String, types.Scheme) =
+  [ ("int_range",       bt_mono(bt_fn2(bt_int(), bt_int(), bt_intrange())))
+  , ("int_range_start", bt_mono(bt_fn(bt_intrange(), bt_int())))
+  , ("int_range_end",   bt_mono(bt_fn(bt_intrange(), bt_int())))
+  ]
+
+fn raw_vector_entries() -> List (String, types.Scheme) =
+  [ ("vector_empty",    bt_poly1("a", bt_vector(bt_a())))
+  , ("vector_length",   bt_poly1("a", bt_fn(bt_vector(bt_a()), bt_int())))
+  , ("vector_get",      bt_poly1("a", bt_fn2(bt_vector(bt_a()), bt_int(), bt_maybe(bt_a()))))
+  , ("vector_set",      bt_poly1("a", bt_fn3(bt_vector(bt_a()), bt_int(), bt_a(), bt_vector(bt_a()))))
+  , ("vector_append",   bt_poly1("a", bt_fn2(bt_vector(bt_a()), bt_a(), bt_vector(bt_a()))))
+  , ("vector_from_list",bt_poly1("a", bt_fn(bt_list(bt_a()), bt_vector(bt_a()))))
+  ]
+
+fn raw_map_entries() -> List (String, types.Scheme) =
+  [ ("map_empty",     bt_poly1("v", bt_map(bt_v())))
+  , ("map_get",       bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_str(), bt_maybe(bt_v()))))
+  , ("map_set",       bt_poly1("v", bt_fn3(bt_map(bt_v()), bt_str(), bt_v(), bt_map(bt_v()))))
+  , ("map_remove",    bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_str(), bt_map(bt_v()))))
+  , ("map_size",      bt_poly1("v", bt_fn(bt_map(bt_v()), bt_int())))
+  , ("map_nth_key",   bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_int(), bt_maybe(bt_str()))))
+  , ("map_nth_value", bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_int(), bt_maybe(bt_v()))))
+  ]
+
+fn raw_native_set_entries() -> List (String, types.Scheme) =
+  [ ("native_set_empty",   bt_mono(bt_native_set()))
+  , ("native_set_insert",  bt_mono(bt_fn2(bt_str(), bt_native_set(), bt_native_set())))
+  , ("native_set_member",  bt_mono(bt_fn2(bt_str(), bt_native_set(), bt_bool())))
+  , ("native_set_to_list", bt_mono(bt_fn(bt_native_set(), bt_list(bt_str()))))
+  , ("native_set_size",    bt_mono(bt_fn(bt_native_set(), bt_int())))
+  ]
+
+fn raw_str_entries() -> List (String, types.Scheme) =
+  [ ("split_words",              bt_mono(bt_fn(bt_str(), bt_list(bt_str()))))
+  , ("str_char_at",              bt_mono(bt_fn2(bt_str(), bt_int(), bt_maybe(bt_char()))))
+  , ("str_split_lines",          bt_mono(bt_fn(bt_str(), bt_list(bt_str()))))
+  , ("str_char_at_byte",         bt_mono(bt_fn2(bt_str(), bt_int(), bt_maybe(bt_char()))))
+  , ("str_char_width_at_byte",   bt_mono(bt_fn2(bt_str(), bt_int(), bt_int())))
+  , ("str_byte_len",             bt_mono(bt_fn(bt_str(), bt_int())))
+  , ("str_starts_with_at_byte",  bt_mono(bt_fn3(bt_str(), bt_int(), bt_str(), bt_bool())))
+  ]
 
 fn semigroup_markers() -> List (String, types.Scheme) =
   [ ("@class:append",          types.mono(types.TConst("Semigroup")))
@@ -159,8 +207,12 @@ fn bt_v()    -> types.Type = types.TVar("v")
 fn bt_maybe(t: types.Type)  -> types.Type = types.TApp(types.TConst("Maybe"), t)
 fn bt_list(t: types.Type)   -> types.Type = types.TApp(types.TConst("List"), t)
 fn bt_dict(t: types.Type)   -> types.Type = types.TApp(types.TConst("Dict"), t)
-fn bt_vec(t: types.Type)    -> types.Type = types.TApp(types.TConst("Vec"), t)
-fn bt_set()                 -> types.Type = types.TConst("Set")
+fn bt_vec(t: types.Type)     -> types.Type = types.TApp(types.TConst("Vec"), t)
+fn bt_set()                  -> types.Type = types.TConst("Set")
+fn bt_vector(t: types.Type)  -> types.Type = types.TApp(types.TConst("Vector"), t)
+fn bt_map(t: types.Type)     -> types.Type = types.TApp(types.TConst("Map"), t)
+fn bt_native_set()           -> types.Type = types.TConst("NativeSet")
+fn bt_intrange()             -> types.Type = types.TConst("IntRange")
 fn bt_result(e: types.Type, a: types.Type) -> types.Type =
   types.TApp(types.TApp(types.TConst("Result"), e), a)
 
@@ -200,6 +252,7 @@ fn str_entries() -> List (String, types.Scheme) =
   , ("str_find",        bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
   , ("str_starts_with", bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
   , ("str_compare",     bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
+  , ("str_concat",      bt_mono(bt_fn2(bt_str(), bt_str(), bt_str())))
   , ("append",          bt_poly1("t", bt_fn2(types.TVar("t"), types.TVar("t"), types.TVar("t"))))
   , ("int_to_string",   bt_mono(bt_fn(bt_int(), bt_str())))
   , ("parse_int",       bt_mono(bt_fn(bt_str(), bt_int())))

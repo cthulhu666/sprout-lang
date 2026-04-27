@@ -444,19 +444,19 @@ fn process_wi_finalize(
             | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
         | Ok tokens ->
             match parser.parse_program(tokens) with
-            | Err e ->
-                match e with
-                | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
-            | Ok prog ->
-                do
-                  match prog with
-                  | ast.Program decls _ ->
-                      do
-                        ordered_now <- ref_read(ordered)
-                        ref_write(ordered, Cons(ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
-                        seen_now <- ref_read(seen)
-                        ref_write(seen, Cons(path, seen_now))
-                        Nil
+              | Err e ->
+                  match e with
+                  | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
+              | Ok prog ->
+                  do
+                    match prog with
+                    | ast.Program decls _ ->
+                        do
+                          ordered_now <- ref_read(ordered)
+                          ref_write(ordered, Cons(ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
+                          seen_now <- ref_read(seen)
+                          ref_write(seen, Cons(path, seen_now))
+                          Nil
 
 fn visit_module_iter(
   entry_path: String,
@@ -492,13 +492,13 @@ fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, Li
                       | token.TokenizeError msg _ -> (Just(str_concat("Lex error in prelude: ", msg)), Nil)
                   | Ok tokens ->
                       match parser.parse_program(tokens) with
-                      | Err e ->
-                          match e with
-                          | parser.ParseError msg _ -> (Just(str_concat("Parse error in prelude: ", msg)), Nil)
-                      | Ok prog ->
-                          match prog with
-                          | ast.Program decls _ ->
-                              (Nothing, Cons(ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
+                        | Err e ->
+                            match e with
+                            | parser.ParseError msg _ -> (Just(str_concat("Parse error in prelude: ", msg)), Nil)
+                        | Ok prog ->
+                            match prog with
+                            | ast.Program decls _ ->
+                                (Nothing, Cons(ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
           else
             (Nothing, rev_mods)
 
@@ -929,7 +929,7 @@ fn qualify_ctor_args(ctx: ResolveCtx, ctors: List ast.TypeConstructor) -> List a
   | Cons ctor rest ->
       match ctor with
       | ast.TypeConstructor name args ->
-          Cons(ast.TypeConstructor(name, qualify_type_list(ctx, args)),
+          Cons(ast.TypeConstructor(qualify_value_name(ctx, Nil, name), qualify_type_list(ctx, args)),
                qualify_ctor_args(ctx, rest))
 
 fn qualify_record_field_decls(ctx: ResolveCtx, fields: List ast.RecordFieldDecl) -> List ast.RecordFieldDecl =
@@ -1015,3 +1015,22 @@ export fn bundle_file(path: String, stdlib_root: String) -> BundleResult !{IO} =
         BundleOk(ast.Program(
           qualify_all_modules(modules, build_all_symbols(modules), stdlib_root),
           dummy_pos()))
+
+fn tok_at_bundler(tokens: Vec token.Token, i: Int) -> token.Token =
+  match vec_get(i, tokens) with
+  | Just t -> t
+  | Nothing -> token.eof_token(source.SourcePos(0, 0, 0))
+
+fn bundler_tok_is_ident(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenIdentKind -> true
+  | _ -> false
+
+fn bundler_tok_is_symbol(t: token.Token, sym: String) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenSymbolKind -> token.token_text(t) == sym
+  | _ -> false
+
+fn bundler_starts_where_binding(tokens: Vec token.Token, i: Int) -> Bool =
+  bundler_tok_is_ident(tok_at_bundler(tokens, i)) && bundler_tok_is_symbol(tok_at_bundler(tokens, i + 1), "=")
+

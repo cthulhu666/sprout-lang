@@ -851,7 +851,15 @@ fn collect_where_bindings(tokens: Vec token.Token, i: Int, acc: List (ast.Patter
     Ok((acc, i))
 
 fn desugar_where(body: ast.Expr, bindings: List (ast.Pattern, ast.Expr)) -> ast.Expr =
-  list_fold(wrap_where_binding, body, list_reverse(bindings))
+  desugar_where_step(body, bindings)
+
+fn desugar_where_step(body: ast.Expr, bindings: List (ast.Pattern, ast.Expr)) -> ast.Expr =
+  match bindings with
+  | Nil -> body
+  | Cons binding rest ->
+      match binding with
+      | (pattern, value) ->
+          desugar_where_step(wrap_where_binding(body, (pattern, value)), rest)
 
 fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.Expr =
   match binding with
@@ -960,7 +968,7 @@ fn parse_optional_where_body(tokens: Vec token.Token, i: Int, body: ast.Expr) ->
   | Just (_, i2) ->
       do
         (bindings, i3) <- collect_where_bindings(tokens, i2, Nil)
-        Ok((desugar_where(body, list_reverse(bindings)), i3))
+        Ok((desugar_where(body, bindings), i3))
 
 fn parse_let_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do

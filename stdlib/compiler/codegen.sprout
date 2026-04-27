@@ -1306,6 +1306,8 @@ fn has_self_tail_calls(e: typed_ast.TypedExpr, fn_name_: String) -> Bool =
       has_self_tail_calls(thn, fn_name_) || has_self_tail_calls(els, fn_name_)
   | typed_ast.TMatch _ branches _ _ ->
       any_branch_has_tail(branches, fn_name_)
+  | typed_ast.TDo steps _ _ ->
+      do_last_has_tail(steps, fn_name_)
   | _ -> false
 
 fn any_branch_has_tail(branches: List typed_ast.TypedMatchBranch, fn_name_: String) -> Bool =
@@ -1313,6 +1315,16 @@ fn any_branch_has_tail(branches: List typed_ast.TypedMatchBranch, fn_name_: Stri
   | Nil -> false
   | Cons (typed_ast.TypedMatchBranch _ body) rest ->
       has_self_tail_calls(body, fn_name_) || any_branch_has_tail(rest, fn_name_)
+
+# Only the last TDoExprStep is in tail position; TDoBindStep always has a continuation.
+fn do_last_has_tail(steps: List typed_ast.TypedDoStep, fn_name_: String) -> Bool =
+  match steps with
+  | Nil -> false
+  | Cons step Nil ->
+      match step with
+      | typed_ast.TDoExprStep e -> has_self_tail_calls(e, fn_name_)
+      | _ -> false
+  | Cons _ rest -> do_last_has_tail(rest, fn_name_)
 
 fn emit_tco_back_edge(tco: TcoCtx, new_args: List Value, extra_roots: Int, em: Emitter) -> Unit !{IO} =
   do
@@ -1470,7 +1482,7 @@ fn emit_var(name: String, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Em
                       val_make(type_to_ll(ty), "0")   # unknown — return zero
 
 fn is_nothing_ctor(name: String) -> Bool =
-  str_slice(name, n - 7, n) == "Nothing" || name == "Nothing"
+  name == "Nothing" || (n >= 7 && str_slice(name, n - 7, n) == "Nothing")
   where n = str_len(name)
 
 fn emit_ctor_closure_wrapper(wrap_name: String, ctor: CtorSig, em: Emitter) -> Unit !{IO} =

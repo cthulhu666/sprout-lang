@@ -53,7 +53,7 @@ fn strip_module_prefix(name: String) -> String =
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   match dict_get(name, local_vars) with
   | Just t -> t
-  | Nothing -> types.TConst(strip_module_prefix(name))
+  | Nothing -> types.TConst(name)
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
@@ -109,7 +109,7 @@ fn ast_param_type(p: ast.Param) -> Maybe ast.TypeExpr =
 
 fn collect_type_expr_vars(maybe_te: Maybe ast.TypeExpr, acc: List String) -> List String =
   match maybe_te with
-  | Nothing -> acc
+  | Nothing -> list_add_unique("_unann", acc)
   | Just te -> collect_te_vars(te, acc)
 
 fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
@@ -509,7 +509,8 @@ fn check_call_constraint(
   match callee with
   | ast.VarExpr method_name _ ->
       match dict_get("@class:" ++ method_name, env) with
-      | Nothing -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+      | Nothing ->
+          inject_constrained_fn_dicts(method_name, 0, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
       | Just class_marker ->
           check_instance_for_marker(class_marker, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
   | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
@@ -545,24 +546,51 @@ fn check_instance_for_marker(
                     s3, es3, call_eff)
           | Nothing ->
               # Polymorphic call — try to forward from a @fwd marker in env.
-              match first_tvar_head_after_subst(typed_args, subst) with
-              | Nothing -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
-              | Just tvar_name ->
-                  match dict_get("@fwd:" ++ tvar_name ++ ":" ++ class_name, env) with
-                  | Nothing -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
-                  | Just fwd_scheme ->
-                      match fwd_scheme with
-                      | types.Scheme _ _ (types.TConst prog_var) _ ->
-                          InferOk(
-                            typed_ast.TCall(typed_callee,
-                              Cons(typed_ast.TDict(
-                                ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
-                                types.TConst(class_name), pos),
-                                typed_args),
-                              ret_t, pos),
-                            s3, es3, call_eff)
-                      | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+              # Falls back to env scan so that container args like `xs: f a` (whose
+              # @fwd key is the TVar for `f`) are found even when an earlier arg like
+              # `init: b` returns a TVar first but has no matching @fwd marker.
+              check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
       | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# Resolve a polymorphic class-method call by scanning args for a @fwd marker.
+# First tries direct @fwd:tvar:class lookup for each TVar-headed arg; if none
+# match, falls back to scanning env for any @fwd:*:class entry.  This handles
+# cases where the constraint's type variable is not the first TVar-headed arg
+# (e.g., `fold_values(step: b->a->b, init: b, xs: f a)` — `f` has the @fwd
+# marker but `init`'s TVar `b` is found first by the scanner).
+
+fn check_instance_fwd(
+  class_name: String,
+  typed_callee: typed_ast.TypedExpr,
+  typed_args: List typed_ast.TypedExpr,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult =
+  match find_fwd_tdict_in_args(class_name, typed_args, env, pos) with
+  | Just tdict ->
+      InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
+  | Nothing ->
+      match scan_fwd_markers(class_name, env, pos) with
+      | Just tdict ->
+          InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
+      | Nothing ->
+          InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# Walk each arg looking for one whose raw TVar head maps to a @fwd marker.
+fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  match args with
+  | Nil -> Nothing
+  | Cons arg rest ->
+      match tvar_head_of_type(typed_ast.typed_expr_type(arg)) with
+      | Nothing -> find_fwd_tdict_in_args(class_name, rest, env, pos)
+      | Just tvar_name ->
+          match dict_get("@fwd:" ++ tvar_name ++ ":" ++ class_name, env) with
+          | Just fwd_scheme -> fwd_scheme_to_tdict(fwd_scheme, class_name, pos)
+          | Nothing -> find_fwd_tdict_in_args(class_name, rest, env, pos)
 
 # Scan all args for the first whose head type is a concrete constructor (TConst).
 # Skips function-typed args (TFunc) and type-variable-headed containers, which
@@ -580,11 +608,18 @@ fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dic
 # Returns the outermost TVar name from the first arg whose head is a TVar after
 # substitution.  Scans all args so that function-typed leading arguments (e.g.
 # the fn-arg in fmap(fn, xs)) do not shadow the actual container argument.
+#
+# NOTE: we use the RAW typed-expr type (no subst application) rather than the
+# fully-substituted type.  Pattern inference in infer_tuple_pattern binds the
+# original @fwd key (e.g. "t360") to a fresh element variable (e.g. TVar "t364")
+# in the subst.  Fully applying the subst would follow that chain and return
+# "t364", which has no @fwd marker — the marker was registered for "t360".
+# Using the raw type preserves the original TVar name so the @fwd lookup works.
 fn first_tvar_head_after_subst(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe String =
   match typed_args with
   | Nil -> Nothing
   | Cons first_arg rest ->
-      match tvar_head_of_type(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      match tvar_head_of_type(typed_ast.typed_expr_type(first_arg)) with
       | Just name -> Just(name)
       | Nothing   -> first_tvar_head_after_subst(rest, subst)
 
@@ -609,6 +644,138 @@ fn concrete_type_str(t: types.Type) -> Maybe String =
   | types.TConst name -> Just(name)
   | types.TApp base _ -> concrete_type_str(base)
   | _ -> Nothing
+
+# --- Constrained-function TDict injection ---
+#
+# inject_constrained_fn_dicts: when calling a constrained regular function
+# (not a class method), look up "@constrained_N:fn_name" markers and inject
+# TDict evidence for each constraint, so that lowering.sprout can forward the
+# appropriate dict args at the call site.
+#
+# user_typed_args strips TDict nodes already prepended in earlier iterations so
+# that first_concrete_typed_arg_str and first_tvar_head_after_subst only see
+# the real user arguments when resolving each constraint.
+# Also strips TVar nodes whose names start with "__tc_" — these are materialized
+# hidden dict params inserted by the lowering pass (check2 path). Without this
+# filter the pre-scan @constrained_N markers cause double-injection in check2.
+
+fn user_typed_args(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match args with
+  | Nil -> Nil
+  | Cons (typed_ast.TDict _ _ _) rest -> user_typed_args(rest)
+  | Cons (typed_ast.TVar name t p) rest ->
+      if str_starts_with(name, "__tc_") then user_typed_args(rest)
+      else Cons(typed_ast.TVar(name, t, p), user_typed_args(rest))
+  | Cons e rest -> Cons(e, user_typed_args(rest))
+
+fn resolve_one_constraint_tdict(
+  class_name: String,
+  user_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  match first_concrete_typed_arg_str(user_args, subst) with
+  | Just head_str ->
+      match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+      | Just _ ->
+          Just(typed_ast.TDict(
+            ast.TypeConstraint(class_name, Cons(ast.TypeName(head_str), Nil)),
+            types.TConst(class_name), pos))
+      | Nothing ->
+          # Concrete type found but no instance for it (e.g., arg is List (k, Int, a)
+          # and Ord List doesn't exist). Fall through to @fwd / env scan.
+          resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+  | Nothing ->
+      resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+
+# Try @fwd marker lookup first (direct TVar arg), then fall back to env scan.
+# Used when the first concrete-type lookup finds no instance (or no concrete type).
+fn resolve_via_fwd_or_scan(
+  class_name: String,
+  user_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  match first_tvar_head_after_subst(user_args, subst) with
+  | Just tvar_name ->
+      match dict_get("@fwd:" ++ tvar_name ++ ":" ++ class_name, env) with
+      | Just fwd_scheme ->
+          fwd_scheme_to_tdict(fwd_scheme, class_name, pos)
+      | Nothing ->
+          # tvar_name not directly in @fwd; fall through to env scan
+          scan_fwd_markers(class_name, env, pos)
+  | Nothing ->
+      # Arg head is not a TVar (e.g., constraint type embedded inside a tuple or
+      # container arg). Fall back to scanning env for any @fwd:*:class_name marker
+      # seeded for this function's constraints.
+      scan_fwd_markers(class_name, env, pos)
+
+# Convert a stored @fwd scheme value to a TDict evidence node.
+fn fwd_scheme_to_tdict(fwd_scheme: types.Scheme, class_name: String, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  match fwd_scheme with
+  | types.Scheme _ _ (types.TConst prog_var) _ ->
+      Just(typed_ast.TDict(
+        ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
+        types.TConst(class_name), pos))
+  | _ -> Nothing
+
+# Scan all env entries for the first "@fwd:*:class_name" marker.
+# Used as a fallback when the constraint type is not visible at the head of any
+# argument (e.g., Ord k where k appears inside a tuple argument).
+fn scan_fwd_markers(class_name: String, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  scan_fwd_marker_entries(class_name, vec_to_list(dict_entries(env)), pos)
+
+fn scan_fwd_marker_entries(
+  class_name: String,
+  entries: List (String, types.Scheme),
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  match entries with
+  | Nil -> Nothing
+  | Cons entry rest ->
+      match entry with
+      | (key, val) ->
+          if is_fwd_key_for_class(key, class_name)
+          then fwd_scheme_to_tdict(val, class_name, pos)
+          else scan_fwd_marker_entries(class_name, rest, pos)
+
+# Check whether an env key is an @fwd marker for the given class.
+# Key format: "@fwd:" ++ tvar_name ++ ":" ++ class_name
+fn is_fwd_key_for_class(key: String, class_name: String) -> Bool =
+  str_starts_with(key, "@fwd:") && str_ends_with_suffix(key, ":" ++ class_name)
+
+fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
+  if str_len(s) < str_len(suffix) then false
+  else str_slice(s, str_len(s) - str_len(suffix), str_len(s)) == suffix
+
+fn inject_constrained_fn_dicts(
+  name: String,
+  idx: Int,
+  env: Dict types.Scheme,
+  typed_callee: typed_ast.TypedExpr,
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match dict_get("@constrained_" ++ int_to_string(idx) ++ ":" ++ name, env) with
+  | Nothing ->
+      InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+  | Just class_marker ->
+      match class_marker with
+      | types.Scheme _ _ (types.TConst class_name) _ ->
+          match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos) with
+          | Nothing ->
+              inject_constrained_fn_dicts(name, idx + 1, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+          | Just tdict ->
+              inject_constrained_fn_dicts(name, idx + 1, env, typed_callee, Cons(tdict, typed_args), subst, ret_t, s3, es3, call_eff, pos)
+      | _ ->
+          inject_constrained_fn_dicts(name, idx + 1, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
 
 # --- Forward marker helpers ---
 #
@@ -637,10 +804,34 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
                   match fresh_t with
                   | types.TVar fresh_name ->
                       # Store prog_var name in the scheme value for retrieval in check_instance_for_marker.
-                      dict_set("@fwd:" ++ fresh_name ++ ":" ++ class_name,
-                               types.mono(types.TConst(prog_var)), env)
+                      # Also seed @fwd markers for any superclasses registered under @super:class_name:*.
+                      seed_fwd_with_supers(class_name, fresh_name, prog_var, env)
                   | _ -> env
           | _ -> env
+
+# Seed the direct @fwd marker and then transitively seed all superclass markers.
+fn seed_fwd_with_supers(class_name: String, fresh_name: String, prog_var: String, env: Dict types.Scheme) -> Dict types.Scheme =
+  seed_superclass_fwd_markers(class_name, fresh_name, prog_var,
+    dict_set("@fwd:" ++ fresh_name ++ ":" ++ class_name,
+             types.mono(types.TConst(prog_var)), env))
+
+# Seed @fwd markers for all superclasses of class_name.
+# Scans env for "@super:{class_name}:{super_name}" entries and adds
+# "@fwd:{fresh_name}:{super_name}" for each.
+fn seed_superclass_fwd_markers(class_name: String, fresh_name: String, prog_var: String, env: Dict types.Scheme) -> Dict types.Scheme =
+  seed_super_from_entries(class_name, fresh_name, prog_var, vec_to_list(dict_entries(env)), env)
+
+fn seed_super_from_entries(class_name: String, fresh_name: String, prog_var: String, entries: List (String, types.Scheme), env: Dict types.Scheme) -> Dict types.Scheme =
+  match entries with
+  | Nil -> env
+  | Cons entry rest ->
+      match entry with
+      | (key, _) ->
+          if str_starts_with(key, "@super:" ++ class_name ++ ":")
+          then seed_super_from_entries(class_name, fresh_name, prog_var, rest,
+                 dict_set("@fwd:" ++ fresh_name ++ ":" ++ str_slice(key, str_len("@super:" ++ class_name ++ ":"), str_len(key)),
+                          types.mono(types.TConst(prog_var)), env))
+          else seed_super_from_entries(class_name, fresh_name, prog_var, rest, env)
 
 # --- Args accumulator ---
 
@@ -756,14 +947,20 @@ fn check_compare(
   eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), types.type_int()) with
-  | Err e -> InferErr(op ++ " needs Int: " ++ e)
+  # Unify left and right with each other first, then check the result is Int or Char.
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
+  | Err e -> InferErr(op ++ " needs matching types: " ++ e)
   | Ok s1 ->
-      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_right), types.type_int()) with
-      | Err e -> InferErr(op ++ " needs Int: " ++ e)
+      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
       | Ok s2 ->
           InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
                   s2, eff_subst, eff)
+      | Err _ ->
+          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_char()) with
+          | Err e -> InferErr(op ++ " needs Int or Char: " ++ e)
+          | Ok s2 ->
+              InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
+                      s2, eff_subst, eff)
 
 fn check_eq(
   subst: Dict types.Type,
@@ -1178,7 +1375,8 @@ fn infer_lambda(
 ) -> InferResult !{IO} =
   do
     fresh_params <- make_fresh_param_types(state, params)
-    br <- infer_expr(state, extend_env_with_params(params, fresh_params, env), subst, eff_subst, body)
+    let env2 = extend_env_with_params(params, fresh_params, env)
+    br <- infer_expr(state, env2, subst, eff_subst, body)
     match br with
     | InferErr e -> InferErr(e)
     | InferOk typed_body s1 es1 body_eff ->
@@ -1438,7 +1636,33 @@ export fn typecheck_decls(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
-  typecheck_decls_inner(state, decls, env, subst, eff_subst, dict_empty(), Nil)
+  # Pre-scan: register all FnDecl signatures and their @constrained_N markers
+  # in env before processing bodies.  This enables forward references and
+  # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
+  # is defined later in the same file).
+  typecheck_decls_inner(state, decls, pre_scan_fn_decls(decls, env, dict_empty()), subst, eff_subst, dict_empty(), Nil)
+
+# Pre-scan pass: register FnDecl signatures, @constrained_N markers, and
+# TypeDecl constructors for all declarations without typechecking bodies.
+# Also tracks AliasDecl entries so that type aliases in signatures are resolved.
+# TypeDecl pre-scanning is required to allow forward references to type
+# constructors (e.g. a fn defined before the type it uses in the same module).
+fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Dict types.Type) -> Dict types.Scheme =
+  match decls with
+  | Nil -> env
+  | Cons decl rest ->
+      match decl with
+      | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
+          pre_scan_fn_decls(rest,
+            register_constrained_fn_markers(name, constraints,
+              dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)),
+            alias_env)
+      | ast.AliasDecl name Nil rhs_te _ ->
+          pre_scan_fn_decls(rest, env,
+            dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
+      | ast.TypeDecl _ _ _ _ ->
+          pre_scan_fn_decls(rest, register_type_decl(decl, env), alias_env)
+      | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 fn typecheck_decls_inner(
   state: unifier.InferState,
@@ -1491,11 +1715,13 @@ fn typecheck_decl(
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints,
                                 dummy_unit()),
-              dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
+              register_constrained_fn_markers(name, constraints,
+                dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
         | typed_ast.BodyOk typed_body ->
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
-              dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
+              register_constrained_fn_markers(name, constraints,
+                dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
   | ast.LetDecl name expr _ ->
       do
         r <- infer_expr(state, env, subst, eff_subst, expr)
@@ -1510,10 +1736,11 @@ fn typecheck_decl(
                 env))
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env)
-  | ast.ClassDecl class_name type_params methods _ _ ->
+  | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         register_class_methods(type_params, methods,
-          register_class_method_markers(class_name, methods, env)))
+          register_class_method_markers(class_name, methods,
+            register_superclass_markers(class_name, superclasses, env))))
   | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
         r <- check_instance_methods(state, inst_constraints, methods, env, subst, eff_subst)
@@ -1541,7 +1768,11 @@ fn check_fn_body(
       do
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env))
         let fwd_env = seed_forward_markers(constraints, prog_to_fresh, env)
-        br <- infer_expr(state, fn_body_env(name, params, inst_type, fwd_env), subst, eff_subst, body)
+        # Seed @constrained_N:name markers into the body env so that recursive
+        # constrained calls (e.g., decorated_merge_sorted calling itself) can
+        # find the markers and have dict args injected by inject_constrained_fn_dicts.
+        let self_env = register_constrained_fn_markers(name, constraints, fwd_env)
+        br <- infer_expr(state, fn_body_env(name, params, inst_type, self_env), subst, eff_subst, body)
         match br with
         | InferErr msg -> fn_body_err(name, msg)
         | InferOk typed_body s1 _ _ ->
@@ -1558,7 +1789,9 @@ fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env:
   )
 
 fn fn_body_err(name: String, msg: String) -> typed_ast.BodyResult =
-  if is_unknown_ref(msg)
+  if str_starts_with(name, "stdlib.compiler.")
+  then typed_ast.BodyErr("[DIAG] " ++ msg ++ " in function " ++ name)
+  else if is_unknown_ref(msg)
   then typed_ast.BodyLenient
   else typed_ast.BodyErr(msg ++ " in function " ++ name)
 
@@ -1596,6 +1829,41 @@ fn register_class_method_markers(class_name: String, methods: List ast.ClassMeth
       | ast.ClassMethodSig name _ _ _ ->
           register_class_method_markers(class_name, rest,
             dict_set("@class:" ++ name, types.mono(types.TConst(class_name)), env))
+
+# Register "@super:{class_name}:{super_name}" entries for each superclass in the
+# ClassDecl's where-clause.  These are later consumed by seed_superclass_fwd_markers
+# to propagate @fwd markers to superclass methods at call sites.
+fn register_superclass_markers(class_name: String, superclasses: List ast.TypeConstraint, env: Dict types.Scheme) -> Dict types.Scheme =
+  match superclasses with
+  | Nil -> env
+  | Cons sc rest ->
+      match sc with
+      | ast.TypeConstraint super_name _ ->
+          register_superclass_markers(class_name, rest,
+            dict_set("@super:" ++ class_name ++ ":" ++ super_name,
+                     types.mono(types.TConst(super_name)), env))
+
+# ---------------------------------------------------------------------------
+# FnDecl: constrained-function markers
+# ---------------------------------------------------------------------------
+#
+# register_constrained_fn_markers seeds "@constrained_N:fn_name" entries so
+# that check_call_constraint can inject TDict evidence when calling regular
+# constrained functions (not class methods).  Each constraint gets its own
+# numbered key to support functions with multiple constraints.
+
+fn register_constrained_fn_markers(name: String, constraints: List ast.TypeConstraint, env: Dict types.Scheme) -> Dict types.Scheme =
+  register_constrained_fn_markers_acc(name, constraints, 0, env)
+
+fn register_constrained_fn_markers_acc(name: String, constraints: List ast.TypeConstraint, idx: Int, env: Dict types.Scheme) -> Dict types.Scheme =
+  match constraints with
+  | Nil -> env
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name _ ->
+          register_constrained_fn_markers_acc(name, rest, idx + 1,
+            dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
+                     types.mono(types.TConst(class_name)), env))
 
 # ---------------------------------------------------------------------------
 # InstanceDecl: instance marker registration

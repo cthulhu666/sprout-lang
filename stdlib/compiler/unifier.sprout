@@ -163,7 +163,10 @@ fn unify_applied(
 ) -> Result String (Dict types.Type) =
   match (l, r) with
   | (types.TVar a, types.TVar b) ->
-      if a == b then Ok(subst) else bind_var(a, r, subst)
+      # Bind right→left so the left (expected/older) TVar stays canonical.
+      # This ensures @fwd markers (keyed by the instantiation TVar) remain
+      # reachable after tuple pattern matching introduces fresh element vars.
+      if a == b then Ok(subst) else bind_var(b, l, subst)
   | (types.TVar a, _) -> bind_var(a, r, subst)
   | (_, types.TVar b) -> bind_var(b, l, subst)
   | (types.TConst a, types.TConst b) ->
