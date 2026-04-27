@@ -73,10 +73,10 @@ fn parse_err_diag(e: parser.ParseError) -> Diagnostic =
 
 fn lex_parse(src: String) -> LexParseResult =
   match lexer.tokenize(src) with
-  | Err e    -> LexParseFail(Cons(lex_err_diag(e), Nil))
+  | Err e -> LexParseFail(Cons(lex_err_diag(e), Nil))
   | Ok tokens ->
       match parser.parse_program(tokens) with
-      | Err e   -> LexParseFail(Cons(parse_err_diag(e), Nil))
+      | Err e -> LexParseFail(Cons(parse_err_diag(e), Nil))
       | Ok prog -> LexParseOk(prog)
 
 # compile_source: run full lex -> parse -> check pipeline on raw source text.
@@ -87,8 +87,8 @@ export fn compile_source(src: String) -> CompileResult !{IO} =
       do
         result <- checker.check_program(prog)
         match result with
-        | checker.CheckErr msg -> CompileFail(Cons(DiagError("check: " ++ msg), Nil))
-        | checker.CheckOk env  -> CompileOk(env)
+        | checker.CheckErr msg -> CompileFail(Cons (DiagError("check: " ++ msg), Nil))
+        | checker.CheckOk env -> CompileOk(env)
 
 # compile_source_with_root: like compile_source but also resolves imports.
 # Accepts raw source (with module/import header); strips headers internally
@@ -104,8 +104,8 @@ export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileR
         do
           result <- checker.check_program_with_env(prog, import_pairs)
           match result with
-          | checker.CheckErr msg -> CompileFail(Cons(DiagError("check: " ++ msg), Nil))
-          | checker.CheckOk env  -> CompileOk(env)
+          | checker.CheckErr msg -> CompileFail(Cons (DiagError("check: " ++ msg), Nil))
+          | checker.CheckOk env -> CompileOk(env)
 
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: String) -> CompileResult !{IO} =
@@ -133,15 +133,15 @@ export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
-    | bundler.BundleErr msg -> FullFail(Cons(DiagError("bundle: " ++ msg), Nil))
+    | bundler.BundleErr msg -> FullFail(Cons (DiagError("bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
           tc_result <- checker.typecheck_typed(prog, Nil)
           match tc_result with
-          | typed_ast.TypedErr msg -> FullFail(Cons(DiagError("check: " ++ msg), Nil))
+          | typed_ast.TypedErr msg -> FullFail(Cons (DiagError("check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog env ->
               match lowering.lower_program(typed_prog) with
-              | lowering.LowerErr msg -> FullFail(Cons(DiagError("lower: " ++ msg), Nil))
+              | lowering.LowerErr msg -> FullFail(Cons (DiagError("lower: " ++ msg), Nil))
               | lowering.LowerOk lowered -> FullOk(lowered, env)
 
 # ---------------------------------------------------------------------------
@@ -160,27 +160,46 @@ export type IrFullResult (..) =
   | IrFullOk String
   | IrFullFail (List Diagnostic)
 
+export type IrFullLinesResult (..) =
+  | IrFullLinesOk (List String)(List String)(List String)
+  | IrFullLinesFail (List Diagnostic)
+
 export fn compile_full_ir(path: String, stdlib_root: String) -> IrFullResult !{IO} =
+  do
+    lines_result <- compile_full_ir_lines(path, stdlib_root)
+    match lines_result with
+    | IrFullLinesFail diags -> IrFullFail(diags)
+    | IrFullLinesOk header_lines str_lines def_lines -> IrFullOk(join_line_sections(header_lines, str_lines, def_lines))
+
+fn join_line_sections(header_lines: List String, str_lines: List String, def_lines: List String) -> String =
+  join_lines_with_tail(header_lines, join_lines_with_tail(str_lines, join_lines_with_tail(def_lines, "")))
+
+fn join_lines_with_tail(lines: List String, tail: String) -> String =
+  match lines with
+  | Nil -> tail
+  | Cons h t -> h ++ "\n" ++ join_lines_with_tail(t, tail)
+
+export fn compile_full_ir_lines(path: String, stdlib_root: String) -> IrFullLinesResult !{IO} =
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
-    | bundler.BundleErr msg -> IrFullFail(Cons(DiagError("bundle: " ++ msg), Nil))
+    | bundler.BundleErr msg -> IrFullLinesFail(Cons (DiagError("bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
           tc_result <- checker.typecheck_typed(prog, Nil)
           match tc_result with
-          | typed_ast.TypedErr msg -> IrFullFail(Cons(DiagError("check: " ++ msg), Nil))
+          | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError("check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog _ ->
               match lowering.lower_program(typed_prog) with
-              | lowering.LowerErr msg -> IrFullFail(Cons(DiagError("lower: " ++ msg), Nil))
+              | lowering.LowerErr msg -> IrFullLinesFail(Cons (DiagError("lower: " ++ msg), Nil))
               | lowering.LowerOk lowered ->
                   do
                     tc2_result <- checker.typecheck_typed(lowered, Nil)
                     match tc2_result with
-                    | typed_ast.TypedErr msg -> IrFullFail(Cons(DiagError("check2: " ++ msg), Nil))
+                    | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError("check2: " ++ msg), Nil))
                     | typed_ast.TypedOk typed_lowered env ->
                         do
-                          ir_result <- codegen.compile_to_ir(typed_lowered, env)
+                          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env)
                           match ir_result with
-                          | codegen.IrOk ir   -> IrFullOk(ir)
-                          | codegen.IrErr msg -> IrFullFail(Cons(DiagError("codegen: " ++ msg), Nil))
+                          | codegen.IrLinesOk header_lines str_lines def_lines -> IrFullLinesOk(header_lines, str_lines, def_lines)
+                          | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))

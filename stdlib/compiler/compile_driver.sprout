@@ -35,7 +35,7 @@ fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
   | Cons d rest ->
       do
         match d with
-        | compiler.DiagError msg   -> print("ERROR: " ++ msg)
+        | compiler.DiagError msg -> print("ERROR: " ++ msg)
         | compiler.DiagWarning msg -> print("WARNING: " ++ msg)
         print_diags(rest)
 
@@ -62,11 +62,11 @@ fn run_with_src(src: String, stdlib_root: String) -> Unit !{IO} =
     result <- compiler.compile_source_with_root(src, stdlib_root)
     match result with
     | compiler.CompileFail diags -> print_diags(diags)
-    | compiler.CompileOk env     ->
+    | compiler.CompileOk env ->
         do
           print("OK")
           match parse_for_decls(strip_headers(src, 0)) with
-          | Nothing    -> ()
+          | Nothing -> ()
           | Just decls -> checker.dump_typed_names(decls, env)
 
 # ---------------------------------------------------------------------------
@@ -74,10 +74,22 @@ fn run_with_src(src: String, stdlib_root: String) -> Unit !{IO} =
 
 fn run_file_ir(path: String, stdlib_root: String) -> Unit !{IO} =
   do
-    result <- compiler.compile_full_ir(path, stdlib_root)
+    result <- compiler.compile_full_ir_lines(path, stdlib_root)
     match result with
-    | compiler.IrFullFail diags -> print_diags(diags)
-    | compiler.IrFullOk ir      -> print(ir)
+    | compiler.IrFullLinesFail diags -> print_diags(diags)
+    | compiler.IrFullLinesOk header_lines str_lines def_lines ->
+        do
+          print_lines(header_lines)
+          print_lines(str_lines)
+          print_lines(def_lines)
+
+fn print_lines(lines: List String) -> Unit !{IO} =
+  match lines with
+  | Nil -> ()
+  | Cons line rest ->
+      do
+        print(line)
+        print_lines(rest)
 
 # ---------------------------------------------------------------------------
 # Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
@@ -85,8 +97,8 @@ fn run_file_ir(path: String, stdlib_root: String) -> Unit !{IO} =
 
 fn run_batch(stdlib_root: String, idx: Int, emit_ir: Bool) -> Unit !{IO} =
   match argv_get(idx) with
-  | Nothing    -> ()
-  | Just path  ->
+  | Nothing -> ()
+  | Just path ->
       do
         print("=== " ++ path ++ " ===")
         if emit_ir then run_file_ir(path, stdlib_root)
@@ -95,11 +107,11 @@ fn run_batch(stdlib_root: String, idx: Int, emit_ir: Bool) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing          -> print("ERROR: usage: compile-driver [--emit-ir] <stdlib-root> <file>...")
-  | Just first_arg   ->
+  | Nothing -> print("ERROR: usage: compile-driver [--emit-ir] <stdlib-root> <file>...")
+  | Just first_arg ->
       if first_arg == "--emit-ir" then
         match argv_get(1) with
-        | Nothing          -> print("ERROR: usage: compile-driver --emit-ir <stdlib-root> <file>...")
+        | Nothing -> print("ERROR: usage: compile-driver --emit-ir <stdlib-root> <file>...")
         | Just stdlib_root -> run_batch(stdlib_root, 2, true)
       else
         run_batch(first_arg, 1, false)
