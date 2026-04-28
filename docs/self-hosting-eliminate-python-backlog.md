@@ -256,14 +256,19 @@ Definition of done:
 
 ### Phase 10: Self-Hosted Backend Orchestration
 
-- [ ] Move compile planning, lowering orchestration, artifact emission policy,
+- [~] Move compile planning, lowering orchestration, artifact emission policy,
   and packaging flow into Sprout.
 - [ ] Decide whether the first self-hosted backend target is:
   interpreter IR, typed-core artifact, existing native backend bridge, or
   another narrow target.
-- [ ] Keep LLVM/object emission or native runtime substrate behind explicit
+- [~] Keep LLVM/object emission or native runtime substrate behind explicit
   non-Python seams until Sprout can reasonably own more of that stack.
-- [ ] Add end-to-end self-hosted compile tests for representative programs.
+- [~] Add end-to-end self-hosted compile tests for representative programs.
+  Manual stage-2 verification now works: stage-0 `compile_driver_bin --emit-ir`
+  can emit LLVM IR for `compile_driver.sprout`; compiling that IR with `clang`
+  produces a stage-1 native compiler that passes the bootstrap corpus. Remaining
+  work is to automate this in the bootstrap test suite and make artifact
+  production policy explicit.
 - [ ] Make the Sprout-owned compiler pipeline the default build path.
 
 Definition of done:
@@ -320,8 +325,9 @@ These tracks run across multiple phases and should be maintained explicitly.
 - [ ] Add host-vs-self-hosted differential tests for each replaced slice.
 - [ ] Preserve stable diagnostics where intended and flag intentional
   differences explicitly.
-- [ ] Add bootstrap-stage verification to CI once the first self-hosted stages
-  exist.
+- [~] Add bootstrap-stage verification to CI once the first self-hosted stages
+  exist. Stage-1 bootstrap parity exists through `test_bootstrap_stage1.py`;
+  stage-2 native-binary parity has been verified manually but is not automated.
 
 ### C. Documentation and Architecture Hygiene
 

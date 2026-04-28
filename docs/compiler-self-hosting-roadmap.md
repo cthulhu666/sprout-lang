@@ -252,6 +252,19 @@ Possible landing points:
    host boundary,
 4. only later does it gain end-to-end native code emission ownership.
 
+Current implementation status: the Sprout-owned pipeline can now manually
+produce a stage-1 native `compile_driver` binary by running the stage-0
+`compile_driver_bin --emit-ir` path and compiling the resulting LLVM IR with
+`clang`. That stage-1 binary has been checked against the bootstrap corpus.
+This is still not the default build path and does not yet have an automated
+stage-2 test gate.
+
+Recent blocker fixed: ADT constructor signatures in the Sprout LLVM emitter now
+preserve primitive field LLVM types. This keeps `TConst String` payloads as
+`ptr` during constructor pattern binding, so type-name equality in the
+self-hosted unifier lowers to content equality instead of packed pointer
+identity. That fixed the stage-2 `Int vs Int` / `Maybe vs Maybe` mismatch.
+
 This is the first stage that should reasonably be called “Sprout compiler
 implemented in Sprout” in the stronger sense.
 
