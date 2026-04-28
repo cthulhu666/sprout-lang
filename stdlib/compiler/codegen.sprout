@@ -212,12 +212,25 @@ fn is_result_type(t: types.Type) -> Bool =
   | types.TApp (types.TApp(types.TConst "Result") _) _ -> true
   | _ -> false
 
+fn is_string_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst "String" -> true
+  | _ -> false
+
+fn is_list_type(t: types.Type) -> Bool =
+  match t with
+  | types.TApp (types.TConst "List") _ -> true
+  | _ -> false
+
 # ===========================================================================
 # Section 3 — Value constructors / accessors
 # ===========================================================================
 
 fn val_make(ll: String, ir: String) -> Value =
   Value(ll, ir, Nothing, Nothing, Nothing)
+
+fn val_for_ll(ll: String, ir: String) -> Value =
+  val_with_tuple_items(val_make(ll, ir), tuple_items_from_ll(ll))
 
 fn val_ll(v: Value) -> String =
   match v with | Value ll _ _ _ _ -> ll
@@ -724,7 +737,7 @@ fn coerce_value(v: Value, target: String, em: Emitter) -> Value !{IO} =
 # We do a simple linear scan splitting on ", " at depth 0.
 fn tuple_items_from_ll(ll: String) -> Maybe (List String) =
   if str_starts_with(ll, "{ ") && str_ends_with_colon2(ll) then
-    Just(split_ll_types(str_slice(ll, 2, str_len(ll) - 2), 0, 0, "", Nil))
+    Just(split_ll_types(str_slice(ll, 2, str_len(ll) - 4), 0, 0, "", Nil))
   else Nothing
 
 fn str_ends_with_colon2(s: String) -> Bool =
@@ -752,6 +765,9 @@ fn zero_init(ll: String) -> String =
   if ll == ll_ptr() then "null"
   else if str_starts_with(ll, "{ ") then "zeroinitializer"
   else "0"
+
+fn zero_val(ll: String) -> Value =
+  val_for_ll(ll, zero_init(ll))
 
 # ===========================================================================
 # Section 10 — Pattern operations
@@ -785,14 +801,16 @@ fn emit_pattern_test(pat: ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) ->
   | ast.StringPattern s _ ->
       do
         lit_v <- emit_str_ptr(em, s)
+        scrut_ptr <- coerce_value(scrut, ll_ptr(), em)
         tmp <- fresh_tmp(em)
-        emit_line(em, "  " ++ tmp ++ " = call i1 @str_eq(ptr " ++ val_ir(scrut) ++ ", ptr " ++ val_ir(lit_v) ++")")
+        emit_line(em, "  " ++ tmp ++ " = call i1 @str_eq(ptr " ++ val_ir(scrut_ptr) ++ ", ptr " ++ val_ir(lit_v) ++")")
         val_make(ll_i1(), tmp)
   | ast.CharPattern ch _ ->
       do
         lit_v <- emit_str_ptr(em, char_to_string(ch))
+        scrut_ptr <- coerce_value(scrut, ll_ptr(), em)
         tmp <- fresh_tmp(em)
-        emit_line(em, "  " ++ tmp ++ " = call i1 @str_eq(ptr " ++ val_ir(scrut) ++ ", ptr " ++ val_ir(lit_v) ++")")
+        emit_line(em, "  " ++ tmp ++ " = call i1 @str_eq(ptr " ++ val_ir(scrut_ptr) ++ ", ptr " ++ val_ir(lit_v) ++")")
         val_make(ll_i1(), tmp)
   | ast.UnitPattern _ ->
       do
@@ -1087,7 +1105,7 @@ fn emit_closure_call(callee: Value, sig: CallSig, args: List Value, em: Emitter)
     args_ir_str <- build_closure_args_ir(callee, sig_params(sig), args, em)
     out <- fresh_tmp(em)
     emit_line(em, "  " ++ out ++ " = call " ++ sig_ret(sig) ++ " " ++ code ++ "("++ args_ir_str ++")")
-    val_with_call_sig(val_make(sig_ret(sig), out), sig_ret_sig(sig))
+    val_with_call_sig(val_for_ll(sig_ret(sig), out), sig_ret_sig(sig))
 
 fn build_closure_args_ir(callee: Value, param_lls: List String, args: List Value, em: Emitter) -> String !{IO} =
   do
@@ -1236,8 +1254,9 @@ fn emit_lambda_helper(lam_name: String, params: List ast.Param, param_lls: List 
     let lam_locals = extend_locals(extend_locals(dict_empty(), cap_locals), param_locals)
     let total_rooted = env_val + cap_rooted + param_rooted
     body_val <- emit_expr(ctx, lam_locals, em, Nothing, body)
+    coerced_body <- coerce_value(body_val, ret_ll, em)
     pop_temp_roots(total_rooted, em)
-    emit_line(em, "  ret " ++ ret_ll ++ " " ++ val_ir(body_val))
+    emit_line(em, "  ret " ++ ret_ll ++ " " ++ val_ir(coerced_body))
     emit_line(em, "}")
     fn_lines <- flush_body(em)
     emit_defs_list(fn_lines, em)
@@ -1256,7 +1275,7 @@ fn load_captures(names: List String, lls: List String, em: Emitter, idx: Int) ->
             emit_line(em, "  " ++ slot ++ " = getelementptr i64, ptr %env, i64 " ++ int_to_string(idx))
             raw <- fresh_tmp(em)
             emit_line(em, "  " ++ raw ++ " = load i64, ptr " ++ slot)
-            let v = val_make(ll_i64(), raw)
+            v <- coerce_value(val_make(ll_i64(), raw), ll, em)
             rooted <- push_temp_root(v, em)
             (rest_binds, rest_rooted) <- load_captures(rest_names, rest_lls, em, idx + 1)
             (Cons((name, v), rest_binds), rooted + rest_rooted)
@@ -1270,7 +1289,7 @@ fn load_lambda_params(params: List ast.Param, lls: List String, em: Emitter, idx
       | Cons ll rest_lls ->
           do
             let ir = "%a" ++ int_to_string(idx)
-            let v = val_make(ll, ir)
+            let v = val_for_ll(ll, ir)
             rooted <- push_temp_root(v, em)
             (rest_binds, rest_rooted) <- load_lambda_params(rest_params, rest_lls, em, idx + 1)
             (Cons((name, v), rest_binds), rooted + rest_rooted)
@@ -1343,6 +1362,22 @@ fn emit_tco_back_edge(tco: TcoCtx, new_args: List Value, extra_roots: Int, em: E
     store_tco_args(tco_slots(tco), new_args, em)
     emit_line(em, "  br label %" ++ tco_loop_lbl(tco))
 
+fn emit_pending_tco(tco_ctx: Maybe TcoCtx, v: Value, em: Emitter) -> Bool !{IO} =
+  match tco_ctx with
+  | Nothing -> false
+  | Just tc ->
+      match val_tco_args(v) with
+      | Nothing -> false
+      | Just new_args ->
+          do
+            emit_tco_back_edge(tc, new_args, 0, em)
+            true
+
+fn tco_with_extra_roots(tco_ctx: Maybe TcoCtx, extra_roots: Int) -> Maybe TcoCtx =
+  match tco_ctx with
+  | Nothing -> Nothing
+  | Just tc -> Just(tco_with_outer_roots(tc, tco_outer_roots(tc) + extra_roots))
+
 fn store_tco_args(slots: List (String, String), vals: List Value, em: Emitter) -> Unit !{IO} =
   match slots with
   | Nil -> ()
@@ -1383,24 +1418,24 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
       emit_range(start, end_, ctx, locals, em)
   | typed_ast.TBinary op left right ty _ ->
       emit_binary(op, left, right, ty, ctx, locals, em)
-  | typed_ast.TIf cond thn els _ _ ->
-      emit_if(cond, thn, els, ctx, locals, em, tco_ctx)
-  | typed_ast.TMatch scrut branches _ _ ->
-      emit_match(scrut, branches, ctx, locals, em, tco_ctx)
+  | typed_ast.TIf cond thn els ty _ ->
+      emit_if(cond, thn, els, ty, ctx, locals, em, tco_ctx)
+  | typed_ast.TMatch scrut branches ty _ ->
+      emit_match(scrut, branches, ty, ctx, locals, em, tco_ctx)
   | typed_ast.TCall callee args ty _ ->
       emit_call(callee, args, ty, ctx, locals, em, tco_ctx)
   | typed_ast.TDo steps ty _ ->
       emit_do(steps, ty, ctx, locals, em, tco_ctx)
   | typed_ast.TDict _ ty _ ->
       # TDict nodes should be eliminated by lowering; treat as unit if we see one
-      val_make(type_to_ll(ty), "0")
+      zero_val(type_to_ll(ty))
   | typed_ast.TRecord _ _ ty _ ->
-      val_make(type_to_ll(ty), "0")
+      zero_val(type_to_ll(ty))
   | typed_ast.TGetField obj _ ty _ ->
       # Record field access not supported in LLVM backend
       do
         _ <- emit_expr(ctx, locals, em, Nothing, obj)
-        val_make(type_to_ll(ty), "0")
+        zero_val(type_to_ll(ty))
 
 fn emit_tuple_expr(items: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   do
@@ -1490,11 +1525,18 @@ fn emit_var(name: String, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Em
                         closure <- emit_make_closure("@" ++ wname, Nil, em)
                         val_with_call_sig(closure, Just(fn_sig_to_call_sig(ext_sig)))
                   | Nothing ->
-                      val_make(type_to_ll(ty), "0")  # unknown — return zero
+                      zero_val(type_to_ll(ty))  # unknown — return zero
 
 fn is_nothing_ctor(name: String) -> Bool =
   name == "Nothing" || (n >= 7 && str_slice(name, n - 7, n) == "Nothing")
   where n = str_len(name)
+
+fn is_entry_fn_name(name: String) -> Bool =
+  name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
+  where n = str_len(name)
+
+fn emitted_fn_name(name: String) -> String =
+  if is_entry_fn_name(name) then "main" else name
 
 fn emit_ctor_closure_wrapper(wrap_name: String, ctor: CtorSig, em: Emitter) -> Unit !{IO} =
   do
@@ -1641,8 +1683,20 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
 fn emit_comparison(op: String, lv: Value, rv: Value, em: Emitter) -> Value !{IO} =
   if val_is_ptr(lv) then
     do
+      rv_ptr <- coerce_value(rv, ll_ptr(), em)
       eq_tmp <- fresh_tmp(em)
-      emit_line(em, "  " ++ eq_tmp ++ " = call i1 @str_eq(ptr " ++ val_ir(lv) ++ ", ptr " ++ val_ir(rv) ++")")
+      emit_line(em, "  " ++ eq_tmp ++ " = call i1 @str_eq(ptr " ++ val_ir(lv) ++ ", ptr " ++ val_ir(rv_ptr) ++")")
+      if op == "==" then val_make(ll_i1(), eq_tmp)
+      else
+        do
+          not_tmp <- fresh_tmp(em)
+          emit_line(em, "  " ++ not_tmp ++ " = xor i1 " ++ eq_tmp ++ ", true")
+          val_make(ll_i1(), not_tmp)
+  else if val_is_ptr(rv) then
+    do
+      lv_ptr <- coerce_value(lv, ll_ptr(), em)
+      eq_tmp <- fresh_tmp(em)
+      emit_line(em, "  " ++ eq_tmp ++ " = call i1 @str_eq(ptr " ++ val_ir(lv_ptr) ++ ", ptr " ++ val_ir(rv) ++")")
       if op == "==" then val_make(ll_i1(), eq_tmp)
       else
         do
@@ -1664,7 +1718,8 @@ fn emit_comparison(op: String, lv: Value, rv: Value, em: Emitter) -> Value !{IO}
 
 fn emit_short_circuit(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   do
-    lv <- emit_expr(ctx, locals, em, Nothing, left)
+    raw_lv <- emit_expr(ctx, locals, em, Nothing, left)
+    lv <- coerce_value(raw_lv, ll_i1(), em)
     left_blk <- read_cur_blk_or(em, "entry")
     rhs_lbl <- fresh_block(em, "logic_rhs")
     done_lbl <- fresh_block(em, "logic_done")
@@ -1674,7 +1729,8 @@ fn emit_short_circuit(op: String, left: typed_ast.TypedExpr, right: typed_ast.Ty
                    else "  br i1 " ++ val_ir(lv) ++ ", label %" ++ done_lbl ++ ", label %" ++ rhs_lbl
     emit_line(em, br_instr)
     emit_label(em, rhs_lbl)
-    rv <- emit_expr(ctx, locals, em, Nothing, right)
+    raw_rv <- emit_expr(ctx, locals, em, Nothing, right)
+    rv <- coerce_value(raw_rv, ll_i1(), em)
     rhs_end <- read_cur_blk_or(em, rhs_lbl)
     emit_line(em, "  br label %" ++ done_lbl)
     emit_label(em, done_lbl)
@@ -1682,56 +1738,61 @@ fn emit_short_circuit(op: String, left: typed_ast.TypedExpr, right: typed_ast.Ty
     emit_line(em, "  " ++ phi ++ " = phi i1 [ " ++ const_on_short ++ ", %" ++ left_blk ++ " ], [ " ++ val_ir(rv) ++ ", %" ++ rhs_end ++ " ]")
     val_make(ll_i1(), phi)
 
-fn emit_if(cond: typed_ast.TypedExpr, thn: typed_ast.TypedExpr, els: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
+fn emit_if(cond: typed_ast.TypedExpr, thn: typed_ast.TypedExpr, els: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   do
-    cv <- emit_expr(ctx, locals, em, Nothing, cond)
+    let out_ll = match tco_ctx with | Nothing -> type_to_ll(ty) | Just tc -> tco_ret_ll(tc)
+    raw_cv <- emit_expr(ctx, locals, em, Nothing, cond)
+    cv <- coerce_value(raw_cv, ll_i1(), em)
     then_lbl <- fresh_block(em, "if_then")
     else_lbl <- fresh_block(em, "if_else")
     done_lbl <- fresh_block(em, "if_done")
     emit_line(em, "  br i1 " ++ val_ir(cv) ++ ", label %" ++ then_lbl ++ ", label %" ++ else_lbl)
     emit_label(em, then_lbl)
     then_val <- emit_expr(ctx, locals, em, tco_ctx, thn)
-    then_blk <- read_cur_blk_or(em, then_lbl)
+    _ <- emit_pending_tco(tco_ctx, then_val, em)
     then_term <- is_terminated(em)
+    then_coerced <- if then_term then then_val else coerce_value(then_val, out_ll, em)
+    then_blk <- read_cur_blk_or(em, then_lbl)
     if then_term == false then emit_line(em, "  br label %" ++ done_lbl) else ()
     emit_label(em, else_lbl)
     else_val <- emit_expr(ctx, locals, em, tco_ctx, els)
-    else_blk <- read_cur_blk_or(em, else_lbl)
+    _ <- emit_pending_tco(tco_ctx, else_val, em)
     else_term <- is_terminated(em)
+    else_coerced <- if else_term then else_val else coerce_value(else_val, out_ll, em)
+    else_blk <- read_cur_blk_or(em, else_lbl)
     if else_term == false then emit_line(em, "  br label %" ++ done_lbl) else ()
     emit_label(em, done_lbl)
     if then_term && else_term then
-      val_make(match tco_ctx with | Nothing -> ll_i64() | Just tc -> tco_ret_ll(tc), "undef")
+      val_for_ll(out_ll, "undef")
     else
       do
         phi <- fresh_tmp(em)
-        let out_ll = val_ll(then_val)
         let parts = if then_term
-                    then "[ " ++ val_ir(else_val) ++ ", %" ++ else_blk ++ " ]"
+                    then "[ " ++ val_ir(else_coerced) ++ ", %" ++ else_blk ++ " ]"
                     else if else_term
-                    then "[ " ++ val_ir(then_val) ++ ", %" ++ then_blk ++ " ]"
-                    else "[ " ++ val_ir(then_val) ++ ", %" ++ then_blk ++ " ], [ " ++ val_ir(else_val) ++ ", %" ++ else_blk ++ " ]"
+                    then "[ " ++ val_ir(then_coerced) ++ ", %" ++ then_blk ++ " ]"
+                    else "[ " ++ val_ir(then_coerced) ++ ", %" ++ then_blk ++ " ], [ " ++ val_ir(else_coerced) ++ ", %" ++ else_blk ++ " ]"
         emit_line(em, "  " ++ phi ++ " = phi " ++ out_ll ++ " " ++ parts)
-        val_make(out_ll, phi)
+        val_for_ll(out_ll, phi)
 
-fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
+fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   do
     sv <- emit_expr(ctx, locals, em, Nothing, scrut)
     done_lbl <- fresh_block(em, "match_done")
-    match_result <- emit_branches(branches, sv, ctx, locals, em, tco_ctx, done_lbl, Nil)
+    let out_ll = match tco_ctx with | Nothing -> type_to_ll(ty) | Just tc -> tco_ret_ll(tc)
+    match_result <- emit_branches(branches, sv, out_ll, ctx, locals, em, tco_ctx, done_lbl, Nil)
     let branch_vals = match_result
     if list_is_nil_branch_vals(branch_vals) then
-      val_make(match tco_ctx with | Nothing -> ll_i64() | Just tc -> tco_ret_ll(tc), "undef")
+      val_for_ll(out_ll, "undef")
     else
       do
         emit_label(em, done_lbl)
         phi <- fresh_tmp(em)
-        let out_ll = match list_head_branch_val(branch_vals) with | Nothing -> ll_i64() | Just (v, _) -> val_ll(v)
         let parts = join_comma(list_map(\p -> match p with | (v, blk) -> "[ " ++ val_ir(v) ++ ", %" ++ blk ++ " ]", branch_vals))
         emit_line(em, "  " ++ phi ++ " = phi " ++ out_ll ++ " " ++ parts)
-        val_make(out_ll, phi)
+        val_for_ll(out_ll, phi)
 
-fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
+fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, out_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
   match branches with
   | Nil ->
       do
@@ -1755,11 +1816,10 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, ctx: C
                          | Nothing -> Nothing
                          | Just tc -> Just(tco_with_outer_roots(tc, tco_outer_roots(tc) + rooted))
         body_val <- emit_expr(ctx, branch_locals, em, branch_tco, body)
-        end_blk <- read_cur_blk_or(em, branch_lbl)
+        _ <- emit_pending_tco(branch_tco, body_val, em)
         branch_term <- is_terminated(em)
         if branch_term then
           do
-            pop_temp_roots(rooted, em)
             if list_is_nil_branches(rest) then
               do
                 emit_label(em, next_lbl)
@@ -1768,13 +1828,15 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, ctx: C
             else
               do
                 emit_label(em, next_lbl)
-                emit_branches(rest, scrut, ctx, locals, em, tco_ctx, done_lbl, acc)
+                emit_branches(rest, scrut, out_ll, ctx, locals, em, tco_ctx, done_lbl, acc)
         else
           do
+            coerced_body <- coerce_value(body_val, out_ll, em)
+            end_blk <- read_cur_blk_or(em, branch_lbl)
             pop_temp_roots(rooted, em)
             emit_line(em, "  br label %" ++ done_lbl)
             emit_label(em, next_lbl)
-            emit_branches(rest, scrut, ctx, locals, em, tco_ctx, done_lbl, Cons((body_val, end_blk), acc))
+            emit_branches(rest, scrut, out_ll, ctx, locals, em, tco_ctx, done_lbl, Cons((coerced_body, end_blk), acc))
 
 fn is_wildcard_or_var(pat: ast.Pattern) -> Bool =
   match pat with
@@ -1809,7 +1871,7 @@ fn emit_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ty: ty
         | Nothing ->
             do
               pop_temp_roots(rooted_callee, em)
-              val_make(type_to_ll(ty), "0")
+              zero_val(type_to_ll(ty))
         | Just sig ->
             do
               (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
@@ -1858,54 +1920,75 @@ fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Valu
           val_make(ll_i64(), "0")
 
 fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
-  match dict_get(name, ctx_ctor_sigs(ctx)) with
-  | Just ctor ->
-      emit_ctor_call_expr(ctor, args, ctx, locals, em)
-  | Nothing ->
-      match dict_get(name, ctx_fn_sigs(ctx)) with
-      | Just sig ->
-          emit_direct_fn_call(name, sig, args, ty, ctx, locals, em, tco_ctx)
-      | Nothing ->
-          match dict_get(name, ctx_extern_sigs(ctx)) with
-          | Just ext_sig ->
-              emit_direct_fn_call(name, ext_sig, args, ty, ctx, locals, em, Nothing)
-          | Nothing ->
-              match dict_get(name, locals) with
-              | Just local_v ->
-                  do
-                    rooted <- push_temp_root(local_v, em)
-                    let sig_opt = match val_call_sig(local_v) with
-                                  | Just s -> Just(s)
-                                  | Nothing -> call_sig_from_type(callee_ty)
-                    match sig_opt with
+  if name == "append" then
+    emit_append_call(args, ty, ctx, locals, em)
+  else
+    match dict_get(name, ctx_ctor_sigs(ctx)) with
+    | Just ctor ->
+        emit_ctor_call_expr(ctor, args, ctx, locals, em)
+    | Nothing ->
+        match dict_get(name, ctx_fn_sigs(ctx)) with
+        | Just sig ->
+            emit_direct_fn_call(name, sig, args, ty, ctx, locals, em, tco_ctx)
+        | Nothing ->
+            match dict_get(name, ctx_extern_sigs(ctx)) with
+            | Just ext_sig ->
+                emit_direct_fn_call(name, ext_sig, args, ty, ctx, locals, em, Nothing)
+            | Nothing ->
+                match dict_get(name, locals) with
+                | Just local_v ->
+                    do
+                      rooted <- push_temp_root(local_v, em)
+                      let sig_opt = match val_call_sig(local_v) with
+                                    | Just s -> Just(s)
+                                    | Nothing -> call_sig_from_type(callee_ty)
+                      match sig_opt with
+                      | Nothing ->
+                          do
+                            pop_temp_roots(rooted, em)
+                            zero_val(type_to_ll(ty))
+                      | Just sig ->
+                          do
+                            (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
+                            result <- emit_closure_call(local_v, sig, arg_vals, em)
+                            pop_temp_roots(rooted_args, em)
+                            pop_temp_roots(rooted, em)
+                            result
+                | Nothing ->
+                    match dict_get(name, ctx_globals(ctx)) with
+                    | Just gi ->
+                        do
+                          tmp <- fresh_tmp(em)
+                          emit_line(em, "  " ++ tmp ++ " = load " ++ gi_ll(gi) ++ ", ptr @" ++ name)
+                          let gv = val_with_call_sig(val_make(gi_ll(gi), tmp), gi_call_sig(gi))
+                          match gi_call_sig(gi) with
+                          | Nothing -> gv
+                          | Just sig ->
+                              do
+                                (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
+                                result <- emit_closure_call(gv, sig, arg_vals, em)
+                                pop_temp_roots(rooted_args, em)
+                                result
                     | Nothing ->
-                        do
-                          pop_temp_roots(rooted, em)
-                          val_make(type_to_ll(ty), "0")
-                    | Just sig ->
-                        do
-                          (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
-                          result <- emit_closure_call(local_v, sig, arg_vals, em)
-                          pop_temp_roots(rooted_args, em)
-                          pop_temp_roots(rooted, em)
-                          result
-              | Nothing ->
-                  match dict_get(name, ctx_globals(ctx)) with
-                  | Just gi ->
-                      do
-                        tmp <- fresh_tmp(em)
-                        emit_line(em, "  " ++ tmp ++ " = load " ++ gi_ll(gi) ++ ", ptr @" ++ name)
-                        let gv = val_with_call_sig(val_make(gi_ll(gi), tmp), gi_call_sig(gi))
-                        match gi_call_sig(gi) with
-                        | Nothing -> gv
-                        | Just sig ->
-                            do
-                              (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
-                              result <- emit_closure_call(gv, sig, arg_vals, em)
-                              pop_temp_roots(rooted_args, em)
-                              result
-                  | Nothing ->
-                      val_make(type_to_ll(ty), "0")
+                        zero_val(type_to_ll(ty))
+
+fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
+  match args with
+  | Cons _ (Cons left (Cons right _)) ->
+      if is_string_type(typed_ast.typed_expr_type(left)) then
+        do
+          lv <- emit_expr(ctx, locals, em, Nothing, left)
+          rv <- emit_expr(ctx, locals, em, Nothing, right)
+          lp <- coerce_value(lv, ll_ptr(), em)
+          rp <- coerce_value(rv, ll_ptr(), em)
+          tmp <- fresh_tmp(em)
+          emit_line(em, "  " ++ tmp ++ " = call ptr @str_concat(ptr " ++ val_ir(lp) ++ ", ptr " ++ val_ir(rp) ++")")
+          val_make(ll_ptr(), tmp)
+      else if is_list_type(typed_ast.typed_expr_type(left)) then
+        emit_regular_direct_call("list_append", FnSig("list_append", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing), Cons(left, Cons(right, Nil)), type_to_ll(ty), ctx, locals, em)
+      else
+        zero_val(type_to_ll(ty))
+  | _ -> zero_val(type_to_ll(ty))
 
 fn emit_ctor_call_expr(ctor: CtorSig, args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   if n_arity == 0 then
@@ -2022,24 +2105,26 @@ fn emit_direct_fn_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr,
             pop_temp_roots(rooted_args, em)
             val_with_tco_args(val_make(tco_ret_ll(tc), "undef"), Just(coerced_args))
         else
-          emit_regular_direct_call(name, sig, args, ctx, locals, em)
+          emit_regular_direct_call(name, sig, args, type_to_ll(ty), ctx, locals, em)
     | Nothing ->
-        emit_regular_direct_call(name, sig, args, ctx, locals, em)
+        emit_regular_direct_call(name, sig, args, type_to_ll(ty), ctx, locals, em)
   where n_args = list_length_exprs(args)
         n_params = fn_arity(sig)
 
-fn emit_regular_direct_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
+fn emit_regular_direct_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr, target_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   do
     (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
     coerced <- coerce_args(fn_params(sig), arg_vals, em)
     let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> ll ++ " " ++ ir, coerced))
     tmp <- fresh_tmp(em)
+    let call_name = emitted_fn_name(name)
     let call_str = if args_ir == ""
-                   then "  " ++ tmp ++ " = call " ++ fn_ret(sig) ++ " @" ++ name ++ "()"
-                   else "  " ++ tmp ++ " = call " ++ fn_ret(sig) ++ " @" ++ name ++ "("++ args_ir ++")"
+                   then "  " ++ tmp ++ " = call " ++ fn_ret(sig) ++ " @" ++ call_name ++ "()"
+                   else "  " ++ tmp ++ " = call " ++ fn_ret(sig) ++ " @" ++ call_name ++ "("++ args_ir ++")"
     emit_line(em, call_str)
     pop_temp_roots(rooted_args, em)
-    val_with_call_sig(val_make(fn_ret(sig), tmp), fn_ret_sig(sig))
+    result <- coerce_value(val_with_call_sig(val_for_ll(fn_ret(sig), tmp), fn_ret_sig(sig)), target_ll, em)
+    val_with_call_sig(result, fn_ret_sig(sig))
 
 fn emit_args_with_roots(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> (List Value, Int) !{IO} =
   match args with
@@ -2131,7 +2216,7 @@ fn list_length_exprs(xs: List typed_ast.TypedExpr) -> Int =
 
 fn emit_do(steps: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   match steps with
-  | Nil -> val_make(type_to_ll(result_ty), "0")
+  | Nil -> zero_val(type_to_ll(result_ty))
   | Cons step rest ->
       match step with
       | typed_ast.TDoLetStep name e ->
@@ -2157,8 +2242,11 @@ fn emit_do(steps: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx,
               do
                 # IO bind: just evaluate and bind
                 (new_binds, rooted) <- emit_pattern_bind(pat, v, ctx, em)
-                result <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, tco_ctx)
-                pop_temp_roots(rooted, em)
+                let bind_tco = tco_with_extra_roots(tco_ctx, rooted)
+                result <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, bind_tco)
+                _ <- emit_pending_tco(bind_tco, result, em)
+                result_term <- is_terminated(em)
+                if result_term == false then pop_temp_roots(rooted, em) else ()
                 result
 
 fn emit_do_maybe_bind(pat: ast.Pattern, v: Value, maybe_ty: types.Type, rest: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
@@ -2185,16 +2273,26 @@ fn emit_do_maybe_bind(pat: ast.Pattern, v: Value, maybe_ty: types.Type, rest: Li
                    | _ -> ll_i64()
     payload <- emit_ctor_field(val_ir(v), 0, inner_ll, em)
     (new_binds, rooted) <- emit_pattern_bind(pat, payload, ctx, em)
-    cont_v <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, tco_ctx)
-    pop_temp_roots(rooted, em)
+    let bind_tco = tco_with_extra_roots(tco_ctx, rooted)
+    cont_v <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, bind_tco)
+    _ <- emit_pending_tco(bind_tco, cont_v, em)
+    cont_term <- is_terminated(em)
     just_end <- read_cur_blk_or(em, just_lbl)
-    emit_line(em, "  br label %" ++ done_lbl)
+    if cont_term == false then
+      do
+        pop_temp_roots(rooted, em)
+        emit_line(em, "  br label %" ++ done_lbl)
+    else ()
     # Merge
     emit_label(em, done_lbl)
-    phi <- fresh_tmp(em)
-    let out_ll = val_ll(cont_v)
-    emit_line(em, "  " ++ phi ++ " = phi " ++ out_ll ++ " [ " ++ val_ir(nothing_v) ++ ", %" ++ nothing_lbl ++ " ], [ " ++ val_ir(cont_v) ++ ", %" ++ just_end ++ " ]")
-    val_make(out_ll, phi)
+    if cont_term then
+      nothing_v
+    else
+      do
+        phi <- fresh_tmp(em)
+        let out_ll = val_ll(cont_v)
+        emit_line(em, "  " ++ phi ++ " = phi " ++ out_ll ++ " [ " ++ val_ir(nothing_v) ++ ", %" ++ nothing_lbl ++ " ], [ " ++ val_ir(cont_v) ++ ", %" ++ just_end ++ " ]")
+        val_make(out_ll, phi)
 
 fn emit_do_result_bind(pat: ast.Pattern, v: Value, result_ty_: types.Type, rest: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   do
@@ -2220,16 +2318,26 @@ fn emit_do_result_bind(pat: ast.Pattern, v: Value, result_ty_: types.Type, rest:
                    | _ -> ll_i64()
     ok_payload <- emit_ctor_field(val_ir(v), 0, inner_ll, em)
     (new_binds, rooted) <- emit_pattern_bind(pat, ok_payload, ctx, em)
-    cont_v <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, tco_ctx)
-    pop_temp_roots(rooted, em)
+    let bind_tco = tco_with_extra_roots(tco_ctx, rooted)
+    cont_v <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, bind_tco)
+    _ <- emit_pending_tco(bind_tco, cont_v, em)
+    cont_term <- is_terminated(em)
     ok_end <- read_cur_blk_or(em, ok_lbl)
-    emit_line(em, "  br label %" ++ done_lbl)
+    if cont_term == false then
+      do
+        pop_temp_roots(rooted, em)
+        emit_line(em, "  br label %" ++ done_lbl)
+    else ()
     # Merge
     emit_label(em, done_lbl)
-    phi <- fresh_tmp(em)
-    let out_ll = val_ll(cont_v)
-    emit_line(em, "  " ++ phi ++ " = phi " ++ out_ll ++ " [ " ++ err_v ++ ", %" ++ err_lbl ++ " ], [ " ++ val_ir(cont_v) ++ ", %" ++ ok_end ++ " ]")
-    val_make(out_ll, phi)
+    if cont_term then
+      val_make(ll_i64(), err_v)
+    else
+      do
+        phi <- fresh_tmp(em)
+        let out_ll = val_ll(cont_v)
+        emit_line(em, "  " ++ phi ++ " = phi " ++ out_ll ++ " [ " ++ err_v ++ ", %" ++ err_lbl ++ " ], [ " ++ val_ir(cont_v) ++ ", %" ++ ok_end ++ " ]")
+        val_make(out_ll, phi)
 
 fn find_nothing_tag(ctor_sigs_: Dict CtorSig) -> Int =
   match dict_get("Nothing", ctor_sigs_) with
@@ -2265,7 +2373,7 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
       let params_str = if is_entry
                        then "i32 %argc, ptr %argv"
                        else build_fn_params(fn_params(sig), params, 0)
-      let emit_name = if is_entry then "main" else name
+      let emit_name = emitted_fn_name(name)
       emit_line(em, "define " ++ fn_ret(sig) ++ " @" ++ emit_name ++ "("++ params_str ++ ") {")
       emit_label(em, "entry")
       rooted <- if is_entry then
@@ -2287,11 +2395,12 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
           pair <- build_param_locals(params, fn_params(sig), 0)
           pair
       result <- emit_expr(ctx, param_locals, em, Nothing, body)
+      coerced_result <- if is_entry then result else coerce_value(result, fn_ret(sig), em)
       pop_temp_roots(rooted, em)
       if is_entry then
         emit_line(em, "  ret i64 0")
       else
-        emit_line(em, "  ret " ++ fn_ret(sig) ++ " " ++ val_ir(result))
+        emit_line(em, "  ret " ++ fn_ret(sig) ++ " " ++ val_ir(coerced_result))
       emit_line(em, "}")
 
 fn build_fn_params(lls: List String, params: List ast.Param, idx: Int) -> String =
@@ -2314,7 +2423,7 @@ fn build_param_locals_acc(params: List ast.Param, lls: List String, idx: Int, ac
       match lls with
       | Nil -> acc
       | Cons ll rest_lls ->
-          build_param_locals_acc(rest_params, rest_lls, idx + 1, dict_set(name, val_make(ll, "%" ++ name), acc))
+          build_param_locals_acc(rest_params, rest_lls, idx + 1, dict_set(name, val_for_ll(ll, "%" ++ name), acc))
 
 fn push_roots_for_params(locals: Dict Value, em: Emitter) -> Int !{IO} =
   push_roots_for_pairs(dict_keys(locals), locals, em, 0)
@@ -2383,8 +2492,9 @@ fn emit_fn_tco(name: String, params: List ast.Param, body: typed_ast.TypedExpr, 
           is_term <- is_terminated(em)
           if is_term == false then
             do
+              coerced_result <- coerce_value(result, fn_ret(sig), em)
               pop_temp_roots(n_roots, em)
-              emit_line(em, "  ret " ++ fn_ret(sig) ++ " " ++ val_ir(result))
+              emit_line(em, "  ret " ++ fn_ret(sig) ++ " " ++ val_ir(coerced_result))
           else ()
     emit_line(em, "}")
 
@@ -2428,7 +2538,7 @@ fn load_tco_params_acc(params: List ast.Param, slots: List (String, String), em:
           do
             tmp <- fresh_tmp(em)
             emit_line(em, "  " ++ tmp ++ " = load " ++ ll ++ ", ptr " ++ slot)
-            load_tco_params_acc(rest_params, rest_slots, em, dict_set(name, val_make(ll, tmp), acc))
+            load_tco_params_acc(rest_params, rest_slots, em, dict_set(name, val_for_ll(ll, tmp), acc))
 
 # ===========================================================================
 # Section 19 — Global init emission
@@ -2502,6 +2612,11 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("str_find", FnSig("str_find", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
   , ("str_starts_with", FnSig("str_starts_with", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
   , ("str_compare", FnSig("str_compare", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  , ("str_split_lines", FnSig("str_split_lines", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("str_char_at_byte", FnSig("str_char_at_byte", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
+  , ("str_char_width_at_byte", FnSig("str_char_width_at_byte", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
+  , ("str_byte_len", FnSig("str_byte_len", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("str_starts_with_at_byte", FnSig("str_starts_with_at_byte", Cons(ll_ptr(), Cons(ll_i64(), Cons(ll_ptr(), Nil))), ll_i1(), Nothing))
   , ("vector_empty", FnSig("vector_empty", Nil, ll_i64(), Nothing))
   , ("vector_length", FnSig("vector_length", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("vector_get", FnSig("vector_get", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
@@ -2535,6 +2650,13 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("sprout_make0", FnSig("sprout_make0", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_make1", FnSig("sprout_make1", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_make2", FnSig("sprout_make2", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
+  , ("sprout_make3", FnSig("sprout_make3", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil)))), ll_i64(), Nothing))
+  , ("sprout_make4", FnSig("sprout_make4", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))))), ll_i64(), Nothing))
+  , ("sprout_make5", FnSig("sprout_make5", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil)))))), ll_i64(), Nothing))
+  , ("sprout_make6", FnSig("sprout_make6", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))))))), ll_i64(), Nothing))
+  , ("sprout_make7", FnSig("sprout_make7", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil)))))))), ll_i64(), Nothing))
+  , ("sprout_make8", FnSig("sprout_make8", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))))))))), ll_i64(), Nothing))
+  , ("sprout_make9", FnSig("sprout_make9", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil)))))))))), ll_i64(), Nothing))
   , ("sprout_nothing", FnSig("sprout_nothing", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_tag", FnSig("sprout_tag", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_field", FnSig("sprout_field", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
@@ -2700,7 +2822,7 @@ fn register_fn_wrappers(decls: List typed_ast.TypedDecl, fn_sigs_: Dict FnSig, e
                     lam_idx <- fresh_lambda_idx(em)
                     let wname = "__sprout_fn_closure_" ++ int_to_string(lam_idx)
                     set_fn_wrapper(em, name, wname)
-                    let wrapper_lines = emit_named_fn_wrapper_lines(wname, name, sig)
+                    let wrapper_lines = emit_named_fn_wrapper_lines(wname, emitted_fn_name(name), sig)
                     emit_defs_list(wrapper_lines, em)
                     add_def_line(em, "")
         | _ -> ()
@@ -2718,7 +2840,7 @@ fn emit_all_fns(decls: List typed_ast.TypedDecl, fn_sigs_: Dict FnSig, ctor_reg_
             | Nothing -> ()
             | Just sig ->
                 do
-                  let is_entry = name == "main"
+                  let is_entry = is_entry_fn_name(name)
                   emit_fn_decl(name, params, body, sig, is_entry, ctor_reg_meta, runtime_lets, ctx, em)
                   emit_line(em, "")
         | _ -> ()
