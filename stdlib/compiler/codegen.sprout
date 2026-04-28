@@ -168,11 +168,18 @@ fn type_to_ll(t: types.Type) -> String =
   | types.TTuple items -> tuple_ll(list_map(\i -> type_to_ll(i), items))
 
 fn const_to_ll(name: String) -> String =
-  if name == "Int" then ll_i64()
-  else if name == "Bool" then ll_i1()
-  else if name == "String" then ll_ptr()
-  else if name == "Char" then ll_ptr()
+  if type_name_leaf_is(name, "Int") then ll_i64()
+  else if type_name_leaf_is(name, "Bool") then ll_i1()
+  else if type_name_leaf_is(name, "String") then ll_ptr()
+  else if type_name_leaf_is(name, "Char") then ll_ptr()
   else ll_i64()  # Unit, Set, Bytes, Builder, IntRange, ADT names, …
+
+fn type_name_leaf_is(name: String, leaf: String) -> Bool =
+  name == leaf || string_ends_with(name, "." ++ leaf)
+
+fn string_ends_with(raw: String, suffix: String) -> Bool =
+  str_len(raw) >= str_len(suffix) &&
+  str_slice(raw, str_len(raw) - str_len(suffix), str_len(raw)) == suffix
 
 # Peel all TFunc layers to get the flat (params, ret) pair.
 fn call_sig_from_type(t: types.Type) -> Maybe CallSig =
@@ -2569,7 +2576,20 @@ fn register_ctors(ctors: List ast.TypeConstructor, next_tag: Int, sigs: Dict Cto
   match ctors with
   | Nil -> (sigs, set_insert(type_name, adts), next_tag)
   | Cons (ast.TypeConstructor ctor_name ctor_args) rest ->
-      register_ctors(rest, next_tag + 1, dict_set(ctor_name, CtorSig(ctor_name, next_tag, list_map(\_ -> ll_i64(), ctor_args)), sigs), adts, type_name)
+      register_ctors(rest, next_tag + 1, dict_set(ctor_name, CtorSig(ctor_name, next_tag, type_expr_lls(ctor_args)), sigs), adts, type_name)
+
+fn type_expr_lls(args: List ast.TypeExpr) -> List String =
+  match args with
+  | Nil -> Nil
+  | Cons arg rest -> Cons(type_expr_to_ll(arg), type_expr_lls(rest))
+
+fn type_expr_to_ll(t: ast.TypeExpr) -> String =
+  match t with
+  | ast.TypeName name -> const_to_ll(name)
+  | ast.TypeApply _ _ -> ll_i64()
+  | ast.TypeArrow _ _ _ -> ll_ptr()
+  | ast.TypeEffect inner _ -> type_expr_to_ll(inner)
+  | ast.TupleType items -> tuple_ll(type_expr_lls(items))
 
 # Build FnSig for every TFnDecl using the env dict for type information.
 fn build_fn_sigs_from_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Dict FnSig =
