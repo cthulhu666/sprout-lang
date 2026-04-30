@@ -100,7 +100,8 @@ fn run_batch(stdlib_root: String, idx: Int, emit_ir: Bool) -> Unit !{IO} =
   | Nothing -> ()
   | Just path ->
       do
-        print("=== " ++ path ++ " ===")
+        if emit_ir then ()
+        else print("=== " ++ path ++ " ===")
         if emit_ir then run_file_ir(path, stdlib_root)
         else run_file(path, stdlib_root)
         run_batch(stdlib_root, idx + 1, emit_ir)

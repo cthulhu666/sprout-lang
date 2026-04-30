@@ -1,16 +1,24 @@
 """
-Bootstrap stage-1 parity test: native compile_driver_bin vs Python-hosted output.
+Bootstrap stage-1/stage-2 parity tests.
 
-Verifies that the native binary produced by `sprout compile compile_driver.sprout`
-(stage-0) produces identical type-checker output to the Python-hosted interpreter
-running the same driver on the same corpus files.
+Stage-1 (BootstrapStage1Tests, M5):
+  Verifies that compile_driver_bin (stage-0, Python-compiled) produces the same
+  type-checker output as the Python-hosted interpreter on the bootstrap corpus.
+  Invariant: Python pipeline → native binary → same typecheck output as Python driver.
 
-The comparison establishes M5's reproducibility invariant:
-  Python pipeline (stage-0) → native binary → same typecheck output as Python driver
+Stage-2 (BootstrapStage2Tests, M6):
+  Verifies that compile_driver_bin_stage1 (produced from Sprout-native --emit-ir
+  codegen, without Python involvement in the compile step) produces the same output
+  as the Python-hosted driver.  Establishes that the Sprout-native LLVM IR emitter
+  (codegen.sprout) is correct end-to-end.
+
+  Build compile_driver_bin_stage1 with:
+    just build-stage1
 
 Notes:
-  - The binary must exist at ROOT/compile_driver_bin (built by `sprout compile --native`).
-  - Tests are skipped if compile_driver_bin is absent.
+  - compile_driver_bin must exist at ROOT/compile_driver_bin.
+  - compile_driver_bin_stage1 must exist at ROOT/compile_driver_bin_stage1.
+  - Tests are skipped if the required binary is absent.
 """
 from __future__ import annotations
 
@@ -26,6 +34,7 @@ CORPUS_DIR = ROOT / "tests" / "conformance" / "run"
 IMPORT_CORPUS_DIR = ROOT / "tests" / "conformance" / "parity_import"
 COMPILE_DRIVER = ROOT / "stdlib" / "compiler" / "compile_driver.sprout"
 NATIVE_BINARY = ROOT / "compile_driver_bin"
+STAGE1_BINARY = ROOT / "compile_driver_bin_stage1"
 
 # Corpus shared with test_checker_parity — same files, same expectations.
 CORPUS = [
@@ -61,11 +70,12 @@ def _parse_batch_output(stdout: str) -> dict[str, list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Caches — both drivers run once for all files
+# Caches — each driver runs once for all files
 # ---------------------------------------------------------------------------
 
 _PYTHON_CACHE: dict[str, list[str]] | None = None
 _NATIVE_CACHE: dict[str, list[str]] | None = None
+_STAGE2_CACHE: dict[str, list[str]] | None = None
 
 
 def _all_paths() -> list[Path]:
@@ -182,6 +192,91 @@ for _corpus_file in IMPORT_CORPUS:
     _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
     setattr(BootstrapStage1Tests, _test_name,
             _make_test(_corpus_file, corpus_dir=IMPORT_CORPUS_DIR))
+
+
+def _ensure_stage2_cache() -> dict[str, list[str]] | None:
+    """Return None if compile_driver_bin_stage1 doesn't exist (tests will be skipped)."""
+    global _STAGE2_CACHE
+    if _STAGE2_CACHE is not None:
+        return _STAGE2_CACHE
+    if not STAGE1_BINARY.exists():
+        return None
+    stdlib_root = str(ROOT / "stdlib")
+    paths = [str(p) for p in _all_paths() if p.exists()]
+    env = os.environ.copy()
+    result = subprocess.run(
+        [str(STAGE1_BINARY), stdlib_root, *paths],
+        capture_output=True, text=True, cwd=str(ROOT), env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"compile_driver_bin_stage1 failed:\n{result.stderr}\n{result.stdout}"
+        )
+    raw = _parse_batch_output(result.stdout)
+    _STAGE2_CACHE = {
+        k: (v[1:] if v and v[0] == "OK" else v) for k, v in raw.items()
+    }
+    return _STAGE2_CACHE
+
+
+# ---------------------------------------------------------------------------
+# Stage-2 test class (M6): stage1 binary vs Python reference
+# ---------------------------------------------------------------------------
+
+class BootstrapStage2Tests(unittest.TestCase):
+    pass
+
+
+def _make_stage2_test(corpus_file: str, corpus_dir: Path = CORPUS_DIR):
+    def test(self: unittest.TestCase) -> None:
+        if not STAGE1_BINARY.exists():
+            self.skipTest(
+                f"compile_driver_bin_stage1 not found at {STAGE1_BINARY}; "
+                "build with: just build-stage1"
+            )
+
+        path = corpus_dir / corpus_file
+        if not path.exists():
+            self.skipTest(f"Corpus file not found: {path}")
+
+        try:
+            py_cache = _ensure_python_cache()
+            stage2_cache = _ensure_stage2_cache()
+        except RuntimeError as e:
+            self.fail(str(e))
+
+        if stage2_cache is None:
+            self.skipTest("compile_driver_bin_stage1 not found")
+
+        key = str(path)
+        py_lines = py_cache.get(key, [])
+        stage2_lines = stage2_cache.get(key, [])
+
+        if py_lines != stage2_lines:
+            diff_lines = []
+            for i, (p, s) in enumerate(zip(py_lines, stage2_lines)):
+                if p != s:
+                    diff_lines.append(f"  line {i+1}: python={p!r} stage2={s!r}")
+            if len(py_lines) != len(stage2_lines):
+                diff_lines.append(
+                    f"  length: python={len(py_lines)} stage2={len(stage2_lines)}"
+                )
+            self.fail(
+                f"{corpus_file}: stage2 output differs from Python output:\n"
+                + textwrap.indent("\n".join(diff_lines or ["(no detailed diff)"]), "  ")
+            )
+
+    return test
+
+
+for _corpus_file in CORPUS:
+    _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
+    setattr(BootstrapStage2Tests, _test_name, _make_stage2_test(_corpus_file))
+
+for _corpus_file in IMPORT_CORPUS:
+    _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
+    setattr(BootstrapStage2Tests, _test_name,
+            _make_stage2_test(_corpus_file, corpus_dir=IMPORT_CORPUS_DIR))
 
 
 if __name__ == "__main__":

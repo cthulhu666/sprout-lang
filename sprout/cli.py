@@ -235,6 +235,7 @@ def cmd_compile(
     out: Path,
     with_stdlib: bool = False,
     native: bool = False,
+    emit_runtime_c: "Path | None" = None,
 ) -> int:
     bundle = load_module_bundle(path)
     source = bundle.source
@@ -257,17 +258,19 @@ def cmd_compile(
     _validate_executable_entrypoint(lowered, typed, entry_main_name)
     llvm_ir = compile_to_llvm(lowered, entry_main_name=entry_main_name)
 
-    if not native:
+    if not native and emit_runtime_c is None:
         out.write_text(llvm_ir, encoding="utf-8")
         return 0
 
     clang = shutil.which("clang")
-    if clang is None:
+    if clang is None and emit_runtime_c is None:
         raise CodegenError("clang not found; install clang or compile with --emit-llvm only")
 
-    with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False, encoding="utf-8") as tmp:
-        tmp.write(llvm_ir)
-        ll_path = Path(tmp.name)
+    ll_path: Path | None = None
+    if emit_runtime_c is None:
+        with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False, encoding="utf-8") as tmp:
+            tmp.write(llvm_ir)
+            ll_path = Path(tmp.name)
     embedded_analysis_service_cmd = default_analysis_service_cmd()
     runtime_c = """#include <stdio.h>
 #include <stdlib.h>
@@ -5314,6 +5317,9 @@ long long tcp_echo_serve(long long port, long long max_connections) {
 ).replace(
     "__SPROUT_ANALYSIS_OP_COMPLETE_IN_STATE__", OP_COMPLETE_IN_STATE
 )
+    if emit_runtime_c is not None:
+        emit_runtime_c.write_text(runtime_c, encoding="utf-8")
+        return 0
     with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
         tmp_c.write(runtime_c)
         c_path = Path(tmp_c.name)
@@ -5357,6 +5363,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--native",
         action="store_true",
         help="emit native binary with clang (default writes LLVM .ll text)",
+    )
+    p_compile.add_argument(
+        "--emit-runtime-c",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        dest="emit_runtime_c",
+        help="write the Sprout C runtime to FILE and exit (for linking pre-generated LLVM IR)",
     )
     p_bootstrap_parse = sub.add_parser("bootstrap-parse", help="parse a Sprout file using the bootstrap (self-hosted) parser")
     p_bootstrap_parse.add_argument("file", type=Path)
@@ -5402,6 +5416,7 @@ def main(argv: list[str] | None = None) -> int:
                 out=args.output,
                 with_stdlib=args.with_stdlib,
                 native=args.native,
+                emit_runtime_c=args.emit_runtime_c,
             )
         if args.command == "bootstrap-parse":
             return cmd_bootstrap_parse(args.file)

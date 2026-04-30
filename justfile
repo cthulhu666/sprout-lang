@@ -63,6 +63,28 @@ compile file out:
 compile-native file out:
   python3 -m sprout.cli compile {{file}} --native -o {{out}}
 
+# Build compile_driver_bin_stage1 using Sprout-native IR emission (M6 bootstrap).
+# Requires compile_driver_bin (stage-0) to already exist.
+# Output: compile_driver_bin_stage1 — a native binary produced without Python codegen.
+build-stage1:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/compile_driver.sprout"
+  STAGE1="compile_driver_bin_stage1"
+  TMP_LL="/tmp/sprout_stage1_$$.ll"
+  TMP_C="/tmp/sprout_runtime_$$.c"
+  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  echo "==> Emitting LLVM IR via Sprout-native codegen..."
+  ./compile_driver_bin --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Extracting C runtime..."
+  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
+  echo "==> Linking with clang..."
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o "$STAGE1"
+  echo "==> Built $STAGE1"
+
 compile-examples:
   for file in examples/*.sprout; do \
     flags=""; \
