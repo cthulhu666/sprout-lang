@@ -266,9 +266,16 @@ Definition of done:
 - [~] Add end-to-end self-hosted compile tests for representative programs.
   Manual stage-2 verification now works: stage-0 `compile_driver_bin --emit-ir`
   can emit LLVM IR for `compile_driver.sprout`; compiling that IR with `clang`
-  produces a stage-1 native compiler that passes the bootstrap corpus. Remaining
-  work is to automate this in the bootstrap test suite and make artifact
-  production policy explicit.
+  produces a stage-1 native compiler that passes the bootstrap corpus.
+  Stage-3 (fixed-point) work is in progress under BACKLOG M7: the codegen
+  blockers are resolved (TDoLetStep GC-rooting + emit_fn_tco
+  stacksave/stackrestore, both in `stdlib/compiler/codegen.sprout`), and
+  static IR/assembly verification confirms the fixes survive LLVM-O2.
+  The end-to-end dynamic run (`compile_driver_bin_stage1` self-compiling
+  `compile_driver.sprout`) is blocked on a stage-1 memory profile that runs
+  ~15× higher than stage-0's, which still needs investigation. Remaining
+  work is to land that profile fix, automate stage-2/stage-3 in the
+  bootstrap test suite, and make artifact production policy explicit.
 - [ ] Make the Sprout-owned compiler pipeline the default build path.
 
 Definition of done:
@@ -327,7 +334,12 @@ These tracks run across multiple phases and should be maintained explicitly.
   differences explicitly.
 - [~] Add bootstrap-stage verification to CI once the first self-hosted stages
   exist. Stage-1 bootstrap parity exists through `test_bootstrap_stage1.py`;
-  stage-2 native-binary parity has been verified manually but is not automated.
+  stage-2 native-binary parity is exercised by `BootstrapStage2Tests` (added
+  during M6) which builds `compile_driver_bin_stage1` from Sprout-native
+  `--emit-ir` output via the `just build-stage1` recipe. Stage-3
+  (fixed-point: stage-1 self-compiles to stage-2) is in progress under
+  BACKLOG M7; codegen-side blockers are resolved but the end-to-end run is
+  pending a memory-profile investigation.
 
 ### C. Documentation and Architecture Hygiene
 

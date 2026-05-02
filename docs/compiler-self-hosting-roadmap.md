@@ -259,11 +259,28 @@ produce a stage-1 native `compile_driver` binary by running the stage-0
 This is still not the default build path and does not yet have an automated
 stage-2 test gate.
 
-Recent blocker fixed: ADT constructor signatures in the Sprout LLVM emitter now
-preserve primitive field LLVM types. This keeps `TConst String` payloads as
-`ptr` during constructor pattern binding, so type-name equality in the
-self-hosted unifier lowers to content equality instead of packed pointer
+Recent blocker fixed (M6): ADT constructor signatures in the Sprout LLVM
+emitter now preserve primitive field LLVM types. This keeps `TConst String`
+payloads as `ptr` during constructor pattern binding, so type-name equality in
+the self-hosted unifier lowers to content equality instead of packed pointer
 identity. That fixed the stage-2 `Int vs Int` / `Maybe vs Maybe` mismatch.
+
+Stage-3 (fixed point) blockers fixed (M7, in progress): two codegen issues
+that prevented stage-1 from self-compiling `compile_driver.sprout`. First,
+`emit_do`'s `TDoLetStep` did not push a temp GC root for the bound value, so
+allocating sub-expressions later in a do-block could free a still-live let
+binding (the `compile_to_ir_lines` do-block has nine consecutive lets, several
+of which were unrooted at GC-triggering call sites). Second, `emit_fn_tco`
+did not emit `llvm.stacksave` / `llvm.stackrestore` around its TCO loop, so
+dynamic GC-root allocas in the loop body accumulated forever — long qualified
+names blew the 8 MiB thread stack inside `read_dotted_ident_chars`. Both
+fixes mirror what the Python codegen already did and are now in
+`stdlib/compiler/codegen.sprout`. Static verification (IR + AArch64 assembly
+inspection on the rebuilt stage-1 binary) confirms the LLVM-O2 backend
+preserves the stackrestore on TCO functions whose loop bodies have escaping
+GC-root allocas. The end-to-end dynamic run (stage-1 producing stage-2 IR
+in-memory) still needs a memory-profile pass before it can complete on
+typical developer hardware.
 
 This is the first stage that should reasonably be called “Sprout compiler
 implemented in Sprout” in the stronger sense.
