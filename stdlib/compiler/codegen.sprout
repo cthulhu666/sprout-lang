@@ -76,8 +76,9 @@ export type GlobalInfo (..) =
 # slots     — (alloca_ir, lltype) for each parameter
 # ret_ll    — return lltype of the function
 # outer_roots — cumulative GC roots registered in enclosing pattern branches
+# sp_save   — IR register from llvm.stacksave(); restored at each back-edge
 export type TcoCtx (..) =
-  | TcoCtx String String (List (String, String)) String Int
+  | TcoCtx String String (List (String, String)) String Int String
 
 # ---------------------------------------------------------------------------
 # Emitter state  (9 fields → fits sprout_make9)
@@ -320,22 +321,25 @@ fn gi_call_sig(g: GlobalInfo) -> Maybe CallSig =
 
 # TcoCtx accessors
 fn tco_fn_name(t: TcoCtx) -> String =
-  match t with | TcoCtx n _ _ _ _ -> n
+  match t with | TcoCtx n _ _ _ _ _ -> n
 
 fn tco_loop_lbl(t: TcoCtx) -> String =
-  match t with | TcoCtx _ l _ _ _ -> l
+  match t with | TcoCtx _ l _ _ _ _ -> l
 
 fn tco_slots(t: TcoCtx) -> List (String, String) =
-  match t with | TcoCtx _ _ s _ _ -> s
+  match t with | TcoCtx _ _ s _ _ _ -> s
 
 fn tco_ret_ll(t: TcoCtx) -> String =
-  match t with | TcoCtx _ _ _ r _ -> r
+  match t with | TcoCtx _ _ _ r _ _ -> r
 
 fn tco_outer_roots(t: TcoCtx) -> Int =
-  match t with | TcoCtx _ _ _ _ or -> or
+  match t with | TcoCtx _ _ _ _ or _ -> or
+
+fn tco_sp_save(t: TcoCtx) -> String =
+  match t with | TcoCtx _ _ _ _ _ sp -> sp
 
 fn tco_with_outer_roots(t: TcoCtx, n: Int) -> TcoCtx =
-  match t with | TcoCtx fnm lp sl rt _ -> TcoCtx(fnm, lp, sl, rt, n)
+  match t with | TcoCtx fnm lp sl rt _ sp -> TcoCtx(fnm, lp, sl, rt, n, sp)
 
 # ===========================================================================
 # Section 4 — EmitterState helpers
@@ -1360,6 +1364,10 @@ fn emit_tco_back_edge(tco: TcoCtx, new_args: List Value, extra_roots: Int, em: E
   do
     pop_temp_roots(extra_roots + tco_outer_roots(tco), em)
     store_tco_args(tco_slots(tco), new_args, em)
+    let sp = tco_sp_save(tco)
+    if str_len(sp) > 0 then
+      emit_line(em, "  call void @llvm.stackrestore(ptr " ++ sp ++ ")")
+    else ()
     emit_line(em, "  br label %" ++ tco_loop_lbl(tco))
 
 fn emit_pending_tco(tco_ctx: Maybe TcoCtx, v: Value, em: Emitter) -> Bool !{IO} =
@@ -2222,7 +2230,13 @@ fn emit_do(steps: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx,
       | typed_ast.TDoLetStep name e ->
           do
             v <- emit_expr(ctx, locals, em, Nothing, e)
-            emit_do(rest, result_ty, ctx, dict_set(name, v, locals), em, tco_ctx)
+            rooted <- push_temp_root(v, em)
+            let step_tco = tco_with_extra_roots(tco_ctx, rooted)
+            result <- emit_do(rest, result_ty, ctx, dict_set(name, v, locals), em, step_tco)
+            _ <- emit_pending_tco(step_tco, result, em)
+            result_term <- is_terminated(em)
+            if result_term == false then pop_temp_roots(rooted, em) else ()
+            result
       | typed_ast.TDoExprStep e ->
           match rest with
           | Nil -> emit_expr(ctx, locals, em, tco_ctx, e)
@@ -2476,16 +2490,19 @@ fn emit_fn_tco(name: String, params: List ast.Param, body: typed_ast.TypedExpr, 
     emit_label(em, "entry")
     loop_lbl <- fresh_block(em, "tco_loop")
     (slots, n_roots) <- allocate_tco_slots(params, fn_params(sig), loop_lbl, em)
+    sp_save <- fresh_tmp(em)
+    emit_line(em, "  " ++ sp_save ++ " = call ptr @llvm.stacksave()")
     emit_line(em, "  br label %" ++ loop_lbl)
     emit_label(em, loop_lbl)
     tco_locals <- load_tco_params(params, slots, em)
-    let tco = TcoCtx(name, loop_lbl, slots, fn_ret(sig), 0)
+    let tco = TcoCtx(name, loop_lbl, slots, fn_ret(sig), 0, sp_save)
     result <- emit_expr(ctx, tco_locals, em, Just(tco), body)
     match val_tco_args(result) with
     | Just new_args ->
         do
           pop_temp_roots(n_roots, em)
           store_tco_args(slots, new_args, em)
+          emit_line(em, "  call void @llvm.stackrestore(ptr " ++ sp_save ++ ")")
           emit_line(em, "  br label %" ++ loop_lbl)
     | Nothing ->
         do
