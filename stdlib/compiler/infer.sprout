@@ -50,10 +50,19 @@ fn strip_module_prefix(name: String) -> String =
   else strip_module_prefix(str_slice(name, dot + 1, str_len(name)))
   where dot = str_find(name, ".")
 
+# Normalise a TConst with a qualified name (e.g. TConst("types.Type")) to its
+# bare leaf name (TConst("Type")).  Other type forms are returned unchanged.
+# Used before unifying a pattern scrutinee type against a constructor's result
+# type so that qualified annotations match unqualified constructor registrations.
+fn strip_tconst_prefix(t: types.Type) -> types.Type =
+  match t with
+  | types.TConst name -> types.TConst(strip_module_prefix(name))
+  | _ -> t
+
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   match dict_get(name, local_vars) with
   | Just t -> t
-  | Nothing -> types.TConst(name)
+  | Nothing -> types.TConst(strip_module_prefix(name))
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
@@ -1241,7 +1250,7 @@ fn infer_ctor_pattern_typed(
   fields: List ast.Pattern,
   ctor_type: types.Type
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, expected, ctor_result_type(ctor_type)) with
+  match unifier.unify_types(subst, strip_tconst_prefix(expected), ctor_result_type(ctor_type)) with
   | Err e -> InferErr("Constructor " ++ name ++ ": " ++ e)
   | Ok s1 ->
       check_pattern_list(state, env, s1, eff_subst, ctor_param_types(ctor_type), fields)
