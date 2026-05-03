@@ -248,11 +248,15 @@ fn scan_template_content(raw: String, cursor: source.SourceCursor, start_pos: so
 # Handle $ in template: either ${ (interp start) or bare $ (literal).
 fn scan_template_dollar(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
   match source.peek_char(source.advance_char(cursor)) with
-  | Just '{' ->
-      scan_template_interp_start(raw, cursor, start_pos, lit_acc, lit_start, toks_acc)
-  | _ ->
+  | Nothing ->
       scan_template_content(raw, source.advance_char(cursor), start_pos,
         string.concat(lit_acc, "$"), lit_start, toks_acc)
+  | Just c ->
+      if c == '{' then
+        scan_template_interp_start(raw, cursor, start_pos, lit_acc, lit_start, toks_acc)
+      else
+        scan_template_content(raw, source.advance_char(cursor), start_pos,
+          string.concat(lit_acc, "$"), lit_start, toks_acc)
 
 # cursor is at '$', next char is '{'. Flush lit, emit INTERP_START, enter body.
 fn scan_template_interp_start(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
