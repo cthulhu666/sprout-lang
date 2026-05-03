@@ -1250,7 +1250,7 @@ fn infer_ctor_pattern_typed(
   fields: List ast.Pattern,
   ctor_type: types.Type
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, strip_tconst_prefix(expected), ctor_result_type(ctor_type)) with
+  match unifier.unify_types(subst, expected, ctor_result_type(ctor_type)) with
   | Err e -> InferErr("Constructor " ++ name ++ ": " ++ e)
   | Ok s1 ->
       check_pattern_list(state, env, s1, eff_subst, ctor_param_types(ctor_type), fields)
