@@ -1,0 +1,8 @@
+fn accept_template(t: StringTemplate) -> String =
+  template_to_string(t)
+
+fn greet(name: String) -> String =
+  accept_template(`hello ${name}!`)
+
+fn main() -> Unit !{IO} =
+  print(greet("world"))
