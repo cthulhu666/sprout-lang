@@ -215,6 +215,31 @@ class StringExpr(Expr):
     value: str
 
 
+# --- Template literals (Experimental — Phase 1 AST stub) ---
+# Parser wiring happens in Phase 2; these nodes are unreachable until then.
+
+class TemplateExprPart:
+    pass
+
+
+@dataclass
+class LitPart(TemplateExprPart):
+    text: str
+
+
+@dataclass
+class InterpPart(TemplateExprPart):
+    expr: Expr
+
+
+@dataclass
+class StringTemplateExpr(Expr):
+    parts: list[TemplateExprPart]
+
+
+# --- End template literals ---
+
+
 @dataclass
 class CharExpr(Expr):
     value: str

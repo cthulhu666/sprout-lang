@@ -51,6 +51,7 @@ export type Expr (..) =
   | IntExpr Int source.SourcePos
   | BoolExpr Bool source.SourcePos
   | StringExpr String source.SourcePos
+  | StringTemplateExpr (List TemplateExprPart) source.SourcePos
   | CharExpr Char source.SourcePos
   | UnitExpr source.SourcePos
   | TupleExpr (List Expr) source.SourcePos
@@ -64,6 +65,13 @@ export type Expr (..) =
   | DoExpr (List DoStep) source.SourcePos
   | RecordExpr String (List RecordField) source.SourcePos
   | GetFieldExpr Expr String source.SourcePos
+
+# --- Template literal parts (Experimental — Phase 1 AST stub) ---
+# Parser wiring happens in Phase 3; this variant is unreachable until then.
+
+export type TemplateExprPart (..) =
+  | LitPart String
+  | InterpPart Expr
 
 # --- Shared helpers used in declarations ---
 

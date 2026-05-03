@@ -221,6 +221,31 @@ type Maybe a =
   | Nothing
 ```
 
+### 5.7 Template literals (Experimental)
+
+> **Experimental** — not part of normative v0 until Phase 5 of the string
+> interpolation roadmap lands and the full test gate passes.  Full design
+> rationale and the phased implementation plan live in
+> `docs/string-interpolation-v1.md`.
+
+Grammar:
+
+```
+template_literal  ::= "`" template_content* "`"
+template_content  ::= template_char
+                    | escape_seq
+                    | "${" expr "}"
+template_char     ::= any character except "`", "\", and "${"
+escape_seq        ::= "\`" | "\${" | "\n" | "\t" | "\\"
+```
+
+A template literal `` `Hello, ${name}!` `` is a primary expression with type
+`StringTemplate`.  Each `${expr}` slot requires a `ToString` instance for the
+type of `expr`.  When a `StringTemplate` appears in a `String`-expected context
+the elaborator inserts an implicit coercion `template_to_string :
+StringTemplate -> String`; in a `StringTemplate`-expected context the parts
+flow through unchanged.  Plain `"..."` string literals are unaffected.
+
 ## 6. Evaluation Semantics (Strict)
 
 1. Function application: evaluate callee, then args left-to-right.
