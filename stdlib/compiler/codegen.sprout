@@ -97,17 +97,17 @@ export type TcoCtx (..) =
 # next_lam  — counter for lambda/wrapper function names
 type EmitterState =
   | EmitterState
-      (List String)  # body
-      (List String)  # all_defs
-      (List String)  # str_glbs
-      (Dict String)  # fn_wrap
-      (Maybe String)  # cur_blk
-      Int  # next_tmp
-      Int  # next_blk
-      Int  # next_str
-      Int  # next_lam
+      (Ref (List String))   # body
+      (Ref (List String))   # all_defs
+      (Ref (List String))   # str_glbs
+      (Ref (Dict String))   # fn_wrap
+      (Ref String)          # cur_blk  ("" = no current block)
+      (Ref Int)             # next_tmp
+      (Ref Int)             # next_blk
+      (Ref Int)             # next_str
+      (Ref Int)             # next_lam
 
-type alias Emitter = Ref EmitterState
+type alias Emitter = EmitterState
 
 # ---------------------------------------------------------------------------
 # Codegen context (read-only, passed through all emit calls)
@@ -345,162 +345,206 @@ fn tco_with_outer_roots(t: TcoCtx, n: Int) -> TcoCtx =
 # Section 4 — EmitterState helpers
 # ===========================================================================
 
-fn es_body(s: EmitterState) -> List String =
+# --- field-Ref accessors (pure) ---
+
+fn es_body_ref(s: EmitterState) -> Ref (List String) =
   match s with | EmitterState b _ _ _ _ _ _ _ _ -> b
 
-fn es_all_defs(s: EmitterState) -> List String =
+fn es_all_defs_ref(s: EmitterState) -> Ref (List String) =
   match s with | EmitterState _ a _ _ _ _ _ _ _ -> a
 
-fn es_str_glbs(s: EmitterState) -> List String =
+fn es_str_glbs_ref(s: EmitterState) -> Ref (List String) =
   match s with | EmitterState _ _ sg _ _ _ _ _ _ -> sg
 
-fn es_fn_wrap(s: EmitterState) -> Dict String =
+fn es_fn_wrap_ref(s: EmitterState) -> Ref (Dict String) =
   match s with | EmitterState _ _ _ fw _ _ _ _ _ -> fw
 
-fn es_cur_blk(s: EmitterState) -> Maybe String =
+fn es_cur_blk_ref(s: EmitterState) -> Ref String =
   match s with | EmitterState _ _ _ _ cb _ _ _ _ -> cb
 
-fn es_next_tmp(s: EmitterState) -> Int =
+fn es_next_tmp_ref(s: EmitterState) -> Ref Int =
   match s with | EmitterState _ _ _ _ _ nt _ _ _ -> nt
 
-fn es_next_blk(s: EmitterState) -> Int =
+fn es_next_blk_ref(s: EmitterState) -> Ref Int =
   match s with | EmitterState _ _ _ _ _ _ nb _ _ -> nb
 
-fn es_next_str(s: EmitterState) -> Int =
+fn es_next_str_ref(s: EmitterState) -> Ref Int =
   match s with | EmitterState _ _ _ _ _ _ _ ns _ -> ns
 
-fn es_next_lam(s: EmitterState) -> Int =
+fn es_next_lam_ref(s: EmitterState) -> Ref Int =
   match s with | EmitterState _ _ _ _ _ _ _ _ nl -> nl
 
-fn es_add_line(s: EmitterState, line: String) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(Cons(line, b), a, sg, fw, cb, nt, nb, ns, nl)
+# --- field value-getters (IO, reads through the Ref) ---
 
-fn es_set_cur_blk(s: EmitterState, blk: String) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw _ nt nb ns nl ->
-      EmitterState(b, a, sg, fw, Just(blk), nt, nb, ns, nl)
+fn es_body(s: EmitterState) -> List String !{IO} =
+  ref_read(es_body_ref(s))
 
-fn es_bump_tmp(s: EmitterState) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(b, a, sg, fw, cb, nt + 1, nb, ns, nl)
+fn es_all_defs(s: EmitterState) -> List String !{IO} =
+  ref_read(es_all_defs_ref(s))
 
-fn es_bump_blk(s: EmitterState) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(b, a, sg, fw, cb, nt, nb + 1, ns, nl)
+fn es_str_glbs(s: EmitterState) -> List String !{IO} =
+  ref_read(es_str_glbs_ref(s))
 
-fn es_bump_str(s: EmitterState) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(b, a, sg, fw, cb, nt, nb, ns + 1, nl)
+fn es_fn_wrap(s: EmitterState) -> Dict String !{IO} =
+  ref_read(es_fn_wrap_ref(s))
 
-fn es_bump_lam(s: EmitterState) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(b, a, sg, fw, cb, nt, nb, ns, nl + 1)
+fn es_cur_blk_raw(s: EmitterState) -> String !{IO} =
+  ref_read(es_cur_blk_ref(s))
 
-fn es_add_def(s: EmitterState, line: String) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(b, Cons(line, a), sg, fw, cb, nt, nb, ns, nl)
+# Convert the raw cur_blk string (empty = no block) to Maybe String.
+fn cur_blk_as_maybe(raw: String) -> Maybe String =
+  if str_len(raw) == 0 then Nothing
+  else Just(raw)
 
-fn es_add_str_glb(s: EmitterState, line: String) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(b, a, Cons(line, sg), fw, cb, nt, nb, ns, nl)
+fn es_next_tmp(s: EmitterState) -> Int !{IO} =
+  ref_read(es_next_tmp_ref(s))
 
-fn es_set_fn_wrap(s: EmitterState, fn_n: String, wrap_n: String) -> EmitterState =
-  match s with
-  | EmitterState b a sg fw cb nt nb ns nl ->
-      EmitterState(b, a, sg, dict_set(fn_n, wrap_n, fw), cb, nt, nb, ns, nl)
+fn es_next_blk(s: EmitterState) -> Int !{IO} =
+  ref_read(es_next_blk_ref(s))
 
-fn es_reset_body(s: EmitterState) -> EmitterState =
-  match s with
-  | EmitterState _ a sg fw _ nt nb ns nl ->
-      EmitterState(Nil, a, sg, fw, Nothing, nt, nb, ns, nl)
+fn es_next_str(s: EmitterState) -> Int !{IO} =
+  ref_read(es_next_str_ref(s))
 
-fn es_adopt_body(s: EmitterState, lines: List String, blk: Maybe String) -> EmitterState =
-  match s with
-  | EmitterState _ a sg fw _ nt nb ns nl ->
-      EmitterState(lines, a, sg, fw, blk, nt, nb, ns, nl)
+fn es_next_lam(s: EmitterState) -> Int !{IO} =
+  ref_read(es_next_lam_ref(s))
+
+# --- mutation helpers (operate directly on the field Refs) ---
+
+fn es_add_line(em: Emitter, line: String) -> Unit !{IO} =
+  do
+    let r = es_body_ref(em)
+    cur <- ref_read(r)
+    ref_write(r, Cons(line, cur))
+
+fn es_set_cur_blk(em: Emitter, blk: String) -> Unit !{IO} =
+  ref_write(es_cur_blk_ref(em), blk)
+
+fn es_bump_tmp(em: Emitter) -> Unit !{IO} =
+  do
+    let r = es_next_tmp_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
+
+fn es_bump_blk(em: Emitter) -> Unit !{IO} =
+  do
+    let r = es_next_blk_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
+
+fn es_bump_str(em: Emitter) -> Unit !{IO} =
+  do
+    let r = es_next_str_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
+
+fn es_bump_lam(em: Emitter) -> Unit !{IO} =
+  do
+    let r = es_next_lam_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
+
+fn es_add_def(em: Emitter, line: String) -> Unit !{IO} =
+  do
+    let r = es_all_defs_ref(em)
+    cur <- ref_read(r)
+    ref_write(r, Cons(line, cur))
+
+fn es_add_str_glb(em: Emitter, line: String) -> Unit !{IO} =
+  do
+    let r = es_str_glbs_ref(em)
+    cur <- ref_read(r)
+    ref_write(r, Cons(line, cur))
+
+fn es_set_fn_wrap(em: Emitter, fn_n: String, wrap_n: String) -> Unit !{IO} =
+  do
+    let r = es_fn_wrap_ref(em)
+    fw <- ref_read(r)
+    ref_write(r, dict_set(fn_n, wrap_n, fw))
+
+fn es_reset_body(em: Emitter) -> Unit !{IO} =
+  do
+    ref_write(es_body_ref(em), Nil)
+    ref_write(es_cur_blk_ref(em), "")
+
+fn es_adopt_body(em: Emitter, lines: List String, blk: String) -> Unit !{IO} =
+  do
+    ref_write(es_body_ref(em), lines)
+    ref_write(es_cur_blk_ref(em), blk)
 
 # ===========================================================================
 # Section 5 — High-level Emitter operations
 # ===========================================================================
 
 fn new_emitter() -> Emitter !{IO} =
-  ref_new(EmitterState (Nil, Nil, Nil, dict_empty(), Nothing, 0, 0, 0, 0))
+  do
+    body_ref <- ref_new(Nil)
+    defs_ref <- ref_new(Nil)
+    strs_ref <- ref_new(Nil)
+    wrap_ref <- ref_new(dict_empty())
+    blk_ref  <- ref_new("")
+    nt_ref   <- ref_new(0)
+    nb_ref   <- ref_new(0)
+    ns_ref   <- ref_new(0)
+    nl_ref   <- ref_new(0)
+    EmitterState(body_ref, defs_ref, strs_ref, wrap_ref, blk_ref, nt_ref, nb_ref, ns_ref, nl_ref)
 
 fn emit_line(em: Emitter, line: String) -> Unit !{IO} =
-  do
-    s <- ref_read(em)
-    ref_write(em, es_add_line(s, line))
+  es_add_line(em, line)
 
 fn emit_label(em: Emitter, name: String) -> Unit !{IO} =
   do
-    s <- ref_read(em)
-    ref_write(em, es_set_cur_blk(es_add_line(s, name ++":" ), name))
+    es_add_line(em, name ++ ":")
+    es_set_cur_blk(em, name)
 
 fn fresh_tmp(em: Emitter) -> String !{IO} =
   do
-    s <- ref_read(em)
-    let n = es_next_tmp(s)
-    ref_write(em, es_bump_tmp(s))
+    let r = es_next_tmp_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
     "%t" ++ int_to_string(n)
 
 fn fresh_block(em: Emitter, prefix: String) -> String !{IO} =
   do
-    s <- ref_read(em)
-    let n = es_next_blk(s)
-    ref_write(em, es_bump_blk(s))
+    let r = es_next_blk_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
     prefix ++ int_to_string(n)
 
 fn fresh_lambda_idx(em: Emitter) -> Int !{IO} =
   do
-    s <- ref_read(em)
-    let n = es_next_lam(s)
-    ref_write(em, es_bump_lam(s))
+    let r = es_next_lam_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
     n
 
 fn add_def_line(em: Emitter, line: String) -> Unit !{IO} =
-  do
-    s <- ref_read(em)
-    ref_write(em, es_add_def(s, line))
+  es_add_def(em, line)
 
 fn add_str_global(em: Emitter, line: String) -> Unit !{IO} =
-  do
-    s <- ref_read(em)
-    ref_write(em, es_add_str_glb(s, line))
+  es_add_str_glb(em, line)
 
 fn get_fn_wrapper(em: Emitter, name: String) -> Maybe String !{IO} =
   do
-    s <- ref_read(em)
-    dict_get(name, es_fn_wrap(s))
+    fw <- es_fn_wrap(em)
+    dict_get(name, fw)
 
 fn set_fn_wrapper(em: Emitter, fn_n: String, wrap_n: String) -> Unit !{IO} =
-  do
-    s <- ref_read(em)
-    ref_write(em, es_set_fn_wrap(s, fn_n, wrap_n))
+  es_set_fn_wrap(em, fn_n, wrap_n)
 
 fn read_cur_blk(em: Emitter) -> Maybe String !{IO} =
   do
-    s <- ref_read(em)
-    es_cur_blk(s)
+    raw <- es_cur_blk_raw(em)
+    cur_blk_as_maybe(raw)
 
 fn read_cur_blk_or(em: Emitter, default_blk: String) -> String !{IO} =
   do
-    s <- ref_read(em)
-    match es_cur_blk(s) with
-    | Nothing -> default_blk
-    | Just b -> b
+    raw <- es_cur_blk_raw(em)
+    if str_len(raw) == 0 then default_blk else raw
 
 fn is_terminated(em: Emitter) -> Bool !{IO} =
   do
-    s <- ref_read(em)
-    is_terminated_lines(es_body(s))
+    body <- es_body(em)
+    is_terminated_lines(body)
 
 # body is stored in reverse (head = most recent line).
 fn is_terminated_lines(lines: List String) -> Bool =
@@ -538,27 +582,24 @@ fn str_trim_spaces(s: String) -> String =
 
 # Save the current body lines, leaving em with an empty body.
 # Used when starting to build a lambda/wrapper function definition.
-fn save_body(em: Emitter) -> (List String, Maybe String) !{IO} =
+fn save_body(em: Emitter) -> (List String, String) !{IO} =
   do
-    s <- ref_read(em)
-    let saved = (es_body(s), es_cur_blk(s))
-    ref_write(em, es_reset_body(s))
-    saved
+    saved_lines <- es_body(em)
+    saved_blk   <- es_cur_blk_raw(em)
+    es_reset_body(em)
+    (saved_lines, saved_blk)
 
 # Restore a previously-saved body into em.
-fn restore_body(em: Emitter, saved: (List String, Maybe String)) -> Unit !{IO} =
+fn restore_body(em: Emitter, saved: (List String, String)) -> Unit !{IO} =
   match saved with
-  | (lines, blk) ->
-      do
-        s <- ref_read(em)
-        ref_write(em, es_adopt_body(s, lines, blk))
+  | (lines, blk) -> es_adopt_body(em, lines, blk)
 
 # Flush and return the current body as a reversed line list (for building defs).
 fn flush_body(em: Emitter) -> List String !{IO} =
   do
-    s <- ref_read(em)
-    let lines = list_reverse(es_body(s))
-    ref_write(em, es_reset_body(s))
+    body <- es_body(em)
+    let lines = list_reverse(body)
+    es_reset_body(em)
     lines
 
 # ===========================================================================
@@ -591,9 +632,9 @@ fn encode_str_for_ir(s: String, i: Int, acc: String) -> String =
 # (global_name, byte_length_including_null).
 fn string_const(em: Emitter, s: String) -> (String, Int) !{IO} =
   do
-    st <- ref_read(em)
-    let n = es_next_str(st)
-    ref_write(em, es_bump_str(st))
+    let r = es_next_str_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
     let gname = "@.str." ++ int_to_string(n)
     let body = encode_str_for_ir(s, 0, "") ++ "\\00"
     let len = str_len(s) + 1
@@ -873,18 +914,14 @@ fn emit_ctor_field_tests(args: List ast.Pattern, arg_lls: List String, handle: V
   match args with
   | Nil ->
       do
-        s <- ref_read(em)
-        match es_cur_blk(s) with
-        | Nothing -> miss_lbl
-        | Just b -> b
+        raw <- es_cur_blk_raw(em)
+        if str_len(raw) == 0 then miss_lbl else raw
   | Cons arg rest_args ->
       match arg_lls with
       | Nil ->
           do
-            s <- ref_read(em)
-            match es_cur_blk(s) with
-            | Nothing -> miss_lbl
-            | Just b -> b
+            raw <- es_cur_blk_raw(em)
+            if str_len(raw) == 0 then miss_lbl else raw
       | Cons arg_ll rest_lls ->
           do
             field <- emit_ctor_field(val_ir(handle), idx, arg_ll, em)
@@ -1484,8 +1521,8 @@ fn emit_var(name: String, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Em
       match dict_get(name, ctx_fn_sigs(ctx)) with
       | Just sig ->
           do
-            em_s <- ref_read(em)
-            let wrapper_opt = dict_get(name, es_fn_wrap(em_s))
+            fw <- es_fn_wrap(em)
+            let wrapper_opt = dict_get(name, fw)
             match wrapper_opt with
             | Nothing -> val_make(ll_ptr(), "null")  # no wrapper? return null closure
             | Just wname ->
@@ -2890,10 +2927,12 @@ fn assemble_ir(em: Emitter) -> String !{IO} =
 
 fn assemble_ir_sections(em: Emitter) -> (List String, List String, List String) !{IO} =
   do
-    s <- ref_read(em)
-    let header_lines = list_reverse(es_body(s))
-    let def_lines = list_reverse(es_all_defs(s))
-    let str_lines = list_reverse(es_str_glbs(s))
+    body <- es_body(em)
+    defs <- es_all_defs(em)
+    strs <- es_str_glbs(em)
+    let header_lines = list_reverse(body)
+    let def_lines = list_reverse(defs)
+    let str_lines = list_reverse(strs)
     (header_lines, str_lines, def_lines)
 
 fn join_lines(lines: List String) -> String =
