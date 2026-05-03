@@ -2672,6 +2672,7 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("int_to_string", FnSig("int_to_string", Cons(ll_i64(), Nil), ll_ptr(), Nothing))
   , ("char_to_string", FnSig("char_to_string", Cons(ll_ptr(), Nil), ll_ptr(), Nothing))
   , ("str_concat", FnSig("str_concat", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_ptr(), Nothing))
+  , ("string_concat_many", FnSig("string_concat_many", Cons(ll_i64(), Nil), ll_ptr(), Nothing))
   , ("str_len", FnSig("str_len", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("str_slice", FnSig("str_slice", Cons(ll_ptr(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_ptr(), Nothing))
   , ("str_char_at", FnSig("str_char_at", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
