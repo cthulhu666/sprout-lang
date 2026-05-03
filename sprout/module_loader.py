@@ -1193,6 +1193,14 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
             for arg in e.args:
                 walk_expr(arg, e, current_scope)
             return
+        string_template_expr = getattr(ast, "StringTemplateExpr", None)
+        if string_template_expr is not None and isinstance(e, string_template_expr):
+            interp_part = getattr(ast, "InterpPart", None)
+            if interp_part is not None:
+                for part in e.parts:
+                    if isinstance(part, interp_part):
+                        walk_expr(part.expr, e, current_scope)
+            return
         if isinstance(e, ast.LambdaExpr):
             lambda_scope = set(current_scope)
             lambda_scope |= {param.name for param in e.params}
