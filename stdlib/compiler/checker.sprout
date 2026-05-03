@@ -93,12 +93,26 @@ fn desugar_decls(decls: List ast.Decl) -> List ast.Decl =
 fn desugar_decl(d: ast.Decl) -> ast.Decl =
   match d with
   | ast.FnDecl name params ret effs constraints body pos ->
-      ast.FnDecl(name, params, ret, effs, constraints, desugar_expr(body), pos)
+      ast.FnDecl(name, params, ret, effs, constraints, desugar_expr_with_expected(body, type_expr_bare_name(ret)), pos)
   | ast.LetDecl name body pos ->
       ast.LetDecl(name, desugar_expr(body), pos)
   | ast.InstanceDecl constraint inst_constraints methods pos ->
       ast.InstanceDecl(constraint, inst_constraints, desugar_instance_methods(methods), pos)
   | _ -> d
+
+# Extract the bare constructor name from a Maybe TypeExpr, or Nothing if not
+# a simple TypeName.  Used to propagate "StringTemplate" context downward.
+fn type_expr_bare_name(te: Maybe ast.TypeExpr) -> Maybe String =
+  match te with
+  | Nothing -> Nothing
+  | Just texpr -> type_texpr_to_maybe_name(texpr)
+
+fn type_texpr_to_maybe_name(texpr: ast.TypeExpr) -> Maybe String =
+  match texpr with
+  | ast.TypeName tname ->
+      Just(tname)
+  | _ ->
+      Nothing
 
 fn desugar_instance_methods(methods: List ast.InstanceMethodImpl) -> List ast.InstanceMethodImpl =
   match methods with
@@ -108,7 +122,39 @@ fn desugar_instance_methods(methods: List ast.InstanceMethodImpl) -> List ast.In
 fn desugar_instance_method(m: ast.InstanceMethodImpl) -> ast.InstanceMethodImpl =
   match m with
   | ast.InstanceMethodImpl name params ret effs body ->
-      ast.InstanceMethodImpl(name, params, ret, effs, desugar_expr(body))
+      ast.InstanceMethodImpl(name, params, ret, effs, desugar_expr_with_expected(body, type_expr_bare_name(ret)))
+
+# Context-aware desugar.  When expected is Just "StringTemplate" and the
+# expression is a StringTemplateExpr, lowers to the StringTemplate ADT.
+# In all other positions, behaves identically to desugar_expr.
+fn desugar_expr_with_expected(expr: ast.Expr, expected: Maybe String) -> ast.Expr =
+  match expected with
+  | Nothing -> desugar_expr(expr)
+  | Just exp_name ->
+      if exp_name == "StringTemplate" then
+        match expr with
+        | ast.StringTemplateExpr parts pos ->
+            desugar_template_as_string_template(parts, pos)
+        | ast.IfExpr cond then_ else_ pos ->
+            ast.IfExpr(
+              desugar_expr(cond),
+              desugar_expr_with_expected(then_, expected),
+              desugar_expr_with_expected(else_, expected),
+              pos
+            )
+        | ast.MatchExpr scrut branches pos ->
+            ast.MatchExpr(desugar_expr(scrut), desugar_branches_with_expected(branches, expected), pos)
+        | _ -> desugar_expr(expr)
+      else
+        desugar_expr(expr)
+
+fn desugar_branches_with_expected(branches: List ast.MatchBranch, expected: Maybe String) -> List ast.MatchBranch =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          Cons(ast.MatchBranch(pat, desugar_expr_with_expected(body, expected)), desugar_branches_with_expected(rest, expected))
 
 fn desugar_expr(expr: ast.Expr) -> ast.Expr =
   match expr with
@@ -231,6 +277,81 @@ fn build_cons_list(exprs: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
         Cons(e, Cons(build_cons_list(rest, pos), Nil)),
         pos
       )
+
+# ---------------------------------------------------------------------------
+# StringTemplate ADT lowering (Phase 4B)
+# ---------------------------------------------------------------------------
+#
+# desugar_template_as_string_template mirrors Python's
+# desugar_string_template_as_string_template.  It is called when the
+# immediate expected-type context is "StringTemplate".
+#
+# Produces:
+#   StringTemplate(Cons(TemplateLit("lit"), Cons(TemplateInterp(to_string(x)), Nil)))
+# Optimisations:
+#   empty        → StringTemplate(Nil)
+#   all-literal  → StringTemplate(Cons(TemplateLit("combined"), Nil))
+#   general      → StringTemplate(Cons(... parts ..., Nil))
+#
+# Note: coverage here is limited to the *immediate-annotation* rule:
+# fn/method return type = StringTemplate.  Call-site param-type lookup is
+# NOT implemented in this bootstrap path (declared reduced coverage, Phase 4C
+# note: add full callee param lookup once the Sprout-side compiler can query
+# its own function-signature table from a pre-desugar index).
+
+fn wrap_string_template(parts_list: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("StringTemplate", pos),
+    Cons(parts_list, Nil),
+    pos
+  )
+
+fn desugar_template_as_string_template(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> ast.Expr =
+  if list_length(parts) == 0 then
+    wrap_string_template(ast.VarExpr("Nil", pos), pos)
+  else if all_lit_parts(parts) then
+    wrap_string_template(
+      ast.CallExpr(
+        ast.VarExpr("Cons", pos),
+        Cons(
+          ast.CallExpr(ast.VarExpr("TemplateLit", pos), Cons(ast.StringExpr(merge_lit_parts(parts, ""), pos), Nil), pos),
+          Cons(ast.VarExpr("Nil", pos), Nil)
+        ),
+        pos
+      ),
+      pos
+    )
+  else
+    wrap_string_template(
+      build_cons_list(collect_template_part_nodes(parts, pos), pos),
+      pos
+    )
+
+# Build the list of TemplateLit/TemplateInterp AST nodes for each effective part.
+fn collect_template_part_nodes(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> List ast.Expr =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart text ->
+          if str_len(text) == 0 then collect_template_part_nodes(rest, pos)
+          else
+            Cons(
+              ast.CallExpr(ast.VarExpr("TemplateLit", pos), Cons(ast.StringExpr(text, pos), Nil), pos),
+              collect_template_part_nodes(rest, pos)
+            )
+      | ast.InterpPart inner_expr ->
+          Cons(
+            ast.CallExpr(
+              ast.VarExpr("TemplateInterp", pos),
+              Cons(
+                ast.CallExpr(ast.VarExpr("to_string", pos), Cons(desugar_expr(inner_expr), Nil), pos),
+                Nil
+              ),
+              pos
+            ),
+            collect_template_part_nodes(rest, pos)
+          )
 
 # ---------------------------------------------------------------------------
 # dump_typed_names — parity-test output renderer

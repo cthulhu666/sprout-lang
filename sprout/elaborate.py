@@ -9,8 +9,35 @@ class ElaborateError(ValueError):
     pass
 
 
+def _type_expr_name(te: ast.TypeExpr | None) -> str | None:
+    """Return the bare type-constructor name if te is a simple TypeName, else None."""
+    if isinstance(te, ast.TypeName):
+        return te.name
+    return None
+
+
+def _build_fn_sig_index(
+    program: ast.Program,
+) -> tuple[dict[str, list[ast.TypeExpr | None]], dict[str, ast.TypeExpr | None]]:
+    """Walk program declarations and build:
+    - param_types_by_fn : fn_name -> [param.type_expr, ...]  (positional)
+    - return_type_by_fn : fn_name -> return_type TypeExpr or None
+
+    Only FnDecl entries are indexed; class methods are not included because
+    call-site resolution for methods would require typeclass dispatch which is
+    beyond the scope of the pre-typecheck desugar.
+    """
+    param_types: dict[str, list[ast.TypeExpr | None]] = {}
+    return_types: dict[str, ast.TypeExpr | None] = {}
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            param_types[decl.name] = [p.type_expr for p in decl.params]
+            return_types[decl.name] = decl.return_type
+    return param_types, return_types
+
+
 def desugar_string_template_expr(expr: ast.StringTemplateExpr) -> ast.Expr:
-    """Desugar a StringTemplateExpr to its equivalent call-based form.
+    """Desugar a StringTemplateExpr to a String-producing call-based form.
 
     Rules:
     - Empty template  ``  → StringExpr("")
@@ -20,7 +47,6 @@ def desugar_string_template_expr(expr: ast.StringTemplateExpr) -> ast.Expr:
       where each LitPart becomes StringExpr and each InterpPart becomes
       CallExpr(to_string, [inner_expr]).
     """
-    src = expr
     line = getattr(expr, "line", 0)
     col = getattr(expr, "column", 0)
 
@@ -69,6 +95,80 @@ def desugar_string_template_expr(expr: ast.StringTemplateExpr) -> ast.Expr:
     ))
 
 
+def desugar_string_template_as_string_template(expr: ast.StringTemplateExpr) -> ast.Expr:
+    """Desugar a StringTemplateExpr into a StringTemplate ADT value.
+
+    Produces:
+      StringTemplate(Cons(TemplateLit("text"), Cons(TemplateInterp(to_string(x)), Nil)))
+
+    Optimisations:
+    - Empty  → StringTemplate(Nil)
+    - All-literal → StringTemplate(Cons(TemplateLit("combined"), Nil))
+    - Single interp only → StringTemplate(Cons(TemplateInterp(to_string(x)), Nil))
+    """
+    line = getattr(expr, "line", 0)
+    col = getattr(expr, "column", 0)
+
+    def loc(node: object) -> object:
+        return ast.attach_loc(node, line, col)
+
+    parts = expr.parts
+
+    def wrap(cons_list: ast.Expr) -> ast.Expr:
+        return loc(ast.CallExpr(
+            callee=loc(ast.VarExpr(name="StringTemplate")),
+            args=[cons_list],
+        ))
+
+    nil: ast.Expr = loc(ast.VarExpr(name="Nil"))
+
+    # Empty template
+    if not parts:
+        return wrap(nil)
+
+    # All-literal: single TemplateLit
+    if all(isinstance(p, ast.LitPart) for p in parts):
+        combined = "".join(p.text for p in parts)  # type: ignore[union-attr]
+        lit_node = loc(ast.CallExpr(
+            callee=loc(ast.VarExpr(name="TemplateLit")),
+            args=[loc(ast.StringExpr(value=combined))],
+        ))
+        list_expr = loc(ast.CallExpr(
+            callee=loc(ast.VarExpr(name="Cons")),
+            args=[lit_node, nil],
+        ))
+        return wrap(list_expr)
+
+    # Build TemplatePart nodes, skipping empty literal segments
+    part_nodes: list[ast.Expr] = []
+    for p in parts:
+        if isinstance(p, ast.LitPart):
+            if p.text:
+                part_nodes.append(loc(ast.CallExpr(
+                    callee=loc(ast.VarExpr(name="TemplateLit")),
+                    args=[loc(ast.StringExpr(value=p.text))],
+                )))
+        else:
+            assert isinstance(p, ast.InterpPart)
+            to_str_call = loc(ast.CallExpr(
+                callee=loc(ast.VarExpr(name="to_string")),
+                args=[p.expr],
+            ))
+            part_nodes.append(loc(ast.CallExpr(
+                callee=loc(ast.VarExpr(name="TemplateInterp")),
+                args=[to_str_call],
+            )))
+
+    # Build Cons list
+    list_expr = nil
+    for node in reversed(part_nodes):
+        list_expr = loc(ast.CallExpr(
+            callee=loc(ast.VarExpr(name="Cons")),
+            args=[node, list_expr],
+        ))
+    return wrap(list_expr)
+
+
 def _attach_ast_loc(node: object, src: object | None) -> object:
     out = ast.attach_loc(node, getattr(src, "line", 0), getattr(src, "column", 0))
     if src is None or not hasattr(src, "__dict__"):
@@ -83,17 +183,46 @@ def _attach_ast_loc(node: object, src: object | None) -> object:
     return out
 
 
-def _desugar_expr(expr: ast.Expr) -> ast.Expr:
-    """Recursively desugar StringTemplateExpr nodes in an expression tree."""
+def _desugar_expr(
+    expr: ast.Expr,
+    expected_type: str | None = None,
+    param_types: dict[str, list[ast.TypeExpr | None]] | None = None,
+) -> ast.Expr:
+    """Recursively desugar StringTemplateExpr nodes in an expression tree.
+
+    expected_type: if "StringTemplate", a StringTemplateExpr at this position
+                   will be lowered to the StringTemplate ADT form instead of
+                   the default String-producing form.
+    param_types:   maps function name → [param TypeExpr, ...] for resolving
+                   call-site expected types.
+    """
+    pt = param_types or {}
+
+    def walk(e: ast.Expr, exp: str | None = None) -> ast.Expr:
+        return _desugar_expr(e, expected_type=exp, param_types=pt)
+
     if isinstance(expr, ast.StringTemplateExpr):
-        desugared = desugar_string_template_expr(expr)
-        return _desugar_expr(desugared)
+        if expected_type == "StringTemplate":
+            # Lower to StringTemplate ADT; recursively desugar interp sub-exprs first
+            inner_parts: list[ast.TemplateExprPart] = []
+            for p in expr.parts:
+                if isinstance(p, ast.InterpPart):
+                    # walk the inner expression with no expected type (produces String)
+                    inner_parts.append(ast.InterpPart(expr=walk(p.expr)))
+                else:
+                    inner_parts.append(p)
+            rewired = ast.StringTemplateExpr(parts=inner_parts)
+            ast.attach_loc(rewired, getattr(expr, "line", 0), getattr(expr, "column", 0))
+            return desugar_string_template_as_string_template(rewired)
+        else:
+            desugared = desugar_string_template_expr(expr)
+            return walk(desugared)
     if isinstance(expr, (ast.IntExpr, ast.BoolExpr, ast.StringExpr, ast.CharExpr,
                          ast.UnitExpr, ast.VarExpr)):
         return expr
     if isinstance(expr, ast.TupleExpr):
         return _attach_ast_loc(
-            ast.TupleExpr(items=[_desugar_expr(i) for i in expr.items]),
+            ast.TupleExpr(items=[walk(i) for i in expr.items]),
             expr,
         )
     if isinstance(expr, ast.RecordExpr):
@@ -102,7 +231,7 @@ def _desugar_expr(expr: ast.Expr) -> ast.Expr:
                 type_name=expr.type_name,
                 fields=[
                     _attach_ast_loc(
-                        ast.RecordFieldValue(name=f.name, value=_desugar_expr(f.value)),
+                        ast.RecordFieldValue(name=f.name, value=walk(f.value)),
                         f,
                     )
                     for f in expr.fields
@@ -112,50 +241,61 @@ def _desugar_expr(expr: ast.Expr) -> ast.Expr:
         )
     if isinstance(expr, ast.GetFieldExpr):
         return _attach_ast_loc(
-            ast.GetFieldExpr(record=_desugar_expr(expr.record), field_name=expr.field_name),
+            ast.GetFieldExpr(record=walk(expr.record), field_name=expr.field_name),
             expr,
         )
     if isinstance(expr, ast.BinaryExpr):
         return _attach_ast_loc(
-            ast.BinaryExpr(op=expr.op, left=_desugar_expr(expr.left), right=_desugar_expr(expr.right)),
+            ast.BinaryExpr(op=expr.op, left=walk(expr.left), right=walk(expr.right)),
             expr,
         )
     if isinstance(expr, ast.IntRangeExpr):
         return _attach_ast_loc(
-            ast.IntRangeExpr(start=_desugar_expr(expr.start), end=_desugar_expr(expr.end)),
+            ast.IntRangeExpr(start=walk(expr.start), end=walk(expr.end)),
             expr,
         )
     if isinstance(expr, ast.UnaryExpr):
         return _attach_ast_loc(
-            ast.UnaryExpr(op=expr.op, operand=_desugar_expr(expr.operand)),
+            ast.UnaryExpr(op=expr.op, operand=walk(expr.operand)),
             expr,
         )
     if isinstance(expr, ast.CallExpr):
+        # Determine per-argument expected types from callee's declared param types.
+        callee_name: str | None = None
+        if isinstance(expr.callee, ast.VarExpr):
+            callee_name = expr.callee.name
+        callee_param_types = pt.get(callee_name) if callee_name else None
+        desugared_args: list[ast.Expr] = []
+        for idx, arg in enumerate(expr.args):
+            arg_expected: str | None = None
+            if callee_param_types is not None and idx < len(callee_param_types):
+                arg_expected = _type_expr_name(callee_param_types[idx])
+            desugared_args.append(walk(arg, arg_expected))
         return _attach_ast_loc(
-            ast.CallExpr(callee=_desugar_expr(expr.callee), args=[_desugar_expr(a) for a in expr.args]),
+            ast.CallExpr(callee=walk(expr.callee), args=desugared_args),
             expr,
         )
     if isinstance(expr, ast.LambdaExpr):
         return _attach_ast_loc(
-            ast.LambdaExpr(params=expr.params, body=_desugar_expr(expr.body)),
+            ast.LambdaExpr(params=expr.params, body=walk(expr.body)),
             expr,
         )
     if isinstance(expr, ast.IfExpr):
         return _attach_ast_loc(
             ast.IfExpr(
-                condition=_desugar_expr(expr.condition),
-                then_branch=_desugar_expr(expr.then_branch),
-                else_branch=_desugar_expr(expr.else_branch),
+                condition=walk(expr.condition),
+                then_branch=walk(expr.then_branch, expected_type),
+                else_branch=walk(expr.else_branch, expected_type),
             ),
             expr,
         )
     if isinstance(expr, ast.MatchExpr):
         return _attach_ast_loc(
             ast.MatchExpr(
-                scrutinee=_desugar_expr(expr.scrutinee),
+                scrutinee=walk(expr.scrutinee),
                 branches=[
                     _attach_ast_loc(
-                        ast.MatchBranch(pattern=b.pattern, value=_desugar_expr(b.value)),
+                        ast.MatchBranch(pattern=b.pattern, value=walk(b.value, expected_type)),
                         b,
                     )
                     for b in expr.branches
@@ -165,16 +305,20 @@ def _desugar_expr(expr: ast.Expr) -> ast.Expr:
         )
     if isinstance(expr, ast.DoExpr):
         rewritten: list[ast.DoStep] = []
-        for step in expr.steps:
+        steps = expr.steps
+        for step_idx, step in enumerate(steps):
+            is_last = (step_idx == len(steps) - 1)
             if isinstance(step, ast.DoBindStep):
-                s = _attach_ast_loc(ast.DoBindStep(pattern=step.pattern, value=_desugar_expr(step.value)), step)
+                s = _attach_ast_loc(ast.DoBindStep(pattern=step.pattern, value=walk(step.value)), step)
                 if hasattr(step, "_do_family"):
                     setattr(s, "_do_family", getattr(step, "_do_family"))
                 rewritten.append(s)
             elif isinstance(step, ast.DoLetStep):
-                rewritten.append(_attach_ast_loc(ast.DoLetStep(name=step.name, value=_desugar_expr(step.value)), step))
+                rewritten.append(_attach_ast_loc(ast.DoLetStep(name=step.name, value=walk(step.value)), step))
             elif isinstance(step, ast.DoExprStep):
-                rewritten.append(_attach_ast_loc(ast.DoExprStep(value=_desugar_expr(step.value)), step))
+                # Only propagate expected_type to the tail expression of the do block
+                step_exp = expected_type if is_last else None
+                rewritten.append(_attach_ast_loc(ast.DoExprStep(value=walk(step.value, step_exp)), step))
             else:
                 rewritten.append(step)
         return _attach_ast_loc(ast.DoExpr(steps=rewritten), expr)
@@ -183,15 +327,28 @@ def _desugar_expr(expr: ast.Expr) -> ast.Expr:
 
 
 def desugar_string_templates_in_program(program: ast.Program) -> None:
-    """In-place desugar all StringTemplateExpr nodes in the program."""
+    """In-place, context-aware desugar of all StringTemplateExpr nodes.
+
+    Context sources (Shape A — pre-typecheck-aware):
+    1. FnDecl return annotation is StringTemplate → body desugared with
+       expected_type="StringTemplate".
+    2. CallExpr whose callee is a known top-level fn → each arg desugared
+       with the expected type taken from the callee's declared param type.
+
+    Default: produce String (existing behaviour), so existing programs are
+    completely unaffected.
+    """
+    param_types, return_types = _build_fn_sig_index(program)
     for decl in program.declarations:
         if isinstance(decl, ast.FnDecl):
-            decl.body = _desugar_expr(decl.body)
+            ret_name = _type_expr_name(return_types.get(decl.name))
+            decl.body = _desugar_expr(decl.body, expected_type=ret_name, param_types=param_types)
         elif isinstance(decl, ast.LetDecl):
-            decl.value = _desugar_expr(decl.value)
+            decl.value = _desugar_expr(decl.value, param_types=param_types)
         elif isinstance(decl, ast.InstanceDecl):
             for method in decl.methods:
-                method.body = _desugar_expr(method.body)
+                ret_name = _type_expr_name(method.return_type)
+                method.body = _desugar_expr(method.body, expected_type=ret_name, param_types=param_types)
 
 
 def _core_pattern_to_ast(pattern: core.Pattern) -> ast.Pattern:

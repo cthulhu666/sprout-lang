@@ -5,6 +5,30 @@ export type Maybe a =
   | Just a
   | Nothing
 
+# StringTemplate runtime ADT — produced by context-aware template desugar
+# when the expected type at the use-site is StringTemplate (Phase 4B).
+# Each TemplatePart holds an already-evaluated String; the ADT is opaque
+# to the HM typechecker and carries no type variables.
+
+export type TemplatePart =
+  | TemplateLit String
+  | TemplateInterp String
+
+export type StringTemplate =
+  | StringTemplate (List TemplatePart)
+
+export fn template_to_string(t: StringTemplate) -> String =
+  match t with
+  | StringTemplate parts -> string_concat_many(template_parts_to_strings(parts))
+
+fn template_parts_to_strings(parts: List TemplatePart) -> List String =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | TemplateLit s -> Cons(s, template_parts_to_strings(rest))
+      | TemplateInterp s -> Cons(s, template_parts_to_strings(rest))
+
 export type List a =
   | Cons a (List a)
   | Nil
