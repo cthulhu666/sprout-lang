@@ -2257,6 +2257,37 @@ const char* str_concat(const char* left, const char* right) {
   return out;
 }
 
+/* string_concat_many: concatenate a List String into a single String.
+ * Matches str_concat's allocation pattern (malloc, no GC tracking). */
+const char* string_concat_many(long long list_handle) {
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  /* First pass: compute total byte length. */
+  size_t total = 0;
+  long long cur = list_handle;
+  while (sprout_tag(cur) != nil_tag) {
+    if (sprout_tag(cur) != cons_tag) tcp_fail("string_concat_many: malformed list");
+    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
+    if (s == NULL) tcp_fail("string_concat_many: null string element");
+    total += strlen(s);
+    cur = sprout_field(cur, 1);
+  }
+  char* out = (char*)malloc(total + 1);
+  if (out == NULL) tcp_fail("string_concat_many: out of memory");
+  /* Second pass: copy bytes. */
+  size_t pos = 0;
+  cur = list_handle;
+  while (sprout_tag(cur) != nil_tag) {
+    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
+    size_t slen = strlen(s);
+    memcpy(out + pos, s, slen);
+    pos += slen;
+    cur = sprout_field(cur, 1);
+  }
+  out[total] = '\\0';
+  return out;
+}
+
 static size_t sprout_utf8_char_width(unsigned char lead) {
   if ((lead & 0x80) == 0) return 1;
   if ((lead & 0xE0) == 0xC0) return 2;

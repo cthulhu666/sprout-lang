@@ -809,6 +809,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "char_to_string",
         "split_words",
         "str_concat",
+        "string_concat_many",
         "str_len",
         "str_slice",
         "str_char_at",

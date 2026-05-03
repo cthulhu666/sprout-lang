@@ -9,6 +9,66 @@ class ElaborateError(ValueError):
     pass
 
 
+def desugar_string_template_expr(expr: ast.StringTemplateExpr) -> ast.Expr:
+    """Desugar a StringTemplateExpr to its equivalent call-based form.
+
+    Rules:
+    - Empty template  ``  → StringExpr("")
+    - All-literal     `hello`  → StringExpr("hello")
+    - Single interp, no surrounding literals  `${x}`  → CallExpr(to_string, [x])
+    - General case  → CallExpr(string_concat_many, [Cons(part, ... Nil)])
+      where each LitPart becomes StringExpr and each InterpPart becomes
+      CallExpr(to_string, [inner_expr]).
+    """
+    src = expr
+    line = getattr(expr, "line", 0)
+    col = getattr(expr, "column", 0)
+
+    def loc(node: object) -> object:
+        return ast.attach_loc(node, line, col)
+
+    parts = expr.parts
+
+    # Empty template
+    if not parts:
+        return loc(ast.StringExpr(value=""))
+
+    # All-literal: merge into single StringExpr
+    if all(isinstance(p, ast.LitPart) for p in parts):
+        combined = "".join(p.text for p in parts)  # type: ignore[union-attr]
+        return loc(ast.StringExpr(value=combined))
+
+    # Build per-part expressions
+    part_exprs: list[ast.Expr] = []
+    for p in parts:
+        if isinstance(p, ast.LitPart):
+            if p.text:  # skip empty literal segments
+                part_exprs.append(loc(ast.StringExpr(value=p.text)))
+        else:
+            assert isinstance(p, ast.InterpPart)
+            to_str_call = loc(ast.CallExpr(
+                callee=loc(ast.VarExpr(name="to_string")),
+                args=[p.expr],
+            ))
+            part_exprs.append(to_str_call)
+
+    # Single part: just return it directly
+    if len(part_exprs) == 1:
+        return part_exprs[0]
+
+    # General: string_concat_many(Cons(p0, Cons(p1, ... Nil)))
+    list_expr: ast.Expr = loc(ast.VarExpr(name="Nil"))
+    for p in reversed(part_exprs):
+        list_expr = loc(ast.CallExpr(
+            callee=loc(ast.VarExpr(name="Cons")),
+            args=[p, list_expr],
+        ))
+    return loc(ast.CallExpr(
+        callee=loc(ast.VarExpr(name="string_concat_many")),
+        args=[list_expr],
+    ))
+
+
 def _attach_ast_loc(node: object, src: object | None) -> object:
     out = ast.attach_loc(node, getattr(src, "line", 0), getattr(src, "column", 0))
     if src is None or not hasattr(src, "__dict__"):
@@ -21,6 +81,117 @@ def _attach_ast_loc(node: object, src: object | None) -> object:
             continue
         setattr(out, key, value)
     return out
+
+
+def _desugar_expr(expr: ast.Expr) -> ast.Expr:
+    """Recursively desugar StringTemplateExpr nodes in an expression tree."""
+    if isinstance(expr, ast.StringTemplateExpr):
+        desugared = desugar_string_template_expr(expr)
+        return _desugar_expr(desugared)
+    if isinstance(expr, (ast.IntExpr, ast.BoolExpr, ast.StringExpr, ast.CharExpr,
+                         ast.UnitExpr, ast.VarExpr)):
+        return expr
+    if isinstance(expr, ast.TupleExpr):
+        return _attach_ast_loc(
+            ast.TupleExpr(items=[_desugar_expr(i) for i in expr.items]),
+            expr,
+        )
+    if isinstance(expr, ast.RecordExpr):
+        return _attach_ast_loc(
+            ast.RecordExpr(
+                type_name=expr.type_name,
+                fields=[
+                    _attach_ast_loc(
+                        ast.RecordFieldValue(name=f.name, value=_desugar_expr(f.value)),
+                        f,
+                    )
+                    for f in expr.fields
+                ],
+            ),
+            expr,
+        )
+    if isinstance(expr, ast.GetFieldExpr):
+        return _attach_ast_loc(
+            ast.GetFieldExpr(record=_desugar_expr(expr.record), field_name=expr.field_name),
+            expr,
+        )
+    if isinstance(expr, ast.BinaryExpr):
+        return _attach_ast_loc(
+            ast.BinaryExpr(op=expr.op, left=_desugar_expr(expr.left), right=_desugar_expr(expr.right)),
+            expr,
+        )
+    if isinstance(expr, ast.IntRangeExpr):
+        return _attach_ast_loc(
+            ast.IntRangeExpr(start=_desugar_expr(expr.start), end=_desugar_expr(expr.end)),
+            expr,
+        )
+    if isinstance(expr, ast.UnaryExpr):
+        return _attach_ast_loc(
+            ast.UnaryExpr(op=expr.op, operand=_desugar_expr(expr.operand)),
+            expr,
+        )
+    if isinstance(expr, ast.CallExpr):
+        return _attach_ast_loc(
+            ast.CallExpr(callee=_desugar_expr(expr.callee), args=[_desugar_expr(a) for a in expr.args]),
+            expr,
+        )
+    if isinstance(expr, ast.LambdaExpr):
+        return _attach_ast_loc(
+            ast.LambdaExpr(params=expr.params, body=_desugar_expr(expr.body)),
+            expr,
+        )
+    if isinstance(expr, ast.IfExpr):
+        return _attach_ast_loc(
+            ast.IfExpr(
+                condition=_desugar_expr(expr.condition),
+                then_branch=_desugar_expr(expr.then_branch),
+                else_branch=_desugar_expr(expr.else_branch),
+            ),
+            expr,
+        )
+    if isinstance(expr, ast.MatchExpr):
+        return _attach_ast_loc(
+            ast.MatchExpr(
+                scrutinee=_desugar_expr(expr.scrutinee),
+                branches=[
+                    _attach_ast_loc(
+                        ast.MatchBranch(pattern=b.pattern, value=_desugar_expr(b.value)),
+                        b,
+                    )
+                    for b in expr.branches
+                ],
+            ),
+            expr,
+        )
+    if isinstance(expr, ast.DoExpr):
+        rewritten: list[ast.DoStep] = []
+        for step in expr.steps:
+            if isinstance(step, ast.DoBindStep):
+                s = _attach_ast_loc(ast.DoBindStep(pattern=step.pattern, value=_desugar_expr(step.value)), step)
+                if hasattr(step, "_do_family"):
+                    setattr(s, "_do_family", getattr(step, "_do_family"))
+                rewritten.append(s)
+            elif isinstance(step, ast.DoLetStep):
+                rewritten.append(_attach_ast_loc(ast.DoLetStep(name=step.name, value=_desugar_expr(step.value)), step))
+            elif isinstance(step, ast.DoExprStep):
+                rewritten.append(_attach_ast_loc(ast.DoExprStep(value=_desugar_expr(step.value)), step))
+            else:
+                rewritten.append(step)
+        return _attach_ast_loc(ast.DoExpr(steps=rewritten), expr)
+    # Unrecognized: return unchanged
+    return expr
+
+
+def desugar_string_templates_in_program(program: ast.Program) -> None:
+    """In-place desugar all StringTemplateExpr nodes in the program."""
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            decl.body = _desugar_expr(decl.body)
+        elif isinstance(decl, ast.LetDecl):
+            decl.value = _desugar_expr(decl.value)
+        elif isinstance(decl, ast.InstanceDecl):
+            for method in decl.methods:
+                method.body = _desugar_expr(method.body)
 
 
 def _core_pattern_to_ast(pattern: core.Pattern) -> ast.Pattern:
@@ -225,6 +396,8 @@ def _surface_expr_to_core(expr: ast.Expr) -> core.Expr:
         )
     if isinstance(expr, ast.DoExpr):
         return elaborate_expr_to_core(expr)
+    if isinstance(expr, ast.StringTemplateExpr):
+        return _surface_expr_to_core(desugar_string_template_expr(expr))
     raise ElaborateError(f"Unsupported surface expr {type(expr).__name__}")
 
 

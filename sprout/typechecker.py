@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 from . import ast
+from .elaborate import desugar_string_templates_in_program
 
 
 class TypeCheckError(ValueError):
@@ -1868,6 +1869,7 @@ def typecheck_program(
     program: ast.Program,
     seed_env: "dict[str, Scheme] | None" = None,
 ) -> dict[str, str]:
+    desugar_string_templates_in_program(program)
     _expand_type_aliases_in_program(program)
     state = InferState()
     type_decls = build_type_decls(program)
@@ -1954,6 +1956,7 @@ def typecheck_program(
         "int_range_end": Scheme(vars=(), type=TFunc(INT_RANGE, INT)),
         "int_to_string": Scheme(vars=(), type=TFunc(INT, STRING)),
         "str_concat": Scheme(vars=(), type=TFunc(STRING, TFunc(STRING, STRING))),
+        "string_concat_many": Scheme(vars=(), type=TFunc(TApp(TConst("List"), STRING), STRING)),
         "str_len": Scheme(vars=(), type=TFunc(STRING, INT)),
         "str_slice": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TFunc(INT, STRING)))),
         "str_char_at": Scheme(vars=(), type=TFunc(STRING, TFunc(INT, TApp(maybe_type, CHAR)))),
