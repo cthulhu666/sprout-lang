@@ -4,6 +4,8 @@ import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
 import stdlib.compiler.infer as infer
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.source as source
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # CheckResult — the output of the Sprout-owned checker seam
@@ -46,7 +48,8 @@ export fn check_program(prog: ast.Program) -> CheckResult !{IO} =
 export fn check_program_with_env(prog: ast.Program, extra: List (String, types.Scheme)) -> CheckResult !{IO} =
   do
     state <- unifier.new_state()
-    match prog with
+    let desugared = desugar_program(prog)
+    match desugared with
     | ast.Program decls _ ->
         do
           r <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
@@ -59,9 +62,175 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
 export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
     state <- unifier.new_state()
-    match prog with
+    let desugared = desugar_program(prog)
+    match desugared with
     | ast.Program decls _ ->
         infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+
+# ---------------------------------------------------------------------------
+# String template desugar pass
+# ---------------------------------------------------------------------------
+#
+# Rewrites all StringTemplateExpr nodes in a Program before typechecking.
+# This mirrors Python's desugar_string_templates_in_program in elaborate.py.
+# Lowering rules (must match Python exactly for parity):
+#   empty              → StringExpr("")
+#   all-literal        → StringExpr(merged_text)
+#   single effective part → that part's expr directly (to_string or StringExpr)
+#   general            → string_concat_many(Cons(p0, Cons(p1, ... Nil)))
+# Each interp part is wrapped in to_string(expr).
+# Empty literal segments are skipped from the parts list.
+
+fn desugar_program(prog: ast.Program) -> ast.Program =
+  match prog with
+  | ast.Program decls pos -> ast.Program(desugar_decls(decls), pos)
+
+fn desugar_decls(decls: List ast.Decl) -> List ast.Decl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> Cons(desugar_decl(d), desugar_decls(rest))
+
+fn desugar_decl(d: ast.Decl) -> ast.Decl =
+  match d with
+  | ast.FnDecl name params ret effs constraints body pos ->
+      ast.FnDecl(name, params, ret, effs, constraints, desugar_expr(body), pos)
+  | ast.LetDecl name body pos ->
+      ast.LetDecl(name, desugar_expr(body), pos)
+  | ast.InstanceDecl constraint inst_constraints methods pos ->
+      ast.InstanceDecl(constraint, inst_constraints, desugar_instance_methods(methods), pos)
+  | _ -> d
+
+fn desugar_instance_methods(methods: List ast.InstanceMethodImpl) -> List ast.InstanceMethodImpl =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest -> Cons(desugar_instance_method(m), desugar_instance_methods(rest))
+
+fn desugar_instance_method(m: ast.InstanceMethodImpl) -> ast.InstanceMethodImpl =
+  match m with
+  | ast.InstanceMethodImpl name params ret effs body ->
+      ast.InstanceMethodImpl(name, params, ret, effs, desugar_expr(body))
+
+fn desugar_expr(expr: ast.Expr) -> ast.Expr =
+  match expr with
+  | ast.StringTemplateExpr parts pos ->
+      desugar_template(parts, pos)
+  | ast.IfExpr cond then_ else_ pos ->
+      ast.IfExpr(desugar_expr(cond), desugar_expr(then_), desugar_expr(else_), pos)
+  | ast.CallExpr callee args pos ->
+      ast.CallExpr(desugar_expr(callee), desugar_exprs(args), pos)
+  | ast.MatchExpr scrut branches pos ->
+      ast.MatchExpr(desugar_expr(scrut), desugar_branches(branches), pos)
+  | ast.TupleExpr elems pos ->
+      ast.TupleExpr(desugar_exprs(elems), pos)
+  | ast.BinaryExpr op left right pos ->
+      ast.BinaryExpr(op, desugar_expr(left), desugar_expr(right), pos)
+  | ast.UnaryExpr op operand pos ->
+      ast.UnaryExpr(op, desugar_expr(operand), pos)
+  | ast.LambdaExpr params body pos ->
+      ast.LambdaExpr(params, desugar_expr(body), pos)
+  | ast.DoExpr steps pos ->
+      ast.DoExpr(desugar_do_steps(steps), pos)
+  | ast.RecordExpr type_name fields pos ->
+      ast.RecordExpr(type_name, desugar_record_fields(fields), pos)
+  | ast.GetFieldExpr rec_expr field_name pos ->
+      ast.GetFieldExpr(desugar_expr(rec_expr), field_name, pos)
+  | ast.IntRangeExpr lo hi pos ->
+      ast.IntRangeExpr(desugar_expr(lo), desugar_expr(hi), pos)
+  | _ -> expr
+
+fn desugar_exprs(exprs: List ast.Expr) -> List ast.Expr =
+  match exprs with
+  | Nil -> Nil
+  | Cons e rest -> Cons(desugar_expr(e), desugar_exprs(rest))
+
+fn desugar_branches(branches: List ast.MatchBranch) -> List ast.MatchBranch =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          Cons(ast.MatchBranch(pat, desugar_expr(body)), desugar_branches(rest))
+
+fn desugar_do_steps(steps: List ast.DoStep) -> List ast.DoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> Cons(desugar_do_step(s), desugar_do_steps(rest))
+
+fn desugar_do_step(s: ast.DoStep) -> ast.DoStep =
+  match s with
+  | ast.DoBindStep pat value -> ast.DoBindStep(pat, desugar_expr(value))
+  | ast.DoLetStep name value -> ast.DoLetStep(name, desugar_expr(value))
+  | ast.DoExprStep value -> ast.DoExprStep(desugar_expr(value))
+
+fn desugar_record_fields(fields: List ast.RecordField) -> List ast.RecordField =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordField name value ->
+          Cons(ast.RecordField(name, desugar_expr(value)), desugar_record_fields(rest))
+
+# Lowering for a single StringTemplateExpr.
+fn desugar_template(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> ast.Expr =
+  if list_length(parts) == 0 then
+    ast.StringExpr("", pos)
+  else if all_lit_parts(parts) then
+    ast.StringExpr(merge_lit_parts(parts, ""), pos)
+  else
+    desugar_template_general(collect_effective_parts(parts, pos), pos)
+
+fn desugar_template_general(effective: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  if list_length(effective) == 1 then
+    match effective with
+    | Cons single _ -> single
+    | Nil -> ast.StringExpr("", pos)
+  else
+    ast.CallExpr(
+      ast.VarExpr("string_concat_many", pos),
+      Cons(build_cons_list(effective, pos), Nil),
+      pos
+    )
+
+fn all_lit_parts(parts: List ast.TemplateExprPart) -> Bool =
+  match parts with
+  | Nil -> true
+  | Cons p rest ->
+      match p with
+      | ast.LitPart _ -> all_lit_parts(rest)
+      | ast.InterpPart _ -> false
+
+fn merge_lit_parts(parts: List ast.TemplateExprPart, acc: String) -> String =
+  match parts with
+  | Nil -> acc
+  | Cons p rest ->
+      match p with
+      | ast.LitPart text -> merge_lit_parts(rest, string.concat(acc, text))
+      | ast.InterpPart _ -> merge_lit_parts(rest, acc)
+
+# Build the list of effective (non-empty) part expressions.
+fn collect_effective_parts(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> List ast.Expr =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart text ->
+          if str_len(text) == 0 then collect_effective_parts(rest, pos)
+          else Cons(ast.StringExpr(text, pos), collect_effective_parts(rest, pos))
+      | ast.InterpPart inner_expr ->
+          Cons(
+            ast.CallExpr(ast.VarExpr("to_string", pos), Cons(desugar_expr(inner_expr), Nil), pos),
+            collect_effective_parts(rest, pos)
+          )
+
+fn build_cons_list(exprs: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match exprs with
+  | Nil -> ast.VarExpr("Nil", pos)
+  | Cons e rest ->
+      ast.CallExpr(
+        ast.VarExpr("Cons", pos),
+        Cons(e, Cons(build_cons_list(rest, pos), Nil)),
+        pos
+      )
 
 # ---------------------------------------------------------------------------
 # dump_typed_names — parity-test output renderer

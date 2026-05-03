@@ -128,12 +128,23 @@ fn dump_param_list(params: List ast.Param) -> List String =
 # ---------------------------------------------------------------------------
 # Expressions
 
+fn dump_template_part(p: ast.TemplateExprPart) -> String =
+  match p with
+  | ast.LitPart text -> sexp("lit-part", Cons(q(text), Nil))
+  | ast.InterpPart expr -> sexp("interp-part", Cons(dump_expr(expr), Nil))
+
+fn dump_template_parts(parts: List ast.TemplateExprPart) -> List String =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest -> Cons(dump_template_part(p), dump_template_parts(rest))
+
 fn dump_expr(e: ast.Expr) -> String =
   match e with
   | ast.VarExpr name _ -> sexp("var", Cons(q(name), Nil))
   | ast.IntExpr n _ -> sexp("int", Cons(int_to_string(n), Nil))
   | ast.BoolExpr b _ -> sexp("bool", Cons(bool_str(b), Nil))
   | ast.StringExpr s _ -> sexp("string", Cons(q(s), Nil))
+  | ast.StringTemplateExpr parts _ -> sexp("template-expr", dump_template_parts(parts))
   | ast.CharExpr ch _ -> sexp("char", Cons(q(char_to_string(ch)), Nil))
   | ast.UnitExpr _ -> "(unit)"
   | ast.TupleExpr items _ -> sexp("tuple", dump_exprs(items))

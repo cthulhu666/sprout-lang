@@ -1,0 +1,5 @@
+fn greet(name: String) -> String =
+  `hello ${name}!`
+
+fn main() -> Unit !{IO} =
+  print(greet("world"))

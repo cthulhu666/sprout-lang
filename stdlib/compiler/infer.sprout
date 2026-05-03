@@ -350,6 +350,8 @@ export fn infer_expr(
   | ast.GetFieldExpr rec_expr field_name pos ->
       infer_get_field(state, env, subst, eff_subst, rec_expr, field_name, pos)
   | ast.IntRangeExpr lo hi pos -> infer_range(state, env, subst, eff_subst, lo, hi, pos)
+  | ast.StringTemplateExpr _ pos ->
+      InferErr("Internal error: StringTemplateExpr reached inference; desugar pass should have eliminated it")
 
 # --- Variable ---
 

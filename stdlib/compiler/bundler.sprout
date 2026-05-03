@@ -895,6 +895,17 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
       ast.RecordExpr(qualify_type_name(ctx, type_name), qualify_record_fields(ctx, scope, fields), pos)
   | ast.GetFieldExpr record field_name pos ->
       ast.GetFieldExpr(qualify_expr(ctx, scope, record), field_name, pos)
+  | ast.StringTemplateExpr parts pos ->
+      ast.StringTemplateExpr(qualify_template_parts(ctx, scope, parts), pos)
+
+fn qualify_template_parts(ctx: ResolveCtx, scope: List String, parts: List ast.TemplateExprPart) -> List ast.TemplateExprPart =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart text -> Cons(ast.LitPart(text), qualify_template_parts(ctx, scope, rest))
+      | ast.InterpPart expr ->
+          Cons(ast.InterpPart(qualify_expr(ctx, scope, expr)), qualify_template_parts(ctx, scope, rest))
 
 fn qualify_class_methods(ctx: ResolveCtx, methods: List ast.ClassMethodSig) -> List ast.ClassMethodSig =
   match methods with

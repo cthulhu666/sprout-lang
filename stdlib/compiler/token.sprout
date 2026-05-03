@@ -9,6 +9,11 @@ export type TokenKind (..) =
   | TokenStringKind
   | TokenSymbolKind
   | TokenEofKind
+  | TokenTemplateStart
+  | TokenTemplateLit
+  | TokenTemplateInterpStart
+  | TokenTemplateInterpEnd
+  | TokenTemplateEnd
 
 export type Token (..) =
   | Token TokenKind String source.SourcePos

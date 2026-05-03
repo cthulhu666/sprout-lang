@@ -60,6 +60,31 @@ fn tok_is_char(t: token.Token) -> Bool =
   | token.TokenCharKind -> true
   | _ -> false
 
+fn tok_is_template_start(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenTemplateStart -> true
+  | _ -> false
+
+fn tok_is_template_lit(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenTemplateLit -> true
+  | _ -> false
+
+fn tok_is_template_interp_start(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenTemplateInterpStart -> true
+  | _ -> false
+
+fn tok_is_template_interp_end(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenTemplateInterpEnd -> true
+  | _ -> false
+
+fn tok_is_template_end(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenTemplateEnd -> true
+  | _ -> false
+
 fn match_keyword(tokens: Vec token.Token, i: Int, kw: String) -> Maybe (token.Token, Int) =
   if tok_is_keyword(tok_at(tokens, i), kw) then Just((tok_at(tokens, i), i + 1))
   else Nothing
@@ -334,7 +359,8 @@ fn looks_like_do_step_start(tokens: Vec token.Token, i: Int) -> Bool =
   tok_is_symbol(tok_at(tokens, i), "[") ||
   tok_is_symbol(tok_at(tokens, i), "{") ||
   tok_is_symbol(tok_at(tokens, i), "(") ||
-  tok_is_symbol(tok_at(tokens, i), "-")
+  tok_is_symbol(tok_at(tokens, i), "-") ||
+  tok_is_template_start(tok_at(tokens, i))
 
 fn update_bracket_depth(t: token.Token, depth: Int) -> Int =
   if tok_is_symbol(t, "(") || tok_is_symbol(t, "[") || tok_is_symbol(t, "{") then depth + 1
@@ -630,6 +656,7 @@ fn parse_primary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
     Ok((ast.CharExpr(string.char_at_or(token.token_text(tok_at(tokens, i)), 0, '?'), cur_pos(tokens, i)), i + 1))
   else if tok_is_string(tok_at(tokens, i)) then
     Ok((ast.StringExpr(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
+  else if tok_is_template_start(tok_at(tokens, i)) then parse_template(tokens, i)
   else if tok_is_symbol(tok_at(tokens, i), "\\") then parse_lambda(tokens, i)
   else if tok_is_symbol(tok_at(tokens, i), "[") then parse_list_literal(tokens, i)
   else if tok_is_symbol(tok_at(tokens, i), "{") then parse_dict_literal(tokens, i)
@@ -649,6 +676,28 @@ fn parse_primary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
       string.concat("Expected expression at ", string.concat(pos_str(cur_pos(tokens, i)), string.concat(", got ", token.token_text(tok_at(tokens, i))))),
       cur_pos(tokens, i)
     ))
+
+fn parse_template(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- if tok_is_template_start(tok_at(tokens, i)) then Ok((tok_at(tokens, i), i + 1))
+               else Err(ParseError(string.concat("Expected template start at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+    (parts, i3) <- collect_template_parts(tokens, i2, Nil)
+    Ok((ast.StringTemplateExpr(list_reverse(parts), cur_pos(tokens, i)), i3))
+
+fn collect_template_parts(tokens: Vec token.Token, i: Int, acc: List ast.TemplateExprPart) -> Result ParseError (List ast.TemplateExprPart, Int) =
+  if tok_is_template_end(tok_at(tokens, i)) then
+    Ok((acc, i + 1))
+  else if tok_is_template_lit(tok_at(tokens, i)) then
+    collect_template_parts(tokens, i + 1, Cons(ast.LitPart(token.token_text(tok_at(tokens, i))), acc))
+  else if tok_is_template_interp_start(tok_at(tokens, i)) then
+    do
+      (expr, i2) <- parse_expr(tokens, i + 1)
+      if tok_is_template_interp_end(tok_at(tokens, i2)) then
+        collect_template_parts(tokens, i2 + 1, Cons(ast.InterpPart(expr), acc))
+      else
+        Err(ParseError(string.concat("Expected template interp end at ", pos_str(cur_pos(tokens, i2))), cur_pos(tokens, i2)))
+  else
+    Err(ParseError(string.concat("Expected template part at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
 
 fn parse_lambda(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
