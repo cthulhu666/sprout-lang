@@ -90,7 +90,7 @@ export type TcoCtx (..) =
 # all_defs  — completed function/lambda definitions (reversed)
 # str_glbs  — string literal global declarations (reversed)
 # fn_wrap   — dict of top-level fn_name → wrapper_fn_name
-# cur_blk   — name of the current basic block (Nothing before first label)
+# cur_blk   — name of the current basic block (NoBlk before first label)
 # next_tmp  — counter for fresh SSA names (%t0, %t1, ...)
 # next_blk  — counter for fresh block labels
 # next_str  — counter for string literal globals (@.str.0, ...)
@@ -101,13 +101,19 @@ type EmitterState =
       (Ref (List String))   # all_defs
       (Ref (List String))   # str_glbs
       (Ref (Dict String))   # fn_wrap
-      (Ref String)          # cur_blk  ("" = no current block)
+      (Ref CurBlk)          # cur_blk  (NoBlk = no current block)
       (Ref Int)             # next_tmp
       (Ref Int)             # next_blk
       (Ref Int)             # next_str
       (Ref Int)             # next_lam
 
 type alias Emitter = EmitterState
+
+# Encodes the current basic block name.  A dedicated ADT avoids the do-bind
+# monadic-unwrap rule that applies to Maybe/Result.
+type CurBlk =
+  | NoBlk
+  | SomeBlk String
 
 # ---------------------------------------------------------------------------
 # Codegen context (read-only, passed through all emit calls)
@@ -359,7 +365,7 @@ fn es_str_glbs_ref(s: EmitterState) -> Ref (List String) =
 fn es_fn_wrap_ref(s: EmitterState) -> Ref (Dict String) =
   match s with | EmitterState _ _ _ fw _ _ _ _ _ -> fw
 
-fn es_cur_blk_ref(s: EmitterState) -> Ref String =
+fn es_cur_blk_ref(s: EmitterState) -> Ref CurBlk =
   match s with | EmitterState _ _ _ _ cb _ _ _ _ -> cb
 
 fn es_next_tmp_ref(s: EmitterState) -> Ref Int =
@@ -388,13 +394,8 @@ fn es_str_glbs(s: EmitterState) -> List String !{IO} =
 fn es_fn_wrap(s: EmitterState) -> Dict String !{IO} =
   ref_read(es_fn_wrap_ref(s))
 
-fn es_cur_blk_raw(s: EmitterState) -> String !{IO} =
+fn es_cur_blk(s: EmitterState) -> CurBlk !{IO} =
   ref_read(es_cur_blk_ref(s))
-
-# Convert the raw cur_blk string (empty = no block) to Maybe String.
-fn cur_blk_as_maybe(raw: String) -> Maybe String =
-  if str_len(raw) == 0 then Nothing
-  else Just(raw)
 
 fn es_next_tmp(s: EmitterState) -> Int !{IO} =
   ref_read(es_next_tmp_ref(s))
@@ -416,7 +417,7 @@ fn es_add_line(em: Emitter, line: String) -> Unit !{IO} =
     cur <- ref_read(r)
     ref_write(r, Cons(line, cur))
 
-fn es_set_cur_blk(em: Emitter, blk: String) -> Unit !{IO} =
+fn es_set_cur_blk(em: Emitter, blk: CurBlk) -> Unit !{IO} =
   ref_write(es_cur_blk_ref(em), blk)
 
 fn es_bump_tmp(em: Emitter) -> Unit !{IO} =
@@ -464,9 +465,9 @@ fn es_set_fn_wrap(em: Emitter, fn_n: String, wrap_n: String) -> Unit !{IO} =
 fn es_reset_body(em: Emitter) -> Unit !{IO} =
   do
     ref_write(es_body_ref(em), Nil)
-    ref_write(es_cur_blk_ref(em), "")
+    ref_write(es_cur_blk_ref(em), NoBlk)
 
-fn es_adopt_body(em: Emitter, lines: List String, blk: String) -> Unit !{IO} =
+fn es_adopt_body(em: Emitter, lines: List String, blk: CurBlk) -> Unit !{IO} =
   do
     ref_write(es_body_ref(em), lines)
     ref_write(es_cur_blk_ref(em), blk)
@@ -481,7 +482,7 @@ fn new_emitter() -> Emitter !{IO} =
     defs_ref <- ref_new(Nil)
     strs_ref <- ref_new(Nil)
     wrap_ref <- ref_new(dict_empty())
-    blk_ref  <- ref_new("")
+    blk_ref  <- ref_new(NoBlk)
     nt_ref   <- ref_new(0)
     nb_ref   <- ref_new(0)
     ns_ref   <- ref_new(0)
@@ -494,7 +495,7 @@ fn emit_line(em: Emitter, line: String) -> Unit !{IO} =
 fn emit_label(em: Emitter, name: String) -> Unit !{IO} =
   do
     es_add_line(em, name ++ ":")
-    es_set_cur_blk(em, name)
+    es_set_cur_blk(em, SomeBlk(name))
 
 fn fresh_tmp(em: Emitter) -> String !{IO} =
   do
@@ -533,13 +534,17 @@ fn set_fn_wrapper(em: Emitter, fn_n: String, wrap_n: String) -> Unit !{IO} =
 
 fn read_cur_blk(em: Emitter) -> Maybe String !{IO} =
   do
-    raw <- es_cur_blk_raw(em)
-    cur_blk_as_maybe(raw)
+    cb <- es_cur_blk(em)
+    match cb with
+    | NoBlk -> Nothing
+    | SomeBlk name -> Just(name)
 
 fn read_cur_blk_or(em: Emitter, default_blk: String) -> String !{IO} =
   do
-    raw <- es_cur_blk_raw(em)
-    if str_len(raw) == 0 then default_blk else raw
+    cb <- es_cur_blk(em)
+    match cb with
+    | NoBlk -> default_blk
+    | SomeBlk name -> name
 
 fn is_terminated(em: Emitter) -> Bool !{IO} =
   do
@@ -582,15 +587,15 @@ fn str_trim_spaces(s: String) -> String =
 
 # Save the current body lines, leaving em with an empty body.
 # Used when starting to build a lambda/wrapper function definition.
-fn save_body(em: Emitter) -> (List String, String) !{IO} =
+fn save_body(em: Emitter) -> (List String, CurBlk) !{IO} =
   do
     saved_lines <- es_body(em)
-    saved_blk   <- es_cur_blk_raw(em)
+    saved_blk   <- es_cur_blk(em)
     es_reset_body(em)
     (saved_lines, saved_blk)
 
 # Restore a previously-saved body into em.
-fn restore_body(em: Emitter, saved: (List String, String)) -> Unit !{IO} =
+fn restore_body(em: Emitter, saved: (List String, CurBlk)) -> Unit !{IO} =
   match saved with
   | (lines, blk) -> es_adopt_body(em, lines, blk)
 
@@ -914,14 +919,14 @@ fn emit_ctor_field_tests(args: List ast.Pattern, arg_lls: List String, handle: V
   match args with
   | Nil ->
       do
-        raw <- es_cur_blk_raw(em)
-        if str_len(raw) == 0 then miss_lbl else raw
+        cb <- es_cur_blk(em)
+        match cb with | NoBlk -> miss_lbl | SomeBlk name -> name
   | Cons arg rest_args ->
       match arg_lls with
       | Nil ->
           do
-            raw <- es_cur_blk_raw(em)
-            if str_len(raw) == 0 then miss_lbl else raw
+            cb <- es_cur_blk(em)
+            match cb with | NoBlk -> miss_lbl | SomeBlk name -> name
       | Cons arg_ll rest_lls ->
           do
             field <- emit_ctor_field(val_ir(handle), idx, arg_ll, em)
