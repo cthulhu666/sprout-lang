@@ -37,6 +37,7 @@ CORPUS = [
     "type_classes.spr",
     "where_clauses.spr",
     "poly_types.spr",
+    "string_template_basic.spr",
 ]
 
 # Known divergences between the Python and Sprout parsers.

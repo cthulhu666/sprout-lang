@@ -156,7 +156,17 @@ def dump_expr(e: ast.Expr) -> str:
         return sexp("record", [q(e.type_name)] + fields)
     if isinstance(e, ast.GetFieldExpr):
         return sexp("get-field", [dump_expr(e.record), q(e.field_name)])
+    if isinstance(e, ast.StringTemplateExpr):
+        return sexp("template-expr", [dump_template_part(p) for p in e.parts])
     raise ValueError(f"Unknown Expr: {type(e)}")
+
+
+def dump_template_part(p: ast.TemplateExprPart) -> str:
+    if isinstance(p, ast.LitPart):
+        return sexp("lit-part", [q(p.text)])
+    if isinstance(p, ast.InterpPart):
+        return sexp("interp-part", [dump_expr(p.expr)])
+    raise ValueError(f"Unknown TemplateExprPart: {type(p)}")
 
 
 def dump_branch(b: ast.MatchBranch) -> str:

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 
 from . import ast
-from .tokenizer import Token, tokenize
+from .tokenizer import Token, tokenize, TEMPLATE_START, TEMPLATE_LIT, TEMPLATE_INTERP_START, TEMPLATE_INTERP_END, TEMPLATE_END
 
 
 class ParseError(ValueError):
@@ -478,7 +478,7 @@ class Parser:
         return self._token_starts_expr(token)
 
     def _token_starts_expr(self, token: Token) -> bool:
-        if token.kind in {"IDENT", "INT", "STRING", "CHAR"}:
+        if token.kind in {"IDENT", "INT", "STRING", "CHAR", TEMPLATE_START}:
             return True
         if token.kind == "KEYWORD" and token.value in {"if", "match", "do", "true", "false"}:
             return True
@@ -750,6 +750,8 @@ class Parser:
                     open_tok,
                 )
             return out
+        if self.check(TEMPLATE_START):
+            return self.parse_template()
         if self.check("INT"):
             tok = self.advance()
             return self.mark(ast.IntExpr(value=int(tok.value)), tok)
@@ -795,6 +797,26 @@ class Parser:
             return self.mark(expr, open_tok)
         t = self.current()
         raise ParseError(f"Expected expression at {t.line}:{t.column}, got {t.kind} {t.value!r}")
+
+    def parse_template(self) -> ast.StringTemplateExpr:
+        start = self.expect(TEMPLATE_START)
+        parts: list[ast.TemplateExprPart] = []
+        while True:
+            if self.check(TEMPLATE_LIT):
+                tok = self.advance()
+                parts.append(ast.LitPart(text=tok.value))
+            elif self.check(TEMPLATE_INTERP_START):
+                self.advance()
+                expr = self.parse_expr()
+                self.expect(TEMPLATE_INTERP_END)
+                parts.append(ast.InterpPart(expr=expr))
+            elif self.check(TEMPLATE_END):
+                self.advance()
+                break
+            else:
+                t = self.current()
+                raise ParseError(f"Unexpected token inside template literal at {t.line}:{t.column}, got {t.kind} {t.value!r}")
+        return self.mark(ast.StringTemplateExpr(parts=parts), start)
 
     def parse_pattern(self):
         if self.match("IDENT", "_"):
