@@ -492,6 +492,15 @@ fn new_emitter() -> Emitter !{IO} =
 fn emit_line(em: Emitter, line: String) -> Unit !{IO} =
   es_add_line(em, line)
 
+# Emit a StringTemplate as a single body line.
+# Assembly joins body entries with "\n", so we must collapse all template
+# parts into one string before pushing — using string_concat_many (one
+# allocation per logical line, no ++ chains).
+fn emit_template(em: Emitter, t: StringTemplate) -> Unit !{IO} =
+  match t with
+  | StringTemplate parts ->
+      emit_line(em, string_concat_many(template_parts_to_strings(parts)))
+
 fn emit_label(em: Emitter, name: String) -> Unit !{IO} =
   do
     es_add_line(em, name ++ ":")

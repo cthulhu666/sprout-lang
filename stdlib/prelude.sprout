@@ -21,7 +21,7 @@ export fn template_to_string(t: StringTemplate) -> String =
   match t with
   | StringTemplate parts -> string_concat_many(template_parts_to_strings(parts))
 
-fn template_parts_to_strings(parts: List TemplatePart) -> List String =
+export fn template_parts_to_strings(parts: List TemplatePart) -> List String =
   match parts with
   | Nil -> Nil
   | Cons p rest ->
