@@ -683,7 +683,16 @@ export fn builtin_entries() -> List (String, types.Scheme) =
   raw_map_entries() ++
   raw_native_set_entries() ++
   raw_str_entries() ++
-  semigroup_markers()
+  semigroup_markers() ++
+  prelude_ext_entries() ++
+  io_extra_entries() ++
+  json_entries() ++
+  regex_ext_entries() ++
+  bytes_ext_entries() ++
+  crypto_ext_entries() ++
+  tcp_ext_entries() ++
+  http_ext_entries() ++
+  term_ext_entries()
 
 fn raw_range_entries() -> List (String, types.Scheme) =
   [ ("int_range",       bt_mono(bt_fn2(bt_int(), bt_int(), bt_intrange())))
@@ -867,4 +876,112 @@ fn string_module_entries() -> List (String, types.Scheme) =
   , ("string.is_ascii_digit",    bt_mono(bt_fn(bt_char(), bt_bool())))
   , ("string.is_ident_start",    bt_mono(bt_fn(bt_char(), bt_bool())))
   , ("string.is_ident_continue", bt_mono(bt_fn(bt_char(), bt_bool())))
+  ]
+
+# Prelude functions that stdlib modules use without an explicit import.
+# These are defined in stdlib/prelude.sprout but must be visible when the
+# module_loader checks stdlib/*.sprout files in isolation (no bundler step).
+# filter_own_pairs strips these from a module's own exports, so they don't
+# pollute the namespace.
+fn bt_pair(a: types.Type, b: types.Type) -> types.Type =
+  types.TTuple(Cons(a, Cons(b, Nil)))
+
+fn prelude_ext_entries() -> List (String, types.Scheme) =
+  [ ("dict_entries",   bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_pair(bt_str(), bt_v())))))
+  , ("dict_from_list", bt_poly1("v", bt_fn(bt_list(bt_pair(bt_str(), bt_v())), bt_dict(bt_v()))))
+  , ("vec_to_list",    bt_poly1("a", bt_fn(bt_vec_a(), bt_list(bt_a()))))
+  , ("vec_singleton",  bt_poly1("a", bt_fn(bt_a(), bt_vec_a())))
+  , ("vec_map",        bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_vec_a(), bt_vec(bt_b()))))
+  , ("vec_fold",       bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_vec_a(), bt_b())))
+  , ("vec_filter",     bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_vec_a())))
+  , ("vec_reverse",    bt_poly1("a", bt_fn(bt_vec_a(), bt_vec_a())))
+  , ("vec_any",        bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_bool())))
+  , ("vec_all",        bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_bool())))
+  , ("vec_count",      bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_int())))
+  , ("vec_sum",        bt_mono(bt_fn(bt_vec(bt_int()), bt_int())))
+  , ("vec_sum_by",     bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_int()), bt_vec_a(), bt_int())))
+  , ("vec_filter_map", bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_maybe(bt_b())), bt_vec_a(), bt_vec(bt_b()))))
+  , ("pipe",           bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_a(), bt_b())))
+  , ("list_length",    bt_poly1("a", bt_fn(bt_list(bt_a()), bt_int())))
+  , ("fold",           bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_list(bt_a()), bt_b())))
+  , ("map",            bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_list(bt_a()), bt_list(bt_b()))))
+  , ("split_ints",     bt_mono(bt_fn(bt_str(), bt_list(bt_int()))))
+  ]
+
+fn bt_bytes()   -> types.Type = types.TConst("Bytes")
+fn bt_builder() -> types.Type = types.TConst("Builder")
+
+fn io_extra_entries() -> List (String, types.Scheme) =
+  [ ("print_int",      bt_mono(bt_io(bt_int(), bt_int())))
+  , ("read_lines",     bt_mono(bt_io(bt_str(), bt_list(bt_str()))))
+  , ("read_int_lines", bt_mono(bt_io(bt_str(), bt_vector(bt_int()))))
+  , ("env_get",        bt_mono(bt_io(bt_str(), bt_maybe(bt_str()))))
+  ]
+
+fn json_entries() -> List (String, types.Scheme) =
+  [ ("json_parse",     bt_mono(bt_fn(bt_str(), bt_result(types.TConst("stdlib.json.JsonError"), types.TConst("stdlib.json.Json")))))
+  , ("json_stringify", bt_mono(bt_fn(types.TConst("stdlib.json.Json"), bt_str())))
+  ]
+
+fn regex_ext_entries() -> List (String, types.Scheme) =
+  [ ("regex_validate",            bt_mono(bt_fn(bt_str(), bt_result(bt_str(), bt_unit()))))
+  , ("regex_is_match",            bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
+  , ("regex_find_range",          bt_mono(bt_fn2(bt_str(), bt_str(), bt_maybe(bt_intrange()))))
+  , ("regex_replace_all_literal", bt_mono(bt_fn3(bt_str(), bt_str(), bt_str(), bt_str())))
+  , ("regex_escape",              bt_mono(bt_fn(bt_str(), bt_str())))
+  ]
+
+fn bytes_ext_entries() -> List (String, types.Scheme) =
+  [ ("bytes_empty",          bt_mono(bt_bytes()))
+  , ("bytes_length",         bt_mono(bt_fn(bt_bytes(), bt_int())))
+  , ("bytes_get",            bt_mono(bt_fn2(bt_bytes(), bt_int(), bt_maybe(bt_int()))))
+  , ("bytes_slice",          bt_mono(bt_fn3(bt_bytes(), bt_int(), bt_int(), bt_bytes())))
+  , ("bytes_append",         bt_mono(bt_fn2(bt_bytes(), bt_bytes(), bt_bytes())))
+  , ("bytes_singleton",      bt_mono(bt_fn(bt_int(), bt_bytes())))
+  , ("bytes_from_utf8",      bt_mono(bt_fn(bt_str(), bt_bytes())))
+  , ("bytes_to_utf8",        bt_mono(bt_fn(bt_bytes(), bt_result(types.TConst("stdlib.bytes.Utf8Error"), bt_str()))))
+  , ("bytes_builder_empty",  bt_mono(bt_builder()))
+  , ("bytes_builder_bytes",  bt_mono(bt_fn(bt_bytes(), bt_builder())))
+  , ("bytes_builder_byte",   bt_mono(bt_fn(bt_int(), bt_builder())))
+  , ("bytes_builder_u16_be", bt_mono(bt_fn(bt_int(), bt_builder())))
+  , ("bytes_builder_u32_be", bt_mono(bt_fn(bt_int(), bt_builder())))
+  , ("bytes_builder_append", bt_mono(bt_fn2(bt_builder(), bt_builder(), bt_builder())))
+  , ("bytes_builder_build",  bt_mono(bt_fn(bt_builder(), bt_bytes())))
+  ]
+
+fn crypto_ext_entries() -> List (String, types.Scheme) =
+  [ ("crypto_sha256",        bt_mono(bt_fn(bt_bytes(), bt_bytes())))
+  , ("crypto_hmac_sha256",   bt_mono(bt_fn2(bt_bytes(), bt_bytes(), bt_bytes())))
+  , ("crypto_base64_encode", bt_mono(bt_fn(bt_bytes(), bt_str())))
+  , ("crypto_base64_decode", bt_mono(bt_fn(bt_str(), bt_result(types.TConst("stdlib.crypto.Base64Error"), bt_bytes()))))
+  , ("crypto_bytes_xor",     bt_mono(bt_fn2(bt_bytes(), bt_bytes(), bt_result(types.TConst("stdlib.crypto.BytesOpError"), bt_bytes()))))
+  , ("crypto_random_bytes",  bt_mono(bt_io(bt_int(), bt_result(types.TConst("stdlib.crypto.CryptoError"), bt_bytes()))))
+  ]
+
+fn tcp_ext_entries() -> List (String, types.Scheme) =
+  [ ("tcp_listen",         bt_mono(bt_io(bt_int(), bt_int())))
+  , ("tcp_accept",         bt_mono(bt_io(bt_int(), bt_int())))
+  , ("tcp_read",           bt_mono(bt_io(bt_int(), bt_str())))
+  , ("tcp_write",          bt_mono(bt_fn(bt_int(), bt_io(bt_str(), bt_unit()))))
+  , ("tcp_connect",        bt_mono(bt_fn(bt_str(), bt_io(bt_int(), bt_result(types.TConst("stdlib.net.TcpError"), bt_int())))))
+  , ("tcp_read_exact",     bt_mono(bt_fn(bt_int(), bt_io(bt_int(), bt_result(types.TConst("stdlib.net.TcpError"), bt_bytes())))))
+  , ("tcp_write_all",      bt_mono(bt_fn(bt_int(), bt_io(bt_bytes(), bt_result(types.TConst("stdlib.net.TcpError"), bt_int())))))
+  , ("tcp_close",          bt_mono(bt_io(bt_int(), bt_unit())))
+  , ("tcp_close_listener", bt_mono(bt_io(bt_int(), bt_unit())))
+  , ("tcp_echo_serve",     bt_mono(bt_fn(bt_int(), bt_io(bt_int(), bt_unit()))))
+  ]
+
+fn http_ext_entries() -> List (String, types.Scheme) =
+  [ ("http_request", bt_mono(bt_fn(bt_str(), bt_fn(bt_str(), bt_fn(bt_str(), bt_fn(bt_str(), bt_io(bt_int(), bt_result(types.TConst("stdlib.http.HttpError"), types.TConst("stdlib.http.HttpResponse")))))))))
+  ]
+
+fn term_ext_entries() -> List (String, types.Scheme) =
+  [ ("term_clear",          bt_mono(bt_io(bt_unit(), bt_unit())))
+  , ("term_move",           bt_mono(bt_fn(bt_int(), bt_io(bt_int(), bt_unit()))))
+  , ("term_hide_cursor",    bt_mono(bt_io(bt_unit(), bt_unit())))
+  , ("term_show_cursor",    bt_mono(bt_io(bt_unit(), bt_unit())))
+  , ("term_read_key",       bt_mono(bt_io(bt_unit(), bt_str())))
+  , ("term_read_line",      bt_mono(bt_io(bt_unit(), bt_maybe(bt_str()))))
+  , ("term_is_interactive", bt_mono(bt_io(bt_unit(), bt_bool())))
+  , ("term_write",          bt_mono(bt_io(bt_str(), bt_unit())))
   ]

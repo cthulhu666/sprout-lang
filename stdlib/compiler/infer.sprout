@@ -1723,11 +1723,9 @@ fn typecheck_decl(
         match r with
         | typed_ast.BodyErr e -> TypedDeclErr(e)
         | typed_ast.BodyLenient ->
-            TypedDeclOk(
-              typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints,
-                                dummy_unit()),
-              register_constrained_fn_markers(name, constraints,
-                dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
+            # BodyLenient is no longer produced (fn_body_err always returns BodyErr).
+            # Retained as a constructor only to avoid breaking the typed_ast public API.
+            TypedDeclErr("internal: unexpected BodyLenient in " ++ name)
         | typed_ast.BodyOk typed_body ->
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
@@ -1800,10 +1798,13 @@ fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env:
   )
 
 fn fn_body_err(name: String, msg: String) -> typed_ast.BodyResult =
+  # Previously: if `is_unknown_ref(msg)` returned BodyLenient, which caused
+  # `typecheck_decl` to silently substitute a `dummy_unit()` body and continue.
+  # That masked real bugs (e.g. unresolved class-method references like
+  # `__unresolved_Semigroup_a`) and produced misleading downstream errors.
+  # All Unknown-variable / Unknown-constructor errors are now hard errors.
   if str_starts_with(name, "stdlib.compiler.")
   then typed_ast.BodyErr("[DIAG] " ++ msg ++ " in function " ++ name)
-  else if is_unknown_ref(msg)
-  then typed_ast.BodyLenient
   else typed_ast.BodyErr(msg ++ " in function " ++ name)
 
 fn is_unknown_ref(msg: String) -> Bool =
@@ -1949,7 +1950,7 @@ fn check_instance_method(
                   typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, typed_body))
 
 fn instance_method_err(name: String, msg: String) -> InstanceMethodResult =
-  if is_unknown_ref(msg)
-  then InstanceMethodOk(
-    typed_ast.TypedInstanceMethod(name, Nil, Nothing, Nothing, dummy_unit()))
-  else InstanceMethodErr(msg ++ " in instance method " ++ name)
+  # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
+  # method on Unknown-variable / Unknown-constructor errors. Now hard error,
+  # matching the change to `fn_body_err`.
+  InstanceMethodErr(msg ++ " in instance method " ++ name)

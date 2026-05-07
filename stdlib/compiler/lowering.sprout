@@ -28,7 +28,8 @@ export fn lower_program(prog: typed_ast.TypedProgram) -> LowerResult =
 fn lower_program_decls(decls: List typed_ast.TypedDecl) -> LowerResult =
   match lower_decls(decls,
                     LowerEnv(collect_class_order(decls, dict_empty()),
-                             collect_instance_table(decls, dict_empty())),
+                             collect_instance_table(decls, dict_empty()),
+                             collect_super_map(decls, dict_empty())),
                     Nil, Nil, Nil) with
   | (user_rev, wrapper_rev, inst_rev) ->
       LowerOk(ast.Program(
@@ -44,30 +45,38 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl) -> LowerResult =
 # LowerEnv: global information collected from the typed program.
 #   class_order  – class_name → [method_names in declaration order]
 #   inst_table   – constraint_key → { method_name → instance_fn_name }
+#   super_map    – class_name → [direct superclass names in declaration order]
 type LowerEnv =
-  | LowerEnv (Dict (List String)) (Dict (Dict String))
+  | LowerEnv (Dict (List String)) (Dict (Dict String)) (Dict (List String))
 
 # LowerCtx: per-function context passed during expression lowering.
 #   class_order – inherited from LowerEnv
 #   fwd_methods – constraint_key → { method_name → hidden_param_name }  (forwarded)
 #   inst_table  – constraint_key → { method_name → instance_fn_name }   (concrete)
+#   super_map   – class_name → [direct superclass names]
 type LowerCtx =
-  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String))
+  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String))
 
 fn env_class_order(env: LowerEnv) -> Dict (List String) =
-  match env with | LowerEnv co _ -> co
+  match env with | LowerEnv co _ _ -> co
 
 fn env_inst_table(env: LowerEnv) -> Dict (Dict String) =
-  match env with | LowerEnv _ it -> it
+  match env with | LowerEnv _ it _ -> it
+
+fn env_super_map(env: LowerEnv) -> Dict (List String) =
+  match env with | LowerEnv _ _ sm -> sm
 
 fn ctx_class_order(ctx: LowerCtx) -> Dict (List String) =
-  match ctx with | LowerCtx co _ _ -> co
+  match ctx with | LowerCtx co _ _ _ -> co
 
 fn ctx_fwd(ctx: LowerCtx) -> Dict (Dict String) =
-  match ctx with | LowerCtx _ fwd _ -> fwd
+  match ctx with | LowerCtx _ fwd _ _ -> fwd
 
 fn ctx_inst(ctx: LowerCtx) -> Dict (Dict String) =
-  match ctx with | LowerCtx _ _ inst -> inst
+  match ctx with | LowerCtx _ _ inst _ -> inst
+
+fn ctx_super_map(ctx: LowerCtx) -> Dict (List String) =
+  match ctx with | LowerCtx _ _ _ sm -> sm
 
 fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
@@ -97,6 +106,62 @@ fn extract_method_names_acc(methods: List ast.ClassMethodSig, acc: List String) 
       match sig with
       | ast.ClassMethodSig name _ _ _ ->
           extract_method_names_acc(rest, Cons(name, acc))
+
+# ---------------------------------------------------------------------------
+# Pass 1 – collect superclass map
+# ---------------------------------------------------------------------------
+#
+# class_name → list of direct superclass class names (in declaration order).
+# Used to expand transitive superclass dictionaries when lowering constraints.
+
+fn collect_super_map(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TPassThrough inner_decl ->
+          match inner_decl with
+          | ast.ClassDecl class_name _ _ supers _ ->
+              collect_super_map(rest, dict_set(class_name, extract_super_names(supers, Nil), acc))
+          | _ -> collect_super_map(rest, acc)
+      | _ -> collect_super_map(rest, acc)
+
+fn extract_super_names(supers: List ast.TypeConstraint, acc: List String) -> List String =
+  match supers with
+  | Nil -> list_reverse(acc)
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint super_name _ ->
+          extract_super_names(rest, Cons(super_name, acc))
+
+# Returns the class itself followed by all transitive superclasses in DFS order,
+# deduplicated.  Used to compute the ordered list of class names whose method
+# slots a constraint instance dictionary must populate.
+fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =
+  list_reverse(collect_supers_dfs(Cons(class_name, Nil), super_map, Nil))
+
+fn collect_supers_dfs(stack: List String, super_map: Dict (List String), visited: List String) -> List String =
+  match stack with
+  | Nil -> visited
+  | Cons name rest ->
+      if list_str_member(name, visited)
+      then collect_supers_dfs(rest, super_map, visited)
+      else collect_supers_dfs(prepend_supers(name, super_map, rest), super_map, Cons(name, visited))
+
+fn prepend_supers(name: String, super_map: Dict (List String), rest: List String) -> List String =
+  match dict_get(name, super_map) with
+  | Nothing -> rest
+  | Just supers -> append_str_list(supers, rest)
+
+fn append_str_list(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> ys
+  | Cons h t -> Cons(h, append_str_list(t, ys))
+
+fn list_str_member(x: String, xs: List String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons h rest -> if h == x then true else list_str_member(x, rest)
 
 # ---------------------------------------------------------------------------
 # Pass 1 – collect instance_table
@@ -161,7 +226,7 @@ fn lower_one_decl(
       # Generate class method dispatch wrappers; drop ClassDecl from output.
       | ast.ClassDecl class_name _ methods _ _ ->
           (user_rev,
-           prepend_decls(generate_class_wrappers(class_name, methods, env_class_order(env)), wrapper_rev),
+           prepend_decls(generate_class_wrappers(class_name, methods, env_class_order(env), env_super_map(env)), wrapper_rev),
            inst_rev)
       # Drop InstanceDecl — replaced by generated instance fns.
       | ast.InstanceDecl _ _ _ _ ->
@@ -173,7 +238,7 @@ fn lower_one_decl(
        wrapper_rev, inst_rev)
   | typed_ast.TLetDecl name body ->
       (Cons(ast.LetDecl(name,
-                        lower_expr(body, LowerCtx(env_class_order(env), dict_empty(), env_inst_table(env))),
+                        lower_expr(body, LowerCtx(env_class_order(env), dict_empty(), env_inst_table(env), env_super_map(env))),
                         dummy_pos()),
             user_rev),
        wrapper_rev, inst_rev)
@@ -200,37 +265,61 @@ fn prepend_decls(new_decls: List ast.Decl, acc: List ast.Decl) -> List ast.Decl 
 fn generate_class_wrappers(
   class_name: String,
   methods: List ast.ClassMethodSig,
-  class_order: Dict (List String)
+  class_order: Dict (List String),
+  super_map: Dict (List String)
 ) -> List ast.Decl =
-  generate_class_wrappers_acc(class_name, methods, all_method_names, Nil)
-  where all_method_names = match dict_get(class_name, class_order) with
-                           | Nothing -> Nil
-                           | Just ms -> ms
+  generate_class_wrappers_acc(class_name, methods, hidden_params_for_classes(
+                                                     class_with_transitive_supers(class_name, super_map),
+                                                     0, class_order, Nil), Nil)
 
 fn generate_class_wrappers_acc(
   class_name: String,
   methods: List ast.ClassMethodSig,
-  all_method_names: List String,
+  hidden_params: List ast.Param,
   acc: List ast.Decl
 ) -> List ast.Decl =
   match methods with
   | Nil -> list_reverse(acc)
   | Cons sig rest ->
-      generate_class_wrappers_acc(class_name, rest, all_method_names,
-        Cons(generate_one_class_wrapper(class_name, sig, all_method_names), acc))
+      generate_class_wrappers_acc(class_name, rest, hidden_params,
+        Cons(generate_one_class_wrapper(class_name, sig, hidden_params), acc))
+
+# Build a list of hidden params __tc_<C>_<idx>_<method> for the ordered list of
+# class names (typically [Class, super1, super2, ...]) at the given index.
+fn hidden_params_for_classes(
+  classes: List String,
+  idx: Int,
+  class_order: Dict (List String),
+  acc: List ast.Param
+) -> List ast.Param =
+  match classes with
+  | Nil -> list_reverse(acc)
+  | Cons c rest ->
+      hidden_params_for_classes(rest, idx, class_order,
+        prepend_class_hidden_params(c, idx, class_methods_for(c, class_order), acc))
+
+fn prepend_class_hidden_params(
+  class_name: String,
+  idx: Int,
+  methods: List String,
+  acc: List ast.Param
+) -> List ast.Param =
+  match methods with
+  | Nil -> acc
+  | Cons m rest ->
+      prepend_class_hidden_params(class_name, idx, rest,
+        Cons(ast.Param("__tc_" ++ class_name ++ "_" ++ int_to_string(idx) ++ "_" ++ m, Nothing), acc))
 
 fn generate_one_class_wrapper(
   class_name: String,
   sig: ast.ClassMethodSig,
-  all_method_names: List String
+  hidden_params: List ast.Param
 ) -> ast.Decl =
   match sig with
   | ast.ClassMethodSig method_name params ret_ty effects_maybe ->
       ast.FnDecl(
         method_name,
-        list_append(params,
-          list_map(\m -> ast.Param("__tc_" ++ class_name ++ "_0_" ++ m, Nothing),
-                   all_method_names)),
+        list_append(params, hidden_params),
         Just(ret_ty),
         effects_maybe,
         [],
@@ -278,7 +367,7 @@ fn generate_one_instance_fn(
 ) -> ast.Decl =
   match method with
   | typed_ast.TypedInstanceMethod method_name params ret_maybe effects_maybe body ->
-      match build_hidden_for_constraints(inst_constraints, env_class_order(env)) with
+      match build_hidden_for_constraints(inst_constraints, env_class_order(env), env_super_map(env)) with
       | (hidden_params, fwd_map) ->
           ast.FnDecl(
             instance_fn_name(constraint, method_name),
@@ -286,7 +375,7 @@ fn generate_one_instance_fn(
             ret_maybe,
             effects_maybe,
             [],
-            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env))),
+            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env))),
             dummy_pos())
 
 # ---------------------------------------------------------------------------
@@ -302,7 +391,7 @@ fn lower_fn_decl(
   body: typed_ast.TypedExpr,
   env: LowerEnv
 ) -> ast.Decl =
-  match build_hidden_for_constraints(constraints, env_class_order(env)) with
+  match build_hidden_for_constraints(constraints, env_class_order(env), env_super_map(env)) with
   | (hidden_params, fwd_map) ->
       ast.FnDecl(
         name,
@@ -310,7 +399,7 @@ fn lower_fn_decl(
         ret_ty,
         effects,
         [],
-        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env))),
+        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env))),
         dummy_pos())
 
 # ---------------------------------------------------------------------------
@@ -323,13 +412,15 @@ fn lower_fn_decl(
 
 fn build_hidden_for_constraints(
   constraints: List ast.TypeConstraint,
-  class_order: Dict (List String)
+  class_order: Dict (List String),
+  super_map: Dict (List String)
 ) -> (List ast.Param, Dict (Dict String)) =
-  build_hidden_acc(constraints, class_order, 0, Nil, dict_empty())
+  build_hidden_acc(constraints, class_order, super_map, 0, Nil, dict_empty())
 
 fn build_hidden_acc(
   constraints: List ast.TypeConstraint,
   class_order: Dict (List String),
+  super_map: Dict (List String),
   idx: Int,
   param_rev: List ast.Param,
   map_acc: Dict (Dict String)
@@ -339,11 +430,35 @@ fn build_hidden_acc(
   | Cons c rest ->
       match c with
       | ast.TypeConstraint class_name type_args ->
-          match build_hidden_for_one(class_name, idx, class_methods_for(class_name, class_order)) with
-          | (new_params, method_map) ->
-              build_hidden_acc(rest, class_order, idx + 1,
-                prepend_params(new_params, param_rev),
-                dict_set(constraint_key_str(class_name, type_args), method_map, map_acc))
+          match build_hidden_for_constraint_with_supers(
+                  class_name, type_args, idx,
+                  class_with_transitive_supers(class_name, super_map),
+                  class_order, param_rev, map_acc) with
+          | (param_rev2, map_acc2) ->
+              build_hidden_acc(rest, class_order, super_map, idx + 1, param_rev2, map_acc2)
+
+# For one direct constraint (Class, T) at idx, iterate over the ordered list
+# [Class, super1, super2, ...] (transitive) and for each effective class build
+# hidden params __tc_<EffClass>_<idx>_<method> and seed the fwd_map entry under
+# key <EffClass>_<T_head>.  This guarantees that downstream calls needing a
+# super-class dictionary find a forwarded slot under the correct key.
+fn build_hidden_for_constraint_with_supers(
+  direct_class: String,
+  type_args: List ast.TypeExpr,
+  idx: Int,
+  classes: List String,
+  class_order: Dict (List String),
+  param_rev: List ast.Param,
+  map_acc: Dict (Dict String)
+) -> (List ast.Param, Dict (Dict String)) =
+  match classes with
+  | Nil -> (param_rev, map_acc)
+  | Cons eff_class rest ->
+      match build_hidden_for_one(eff_class, idx, class_methods_for(eff_class, class_order)) with
+      | (new_params, method_map) ->
+          build_hidden_for_constraint_with_supers(direct_class, type_args, idx, rest, class_order,
+            prepend_params(new_params, param_rev),
+            dict_set(constraint_key_str(eff_class, type_args), method_map, map_acc))
 
 fn build_hidden_for_one(
   class_name: String,
@@ -535,12 +650,28 @@ fn resolve_tdict(
 ) -> List ast.Expr =
   match c with
   | ast.TypeConstraint class_name type_args ->
-      resolve_tdict_with_key(
-        constraint_key_str(class_name, type_args),
-        class_name,
-        type_args,
-        pos,
-        ctx)
+      resolve_tdict_for_classes(
+        class_with_transitive_supers(class_name, ctx_super_map(ctx)),
+        type_args, pos, ctx)
+
+# Iterate over [Class, super1, super2, ...] (transitive) and concatenate the
+# witness exprs each effective class needs. This must mirror the order in which
+# build_hidden_for_constraints (and class wrappers) lay out hidden params, so
+# the call site's witness list lines up with the callee's hidden param list.
+fn resolve_tdict_for_classes(
+  classes: List String,
+  type_args: List ast.TypeExpr,
+  pos: source.SourcePos,
+  ctx: LowerCtx
+) -> List ast.Expr =
+  match classes with
+  | Nil -> Nil
+  | Cons eff_class rest ->
+      list_append(
+        resolve_tdict_with_key(
+          constraint_key_str(eff_class, type_args),
+          eff_class, type_args, pos, ctx),
+        resolve_tdict_for_classes(rest, type_args, pos, ctx))
 
 fn resolve_tdict_with_key(
   key: String,
