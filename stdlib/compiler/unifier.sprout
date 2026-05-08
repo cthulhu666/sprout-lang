@@ -302,4 +302,4 @@ fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff:
 # ---------------------------------------------------------------------------
 
 export fn ftv_env(env: Dict types.Scheme) -> List String =
-  vec_fold(\acc s -> list_union(types.ftv_scheme(s), acc), Nil, dict_values(env))
+  vec_fold(\(acc, s) -> list_union(types.ftv_scheme(s), acc), Nil, dict_values(env))
