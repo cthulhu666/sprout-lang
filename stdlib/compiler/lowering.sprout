@@ -33,9 +33,9 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl) -> LowerResult =
                     Nil, Nil, Nil) with
   | (user_rev, wrapper_rev, inst_rev) ->
       LowerOk(ast.Program(
-        decl_list_append(
-          decl_list_append(decl_list_reverse(user_rev), decl_list_reverse(wrapper_rev)),
-          decl_list_reverse(inst_rev)),
+        list_append(
+          list_append(list_reverse(user_rev), list_reverse(wrapper_rev)),
+          list_reverse(inst_rev)),
         dummy_pos()))
 
 # ---------------------------------------------------------------------------
@@ -739,20 +739,3 @@ fn lower_record_fields(fields: List typed_ast.TypedRecordField, ctx: LowerCtx) -
       match f with
       | typed_ast.TypedRecordField fname e ->
           Cons(ast.RecordField(fname, lower_expr(e, ctx)), lower_record_fields(rest, ctx))
-
-# ---------------------------------------------------------------------------
-# List utilities (typed to avoid conflict with generic list_reverse)
-# ---------------------------------------------------------------------------
-
-fn decl_list_reverse(xs: List ast.Decl) -> List ast.Decl =
-  decl_list_rev_acc(xs, Nil)
-
-fn decl_list_rev_acc(xs: List ast.Decl, acc: List ast.Decl) -> List ast.Decl =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> decl_list_rev_acc(t, Cons(h, acc))
-
-fn decl_list_append(xs: List ast.Decl, ys: List ast.Decl) -> List ast.Decl =
-  match xs with
-  | Nil -> ys
-  | Cons h t -> Cons(h, decl_list_append(t, ys))

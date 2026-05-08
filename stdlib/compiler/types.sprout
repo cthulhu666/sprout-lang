@@ -116,40 +116,6 @@ export fn ftv_scheme(s: Scheme) -> List String =
   )
 
 # ---------------------------------------------------------------------------
-# List-as-set helpers
-# (Sprout has no built-in set; these are O(n²) but fine for the bootstrap.)
-# ---------------------------------------------------------------------------
-
-export fn list_member(x: String, xs: List String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons h t -> if h == x then true else list_member(x, t)
-
-export fn list_union(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> ys
-  | Cons h t ->
-      if list_member(h, ys) then list_union(t, ys)
-      else Cons(h, list_union(t, ys))
-
-export fn list_diff(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> Nil
-  | Cons h t ->
-      if list_member(h, ys) then list_diff(t, ys)
-      else Cons(h, list_diff(t, ys))
-
-fn list_dedup_acc(xs: List String, seen: List String) -> List String =
-  match xs with
-  | Nil -> Nil
-  | Cons h t ->
-      if list_member(h, seen) then list_dedup_acc(t, seen)
-      else Cons(h, list_dedup_acc(t, Cons(h, seen)))
-
-export fn list_dedup(xs: List String) -> List String =
-  list_dedup_acc(xs, Nil)
-
-# ---------------------------------------------------------------------------
 # Pretty-printing
 # ---------------------------------------------------------------------------
 

@@ -330,6 +330,38 @@ fn list_reverse_go(xs: List a, acc: List a) -> List a =
 export fn list_reverse(xs: List a) -> List a =
   list_reverse_go(xs, Nil)
 
+export fn list_member(x: a, xs: List a) -> Bool where Eq a =
+  match xs with
+  | Nil -> false
+  | Cons h t -> if eq(h, x) then true else list_member(x, t)
+
+export fn list_add_unique(x: a, xs: List a) -> List a where Eq a =
+  if list_member(x, xs) then xs else list_append(xs, Cons(x, Nil))
+
+export fn list_union(xs: List a, ys: List a) -> List a where Eq a =
+  match xs with
+  | Nil -> ys
+  | Cons h t ->
+      if list_member(h, ys) then list_union(t, ys)
+      else Cons(h, list_union(t, ys))
+
+export fn list_diff(xs: List a, ys: List a) -> List a where Eq a =
+  match xs with
+  | Nil -> Nil
+  | Cons h t ->
+      if list_member(h, ys) then list_diff(t, ys)
+      else Cons(h, list_diff(t, ys))
+
+fn list_dedup_acc(xs: List a, seen: List a) -> List a where Eq a =
+  match xs with
+  | Nil -> Nil
+  | Cons h t ->
+      if list_member(h, seen) then list_dedup_acc(t, seen)
+      else Cons(h, list_dedup_acc(t, Cons(h, seen)))
+
+export fn list_dedup(xs: List a) -> List a where Eq a =
+  list_dedup_acc(xs, Nil)
+
 fn list_take(xs: List a, count: Int) -> List a =
   if count <= 0 then Nil
   else

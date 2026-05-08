@@ -150,9 +150,6 @@ fn is_lowercase_name(name: String) -> Bool =
    c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z")
   where c = str_slice(name, 0, 1)
 
-fn list_add_unique(x: String, xs: List String) -> List String =
-  if types.list_member(x, xs) then xs else append(xs, Cons(x, Nil))
-
 fn collect_ret_type_vars(ret_type_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
   match ret_type_maybe with
   | Nothing -> acc
