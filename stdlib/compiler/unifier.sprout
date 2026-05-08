@@ -291,8 +291,8 @@ export fn generalize(
 
 fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff: types.Effect) -> types.Scheme =
   types.Scheme(
-    list_diff(types.ftv(resolved), env_ftv),
-    list_diff(types.ftv_effect(resolved_eff), env_ftv),
+    types.list_diff(types.ftv(resolved), env_ftv),
+    types.list_diff(types.ftv_effect(resolved_eff), env_ftv),
     resolved,
     resolved_eff
   )
@@ -302,4 +302,4 @@ fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff:
 # ---------------------------------------------------------------------------
 
 export fn ftv_env(env: Dict types.Scheme) -> List String =
-  vec_fold(\(acc, s) -> list_union(types.ftv_scheme(s), acc), Nil, dict_values(env))
+  vec_fold(\(acc, s) -> types.list_union(types.ftv_scheme(s), acc), Nil, dict_values(env))

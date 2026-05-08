@@ -286,6 +286,10 @@ export fn vec_sum(vec: Vec Int) -> Int =
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_fold(\(acc, x) -> acc + f(x), 0, vec)
 
+export class Eq a {
+  fn eq(left: a, right: a) -> Bool
+}
+
 export class ToString a {
   fn to_string(value: a) -> String
 }
@@ -505,10 +509,6 @@ export fn set_to_list(s: Set) -> List String =
 export fn set_size(s: Set) -> Int =
   match s with
   | Set raw -> native_set_size(raw)
-
-export class Eq a {
-  fn eq(left: a, right: a) -> Bool
-}
 
 export class Semigroup t {
   fn append(left: t, right: t) -> t

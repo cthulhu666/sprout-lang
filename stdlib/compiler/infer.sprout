@@ -106,6 +106,9 @@ fn scheme_from_fn_parts(
     alias_env
   )
 
+fn list_add_unique(x: String, xs: List String) -> List String =
+  if types.list_member(x, xs) then xs else append(xs, Cons(x, Nil))
+
 fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List String =
   match params with
   | Nil -> acc

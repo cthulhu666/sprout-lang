@@ -101,6 +101,45 @@ fn ftv_list_acc(items: List Type, acc: List String) -> List String =
   | Nil -> acc
   | Cons h t -> ftv_list_acc(t, ftv_acc(h, acc))
 
+# ---------------------------------------------------------------------------
+# List-as-set helpers for String (stage-0 compatible: no Eq constraint)
+# ---------------------------------------------------------------------------
+#
+# The generic prelude list_member/union/diff/dedup use `where Eq a`, but the
+# self-hosted stage-0 constraint dispatch cannot resolve Eq for element types
+# inside container arguments (e.g. List String → looks for @inst:Eq:List, not
+# @inst:Eq:String).  These String-specific helpers shadow the prelude generics
+# within this module and are exported for use by unifier/infer.
+
+export fn list_member(x: String, xs: List String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons h t -> if h == x then true else list_member(x, t)
+
+export fn list_union(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> ys
+  | Cons h t ->
+      if list_member(h, ys) then list_union(t, ys)
+      else Cons(h, list_union(t, ys))
+
+export fn list_diff(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | Cons h t ->
+      if list_member(h, ys) then list_diff(t, ys)
+      else Cons(h, list_diff(t, ys))
+
+fn list_dedup_acc(xs: List String, seen: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | Cons h t ->
+      if list_member(h, seen) then list_dedup_acc(t, seen)
+      else Cons(h, list_dedup_acc(t, Cons(h, seen)))
+
+fn list_dedup(xs: List String) -> List String =
+  list_dedup_acc(xs, Nil)
+
 export fn ftv(t: Type) -> List String =
   list_dedup(ftv_acc(t, Nil))
 
