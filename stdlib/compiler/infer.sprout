@@ -110,7 +110,11 @@ fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List Str
   match params with
   | Nil -> acc
   | Cons p rest ->
-      collect_param_type_vars(rest, collect_type_expr_vars(ast_param_type(p), acc))
+      match p with
+      | ast.Param name maybe_type ->
+          match maybe_type with
+          | Nothing -> collect_param_type_vars(rest, list_add_unique("_unann_" ++ name, acc))
+          | Just te -> collect_param_type_vars(rest, collect_te_vars(te, acc))
 
 fn ast_param_type(p: ast.Param) -> Maybe ast.TypeExpr =
   match p with
@@ -178,9 +182,11 @@ fn param_types_from_decl(params: List ast.Param, local_vars: Dict types.Type) ->
   match params with
   | Nil -> Nil
   | Cons p rest ->
-      match ast_param_type(p) with
-      | Nothing -> Cons(types.TVar("_unann"), param_types_from_decl(rest, local_vars))
-      | Just te -> Cons(type_from_ast(te, local_vars), param_types_from_decl(rest, local_vars))
+      match p with
+      | ast.Param name maybe_type ->
+          match maybe_type with
+          | Nothing -> Cons(types.TVar("_unann_" ++ name), param_types_from_decl(rest, local_vars))
+          | Just te -> Cons(type_from_ast(te, local_vars), param_types_from_decl(rest, local_vars))
 
 fn ret_from_maybe_with_vars(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with

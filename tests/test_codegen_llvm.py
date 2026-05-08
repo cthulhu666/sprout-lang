@@ -823,9 +823,11 @@ class CodegenLlvmTests(CodegenTestCase):
         program = self._load_module_program(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 9"), 2)
-        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 10"), 2)
-        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 11"), 2)
+        # Tags 12/13/14 = HttpResponse/HttpTimeout/HttpNetwork — each should register
+        # under both qualified (stdlib.http.X) and leaf (X) names.
+        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 12"), 2)
+        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 13"), 2)
+        self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 14"), 2)
         self.assertIn("declare i64 @argv_get(i64)", ir)
         self.assertIn("declare i64 @sprout_set_argv(i32, ptr)", ir)
         self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)

@@ -991,6 +991,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | token.TokenStringKind -> "string"
                   | token.TokenSymbolKind -> "symbol"
                   | token.TokenEofKind -> "eof"
+                  | _ -> "template"
 
                 fn render_pos(pos: source.SourcePos) -> String =
                   string.concat(
@@ -1077,6 +1078,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | token.TokenStringKind -> "string"
                   | token.TokenSymbolKind -> "symbol"
                   | token.TokenEofKind -> "eof"
+                  | _ -> "template"
 
                 fn render_pos(pos: source.SourcePos) -> String =
                   string.concat(
@@ -1166,6 +1168,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | token.TokenStringKind -> "string"
                   | token.TokenSymbolKind -> "symbol"
                   | token.TokenEofKind -> "eof"
+                  | _ -> "template"
 
                 fn render_pos(pos: source.SourcePos) -> String =
                   string.concat(
@@ -1381,6 +1384,7 @@ class ModuleLoaderTests(unittest.TestCase):
                   | ast.DoExpr _ _ -> "do"
                   | ast.RecordExpr _ _ _ -> "record"
                   | ast.GetFieldExpr _ _ _ -> "getfield"
+                  | ast.StringTemplateExpr _ _ -> "template"
 
                 fn describe_pattern(p: ast.Pattern) -> String =
                   match p with
