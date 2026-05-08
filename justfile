@@ -85,6 +85,30 @@ build-stage1:
   clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o "$STAGE1"
   echo "==> Built $STAGE1"
 
+build-stage2:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/compile_driver.sprout"
+  STAGE1="compile_driver_bin_stage1"
+  STAGE2="compile_driver_bin_stage2"
+  TMP_LL="/tmp/sprout_stage2_$$.ll"
+  TMP_C="/tmp/sprout_runtime_$$.c"
+  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  if [[ ! -x "$STAGE1" ]]; then
+    echo "ERROR: $STAGE1 not found; run: just build-stage1" >&2
+    exit 1
+  fi
+  echo "==> Emitting LLVM IR via stage-1 Sprout-native codegen..."
+  "./$STAGE1" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Extracting C runtime..."
+  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
+  echo "==> Linking with clang..."
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o "$STAGE2"
+  echo "==> Built $STAGE2"
+
 compile-examples:
   for file in examples/*.sprout; do \
     flags=""; \
