@@ -53,8 +53,8 @@ export type Value (..) =
 # ---------------------------------------------------------------------------
 
 export type CtorSig (..) =
-  | CtorSig String Int (List String)
-  # CtorSig name tag arg_lltypes
+  | CtorSig String Int (List String) (List ast.TypeExpr) (List String)
+  # CtorSig name tag arg_lltypes arg_type_exprs type_params
 
 export type FnSig (..) =
   | FnSig String (List String) String(Maybe CallSig)
@@ -282,13 +282,19 @@ fn sig_ret_sig(s: CallSig) -> Maybe CallSig =
 
 # CtorSig accessors
 fn ctor_name(c: CtorSig) -> String =
-  match c with | CtorSig n _ _ -> n
+  match c with | CtorSig n _ _ _ _ -> n
 
 fn ctor_tag(c: CtorSig) -> Int =
-  match c with | CtorSig _ t _ -> t
+  match c with | CtorSig _ t _ _ _ -> t
 
 fn ctor_arg_lls(c: CtorSig) -> List String =
-  match c with | CtorSig _ _ ls -> ls
+  match c with | CtorSig _ _ ls _ _ -> ls
+
+fn ctor_type_exprs(c: CtorSig) -> List ast.TypeExpr =
+  match c with | CtorSig _ _ _ es _ -> es
+
+fn ctor_type_params(c: CtorSig) -> List String =
+  match c with | CtorSig _ _ _ _ ps -> ps
 
 fn ctor_arity(c: CtorSig) -> Int =
   list_length(ctor_arg_lls(c))
@@ -988,7 +994,8 @@ fn emit_tuple_field_by_idx(scrut: Value, idx: Int, em: Emitter) -> Value !{IO} =
               val_with_tuple_items(val_make(item_ll, out), tuple_items_from_ll(item_ll))
 
 # Emit pattern bindings.  Returns (new_bindings_as_list, gc_roots_pushed).
-fn emit_pattern_bind(pat: ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) -> (List (String, Value), Int) !{IO} =
+# scrut_type: the Sprout type of the scrutinee, used to instantiate generic ctor field types.
+fn emit_pattern_bind(pat: ast.Pattern, scrut: Value, scrut_type: Maybe types.Type, ctx: CgCtx, em: Emitter) -> (List (String, Value), Int) !{IO} =
   match pat with
   | ast.WildcardPattern _ -> (Nil, 0)
   | ast.IntPattern _ _ -> (Nil, 0)
@@ -1003,7 +1010,7 @@ fn emit_pattern_bind(pat: ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) ->
   | ast.TuplePattern items _ ->
       emit_tuple_pattern_bind(items, scrut, ctx, em, 0, Nil, 0)
   | ast.ConstructorPattern name args _ ->
-      emit_ctor_pattern_bind(name, args, scrut, ctx, em)
+      emit_ctor_pattern_bind(name, args, scrut, scrut_type, ctx, em)
 
 fn emit_tuple_pattern_bind(items: List ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter, idx: Int, acc: List (String, Value), rooted: Int) -> (List (String, Value), Int) !{IO} =
   match items with
@@ -1011,14 +1018,18 @@ fn emit_tuple_pattern_bind(items: List ast.Pattern, scrut: Value, ctx: CgCtx, em
   | Cons item rest ->
       do
         field <- emit_tuple_field_by_idx(scrut, idx, em)
-        (binds, r) <- emit_pattern_bind(item, field, ctx, em)
+        (binds, r) <- emit_pattern_bind(item, field, Nothing, ctx, em)
         emit_tuple_pattern_bind(rest, scrut, ctx, em, idx + 1, list_reverse(binds) ++ acc, rooted + r)
 
-fn emit_ctor_pattern_bind(name: String, args: List ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) -> (List (String, Value), Int) !{IO} =
+fn emit_ctor_pattern_bind(name: String, args: List ast.Pattern, scrut: Value, scrut_type: Maybe types.Type, ctx: CgCtx, em: Emitter) -> (List (String, Value), Int) !{IO} =
   match dict_get(name, ctx_ctor_sigs(ctx)) with
   | Nothing -> (Nil, 0)
   | Just ctor ->
-      emit_ctor_args_bind(args, ctor_arg_lls(ctor), scrut, ctx, em, 0, Nil, 0)
+      do
+        let lls = match scrut_type with
+                  | Nothing -> ctor_arg_lls(ctor)
+                  | Just st -> instantiated_ctor_arg_lls(ctor, st)
+        emit_ctor_args_bind(args, lls, scrut, ctx, em, 0, Nil, 0)
 
 fn emit_ctor_args_bind(args: List ast.Pattern, lls: List String, scrut: Value, ctx: CgCtx, em: Emitter, idx: Int, acc: List (String, Value), rooted: Int) -> (List (String, Value), Int) !{IO} =
   match args with
@@ -1029,7 +1040,7 @@ fn emit_ctor_args_bind(args: List ast.Pattern, lls: List String, scrut: Value, c
       | Cons ll rest_lls ->
           do
             field <- emit_ctor_field(val_ir(scrut), idx, ll, em)
-            (binds, r) <- emit_pattern_bind(arg, field, ctx, em)
+            (binds, r) <- emit_pattern_bind(arg, field, Nothing, ctx, em)
             emit_ctor_args_bind(rest_args, rest_lls, scrut, ctx, em, idx + 1, list_reverse(binds) ++ acc, rooted + r)
 
 fn extend_locals(base: Dict Value, pairs: List (String, Value)) -> Dict Value =
@@ -1838,7 +1849,8 @@ fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBra
     sv <- emit_expr(ctx, locals, em, Nothing, scrut)
     done_lbl <- fresh_block(em, "match_done")
     let out_ll = match tco_ctx with | Nothing -> type_to_ll(ty) | Just tc -> tco_ret_ll(tc)
-    match_result <- emit_branches(branches, sv, out_ll, ctx, locals, em, tco_ctx, done_lbl, Nil)
+    let scrut_type = typed_ast.typed_expr_type(scrut)
+    match_result <- emit_branches(branches, sv, scrut_type, out_ll, ctx, locals, em, tco_ctx, done_lbl, Nil)
     let branch_vals = match_result
     if list_is_nil_branch_vals(branch_vals) then
       val_for_ll(out_ll, "undef")
@@ -1850,7 +1862,7 @@ fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBra
         emit_template(em, `  ${phi} = phi ${out_ll} ${parts}`)
         val_for_ll(out_ll, phi)
 
-fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, out_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
+fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_type: types.Type, out_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
   match branches with
   | Nil ->
       do
@@ -1868,7 +1880,7 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, out_ll
             test_v <- emit_pattern_test(pat, scrut, ctx, em)
             emit_template(em, `  br i1 ${val_ir(test_v)}, label %${branch_lbl}, label %${next_lbl}`)
         emit_label(em, branch_lbl)
-        (new_binds, rooted) <- emit_pattern_bind(pat, scrut, ctx, em)
+        (new_binds, rooted) <- emit_pattern_bind(pat, scrut, Just(scrut_type), ctx, em)
         let branch_locals = extend_locals(locals, new_binds)
         let branch_tco = match tco_ctx with
                          | Nothing -> Nothing
@@ -1886,7 +1898,7 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, out_ll
             else
               do
                 emit_label(em, next_lbl)
-                emit_branches(rest, scrut, out_ll, ctx, locals, em, tco_ctx, done_lbl, acc)
+                emit_branches(rest, scrut, scrut_type, out_ll, ctx, locals, em, tco_ctx, done_lbl, acc)
         else
           do
             coerced_body <- coerce_value(body_val, out_ll, em)
@@ -1894,7 +1906,7 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, out_ll
             pop_temp_roots(rooted, em)
             emit_template(em, `  br label %${done_lbl}`)
             emit_label(em, next_lbl)
-            emit_branches(rest, scrut, out_ll, ctx, locals, em, tco_ctx, done_lbl, Cons((coerced_body, end_blk), acc))
+            emit_branches(rest, scrut, scrut_type, out_ll, ctx, locals, em, tco_ctx, done_lbl, Cons((coerced_body, end_blk), acc))
 
 fn is_wildcard_or_var(pat: ast.Pattern) -> Bool =
   match pat with
@@ -2003,8 +2015,19 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
                       match sig_opt with
                       | Nothing ->
                           do
+                            # sig_opt = Nothing means callee_ty is TVar (unannotated dispatch param).
+                            # The value is an i64-boxed closure ptr. Re-root as ptr, reconstruct
+                            # CallSig from call-site arg types, and invoke via emit_closure_call.
                             pop_temp_roots(rooted, em)
-                            zero_val(type_to_ll(ty))
+                            let arg_lls = list_map(\a -> type_to_ll(typed_ast.typed_expr_type(a)), args)
+                            let reconstructed_sig = CallSig(arg_lls, type_to_ll(ty), Nothing)
+                            ptr_v <- coerce_value(local_v, ll_ptr(), em)
+                            rooted2 <- push_temp_root(ptr_v, em)
+                            (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
+                            result <- emit_closure_call(ptr_v, reconstructed_sig, arg_vals, em)
+                            pop_temp_roots(rooted_args, em)
+                            pop_temp_roots(rooted2, em)
+                            result
                       | Just sig ->
                           do
                             (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
@@ -2305,7 +2328,7 @@ fn emit_do(steps: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx,
             else
               do
                 # IO bind: just evaluate and bind
-                (new_binds, rooted) <- emit_pattern_bind(pat, v, ctx, em)
+                (new_binds, rooted) <- emit_pattern_bind(pat, v, Nothing, ctx, em)
                 let bind_tco = tco_with_extra_roots(tco_ctx, rooted)
                 result <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, bind_tco)
                 _ <- emit_pending_tco(bind_tco, result, em)
@@ -2336,7 +2359,7 @@ fn emit_do_maybe_bind(pat: ast.Pattern, v: Value, maybe_ty: types.Type, rest: Li
                    | types.TApp _ inner -> type_to_ll(inner)
                    | _ -> ll_i64()
     payload <- emit_ctor_field(val_ir(v), 0, inner_ll, em)
-    (new_binds, rooted) <- emit_pattern_bind(pat, payload, ctx, em)
+    (new_binds, rooted) <- emit_pattern_bind(pat, payload, Nothing, ctx, em)
     let bind_tco = tco_with_extra_roots(tco_ctx, rooted)
     cont_v <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, bind_tco)
     _ <- emit_pending_tco(bind_tco, cont_v, em)
@@ -2381,7 +2404,7 @@ fn emit_do_result_bind(pat: ast.Pattern, v: Value, result_ty_: types.Type, rest:
                    | types.TApp (types.TApp _ _) inner -> type_to_ll(inner)
                    | _ -> ll_i64()
     ok_payload <- emit_ctor_field(val_ir(v), 0, inner_ll, em)
-    (new_binds, rooted) <- emit_pattern_bind(pat, ok_payload, ctx, em)
+    (new_binds, rooted) <- emit_pattern_bind(pat, ok_payload, Nothing, ctx, em)
     let bind_tco = tco_with_extra_roots(tco_ctx, rooted)
     cont_v <- emit_do(rest, result_ty, ctx, extend_locals(locals, new_binds), em, bind_tco)
     _ <- emit_pending_tco(bind_tco, cont_v, em)
@@ -2755,18 +2778,18 @@ fn build_ctor_sigs_acc(decls: List typed_ast.TypedDecl, next_tag: Int, sigs: Dic
   | Nil -> (sigs, adts)
   | Cons decl rest ->
       match decl with
-      | typed_ast.TPassThrough (ast.TypeDecl type_name _ ctors _) ->
-          match register_ctors(ctors, next_tag, sigs, adts, type_name) with
+      | typed_ast.TPassThrough (ast.TypeDecl type_name type_params ctors _) ->
+          match register_ctors(ctors, next_tag, sigs, adts, type_name, type_params) with
           | (new_sigs, new_adts, new_tag) ->
               build_ctor_sigs_acc(rest, new_tag, new_sigs, new_adts)
       | _ ->
           build_ctor_sigs_acc(rest, next_tag, sigs, adts)
 
-fn register_ctors(ctors: List ast.TypeConstructor, next_tag: Int, sigs: Dict CtorSig, adts: Set, type_name: String) -> (Dict CtorSig, Set, Int) =
+fn register_ctors(ctors: List ast.TypeConstructor, next_tag: Int, sigs: Dict CtorSig, adts: Set, type_name: String, type_params: List String) -> (Dict CtorSig, Set, Int) =
   match ctors with
   | Nil -> (sigs, set_insert(type_name, adts), next_tag)
   | Cons (ast.TypeConstructor ctor_name ctor_args) rest ->
-      register_ctors(rest, next_tag + 1, dict_set(ctor_name, CtorSig(ctor_name, next_tag, type_expr_lls(ctor_args)), sigs), adts, type_name)
+      register_ctors(rest, next_tag + 1, dict_set(ctor_name, CtorSig(ctor_name, next_tag, type_expr_lls(ctor_args), ctor_args, type_params), sigs), adts, type_name, type_params)
 
 fn type_expr_lls(args: List ast.TypeExpr) -> List String =
   match args with
@@ -2780,6 +2803,44 @@ fn type_expr_to_ll(t: ast.TypeExpr) -> String =
   | ast.TypeArrow _ _ _ -> ll_ptr()
   | ast.TypeEffect inner _ -> type_expr_to_ll(inner)
   | ast.TupleType items -> tuple_ll(type_expr_lls(items))
+
+# Collect TApp args left-to-right: TApp(TApp(TConst "F") A) B → [A, B]
+fn extract_type_args(t: types.Type) -> List types.Type =
+  list_reverse(extract_type_args_acc(t, Nil))
+
+fn extract_type_args_acc(t: types.Type, acc: List types.Type) -> List types.Type =
+  match t with
+  | types.TApp base arg -> extract_type_args_acc(base, Cons(arg, acc))
+  | _ -> acc
+
+fn build_tvar_subst(params: List String, args: List types.Type, acc: Dict String) -> Dict String =
+  match params with
+  | Nil -> acc
+  | Cons p rest_params ->
+      match args with
+      | Nil -> acc
+      | Cons a rest_args -> build_tvar_subst(rest_params, rest_args, dict_set(p, type_to_ll(a), acc))
+
+fn type_expr_to_ll_subst(t: ast.TypeExpr, subst: Dict String) -> String =
+  match t with
+  | ast.TypeName name ->
+      match dict_get(name, subst) with
+      | Just ll -> ll
+      | Nothing -> const_to_ll(name)
+  | ast.TypeApply _ _ -> ll_i64()
+  | ast.TypeArrow _ _ _ -> ll_ptr()
+  | ast.TypeEffect inner _ -> type_expr_to_ll_subst(inner, subst)
+  | ast.TupleType items -> tuple_ll(list_map(\e -> type_expr_to_ll_subst(e, subst), items))
+
+# Return concrete LLVM types for ctor fields given the scrutinee's monomorphic type.
+fn instantiated_ctor_arg_lls(ctor: CtorSig, scrut_type: types.Type) -> List String =
+  match ctor_type_params(ctor) with
+  | Nil -> ctor_arg_lls(ctor)
+  | _ ->
+      apply_subst_to_type_exprs(ctor_type_exprs(ctor), build_tvar_subst(ctor_type_params(ctor), extract_type_args(scrut_type), dict_empty()))
+
+fn apply_subst_to_type_exprs(exprs: List ast.TypeExpr, subst: Dict String) -> List String =
+  list_map(\e -> type_expr_to_ll_subst(e, subst), exprs)
 
 # Build FnSig for every TFnDecl using the env dict for type information.
 fn build_fn_sigs_from_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Dict FnSig =

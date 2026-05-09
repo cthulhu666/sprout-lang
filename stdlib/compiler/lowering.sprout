@@ -43,11 +43,11 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl) -> LowerResult =
 # ---------------------------------------------------------------------------
 
 # LowerEnv: global information collected from the typed program.
-#   class_order  – class_name → [method_names in declaration order]
+#   class_order  – class_name → [(method_name, method_type)] in declaration order
 #   inst_table   – constraint_key → { method_name → instance_fn_name }
 #   super_map    – class_name → [direct superclass names in declaration order]
 type LowerEnv =
-  | LowerEnv (Dict (List String)) (Dict (Dict String)) (Dict (List String))
+  | LowerEnv (Dict (List (String, ast.TypeExpr))) (Dict (Dict String)) (Dict (List String))
 
 # LowerCtx: per-function context passed during expression lowering.
 #   class_order – inherited from LowerEnv
@@ -55,9 +55,9 @@ type LowerEnv =
 #   inst_table  – constraint_key → { method_name → instance_fn_name }   (concrete)
 #   super_map   – class_name → [direct superclass names]
 type LowerCtx =
-  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String))
+  | LowerCtx (Dict (List (String, ast.TypeExpr))) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String))
 
-fn env_class_order(env: LowerEnv) -> Dict (List String) =
+fn env_class_order(env: LowerEnv) -> Dict (List (String, ast.TypeExpr)) =
   match env with | LowerEnv co _ _ -> co
 
 fn env_inst_table(env: LowerEnv) -> Dict (Dict String) =
@@ -66,7 +66,7 @@ fn env_inst_table(env: LowerEnv) -> Dict (Dict String) =
 fn env_super_map(env: LowerEnv) -> Dict (List String) =
   match env with | LowerEnv _ _ sm -> sm
 
-fn ctx_class_order(ctx: LowerCtx) -> Dict (List String) =
+fn ctx_class_order(ctx: LowerCtx) -> Dict (List (String, ast.TypeExpr)) =
   match ctx with | LowerCtx co _ _ _ -> co
 
 fn ctx_fwd(ctx: LowerCtx) -> Dict (Dict String) =
@@ -84,7 +84,7 @@ fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 # Pass 1 – collect class_order
 # ---------------------------------------------------------------------------
 
-fn collect_class_order(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
+fn collect_class_order(decls: List typed_ast.TypedDecl, acc: Dict (List (String, ast.TypeExpr))) -> Dict (List (String, ast.TypeExpr)) =
   match decls with
   | Nil -> acc
   | Cons d rest ->
@@ -92,20 +92,36 @@ fn collect_class_order(decls: List typed_ast.TypedDecl, acc: Dict (List String))
       | typed_ast.TPassThrough inner_decl ->
           match inner_decl with
           | ast.ClassDecl class_name _ methods _ _ ->
-              collect_class_order(rest, dict_set(class_name, extract_method_names(methods), acc))
+              collect_class_order(rest, dict_set(class_name, extract_method_pairs(methods), acc))
           | _ -> collect_class_order(rest, acc)
       | _ -> collect_class_order(rest, acc)
 
-fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
-  extract_method_names_acc(methods, Nil)
+# Build the arrow type for a class method: param_types → ret_type.
+fn method_sig_to_type(sig: ast.ClassMethodSig) -> ast.TypeExpr =
+  match sig with
+  | ast.ClassMethodSig _ params ret_ty _ ->
+      build_arrow_from_params(params, ret_ty)
 
-fn extract_method_names_acc(methods: List ast.ClassMethodSig, acc: List String) -> List String =
+fn build_arrow_from_params(params: List ast.Param, ret_ty: ast.TypeExpr) -> ast.TypeExpr =
+  match params with
+  | Nil -> ret_ty
+  | Cons p rest ->
+      match p with
+      | ast.Param _ maybe_t ->
+          match maybe_t with
+          | Just t -> ast.TypeArrow(t, build_arrow_from_params(rest, ret_ty), Nothing)
+          | Nothing -> build_arrow_from_params(rest, ret_ty)
+
+fn extract_method_pairs(methods: List ast.ClassMethodSig) -> List (String, ast.TypeExpr) =
+  extract_method_pairs_acc(methods, Nil)
+
+fn extract_method_pairs_acc(methods: List ast.ClassMethodSig, acc: List (String, ast.TypeExpr)) -> List (String, ast.TypeExpr) =
   match methods with
   | Nil -> list_reverse(acc)
   | Cons sig rest ->
       match sig with
       | ast.ClassMethodSig name _ _ _ ->
-          extract_method_names_acc(rest, Cons(name, acc))
+          extract_method_pairs_acc(rest, Cons((name, method_sig_to_type(sig)), acc))
 
 # ---------------------------------------------------------------------------
 # Pass 1 – collect superclass map
@@ -265,7 +281,7 @@ fn prepend_decls(new_decls: List ast.Decl, acc: List ast.Decl) -> List ast.Decl 
 fn generate_class_wrappers(
   class_name: String,
   methods: List ast.ClassMethodSig,
-  class_order: Dict (List String),
+  class_order: Dict (List (String, ast.TypeExpr)),
   super_map: Dict (List String)
 ) -> List ast.Decl =
   generate_class_wrappers_acc(class_name, methods, hidden_params_for_classes(
@@ -289,26 +305,28 @@ fn generate_class_wrappers_acc(
 fn hidden_params_for_classes(
   classes: List String,
   idx: Int,
-  class_order: Dict (List String),
+  class_order: Dict (List (String, ast.TypeExpr)),
   acc: List ast.Param
 ) -> List ast.Param =
   match classes with
   | Nil -> list_reverse(acc)
   | Cons c rest ->
       hidden_params_for_classes(rest, idx, class_order,
-        prepend_class_hidden_params(c, idx, class_methods_for(c, class_order), acc))
+        prepend_class_hidden_params(c, idx, class_method_pairs_for(c, class_order), acc))
 
 fn prepend_class_hidden_params(
   class_name: String,
   idx: Int,
-  methods: List String,
+  methods: List (String, ast.TypeExpr),
   acc: List ast.Param
 ) -> List ast.Param =
   match methods with
   | Nil -> acc
-  | Cons m rest ->
-      prepend_class_hidden_params(class_name, idx, rest,
-        Cons(ast.Param("__tc_" ++ class_name ++ "_" ++ int_to_string(idx) ++ "_" ++ m, Nothing), acc))
+  | Cons p rest ->
+      match p with
+      | (m, t) ->
+          prepend_class_hidden_params(class_name, idx, rest,
+            Cons(ast.Param("__tc_" ++ class_name ++ "_" ++ int_to_string(idx) ++ "_" ++ m, Just(t)), acc))
 
 fn generate_one_class_wrapper(
   class_name: String,
@@ -412,14 +430,14 @@ fn lower_fn_decl(
 
 fn build_hidden_for_constraints(
   constraints: List ast.TypeConstraint,
-  class_order: Dict (List String),
+  class_order: Dict (List (String, ast.TypeExpr)),
   super_map: Dict (List String)
 ) -> (List ast.Param, Dict (Dict String)) =
   build_hidden_acc(constraints, class_order, super_map, 0, Nil, dict_empty())
 
 fn build_hidden_acc(
   constraints: List ast.TypeConstraint,
-  class_order: Dict (List String),
+  class_order: Dict (List (String, ast.TypeExpr)),
   super_map: Dict (List String),
   idx: Int,
   param_rev: List ast.Param,
@@ -447,14 +465,14 @@ fn build_hidden_for_constraint_with_supers(
   type_args: List ast.TypeExpr,
   idx: Int,
   classes: List String,
-  class_order: Dict (List String),
+  class_order: Dict (List (String, ast.TypeExpr)),
   param_rev: List ast.Param,
   map_acc: Dict (Dict String)
 ) -> (List ast.Param, Dict (Dict String)) =
   match classes with
   | Nil -> (param_rev, map_acc)
   | Cons eff_class rest ->
-      match build_hidden_for_one(eff_class, idx, class_methods_for(eff_class, class_order)) with
+      match build_hidden_for_one(eff_class, idx, class_method_pairs_for(eff_class, class_order)) with
       | (new_params, method_map) ->
           build_hidden_for_constraint_with_supers(direct_class, type_args, idx, rest, class_order,
             prepend_params(new_params, param_rev),
@@ -463,36 +481,44 @@ fn build_hidden_for_constraint_with_supers(
 fn build_hidden_for_one(
   class_name: String,
   idx: Int,
-  methods: List String
+  methods: List (String, ast.TypeExpr)
 ) -> (List ast.Param, Dict String) =
   build_hidden_one_acc(class_name, idx, methods, Nil, dict_empty())
 
 fn build_hidden_one_acc(
   class_name: String,
   idx: Int,
-  methods: List String,
+  methods: List (String, ast.TypeExpr),
   param_rev: List ast.Param,
   map_acc: Dict String
 ) -> (List ast.Param, Dict String) =
   match methods with
   | Nil -> (list_reverse(param_rev), map_acc)
-  | Cons method_name rest ->
-      build_hidden_one_acc(class_name, idx, rest,
-        Cons(ast.Param("__tc_" ++ class_name ++ "_" ++ int_to_string(idx) ++ "_" ++ method_name, Nothing),
-             param_rev),
-        dict_set(method_name,
-                 "__tc_" ++ class_name ++ "_" ++ int_to_string(idx) ++ "_" ++ method_name,
-                 map_acc))
+  | Cons p rest ->
+      match p with
+      | (method_name, method_type) ->
+          build_hidden_one_acc(class_name, idx, rest,
+            Cons(ast.Param("__tc_" ++ class_name ++ "_" ++ int_to_string(idx) ++ "_" ++ method_name,
+                           Just(method_type)),
+                 param_rev),
+            dict_set(method_name,
+                     "__tc_" ++ class_name ++ "_" ++ int_to_string(idx) ++ "_" ++ method_name,
+                     map_acc))
 
 fn prepend_params(new_params: List ast.Param, acc: List ast.Param) -> List ast.Param =
   match new_params with
   | Nil -> acc
   | Cons p rest -> prepend_params(rest, Cons(p, acc))
 
-fn class_methods_for(class_name: String, class_order: Dict (List String)) -> List String =
+fn class_methods_for(class_name: String, class_order: Dict (List (String, ast.TypeExpr))) -> List String =
   match dict_get(class_name, class_order) with
   | Nothing -> Nil
-  | Just ms -> ms
+  | Just pairs -> list_map(\p -> match p with | (n, _) -> n, pairs)
+
+fn class_method_pairs_for(class_name: String, class_order: Dict (List (String, ast.TypeExpr))) -> List (String, ast.TypeExpr) =
+  match dict_get(class_name, class_order) with
+  | Nothing -> Nil
+  | Just pairs -> pairs
 
 # ---------------------------------------------------------------------------
 # Constraint key helpers

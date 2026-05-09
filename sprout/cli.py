@@ -2277,13 +2277,19 @@ const char* string_concat_many(long long list_handle) {
   long long cons_tag = find_ctor_tag_by_name("Cons");
   /* First pass: compute total byte length. */
   size_t total = 0;
+  size_t elem_idx = 0;
   long long cur = list_handle;
+  const char* prev_s = NULL;
   while (sprout_tag(cur) != nil_tag) {
     if (sprout_tag(cur) != cons_tag) tcp_fail("string_concat_many: malformed list");
     const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    if (s == NULL) tcp_fail("string_concat_many: null string element");
+    if (s == NULL) {
+      tcp_fail("string_concat_many: null string element");
+    }
     total += strlen(s);
+    prev_s = s;
     cur = sprout_field(cur, 1);
+    elem_idx++;
   }
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(total + 1);
