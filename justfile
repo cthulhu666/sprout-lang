@@ -77,6 +77,8 @@ build-stage1:
   trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
   echo "==> Emitting LLVM IR via Sprout-native codegen..."
   ./compile_driver_bin --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Validating IR..."
+  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
   echo "==> Extracting C runtime..."
   python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
   echo "==> Linking with clang..."
@@ -101,6 +103,8 @@ build-stage2:
   fi
   echo "==> Emitting LLVM IR via stage-1 Sprout-native codegen..."
   "./$STAGE1" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Validating IR..."
+  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
   echo "==> Extracting C runtime..."
   python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
   echo "==> Linking with clang..."

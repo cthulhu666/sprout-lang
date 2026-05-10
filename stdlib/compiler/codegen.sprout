@@ -157,6 +157,14 @@ fn join_comma(xs: List String) -> String =
   | Cons h Nil -> h
   | Cons h t -> h ++ ", " ++ join_comma(t)
 
+fn join_args_str(a: String, b: String) -> String =
+  if a == "" && b == "" then ""
+  else if a == "" then b
+  else if b == "" then a
+  else a ++ ", " ++ b
+
+fn format_ll_ir(ll: String, ir: String) -> String = ll ++ " " ++ ir
+
 # ===========================================================================
 # Section 2 — Type → LLType
 # ===========================================================================
@@ -1175,7 +1183,7 @@ fn emit_closure_call(callee: Value, sig: CallSig, args: List Value, em: Emitter)
 fn build_closure_args_ir(callee: Value, param_lls: List String, args: List Value, em: Emitter) -> String !{IO} =
   do
     coerced <- coerce_args(param_lls, args, em)
-    let arg_parts = list_map(\p -> match p with | (ll, ir) -> ll ++ " " ++ ir, coerced)
+    let arg_parts = list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced)
     "ptr " ++ val_ir(callee) ++ (if list_is_nil(arg_parts) then "" else ", " ++ join_comma(arg_parts))
 
 fn coerce_args(param_lls: List String, args: List Value, em: Emitter) -> List (String, String) !{IO} =
@@ -1240,10 +1248,7 @@ fn emit_partial_direct_wrapper_lines(wrapper_name: String, fn_name_: String, sig
         load_lines = build_load_applied(fn_params(sig), 0, applied)
         applied_args = build_applied_arg_strs(fn_params(sig), 0, applied)
         remain_args = build_remain_arg_strs(remaining, 0)
-        all_args = if applied_args == "" && remain_args == "" then ""
-                        else if applied_args == "" then remain_args
-                        else if remain_args == "" then applied_args
-                        else applied_args ++ ", " ++ remain_args
+        all_args = join_args_str(applied_args, remain_args)
         call_str = "  %ret = call " ++ fn_ret(sig) ++ " @" ++ fn_name_ ++ (if all_args == "" then "()" else "("++ all_args ++")")
 
 fn build_load_applied(lls: List String, idx: Int, n: Int) -> List String =
@@ -1862,11 +1867,17 @@ fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBra
         emit_template(em, `  ${phi} = phi ${out_ll} ${parts}`)
         val_for_ll(out_ll, phi)
 
+fn emit_match_abort(em: Emitter) -> Unit !{IO} =
+  do
+    tmp <- fresh_tmp(em)
+    emit_template(em, `  ${tmp} = call i64 @sprout_abort_match()`)
+    emit_line(em, "  unreachable")
+
 fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_type: types.Type, out_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
   match branches with
   | Nil ->
       do
-        emit_line(em, "  unreachable")
+        emit_match_abort(em)
         list_reverse(acc)
   | Cons (typed_ast.TypedMatchBranch pat body) rest ->
       do
@@ -1893,7 +1904,7 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_
             if list_is_nil_branches(rest) then
               do
                 emit_label(em, next_lbl)
-                emit_line(em, "  unreachable")
+                emit_match_abort(em)
                 list_reverse(acc)
             else
               do
@@ -2056,7 +2067,7 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
 fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   match args with
   | Cons _ (Cons left (Cons right _)) ->
-      if is_string_type(typed_ast.typed_expr_type(left)) then
+      if is_string_type(typed_ast.typed_expr_type(left)) || is_string_type(ty) then
         do
           lv <- emit_expr(ctx, locals, em, Nothing, left)
           rv <- emit_expr(ctx, locals, em, Nothing, right)
@@ -2196,7 +2207,7 @@ fn emit_regular_direct_call(name: String, sig: FnSig, args: List typed_ast.Typed
   do
     (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
     coerced <- coerce_args(fn_params(sig), arg_vals, em)
-    let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> ll ++ " " ++ ir, coerced))
+    let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
     tmp <- fresh_tmp(em)
     let call_name = emitted_fn_name(name)
     let call_str = if args_ir == ""
@@ -2267,10 +2278,7 @@ fn emit_partial_closure_wrapper_lines(wrap_name: String, sig: CallSig, applied: 
                             Cons("  %callee = inttoptr i64 %callee_raw to ptr", Nil)))
         applied_args = build_applied_arg_strs(all_params, 0, applied)
         remain_args = build_remain_arg_strs(remaining, 0)
-        all_args = if applied_args == "" && remain_args == "" then ""
-                   else if applied_args == "" then remain_args
-                   else if remain_args == "" then applied_args
-                   else applied_args ++ ", " ++ remain_args
+        all_args = join_args_str(applied_args, remain_args)
         call_str = "  %ret = call " ++ sig_ret(sig) ++ " %callee(ptr %callee" ++ (if all_args == "" then")" else ", " ++ all_args ++")")
 
 fn build_load_applied_closure(lls: List String, n: Int) -> List String =
@@ -2762,6 +2770,7 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("sprout_gc_register_i64_root", FnSig("sprout_gc_register_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_ptr_root", FnSig("sprout_gc_register_ptr_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_scan_root", FnSig("sprout_gc_register_scan_root", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
+  , ("sprout_abort_match", FnSig("sprout_abort_match", Nil, ll_i64(), Nothing))
   ]
 
 # ===========================================================================

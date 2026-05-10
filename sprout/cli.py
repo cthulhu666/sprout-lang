@@ -450,6 +450,7 @@ static double g_gc_adapt_factor = 2.0;  /* multiplier applied to threshold when 
 static long long g_gc_adapt_cap = 0;    /* 0 = no cap on threshold growth */
 
 static void tcp_fail(const char* msg);
+long long sprout_abort_match(void);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
 long long sprout_make2(long long tag, long long a0, long long a1);
@@ -2244,6 +2245,10 @@ long long sprout_make9(long long tag, long long a0, long long a1, long long a2, 
   return sprout_box_registered_obj(obj);
 }
 
+long long sprout_abort_match(void) {
+  fprintf(stderr, "runtime error: non-exhaustive match\\n");
+  exit(1);
+}
 static void tcp_fail(const char* msg) {
   const char* colon = strchr(msg, ':');
   if (colon != NULL) {
