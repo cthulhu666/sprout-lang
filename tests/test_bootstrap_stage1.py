@@ -118,6 +118,7 @@ def _ensure_native_cache() -> dict[str, list[str]] | None:
     stdlib_root = str(ROOT / "stdlib")
     paths = [str(p) for p in _all_paths() if p.exists()]
     env = os.environ.copy()
+    env.setdefault("SPROUT_GC_LIVELOCK_ACTION", "abort")
     result = subprocess.run(
         [str(NATIVE_BINARY), stdlib_root, *paths],
         capture_output=True, text=True, cwd=str(ROOT), env=env,
@@ -204,6 +205,7 @@ def _ensure_stage2_cache() -> dict[str, list[str]] | None:
     stdlib_root = str(ROOT / "stdlib")
     paths = [str(p) for p in _all_paths() if p.exists()]
     env = os.environ.copy()
+    env.setdefault("SPROUT_GC_LIVELOCK_ACTION", "abort")
     result = subprocess.run(
         [str(STAGE1_BINARY), stdlib_root, *paths],
         capture_output=True, text=True, cwd=str(ROOT), env=env,
