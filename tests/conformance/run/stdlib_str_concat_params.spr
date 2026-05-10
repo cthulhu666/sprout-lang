@@ -1,0 +1,9 @@
+fn cat(a: String, b: String) -> String = a ++ b
+fn wrap(s: String) -> String = "[" ++ s ++ "]"
+fn join3(a: String, b: String, c: String) -> String = a ++ b ++ c
+
+fn main() -> Unit !{IO} =
+  do
+    print(cat("hello", "world"))
+    print(wrap("test"))
+    print(join3("a", "-", "b"))

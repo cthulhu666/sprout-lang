@@ -60,6 +60,25 @@ SHAPES: dict[str, str] = {
           | Cons h t   -> if h == x then true else contains(x, t)
         fn main() -> Unit !{IO} = print(contains(1, Cons(1, Nil)))
     """),
+    # Exercises ++ with function parameters — previously crashed stage-1
+    # with str_concat(ptr null, ...) due to TVar-typed left operand in
+    # emit_append_call when the operand came from a lambda or CPS binding.
+    "strconcat": textwrap.dedent("""\
+        fn cat(a: String, b: String) -> String = a ++ b
+        fn main() -> Unit !{IO} = print(cat("hello", "world"))
+    """),
+    # Exercises a named function used as a first-class value via list_map.
+    # Previously revealed a calling-convention mismatch: named functions with
+    # tuple parameters get their tuple unpacked into separate pointer args in
+    # the closure wrapper, but list_map_go passes a single packed i64.
+    "tuple_fn_as_value": textwrap.dedent("""\
+        fn fst_str(p: (String, String)) -> String =
+          match p with | (a, _) -> a
+        fn main() -> Unit !{IO} =
+          match list_map(fst_str, Cons(("hello", "world"), Nil)) with
+          | Cons h _ -> print(h)
+          | Nil -> print("empty")
+    """),
 }
 
 # ---------------------------------------------------------------------------
@@ -98,6 +117,20 @@ def _assert_valid_ir(test: unittest.TestCase, result: subprocess.CompletedProces
             f"stdout: {result.stdout[:500]}\n"
             f"stderr: {result.stderr[:500]}"
         )
+    # Null-pointer audit: no string builtin should ever receive a null pointer
+    # argument.  str_concat(ptr null, ...) or str_concat(..., ptr null) means
+    # emit_append_call fell through to zero_val("ptr") because the LHS/RHS had
+    # type TVar instead of String — a codegen bug that produces a runtime crash.
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if "str_concat(ptr null," in stripped or ", ptr null)" in stripped:
+            test.fail(
+                f"{label}: generated IR contains str_concat with null argument:\n"
+                f"  {stripped}\n"
+                "This indicates emit_append_call produced zero_val for a TVar-typed "
+                "operand. Check that the ++ operands have concrete String types at "
+                "the codegen call site."
+            )
     # If llvm-as is available, validate IR syntax.
     if shutil.which("llvm-as"):
         with tempfile.NamedTemporaryFile(
