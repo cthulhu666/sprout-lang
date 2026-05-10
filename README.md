@@ -170,7 +170,35 @@ Integration-style IO test convention:
 - Prefer local mock services on `127.0.0.1` over external hosted dependencies.
 - Keep `just test` as the default authoritative gate when run without filters, use targeted forms such as `mise exec -- just test tests.test_parser tests.test_typechecker` or `SPROUT_TESTS="..." mise exec -- just test` for faster local loops, use `mise exec -- just test-parallel` when you want to invoke the same runner explicitly, use `mise exec -- just test-serial` or `mise exec -- just test-all` only for fallback/debugging, and use `mise exec -- just test-integration` when iterating on service-backed interpreter/native behavior.
 - Use `mise exec -- just measure-gc-thresholds` for the fast GC regression/stress loop and `mise exec -- just measure-gc-real` or targeted runs such as `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 --threshold off --threshold 4096` for the heavier real workloads that now drive default-threshold decisions. The opt-in real set currently includes `vector_build_medium`, `aoc_day3`, `aoc_day4_small`, and `aoc_day5`, and the script summarizes GC cycles, swept nodes, max live heap, max root-slot count, max marked-node count, wall time, and elapsed microseconds across the selected thresholds.
-- Current GC tuning note: after indexing managed nodes for mark-time lookup, the native runtime now defaults to `SPROUT_GC_THRESHOLD=4096`. On the measured `aoc_day3` and `aoc_day5` workloads, `4096` is dramatically better than the old `1024` default and better than `off`. Use `python3 -m sprout.cli compile examples/aoc_2025_day_5.sprout --native -o /tmp/aoc_day5 && SPROUT_GC_THRESHOLD=8192 /tmp/aoc_day5 < day5input` or a similar override only when comparing thresholds on a specific workload.
+
+### Native runtime GC environment variables
+
+All variables are read at program startup; invalid values abort with a message.
+
+**Collection policy**
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. |
+| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N`. |
+
+**Adaptive threshold** — grows the threshold after low-yield cycles to prevent GC thrash when the working set is large. Set `SPROUT_GC_ADAPT_RATIO=0` to disable.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPROUT_GC_ADAPT_RATIO` | `0.2` | Float in `[0, 1]`. If the fraction of heap freed is below this, multiply the threshold by `SPROUT_GC_ADAPT_FACTOR`. |
+| `SPROUT_GC_ADAPT_FACTOR` | `2.0` | Float > 1. Threshold growth multiplier. |
+| `SPROUT_GC_ADAPT_CAP` | `0` (no cap) | Non-negative integer. Maximum threshold value; `0` = unbounded. **Set a cap for long-lived or memory-constrained workloads** to prevent unbounded RSS growth. |
+
+**Livelock detection** — warns or aborts when consecutive GC cycles free almost nothing (working set fills the heap).
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPROUT_GC_LIVELOCK_RATIO` | `0.05` | Float in `[0, 1]`. A cycle is "bad" when the fraction of heap freed is below this value. |
+| `SPROUT_GC_LIVELOCK_CYCLES` | `1000` | Consecutive bad cycles before triggering the action. |
+| `SPROUT_GC_LIVELOCK_ACTION` | `warn` | `off`/`0`, `warn`/`1`, or `abort`/`2`. `warn` prints one diagnostic; `abort` also calls `abort()`. |
+
+Tip: `SPROUT_GC_LIVELOCK_ACTION=abort SPROUT_DEBUG_GC=1` turns an infinite GC thrash into a fast diagnosable crash with a full cycle log.
 
 ## Builtin Helpers (v0)
 
