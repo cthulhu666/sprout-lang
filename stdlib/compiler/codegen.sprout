@@ -1663,7 +1663,8 @@ fn lambda_free_names(body: typed_ast.TypedExpr, params: List ast.Param) -> List 
 fn emit_lambda_expr(params: List ast.Param, body: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   do
     lam_idx <- fresh_lambda_idx(em)
-    let lam_name = "__sprout_lambda_" ++ int_to_string(lam_idx)
+    let scope_suffix = if ctx_scope(ctx) == "" then "" else "_" ++ ctx_scope(ctx)
+    let lam_name = "__sprout_lambda_" ++ int_to_string(lam_idx) ++ scope_suffix
     let free_list = lambda_free_names(body, params)
     let captures = list_filter_in_locals(free_list, locals)
     let capture_vals = get_capture_vals(captures, locals)
