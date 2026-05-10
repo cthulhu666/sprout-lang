@@ -7,6 +7,9 @@ import stdlib.compiler.checker as checker
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.types as types
 import stdlib.compiler.codegen as codegen
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.lowering as lowering
 
 # ---------------------------------------------------------------------------
 # Header stripping (mirrors compiler.sprout / type_driver.sprout)
@@ -40,7 +43,7 @@ fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
         print_diags(rest)
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point (default phase: source-level typecheck with import resolution)
 
 fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
   do
@@ -70,7 +73,72 @@ fn run_with_src(src: String, stdlib_root: String) -> Unit !{IO} =
           | Just decls -> checker.dump_typed_names(decls, env)
 
 # ---------------------------------------------------------------------------
-# IR emission entry point
+# Phase: bundle — load entry file + imports, qualify names
+
+fn dump_ast_decl_names(decls: List ast.Decl) -> Unit !{IO} =
+  match decls with
+  | Nil -> ()
+  | Cons d rest ->
+      do
+        match d with
+        | ast.FnDecl name _ _ _ _ _ _ -> print(name)
+        | ast.LetDecl name _ _        -> print(name)
+        | _                           -> ()
+        dump_ast_decl_names(rest)
+
+fn run_file_bundle(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- compiler.compile_phase_bundle(path, stdlib_root)
+    match result with
+    | bundler.BundleErr msg -> print("ERROR: bundle: " ++ msg)
+    | bundler.BundleOk prog ->
+        do
+          print("OK")
+          match prog with
+          | ast.Program decls _ -> dump_ast_decl_names(decls)
+
+# ---------------------------------------------------------------------------
+# Phase: check — bundle + HM typecheck, produces typed IR
+
+fn run_file_check(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- compiler.compile_phase_check(path, stdlib_root)
+    match result with
+    | typed_ast.TypedErr msg -> print("ERROR: " ++ msg)
+    | typed_ast.TypedOk typed_prog env ->
+        do
+          print("OK")
+          checker.dump_typed_program_names(typed_prog, env)
+
+# ---------------------------------------------------------------------------
+# Phase: lower — typeclass dictionary-passing lowering
+
+fn run_file_lower(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- compiler.compile_phase_lower(path, stdlib_root)
+    match result with
+    | lowering.LowerErr msg -> print("ERROR: lower: " ++ msg)
+    | lowering.LowerOk prog ->
+        do
+          print("OK")
+          match prog with
+          | ast.Program decls _ -> dump_ast_decl_names(decls)
+
+# ---------------------------------------------------------------------------
+# Phase: recheck — re-typecheck the lowered AST so typed nodes carry resolved types
+
+fn run_file_recheck(path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- compiler.compile_phase_recheck(path, stdlib_root)
+    match result with
+    | typed_ast.TypedErr msg -> print("ERROR: " ++ msg)
+    | typed_ast.TypedOk typed_prog env ->
+        do
+          print("OK")
+          checker.dump_typed_program_names(typed_prog, env)
+
+# ---------------------------------------------------------------------------
+# Phase: ir — emit LLVM IR text
 
 fn run_file_ir(path: String, stdlib_root: String) -> Unit !{IO} =
   do
@@ -93,26 +161,39 @@ fn print_lines(lines: List String) -> Unit !{IO} =
 
 # ---------------------------------------------------------------------------
 # Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
-# Prints "=== <path> ===" before each file's output.
+# Prints "=== <path> ===" before each file's output (except for ir phase).
+#
+# phase: "" = default source check, "bundle"|"check"|"lower"|"recheck"|"ir"
 
-fn run_batch(stdlib_root: String, idx: Int, emit_ir: Bool) -> Unit !{IO} =
+fn run_batch(stdlib_root: String, idx: Int, phase: String) -> Unit !{IO} =
   match argv_get(idx) with
   | Nothing -> ()
   | Just path ->
       do
-        if emit_ir then ()
+        if phase == "ir" then ()
         else print("=== " ++ path ++ " ===")
-        if emit_ir then run_file_ir(path, stdlib_root)
+        if phase == "bundle" then run_file_bundle(path, stdlib_root)
+        else if phase == "check" then run_file_check(path, stdlib_root)
+        else if phase == "lower" then run_file_lower(path, stdlib_root)
+        else if phase == "recheck" then run_file_recheck(path, stdlib_root)
+        else if phase == "ir" then run_file_ir(path, stdlib_root)
         else run_file(path, stdlib_root)
-        run_batch(stdlib_root, idx + 1, emit_ir)
+        run_batch(stdlib_root, idx + 1, phase)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing -> print("ERROR: usage: compile-driver [--emit-ir] <stdlib-root> <file>...")
+  | Nothing -> print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir | --emit-ir] <stdlib-root> <file>...")
   | Just first_arg ->
       if first_arg == "--emit-ir" then
         match argv_get(1) with
         | Nothing -> print("ERROR: usage: compile-driver --emit-ir <stdlib-root> <file>...")
-        | Just stdlib_root -> run_batch(stdlib_root, 2, true)
+        | Just stdlib_root -> run_batch(stdlib_root, 2, "ir")
+      else if first_arg == "--phase" then
+        match argv_get(1) with
+        | Nothing -> print("ERROR: --phase requires an argument: bundle|check|lower|recheck|ir")
+        | Just phase ->
+            match argv_get(2) with
+            | Nothing -> print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> <file>...")
+            | Just stdlib_root -> run_batch(stdlib_root, 3, phase)
       else
-        run_batch(first_arg, 1, false)
+        run_batch(first_arg, 1, "")

@@ -679,6 +679,22 @@ fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
 # Source-level TypeDecl/FnDecl/LetDecl declarations are added on top of this
 # env by typecheck_decls, so source definitions always take precedence.
 
+export fn dump_typed_program_names(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> Unit !{IO} =
+  match prog with
+  | typed_ast.TypedProgram decls -> dump_typed_decl_names(decls, env)
+
+fn dump_typed_decl_names(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Unit !{IO} =
+  match decls with
+  | Nil -> ()
+  | Cons d rest ->
+      do
+        match d with
+        | typed_ast.TFnDecl name _ _ _ _ _ -> print_name_scheme(name, env)
+        | typed_ast.TLetDecl name _        -> print_name_scheme(name, env)
+        | typed_ast.TInstanceDecl _ _ _    -> ()
+        | typed_ast.TPassThrough _         -> ()
+        dump_typed_decl_names(rest, env)
+
 export fn builtin_entries() -> List (String, types.Scheme) =
   ctor_entries() ++
   str_entries() ++

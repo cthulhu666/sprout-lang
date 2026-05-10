@@ -164,6 +164,60 @@ export type IrFullLinesResult (..) =
   | IrFullLinesOk (List String)(List String)(List String)
   | IrFullLinesFail (List Diagnostic)
 
+# ---------------------------------------------------------------------------
+# Phase-isolated pipeline functions
+#
+# Each function runs the pipeline through a specific phase and returns only
+# that phase's result.  Intermediate data (AST nodes from earlier phases) is
+# freed when the function returns, because it never escapes into the caller's
+# GC root set.  This prevents the simultaneous-live-set problem that caused
+# stage-2 self-compile OOMs.
+#
+#   compile_phase_bundle  → bundler output only
+#   compile_phase_check   → bundle + typecheck     (frees bundle on return)
+#   compile_phase_lower   → + lower                (frees typed_prog on return)
+#   compile_phase_recheck → + retypecheck          (frees lowered on return)
+#
+# The chain compile_phase_recheck → compile_phase_lower → compile_phase_check
+# means codegen only ever sees typed_lowered + env, not the four earlier ASTs.
+
+export fn compile_phase_bundle(path: String, stdlib_root: String) -> bundler.BundleResult !{IO} =
+  bundler.bundle_file(path, stdlib_root)
+
+export fn compile_phase_check(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
+  do
+    bundle_result <- bundler.bundle_file(path, stdlib_root)
+    match bundle_result with
+    | bundler.BundleErr msg -> typed_ast.TypedErr("bundle: " ++ msg)
+    | bundler.BundleOk prog ->
+        do
+          result <- checker.typecheck_typed(prog, Nil)
+          match result with
+          | typed_ast.TypedErr msg -> typed_ast.TypedErr("check: " ++ msg)
+          | ok -> ok
+
+export fn compile_phase_lower(path: String, stdlib_root: String) -> lowering.LowerResult !{IO} =
+  do
+    check_result <- compile_phase_check(path, stdlib_root)
+    match check_result with
+    | typed_ast.TypedErr msg -> lowering.LowerErr(msg)
+    | typed_ast.TypedOk typed_prog _ ->
+        match lowering.lower_program(typed_prog) with
+        | lowering.LowerErr msg -> lowering.LowerErr("lower: " ++ msg)
+        | ok -> ok
+
+export fn compile_phase_recheck(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
+  do
+    lower_result <- compile_phase_lower(path, stdlib_root)
+    match lower_result with
+    | lowering.LowerErr msg -> typed_ast.TypedErr(msg)
+    | lowering.LowerOk lowered ->
+        do
+          result <- checker.typecheck_typed(lowered, Nil)
+          match result with
+          | typed_ast.TypedErr msg -> typed_ast.TypedErr("check2: " ++ msg)
+          | ok -> ok
+
 export fn compile_full_ir(path: String, stdlib_root: String) -> IrFullResult !{IO} =
   do
     lines_result <- compile_full_ir_lines(path, stdlib_root)
@@ -179,27 +233,17 @@ fn join_lines_with_tail(lines: List String, tail: String) -> String =
   | Nil -> tail
   | Cons h t -> h ++ "\n" ++ join_lines_with_tail(t, tail)
 
+# compile_full_ir_lines uses compile_phase_recheck so that prog, typed_prog,
+# and lowered are freed before codegen runs — only typed_lowered + env survive
+# into the caller's scope.
 export fn compile_full_ir_lines(path: String, stdlib_root: String) -> IrFullLinesResult !{IO} =
   do
-    bundle_result <- bundler.bundle_file(path, stdlib_root)
-    match bundle_result with
-    | bundler.BundleErr msg -> IrFullLinesFail(Cons (DiagError("bundle: " ++ msg), Nil))
-    | bundler.BundleOk prog ->
+    recheck_result <- compile_phase_recheck(path, stdlib_root)
+    match recheck_result with
+    | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError(msg), Nil))
+    | typed_ast.TypedOk typed_lowered env ->
         do
-          tc_result <- checker.typecheck_typed(prog, Nil)
-          match tc_result with
-          | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError("check: " ++ msg), Nil))
-          | typed_ast.TypedOk typed_prog _ ->
-              match lowering.lower_program(typed_prog) with
-              | lowering.LowerErr msg -> IrFullLinesFail(Cons (DiagError("lower: " ++ msg), Nil))
-              | lowering.LowerOk lowered ->
-                  do
-                    tc2_result <- checker.typecheck_typed(lowered, Nil)
-                    match tc2_result with
-                    | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError("check2: " ++ msg), Nil))
-                    | typed_ast.TypedOk typed_lowered env ->
-                        do
-                          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env)
-                          match ir_result with
-                          | codegen.IrLinesOk header_lines str_lines def_lines -> IrFullLinesOk(header_lines, str_lines, def_lines)
-                          | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))
+          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env)
+          match ir_result with
+          | codegen.IrLinesOk header_lines str_lines def_lines -> IrFullLinesOk(header_lines, str_lines, def_lines)
+          | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))

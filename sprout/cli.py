@@ -448,6 +448,12 @@ static long long g_gc_marked_count = 0;
 static double g_gc_adapt_ratio = 0.2;   /* fraction of heap swept below which threshold grows; 0 disables */
 static double g_gc_adapt_factor = 2.0;  /* multiplier applied to threshold when adapting */
 static long long g_gc_adapt_cap = 0;    /* 0 = no cap on threshold growth */
+/* Livelock detection: track consecutive cycles that sweep almost nothing. */
+static long long g_gc_consecutive_bad_cycles = 0;
+static int       g_gc_livelock_warned = 0;
+static double    g_gc_livelock_ratio = 0.05;  /* sweep efficiency below which a cycle is "bad" */
+static long long g_gc_livelock_cycles = 1000; /* consecutive bad cycles before triggering */
+static int       g_gc_livelock_action = 1;    /* 0=off  1=warn  2=abort */
 
 static void tcp_fail(const char* msg);
 long long sprout_abort_match(void);
@@ -571,6 +577,36 @@ static void sprout_gc_adapt_maybe_enable(void) {
     if (end == cap_raw || *end != '\\0' || parsed < 0)
       tcp_fail("SPROUT_GC_ADAPT_CAP: expected non-negative integer");
     g_gc_adapt_cap = parsed;
+  }
+}
+
+static void sprout_gc_livelock_maybe_enable(void) {
+  const char* ratio_raw = getenv("SPROUT_GC_LIVELOCK_RATIO");
+  if (ratio_raw != NULL && ratio_raw[0] != '\\0') {
+    char* end = NULL;
+    double parsed = strtod(ratio_raw, &end);
+    if (end == ratio_raw || *end != '\\0' || parsed < 0.0 || parsed > 1.0)
+      tcp_fail("SPROUT_GC_LIVELOCK_RATIO: expected float in [0, 1]");
+    g_gc_livelock_ratio = parsed;
+  }
+  const char* cycles_raw = getenv("SPROUT_GC_LIVELOCK_CYCLES");
+  if (cycles_raw != NULL && cycles_raw[0] != '\\0') {
+    char* end = NULL;
+    long long parsed = strtoll(cycles_raw, &end, 10);
+    if (end == cycles_raw || *end != '\\0' || parsed < 0)
+      tcp_fail("SPROUT_GC_LIVELOCK_CYCLES: expected non-negative integer");
+    g_gc_livelock_cycles = parsed;
+  }
+  const char* action_raw = getenv("SPROUT_GC_LIVELOCK_ACTION");
+  if (action_raw != NULL && action_raw[0] != '\\0') {
+    if (strcmp(action_raw, "off") == 0 || strcmp(action_raw, "0") == 0)
+      g_gc_livelock_action = 0;
+    else if (strcmp(action_raw, "warn") == 0)
+      g_gc_livelock_action = 1;
+    else if (strcmp(action_raw, "abort") == 0)
+      g_gc_livelock_action = 2;
+    else
+      tcp_fail("SPROUT_GC_LIVELOCK_ACTION: expected off, warn, or abort");
   }
 }
 
@@ -1192,6 +1228,31 @@ static void sprout_gc_collect_with_reason(const char* reason) {
     }
   }
   g_managed_alloc_since_gc = 0;
+  /* Livelock detection: warn (or abort) when consecutive cycles sweep almost nothing. */
+  if (g_gc_livelock_action > 0 && g_gc_livelock_cycles > 0) {
+    double sweep_efficiency = heap_before > 0
+      ? (double)(heap_before - g_managed_heap_count) / (double)heap_before
+      : 1.0;
+    if (sweep_efficiency < g_gc_livelock_ratio) {
+      g_gc_consecutive_bad_cycles++;
+      if (g_gc_consecutive_bad_cycles >= g_gc_livelock_cycles && !g_gc_livelock_warned) {
+        fprintf(stderr,
+          "[sprout gc] livelock: %lld consecutive cycles sweeping %.1f%% < %.1f%%"
+          "; heap=%lld roots=%lld threshold=%lld\\n",
+          g_gc_consecutive_bad_cycles,
+          sweep_efficiency * 100.0, g_gc_livelock_ratio * 100.0,
+          g_managed_heap_count, root_count, g_gc_threshold);
+        g_gc_livelock_warned = 1;
+        if (g_gc_livelock_action == 2) {
+          fprintf(stderr, "[sprout gc] livelock: aborting (SPROUT_GC_LIVELOCK_ACTION=abort)\\n");
+          abort();
+        }
+      }
+    } else {
+      g_gc_consecutive_bad_cycles = 0;
+      g_gc_livelock_warned = 0;
+    }
+  }
   g_gc_active = 0;
 }
 
@@ -1318,6 +1379,7 @@ long long sprout_set_argv(int argc, char** argv) {
   sprout_debug_gc_maybe_enable();
   sprout_gc_threshold_maybe_enable();
   sprout_gc_adapt_maybe_enable();
+  sprout_gc_livelock_maybe_enable();
   sprout_gc_maybe_register();
   return 0;
 }
