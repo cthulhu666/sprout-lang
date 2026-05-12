@@ -540,9 +540,9 @@ static const char* g_sprout_current_fn = NULL;
 static void sprout_crash_handler(int sig) {
   const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : "SIGABRT";
   if (g_sprout_current_fn != NULL)
-    fprintf(stderr, "[sprout] %s while emitting IR for: %s\n", sig_name, g_sprout_current_fn);
+    fprintf(stderr, "[sprout] %s while emitting IR for: %s\\n", sig_name, g_sprout_current_fn);
   else
-    fprintf(stderr, "[sprout] %s (no current function set)\n", sig_name);
+    fprintf(stderr, "[sprout] %s (no current function set)\\n", sig_name);
   fflush(stderr);
   signal(sig, SIG_DFL);
   raise(sig);
@@ -2399,7 +2399,7 @@ long long sprout_tag(long long h) {
     fprintf(stderr, "[sprout] sprout_tag: null pointer");
     if (g_sprout_current_fn != NULL)
       fprintf(stderr, " (in: %s)", g_sprout_current_fn);
-    fprintf(stderr, "\n");
+    fprintf(stderr, "\\n");
     fflush(stderr);
     abort();
   }
