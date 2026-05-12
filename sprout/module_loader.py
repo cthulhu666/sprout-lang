@@ -810,6 +810,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "split_words",
         "str_concat",
         "string_concat_many",
+        "string_join_newlines",
         "str_len",
         "str_slice",
         "str_char_at",

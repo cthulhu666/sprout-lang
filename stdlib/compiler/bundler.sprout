@@ -1017,15 +1017,48 @@ fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbo
             qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root), decls),
             qualify_all_modules(rest, all_symbols, stdlib_root))
 
+# ---------------------------------------------------------------------------
+# Post-qualification assertion: no qualified name may start with '.'
+# An empty module prefix + dot (e.g. ".fn_name") is always a bug in
+# scan_source_info or build_resolve_ctx returning an empty module name.
+# ---------------------------------------------------------------------------
+
+fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
+  match decl with
+  | ast.FnDecl name _ _ _ _ _ _ ->
+      if str_starts_with(name, ".") then Just("FnDecl name starts with '.': " ++ name)
+      else Nothing
+  | ast.TypeDecl name _ _ _ ->
+      if str_starts_with(name, ".") then Just("TypeDecl name starts with '.': " ++ name)
+      else Nothing
+  | ast.LetDecl name _ _ ->
+      if str_starts_with(name, ".") then Just("LetDecl name starts with '.': " ++ name)
+      else Nothing
+  | ast.ClassDecl name _ _ _ _ ->
+      if str_starts_with(name, ".") then Just("ClassDecl name starts with '.': " ++ name)
+      else Nothing
+  | _ -> Nothing
+
+fn validate_qualified_decls(decls: List ast.Decl) -> Maybe String =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match validate_qualified_decl(d) with
+      | Just msg -> Just(msg)
+      | Nothing -> validate_qualified_decls(rest)
+
+fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String) -> BundleResult =
+  match validate_qualified_decls(qualified) with
+  | Just err_msg -> BundleErr("[assert] qualify_decl: " ++ err_msg)
+  | Nothing -> BundleOk(ast.Program(qualified, dummy_pos()))
+  where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root)
+
 export fn bundle_file(path: String, stdlib_root: String) -> BundleResult !{IO} =
   do
     (err, modules) <- collect_modules(path, stdlib_root)
     match err with
     | Just msg -> BundleErr(msg)
-    | Nothing ->
-        BundleOk(ast.Program(
-          qualify_all_modules(modules, build_all_symbols(modules), stdlib_root),
-          dummy_pos()))
+    | Nothing -> make_bundle_or_err(modules, stdlib_root)
 
 fn tok_at_bundler(tokens: Vec token.Token, i: Int) -> token.Token =
   match vec_get(i, tokens) with
@@ -1044,4 +1077,59 @@ fn bundler_tok_is_symbol(t: token.Token, sym: String) -> Bool =
 
 fn bundler_starts_where_binding(tokens: Vec token.Token, i: Int) -> Bool =
   bundler_tok_is_ident(tok_at_bundler(tokens, i)) && bundler_tok_is_symbol(tok_at_bundler(tokens, i + 1), "=")
+
+# ---------------------------------------------------------------------------
+# Phase: dump-qualify — show original→qualified name mapping per module
+# Useful for diagnosing scan_source_info / build_resolve_ctx bugs.
+# ---------------------------------------------------------------------------
+
+fn decl_orig_name(decl: ast.Decl) -> String =
+  match decl with
+  | ast.FnDecl name _ _ _ _ _ _ -> name
+  | ast.TypeDecl name _ _ _ -> name
+  | ast.RecordDecl name _ _ _ -> name
+  | ast.LetDecl name _ _ -> name
+  | ast.ClassDecl name _ _ _ _ -> name
+  | ast.InstanceDecl constraint _ _ _ ->
+      match constraint with
+      | ast.TypeConstraint class_name _ -> "instance:" ++ class_name
+  | ast.AliasDecl name _ _ _ -> name
+
+fn ctx_status_line(path: String, all_symbols: Dict ModuleSymbols) -> String =
+  match dict_get(path, all_symbols) with
+  | Nothing -> "ctx: EMPTY (path not in all_symbols)"
+  | Just _ -> "ctx: populated"
+
+fn module_header_line(mod_name: String) -> String =
+  if mod_name == "" then "module: (prelude)" else "module: " ++ mod_name
+
+fn qualify_debug_line(ctx: ResolveCtx, decl: ast.Decl) -> String =
+  decl_orig_name(decl) ++ " -> " ++ decl_orig_name(qualify_decl(ctx, decl))
+
+fn qualify_debug_lines_acc(ctx: ResolveCtx, decls: List ast.Decl, acc: List String) -> List String =
+  match decls with
+  | Nil -> list_reverse(acc)
+  | Cons d rest ->
+      qualify_debug_lines_acc(ctx, rest, Cons(qualify_debug_line(ctx, d), acc))
+
+fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
+  match mod with
+  | ParsedModule mod_name path _ _ _ decls ->
+      Cons(module_header_line(mod_name),
+      Cons(ctx_status_line(path, all_symbols),
+      qualify_debug_lines_acc(build_resolve_ctx(mod, all_symbols, stdlib_root), decls, Nil)))
+
+fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
+  match modules with
+  | Nil -> Nil
+  | Cons mod rest ->
+      list_append(dump_qualify_module(mod, all_symbols, stdlib_root),
+                  dump_qualify_modules_acc(rest, all_symbols, stdlib_root))
+
+export fn dump_qualify_file(path: String, stdlib_root: String) -> List String !{IO} =
+  do
+    (err, modules) <- collect_modules(path, stdlib_root)
+    match err with
+    | Just msg -> Cons("ERROR: " ++ msg, Nil)
+    | Nothing -> dump_qualify_modules_acc(modules, build_all_symbols(modules), stdlib_root)
 

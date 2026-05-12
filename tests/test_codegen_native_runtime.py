@@ -285,7 +285,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
             self.assertGreater(int(match.group(1)), 0)
             self.assertEqual(int(match.group(2)), 0)
             self.assertEqual(int(match.group(3)), 4)
-            self.assertEqual(int(match.group(4)), 12)
+            self.assertEqual(int(match.group(4)), 3)  # BST: 3 nodes (leaf "a", leaf "b", copy of "a" for set; remove "a" returns child directly)
             self.assertEqual(int(match.group(5)), 9)
             self.assertEqual(int(match.group(6)), 0)
             self.assertGreater(int(match.group(7)), 0)

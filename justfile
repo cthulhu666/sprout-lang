@@ -24,6 +24,11 @@ measure-gc-thresholds:
 measure-gc-real:
   python3 scripts/measure_gc_thresholds.py --include-real
 
+# Lint the C runtime for GC safety: const char* params used after gc_maybe_collect.
+# Use --strict to exit 1 on findings (CI gate).
+gc-safety-check *args:
+  python3 scripts/gc_safety_check.py {{args}}
+
 parse file:
   python3 -m sprout.cli parse {{file}}
 

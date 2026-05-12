@@ -712,7 +712,7 @@ class CodegenLlvmTests(CodegenTestCase):
         runtime_source = Path(sprout_cli.__file__).read_text(encoding="utf-8")
         self.assertIn("#define SPROUT_GC_PUSH_PTR_LOCAL(slot_name)", runtime_source)
         self.assertIn("long long rooted_vec = vec;", runtime_source)
-        self.assertIn("long long rooted_map = map_h;", runtime_source)
+        self.assertIn("long long rm = map_h;", runtime_source)  # BST map helpers use rm not rooted_map
         self.assertIn("long long rooted_builder = builder_h;", runtime_source)
         self.assertIn("long long rooted_bytes = bytes_h;", runtime_source)
         self.assertIn("long long rooted_left = left_h;", runtime_source)

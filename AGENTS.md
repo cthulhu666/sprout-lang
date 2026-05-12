@@ -108,6 +108,42 @@ For coding tasks, work is done only when:
 4. Add a builtin only when the feature is impossible to implement in Sprout or cannot be implemented efficiently enough in Sprout with the current language/runtime surface.
 5. If a feature could plausibly live in Sprout stdlib, discuss that tradeoff with the user before implementing it as a builtin.
 
+## Bootstrap and Debugging Tools
+
+### Diagnostic phases (`compile_driver_bin --phase ...`)
+
+| Phase | What it does |
+|---|---|
+| `scan-info <stdlib> <file>` | Calls `bundler.scan_source_info` and prints `module:`, `export:`, `ctor:` lines. Diagnoses module-name extraction bugs without running the full bundler pipeline. |
+| `dump-qualify <stdlib> <file>` | Runs full collection + qualify and prints original→qualified name mapping per module, plus `ctx: EMPTY` or `ctx: populated` for each. A `ctx: EMPTY` line means `build_resolve_ctx` failed to find the module's path in `all_symbols` — all names stay unqualified, triggering the `[assert]` error. |
+| `bundle <stdlib> <file>` | Runs the full bundle phase and prints qualified decl names. Gold standard for detecting qualify-stage regressions; output must be identical between stage-0 and stage-1 (enforced by `tests/test_bootstrap_identity.py`). |
+
+**If `bundle_file` returns `BundleErr("[assert] qualify_decl: FnDecl starts with '.'...")`:**
+1. Run `--phase scan-info` to check `scan_source_info` returns a valid non-empty module name.
+2. If the name looks correct, run `--phase dump-qualify` to see which module has `ctx: EMPTY`.
+
+### GC safety in `sprout/cli.py`
+
+`just gc-safety-check` lints the embedded C runtime for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls (callers are expected to root heap values before such calls). Run this after editing any C builtin in `cli.py` that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.
+
+### Bootstrap binary rebuild protocol
+
+1. Rebuild stage-0 (wraps Python compiler; OOM-risk — always use memwatch):
+   ```
+   scripts/memwatch.sh 4096 1 -- python3 -m sprout.cli compile \
+     --with-stdlib --native -o compile_driver_bin \
+     stdlib/compiler/compile_driver.sprout
+   ```
+2. Rebuild stage-1 from stage-0:
+   ```
+   just build-stage1
+   ```
+3. After rebuild, verify identity:
+   ```
+   mise exec -- just test tests.test_bootstrap_identity
+   ```
+   All corpus files are expected to pass. If a file is newly broken in stage-1, add it to `XFAIL_FILES` in `test_bootstrap_identity.py` with a comment explaining the regression, and remove it once fixed.
+
 ## Commit Guidance
 
 Use commit messages that explain intent, for example:

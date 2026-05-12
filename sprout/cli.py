@@ -357,16 +357,16 @@ typedef struct {
   long long* data;
 } VectorVal;
 
-typedef struct {
-  char* key;
-  long long value;
-} MapEntry;
+typedef struct InternBucket { char* str; struct InternBucket* next; } InternBucket;
 
 typedef struct {
-  long long len;
-  long long cap;
-  MapEntry* entries;
-} MapVal;
+  const char* key;    /* interned string — permanent, never freed */
+  long long   value;  /* Sprout handle (GC child at index 0) */
+  long long   left;   /* left child handle, or 0 (GC child at index 1) */
+  long long   right;  /* right child handle, or 0 (GC child at index 2) */
+  int         height; /* AVL height: 1 for leaf */
+  int         size;   /* subtree size for O(log n) nth-key/nth-value */
+} BSTNode;
 
 typedef struct {
   char* data;
@@ -403,6 +403,7 @@ typedef struct {
 
 static ManagedNode* g_heap_nodes = NULL;
 static ManagedNode* g_heap_index[131071];
+static InternBucket* g_intern_table[65537];
 static RootNode* g_root_nodes = NULL;
 static RootNode* g_temp_root_nodes = NULL;
 static SproutObj* g_nothing_singleton = NULL;
@@ -445,9 +446,14 @@ static long long g_managed_heap_count = 0;
 static long long g_managed_alloc_since_gc = 0;
 static long long g_gc_threshold = 4096;
 static long long g_gc_marked_count = 0;
+/* Per-type live counts and CSTR bytes after each sweep (logged with SPROUT_DEBUG_GC). */
+static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
+static long long g_gc_live_map = 0, g_gc_live_bytes = 0, g_gc_live_builder = 0;
+static long long g_gc_live_tuple = 0, g_gc_live_range = 0, g_gc_live_ref = 0;
+static long long g_gc_live_cstr = 0, g_gc_live_cstr_bytes = 0;
 static double g_gc_adapt_ratio = 0.2;   /* fraction of heap swept below which threshold grows; 0 disables */
 static double g_gc_adapt_factor = 2.0;  /* multiplier applied to threshold when adapting */
-static long long g_gc_adapt_cap = 0;    /* 0 = no cap on threshold growth */
+static long long g_gc_adapt_cap = 0;    /* uncapped; BST map is O(1) unmanaged payload per node */
 /* Livelock detection: track consecutive cycles that sweep almost nothing. */
 static long long g_gc_consecutive_bad_cycles = 0;
 static int       g_gc_livelock_warned = 0;
@@ -647,6 +653,13 @@ static void sprout_gc_log_cycle(
     alloc_since_gc,
     swept_delta,
     elapsed_us
+  );
+  fprintf(
+    stderr,
+    "[sprout gc]   types: obj=%lld closure=%lld vec=%lld map=%lld ref=%lld cstr=%lld(%.1fKB) bytes=%lld builder=%lld tuple=%lld range=%lld\\n",
+    g_gc_live_obj, g_gc_live_closure, g_gc_live_vec, g_gc_live_map,
+    g_gc_live_ref, g_gc_live_cstr, (double)g_gc_live_cstr_bytes / 1024.0,
+    g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple, g_gc_live_range
   );
 }
 
@@ -892,15 +905,34 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
   return (long long*)sprout_realloc_counted(&g_debug_alloc_vector, data, count * sizeof(long long), ctx);
 }
 
-static MapVal* sprout_alloc_map_val(const char* ctx) {
+static BSTNode* sprout_alloc_bst_node(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
-  MapVal* out = (MapVal*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(MapVal), ctx);
+  BSTNode* out = (BSTNode*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(BSTNode), ctx);
   register_managed_ptr(out, SPROUT_HEAP_MAP, 0);
   return out;
 }
 
-static MapEntry* sprout_alloc_map_entries(size_t count, const char* ctx) {
-  return count == 0 ? NULL : (MapEntry*)sprout_alloc_counted(&g_debug_alloc_map, count * sizeof(MapEntry), ctx);
+static size_t sprout_intern_hash(const char* s) {
+  size_t h = 5381;
+  for (unsigned char c; (c = (unsigned char)*s) != 0; s++)
+    h = (h << 5) + h + c;
+  return h % 65537;
+}
+
+static const char* intern_string(const char* s) {
+  if (s == NULL) return NULL;
+  size_t bucket = sprout_intern_hash(s);
+  for (InternBucket* b = g_intern_table[bucket]; b != NULL; b = b->next)
+    if (strcmp(b->str, s) == 0) return b->str;
+  InternBucket* entry = (InternBucket*)malloc(sizeof(InternBucket));
+  if (!entry) tcp_fail("intern_string: out of memory");
+  size_t len = strlen(s);
+  entry->str = (char*)malloc(len + 1);
+  if (!entry->str) tcp_fail("intern_string: out of memory for string");
+  memcpy(entry->str, s, len + 1);
+  entry->next = g_intern_table[bucket];
+  g_intern_table[bucket] = entry;
+  return entry->str;
 }
 
 static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
@@ -970,7 +1002,7 @@ static size_t sprout_heap_child_count(ManagedNode* node) {
     case SPROUT_HEAP_VECTOR:
       return (size_t)((VectorVal*)node->ptr)->len;
     case SPROUT_HEAP_MAP:
-      return (size_t)((MapVal*)node->ptr)->len;
+      return 3; /* value, left, right */
     case SPROUT_HEAP_BYTES:
       return 0;
     case SPROUT_HEAP_BUILDER:
@@ -1009,8 +1041,13 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
     }
     case SPROUT_HEAP_VECTOR:
       return ((VectorVal*)node->ptr)->data[index];
-    case SPROUT_HEAP_MAP:
-      return ((MapVal*)node->ptr)->entries[index].value;
+    case SPROUT_HEAP_MAP: {
+      BSTNode* bst = (BSTNode*)node->ptr;
+      if (index == 0) return bst->value;
+      if (index == 1) return bst->left;
+      if (index == 2) return bst->right;
+      break;
+    }
     case SPROUT_HEAP_BYTES:
       break;
     case SPROUT_HEAP_BUILDER:
@@ -1137,13 +1174,9 @@ static void sprout_gc_free_payload(ManagedNode* node) {
       free(value);
       return;
     }
-    case SPROUT_HEAP_MAP: {
-      MapVal* value = (MapVal*)node->ptr;
-      for (long long i = 0; i < value->len; i++) free(value->entries[i].key);
-      free(value->entries);
-      free(value);
+    case SPROUT_HEAP_MAP:
+      free(node->ptr); /* key is interned (permanent); left/right handled by GC */
       return;
-    }
     case SPROUT_HEAP_BYTES: {
       BytesVal* value = (BytesVal*)node->ptr;
       free(value->data);
@@ -1174,6 +1207,11 @@ static void sprout_gc_free_payload(ManagedNode* node) {
 static void sprout_gc_sweep(void) {
   ManagedNode* prev = NULL;
   ManagedNode* node = g_heap_nodes;
+  /* Reset per-type live counters before recomputing. */
+  g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
+  g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
+  g_gc_live_tuple = g_gc_live_range = g_gc_live_ref = 0;
+  g_gc_live_cstr = g_gc_live_cstr_bytes = 0;
   while (node != NULL) {
     ManagedNode* next = node->next;
     if (!node->marked) {
@@ -1191,6 +1229,23 @@ static void sprout_gc_sweep(void) {
     } else {
       node->marked = 0;
       prev = node;
+      if (g_debug_gc_enabled) {
+        switch (node->kind) {
+          case SPROUT_HEAP_OBJ:     g_gc_live_obj++;     break;
+          case SPROUT_HEAP_CLOSURE: g_gc_live_closure++;  break;
+          case SPROUT_HEAP_VECTOR:  g_gc_live_vec++;      break;
+          case SPROUT_HEAP_MAP:     g_gc_live_map++;      break;
+          case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
+          case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
+          case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
+          case SPROUT_HEAP_RANGE:   g_gc_live_range++;    break;
+          case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
+          case SPROUT_HEAP_CSTR:
+            g_gc_live_cstr++;
+            if (node->ptr) g_gc_live_cstr_bytes += (long long)strlen((const char*)node->ptr);
+            break;
+        }
+      }
     }
     node = next;
   }
@@ -2372,6 +2427,38 @@ const char* string_concat_many(long long list_handle) {
     cur = sprout_field(cur, 1);
   }
   out[total] = '\\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return out;
+}
+
+/* string_join_newlines: join a List String appending '\\n' after each element.
+ * Two-pass: compute total length, malloc once, copy. No GC inside traversal. */
+const char* string_join_newlines(long long list_handle) {
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  size_t total = 0;
+  long long cur = list_handle;
+  while (sprout_tag(cur) != nil_tag) {
+    if (sprout_tag(cur) != cons_tag) tcp_fail("string_join_newlines: malformed list");
+    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
+    if (s == NULL) tcp_fail("string_join_newlines: null string element");
+    total += strlen(s) + 1;
+    cur = sprout_field(cur, 1);
+  }
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(total + 1);
+  if (out == NULL) tcp_fail("string_join_newlines: out of memory");
+  size_t pos = 0;
+  cur = list_handle;
+  while (sprout_tag(cur) != nil_tag) {
+    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
+    size_t slen = strlen(s);
+    memcpy(out + pos, s, slen);
+    pos += slen;
+    out[pos++] = '\\n';
+    cur = sprout_field(cur, 1);
+  }
+  out[pos] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return out;
 }
@@ -4296,206 +4383,375 @@ long long vector_sort_by_int(long long decorated_list) {
   return (long long)(uintptr_t)out;
 }
 
-long long map_empty() {
-  MapVal* m = sprout_alloc_map_val("map_empty: out of memory");
-  m->len = 0;
-  m->cap = 0;
-  m->entries = NULL;
-  return (long long)(uintptr_t)m;
+/* ─── Persistent AVL BST map ────────────────────────────────────────────────
+ * Each BST node is an independent SPROUT_HEAP_MAP managed object.
+ * Empty map = handle 0 (no allocation needed).
+ * Keys are interned strings (permanent, never freed by map sweep).
+ * Subtree size enables O(log n) nth-key/nth-value.
+ * Structural sharing: O(log n) new nodes per insert/remove.
+ */
+
+static int bst_height(long long h) {
+  return h == 0 ? 0 : ((BSTNode*)(uintptr_t)h)->height;
+}
+static int bst_size(long long h) {
+  return h == 0 ? 0 : ((BSTNode*)(uintptr_t)h)->size;
+}
+static void bst_update(BSTNode* n) {
+  int lh = bst_height(n->left), rh = bst_height(n->right);
+  n->height = 1 + (lh > rh ? lh : rh);
+  n->size   = 1 + bst_size(n->left) + bst_size(n->right);
+}
+static int bst_bf(long long h) {
+  if (h == 0) return 0;
+  BSTNode* n = (BSTNode*)(uintptr_t)h;
+  return bst_height(n->left) - bst_height(n->right);
 }
 
-static long long map_find_index(MapVal* m, const char* key) {
-  for (long long i = 0; i < m->len; i++) {
-    if (strcmp(m->entries[i].key, key) == 0) return i;
-  }
-  return -1;
+/* forward declaration — bst_balance calls both rotations */
+static long long bst_rotate_left(long long h);
+
+static long long bst_rotate_right(long long h) {
+  /* Creates 2 new nodes; caller must ensure h is GC-reachable. */
+  long long a = h, b = ((BSTNode*)(uintptr_t)a)->left;
+  long long b_right = ((BSTNode*)(uintptr_t)b)->right;
+  long long a_right = ((BSTNode*)(uintptr_t)a)->right;
+  long long b_left  = ((BSTNode*)(uintptr_t)b)->left;
+  long long new_a = 0, new_b = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(a);       SPROUT_GC_PUSH_I64_LOCAL(b);
+  SPROUT_GC_PUSH_I64_LOCAL(b_right); SPROUT_GC_PUSH_I64_LOCAL(a_right);
+  SPROUT_GC_PUSH_I64_LOCAL(b_left);  SPROUT_GC_PUSH_I64_LOCAL(new_a);
+  SPROUT_GC_PUSH_I64_LOCAL(new_b);
+  { BSTNode* na = sprout_alloc_bst_node("bst_rotate_right: oom");
+    BSTNode* oa = (BSTNode*)(uintptr_t)a;
+    na->key = oa->key; na->value = oa->value;
+    na->left = b_right; na->right = a_right;
+    bst_update(na); new_a = (long long)(uintptr_t)na; }
+  { BSTNode* nb = sprout_alloc_bst_node("bst_rotate_right: oom");
+    BSTNode* ob = (BSTNode*)(uintptr_t)b;
+    nb->key = ob->key; nb->value = ob->value;
+    nb->left = b_left; nb->right = new_a;
+    bst_update(nb); new_b = (long long)(uintptr_t)nb; }
+  SPROUT_GC_POP_LOCALS(7);
+  return new_b;
 }
 
-long long map_get(long long map_h, const char* key) {
-  long long rooted_map = map_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
-  MapVal* m = (MapVal*)(uintptr_t)map_h;
-  if (m == NULL) tcp_fail("map_get: null map");
-  if (key == NULL) tcp_fail("map_get: null key");
-  long long idx = map_find_index(m, key);
-  if (idx < 0) {
-    SPROUT_GC_POP_LOCALS(1);
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  }
-  long long out = sprout_make1(find_ctor_tag_by_name("Just"), m->entries[idx].value);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
+static long long bst_rotate_left(long long h) {
+  long long a = h, b = ((BSTNode*)(uintptr_t)a)->right;
+  long long b_left  = ((BSTNode*)(uintptr_t)b)->left;
+  long long a_left  = ((BSTNode*)(uintptr_t)a)->left;
+  long long b_right = ((BSTNode*)(uintptr_t)b)->right;
+  long long new_a = 0, new_b = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(a);      SPROUT_GC_PUSH_I64_LOCAL(b);
+  SPROUT_GC_PUSH_I64_LOCAL(b_left); SPROUT_GC_PUSH_I64_LOCAL(a_left);
+  SPROUT_GC_PUSH_I64_LOCAL(b_right); SPROUT_GC_PUSH_I64_LOCAL(new_a);
+  SPROUT_GC_PUSH_I64_LOCAL(new_b);
+  { BSTNode* na = sprout_alloc_bst_node("bst_rotate_left: oom");
+    BSTNode* oa = (BSTNode*)(uintptr_t)a;
+    na->key = oa->key; na->value = oa->value;
+    na->left = a_left; na->right = b_left;
+    bst_update(na); new_a = (long long)(uintptr_t)na; }
+  { BSTNode* nb = sprout_alloc_bst_node("bst_rotate_left: oom");
+    BSTNode* ob = (BSTNode*)(uintptr_t)b;
+    nb->key = ob->key; nb->value = ob->value;
+    nb->left = new_a; nb->right = b_right;
+    bst_update(nb); new_b = (long long)(uintptr_t)nb; }
+  SPROUT_GC_POP_LOCALS(7);
+  return new_b;
 }
 
-long long map_set(long long map_h, const char* key, long long value) {
-  long long rooted_map = map_h;
-  long long rooted_value = value;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
-  MapVal* src = (MapVal*)(uintptr_t)map_h;
-  if (src == NULL) tcp_fail("map_set: null map");
-  if (key == NULL) tcp_fail("map_set: null key");
-  long long existing = map_find_index(src, key);
-  long long out_len = existing >= 0 ? src->len : (src->len + 1);
-
-  MapVal* out = sprout_alloc_map_val("map_set: out of memory");
-  out->len = out_len;
-  out->cap = out_len;
-  out->entries = sprout_alloc_map_entries((size_t)out_len, "map_set: out of memory");
-
-  for (long long i = 0; i < src->len; i++) {
-    out->entries[i].key = sprout_strdup_counted(&g_debug_alloc_map, src->entries[i].key, "map_set: out of memory");
-    out->entries[i].value = src->entries[i].value;
-  }
-  if (existing >= 0) {
-    out->entries[existing].value = rooted_value;
-  } else {
-    out->entries[src->len].key = sprout_strdup_counted(&g_debug_alloc_map, key, "map_set: out of memory");
-    out->entries[src->len].value = rooted_value;
-  }
-  SPROUT_GC_POP_LOCALS(2);
-  return (long long)(uintptr_t)out;
-}
-
-long long map_remove(long long map_h, const char* key) {
-  long long rooted_map = map_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
-  MapVal* src = (MapVal*)(uintptr_t)map_h;
-  if (src == NULL) tcp_fail("map_remove: null map");
-  if (key == NULL) tcp_fail("map_remove: null key");
-  long long remove_idx = map_find_index(src, key);
-  if (remove_idx < 0) {
-    SPROUT_GC_POP_LOCALS(1);
-    return map_h;
-  }
-
-  MapVal* out = sprout_alloc_map_val("map_remove: out of memory");
-  out->len = src->len - 1;
-  out->cap = out->len;
-  out->entries = sprout_alloc_map_entries((size_t)out->len, "map_remove: out of memory");
-
-  long long j = 0;
-  for (long long i = 0; i < src->len; i++) {
-    if (i == remove_idx) continue;
-    out->entries[j].key = sprout_strdup_counted(&g_debug_alloc_map, src->entries[i].key, "map_remove: out of memory");
-    out->entries[j].value = src->entries[i].value;
-    j++;
-  }
-  SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
-}
-
-long long map_size(long long map_h) {
-  MapVal* m = (MapVal*)(uintptr_t)map_h;
-  if (m == NULL) tcp_fail("map_size: null map");
-  return m->len;
-}
-
-long long map_nth_key(long long map_h, long long index) {
-  long long rooted_map = map_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
-  MapVal* m = (MapVal*)(uintptr_t)map_h;
-  if (m == NULL) tcp_fail("map_nth_key: null map");
-  if (index < 0 || index >= m->len) {
-    SPROUT_GC_POP_LOCALS(1);
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  }
-  char* key = sprout_strdup_counted(&g_debug_alloc_map, m->entries[index].key, "map_nth_key: out of memory");
-  long long out = sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)key);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
-}
-
-long long map_nth_value(long long map_h, long long index) {
-  long long rooted_map = map_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_map);
-  MapVal* m = (MapVal*)(uintptr_t)map_h;
-  if (m == NULL) tcp_fail("map_nth_value: null map");
-  if (index < 0 || index >= m->len) {
-    SPROUT_GC_POP_LOCALS(1);
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  }
-  long long out = sprout_make1(find_ctor_tag_by_name("Just"), m->entries[index].value);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
-}
-
-/* ── NativeSet ─────────────────────────────────────────────────────────────
-   Backed by MapVal with dummy values (0). Keys are malloc-owned strings.
-   Registered as SPROUT_HEAP_MAP so the GC manages the MapVal lifetime;
-   the dummy values (0) are not heap pointers so GC child tracing is a no-op.
-*/
-
-long long native_set_empty() {
-  MapVal* m = sprout_alloc_map_val("native_set_empty: out of memory");
-  m->len = 0;
-  m->cap = 0;
-  m->entries = NULL;
-  return (long long)(uintptr_t)m;
-}
-
-long long native_set_insert(const char* item, long long set_h) {
-  long long rooted_set = set_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_set);
-  MapVal* src = (MapVal*)(uintptr_t)rooted_set;
-  if (src == NULL) tcp_fail("native_set_insert: null set");
-  if (item == NULL) tcp_fail("native_set_insert: null item");
-  /* Check if already present */
-  for (long long i = 0; i < src->len; i++) {
-    if (strcmp(src->entries[i].key, item) == 0) {
-      SPROUT_GC_POP_LOCALS(1);
-      return rooted_set;
+static long long bst_balance(long long h) {
+  if (h == 0) return 0;
+  long long rooted_h = h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_h);
+  int bf = bst_bf(rooted_h);
+  long long result;
+  if (bf > 1) {
+    long long left_h = ((BSTNode*)(uintptr_t)rooted_h)->left;
+    if (bst_bf(left_h) < 0) { /* LR case */
+      long long new_left = 0, new_h = 0;
+      SPROUT_GC_PUSH_I64_LOCAL(new_left); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+      new_left = bst_rotate_left(left_h);
+      { BSTNode* na = sprout_alloc_bst_node("bst_balance: oom");
+        BSTNode* old = (BSTNode*)(uintptr_t)rooted_h;
+        na->key = old->key; na->value = old->value;
+        na->left = new_left; na->right = old->right;
+        bst_update(na); new_h = (long long)(uintptr_t)na; }
+      result = bst_rotate_right(new_h);
+      SPROUT_GC_POP_LOCALS(2);
+    } else { /* LL case */
+      result = bst_rotate_right(rooted_h);
     }
-  }
-  long long out_len = src->len + 1;
-  MapVal* out = sprout_alloc_map_val("native_set_insert: out of memory");
-  src = (MapVal*)(uintptr_t)rooted_set; /* re-read after alloc (GC may move) */
-  out->len = out_len;
-  out->cap = out_len;
-  out->entries = sprout_alloc_map_entries((size_t)out_len, "native_set_insert: out of memory");
-  for (long long i = 0; i < src->len; i++) {
-    out->entries[i].key = sprout_strdup_counted(&g_debug_alloc_map, src->entries[i].key, "native_set_insert: out of memory");
-    out->entries[i].value = 0;
-  }
-  out->entries[src->len].key = sprout_strdup_counted(&g_debug_alloc_map, item, "native_set_insert: out of memory");
-  out->entries[src->len].value = 0;
-  SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
-}
-
-long long native_set_member(const char* item, long long set_h) {
-  MapVal* m = (MapVal*)(uintptr_t)set_h;
-  if (m == NULL) tcp_fail("native_set_member: null set");
-  if (item == NULL) return 0;
-  for (long long i = 0; i < m->len; i++) {
-    if (strcmp(m->entries[i].key, item) == 0) return 1;
-  }
-  return 0;
-}
-
-long long native_set_to_list(long long set_h) {
-  long long rooted_set = set_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_set);
-  MapVal* m = (MapVal*)(uintptr_t)rooted_set;
-  if (m == NULL) tcp_fail("native_set_to_list: null set");
-  long long result = sprout_make0(find_ctor_tag_by_name("Nil"));
-  for (long long i = m->len - 1; i >= 0; i--) {
-    SPROUT_GC_PUSH_I64_LOCAL(result);
-    char* key = sprout_strdup_counted(&g_debug_alloc_map, m->entries[i].key, "native_set_to_list: out of memory");
-    long long key_val = (long long)(uintptr_t)key;
-    long long cons = sprout_make2(find_ctor_tag_by_name("Cons"), key_val, result);
-    SPROUT_GC_POP_LOCALS(1);
-    result = cons;
-    m = (MapVal*)(uintptr_t)rooted_set; /* re-read after alloc */
+  } else if (bf < -1) {
+    long long right_h = ((BSTNode*)(uintptr_t)rooted_h)->right;
+    if (bst_bf(right_h) > 0) { /* RL case */
+      long long new_right = 0, new_h = 0;
+      SPROUT_GC_PUSH_I64_LOCAL(new_right); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+      new_right = bst_rotate_right(right_h);
+      { BSTNode* na = sprout_alloc_bst_node("bst_balance: oom");
+        BSTNode* old = (BSTNode*)(uintptr_t)rooted_h;
+        na->key = old->key; na->value = old->value;
+        na->left = old->left; na->right = new_right;
+        bst_update(na); new_h = (long long)(uintptr_t)na; }
+      result = bst_rotate_left(new_h);
+      SPROUT_GC_POP_LOCALS(2);
+    } else { /* RR case */
+      result = bst_rotate_left(rooted_h);
+    }
+  } else {
+    result = rooted_h;
   }
   SPROUT_GC_POP_LOCALS(1);
   return result;
 }
 
+static long long bst_insert_node(long long h, const char* ikey, long long value) {
+  if (h == 0) { /* allocate leaf */
+    long long rv = value, new_h = 0;
+    SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    n->key = ikey; n->value = rv; n->left = 0; n->right = 0;
+    n->height = 1; n->size = 1;
+    new_h = (long long)(uintptr_t)n;
+    SPROUT_GC_POP_LOCALS(2);
+    return new_h;
+  }
+  BSTNode* node = (BSTNode*)(uintptr_t)h;
+  int cmp = strcmp(ikey, node->key);
+  if (cmp == 0) { /* update value, same structure */
+    long long rh = h, rv = value, new_h = 0;
+    SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = rv; n->left = old->left; n->right = old->right;
+    n->height = old->height; n->size = old->size;
+    new_h = (long long)(uintptr_t)n;
+    SPROUT_GC_POP_LOCALS(3);
+    return new_h;
+  }
+  long long rh = h, rv = value, new_child = 0, new_h = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rv);
+  SPROUT_GC_PUSH_I64_LOCAL(new_child); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+  if (cmp < 0) {
+    new_child = bst_insert_node(((BSTNode*)(uintptr_t)rh)->left, ikey, rv);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = new_child; n->right = old->right;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  } else {
+    new_child = bst_insert_node(((BSTNode*)(uintptr_t)rh)->right, ikey, rv);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = old->left; n->right = new_child;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  }
+  long long balanced = bst_balance(new_h);
+  SPROUT_GC_POP_LOCALS(4);
+  return balanced;
+}
+
+static BSTNode* bst_find_min(long long h) {
+  /* Pure read — no allocation; h must be GC-reachable at call site. */
+  BSTNode* n = (BSTNode*)(uintptr_t)h;
+  while (n && n->left) n = (BSTNode*)(uintptr_t)n->left;
+  return n;
+}
+
+static long long bst_remove_min(long long h) {
+  if (h == 0) return 0;
+  BSTNode* node = (BSTNode*)(uintptr_t)h;
+  if (node->left == 0) return node->right;
+  long long rh = h, new_left = 0, new_h = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_left); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+  new_left = bst_remove_min(((BSTNode*)(uintptr_t)rh)->left);
+  BSTNode* n = sprout_alloc_bst_node("bst_remove_min: oom");
+  BSTNode* old = (BSTNode*)(uintptr_t)rh;
+  n->key = old->key; n->value = old->value; n->left = new_left; n->right = old->right;
+  bst_update(n); new_h = (long long)(uintptr_t)n;
+  long long balanced = bst_balance(new_h);
+  SPROUT_GC_POP_LOCALS(3);
+  return balanced;
+}
+
+static long long bst_remove_node(long long h, const char* ikey) {
+  if (h == 0) return 0;
+  BSTNode* node = (BSTNode*)(uintptr_t)h;
+  int cmp = strcmp(ikey, node->key);
+  if (cmp == 0) {
+    if (node->left == 0) return node->right;
+    if (node->right == 0) return node->left;
+    /* two children: replace with in-order successor */
+    long long rh = h, new_right = 0, new_h = 0;
+    SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_right); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+    BSTNode* succ = bst_find_min(((BSTNode*)(uintptr_t)rh)->right);
+    const char* succ_key = succ->key;
+    long long succ_value = succ->value; /* alive: reachable from rh */
+    new_right = bst_remove_min(((BSTNode*)(uintptr_t)rh)->right);
+    BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = succ_key; n->value = succ_value; n->left = old->left; n->right = new_right;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+    long long balanced = bst_balance(new_h);
+    SPROUT_GC_POP_LOCALS(3);
+    return balanced;
+  }
+  long long rh = h, new_child = 0, new_h = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_child); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+  if (cmp < 0) {
+    new_child = bst_remove_node(((BSTNode*)(uintptr_t)rh)->left, ikey);
+    BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = new_child; n->right = old->right;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  } else {
+    new_child = bst_remove_node(((BSTNode*)(uintptr_t)rh)->right, ikey);
+    BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = old->left; n->right = new_child;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  }
+  long long balanced = bst_balance(new_h);
+  SPROUT_GC_POP_LOCALS(3);
+  return balanced;
+}
+
+static long long bst_get(long long h, const char* key) {
+  while (h != 0) {
+    BSTNode* node = (BSTNode*)(uintptr_t)h;
+    int cmp = strcmp(key, node->key);
+    if (cmp == 0) return node->value;
+    h = (cmp < 0) ? node->left : node->right;
+  }
+  return LLONG_MIN; /* sentinel: not found */
+}
+
+static BSTNode* bst_nth_node(long long h, long long n) {
+  while (h != 0) {
+    BSTNode* node = (BSTNode*)(uintptr_t)h;
+    long long ls = (long long)bst_size(node->left);
+    if (n < ls) { h = node->left; }
+    else if (n == ls) { return node; }
+    else { n -= ls + 1; h = node->right; }
+  }
+  return NULL;
+}
+
+/* In-order accumulation: appends BST keys (sorted) to tail, returning full list. */
+static long long bst_to_list_acc(long long h, long long tail) {
+  if (h == 0) return tail;
+  long long rh = h, rtail = tail, acc = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rtail); SPROUT_GC_PUSH_I64_LOCAL(acc);
+  acc = bst_to_list_acc(((BSTNode*)(uintptr_t)rh)->right, rtail);
+  { BSTNode* node = (BSTNode*)(uintptr_t)rh;
+    long long kv = (long long)(uintptr_t)node->key;
+    long long cons = sprout_make2(find_ctor_tag_by_name("Cons"), kv, acc);
+    acc = cons; }
+  long long result = bst_to_list_acc(((BSTNode*)(uintptr_t)rh)->left, acc);
+  SPROUT_GC_POP_LOCALS(3);
+  return result;
+}
+
+long long map_empty() {
+  return 0; /* empty BST = null handle */
+}
+
+long long map_get(long long map_h, const char* key) {
+  if (key == NULL) tcp_fail("map_get: null key");
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  long long found = bst_get(rm, key);
+  long long out = (found == LLONG_MIN)
+    ? sprout_make0(find_ctor_tag_by_name("Nothing"))
+    : sprout_make1(find_ctor_tag_by_name("Just"), found);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+long long map_set(long long map_h, const char* key, long long value) {
+  if (key == NULL) tcp_fail("map_set: null key");
+  const char* ikey = intern_string(key); /* intern before any GC-triggering alloc */
+  long long rm = map_h, rv = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rv);
+  long long result = bst_insert_node(rm, ikey, rv);
+  SPROUT_GC_POP_LOCALS(2);
+  return result;
+}
+
+long long map_remove(long long map_h, const char* key) {
+  if (key == NULL) tcp_fail("map_remove: null key");
+  const char* ikey = intern_string(key);
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  long long result = bst_remove_node(rm, ikey);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long map_size(long long map_h) {
+  return (long long)bst_size(map_h);
+}
+
+long long map_nth_key(long long map_h, long long index) {
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  BSTNode* node = bst_nth_node(rm, index);
+  long long out = (node == NULL)
+    ? sprout_make0(find_ctor_tag_by_name("Nothing"))
+    : sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)node->key);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+long long map_nth_value(long long map_h, long long index) {
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  BSTNode* node = bst_nth_node(rm, index);
+  long long out = (node == NULL)
+    ? sprout_make0(find_ctor_tag_by_name("Nothing"))
+    : sprout_make1(find_ctor_tag_by_name("Just"), node->value);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+/* ── NativeSet ─────────────────────────────────────────────────────────────
+   Backed by the persistent BST with value=0 (dummy). Keys are interned.
+   SPROUT_HEAP_MAP nodes; GC sees value/left/right as children.
+*/
+
+long long native_set_empty() {
+  return 0; /* empty BST */
+}
+
+long long native_set_insert(const char* item, long long set_h) {
+  if (item == NULL) tcp_fail("native_set_insert: null item");
+  const char* ikey = intern_string(item);
+  long long rs = set_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rs);
+  if (bst_get(rs, ikey) != LLONG_MIN) { /* already present */
+    SPROUT_GC_POP_LOCALS(1);
+    return rs;
+  }
+  long long result = bst_insert_node(rs, ikey, 0LL);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long native_set_member(const char* item, long long set_h) {
+  if (item == NULL) return 0;
+  return bst_get(set_h, item) != LLONG_MIN ? 1 : 0;
+}
+
+long long native_set_to_list(long long set_h) {
+  long long rs = set_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rs);
+  long long list_nil = sprout_make0(find_ctor_tag_by_name("Nil"));
+  long long result = bst_to_list_acc(rs, list_nil);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
 long long native_set_size(long long set_h) {
-  MapVal* m = (MapVal*)(uintptr_t)set_h;
-  if (m == NULL) tcp_fail("native_set_size: null set");
-  return m->len;
+  return (long long)bst_size(set_h);
 }
 
 long long bytes_empty() {

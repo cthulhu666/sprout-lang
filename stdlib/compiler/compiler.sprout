@@ -226,12 +226,7 @@ export fn compile_full_ir(path: String, stdlib_root: String) -> IrFullResult !{I
     | IrFullLinesOk header_lines str_lines def_lines -> IrFullOk(join_line_sections(header_lines, str_lines, def_lines))
 
 fn join_line_sections(header_lines: List String, str_lines: List String, def_lines: List String) -> String =
-  join_lines_with_tail(header_lines, join_lines_with_tail(str_lines, join_lines_with_tail(def_lines, "")))
-
-fn join_lines_with_tail(lines: List String, tail: String) -> String =
-  match lines with
-  | Nil -> tail
-  | Cons h t -> h ++ "\n" ++ join_lines_with_tail(t, tail)
+  string_join_newlines(header_lines) ++ string_join_newlines(str_lines) ++ string_join_newlines(def_lines)
 
 # compile_full_ir_lines uses compile_phase_recheck so that prog, typed_prog,
 # and lowered are freed before codegen runs — only typed_lowered + env survive

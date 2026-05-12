@@ -778,6 +778,22 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             cur = cur.args[1]
         return "".join(parts)
 
+    def builtin_string_join_newlines(args: list[object]) -> object:
+        parts: list[str] = []
+        cur = args[0]
+        while isinstance(cur, ADTValue):
+            ctor = cur.constructor.rsplit(".", 1)[-1]
+            if ctor == "Nil":
+                break
+            if ctor != "Cons" or len(cur.args) != 2:
+                raise RuntimeError("string_join_newlines expects List String")
+            item = cur.args[0]
+            if not isinstance(item, str):
+                raise RuntimeError("string_join_newlines expects List String")
+            parts.append(item)
+            cur = cur.args[1]
+        return "\n".join(parts) + ("\n" if parts else "")
+
     def builtin_str_len(args: list[object]) -> object:
         raw = args[0]
         if not isinstance(raw, str):
@@ -2045,7 +2061,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("int_range_start", BuiltinFunction(name="int_range_start", arity=1, fn=builtin_int_range_start))
     env.set("int_range_end", BuiltinFunction(name="int_range_end", arity=1, fn=builtin_int_range_end))
     env.set("str_concat", BuiltinFunction(name="str_concat", arity=2, fn=builtin_str_concat))
-    env.set("string_concat_many", BuiltinFunction(name="string_concat_many", arity=1, fn=builtin_string_concat_many))
+    env.set("string_concat_many",   BuiltinFunction(name="string_concat_many",   arity=1, fn=builtin_string_concat_many))
+    env.set("string_join_newlines", BuiltinFunction(name="string_join_newlines", arity=1, fn=builtin_string_join_newlines))
     env.set("str_len", BuiltinFunction(name="str_len", arity=1, fn=builtin_str_len))
     env.set("str_slice", BuiltinFunction(name="str_slice", arity=3, fn=builtin_str_slice))
     env.set("str_char_at_byte", BuiltinFunction(name="str_char_at_byte", arity=2, fn=builtin_str_char_at_byte))
