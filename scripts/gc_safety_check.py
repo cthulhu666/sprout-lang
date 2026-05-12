@@ -129,10 +129,13 @@ def check_gc_safety(fn_name: str, body: str, lineno: int) -> list[str]:
     body_before_without_sig = before.split("\n", 1)[1] if "\n" in before else ""
     heap_locals = _extract_char_ptr_locals(body_before_without_sig)
 
-    # Variables registered before the GC call are already tracked — not a risk.
+    # Variables registered or explicitly rooted before the GC call are safe.
     already_tracked = {
         m.group(1)
         for m in re.finditer(r"register_managed_ptr\((\w+)\s*,", before)
+    } | {
+        m.group(1)
+        for m in re.finditer(r"SPROUT_GC_PUSH_(?:PTR|I64)_LOCAL\((\w+)\)", before)
     }
 
     suspect = (heap_params | heap_locals) - already_tracked

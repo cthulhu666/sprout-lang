@@ -2383,13 +2383,18 @@ const char* str_concat(const char* left, const char* right) {
   if (left == NULL || right == NULL) tcp_fail("str_concat: null input");
   size_t left_len = strlen(left);
   size_t right_len = strlen(right);
+  char* left_root = (char*)left;
+  char* right_root = (char*)right;
+  SPROUT_GC_PUSH_PTR_LOCAL(left_root);
+  SPROUT_GC_PUSH_PTR_LOCAL(right_root);
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(left_len + right_len + 1);
   if (out == NULL) tcp_fail("str_concat: out of memory");
-  memcpy(out, left, left_len);
-  memcpy(out + left_len, right, right_len);
+  memcpy(out, left_root, left_len);
+  memcpy(out + left_len, right_root, right_len);
   out[left_len + right_len] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(2);
   return out;
 }
 
@@ -2413,21 +2418,24 @@ const char* string_concat_many(long long list_handle) {
     cur = sprout_field(cur, 1);
     elem_idx++;
   }
+  long long rooted_list = list_handle;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(total + 1);
   if (out == NULL) tcp_fail("string_concat_many: out of memory");
   /* Second pass: copy bytes. */
   size_t pos = 0;
-  cur = list_handle;
+  cur = rooted_list;
   while (sprout_tag(cur) != nil_tag) {
-    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    size_t slen = strlen(s);
-    memcpy(out + pos, s, slen);
+    const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
+    size_t slen = strlen(elem);
+    memcpy(out + pos, elem, slen);
     pos += slen;
     cur = sprout_field(cur, 1);
   }
   out[total] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 
@@ -2445,21 +2453,24 @@ const char* string_join_newlines(long long list_handle) {
     total += strlen(s) + 1;
     cur = sprout_field(cur, 1);
   }
+  long long rooted_list = list_handle;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(total + 1);
   if (out == NULL) tcp_fail("string_join_newlines: out of memory");
   size_t pos = 0;
-  cur = list_handle;
+  cur = rooted_list;
   while (sprout_tag(cur) != nil_tag) {
-    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    size_t slen = strlen(s);
-    memcpy(out + pos, s, slen);
+    const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
+    size_t slen = strlen(elem);
+    memcpy(out + pos, elem, slen);
     pos += slen;
     out[pos++] = '\\n';
     cur = sprout_field(cur, 1);
   }
   out[pos] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 
@@ -2505,26 +2516,30 @@ _Bool str_eq(const char* left, const char* right) {
 const char* str_slice(const char* s, long long start, long long length) {
   if (s == NULL) tcp_fail("str_slice: null input");
   if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
-  size_t total = sprout_utf8_codepoint_count(s);
+  char* s_root = (char*)s;
+  SPROUT_GC_PUSH_PTR_LOCAL(s_root);
+  size_t total = sprout_utf8_codepoint_count(s_root);
   if ((size_t)start >= total) {
     sprout_gc_maybe_collect_threshold();
     char* out = (char*)malloc(1);
     if (out == NULL) tcp_fail("str_slice: out of memory");
     out[0] = '\\0';
     register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+    SPROUT_GC_POP_LOCALS(1);
     return out;
   }
-  size_t start_byte = sprout_utf8_byte_offset(s, (size_t)start);
+  size_t start_byte = sprout_utf8_byte_offset(s_root, (size_t)start);
   size_t end_codepoint = (size_t)start + (size_t)length;
   if (end_codepoint > total) end_codepoint = total;
-  size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
+  size_t end_byte = sprout_utf8_byte_offset(s_root, end_codepoint);
   size_t take = end_byte - start_byte;
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(take + 1);
   if (out == NULL) tcp_fail("str_slice: out of memory");
-  memcpy(out, s + start_byte, take);
+  memcpy(out, s_root + start_byte, take);
   out[take] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 
@@ -2737,15 +2752,21 @@ const char* regex_replace_all_literal(const char* pattern, const char* replaceme
   if (pattern == NULL || replacement == NULL || text == NULL) {
     tcp_fail("regex_replace_all_literal: null input");
   }
+  char* pattern_root = (char*)pattern;
+  char* replacement_root = (char*)replacement;
+  char* text_root = (char*)text;
+  SPROUT_GC_PUSH_PTR_LOCAL(pattern_root);
+  SPROUT_GC_PUSH_PTR_LOCAL(replacement_root);
+  SPROUT_GC_PUSH_PTR_LOCAL(text_root);
   sprout_gc_maybe_collect_threshold();
   regex_t compiled;
   char* error = NULL;
-  if (!regex_compile_ere(pattern, &compiled, &error)) {
+  if (!regex_compile_ere(pattern_root, &compiled, &error)) {
     regex_builtin_fail("regex_replace_all_literal", error);
   }
   ByteBuf out;
   buf_init(&out);
-  const char* cursor = text;
+  const char* cursor = text_root;
   regmatch_t match;
   while (regexec(&compiled, cursor, 1, &match, 0) == 0) {
     if (match.rm_so < 0 || match.rm_eo < 0) {
@@ -2755,7 +2776,7 @@ const char* regex_replace_all_literal(const char* pattern, const char* replaceme
     size_t start = (size_t)match.rm_so;
     size_t end = (size_t)match.rm_eo;
     buf_append_bytes(&out, cursor, start);
-    buf_append_cstr(&out, replacement);
+    buf_append_cstr(&out, replacement_root);
     if (end == 0) {
       if (cursor[0] == '\\0') break;
       size_t width = sprout_utf8_char_width((unsigned char)cursor[0]);
@@ -2768,22 +2789,26 @@ const char* regex_replace_all_literal(const char* pattern, const char* replaceme
   buf_append_cstr(&out, cursor);
   regfree(&compiled);
   register_managed_ptr(out.data, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(3);
   return out.data;
 }
 
 const char* regex_escape(const char* raw) {
   if (raw == NULL) tcp_fail("regex_escape: null input");
+  char* raw_root = (char*)raw;
+  SPROUT_GC_PUSH_PTR_LOCAL(raw_root);
   sprout_gc_maybe_collect_threshold();
   ByteBuf out;
   buf_init(&out);
-  for (size_t i = 0; raw[i] != '\\0'; i++) {
-    if (strchr(".^$*+?()[]{}|\\\\", raw[i]) != NULL) {
+  for (size_t i = 0; raw_root[i] != '\\0'; i++) {
+    if (strchr(".^$*+?()[]{}|\\\\", raw_root[i]) != NULL) {
       buf_append_char(&out, '\\\\');
     }
-    buf_append_char(&out, raw[i]);
+    buf_append_char(&out, raw_root[i]);
   }
   char* result = out.data == NULL ? dup_cstr("") : out.data;
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(1);
   return result;
 }
 
@@ -3396,12 +3421,15 @@ static long long json_parse_value(const char** pos_ptr, char** err_msg) {
 }
 
 const char* json_stringify(long long value) {
+  long long rooted_value = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   sprout_gc_maybe_collect_threshold();
   ByteBuf out;
   buf_init(&out);
-  json_append_value(&out, value);
+  json_append_value(&out, rooted_value);
   char* result = out.data == NULL ? dup_cstr("") : out.data;
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(1);
   return result;
 }
 
@@ -5366,12 +5394,15 @@ long long crypto_hmac_sha256(long long key_h, long long msg_h) {
 }
 
 long long crypto_base64_encode(long long bytes_h) {
-  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  long long rooted_bytes_h = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes_h);
+  BytesVal* value = (BytesVal*)(uintptr_t)rooted_bytes_h;
   if (value == NULL) tcp_fail("crypto_base64_encode: null bytes");
   sprout_gc_maybe_collect_threshold();
   char* out = base64_encode_bytes(value->data, value->len);
   if (out == NULL) tcp_fail("crypto_base64_encode: out of memory");
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
