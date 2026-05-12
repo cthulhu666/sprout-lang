@@ -118,6 +118,52 @@ build-stage2:
   clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o "$STAGE2"
   echo "==> Built $STAGE2"
 
+build-stage1-asan:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Same as build-stage1 but links with AddressSanitizer + UBSan for crash attribution.
+  # Use only for debugging; output binary is ~5x slower.
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/compile_driver.sprout"
+  STAGE1="compile_driver_bin_stage1_asan"
+  TMP_LL="/tmp/sprout_stage1_asan_$$.ll"
+  TMP_C="/tmp/sprout_runtime_asan_$$.c"
+  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  echo "==> Emitting LLVM IR via Sprout-native codegen..."
+  ./compile_driver_bin --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Extracting C runtime..."
+  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
+  echo "==> Linking with clang + ASan/UBSan..."
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" "$TMP_C" -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE1"
+  echo "==> Built $STAGE1 (asan)"
+
+build-stage2-asan:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Same as build-stage2 but links with AddressSanitizer + UBSan.
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/compile_driver.sprout"
+  STAGE1="compile_driver_bin_stage1"
+  STAGE2="compile_driver_bin_stage2_asan"
+  TMP_LL="/tmp/sprout_stage2_asan_$$.ll"
+  TMP_C="/tmp/sprout_runtime_asan_$$.c"
+  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  if [[ ! -x "$STAGE1" ]]; then
+    echo "ERROR: $STAGE1 not found; run: just build-stage1" >&2
+    exit 1
+  fi
+  echo "==> Emitting LLVM IR via stage-1 Sprout-native codegen..."
+  "./$STAGE1" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Extracting C runtime..."
+  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
+  echo "==> Linking with clang + ASan/UBSan..."
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" "$TMP_C" -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE2"
+  echo "==> Built $STAGE2 (asan)"
+
 compile-examples:
   for file in examples/*.sprout; do \
     flags=""; \

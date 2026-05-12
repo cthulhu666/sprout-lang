@@ -89,6 +89,78 @@ def _validate_executable_entrypoint(program: ast.Program, typed: dict[str, str],
         raise TypeCheckError(_entrypoint_type_message(entry_main_name, main_type))
 
 
+def _validate_typed_program_expr(expr: "ast.Expr", decl_name: str) -> None:
+    """Walk an expression tree and assert that no list-typed field is None.
+
+    Catches bugs where a field that must be a list (params, args, steps,
+    branches, items) is accidentally None — these produce cryptic SIGSEGV
+    crashes in the native collect_free_vars rather than a Python traceback.
+    """
+    if isinstance(expr, ast.LambdaExpr):
+        if expr.params is None:
+            raise RuntimeError(
+                f"validate_typed_program: LambdaExpr.params is None in decl {decl_name!r}"
+            )
+        _validate_typed_program_expr(expr.body, decl_name)
+    elif isinstance(expr, ast.CallExpr):
+        if expr.args is None:
+            raise RuntimeError(
+                f"validate_typed_program: CallExpr.args is None in decl {decl_name!r}"
+            )
+        _validate_typed_program_expr(expr.callee, decl_name)
+        for arg in expr.args:
+            _validate_typed_program_expr(arg, decl_name)
+    elif isinstance(expr, ast.DoExpr):
+        if expr.steps is None:
+            raise RuntimeError(
+                f"validate_typed_program: DoExpr.steps is None in decl {decl_name!r}"
+            )
+        for step in expr.steps:
+            if isinstance(step, (ast.DoBindStep, ast.DoLetStep, ast.DoExprStep)):
+                _validate_typed_program_expr(step.value, decl_name)
+    elif isinstance(expr, ast.MatchExpr):
+        if expr.branches is None:
+            raise RuntimeError(
+                f"validate_typed_program: MatchExpr.branches is None in decl {decl_name!r}"
+            )
+        _validate_typed_program_expr(expr.scrutinee, decl_name)
+        for branch in expr.branches:
+            _validate_typed_program_expr(branch.value, decl_name)
+    elif isinstance(expr, ast.TupleExpr):
+        if expr.items is None:
+            raise RuntimeError(
+                f"validate_typed_program: TupleExpr.items is None in decl {decl_name!r}"
+            )
+        for item in expr.items:
+            _validate_typed_program_expr(item, decl_name)
+    elif isinstance(expr, ast.IfExpr):
+        _validate_typed_program_expr(expr.condition, decl_name)
+        _validate_typed_program_expr(expr.then_branch, decl_name)
+        _validate_typed_program_expr(expr.else_branch, decl_name)
+    elif isinstance(expr, ast.BinaryExpr):
+        _validate_typed_program_expr(expr.left, decl_name)
+        _validate_typed_program_expr(expr.right, decl_name)
+    elif isinstance(expr, ast.UnaryExpr):
+        _validate_typed_program_expr(expr.operand, decl_name)
+    elif isinstance(expr, ast.IntRangeExpr):
+        _validate_typed_program_expr(expr.start, decl_name)
+        _validate_typed_program_expr(expr.end, decl_name)
+    elif isinstance(expr, ast.RecordExpr):
+        for field in expr.fields:
+            _validate_typed_program_expr(field.value, decl_name)
+    elif isinstance(expr, ast.GetFieldExpr):
+        _validate_typed_program_expr(expr.record, decl_name)
+
+
+def _validate_typed_program(program: "ast.Program") -> None:
+    """Assert no list-typed field in the typed+lowered AST is None."""
+    for decl in program.declarations:
+        if isinstance(decl, ast.FnDecl):
+            _validate_typed_program_expr(decl.body, decl.name)
+        elif isinstance(decl, ast.LetDecl):
+            _validate_typed_program_expr(decl.value, decl.name)
+
+
 def cmd_parse(path: Path) -> int:
     bundle = load_module_bundle(path)
     source = bundle.source
@@ -225,6 +297,7 @@ def cmd_run(
         if entry_info.header.module is not None:
             entry_main_name = f"{entry_info.header.module}.main"
     typed = typecheck_program(lowered)
+    _validate_typed_program(lowered)
     _validate_executable_entrypoint(lowered, typed, entry_main_name)
     run_program(lowered, argv=program_args)
     return 0
@@ -255,6 +328,7 @@ def cmd_compile(
         if entry_info.header.module is not None:
             entry_main_name = f"{entry_info.header.module}.main"
     typed = typecheck_program(lowered)
+    _validate_typed_program(lowered)
     _validate_executable_entrypoint(lowered, typed, entry_main_name)
     llvm_ir = compile_to_llvm(lowered, entry_main_name=entry_main_name)
 
@@ -460,6 +534,24 @@ static int       g_gc_livelock_warned = 0;
 static double    g_gc_livelock_ratio = 0.05;  /* sweep efficiency below which a cycle is "bad" */
 static long long g_gc_livelock_cycles = 1000; /* consecutive bad cycles before triggering */
 static int       g_gc_livelock_action = 1;    /* 0=off  1=warn  2=abort */
+/* Crash attribution: name of the function currently being compiled to IR. */
+static const char* g_sprout_current_fn = NULL;
+
+static void sprout_crash_handler(int sig) {
+  const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : "SIGABRT";
+  if (g_sprout_current_fn != NULL)
+    fprintf(stderr, "[sprout] %s while emitting IR for: %s\n", sig_name, g_sprout_current_fn);
+  else
+    fprintf(stderr, "[sprout] %s (no current function set)\n", sig_name);
+  fflush(stderr);
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+long long sprout_set_current_fn(const char* fn_name) {
+  g_sprout_current_fn = fn_name;
+  return 0;
+}
 
 static void tcp_fail(const char* msg);
 long long sprout_abort_match(void);
@@ -1430,6 +1522,8 @@ long long env_get(const char* name) {
 long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
   g_sprout_argv = argv;
+  signal(SIGSEGV, sprout_crash_handler);
+  signal(SIGABRT, sprout_crash_handler);
   sprout_debug_alloc_maybe_enable();
   sprout_debug_gc_maybe_enable();
   sprout_gc_threshold_maybe_enable();
@@ -2301,6 +2395,14 @@ long long sprout_make3(long long tag, long long a0, long long a1, long long a2) 
   return sprout_make_registered_obj(tag, a0, a1, a2, "sprout_make3: out of memory");
 }
 long long sprout_tag(long long h) {
+  if (h == 0) {
+    fprintf(stderr, "[sprout] sprout_tag: null pointer");
+    if (g_sprout_current_fn != NULL)
+      fprintf(stderr, " (in: %s)", g_sprout_current_fn);
+    fprintf(stderr, "\n");
+    fflush(stderr);
+    abort();
+  }
   SproutObj* obj = unbox_ptr(h);
   return obj->tag;
 }

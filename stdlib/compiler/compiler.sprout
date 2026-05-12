@@ -242,3 +242,17 @@ export fn compile_full_ir_lines(path: String, stdlib_root: String) -> IrFullLine
           match ir_result with
           | codegen.IrLinesOk header_lines str_lines def_lines -> IrFullLinesOk(header_lines, str_lines, def_lines)
           | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))
+
+# compile_one_fn_ir_lines: like compile_full_ir_lines but only emits codegen for
+# the function(s) whose qualified name contains fn_name as a substring.
+export fn compile_one_fn_ir_lines(fn_name: String, path: String, stdlib_root: String) -> IrFullLinesResult !{IO} =
+  do
+    recheck_result <- compile_phase_recheck(path, stdlib_root)
+    match recheck_result with
+    | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError(msg), Nil))
+    | typed_ast.TypedOk typed_lowered env ->
+        do
+          ir_result <- codegen.compile_to_ir_lines_one_fn(fn_name, typed_lowered, env)
+          match ir_result with
+          | codegen.IrLinesOk header_lines str_lines def_lines -> IrFullLinesOk(header_lines, str_lines, def_lines)
+          | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))

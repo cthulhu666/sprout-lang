@@ -1,0 +1,11 @@
+type Tree = Leaf | Node Tree Int Tree
+
+fn sum_tree(t: Tree) -> Int =
+  match t with
+  | Leaf -> 0
+  | Node l v r -> sum_tree(l) + v + sum_tree(r)
+
+fn main() -> Unit !{IO} =
+  do
+    let t = Node(Node(Leaf, 1, Leaf), 2, Node(Leaf, 3, Leaf))
+    print(sum_tree(t))

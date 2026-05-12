@@ -93,6 +93,54 @@ SHAPES: dict[str, str] = {
           | Cons h _ -> print(h)
           | Nil -> print("empty")
     """),
+    # Exercises TLambda free-var collection: two lambdas passed as fn arguments.
+    # collect_free_vars must correctly enumerate params for each lambda.
+    "codegen_lambda_params": textwrap.dedent("""\
+        fn apply(f: Int -> Int, x: Int) -> Int = f(x)
+        fn main() -> Unit !{IO} =
+          do
+            let f = \\n -> n + 1
+            let g = \\n -> n * 2
+            let result = apply(f, apply(g, 3))
+            print(result)
+    """),
+    # Exercises TDo with Maybe-bind steps (desugared to nested match).
+    "codegen_do_bind": textwrap.dedent("""\
+        type Maybe a = Just a | Nothing
+        fn safe_div(a: Int, b: Int) -> Maybe Int =
+          if b == 0 then Nothing else Just(a / b)
+        fn chain(a: Int, b: Int, c: Int) -> Maybe Int =
+          do
+            x <- safe_div(a, b)
+            y <- safe_div(x, c)
+            Just(y + 1)
+        fn main() -> Unit !{IO} =
+          match chain(10, 2, 1) with
+          | Just n -> print(n)
+          | Nothing -> print("none")
+    """),
+    # Exercises nested lambda free-var capture: g captures f which captures x.
+    # collect_free_vars must recurse into the outer closure body.
+    "codegen_nested_lambda": textwrap.dedent("""\
+        fn main() -> Unit !{IO} =
+          do
+            let x = 10
+            let f = \\n -> n + x
+            let g = \\n -> f(n * 2)
+            print(g(5))
+    """),
+    # Exercises TMatch on a recursive ADT with multi-arg constructors.
+    "codegen_match_patterns": textwrap.dedent("""\
+        type Tree = Leaf | Node Tree Int Tree
+        fn sum_tree(t: Tree) -> Int =
+          match t with
+          | Leaf -> 0
+          | Node l v r -> sum_tree(l) + v + sum_tree(r)
+        fn main() -> Unit !{IO} =
+          do
+            let t = Node(Node(Leaf, 1, Leaf), 2, Node(Leaf, 3, Leaf))
+            print(sum_tree(t))
+    """),
 }
 
 # Expected stdout (stripped) for each shape when compiled and executed.
@@ -103,6 +151,10 @@ SHAPE_OUTPUTS: dict[str, str] = {
     "generic": "1",
     "strconcat": "helloworld",
     "tuple_fn_as_value": "hello",
+    "codegen_lambda_params": "7",    # apply(n+1, apply(n*2, 3)) = 7
+    "codegen_do_bind": "6",          # chain(10,2,1): 10/2=5, 5/1=5, 5+1=6
+    "codegen_nested_lambda": "20",   # g(5) = f(5*2) = f(10) = 10+10 = 20
+    "codegen_match_patterns": "6",   # sum_tree: 1+2+3 = 6
 }
 
 # ---------------------------------------------------------------------------

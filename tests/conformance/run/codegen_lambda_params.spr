@@ -1,0 +1,8 @@
+fn apply(f: Int -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit !{IO} =
+  do
+    let f = \n -> n + 1
+    let g = \n -> n * 2
+    let result = apply(f, apply(g, 3))
+    print(result)

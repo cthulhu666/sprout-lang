@@ -1,0 +1,6 @@
+fn main() -> Unit !{IO} =
+  do
+    let x = 10
+    let f = \n -> n + x
+    let g = \n -> f(n * 2)
+    print(g(5))

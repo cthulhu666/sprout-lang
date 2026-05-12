@@ -1,0 +1,15 @@
+type Maybe a = Just a | Nothing
+
+fn safe_div(a: Int, b: Int) -> Maybe Int =
+  if b == 0 then Nothing else Just(a / b)
+
+fn chain(a: Int, b: Int, c: Int) -> Maybe Int =
+  do
+    x <- safe_div(a, b)
+    y <- safe_div(x, c)
+    Just(y + 1)
+
+fn main() -> Unit !{IO} =
+  match chain(10, 2, 1) with
+  | Just n -> print(n)
+  | Nothing -> print("none")
