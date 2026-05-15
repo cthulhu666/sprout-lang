@@ -755,11 +755,12 @@ static void sprout_gc_log_cycle(
   );
 }
 
+static int g_gc_stress = -1;
 static void sprout_gc_maybe_collect_threshold(void) {
-  if (g_gc_threshold <= 0) return;
-  if (g_gc_active) return;
-  if (g_managed_heap_count < g_gc_threshold) return;
-  sprout_gc_collect_with_reason("threshold");
+  if (g_gc_stress < 0) { const char* e = getenv("SPROUT_GC_STRESS"); g_gc_stress = (e && e[0]=='1') ? 1 : 0; }
+  if (g_gc_stress || (g_gc_threshold > 0 && !g_gc_active && g_managed_heap_count >= g_gc_threshold)) {
+    sprout_gc_collect_with_reason("threshold");
+  }
 }
 
 static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
@@ -889,13 +890,13 @@ static long long sprout_make_registered_obj(long long tag, long long f0, long lo
   return sprout_box_registered_obj(sprout_init_obj(sprout_alloc_obj_raw(ctx), tag, f0, f1, f2));
 }
 
-void* sprout_alloc_closure_env(long long size) {
+long long sprout_alloc_closure_env(long long size) {
   if (size < 0) tcp_fail("sprout_alloc_closure_env: size must be >= 0");
   sprout_gc_maybe_collect_threshold();
   void* out = sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
   size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
   register_managed_ptr(out, SPROUT_HEAP_CLOSURE, slots);
-  return out;
+  return (long long)(uintptr_t)out;
 }
 
 long long sprout_gc_register_i64_root(void* slot) {
@@ -1046,12 +1047,12 @@ static void sprout_handle_cleanup(SproutHandle* hp) {
     = sprout_handle_new(val)
 #define SPROUT_HANDLE_SET(h, val) sprout_handle_set((h), (val))
 
-void* sprout_alloc_tuple_blob(long long size_bytes) {
+long long sprout_alloc_tuple_blob(long long size_bytes) {
   if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
   sprout_gc_maybe_collect_threshold();
   void* out = sprout_alloc_counted(&g_debug_alloc_sprout_obj, (size_t)size_bytes, "sprout_alloc_tuple_blob: out of memory");
   register_managed_ptr(out, SPROUT_HEAP_TUPLE, ((size_t)size_bytes) / sizeof(uintptr_t));
-  return out;
+  return (long long)(uintptr_t)out;
 }
 
 static VectorVal* sprout_alloc_vector_val(const char* ctx) {
@@ -1517,7 +1518,9 @@ static void print_inline_obj(SproutObj* o) {
 
 static void print_inline_value(long long v) {
   ManagedNode* node = find_managed_ptr((void*)(uintptr_t)v);
-  if (node != NULL && node->kind == SPROUT_HEAP_RANGE) {
+  if (node != NULL && node->kind == SPROUT_HEAP_CSTR) {
+    printf("%s", (const char*)node->ptr);
+  } else if (node != NULL && node->kind == SPROUT_HEAP_RANGE) {
     IntRangeVal* value = (IntRangeVal*)node->ptr;
     printf("%lld..%lld", value->start, value->end);
   } else if (is_obj_handle(v)) {
@@ -1559,7 +1562,7 @@ long long parse_int(const char* s) {
   if (end == s || *end != '\\0') tcp_fail("parse_int: invalid integer");
   return out;
 }
-char* int_to_string(long long value) {
+long long int_to_string(long long value) {
   char buf[32];
   int written = snprintf(buf, sizeof(buf), "%lld", value);
   if (written < 0) tcp_fail("int_to_string: formatting failed");
@@ -1569,7 +1572,7 @@ char* int_to_string(long long value) {
   if (out == NULL) tcp_fail("int_to_string: out of memory");
   memcpy(out, buf, size);
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return out;
+  return (long long)(uintptr_t)out;
 }
 long long int_range(long long start, long long end) {
   IntRangeVal* out = sprout_alloc_range_val("int_range: out of memory");
@@ -1621,7 +1624,8 @@ long long argv_get(long long index) {
   if (index >= (long long)(g_sprout_argc - 1)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)g_sprout_argv[index + 1]);
 }
-const char* read_file(const char* path) {
+long long read_file(long long path_i) {
+  const char* path = (const char*)(uintptr_t)path_i;
   if (path == NULL) tcp_fail("read_file: null path");
   FILE* f = NULL;
   int close_after = 0;
@@ -1671,7 +1675,7 @@ const char* read_file(const char* path) {
   if (close_after) fclose(f);
   out[len] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return out;
+  return (long long)(uintptr_t)out;
 }
 long long term_read_line(void) {
   char* line = NULL;
@@ -1711,7 +1715,7 @@ long long term_show_cursor(void) {
   fflush(stdout);
   return 0;
 }
-const char* term_read_key(void) {
+long long term_read_key(void) {
   static char buf[2] = {0, 0};
   static const char* token_ctrl_a = "ctrl-a";
   static const char* token_ctrl_b = "ctrl-b";
@@ -1759,10 +1763,10 @@ const char* term_read_key(void) {
                 ssize_t third_count = read(STDIN_FILENO, &third, 1);
                 if (third_count > 0) {
                   tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-                  if (third == 'A') return token_up;
-                  if (third == 'B') return token_down;
-                  if (third == 'C') return token_right;
-                  if (third == 'D') return token_left;
+                  if (third == 'A') return (long long)(uintptr_t)token_up;
+                  if (third == 'B') return (long long)(uintptr_t)token_down;
+                  if (third == 'C') return (long long)(uintptr_t)token_right;
+                  if (third == 'D') return (long long)(uintptr_t)token_left;
                 }
               }
             }
@@ -1772,18 +1776,18 @@ const char* term_read_key(void) {
       }
     }
   }
-  if (ch == EOF) return buf;
-  if (ch == 1) return token_ctrl_a;
-  if (ch == 2) return token_ctrl_b;
-  if (ch == 4) return token_ctrl_d;
-  if (ch == 5) return token_ctrl_e;
-  if (ch == 6) return token_ctrl_f;
-  if (ch == 8 || ch == 127) return token_backspace;
-  if (ch == 27) return token_escape;
-  if (ch == '\\n' || ch == '\\r') return token_enter;
-  if (ch == '\\t') return token_tab;
+  if (ch == EOF) return (long long)(uintptr_t)buf;
+  if (ch == 1) return (long long)(uintptr_t)token_ctrl_a;
+  if (ch == 2) return (long long)(uintptr_t)token_ctrl_b;
+  if (ch == 4) return (long long)(uintptr_t)token_ctrl_d;
+  if (ch == 5) return (long long)(uintptr_t)token_ctrl_e;
+  if (ch == 6) return (long long)(uintptr_t)token_ctrl_f;
+  if (ch == 8 || ch == 127) return (long long)(uintptr_t)token_backspace;
+  if (ch == 27) return (long long)(uintptr_t)token_escape;
+  if (ch == '\\n' || ch == '\\r') return (long long)(uintptr_t)token_enter;
+  if (ch == '\\t') return (long long)(uintptr_t)token_tab;
   buf[0] = (char)ch;
-  return buf;
+  return (long long)(uintptr_t)buf;
 }
 long long term_write(const char* text) {
   if (text == NULL) tcp_fail("term_write: null text");
@@ -2558,12 +2562,14 @@ static void tcp_fail(const char* msg) {
   exit(1);
 }
 
-const char* str_concat(const char* left, const char* right) {
+long long str_concat(long long left_i, long long right_i) {
+  const char* left = (const char*)(uintptr_t)left_i;
+  const char* right = (const char*)(uintptr_t)right_i;
   if (left == NULL || right == NULL) tcp_fail("str_concat: null input");
   size_t left_len = strlen(left);
   size_t right_len = strlen(right);
-  SPROUT_HANDLE(h_left, (long long)(uintptr_t)left);
-  SPROUT_HANDLE(h_right, (long long)(uintptr_t)right);
+  SPROUT_HANDLE(h_left, left_i);
+  SPROUT_HANDLE(h_right, right_i);
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(left_len + right_len + 1);
   if (out == NULL) tcp_fail("str_concat: out of memory");
@@ -2571,11 +2577,11 @@ const char* str_concat(const char* left, const char* right) {
   memcpy(out + left_len, right, right_len);
   out[left_len + right_len] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return out;
+  return (long long)(uintptr_t)out;
 }
 
 /* string_concat_many: concatenate a List String into a single String. */
-const char* string_concat_many(long long list_handle) {
+long long string_concat_many(long long list_handle) {
   long long nil_tag  = find_ctor_tag_by_name("Nil");
   long long cons_tag = find_ctor_tag_by_name("Cons");
   /* First pass: compute total byte length. */
@@ -2610,12 +2616,12 @@ const char* string_concat_many(long long list_handle) {
   }
   out[total] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return out;
+  return (long long)(uintptr_t)out;
 }
 
 /* string_join_newlines: join a List String appending '\\n' after each element.
  * Two-pass: compute total length, malloc once, copy. No GC inside traversal. */
-const char* string_join_newlines(long long list_handle) {
+long long string_join_newlines(long long list_handle) {
   long long nil_tag  = find_ctor_tag_by_name("Nil");
   long long cons_tag = find_ctor_tag_by_name("Cons");
   size_t total = 0;
@@ -2643,7 +2649,7 @@ const char* string_join_newlines(long long list_handle) {
   }
   out[pos] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return out;
+  return (long long)(uintptr_t)out;
 }
 
 static size_t sprout_utf8_char_width(unsigned char lead) {
@@ -2685,10 +2691,11 @@ _Bool str_eq(const char* left, const char* right) {
   return strcmp(left, right) == 0;
 }
 
-const char* str_slice(const char* s, long long start, long long length) {
+long long str_slice(long long s_i, long long start, long long length) {
+  const char* s = (const char*)(uintptr_t)s_i;
   if (s == NULL) tcp_fail("str_slice: null input");
   if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
-  SPROUT_HANDLE(h_s, (long long)(uintptr_t)s);
+  SPROUT_HANDLE(h_s, s_i);
   size_t total = sprout_utf8_codepoint_count(s);
   if ((size_t)start >= total) {
     sprout_gc_maybe_collect_threshold();
@@ -2696,7 +2703,7 @@ const char* str_slice(const char* s, long long start, long long length) {
     if (out == NULL) tcp_fail("str_slice: out of memory");
     out[0] = '\\0';
     register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-    return out;
+    return (long long)(uintptr_t)out;
   }
   size_t start_byte = sprout_utf8_byte_offset(s, (size_t)start);
   size_t end_codepoint = (size_t)start + (size_t)length;
@@ -2709,7 +2716,7 @@ const char* str_slice(const char* s, long long start, long long length) {
   memcpy(out, s + start_byte, take);
   out[take] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return out;
+  return (long long)(uintptr_t)out;
 }
 
 /* Pre-allocated one-byte C strings for each ASCII codepoint (0-127).
@@ -2922,13 +2929,16 @@ long long regex_find_range(const char* pattern, const char* text) {
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)range);
 }
 
-const char* regex_replace_all_literal(const char* pattern, const char* replacement, const char* text) {
+long long regex_replace_all_literal(long long pattern_i, long long replacement_i, long long text_i) {
+  const char* pattern = (const char*)(uintptr_t)pattern_i;
+  const char* replacement = (const char*)(uintptr_t)replacement_i;
+  const char* text = (const char*)(uintptr_t)text_i;
   if (pattern == NULL || replacement == NULL || text == NULL) {
     tcp_fail("regex_replace_all_literal: null input");
   }
-  SPROUT_HANDLE(h_pattern, (long long)(uintptr_t)pattern);
-  SPROUT_HANDLE(h_replacement, (long long)(uintptr_t)replacement);
-  SPROUT_HANDLE(h_text, (long long)(uintptr_t)text);
+  SPROUT_HANDLE(h_pattern, pattern_i);
+  SPROUT_HANDLE(h_replacement, replacement_i);
+  SPROUT_HANDLE(h_text, text_i);
   sprout_gc_maybe_collect_threshold();
   regex_t compiled;
   char* error = NULL;
@@ -2960,12 +2970,13 @@ const char* regex_replace_all_literal(const char* pattern, const char* replaceme
   buf_append_cstr(&out, cursor);
   regfree(&compiled);
   register_managed_ptr(out.data, SPROUT_HEAP_CSTR, 0);
-  return out.data;
+  return (long long)(uintptr_t)out.data;
 }
 
-const char* regex_escape(const char* raw) {
+long long regex_escape(long long raw_i) {
+  const char* raw = (const char*)(uintptr_t)raw_i;
   if (raw == NULL) tcp_fail("regex_escape: null input");
-  SPROUT_HANDLE(h_raw, (long long)(uintptr_t)raw);
+  SPROUT_HANDLE(h_raw, raw_i);
   sprout_gc_maybe_collect_threshold();
   ByteBuf out;
   buf_init(&out);
@@ -2977,12 +2988,13 @@ const char* regex_escape(const char* raw) {
   }
   char* result = out.data == NULL ? dup_cstr("") : out.data;
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
-  return result;
+  return (long long)(uintptr_t)result;
 }
 
-const char* char_to_string(const char* ch) {
+long long char_to_string(long long ch_i) {
+  const char* ch = (const char*)(uintptr_t)ch_i;
   if (ch == NULL) tcp_fail("char_to_string: null input");
-  return ch;
+  return ch_i;
 }
 
 static void buf_init(ByteBuf* buf) {
@@ -3549,7 +3561,7 @@ static long long json_parse_value(const char** pos_ptr, char** err_msg) {
   return 0;
 }
 
-const char* json_stringify(long long value) {
+long long json_stringify(long long value) {
   SPROUT_HANDLE(h_value, value);
   sprout_gc_maybe_collect_threshold();
   ByteBuf out;
@@ -3557,7 +3569,7 @@ const char* json_stringify(long long value) {
   json_append_value(&out, sprout_handle_get(h_value));
   char* result = out.data == NULL ? dup_cstr("") : out.data;
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
-  return result;
+  return (long long)(uintptr_t)result;
 }
 
 long long json_parse(const char* raw) {
@@ -5727,7 +5739,7 @@ long long tcp_accept(long long listener) {
   return h;
 }
 
-const char* tcp_read(long long conn) {
+long long tcp_read(long long conn) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_read: unknown connection handle");
   sprout_gc_maybe_collect_threshold();
   char* buf = (char*)malloc(65537);
@@ -5739,7 +5751,7 @@ const char* tcp_read(long long conn) {
   }
   buf[n] = '\\0';
   register_managed_ptr(buf, SPROUT_HEAP_CSTR, 0);
-  return buf;
+  return (long long)(uintptr_t)buf;
 }
 
 long long tcp_read_exact(long long conn, long long count) {
@@ -5827,7 +5839,8 @@ long long tcp_echo_serve(long long port, long long max_connections) {
   long long served = 0;
   while (served < max_connections) {
     long long conn = tcp_accept(listener);
-    const char* payload = tcp_read(conn);
+    long long payload_i = tcp_read(conn);
+    const char* payload = (const char*)(uintptr_t)payload_i;
     tcp_write(conn, payload);
     tcp_close(conn);
     served++;

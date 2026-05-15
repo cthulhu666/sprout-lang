@@ -279,7 +279,7 @@ static long long sprout_analysis_ok_string_vec_pair_result(char* label, VectorVa
   SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
   long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
   SPROUT_GC_PUSH_I64_LOCAL(items_vec);
-  void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+  void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
   uintptr_t* words = (uintptr_t*)tuple;
   words[0] = (uintptr_t)label;
   words[1] = (uintptr_t)items_vec;
@@ -315,7 +315,7 @@ static long long sprout_analysis_completion_tuple_or_fail(
   SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
   long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
   SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
-  void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+  void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
   uintptr_t* words = (uintptr_t*)tuple;
   words[0] = (uintptr_t)prefix;
   words[1] = (uintptr_t)matches_vec;
@@ -343,7 +343,7 @@ static long long sprout_analysis_ok_inventory_result(
   SPROUT_GC_PUSH_I64_LOCAL(declared_vec);
   SPROUT_GC_PUSH_I64_LOCAL(imported_vec);
   SPROUT_GC_PUSH_I64_LOCAL(exported_vec);
-  void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
+  void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
   uintptr_t* words = (uintptr_t*)tuple;
   words[0] = (uintptr_t)declared_vec;
   words[1] = (uintptr_t)imported_vec;
@@ -397,7 +397,7 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
   out->cap = messages->len;
   out->data = messages->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)messages->len, "analysis service: out of memory");
   for (long long i = 0; i < messages->len; i++) {
-    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
+    void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
     uintptr_t* words = (uintptr_t*)tuple;
     words[0] = (uintptr_t)messages->data[i];
     words[1] = (uintptr_t)lines[i];
@@ -448,7 +448,7 @@ static long long sprout_analysis_ok_symbol_locations_from_response(
   out->cap = categories->len;
   out->data = categories->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)categories->len, "analysis service: out of memory");
   for (long long i = 0; i < categories->len; i++) {
-    void* tuple = sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 4));
+    void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 4));
     uintptr_t* words = (uintptr_t*)tuple;
     words[0] = (uintptr_t)categories->data[i];
     words[1] = (uintptr_t)names->data[i];

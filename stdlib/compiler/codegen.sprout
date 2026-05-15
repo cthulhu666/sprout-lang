@@ -233,6 +233,11 @@ fn is_string_type(t: types.Type) -> Bool =
   | types.TConst "String" -> true
   | _ -> false
 
+fn is_char_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst "Char" -> true
+  | _ -> false
+
 fn is_list_type(t: types.Type) -> Bool =
   match t with
   | types.TApp (types.TConst "List") _ -> true
@@ -767,13 +772,13 @@ fn pack_to_i64(v: Value, em: Emitter) -> String !{IO} =
       let ll = val_ll(v)
       rooted <- push_temp_root(v, em)
       sz <- sizeof_struct(ll, em)
-      raw <- fresh_tmp(em)
-      emit_template(em, `  ${raw} = call ptr @sprout_alloc_tuple_blob(i64 ${sz})`)
-      emit_template(em, `  store ${ll} ${val_ir(v)}, ptr ${raw}`)
+      raw_i64 <- fresh_tmp(em)
+      emit_template(em, `  ${raw_i64} = call i64 @sprout_alloc_tuple_blob(i64 ${sz})`)
+      raw_ptr <- fresh_tmp(em)
+      emit_template(em, `  ${raw_ptr} = inttoptr i64 ${raw_i64} to ptr`)
+      emit_template(em, `  store ${ll} ${val_ir(v)}, ptr ${raw_ptr}`)
       pop_temp_roots(rooted, em)
-      w <- fresh_tmp(em)
-      emit_template(em, `  ${w} = ptrtoint ptr ${raw} to i64`)
-      w
+      raw_i64
   else
     val_ir(v)  # fallback
 
@@ -1157,8 +1162,10 @@ fn emit_make_closure(code_ir: String, captures: List Value, em: Emitter) -> Valu
     let n_slots = list_length_vals(captures) + 1
     sz <- fresh_tmp(em)
     emit_template(em, `  ${sz} = add i64 ${int_to_string(n_slots * 8)}, 0`)
+    raw_i64 <- fresh_tmp(em)
+    emit_template(em, `  ${raw_i64} = call i64 @sprout_alloc_closure_env(i64 ${sz})`)
     raw <- fresh_tmp(em)
-    emit_template(em, `  ${raw} = call ptr @sprout_alloc_closure_env(i64 ${sz})`)
+    emit_template(em, `  ${raw} = inttoptr i64 ${raw_i64} to ptr`)
     emit_template(em, `  store ptr ${code_ir}, ptr ${raw}`)
     store_captures(captures, raw, em, 1)
     pop_temp_roots(rooted, em)
@@ -1742,6 +1749,8 @@ fn emit_range(start: typed_ast.TypedExpr, end_: typed_ast.TypedExpr, ctx: CgCtx,
 fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   if op == "&&" || op == "||" then
     emit_short_circuit(op, left, right, ctx, locals, em)
+  else if op == "++" then
+    emit_str_binary_concat(left, right, ctx, locals, em)
   else
     do
       lv <- emit_expr(ctx, locals, em, Nothing, left)
@@ -1757,14 +1766,28 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
           tmp <- fresh_tmp(em)
           emit_template(em, `  ${tmp} = srem i64 ${val_ir(lv)}, ${val_ir(rv)}`)
           val_make(ll_i64(), tmp)
-      else if op == "++" then
-        do
-          tmp <- fresh_tmp(em)
-          emit_template(em, `  ${tmp} = call ptr @str_concat(ptr ${val_ir(lv)}, ptr ${val_ir(rv)})`)
-          val_make(ll_ptr(), tmp)
       else
-        # Comparison operators
-        emit_comparison(op, lv, rv, em)
+        do
+          let left_ty = typed_ast.typed_expr_type(left)
+          if is_string_type(left_ty) || is_char_type(left_ty) then
+            do
+              lp <- coerce_value(lv, ll_ptr(), em)
+              rp <- coerce_value(rv, ll_ptr(), em)
+              emit_ptr_comparison(op, lp, rp, em)
+          else
+            emit_comparison(op, lv, rv, em)
+
+fn emit_str_binary_concat(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
+  do
+    lv <- emit_expr(ctx, locals, em, Nothing, left)
+    rooted <- push_temp_root(lv, em)
+    rv <- emit_expr(ctx, locals, em, Nothing, right)
+    pop_temp_roots(rooted, em)
+    li <- coerce_value(lv, ll_i64(), em)
+    ri <- coerce_value(rv, ll_i64(), em)
+    tmp <- fresh_tmp(em)
+    emit_template(em, `  ${tmp} = call i64 @str_concat(i64 ${val_ir(li)}, i64 ${val_ir(ri)})`)
+    val_make(ll_i64(), tmp)
 
 fn emit_ptr_comparison(op: String, lp: Value, rp: Value, em: Emitter) -> Value !{IO} =
   if op == "==" then
@@ -2003,7 +2026,19 @@ fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Valu
   | Cons arg _ ->
       do
         v <- emit_expr(ctx, locals, em, Nothing, arg)
-        if val_is_i64(v) then
+        let arg_ty = typed_ast.typed_expr_type(arg)
+        if val_is_ptr(v) then
+          do
+            tmp <- fresh_tmp(em)
+            emit_template(em, `  ${tmp} = call i64 @print_str(ptr ${val_ir(v)})`)
+            val_make(ll_i64(), tmp)
+        else if val_is_i64(v) && (is_string_type(arg_ty) || is_char_type(arg_ty)) then
+          do
+            vp <- coerce_value(v, ll_ptr(), em)
+            tmp <- fresh_tmp(em)
+            emit_template(em, `  ${tmp} = call i64 @print_str(ptr ${val_ir(vp)})`)
+            val_make(ll_i64(), tmp)
+        else if val_is_i64(v) then
           do
             tmp <- fresh_tmp(em)
             emit_template(em, `  ${tmp} = call i64 @print_value(i64 ${val_ir(v)})`)
@@ -2014,11 +2049,6 @@ fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Valu
             emit_template(em, `  ${w} = zext i1 ${val_ir(v)} to i64`)
             tmp <- fresh_tmp(em)
             emit_template(em, `  ${tmp} = call i64 @print_value(i64 ${w})`)
-            val_make(ll_i64(), tmp)
-        else if val_is_ptr(v) then
-          do
-            tmp <- fresh_tmp(em)
-            emit_template(em, `  ${tmp} = call i64 @print_str(ptr ${val_ir(v)})`)
             val_make(ll_i64(), tmp)
         else
           val_make(ll_i64(), "0")
@@ -2099,12 +2129,14 @@ fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, 
       if is_string_type(typed_ast.typed_expr_type(left)) || is_string_type(ty) then
         do
           lv <- emit_expr(ctx, locals, em, Nothing, left)
+          rooted <- push_temp_root(lv, em)
           rv <- emit_expr(ctx, locals, em, Nothing, right)
-          lp <- coerce_value(lv, ll_ptr(), em)
-          rp <- coerce_value(rv, ll_ptr(), em)
+          pop_temp_roots(rooted, em)
+          li <- coerce_value(lv, ll_i64(), em)
+          ri <- coerce_value(rv, ll_i64(), em)
           tmp <- fresh_tmp(em)
-          emit_template(em, `  ${tmp} = call ptr @str_concat(ptr ${val_ir(lp)}, ptr ${val_ir(rp)})`)
-          val_make(ll_ptr(), tmp)
+          emit_template(em, `  ${tmp} = call i64 @str_concat(i64 ${val_ir(li)}, i64 ${val_ir(ri)})`)
+          val_make(ll_i64(), tmp)
       else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(ty) then
         emit_regular_direct_call("list_append", FnSig("list_append", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing), Cons(left, Cons(right, Nil)), type_to_ll(ty), ctx, locals, em)
       else
@@ -2724,19 +2756,19 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("print_value", FnSig("print_value", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("print_value_part", FnSig("print_value_part", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("print_newline", FnSig("print_newline", Nil, ll_i64(), Nothing))
-  , ("read_file", FnSig("read_file", Cons(ll_ptr(), Nil), ll_ptr(), Nothing))
+  , ("read_file", FnSig("read_file", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("argv_get", FnSig("argv_get", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("parse_int", FnSig("parse_int", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("int_range", FnSig("int_range", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("int_range_start", FnSig("int_range_start", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("int_range_end", FnSig("int_range_end", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("int_to_string", FnSig("int_to_string", Cons(ll_i64(), Nil), ll_ptr(), Nothing))
-  , ("char_to_string", FnSig("char_to_string", Cons(ll_ptr(), Nil), ll_ptr(), Nothing))
-  , ("str_concat", FnSig("str_concat", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_ptr(), Nothing))
-  , ("string_concat_many",   FnSig("string_concat_many",   Cons(ll_i64(), Nil), ll_ptr(), Nothing))
-  , ("string_join_newlines", FnSig("string_join_newlines", Cons(ll_i64(), Nil), ll_ptr(), Nothing))
+  , ("int_to_string", FnSig("int_to_string", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("char_to_string", FnSig("char_to_string", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("str_concat", FnSig("str_concat", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
+  , ("string_concat_many",   FnSig("string_concat_many",   Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("string_join_newlines", FnSig("string_join_newlines", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("str_len", FnSig("str_len", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("str_slice", FnSig("str_slice", Cons(ll_ptr(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_ptr(), Nothing))
+  , ("str_slice", FnSig("str_slice", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
   , ("str_char_at", FnSig("str_char_at", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("str_eq", FnSig("str_eq", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
   , ("str_find", FnSig("str_find", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
@@ -2792,8 +2824,14 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("sprout_field", FnSig("sprout_field", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_register_ctor", FnSig("sprout_register_ctor", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
   , ("sprout_set_argv", FnSig("sprout_set_argv", Cons(ll_i64(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
-  , ("sprout_alloc_closure_env", FnSig("sprout_alloc_closure_env", Cons(ll_i64(), Nil), ll_ptr(), Nothing))
-  , ("sprout_alloc_tuple_blob", FnSig("sprout_alloc_tuple_blob", Cons(ll_i64(), Nil), ll_ptr(), Nothing))
+  , ("sprout_alloc_closure_env", FnSig("sprout_alloc_closure_env", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("sprout_alloc_tuple_blob", FnSig("sprout_alloc_tuple_blob", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("regex_replace_all_literal", FnSig("regex_replace_all_literal", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
+  , ("regex_escape", FnSig("regex_escape", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("tcp_read", FnSig("tcp_read", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("json_stringify", FnSig("json_stringify", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  , ("term_read_key", FnSig("term_read_key", Nil, ll_i64(), Nothing))
+  , ("crypto_base64_encode", FnSig("crypto_base64_encode", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_push_i64_root", FnSig("sprout_gc_push_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_push_ptr_root", FnSig("sprout_gc_push_ptr_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_push_scan_root", FnSig("sprout_gc_push_scan_root", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))

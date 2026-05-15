@@ -48,7 +48,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "print_value": FnSig(name="print_value", params=[I64], ret=I64),
     "print_value_part": FnSig(name="print_value_part", params=[I64], ret=I64),
     "print_newline": FnSig(name="print_newline", params=[], ret=I64),
-    "read_file": FnSig(name="read_file", params=[I8_PTR], ret=I8_PTR),
+    "read_file": FnSig(name="read_file", params=[I64], ret=I64),
     "env_get": FnSig(name="env_get", params=[I8_PTR], ret=I64),
     "argv_get": FnSig(name="argv_get", params=[I64], ret=I64),
     "read_int_lines": FnSig(name="read_int_lines", params=[I8_PTR], ret=I64),
@@ -56,13 +56,13 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "int_range": FnSig(name="int_range", params=[I64, I64], ret=I64),
     "int_range_start": FnSig(name="int_range_start", params=[I64], ret=I64),
     "int_range_end": FnSig(name="int_range_end", params=[I64], ret=I64),
-    "int_to_string": FnSig(name="int_to_string", params=[I64], ret=I8_PTR),
-    "char_to_string": FnSig(name="char_to_string", params=[I8_PTR], ret=I8_PTR),
-    "str_concat": FnSig(name="str_concat", params=[I8_PTR, I8_PTR], ret=I8_PTR),
-    "string_concat_many":   FnSig(name="string_concat_many",   params=[I64], ret=I8_PTR),
-    "string_join_newlines": FnSig(name="string_join_newlines", params=[I64], ret=I8_PTR),
+    "int_to_string": FnSig(name="int_to_string", params=[I64], ret=I64),
+    "char_to_string": FnSig(name="char_to_string", params=[I64], ret=I64),
+    "str_concat": FnSig(name="str_concat", params=[I64, I64], ret=I64),
+    "string_concat_many":   FnSig(name="string_concat_many",   params=[I64], ret=I64),
+    "string_join_newlines": FnSig(name="string_join_newlines", params=[I64], ret=I64),
     "str_len": FnSig(name="str_len", params=[I8_PTR], ret=I64),
-    "str_slice": FnSig(name="str_slice", params=[I8_PTR, I64, I64], ret=I8_PTR),
+    "str_slice": FnSig(name="str_slice", params=[I64, I64, I64], ret=I64),
     "str_char_at": FnSig(name="str_char_at", params=[I8_PTR, I64], ret=I64),
     "str_split_lines": FnSig(name="str_split_lines", params=[I8_PTR], ret=I64),
     "str_char_at_byte": FnSig(name="str_char_at_byte", params=[I8_PTR, I64], ret=I64),
@@ -76,8 +76,8 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "regex_validate": FnSig(name="regex_validate", params=[I8_PTR], ret=I64),
     "regex_is_match": FnSig(name="regex_is_match", params=[I8_PTR, I8_PTR], ret=I1),
     "regex_find_range": FnSig(name="regex_find_range", params=[I8_PTR, I8_PTR], ret=I64),
-    "regex_replace_all_literal": FnSig(name="regex_replace_all_literal", params=[I8_PTR, I8_PTR, I8_PTR], ret=I8_PTR),
-    "regex_escape": FnSig(name="regex_escape", params=[I8_PTR], ret=I8_PTR),
+    "regex_replace_all_literal": FnSig(name="regex_replace_all_literal", params=[I64, I64, I64], ret=I64),
+    "regex_escape": FnSig(name="regex_escape", params=[I64], ret=I64),
     "bytes_empty": FnSig(name="bytes_empty", params=[], ret=I64),
     "bytes_length": FnSig(name="bytes_length", params=[I64], ret=I64),
     "bytes_get": FnSig(name="bytes_get", params=[I64, I64], ret=I64),
@@ -95,7 +95,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "bytes_builder_build": FnSig(name="bytes_builder_build", params=[I64], ret=I64),
     "crypto_sha256": FnSig(name="crypto_sha256", params=[I64], ret=I64),
     "crypto_hmac_sha256": FnSig(name="crypto_hmac_sha256", params=[I64, I64], ret=I64),
-    "crypto_base64_encode": FnSig(name="crypto_base64_encode", params=[I64], ret=I8_PTR),
+    "crypto_base64_encode": FnSig(name="crypto_base64_encode", params=[I64], ret=I64),
     "crypto_base64_decode": FnSig(name="crypto_base64_decode", params=[I8_PTR], ret=I64),
     "crypto_bytes_xor": FnSig(name="crypto_bytes_xor", params=[I64, I64], ret=I64),
     "crypto_random_bytes": FnSig(name="crypto_random_bytes", params=[I64], ret=I64),
@@ -120,7 +120,7 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "native_set_size": FnSig(name="native_set_size", params=[I64], ret=I64),
     "tcp_listen": FnSig(name="tcp_listen", params=[I64], ret=I64),
     "tcp_accept": FnSig(name="tcp_accept", params=[I64], ret=I64),
-    "tcp_read": FnSig(name="tcp_read", params=[I64], ret=I8_PTR),
+    "tcp_read": FnSig(name="tcp_read", params=[I64], ret=I64),
     "tcp_write": FnSig(name="tcp_write", params=[I64, I8_PTR], ret=I64),
     "tcp_connect": FnSig(name="tcp_connect", params=[I8_PTR, I64], ret=I64),
     "tcp_read_exact": FnSig(name="tcp_read_exact", params=[I64, I64], ret=I64),
@@ -130,12 +130,12 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "tcp_echo_serve": FnSig(name="tcp_echo_serve", params=[I64, I64], ret=I64),
     "http_request": FnSig(name="http_request", params=[I8_PTR, I8_PTR, I8_PTR, I8_PTR, I64], ret=I64),
     "json_parse": FnSig(name="json_parse", params=[I8_PTR], ret=I64),
-    "json_stringify": FnSig(name="json_stringify", params=[I64], ret=I8_PTR),
+    "json_stringify": FnSig(name="json_stringify", params=[I64], ret=I64),
     "term_clear": FnSig(name="term_clear", params=[], ret=I64),
     "term_move": FnSig(name="term_move", params=[I64, I64], ret=I64),
     "term_hide_cursor": FnSig(name="term_hide_cursor", params=[], ret=I64),
     "term_show_cursor": FnSig(name="term_show_cursor", params=[], ret=I64),
-    "term_read_key": FnSig(name="term_read_key", params=[], ret=I8_PTR),
+    "term_read_key": FnSig(name="term_read_key", params=[], ret=I64),
     "term_read_line": FnSig(name="term_read_line", params=[], ret=I64),
     "term_is_interactive": FnSig(name="term_is_interactive", params=[], ret=I1),
     "term_write": FnSig(name="term_write", params=[I8_PTR], ret=I64),
@@ -178,8 +178,8 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "sprout_make7": FnSig(name="sprout_make7", params=[I64, I64, I64, I64, I64, I64, I64, I64], ret=I64),
     "sprout_make8": FnSig(name="sprout_make8", params=[I64, I64, I64, I64, I64, I64, I64, I64, I64], ret=I64),
     "sprout_make9": FnSig(name="sprout_make9", params=[I64, I64, I64, I64, I64, I64, I64, I64, I64, I64], ret=I64),
-    "sprout_alloc_closure_env": FnSig(name="sprout_alloc_closure_env", params=[I64], ret=I8_PTR),
-    "sprout_alloc_tuple_blob": FnSig(name="sprout_alloc_tuple_blob", params=[I64], ret=I8_PTR),
+    "sprout_alloc_closure_env": FnSig(name="sprout_alloc_closure_env", params=[I64], ret=I64),
+    "sprout_alloc_tuple_blob": FnSig(name="sprout_alloc_tuple_blob", params=[I64], ret=I64),
     "sprout_gc_register_i64_root": FnSig(name="sprout_gc_register_i64_root", params=[I8_PTR], ret=I64),
     "sprout_gc_register_ptr_root": FnSig(name="sprout_gc_register_ptr_root", params=[I8_PTR], ret=I64),
     "sprout_gc_register_scan_root": FnSig(name="sprout_gc_register_scan_root", params=[I8_PTR, I64], ret=I64),
@@ -223,6 +223,8 @@ class Value:
     ir: str
     callable_sig: "CallSig | None" = None
     tuple_items: list[LLType] | None = None
+    # Parallel to tuple_items: True for each field that is a String/Char (i64 storing a ptr).
+    tuple_item_is_string: list[bool] | None = None
     # Non-None signals a pending TCO back-edge: list of coerced new argument values.
     tco_args: "list[Value] | None" = None
 
@@ -343,9 +345,9 @@ def _type_from_ast(node: ast.TypeExpr | None, adt_names: set[str]) -> LLType:
         if node.name == "Bool":
             return I1
         if node.name == "String":
-            return I8_PTR
+            return I64
         if node.name == "Char":
-            return I8_PTR
+            return I64
         if node.name == "Bytes":
             return I64
         if node.name == "Builder":
@@ -824,8 +826,10 @@ def _emit_make_closure(code_ir: str, captures: list[Value], emitter: Emitter) ->
         rooted += _emit_push_temp_root(capture, emitter)
     size = emitter.tmp()
     emitter.emit(f"  {size} = add i64 {8 * (len(captures) + 1)}, 0")
+    raw_i64 = emitter.tmp()
+    emitter.emit(f"  {raw_i64} = call i64 @sprout_alloc_closure_env(i64 {size})")
     raw = emitter.tmp()
-    emitter.emit(f"  {raw} = call ptr @sprout_alloc_closure_env(i64 {size})")
+    emitter.emit(f"  {raw} = inttoptr i64 {raw_i64} to ptr")
     emitter.emit(f"  store ptr {code_ir}, ptr {raw}")
     for idx, capture in enumerate(captures, start=1):
         packed = _pack_to_i64(capture, emitter)
@@ -991,9 +995,9 @@ def _infer_expr_type(
     if isinstance(expr, ast.BoolExpr):
         return I1
     if isinstance(expr, ast.StringExpr):
-        return I8_PTR
+        return I64
     if isinstance(expr, ast.CharExpr):
-        return I8_PTR
+        return I64
     if isinstance(expr, ast.TupleExpr):
         return _tuple_lltype([_infer_expr_type(item, globals_info, sigs, ctor_sigs) for item in expr.items])
     if isinstance(expr, ast.VarExpr):
@@ -1551,12 +1555,16 @@ def _emit_expr(
         gname, length = emitter.string_const(expr.value)
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = getelementptr inbounds [{length} x i8], ptr {gname}, i64 0, i64 0")
-        return Value(I8_PTR, tmp)
+        i64_tmp = emitter.tmp()
+        emitter.emit(f"  {i64_tmp} = ptrtoint ptr {tmp} to i64")
+        return Value(I64, i64_tmp)
     if isinstance(expr, ast.CharExpr):
         gname, length = emitter.string_const(expr.value)
         tmp = emitter.tmp()
         emitter.emit(f"  {tmp} = getelementptr inbounds [{length} x i8], ptr {gname}, i64 0, i64 0")
-        return Value(I8_PTR, tmp)
+        i64_tmp = emitter.tmp()
+        emitter.emit(f"  {i64_tmp} = ptrtoint ptr {tmp} to i64")
+        return Value(I64, i64_tmp)
     if isinstance(expr, ast.UnitExpr):
         return Value(I64, "0")
     if isinstance(expr, ast.TupleExpr):
@@ -1570,6 +1578,11 @@ def _emit_expr(
             total_rooted += _emit_push_temp_root(item, emitter)
             items.append(item)
         tuple_items = [item.typ for item in items]
+        tuple_item_is_string = [
+            isinstance(getattr(ie, "inferred_type", None), ast.TypeName)
+            and getattr(ie, "inferred_type").name in {"String", "Char"}
+            for ie in expr.items
+        ]
         tuple_typ = _tuple_lltype(tuple_items)
         current = "undef"
         for idx, item in enumerate(items):
@@ -1579,7 +1592,7 @@ def _emit_expr(
             )
             current = next_val
         _emit_pop_temp_roots(total_rooted, emitter)
-        return Value(tuple_typ, current, tuple_items=tuple_items)
+        return Value(tuple_typ, current, tuple_items=tuple_items, tuple_item_is_string=tuple_item_is_string)
     if isinstance(expr, ast.VarExpr):
         val = locals_.get(expr.name)
         if val is not None:
@@ -1682,6 +1695,17 @@ def _emit_binary(
     if expr.op in {"&&", "||"}:
         return _emit_short_circuit(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
 
+    if expr.op == "++":
+        left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        rooted = _emit_push_temp_root(left, emitter)
+        right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        _emit_pop_temp_roots(rooted, emitter)
+        li = _coerce_value(left, I64, emitter)
+        ri = _coerce_value(right, I64, emitter)
+        tmp = emitter.tmp()
+        emitter.emit(f"  {tmp} = call i64 @str_concat(i64 {li.ir}, i64 {ri.ir})")
+        return Value(I64, tmp)
+
     left = _emit_expr(expr.left, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
     right = _emit_expr(expr.right, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
 
@@ -1694,8 +1718,6 @@ def _emit_binary(
         return Value(I64, tmp)
 
     if expr.op in {"<", "<=", ">", ">=", "==", "!="}:
-        if left.typ != right.typ:
-            raise CodegenError("Comparison operands must have same type")
         left_inferred = getattr(expr.left, "inferred_type", None)
         right_inferred = getattr(expr.right, "inferred_type", None)
         if (
@@ -1726,22 +1748,32 @@ def _emit_binary(
             not_tmp = emitter.tmp()
             emitter.emit(f"  {not_tmp} = xor i1 {out}, true")
             return Value(I1, not_tmp)
-        if left.typ == I8_PTR and expr.op in {"==", "!="}:
+        # Check if operands are String/Char values (I8_PTR or I64 with String/Char inferred type)
+        # This check must come before the generic type-mismatch guard to allow mixed-rep comparisons.
+        _left_inferred_str = isinstance(left_inferred, ast.TypeName) and left_inferred.name in {"String", "Char"}
+        _is_string_cmp = left.typ == I8_PTR or (left.typ == I64 and _left_inferred_str)
+        if _is_string_cmp and expr.op in {"==", "!="}:
+            left_ptr = _coerce_value(left, I8_PTR, emitter)
+            right_ptr = _coerce_value(right, I8_PTR, emitter)
             tmp = emitter.tmp()
-            emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {left.ir}, ptr {right.ir})")
+            emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {left_ptr.ir}, ptr {right_ptr.ir})")
             if expr.op == "==":
                 return Value(I1, tmp)
             not_tmp = emitter.tmp()
             emitter.emit(f"  {not_tmp} = xor i1 {tmp}, true")
             return Value(I1, not_tmp)
-        if left.typ == I8_PTR:
+        if _is_string_cmp:
             # Ordering comparison on String/Char via str_compare (returns i64 <0/0/>0)
+            left_ptr = _coerce_value(left, I8_PTR, emitter)
+            right_ptr = _coerce_value(right, I8_PTR, emitter)
             cmp_tmp = emitter.tmp()
-            emitter.emit(f"  {cmp_tmp} = call i64 @str_compare(ptr {left.ir}, ptr {right.ir})")
+            emitter.emit(f"  {cmp_tmp} = call i64 @str_compare(ptr {left_ptr.ir}, ptr {right_ptr.ir})")
             pred = {"<": "slt", "<=": "sle", ">": "sgt", ">=": "sge"}[expr.op]
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = icmp {pred} i64 {cmp_tmp}, 0")
             return Value(I1, tmp)
+        if left.typ != right.typ:
+            raise CodegenError("Comparison operands must have same type")
         tmp = emitter.tmp()
         pred = {
             "<": "slt",
@@ -2337,7 +2369,10 @@ def _finalize_match_result(branch_vals: list[tuple[Value, str]], done_label: str
     tuple_items = branch_vals[0][0].tuple_items
     if any(val.tuple_items != tuple_items for val, _ in branch_vals[1:]):
         tuple_items = None
-    return Value(out_type, phi, callable_sig=callable_sig, tuple_items=tuple_items)
+    tuple_item_is_string = branch_vals[0][0].tuple_item_is_string
+    if any(val.tuple_item_is_string != tuple_item_is_string for val, _ in branch_vals[1:]):
+        tuple_item_is_string = None
+    return Value(out_type, phi, callable_sig=callable_sig, tuple_items=tuple_items, tuple_item_is_string=tuple_item_is_string)
 
 
 def _emit_tuple_field(value: Value, idx: int, emitter: Emitter) -> Value:
@@ -2382,18 +2417,16 @@ def _emit_pattern_test(pattern: ast.Pattern, value: Value, ctor_sigs: dict[str, 
         emitter.emit(f"  {tmp} = icmp eq i1 {value.ir}, {lit}")
         return Value(I1, tmp)
     if isinstance(pattern, ast.StringPattern):
-        if value.typ != I8_PTR:
-            raise CodegenError("String pattern expects String scrutinee")
+        value_ptr = _coerce_value(value, I8_PTR, emitter)
         literal_ptr, _ = emitter.string_const(pattern.value)
         tmp = emitter.tmp()
-        emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value.ir}, ptr {literal_ptr})")
+        emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value_ptr.ir}, ptr {literal_ptr})")
         return Value(I1, tmp)
     if isinstance(pattern, ast.CharPattern):
-        if value.typ != I8_PTR:
-            raise CodegenError("Char pattern expects Char scrutinee")
+        value_ptr = _coerce_value(value, I8_PTR, emitter)
         literal_ptr, _ = emitter.string_const(pattern.value)
         tmp = emitter.tmp()
-        emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value.ir}, ptr {literal_ptr})")
+        emitter.emit(f"  {tmp} = call i1 @str_eq(ptr {value_ptr.ir}, ptr {literal_ptr})")
         return Value(I1, tmp)
     if isinstance(pattern, ast.UnitPattern):
         if value.typ != I64:
@@ -2556,13 +2589,13 @@ def _pack_to_i64(value: Value, emitter: Emitter) -> str:
     if (value.tuple_items or _tuple_item_types_from_lltype(value.typ)) is not None:
         rooted = _emit_push_temp_root(value, emitter)
         size = _sizeof_struct(value.typ.text, emitter)
-        raw = emitter.tmp()
-        emitter.emit(f"  {raw} = call ptr @sprout_alloc_tuple_blob(i64 {size})")
-        emitter.emit(f"  store {value.typ.text} {value.ir}, ptr {raw}")
+        raw_i64 = emitter.tmp()
+        emitter.emit(f"  {raw_i64} = call i64 @sprout_alloc_tuple_blob(i64 {size})")
+        raw_ptr = emitter.tmp()
+        emitter.emit(f"  {raw_ptr} = inttoptr i64 {raw_i64} to ptr")
+        emitter.emit(f"  store {value.typ.text} {value.ir}, ptr {raw_ptr}")
         _emit_pop_temp_roots(rooted, emitter)
-        out = emitter.tmp()
-        emitter.emit(f"  {out} = ptrtoint ptr {raw} to i64")
-        return out
+        return raw_i64
     raise CodegenError("Cannot pack value to i64")
 
 
@@ -2634,7 +2667,13 @@ def _emit_print_tuple_value(value: Value, emitter: Emitter) -> Value:
         if idx > 0:
             last = _emit_print_literal(", ", emitter)
         field = _emit_tuple_field(value, idx, emitter)
-        last = _emit_print_inline_value(field, emitter)
+        is_str = bool(value.tuple_item_is_string and value.tuple_item_is_string[idx])
+        if is_str and field.typ == I64:
+            ptr = emitter.tmp()
+            emitter.emit(f"  {ptr} = inttoptr i64 {field.ir} to ptr")
+            last = _emit_print_text(ptr, emitter)
+        else:
+            last = _emit_print_inline_value(field, emitter)
     last = _emit_print_literal(")", emitter)
     return last
 
@@ -2653,6 +2692,17 @@ def _emit_call(
         if len(expr.args) != 1:
             raise CodegenError("print expects 1 argument")
         arg = _emit_expr(expr.args[0], locals_, globals_info, sigs, ctor_sigs, adt_names, emitter)
+        arg_inferred = getattr(expr.args[0], "inferred_type", None)
+        _is_string_arg = arg.typ == I8_PTR or (
+            arg.typ == I64
+            and isinstance(arg_inferred, ast.TypeName)
+            and arg_inferred.name in {"String", "Char"}
+        )
+        if _is_string_arg:
+            coerced = _coerce_value(arg, I8_PTR, emitter)
+            tmp = emitter.tmp()
+            emitter.emit(f"  {tmp} = call i64 @print_str(ptr {coerced.ir})")
+            return Value(I64, tmp)
         if arg.typ == I64:
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = call i64 @print_value(i64 {arg.ir})")
@@ -2662,10 +2712,6 @@ def _emit_call(
             emitter.emit(f"  {widened} = zext i1 {arg.ir} to i64")
             tmp = emitter.tmp()
             emitter.emit(f"  {tmp} = call i64 @print_value(i64 {widened})")
-            return Value(I64, tmp)
-        if arg.typ == I8_PTR:
-            tmp = emitter.tmp()
-            emitter.emit(f"  {tmp} = call i64 @print_str(ptr {arg.ir})")
             return Value(I64, tmp)
         if (arg.tuple_items or _tuple_item_types_from_lltype(arg.typ)) is not None:
             _emit_print_tuple_value(arg, emitter)

@@ -325,8 +325,8 @@ class CodegenLlvmTests(CodegenTestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertIn("declare ptr @sprout_alloc_tuple_blob(i64)", ir)
-        self.assertIn("call ptr @sprout_alloc_tuple_blob(i64", ir)
+        self.assertIn("declare i64 @sprout_alloc_tuple_blob(i64)", ir)
+        self.assertIn("call i64 @sprout_alloc_tuple_blob(i64", ir)
         self.assertIn("call i64 @sprout_gc_push_scan_root(ptr", ir)
         self.assertNotIn("call ptr @malloc(i64", ir)
 
@@ -351,7 +351,7 @@ class CodegenLlvmTests(CodegenTestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("define i64 @apply(i64 %x, ptr %f)", ir)
-        self.assertIn("call ptr @sprout_alloc_closure_env(i64 %t", ir)
+        self.assertIn("call i64 @sprout_alloc_closure_env(i64 %t", ir)
         self.assertIn("load ptr, ptr %f", ir)
 
     def test_compile_lambda_with_capture_to_llvm(self) -> None:
@@ -367,7 +367,7 @@ class CodegenLlvmTests(CodegenTestCase):
         ir = compile_to_llvm(program)
         self.assertIn("define ptr @__sprout_fn_closure_", ir)
         self.assertIn("define i64 @__sprout_lambda_", ir)
-        self.assertIn("call ptr @sprout_alloc_closure_env(i64 %t", ir)
+        self.assertIn("call i64 @sprout_alloc_closure_env(i64 %t", ir)
         self.assertIn("call i64 @sprout_gc_push_i64_root(ptr", ir)
         self.assertIn("call i64 @sprout_gc_push_ptr_root(ptr", ir)
         self.assertIn("call i64 @sprout_gc_pop_roots(i64", ir)
@@ -419,7 +419,7 @@ class CodegenLlvmTests(CodegenTestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertIn("define ptr @__sprout_partial_", ir)
+        self.assertIn("define i64 @__sprout_partial_", ir)
         self.assertIn("@greet = global ptr null", ir)
 
     def test_compile_runtime_top_level_function_value_let_to_llvm(self) -> None:
@@ -466,7 +466,7 @@ class CodegenLlvmTests(CodegenTestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("define ptr @__sprout_lambda_", ir)
-        self.assertIn("call ptr @sprout_alloc_closure_env(i64 %t", ir)
+        self.assertIn("call i64 @sprout_alloc_closure_env(i64 %t", ir)
         self.assertIn("@__sprout_fn_closure_", ir)
 
     def test_compile_tuple_match_to_llvm(self) -> None:
@@ -501,7 +501,7 @@ class CodegenLlvmTests(CodegenTestCase):
         ir = compile_to_llvm(program)
         self.assertIn("declare i64 @tcp_listen(i64)", ir)
         self.assertIn("declare i64 @tcp_accept(i64)", ir)
-        self.assertIn("declare ptr @tcp_read(i64)", ir)
+        self.assertIn("declare i64 @tcp_read(i64)", ir)
         self.assertIn("declare i64 @tcp_write(i64, ptr)", ir)
         self.assertIn("declare i64 @tcp_close(i64)", ir)
         self.assertIn("declare i64 @tcp_close_listener(i64)", ir)
@@ -703,7 +703,7 @@ class CodegenLlvmTests(CodegenTestCase):
             ir = compile_to_llvm(program)
             self.assertIn("declare i64 @crypto_sha256(i64)", ir)
             self.assertIn("declare i64 @crypto_hmac_sha256(i64, i64)", ir)
-            self.assertIn("declare ptr @crypto_base64_encode(i64)", ir)
+            self.assertIn("declare i64 @crypto_base64_encode(i64)", ir)
             self.assertIn("declare i64 @crypto_base64_decode(ptr)", ir)
             self.assertIn("declare i64 @crypto_bytes_xor(i64, i64)", ir)
             self.assertIn("declare i64 @crypto_random_bytes(i64)", ir)
@@ -737,14 +737,14 @@ class CodegenLlvmTests(CodegenTestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertIn("declare ptr @str_concat(ptr, ptr)", ir)
+        self.assertIn("declare i64 @str_concat(i64, i64)", ir)
         self.assertIn("declare i64 @str_len(ptr)", ir)
-        self.assertIn("declare ptr @str_slice(ptr, i64, i64)", ir)
+        self.assertIn("declare i64 @str_slice(i64, i64, i64)", ir)
         self.assertIn("declare i1 @str_eq(ptr, ptr)", ir)
         self.assertIn("declare i64 @str_find(ptr, ptr)", ir)
         self.assertIn("declare i1 @str_starts_with(ptr, ptr)", ir)
         self.assertIn("declare i64 @str_compare(ptr, ptr)", ir)
-        self.assertIn("declare ptr @int_to_string(i64)", ir)
+        self.assertIn("declare i64 @int_to_string(i64)", ir)
 
     def test_compile_regex_builtins_to_llvm(self) -> None:
         src = """
@@ -757,8 +757,8 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertIn("declare i64 @regex_validate(ptr)", ir)
         self.assertIn("declare i1 @regex_is_match(ptr, ptr)", ir)
         self.assertIn("declare i64 @regex_find_range(ptr, ptr)", ir)
-        self.assertIn("declare ptr @regex_replace_all_literal(ptr, ptr, ptr)", ir)
-        self.assertIn("declare ptr @regex_escape(ptr)", ir)
+        self.assertIn("declare i64 @regex_replace_all_literal(i64, i64, i64)", ir)
+        self.assertIn("declare i64 @regex_escape(i64)", ir)
 
     def test_compile_string_equality_uses_content_compare(self) -> None:
         src = """
@@ -795,7 +795,7 @@ class CodegenLlvmTests(CodegenTestCase):
         program = self._load_module_program(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertIn("declare ptr @json_stringify(i64)", ir)
+        self.assertIn("declare i64 @json_stringify(i64)", ir)
 
     def test_compile_json_parse_to_llvm(self) -> None:
         src = """
