@@ -1782,6 +1782,177 @@ fn typecheck_decl(
               register_instance_marker(constraint, env))
 
 # ---------------------------------------------------------------------------
+# apply_subst_typed_expr — walk a typed AST applying a type substitution
+# ---------------------------------------------------------------------------
+
+fn apply_subst_typed_expr_list(subst: Dict types.Type, exprs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match exprs with
+  | Nil -> Nil
+  | Cons h t -> Cons(apply_subst_typed_expr(subst, h), apply_subst_typed_expr_list(subst, t))
+
+fn apply_subst_typed_match_branches(subst: Dict types.Type, branches: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
+  match branches with
+  | Nil -> Nil
+  | Cons h t ->
+      match h with
+      | typed_ast.TypedMatchBranch pat body ->
+          Cons(typed_ast.TypedMatchBranch(pat, apply_subst_typed_expr(subst, body)), apply_subst_typed_match_branches(subst, t))
+
+fn apply_subst_typed_do_steps(subst: Dict types.Type, steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons h t ->
+      match h with
+      | typed_ast.TDoBindStep pat expr ->
+          Cons(typed_ast.TDoBindStep(pat, apply_subst_typed_expr(subst, expr)), apply_subst_typed_do_steps(subst, t))
+      | typed_ast.TDoLetStep name expr ->
+          Cons(typed_ast.TDoLetStep(name, apply_subst_typed_expr(subst, expr)), apply_subst_typed_do_steps(subst, t))
+      | typed_ast.TDoExprStep expr ->
+          Cons(typed_ast.TDoExprStep(apply_subst_typed_expr(subst, expr)), apply_subst_typed_do_steps(subst, t))
+
+fn apply_subst_typed_record_fields(subst: Dict types.Type, fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
+  match fields with
+  | Nil -> Nil
+  | Cons h t ->
+      match h with
+      | typed_ast.TypedRecordField name expr ->
+          Cons(typed_ast.TypedRecordField(name, apply_subst_typed_expr(subst, expr)), apply_subst_typed_record_fields(subst, t))
+
+fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TVar name t pos ->
+      typed_ast.TVar(name, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TInt val t pos ->
+      typed_ast.TInt(val, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TBool val t pos ->
+      typed_ast.TBool(val, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TString val t pos ->
+      typed_ast.TString(val, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TChar val t pos ->
+      typed_ast.TChar(val, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TUnit t pos ->
+      typed_ast.TUnit(unifier.apply_subst(subst, t), pos)
+  | typed_ast.TTuple items t pos ->
+      typed_ast.TTuple(apply_subst_typed_expr_list(subst, items), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TIf cond then_ else_ t pos ->
+      typed_ast.TIf(apply_subst_typed_expr(subst, cond), apply_subst_typed_expr(subst, then_), apply_subst_typed_expr(subst, else_), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TMatch scrutinee branches t pos ->
+      typed_ast.TMatch(apply_subst_typed_expr(subst, scrutinee), apply_subst_typed_match_branches(subst, branches), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TCall fn_ args t pos ->
+      typed_ast.TCall(apply_subst_typed_expr(subst, fn_), apply_subst_typed_expr_list(subst, args), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TDict constraint t pos ->
+      typed_ast.TDict(constraint, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TLambda params body t pos ->
+      typed_ast.TLambda(params, apply_subst_typed_expr(subst, body), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TBinary op left right t pos ->
+      typed_ast.TBinary(op, apply_subst_typed_expr(subst, left), apply_subst_typed_expr(subst, right), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TUnary op operand t pos ->
+      typed_ast.TUnary(op, apply_subst_typed_expr(subst, operand), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TRange from_ to_ t pos ->
+      typed_ast.TRange(apply_subst_typed_expr(subst, from_), apply_subst_typed_expr(subst, to_), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TDo steps t pos ->
+      typed_ast.TDo(apply_subst_typed_do_steps(subst, steps), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TRecord name fields t pos ->
+      typed_ast.TRecord(name, apply_subst_typed_record_fields(subst, fields), unifier.apply_subst(subst, t), pos)
+  | typed_ast.TGetField expr field t pos ->
+      typed_ast.TGetField(apply_subst_typed_expr(subst, expr), field, unifier.apply_subst(subst, t), pos)
+
+# ---------------------------------------------------------------------------
+# Soundness validator — detect unresolved TVars in typed AST
+# ---------------------------------------------------------------------------
+
+fn has_unresolved_tvar_in_type(t: types.Type) -> Bool =
+  match t with
+  | types.TVar _ -> true
+  | types.TConst _ -> false
+  | types.TApp base arg -> has_unresolved_tvar_in_type(base) || has_unresolved_tvar_in_type(arg)
+  | types.TFunc param ret _ -> has_unresolved_tvar_in_type(param) || has_unresolved_tvar_in_type(ret)
+  | types.TTuple items -> has_unresolved_tvar_in_type_list(items)
+
+fn has_unresolved_tvar_in_type_list(items: List types.Type) -> Bool =
+  match items with
+  | Nil -> false
+  | Cons h t -> has_unresolved_tvar_in_type(h) || has_unresolved_tvar_in_type_list(t)
+
+fn assert_resolved_typed_expr(fn_name: String, expr: typed_ast.TypedExpr) -> Unit !{IO} =
+  do
+    _ <- if has_unresolved_tvar_in_type(typed_ast.typed_expr_type(expr))
+         then print("[WARN] unresolved TVar in typed AST of " ++ fn_name)
+         else ()
+    match expr with
+    | typed_ast.TVar _ _ _ -> ()
+    | typed_ast.TInt _ _ _ -> ()
+    | typed_ast.TBool _ _ _ -> ()
+    | typed_ast.TString _ _ _ -> ()
+    | typed_ast.TChar _ _ _ -> ()
+    | typed_ast.TUnit _ _ -> ()
+    | typed_ast.TTuple items _ _ -> assert_resolved_typed_expr_list(fn_name, items)
+    | typed_ast.TIf cond then_ else_ _ _ ->
+        do
+          assert_resolved_typed_expr(fn_name, cond)
+          assert_resolved_typed_expr(fn_name, then_)
+          assert_resolved_typed_expr(fn_name, else_)
+    | typed_ast.TMatch scrutinee branches _ _ ->
+        do
+          assert_resolved_typed_expr(fn_name, scrutinee)
+          assert_resolved_typed_match_branches(fn_name, branches)
+    | typed_ast.TCall fn_ args _ _ ->
+        do
+          assert_resolved_typed_expr(fn_name, fn_)
+          assert_resolved_typed_expr_list(fn_name, args)
+    | typed_ast.TDict _ _ _ -> ()
+    | typed_ast.TLambda _ body _ _ -> assert_resolved_typed_expr(fn_name, body)
+    | typed_ast.TBinary _ left right _ _ ->
+        do
+          assert_resolved_typed_expr(fn_name, left)
+          assert_resolved_typed_expr(fn_name, right)
+    | typed_ast.TUnary _ operand _ _ -> assert_resolved_typed_expr(fn_name, operand)
+    | typed_ast.TRange from_ to_ _ _ ->
+        do
+          assert_resolved_typed_expr(fn_name, from_)
+          assert_resolved_typed_expr(fn_name, to_)
+    | typed_ast.TDo steps _ _ -> assert_resolved_typed_do_steps(fn_name, steps)
+    | typed_ast.TRecord _ fields _ _ -> assert_resolved_typed_record_fields(fn_name, fields)
+    | typed_ast.TGetField expr _ _ _ -> assert_resolved_typed_expr(fn_name, expr)
+
+fn assert_resolved_typed_expr_list(fn_name: String, exprs: List typed_ast.TypedExpr) -> Unit !{IO} =
+  match exprs with
+  | Nil -> ()
+  | Cons h t ->
+      do
+        assert_resolved_typed_expr(fn_name, h)
+        assert_resolved_typed_expr_list(fn_name, t)
+
+fn assert_resolved_typed_match_branches(fn_name: String, branches: List typed_ast.TypedMatchBranch) -> Unit !{IO} =
+  match branches with
+  | Nil -> ()
+  | Cons h t ->
+      do
+        match h with
+        | typed_ast.TypedMatchBranch _ body -> assert_resolved_typed_expr(fn_name, body)
+        assert_resolved_typed_match_branches(fn_name, t)
+
+fn assert_resolved_typed_do_steps(fn_name: String, steps: List typed_ast.TypedDoStep) -> Unit !{IO} =
+  match steps with
+  | Nil -> ()
+  | Cons h t ->
+      do
+        match h with
+        | typed_ast.TDoBindStep _ expr -> assert_resolved_typed_expr(fn_name, expr)
+        | typed_ast.TDoLetStep _ expr -> assert_resolved_typed_expr(fn_name, expr)
+        | typed_ast.TDoExprStep expr -> assert_resolved_typed_expr(fn_name, expr)
+        assert_resolved_typed_do_steps(fn_name, t)
+
+fn assert_resolved_typed_record_fields(fn_name: String, fields: List typed_ast.TypedRecordField) -> Unit !{IO} =
+  match fields with
+  | Nil -> ()
+  | Cons h t ->
+      do
+        match h with
+        | typed_ast.TypedRecordField _ expr -> assert_resolved_typed_expr(fn_name, expr)
+        assert_resolved_typed_record_fields(fn_name, t)
+
+# ---------------------------------------------------------------------------
 # FnDecl body inference
 # ---------------------------------------------------------------------------
 
@@ -1808,7 +1979,7 @@ fn check_fn_body(
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
             | Err e -> typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e)
-            | Ok _ -> typed_ast.BodyOk(typed_body)
+            | Ok _ -> typed_ast.BodyOk(apply_subst_typed_expr(s1, typed_body))
   | _ -> typed_ast.BodyOk(dummy_unit())
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =

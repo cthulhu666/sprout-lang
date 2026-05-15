@@ -122,6 +122,23 @@ For coding tasks, work is done only when:
 1. Run `--phase scan-info` to check `scan_source_info` returns a valid non-empty module name.
 2. If the name looks correct, run `--phase dump-qualify` to see which module has `ctx: EMPTY`.
 
+### GC Option C ABI — strings and chars travel as `i64`
+
+**This is an intentional design choice, not a bug.** Do not "correct" it.
+
+In the self-hosted codegen (`stdlib/compiler/codegen.sprout`), String and Char values are represented as `i64` at the LLVM IR level — a raw pointer cast to an integer. This is called **GC Option C** in the codebase.
+
+**Why:** The GC's root-tracking table stores all heap roots as `i64` values. By making strings travel as `i64` throughout IR, every string slot is automatically compatible with the root table without needing `ptrtoint`/`inttoptr` casts at each GC-safe point. The alternative (keeping strings as `ptr`) requires constant coercions at every rooting call site, and historically caused subtle bugs where a `ptr` value bypassed the root table.
+
+**Implications for codegen edits:**
+- `const_to_ll("String")` and `const_to_ll("Char")` return `ll_i64()` — correct.
+- `emit_expr` for `TString`/`TChar` nodes: emits a `str_ptr`, then coerces to `i64`.
+- String comparisons in `emit_binary`: must coerce both operands back to `ptr` before calling `str_eq`/`str_compare`. Use `compare_needs_ptr_dispatch(left_ty, right_ty)` to detect this case.
+- `str_concat`, `str_slice`, etc.: called with `i64` args, return `i64`.
+- `string_const` uses `str_byte_len(s) + 1` (not `str_len`) for LLVM array sizing — `str_len` counts Unicode codepoints, `str_byte_len` counts UTF-8 bytes.
+
+If you see `ll_ptr()` for String/Char in codegen, that is a regression. The canonical form is `ll_i64()`.
+
 ### GC safety in `sprout/cli.py`
 
 `just gc-safety-check` lints the embedded C runtime for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls (callers are expected to root heap values before such calls). Run this after editing any C builtin in `cli.py` that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.

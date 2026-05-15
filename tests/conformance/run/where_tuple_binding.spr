@@ -1,0 +1,8 @@
+fn add_extras(x: Int) -> Int =
+  a + b
+  where (a, b) = (x + 1, x + 2)
+
+fn main() -> Unit !{IO} =
+  do
+    print(add_extras(10))
+    print(add_extras(0))

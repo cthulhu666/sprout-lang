@@ -74,6 +74,10 @@ compile-native file out:
 build-stage1:
   #!/usr/bin/env bash
   set -euo pipefail
+  if find stdlib/compiler -name "*.sprout" -newer compile_driver_bin 2>/dev/null | grep -q .; then
+    echo "WARNING: compiler sources are newer than compile_driver_bin (stage-0); edits won't be in this build." >&2
+    echo "WARNING: To include recent edits, rebuild stage-0 from Python first." >&2
+  fi
   STDLIB_ROOT="$(pwd)/stdlib"
   DRIVER="stdlib/compiler/compile_driver.sprout"
   STAGE1="compile_driver_bin_stage1"
@@ -121,6 +125,10 @@ build-stage2:
 build-stage1-asan:
   #!/usr/bin/env bash
   set -euo pipefail
+  if find stdlib/compiler -name "*.sprout" -newer compile_driver_bin 2>/dev/null | grep -q .; then
+    echo "WARNING: compiler sources are newer than compile_driver_bin (stage-0); edits won't be in this build." >&2
+    echo "WARNING: To include recent edits, rebuild stage-0 from Python first." >&2
+  fi
   # Same as build-stage1 but links with AddressSanitizer + UBSan for crash attribution.
   # Use only for debugging; output binary is ~5x slower.
   STDLIB_ROOT="$(pwd)/stdlib"

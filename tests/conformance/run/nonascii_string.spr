@@ -1,0 +1,6 @@
+fn greeting() -> String = "hello world"
+
+fn main() -> Unit !{IO} =
+  do
+    print(greeting())
+    print("done")

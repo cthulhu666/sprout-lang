@@ -17,7 +17,13 @@ import stdlib.compiler.source as source
 # Design notes:
 #   • All LLVM types are strings ("i64", "i1", "ptr", "{ i64, ptr }").
 #   • ADT handles, opaque pointers, Unit, and type-variable positions → "i64".
-#   • Bool → "i1", String/Char → "i64" (GC Option C), function values → "ptr" (closure ptr).
+#   • Bool → "i1", String/Char → "i64" (GC Option C — see below), function values → "ptr" (closure ptr).
+#   • GC Option C: String/Char are represented as i64 (raw ptr cast to int) so every string
+#     slot is unconditionally compatible with the GC root table, which stores roots as i64.
+#     Keeping strings as ptr would require ptrtoint/inttoptr coercions at every rooting call.
+#     Consequence: string comparisons must coerce i64→ptr before calling str_eq/str_compare;
+#     use compare_needs_ptr_dispatch(left_ty, right_ty) to detect the case.
+#     DO NOT change const_to_ll("String"/"Char") to ll_ptr() — that is a regression.
 #   • Tuples → "{ ll0, ll1, ... }" LLVM struct.
 #   • The EmitterState holds all mutable codegen state in a Ref.
 #   • Locals are threaded as a Dict Value (immutable, updated at each let/bind).
@@ -1750,6 +1756,9 @@ fn emit_range(start: typed_ast.TypedExpr, end_: typed_ast.TypedExpr, ctx: CgCtx,
     emit_template(em, `  ${tmp} = call i64 @int_range(i64 ${val_ir(sv)}, i64 ${val_ir(ev)})`)
     val_make(ll_i64(), tmp)
 
+fn compare_needs_ptr_dispatch(left_ty: types.Type, right_ty: types.Type) -> Bool =
+  is_string_type(left_ty) || is_char_type(left_ty) || is_string_type(right_ty) || is_char_type(right_ty)
+
 fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   if op == "&&" || op == "||" then
     emit_short_circuit(op, left, right, ctx, locals, em)
@@ -1774,7 +1783,7 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
         do
           let left_ty = typed_ast.typed_expr_type(left)
           let right_ty = typed_ast.typed_expr_type(right)
-          if is_string_type(left_ty) || is_char_type(left_ty) || is_string_type(right_ty) || is_char_type(right_ty) then
+          if compare_needs_ptr_dispatch(left_ty, right_ty) then
             do
               lp <- coerce_value(lv, ll_ptr(), em)
               rp <- coerce_value(rv, ll_ptr(), em)
