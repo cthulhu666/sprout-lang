@@ -847,11 +847,14 @@ fn zero_val(ll: String) -> Value =
 # ===========================================================================
 
 # Collect all names bound by a pattern.
+fn pbn_acc(acc: List String, p: ast.Pattern) -> List String =
+  list_append(acc, pattern_bound_names(p))
+
 fn pattern_bound_names(pat: ast.Pattern) -> List String =
   match pat with
   | ast.VarPattern name _ -> Cons(name, Nil)
-  | ast.TuplePattern items _ -> list_fold(\ (acc, p) -> acc ++ pattern_bound_names(p), Nil, items)
-  | ast.ConstructorPattern _ args _ -> list_fold(\ (acc, p) -> acc ++ pattern_bound_names(p), Nil, args)
+  | ast.TuplePattern items _ -> list_fold(pbn_acc, Nil, items)
+  | ast.ConstructorPattern _ args _ -> list_fold(pbn_acc, Nil, args)
   | _ -> Nil
 
 # Emit a boolean test for whether `scrut` matches `pat`.
@@ -2020,8 +2023,14 @@ fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Valu
         else
           val_make(ll_i64(), "0")
 
+fn strip_module_prefix(name: String) -> String =
+  if dot_pos < 0
+  then name
+  else strip_module_prefix(str_slice(name, dot_pos + 1, str_len(name)))
+  where dot_pos = str_find(name, ".")
+
 fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
-  if name == "append" then
+  if strip_module_prefix(name) == "append" then
     emit_append_call(args, ty, ctx, locals, em)
   else
     match dict_get(name, ctx_ctor_sigs(ctx)) with
@@ -2096,7 +2105,7 @@ fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, 
           tmp <- fresh_tmp(em)
           emit_template(em, `  ${tmp} = call ptr @str_concat(ptr ${val_ir(lp)}, ptr ${val_ir(rp)})`)
           val_make(ll_ptr(), tmp)
-      else if is_list_type(typed_ast.typed_expr_type(left)) then
+      else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(ty) then
         emit_regular_direct_call("list_append", FnSig("list_append", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing), Cons(left, Cons(right, Nil)), type_to_ll(ty), ctx, locals, em)
       else
         zero_val(type_to_ll(ty))

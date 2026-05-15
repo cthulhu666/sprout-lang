@@ -974,6 +974,78 @@ long long sprout_gc_pop_roots(long long count) {
   (void)sprout_gc_tmp_ignored; \
 } while (0)
 
+/* ── GC Handle Table ─────────────────────────────────────────────────────
+ * Handles root GC-managed values in C builtins without manual push/pop
+ * accounting.  A SproutHandle is an index into a fixed table; the GC scans
+ * all in-use slots during mark_roots.  Handles are released automatically
+ * via __attribute__((cleanup)) when the C variable goes out of scope —
+ * on ALL exit paths including early returns and error branches.
+ *
+ * Moving-GC path: update g_handle_table[h].value on object relocation;
+ * all reads through sprout_handle_get() see the new address automatically.
+ * The shadow root stack (sprout_gc_push_i64_root / sprout_gc_pop_roots)
+ * remains in use for generated Sprout IR code; handles are for C builtins.
+ */
+#define SPROUT_HANDLE_TABLE_SIZE 1024
+typedef int32_t SproutHandle;
+#define SPROUT_INVALID_HANDLE ((SproutHandle)-1)
+
+typedef struct { long long value; uint8_t in_use; } SproutHandleSlot;
+
+static SproutHandleSlot g_handle_table[SPROUT_HANDLE_TABLE_SIZE];
+static SproutHandle     g_handle_freelist[SPROUT_HANDLE_TABLE_SIZE];
+static int              g_handle_freelist_top = 0;
+
+static void sprout_handle_table_init(void) {
+  for (int i = 0; i < SPROUT_HANDLE_TABLE_SIZE; i++) {
+    g_handle_table[i].in_use = 0;
+    g_handle_freelist[i] = (SproutHandle)(SPROUT_HANDLE_TABLE_SIZE - 1 - i);
+  }
+  g_handle_freelist_top = SPROUT_HANDLE_TABLE_SIZE;
+}
+
+__attribute__((constructor))
+static void sprout_handle_table_ctor(void) { sprout_handle_table_init(); }
+
+static SproutHandle sprout_handle_new(long long value) {
+  if (g_handle_freelist_top == 0)
+    tcp_fail("sprout_handle_new: handle table exhausted");
+  SproutHandle h = g_handle_freelist[--g_handle_freelist_top];
+  g_handle_table[h].value  = value;
+  g_handle_table[h].in_use = 1;
+  return h;
+}
+
+static long long sprout_handle_get(SproutHandle h) {
+  return g_handle_table[h].value;
+}
+
+static void sprout_handle_set(SproutHandle h, long long value) {
+  g_handle_table[h].value = value;
+}
+
+static void sprout_handle_release(SproutHandle h) {
+  g_handle_table[h].in_use = 0;
+  g_handle_freelist[g_handle_freelist_top++] = h;
+}
+
+static void sprout_handle_cleanup(SproutHandle* hp) {
+  if (*hp != SPROUT_INVALID_HANDLE) sprout_handle_release(*hp);
+}
+
+/* SPROUT_HANDLE(name, val): declare a scoped GC root; released automatically
+ *   on scope exit (including early returns and error paths).
+ * SPROUT_HANDLE_SET(h, val): update a handle's value in place (required when
+ *   the handle holds a mutable accumulator built up in a loop).
+ * For raw pointer values (char*, VectorVal*): store as (long long)(uintptr_t)ptr;
+ *   mark_roots calls sprout_gc_mark_value which calls find_managed_ptr,
+ *   correctly handling both boxed object pointers and unboxed managed CSTRs. */
+#define SPROUT_HANDLE(name, val) \
+  SproutHandle name \
+    __attribute__((cleanup(sprout_handle_cleanup))) \
+    = sprout_handle_new(val)
+#define SPROUT_HANDLE_SET(h, val) sprout_handle_set((h), (val))
+
 void* sprout_alloc_tuple_blob(long long size_bytes) {
   if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
   sprout_gc_maybe_collect_threshold();
@@ -1249,6 +1321,10 @@ static void sprout_gc_mark_roots(void) {
         sprout_gc_mark_ptr((void*)word);
       }
     }
+  }
+  for (int i = 0; i < SPROUT_HANDLE_TABLE_SIZE; i++) {
+    if (g_handle_table[i].in_use)
+      sprout_gc_mark_value(g_handle_table[i].value);
   }
 }
 
@@ -2338,7 +2414,7 @@ long long read_int_lines(const char* path) {
   FILE* f = fopen(path, "r");
   if (f == NULL) tcp_fail("read_int_lines: cannot open file");
   VectorVal* v = sprout_alloc_vector_val("read_int_lines: out of memory");
-  SPROUT_GC_PUSH_PTR_LOCAL(v);
+  SPROUT_HANDLE(h_v, (long long)(uintptr_t)v);
   v->len = 0;
   v->cap = 0;
   v->data = NULL;
@@ -2364,8 +2440,7 @@ long long read_int_lines(const char* path) {
     v->len++;
   }
   fclose(f);
-  SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)v;
+  return sprout_handle_get(h_v);
 }
 long long sprout_register_ctor(long long tag, const char* name, long long arity) {
   g_ctor_meta[g_ctor_meta_len].tag = tag;
@@ -2409,7 +2484,9 @@ long long sprout_tag(long long h) {
 long long sprout_field(long long h, long long idx) {
   SproutObj* o = unbox_ptr(h);
   if (idx == 0) return o->f0;
-  if (idx == 1) return o->f1;
+  if (idx == 1) {
+    return o->f1;
+  }
   if (idx == 2) return o->f2;
   if (idx == 3) return o->f3;
   if (idx == 4) return o->f4;
@@ -2485,18 +2562,15 @@ const char* str_concat(const char* left, const char* right) {
   if (left == NULL || right == NULL) tcp_fail("str_concat: null input");
   size_t left_len = strlen(left);
   size_t right_len = strlen(right);
-  char* left_root = (char*)left;
-  char* right_root = (char*)right;
-  SPROUT_GC_PUSH_PTR_LOCAL(left_root);
-  SPROUT_GC_PUSH_PTR_LOCAL(right_root);
+  SPROUT_HANDLE(h_left, (long long)(uintptr_t)left);
+  SPROUT_HANDLE(h_right, (long long)(uintptr_t)right);
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(left_len + right_len + 1);
   if (out == NULL) tcp_fail("str_concat: out of memory");
-  memcpy(out, left_root, left_len);
-  memcpy(out + left_len, right_root, right_len);
+  memcpy(out, left, left_len);
+  memcpy(out + left_len, right, right_len);
   out[left_len + right_len] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  SPROUT_GC_POP_LOCALS(2);
   return out;
 }
 
@@ -2520,14 +2594,13 @@ const char* string_concat_many(long long list_handle) {
     cur = sprout_field(cur, 1);
     elem_idx++;
   }
-  long long rooted_list = list_handle;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
+  SPROUT_HANDLE(h_list, list_handle);
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(total + 1);
   if (out == NULL) tcp_fail("string_concat_many: out of memory");
   /* Second pass: copy bytes. */
   size_t pos = 0;
-  cur = rooted_list;
+  cur = sprout_handle_get(h_list);
   while (sprout_tag(cur) != nil_tag) {
     const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
     size_t slen = strlen(elem);
@@ -2537,7 +2610,6 @@ const char* string_concat_many(long long list_handle) {
   }
   out[total] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 
@@ -2555,13 +2627,12 @@ const char* string_join_newlines(long long list_handle) {
     total += strlen(s) + 1;
     cur = sprout_field(cur, 1);
   }
-  long long rooted_list = list_handle;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
+  SPROUT_HANDLE(h_list, list_handle);
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(total + 1);
   if (out == NULL) tcp_fail("string_join_newlines: out of memory");
   size_t pos = 0;
-  cur = rooted_list;
+  cur = sprout_handle_get(h_list);
   while (sprout_tag(cur) != nil_tag) {
     const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
     size_t slen = strlen(elem);
@@ -2572,7 +2643,6 @@ const char* string_join_newlines(long long list_handle) {
   }
   out[pos] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 
@@ -2618,30 +2688,27 @@ _Bool str_eq(const char* left, const char* right) {
 const char* str_slice(const char* s, long long start, long long length) {
   if (s == NULL) tcp_fail("str_slice: null input");
   if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
-  char* s_root = (char*)s;
-  SPROUT_GC_PUSH_PTR_LOCAL(s_root);
-  size_t total = sprout_utf8_codepoint_count(s_root);
+  SPROUT_HANDLE(h_s, (long long)(uintptr_t)s);
+  size_t total = sprout_utf8_codepoint_count(s);
   if ((size_t)start >= total) {
     sprout_gc_maybe_collect_threshold();
     char* out = (char*)malloc(1);
     if (out == NULL) tcp_fail("str_slice: out of memory");
     out[0] = '\\0';
     register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-    SPROUT_GC_POP_LOCALS(1);
     return out;
   }
-  size_t start_byte = sprout_utf8_byte_offset(s_root, (size_t)start);
+  size_t start_byte = sprout_utf8_byte_offset(s, (size_t)start);
   size_t end_codepoint = (size_t)start + (size_t)length;
   if (end_codepoint > total) end_codepoint = total;
-  size_t end_byte = sprout_utf8_byte_offset(s_root, end_codepoint);
+  size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
   size_t take = end_byte - start_byte;
   sprout_gc_maybe_collect_threshold();
   char* out = (char*)malloc(take + 1);
   if (out == NULL) tcp_fail("str_slice: out of memory");
-  memcpy(out, s_root + start_byte, take);
+  memcpy(out, s + start_byte, take);
   out[take] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 
@@ -2719,18 +2786,23 @@ long long str_split_lines(const char* s) {
   /* Build Cons list from back to front (last span prepended first, head at front). */
   long long cons_tag = find_ctor_tag_by_name("Cons");
   long long nil_tag  = find_ctor_tag_by_name("Nil");
-  long long list = sprout_make0(nil_tag);
+  SPROUT_HANDLE(h_s, (long long)(uintptr_t)s);
+  SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
   for (size_t k = nspans; k-- > 0;) {
     size_t slen = spans[k].end - spans[k].start;
     char* line = (char*)malloc(slen + 1);
     if (!line) { free(spans); tcp_fail("str_split_lines: out of memory"); }
     memcpy(line, s + spans[k].start, slen);
     line[slen] = '\\0';
-    list = sprout_make2(cons_tag, (long long)(uintptr_t)line, list);
+    register_managed_ptr(line, SPROUT_HEAP_CSTR, 0);
+    {
+      SPROUT_HANDLE(h_line, (long long)(uintptr_t)line);
+      SPROUT_HANDLE_SET(h_list, sprout_make2(cons_tag, sprout_handle_get(h_line), sprout_handle_get(h_list)));
+    }
   }
 
   free(spans);
-  return list;
+  return sprout_handle_get(h_list);
 }
 
 /* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
@@ -2854,21 +2926,18 @@ const char* regex_replace_all_literal(const char* pattern, const char* replaceme
   if (pattern == NULL || replacement == NULL || text == NULL) {
     tcp_fail("regex_replace_all_literal: null input");
   }
-  char* pattern_root = (char*)pattern;
-  char* replacement_root = (char*)replacement;
-  char* text_root = (char*)text;
-  SPROUT_GC_PUSH_PTR_LOCAL(pattern_root);
-  SPROUT_GC_PUSH_PTR_LOCAL(replacement_root);
-  SPROUT_GC_PUSH_PTR_LOCAL(text_root);
+  SPROUT_HANDLE(h_pattern, (long long)(uintptr_t)pattern);
+  SPROUT_HANDLE(h_replacement, (long long)(uintptr_t)replacement);
+  SPROUT_HANDLE(h_text, (long long)(uintptr_t)text);
   sprout_gc_maybe_collect_threshold();
   regex_t compiled;
   char* error = NULL;
-  if (!regex_compile_ere(pattern_root, &compiled, &error)) {
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
     regex_builtin_fail("regex_replace_all_literal", error);
   }
   ByteBuf out;
   buf_init(&out);
-  const char* cursor = text_root;
+  const char* cursor = text;
   regmatch_t match;
   while (regexec(&compiled, cursor, 1, &match, 0) == 0) {
     if (match.rm_so < 0 || match.rm_eo < 0) {
@@ -2878,7 +2947,7 @@ const char* regex_replace_all_literal(const char* pattern, const char* replaceme
     size_t start = (size_t)match.rm_so;
     size_t end = (size_t)match.rm_eo;
     buf_append_bytes(&out, cursor, start);
-    buf_append_cstr(&out, replacement_root);
+    buf_append_cstr(&out, replacement);
     if (end == 0) {
       if (cursor[0] == '\\0') break;
       size_t width = sprout_utf8_char_width((unsigned char)cursor[0]);
@@ -2891,26 +2960,23 @@ const char* regex_replace_all_literal(const char* pattern, const char* replaceme
   buf_append_cstr(&out, cursor);
   regfree(&compiled);
   register_managed_ptr(out.data, SPROUT_HEAP_CSTR, 0);
-  SPROUT_GC_POP_LOCALS(3);
   return out.data;
 }
 
 const char* regex_escape(const char* raw) {
   if (raw == NULL) tcp_fail("regex_escape: null input");
-  char* raw_root = (char*)raw;
-  SPROUT_GC_PUSH_PTR_LOCAL(raw_root);
+  SPROUT_HANDLE(h_raw, (long long)(uintptr_t)raw);
   sprout_gc_maybe_collect_threshold();
   ByteBuf out;
   buf_init(&out);
-  for (size_t i = 0; raw_root[i] != '\\0'; i++) {
-    if (strchr(".^$*+?()[]{}|\\\\", raw_root[i]) != NULL) {
+  for (size_t i = 0; raw[i] != '\\0'; i++) {
+    if (strchr(".^$*+?()[]{}|\\\\", raw[i]) != NULL) {
       buf_append_char(&out, '\\\\');
     }
-    buf_append_char(&out, raw_root[i]);
+    buf_append_char(&out, raw[i]);
   }
   char* result = out.data == NULL ? dup_cstr("") : out.data;
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
-  SPROUT_GC_POP_LOCALS(1);
   return result;
 }
 
@@ -3110,33 +3176,26 @@ static char* upper_copy(const char* text) {
 }
 
 static long long http_err0(const char* ctor_name) {
-  long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
-  SPROUT_GC_PUSH_I64_LOCAL(err);
-  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
-  SPROUT_GC_POP_LOCALS(1);
+  SPROUT_HANDLE(h_err, sprout_make0(find_ctor_tag_by_name(ctor_name)));
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
   return out;
 }
 
 static long long http_err1(const char* ctor_name, long long payload) {
-  long long rooted_payload = payload;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_payload);
-  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  SPROUT_GC_PUSH_I64_LOCAL(err);
-  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
-  SPROUT_GC_POP_LOCALS(2);
+  SPROUT_HANDLE(h_payload, payload);
+  SPROUT_HANDLE(h_err, sprout_make1(find_ctor_tag_by_name(ctor_name), sprout_handle_get(h_payload)));
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
   return out;
 }
 
 static long long http_ok_response(long long status, const char* headers, const char* body) {
-  long long resp = sprout_make3(
+  SPROUT_HANDLE(h_resp, sprout_make3(
     find_ctor_tag_by_name("stdlib.http.HttpResponse"),
     status,
     (long long)(uintptr_t)headers,
     (long long)(uintptr_t)body
-  );
-  SPROUT_GC_PUSH_I64_LOCAL(resp);
-  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), resp);
-  SPROUT_GC_POP_LOCALS(1);
+  ));
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_resp));
   return out;
 }
 
@@ -3277,116 +3336,90 @@ static void json_append_value(ByteBuf* out, long long value) {
 static long long json_parse_value(const char** pos_ptr, char** err_msg);
 
 static long long json_parse_ok_result(long long value) {
-  long long rooted_value = value;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
-  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), value);
-  SPROUT_GC_POP_LOCALS(1);
+  SPROUT_HANDLE(h_value, value);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_value));
   return out;
 }
 
 static long long json_parse_err_result(const char* message) {
-  long long err = sprout_make1(
+  SPROUT_HANDLE(h_err, sprout_make1(
     find_ctor_tag_by_name("stdlib.json.JsonDecode"),
     (long long)(uintptr_t)dup_cstr(message)
-  );
-  SPROUT_GC_PUSH_I64_LOCAL(err);
-  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
-  SPROUT_GC_POP_LOCALS(1);
+  ));
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
   return out;
 }
 
 static long long json_parse_reverse_array_items(long long reversed) {
-  long long rooted_reversed = reversed;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_reversed);
-  long long out = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil"));
-  SPROUT_GC_PUSH_I64_LOCAL(out);
+  SPROUT_HANDLE(h_reversed, reversed);
+  SPROUT_HANDLE(h_out, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil")));
   long long cursor = reversed;
   while (json_ctor_is(json_ctor_name(cursor), "JsonArrayCons")) {
     long long value = sprout_field(cursor, 0);
-    SPROUT_GC_PUSH_I64_LOCAL(value);
-    out = sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), value, out);
-    SPROUT_GC_POP_LOCALS(1);
+    SPROUT_HANDLE_SET(h_out, sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), value, sprout_handle_get(h_out)));
     cursor = sprout_field(cursor, 1);
   }
-  SPROUT_GC_POP_LOCALS(1);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
+  return sprout_handle_get(h_out);
 }
 
 static long long json_parse_reverse_object_items(long long reversed) {
-  long long rooted_reversed = reversed;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_reversed);
-  long long out = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil"));
-  SPROUT_GC_PUSH_I64_LOCAL(out);
+  SPROUT_HANDLE(h_reversed, reversed);
+  SPROUT_HANDLE(h_out, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil")));
   long long cursor = reversed;
   while (json_ctor_is(json_ctor_name(cursor), "JsonObjectCons")) {
     long long key = sprout_field(cursor, 0);
     long long value = sprout_field(cursor, 1);
-    SPROUT_GC_PUSH_I64_LOCAL(value);
-    out = sprout_make3(find_ctor_tag_by_name("stdlib.json.JsonObjectCons"), key, value, out);
-    SPROUT_GC_POP_LOCALS(1);
+    SPROUT_HANDLE_SET(h_out, sprout_make3(find_ctor_tag_by_name("stdlib.json.JsonObjectCons"), key, value, sprout_handle_get(h_out)));
     cursor = sprout_field(cursor, 2);
   }
-  SPROUT_GC_POP_LOCALS(1);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
+  return sprout_handle_get(h_out);
 }
 
 static long long json_parse_array(const char** pos_ptr, char** err_msg) {
   const char* pos = sprout_json_skip_ws(*pos_ptr);
   pos++;
-  long long reversed = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil"));
-  SPROUT_GC_PUSH_I64_LOCAL(reversed);
+  SPROUT_HANDLE(h_reversed, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil")));
   pos = sprout_json_skip_ws(pos);
   if (*pos == ']') {
-    long long list = json_parse_reverse_array_items(reversed);
-    SPROUT_GC_PUSH_I64_LOCAL(list);
-    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), list);
-    SPROUT_GC_POP_LOCALS(2);
+    SPROUT_HANDLE(h_list, json_parse_reverse_array_items(sprout_handle_get(h_reversed)));
+    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), sprout_handle_get(h_list));
     *pos_ptr = pos + 1;
     return out;
   }
   while (*pos != '\\0') {
     long long value = json_parse_value(&pos, err_msg);
     if (err_msg != NULL && *err_msg != NULL) {
-      SPROUT_GC_POP_LOCALS(1);
       return 0;
     }
-    SPROUT_GC_PUSH_I64_LOCAL(value);
-    reversed = sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), value, reversed);
-    SPROUT_GC_POP_LOCALS(1);
+    {
+      SPROUT_HANDLE(h_value, value);
+      SPROUT_HANDLE_SET(h_reversed, sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), sprout_handle_get(h_value), sprout_handle_get(h_reversed)));
+    }
     pos = sprout_json_skip_ws(pos);
     if (*pos == ']') {
-      long long list = json_parse_reverse_array_items(reversed);
-      SPROUT_GC_PUSH_I64_LOCAL(list);
-      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), list);
-      SPROUT_GC_POP_LOCALS(2);
+      SPROUT_HANDLE(h_list, json_parse_reverse_array_items(sprout_handle_get(h_reversed)));
+      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), sprout_handle_get(h_list));
       *pos_ptr = pos + 1;
       return out;
     }
     if (*pos != ',') {
       if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ',' or ']'");
-      SPROUT_GC_POP_LOCALS(1);
       return 0;
     }
     pos = sprout_json_skip_ws(pos + 1);
   }
   if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unterminated array");
-  SPROUT_GC_POP_LOCALS(1);
   return 0;
 }
 
 static long long json_parse_object(const char** pos_ptr, char** err_msg) {
   const char* pos = sprout_json_skip_ws(*pos_ptr);
   pos++;
-  long long reversed = sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil"));
-  SPROUT_GC_PUSH_I64_LOCAL(reversed);
+  SPROUT_HANDLE(h_reversed, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil")));
   pos = sprout_json_skip_ws(pos);
   if (*pos == '}') {
-    long long list = json_parse_reverse_object_items(reversed);
-    SPROUT_GC_PUSH_I64_LOCAL(list);
-    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), list);
-    SPROUT_GC_POP_LOCALS(2);
+    SPROUT_HANDLE(h_list, json_parse_reverse_object_items(sprout_handle_get(h_reversed)));
+    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), sprout_handle_get(h_list));
     *pos_ptr = pos + 1;
     return out;
   }
@@ -3397,49 +3430,43 @@ static long long json_parse_object(const char** pos_ptr, char** err_msg) {
       if (err_msg != NULL && *err_msg == NULL) {
         *err_msg = dup_cstr(parse_string_err != NULL ? parse_string_err : "expected string key");
       }
-      SPROUT_GC_POP_LOCALS(1);
       return 0;
     }
     pos = sprout_json_skip_ws(pos);
     if (*pos != ':') {
       free(key);
       if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ':' after object key");
-      SPROUT_GC_POP_LOCALS(1);
       return 0;
     }
     pos = sprout_json_skip_ws(pos + 1);
     long long value = json_parse_value(&pos, err_msg);
     if (err_msg != NULL && *err_msg != NULL) {
       free(key);
-      SPROUT_GC_POP_LOCALS(1);
       return 0;
     }
-    SPROUT_GC_PUSH_I64_LOCAL(value);
-    reversed = sprout_make3(
-      find_ctor_tag_by_name("stdlib.json.JsonObjectCons"),
-      (long long)(uintptr_t)key,
-      value,
-      reversed
-    );
-    SPROUT_GC_POP_LOCALS(1);
+    {
+      SPROUT_HANDLE(h_value, value);
+      SPROUT_HANDLE_SET(h_reversed, sprout_make3(
+        find_ctor_tag_by_name("stdlib.json.JsonObjectCons"),
+        (long long)(uintptr_t)key,
+        sprout_handle_get(h_value),
+        sprout_handle_get(h_reversed)
+      ));
+    }
     pos = sprout_json_skip_ws(pos);
     if (*pos == '}') {
-      long long list = json_parse_reverse_object_items(reversed);
-      SPROUT_GC_PUSH_I64_LOCAL(list);
-      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), list);
-      SPROUT_GC_POP_LOCALS(2);
+      SPROUT_HANDLE(h_list, json_parse_reverse_object_items(sprout_handle_get(h_reversed)));
+      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), sprout_handle_get(h_list));
       *pos_ptr = pos + 1;
       return out;
     }
     if (*pos != ',') {
       if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ',' or '}'");
-      SPROUT_GC_POP_LOCALS(1);
       return 0;
     }
     pos = sprout_json_skip_ws(pos + 1);
   }
   if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unterminated object");
-  SPROUT_GC_POP_LOCALS(1);
   return 0;
 }
 
@@ -3523,15 +3550,13 @@ static long long json_parse_value(const char** pos_ptr, char** err_msg) {
 }
 
 const char* json_stringify(long long value) {
-  long long rooted_value = value;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
+  SPROUT_HANDLE(h_value, value);
   sprout_gc_maybe_collect_threshold();
   ByteBuf out;
   buf_init(&out);
-  json_append_value(&out, rooted_value);
+  json_append_value(&out, sprout_handle_get(h_value));
   char* result = out.data == NULL ? dup_cstr("") : out.data;
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
-  SPROUT_GC_POP_LOCALS(1);
   return result;
 }
 

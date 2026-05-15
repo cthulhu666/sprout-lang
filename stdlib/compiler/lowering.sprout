@@ -458,7 +458,7 @@ fn build_hidden_for_constraint_with_supers(
       | (new_params, method_map) ->
           build_hidden_for_constraint_with_supers(direct_class, type_args, idx, rest, class_order,
             prepend_params(new_params, param_rev),
-            dict_set(constraint_key_str(eff_class, type_args), method_map, map_acc))
+            dict_set(constraint_key_str(strip_module_prefix(eff_class), type_args), method_map, map_acc))
 
 fn build_hidden_for_one(
   class_name: String,
@@ -669,7 +669,7 @@ fn resolve_tdict_for_classes(
   | Cons eff_class rest ->
       list_append(
         resolve_tdict_with_key(
-          constraint_key_str(eff_class, type_args),
+          constraint_key_str(strip_module_prefix(eff_class), type_args),
           eff_class, type_args, pos, ctx),
         resolve_tdict_for_classes(rest, type_args, pos, ctx))
 

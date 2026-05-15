@@ -10,10 +10,16 @@ finishes using them.
 Pattern checked:
   1. Function contains a sprout_gc_maybe_collect_threshold() call.
   2. A const char*/char* parameter or local variable is used AFTER that call.
-  3. The variable is not registered via register_managed_ptr() before the call.
+  3. The variable is not registered via register_managed_ptr(),
+     SPROUT_GC_PUSH_PTR_LOCAL(), or SPROUT_HANDLE() before the call.
 
 long long heap-pointer arguments (e.g. list handles) are excluded: they are
 harder to distinguish from plain integers without full type information.
+
+Rooting mechanisms recognized:
+  - register_managed_ptr(var, ...)          — registers a managed allocation
+  - SPROUT_GC_PUSH_PTR_LOCAL(var)           — shadow root stack (old style)
+  - SPROUT_HANDLE(name, (long long)(uintptr_t)var) — handle table (preferred)
 
 Exit codes:
   0  — no findings, or findings are only in functions whose callers are
@@ -136,6 +142,9 @@ def check_gc_safety(fn_name: str, body: str, lineno: int) -> list[str]:
     } | {
         m.group(1)
         for m in re.finditer(r"SPROUT_GC_PUSH_(?:PTR|I64)_LOCAL\((\w+)\)", before)
+    } | {
+        m.group(1)
+        for m in re.finditer(r"SPROUT_HANDLE\(\s*\w+\s*,\s*\(long long\)\(uintptr_t\)\s*(\w+)\s*\)", before)
     }
 
     suspect = (heap_params | heap_locals) - already_tracked
