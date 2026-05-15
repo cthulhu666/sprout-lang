@@ -887,7 +887,8 @@ fn collect_constraints(tokens: Vec token.Token, i: Int, acc: List ast.TypeConstr
 # Where clause desugaring
 
 fn starts_where_binding(tokens: Vec token.Token, i: Int) -> Bool =
-  tok_is_ident(tok_at(tokens, i)) && tok_is_symbol(tok_at(tokens, i + 1), "=")
+  (tok_is_ident(tok_at(tokens, i)) && tok_is_symbol(tok_at(tokens, i + 1), "=")) ||
+  tok_is_symbol(tok_at(tokens, i), "(")
 
 fn collect_where_bindings(tokens: Vec token.Token, i: Int, acc: List (ast.Pattern, ast.Expr)) -> Result ParseError (List (ast.Pattern, ast.Expr), Int) =
   if starts_where_binding(tokens, i) then
@@ -918,6 +919,13 @@ fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.
           ast.CallExpr(ast.LambdaExpr(Cons(ast.Param(name, Nothing), Nil), inner, pos), Cons(value, Nil), pos)
       | ast.WildcardPattern pos ->
           ast.CallExpr(ast.LambdaExpr(Cons(ast.Param("_w", Nothing), Nil), inner, pos), Cons(value, Nil), pos)
+      | ast.TuplePattern _ pos ->
+          ast.CallExpr(
+            ast.LambdaExpr(Cons(ast.Param("__where_tup", Nothing), Nil),
+              ast.MatchExpr(ast.VarExpr("__where_tup", pos),
+                Cons(ast.MatchBranch(pattern, inner), Nil), pos),
+              pos),
+            Cons(value, Nil), pos)
       | _ -> inner
 
 # ---------------------------------------------------------------------------

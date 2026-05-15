@@ -671,7 +671,7 @@ fn string_const(em: Emitter, s: String) -> (String, Int) !{IO} =
     ref_write(r, n + 1)
     let gname = "@.str." ++ int_to_string(n)
     let body = encode_str_for_ir(s, 0, "") ++ "\\00"
-    let len = str_len(s) + 1
+    let len = str_byte_len(s) + 1
     let decl = gname ++ " = private unnamed_addr constant [" ++
                 int_to_string(len) ++ " x i8] c\"" ++ body ++ "\""
     add_str_global(em, decl)
