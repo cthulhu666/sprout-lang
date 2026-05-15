@@ -17,7 +17,7 @@ import stdlib.compiler.source as source
 # Design notes:
 #   • All LLVM types are strings ("i64", "i1", "ptr", "{ i64, ptr }").
 #   • ADT handles, opaque pointers, Unit, and type-variable positions → "i64".
-#   • Bool → "i1", String/Char → "ptr", function values → "ptr" (closure ptr).
+#   • Bool → "i1", String/Char → "i64" (GC Option C), function values → "ptr" (closure ptr).
 #   • Tuples → "{ ll0, ll1, ... }" LLVM struct.
 #   • The EmitterState holds all mutable codegen state in a Ref.
 #   • Locals are threaded as a Dict Value (immutable, updated at each let/bind).
@@ -186,8 +186,8 @@ fn type_to_ll(t: types.Type) -> String =
 fn const_to_ll(name: String) -> String =
   if type_name_leaf_is(name, "Int") then ll_i64()
   else if type_name_leaf_is(name, "Bool") then ll_i1()
-  else if type_name_leaf_is(name, "String") then ll_ptr()
-  else if type_name_leaf_is(name, "Char") then ll_ptr()
+  else if type_name_leaf_is(name, "String") then ll_i64()
+  else if type_name_leaf_is(name, "Char") then ll_i64()
   else ll_i64()  # Unit, Set, Bytes, Builder, IntRange, ADT names, …
 
 fn type_name_leaf_is(name: String, leaf: String) -> Bool =
@@ -1493,9 +1493,13 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
   | typed_ast.TBool b _ _ ->
       val_make(ll_i1(), if b then "1" else "0")
   | typed_ast.TString s _ _ ->
-      emit_str_ptr(em, s)
+      do
+        p <- emit_str_ptr(em, s)
+        coerce_value(p, ll_i64(), em)
   | typed_ast.TChar ch _ _ ->
-      emit_str_ptr(em, char_to_string(ch))
+      do
+        p <- emit_str_ptr(em, char_to_string(ch))
+        coerce_value(p, ll_i64(), em)
   | typed_ast.TUnit _ _ ->
       val_make(ll_i64(), "0")
   | typed_ast.TTuple items ty _ ->
@@ -1769,7 +1773,8 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
       else
         do
           let left_ty = typed_ast.typed_expr_type(left)
-          if is_string_type(left_ty) || is_char_type(left_ty) then
+          let right_ty = typed_ast.typed_expr_type(right)
+          if is_string_type(left_ty) || is_char_type(left_ty) || is_string_type(right_ty) || is_char_type(right_ty) then
             do
               lp <- coerce_value(lv, ll_ptr(), em)
               rp <- coerce_value(rv, ll_ptr(), em)
