@@ -262,9 +262,10 @@ export fn scan_source_info(src: String) -> (String, List String, List String) =
 fn scan_lines(src: String, i: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
   if i >= str_byte_len(src) then (mod_name, list_reverse(exported), list_reverse(ctor_types))
   else
-    match process_line(src, i, find_newline(src, i), mod_name, exported, ctor_types) with
+    match process_line(src, i, nl, mod_name, exported, ctor_types) with
     | (new_mod, new_exp, new_ctor) ->
-        scan_lines(src, find_newline(src, i) + 1, new_mod, new_exp, new_ctor)
+        scan_lines(src, nl + 1, new_mod, new_exp, new_ctor)
+  where nl = find_newline(src, i)
 
 fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
   if str_starts_with_at_byte(src, i, "module ") then

@@ -1695,6 +1695,39 @@ def _emit_expr(
     if isinstance(expr, ast.IfExpr):
         return _emit_if(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
     if isinstance(expr, ast.CallExpr):
+        # IILE: beta-reduce immediately-invoked lambda so TCO propagates through where-bindings.
+        # CallExpr(LambdaExpr([params...], body), [args...]) compiles exactly like match arm binds:
+        # evaluate each arg, bind the corresponding param name inline, emit the body with tco_ctx
+        # adjusted to account for the new roots.  This mirrors _emit_match's branch handling.
+        if (
+            isinstance(expr.callee, ast.LambdaExpr)
+            and len(expr.callee.params) == len(expr.args)
+            and len(expr.args) >= 1
+        ):
+            iile_locals = dict(locals_)
+            rooted = 0
+            for param, arg_expr in zip(expr.callee.params, expr.args):
+                arg_val = _emit_expr(arg_expr, iile_locals, globals_info, sigs, ctor_sigs, adt_names, emitter)
+                rooted += _emit_pattern_bind(ast.VarPattern(param.name), arg_val, iile_locals, ctor_sigs, emitter)
+            iile_tco_ctx = (
+                TcoCtx(
+                    fn_name=tco_ctx.fn_name,
+                    loop_label=tco_ctx.loop_label,
+                    param_slots=tco_ctx.param_slots,
+                    ret=tco_ctx.ret,
+                    outer_roots=tco_ctx.outer_roots + rooted,
+                    sp_save=tco_ctx.sp_save,
+                )
+                if tco_ctx is not None
+                else None
+            )
+            result = _emit_expr(expr.callee.body, iile_locals, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=iile_tco_ctx)
+            if tco_ctx is not None and result.tco_args is not None:
+                _emit_tco_back_edge(tco_ctx, result.tco_args, rooted, emitter)
+                return Value(tco_ctx.ret, "undef")
+            if not emitter.is_block_terminated():
+                _emit_pop_temp_roots(rooted, emitter)
+            return result
         return _emit_call(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
     if isinstance(expr, ast.MatchExpr):
         return _emit_match(expr, locals_, globals_info, sigs, ctor_sigs, adt_names, emitter, tco_ctx=tco_ctx)
