@@ -310,38 +310,39 @@ def cmd_compile(
     native: bool = False,
     emit_runtime_c: "Path | None" = None,
 ) -> int:
-    bundle = load_module_bundle(path)
-    source = bundle.source
-    if with_stdlib and not _bundle_has_implicit_prelude(bundle):
-        source = with_prelude(source)
-        bundle = None
-    tree = parse(source)
-    if bundle is not None:
-        _print_warnings(resolve_program_names(tree, bundle))
-    validate_public_surface(tree, bundle)
-    typecheck_program(tree)
-    validate_public_surface(tree, bundle)
-    lowered = lower_typeclasses(tree)
-    entry_main_name = "main"
-    if bundle is not None:
-        entry_info = bundle.modules[path.resolve()]
-        if entry_info.header.module is not None:
-            entry_main_name = f"{entry_info.header.module}.main"
-    typed = typecheck_program(lowered)
-    _validate_typed_program(lowered)
-    _validate_executable_entrypoint(lowered, typed, entry_main_name)
-    llvm_ir = compile_to_llvm(lowered, entry_main_name=entry_main_name)
-
-    if not native and emit_runtime_c is None:
-        out.write_text(llvm_ir, encoding="utf-8")
-        return 0
-
-    clang = shutil.which("clang")
-    if clang is None and emit_runtime_c is None:
-        raise CodegenError("clang not found; install clang or compile with --emit-llvm only")
-
     ll_path: Path | None = None
+    clang: str | None = None
     if emit_runtime_c is None:
+        bundle = load_module_bundle(path)
+        source = bundle.source
+        if with_stdlib and not _bundle_has_implicit_prelude(bundle):
+            source = with_prelude(source)
+            bundle = None
+        tree = parse(source)
+        if bundle is not None:
+            _print_warnings(resolve_program_names(tree, bundle))
+        validate_public_surface(tree, bundle)
+        typecheck_program(tree)
+        validate_public_surface(tree, bundle)
+        lowered = lower_typeclasses(tree)
+        entry_main_name = "main"
+        if bundle is not None:
+            entry_info = bundle.modules[path.resolve()]
+            if entry_info.header.module is not None:
+                entry_main_name = f"{entry_info.header.module}.main"
+        typed = typecheck_program(lowered)
+        _validate_typed_program(lowered)
+        _validate_executable_entrypoint(lowered, typed, entry_main_name)
+        llvm_ir = compile_to_llvm(lowered, entry_main_name=entry_main_name)
+
+        if not native:
+            out.write_text(llvm_ir, encoding="utf-8")
+            return 0
+
+        clang = shutil.which("clang")
+        if clang is None:
+            raise CodegenError("clang not found; install clang or compile with --emit-llvm only")
+
         with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False, encoding="utf-8") as tmp:
             tmp.write(llvm_ir)
             ll_path = Path(tmp.name)
