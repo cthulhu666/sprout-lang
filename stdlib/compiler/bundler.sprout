@@ -201,58 +201,58 @@ fn dict_merge_keys(acc: Dict String, keys: List String, src: Dict String) -> Dic
 # Source scanning: module name and export names from raw source text
 # ---------------------------------------------------------------------------
 
-fn find_newline(s: String, i: Int) -> Int =
-  if i >= str_len(s) then str_len(s)
+fn find_newline(s: String, b: Int) -> Int =
+  if b >= str_byte_len(s) then str_byte_len(s)
   else
-    match str_char_at(s, i) with
-    | Nothing -> str_len(s)
-    | Just ch -> if ch == '\n' then i else find_newline(s, i + 1)
+    match str_char_at_byte(s, b) with
+    | Nothing -> b + 1
+    | Just ch -> if ch == '\n' then b else find_newline(s, b + str_char_width_at_byte(s, b))
 
-fn skip_spaces_in(s: String, i: Int) -> Int =
-  if i >= str_len(s) then i
+fn skip_spaces_in(s: String, b: Int) -> Int =
+  if b >= str_byte_len(s) then b
   else
-    match str_char_at(s, i) with
-    | Nothing -> i
-    | Just ch -> if ch == ' ' || ch == '\t' then skip_spaces_in(s, i + 1) else i
+    match str_char_at_byte(s, b) with
+    | Nothing -> b
+    | Just ch -> if ch == ' ' || ch == '\t' then skip_spaces_in(s, b + 1) else b
 
 fn is_ident_char(ch: Char) -> Bool =
   (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
   (ch >= '0' && ch <= '9') || ch == '_'
 
-fn read_ident_chars(s: String, i: Int, acc: String) -> (String, Int) =
-  if i >= str_len(s) then (acc, i)
+fn read_ident_chars(s: String, b: Int, acc: String) -> (String, Int) =
+  if b >= str_byte_len(s) then (acc, b)
   else
-    match str_char_at(s, i) with
-    | Nothing -> (acc, i)
+    match str_char_at_byte(s, b) with
+    | Nothing -> (acc, b)
     | Just ch ->
-        if is_ident_char(ch) then read_ident_chars(s, i + 1, str_concat(acc, char_to_string(ch)))
-        else (acc, i)
+        if is_ident_char(ch) then read_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
+        else (acc, b)
 
-fn read_ident_at(s: String, i: Int) -> (String, Int) =
-  read_ident_chars(s, skip_spaces_in(s, i), "")
+fn read_ident_at(s: String, b: Int) -> (String, Int) =
+  read_ident_chars(s, skip_spaces_in(s, b), "")
 
 # Read a dotted identifier like "stdlib.compiler.ast".
-fn read_dotted_ident_chars(s: String, i: Int, acc: String) -> (String, Int) =
-  if i >= str_len(s) then (acc, i)
+fn read_dotted_ident_chars(s: String, b: Int, acc: String) -> (String, Int) =
+  if b >= str_byte_len(s) then (acc, b)
   else
-    match str_char_at(s, i) with
-    | Nothing -> (acc, i)
+    match str_char_at_byte(s, b) with
+    | Nothing -> (acc, b)
     | Just ch ->
-        if is_ident_char(ch) then read_dotted_ident_chars(s, i + 1, str_concat(acc, char_to_string(ch)))
+        if is_ident_char(ch) then read_dotted_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
         else if ch == '.' then
-          match str_char_at(s, i + 1) with
-          | Nothing -> (acc, i)
+          match str_char_at_byte(s, b + 1) with
+          | Nothing -> (acc, b)
           | Just next ->
               if is_ident_char(next) then
-                read_dotted_ident_chars(s, i + 1, str_concat(acc, char_to_string(ch)))
-              else (acc, i)
-        else (acc, i)
+                read_dotted_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
+              else (acc, b)
+        else (acc, b)
 
-fn read_dotted_ident_at(s: String, i: Int) -> (String, Int) =
-  read_dotted_ident_chars(s, skip_spaces_in(s, i), "")
+fn read_dotted_ident_at(s: String, b: Int) -> (String, Int) =
+  read_dotted_ident_chars(s, skip_spaces_in(s, b), "")
 
-fn has_ctor_export(s: String, i: Int) -> Bool =
-  str_starts_with(str_slice(s, skip_spaces_in(s, i), str_len(s)), "(..)")
+fn has_ctor_export(s: String, b: Int) -> Bool =
+  str_starts_with_at_byte(s, skip_spaces_in(s, b), "(..)")
 
 # Returns (module_name, exported_names, ctor_export_type_names).
 # Scans all lines for `module`, `export fn`, `export type`, `export let`, `export class`.
@@ -260,17 +260,18 @@ export fn scan_source_info(src: String) -> (String, List String, List String) =
   scan_lines(src, 0, "", Nil, Nil)
 
 fn scan_lines(src: String, i: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
-  if i >= str_len(src) then (mod_name, list_reverse(exported), list_reverse(ctor_types))
+  if i >= str_byte_len(src) then (mod_name, list_reverse(exported), list_reverse(ctor_types))
   else
-    match process_line(src, i, find_newline(src, i), mod_name, exported, ctor_types) with
+    match process_line(src, i, nl, mod_name, exported, ctor_types) with
     | (new_mod, new_exp, new_ctor) ->
-        scan_lines(src, find_newline(src, i) + 1, new_mod, new_exp, new_ctor)
+        scan_lines(src, nl + 1, new_mod, new_exp, new_ctor)
+  where nl = find_newline(src, i)
 
 fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
-  if str_starts_with(str_slice(src, i, nl), "module ") then
+  if str_starts_with_at_byte(src, i, "module ") then
     match read_dotted_ident_at(src, i + 7) with
     | (name, _) -> (name, exported, ctor_types)
-  else if str_starts_with(str_slice(src, i, nl), "export type ") then
+  else if str_starts_with_at_byte(src, i, "export type ") then
     match read_ident_at(src, i + 12) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, i2) ->
@@ -278,15 +279,15 @@ fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List S
           (mod_name, Cons(name, exported), Cons(name, ctor_types))
         else
           (mod_name, Cons(name, exported), ctor_types)
-  else if str_starts_with(str_slice(src, i, nl), "export fn ") then
+  else if str_starts_with_at_byte(src, i, "export fn ") then
     match read_ident_at(src, i + 10) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
-  else if str_starts_with(str_slice(src, i, nl), "export let ") then
+  else if str_starts_with_at_byte(src, i, "export let ") then
     match read_ident_at(src, i + 11) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
-  else if str_starts_with(str_slice(src, i, nl), "export class ") then
+  else if str_starts_with_at_byte(src, i, "export class ") then
     match read_ident_at(src, i + 13) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
@@ -298,17 +299,15 @@ fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List S
 # ---------------------------------------------------------------------------
 
 fn is_header_line_b(s: String, pos: Int) -> Bool =
-  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
+  str_starts_with_at_byte(s, pos, "module ") ||
+  str_starts_with_at_byte(s, pos, "import ") ||
+  str_starts_with_at_byte(s, pos, "\n")
 
 fn next_line_b(s: String, pos: Int) -> Int =
-  if nl == -1 then str_len(s)
-  else pos + nl + 1
-  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+  find_newline(s, pos) + 1
 
 fn strip_headers_b(s: String, pos: Int) -> String =
-  if pos >= str_len(s) then ""
+  if pos >= str_byte_len(s) then ""
   else if is_header_line_b(s, pos) then strip_headers_b(s, next_line_b(s, pos))
   else str_slice(s, pos, str_len(s))
 
