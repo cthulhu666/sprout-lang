@@ -656,9 +656,13 @@ fn type_head_str(t: types.Type) -> String =
 # Returns the concrete constructor name (TConst head) of a type, or Nothing if
 # the outermost head is a type variable, a function type, or any non-concrete
 # form.  Used to look up @inst:{Class}:{head} instance markers.
+#
+# Module prefix is stripped (e.g. "stdlib.compiler.types.Type" → "Type") so
+# that instance lookups use bare names, matching how register_instance_marker
+# registers them via type_from_ast → lookup_type_var → strip_module_prefix.
 fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(name)
+  | types.TConst name -> Just(strip_module_prefix(name))
   | types.TApp base _ -> concrete_type_str(base)
   | _ -> Nothing
 
