@@ -189,6 +189,10 @@ fn type_to_ll(t: types.Type) -> String =
   | types.TFunc _ _ _ -> ll_ptr()
   | types.TTuple items -> tuple_ll(list_map(\i -> type_to_ll(i), items))
 
+fn normalize_lambda_param_ll(ll: String) -> String =
+  if str_starts_with(ll, "{ ") then ll_i64()
+  else ll
+
 fn const_to_ll(name: String) -> String =
   if type_name_leaf_is(name, "Int") then ll_i64()
   else if type_name_leaf_is(name, "Bool") then ll_i1()
@@ -1329,16 +1333,16 @@ fn list_append(xs: List String, ys: List String) -> List String =
 # Section 14 — Lambda emission
 # ===========================================================================
 
-fn emit_lambda_helper(lam_name: String, params: List ast.Param, param_lls: List String, body: typed_ast.TypedExpr, ret_ll: String, captures: List String, capture_lls: List String, ctx: CgCtx, em: Emitter) -> Unit !{IO} =
+fn emit_lambda_helper(lam_name: String, params: List ast.Param, wire_lls: List String, logical_lls: List String, body: typed_ast.TypedExpr, ret_ll: String, captures: List String, capture_lls: List String, ctx: CgCtx, em: Emitter) -> Unit !{IO} =
   do
     saved <- save_body(em)
-    let params_str = build_wrapper_params(param_lls, 0)
+    let params_str = build_wrapper_params(wire_lls, 0)
     emit_line(em, "; " ++ lam_name ++ " (in " ++ ctx_scope(ctx) ++ ")")
     emit_template(em, `define ${ret_ll} @${lam_name}(ptr %env${params_str}) {`)
     emit_label(em, "entry")
     env_val <- push_temp_root(val_make(ll_ptr(), "%env"), em)
     (cap_locals, cap_rooted) <- load_captures(captures, capture_lls, em, 1)
-    (param_locals, param_rooted) <- load_lambda_params(params, param_lls, em, 0)
+    (param_locals, param_rooted) <- load_lambda_params(params, wire_lls, logical_lls, em, 0)
     let lam_locals = extend_locals(extend_locals(dict_empty(), cap_locals), param_locals)
     let total_rooted = env_val + cap_rooted + param_rooted
     body_val <- emit_expr(ctx, lam_locals, em, Nothing, body)
@@ -1368,19 +1372,23 @@ fn load_captures(names: List String, lls: List String, em: Emitter, idx: Int) ->
             (rest_binds, rest_rooted) <- load_captures(rest_names, rest_lls, em, idx + 1)
             (Cons((name, v), rest_binds), rooted + rest_rooted)
 
-fn load_lambda_params(params: List ast.Param, lls: List String, em: Emitter, idx: Int) -> (List (String, Value), Int) !{IO} =
+fn load_lambda_params(params: List ast.Param, wire_lls: List String, logical_lls: List String, em: Emitter, idx: Int) -> (List (String, Value), Int) !{IO} =
   match params with
   | Nil -> (Nil, 0)
   | Cons (ast.Param name _) rest_params ->
-      match lls with
+      match wire_lls with
       | Nil -> (Nil, 0)
-      | Cons ll rest_lls ->
-          do
-            let ir = "%a" ++ int_to_string(idx)
-            let v = val_for_ll(ll, ir)
-            rooted <- push_temp_root(v, em)
-            (rest_binds, rest_rooted) <- load_lambda_params(rest_params, rest_lls, em, idx + 1)
-            (Cons((name, v), rest_binds), rooted + rest_rooted)
+      | Cons wire rest_wires ->
+          match logical_lls with
+          | Nil -> (Nil, 0)
+          | Cons logical rest_logicals ->
+              do
+                let ir = "%a" ++ int_to_string(idx)
+                let raw_v = val_for_ll(wire, ir)
+                v <- coerce_value(raw_v, logical, em)
+                rooted <- push_temp_root(v, em)
+                (rest_binds, rest_rooted) <- load_lambda_params(rest_params, rest_wires, rest_logicals, em, idx + 1)
+                (Cons((name, v), rest_binds), rooted + rest_rooted)
 
 fn emit_defs_list(lines: List String, em: Emitter) -> Unit !{IO} =
   match lines with
@@ -1689,11 +1697,12 @@ fn emit_lambda_expr(params: List ast.Param, body: typed_ast.TypedExpr, ty: types
     let captures = list_filter_in_locals(free_list, locals)
     let capture_vals = get_capture_vals(captures, locals)
     let param_lls = extract_param_lls_from_type(ty, list_length_params(params))
+    let wire_param_lls = list_map(normalize_lambda_param_ll, param_lls)
     let ret_ll = extract_ret_ll_from_type(ty, list_length_params(params))
     let capture_lls = list_map(\v -> val_ll(v), capture_vals)
-    emit_lambda_helper(lam_name, params, param_lls, body, ret_ll, captures, capture_lls, ctx, em)
+    emit_lambda_helper(lam_name, params, wire_param_lls, param_lls, body, ret_ll, captures, capture_lls, ctx, em)
     closure <- emit_make_closure("@" ++ lam_name, capture_vals, em)
-    let sig = CallSig(param_lls, ret_ll, call_sig_from_type(extract_ret_type(ty, list_length_params(params))))
+    let sig = CallSig(wire_param_lls, ret_ll, call_sig_from_type(extract_ret_type(ty, list_length_params(params))))
     val_with_call_sig(closure, Just(sig))
 
 fn list_filter_in_locals(names: List String, locals: Dict Value) -> List String =
@@ -2114,8 +2123,11 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
                             result
                       | Just sig ->
                           do
+                            # local_v may be i64 (GC Option C: typeclass dict method stored as
+                            # i64-boxed closure). coerce_value is a no-op when already ptr.
+                            callee_ptr <- coerce_value(local_v, ll_ptr(), em)
                             (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
-                            result <- emit_closure_call(local_v, sig, arg_vals, em)
+                            result <- emit_closure_call(callee_ptr, sig, arg_vals, em)
                             pop_temp_roots(rooted_args, em)
                             pop_temp_roots(rooted, em)
                             result

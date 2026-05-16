@@ -907,7 +907,7 @@ for line in sys.stdin:
             )
             self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stderr, "")
-            self.assertEqual(run.stdout.strip(), "Foldable List")
+            self.assertEqual(run.stdout.strip(), "Eq (List a)")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_instances_in_source_builtin_surfaces_service_errors(self) -> None:

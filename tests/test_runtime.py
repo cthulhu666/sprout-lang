@@ -1441,7 +1441,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(lines[0], "2")
         self.assertEqual(lines[1], "ok")
         self.assertEqual(lines[2], "Int")
-        self.assertEqual(lines[3], "Foldable List")
+        self.assertEqual(lines[3], "Eq (List a)")
         self.assertEqual(lines[4], "str:string")
         self.assertEqual(lines[5], "ok")
         self.assertEqual(lines[6], "AAA")

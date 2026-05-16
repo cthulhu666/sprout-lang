@@ -265,36 +265,49 @@ export fn scheme_to_string(s: Scheme) -> String =
 # ---------------------------------------------------------------------------
 # Eq and ToString instances — required by stdlib.test assert_eq
 # ---------------------------------------------------------------------------
+#
+# Stage-0 constraint dispatch cannot resolve Eq inside instance method bodies
+# (see comment above on list helpers).  All real logic lives in standalone
+# monomorphic helpers; the instance `eq` methods are thin delegators.
 
-instance Eq Effect {
-  fn eq(left: Effect, right: Effect) -> Bool =
-    match left with
-    | EffectPure   -> match right with | EffectPure   -> true | _ -> false
-    | EffectIO     -> match right with | EffectIO     -> true | _ -> false
-    | EffectRow ls -> match right with
-        | EffectRow rs -> ls == rs
-        | _ -> false
-    | EffectVar s  -> match right with | EffectVar t  -> s == t | _ -> false
-}
+fn string_list_eq(xs: List String, ys: List String) -> Bool =
+  match xs with
+  | Nil -> match ys with | Nil -> true | Cons _ _ -> false
+  | Cons x rest_xs -> match ys with
+      | Nil -> false
+      | Cons y rest_ys -> if x == y then string_list_eq(rest_xs, rest_ys) else false
 
-instance Eq Type {
-  fn eq(left: Type, right: Type) -> Bool =
-    match left with
-    | TVar s      -> match right with | TVar t      -> s == t               | _ -> false
-    | TConst s    -> match right with | TConst t    -> s == t               | _ -> false
-    | TApp f a    -> match right with | TApp g b    -> eq(f, g) && eq(a, b) | _ -> false
-    | TFunc p r e -> match right with
-        | TFunc q s f -> eq(p, q) && eq(r, s) && eq(e, f)
-        | _ -> false
-    | TTuple ts   -> match right with | TTuple us   -> types_eq(ts, us)     | _ -> false
-}
+fn effect_eq(left: Effect, right: Effect) -> Bool =
+  match left with
+  | EffectPure   -> match right with | EffectPure   -> true | _ -> false
+  | EffectIO     -> match right with | EffectIO     -> true | _ -> false
+  | EffectRow ls -> match right with | EffectRow rs -> string_list_eq(ls, rs) | _ -> false
+  | EffectVar s  -> match right with | EffectVar t  -> s == t | _ -> false
+
+fn type_eq(left: Type, right: Type) -> Bool =
+  match left with
+  | TVar s      -> match right with | TVar t      -> s == t                        | _ -> false
+  | TConst s    -> match right with | TConst t    -> s == t                        | _ -> false
+  | TApp f a    -> match right with | TApp g b    -> type_eq(f, g) && type_eq(a, b) | _ -> false
+  | TFunc p r e -> match right with
+      | TFunc q s f -> type_eq(p, q) && type_eq(r, s) && effect_eq(e, f)
+      | _ -> false
+  | TTuple ts   -> match right with | TTuple us   -> types_eq(ts, us)              | _ -> false
 
 fn types_eq(left: List Type, right: List Type) -> Bool =
   match left with
   | Nil -> match right with | Nil -> true | Cons _ _ -> false
   | Cons x xs -> match right with
       | Nil -> false
-      | Cons y ys -> if eq(x, y) then types_eq(xs, ys) else false
+      | Cons y ys -> if type_eq(x, y) then types_eq(xs, ys) else false
+
+instance Eq Effect {
+  fn eq(left: Effect, right: Effect) -> Bool = effect_eq(left, right)
+}
+
+instance Eq Type {
+  fn eq(left: Type, right: Type) -> Bool = type_eq(left, right)
+}
 
 instance ToString Effect {
   fn to_string(e: Effect) -> String = effect_to_string(e)
