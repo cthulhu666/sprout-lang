@@ -53,6 +53,42 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         return cycles
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_print_tuple_preserves_string_fields_from_loaded_and_nested_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+
+                let loaded = ("a", 1)
+
+                fn main() -> Unit !{IO} =
+                  seq(print(loaded), print((("b", 2), "c")))
+
+                fn seq(a: Unit !{IO}, b: Unit !{IO}) -> Unit !{IO} = b
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+            self.assertEqual(run.stdout.strip(), "(a, 1)\n((b, 2), c)")
+            self.assertEqual(run.returncode, 0)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_int_range_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

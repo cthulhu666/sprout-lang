@@ -40,6 +40,7 @@ CORPUS = [
     "string_template_basic.spr",
     "stdlib_string_template_callsite.spr",
     "where_tuple_binding.spr",
+    "where_tuple_binding_hygiene.spr",
     "nonascii_string.spr",
 ]
 
@@ -47,12 +48,7 @@ CORPUS = [
 # Each entry is (description, python_fragment, sprout_fragment).
 # A diff line containing python_fragment on the Python side and
 # sprout_fragment on the Sprout side is accepted as a known divergence.
-KNOWN_DIVERGENCES: list[tuple[str, str, str]] = [
-    # Tuple where-binding desugaring uses different internal variable names.
-    # Python parser: __sprout_where_N (counter-based); Sprout parser: __where_tup (fixed).
-    # Semantics are identical — both produce (λ__var. match __var with | (a,b) -> body)(expr).
-    ("tuple-where internal param name", "__sprout_where_0", "__where_tup"),
-]
+KNOWN_DIVERGENCES: list[tuple[str, str, str]] = []
 
 
 def run_python_dump(path: Path) -> list[str]:

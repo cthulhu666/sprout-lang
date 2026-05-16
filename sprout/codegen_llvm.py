@@ -223,8 +223,8 @@ class Value:
     ir: str
     callable_sig: "CallSig | None" = None
     tuple_items: list[LLType] | None = None
-    # Parallel to tuple_items: True for each field that is a String/Char (i64 storing a ptr).
-    tuple_item_is_string: list[bool] | None = None
+    # Parallel to tuple_items: True for String/Char fields, or a nested list for tuple fields.
+    tuple_item_is_string: list[object] | None = None
     # Non-None signals a pending TCO back-edge: list of coerced new argument values.
     tco_args: "list[Value] | None" = None
 
@@ -385,6 +385,22 @@ def _tuple_item_types_from_type_expr(node: ast.TypeExpr | None, adt_names: set[s
     if not isinstance(node, ast.TupleType):
         return None
     return [_type_from_ast(item, adt_names) for item in node.items]
+
+
+def _string_meta_from_type_expr(node: ast.TypeExpr | None, adt_names: set[str]) -> object:
+    if isinstance(node, ast.TypeName) and node.name.rsplit(".", 1)[-1] in {"String", "Char"}:
+        return True
+    if isinstance(node, ast.TupleType):
+        return [_string_meta_from_type_expr(item, adt_names) for item in node.items]
+    return False
+
+
+def _tuple_item_string_meta_from_type_expr(
+    node: ast.TypeExpr | None,
+    adt_names: set[str],
+) -> list[object] | None:
+    meta = _string_meta_from_type_expr(node, adt_names)
+    return meta if isinstance(meta, list) else None
 
 
 def _tuple_item_types_from_lltype(typ: LLType) -> list[LLType] | None:
@@ -689,11 +705,15 @@ def _value_for_inferred_type(
     ll_type, call_sig = _lower_value_type(inferred_type, adt_names)
     coerced = _coerce_value(value, ll_type, emitter)
     tuple_items = _tuple_item_types_from_type_expr(inferred_type, adt_names)
+    tuple_item_is_string = _tuple_item_string_meta_from_type_expr(inferred_type, adt_names)
     return Value(
         typ=coerced.typ,
         ir=coerced.ir,
         callable_sig=value.callable_sig or call_sig,
         tuple_items=tuple_items if tuple_items is not None else coerced.tuple_items,
+        tuple_item_is_string=tuple_item_is_string
+        if tuple_item_is_string is not None
+        else coerced.tuple_item_is_string,
     )
 
 
@@ -1579,9 +1599,8 @@ def _emit_expr(
             items.append(item)
         tuple_items = [item.typ for item in items]
         tuple_item_is_string = [
-            isinstance(getattr(ie, "inferred_type", None), ast.TypeName)
-            and getattr(ie, "inferred_type").name in {"String", "Char"}
-            for ie in expr.items
+            _string_meta_from_type_expr(getattr(item_expr, "inferred_type", None), adt_names)
+            for item_expr in expr.items
         ]
         tuple_typ = _tuple_lltype(tuple_items)
         current = "undef"
@@ -2382,7 +2401,12 @@ def _emit_tuple_field(value: Value, idx: int, emitter: Emitter) -> Value:
     item_typ = tuple_items[idx]
     out = emitter.tmp()
     emitter.emit(f"  {out} = extractvalue {value.typ.text} {value.ir}, {idx}")
-    return Value(item_typ, out, tuple_items=_tuple_item_types_from_lltype(item_typ))
+    field_meta = None
+    if value.tuple_item_is_string is not None and idx < len(value.tuple_item_is_string):
+        nested = value.tuple_item_is_string[idx]
+        if isinstance(nested, list):
+            field_meta = nested
+    return Value(item_typ, out, tuple_items=_tuple_item_types_from_lltype(item_typ), tuple_item_is_string=field_meta)
 
 
 def _emit_packed_tuple_field(packed_ir: str, idx: int, emitter: Emitter) -> Value:
@@ -2667,7 +2691,12 @@ def _emit_print_tuple_value(value: Value, emitter: Emitter) -> Value:
         if idx > 0:
             last = _emit_print_literal(", ", emitter)
         field = _emit_tuple_field(value, idx, emitter)
-        is_str = bool(value.tuple_item_is_string and value.tuple_item_is_string[idx])
+        item_meta = (
+            value.tuple_item_is_string[idx]
+            if value.tuple_item_is_string is not None and idx < len(value.tuple_item_is_string)
+            else False
+        )
+        is_str = item_meta is True
         if is_str and field.typ == I64:
             ptr = emitter.tmp()
             emitter.emit(f"  {ptr} = inttoptr i64 {field.ir} to ptr")

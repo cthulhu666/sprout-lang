@@ -1,0 +1,8 @@
+fn main() -> Unit !{IO} =
+  print(__sprout_where_0 + x)
+where
+  (x, y) = pair()
+  __sprout_where_0 = y
+
+fn pair() -> (Int, Int) =
+  (1, 2)

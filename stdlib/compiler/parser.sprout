@@ -911,6 +911,93 @@ fn desugar_where_step(body: ast.Expr, bindings: List (ast.Pattern, ast.Expr)) ->
       | (pattern, value) ->
           desugar_where_step(wrap_where_binding(body, (pattern, value)), rest)
 
+fn params_names(params: List ast.Param) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons param rest ->
+      match param with
+      | ast.Param name _ -> Cons(name, params_names(rest))
+
+fn exprs_names(exprs: List ast.Expr) -> List String =
+  match exprs with
+  | Nil -> Nil
+  | Cons expr rest -> list_append(expr_names(expr), exprs_names(rest))
+
+fn template_parts_names(parts: List ast.TemplateExprPart) -> List String =
+  match parts with
+  | Nil -> Nil
+  | Cons part rest ->
+      match part with
+      | ast.LitPart _ -> template_parts_names(rest)
+      | ast.InterpPart expr -> list_append(expr_names(expr), template_parts_names(rest))
+
+fn match_branches_names(branches: List ast.MatchBranch) -> List String =
+  match branches with
+  | Nil -> Nil
+  | Cons branch rest ->
+      match branch with
+      | ast.MatchBranch _ value -> list_append(expr_names(value), match_branches_names(rest))
+
+fn do_steps_names(steps: List ast.DoStep) -> List String =
+  match steps with
+  | Nil -> Nil
+  | Cons step rest ->
+      match step with
+      | ast.DoBindStep _ value -> list_append(expr_names(value), do_steps_names(rest))
+      | ast.DoLetStep _ value -> list_append(expr_names(value), do_steps_names(rest))
+      | ast.DoExprStep value -> list_append(expr_names(value), do_steps_names(rest))
+
+fn record_fields_names(fields: List ast.RecordField) -> List String =
+  match fields with
+  | Nil -> Nil
+  | Cons field rest ->
+      match field with
+      | ast.RecordField _ value -> list_append(expr_names(value), record_fields_names(rest))
+
+fn expr_names(expr: ast.Expr) -> List String =
+  match expr with
+  | ast.VarExpr name _ -> Cons(name, Nil)
+  | ast.IntExpr _ _ -> Nil
+  | ast.BoolExpr _ _ -> Nil
+  | ast.StringExpr _ _ -> Nil
+  | ast.StringTemplateExpr parts _ -> template_parts_names(parts)
+  | ast.CharExpr _ _ -> Nil
+  | ast.UnitExpr _ -> Nil
+  | ast.TupleExpr items _ -> exprs_names(items)
+  | ast.IfExpr cond then_expr else_expr _ ->
+      list_append(expr_names(cond), list_append(expr_names(then_expr), expr_names(else_expr)))
+  | ast.MatchExpr scrutinee branches _ ->
+      list_append(expr_names(scrutinee), match_branches_names(branches))
+  | ast.CallExpr callee args _ ->
+      list_append(expr_names(callee), exprs_names(args))
+  | ast.LambdaExpr params body _ ->
+      list_append(params_names(params), expr_names(body))
+  | ast.BinaryExpr _ left right _ ->
+      list_append(expr_names(left), expr_names(right))
+  | ast.UnaryExpr _ operand _ -> expr_names(operand)
+  | ast.IntRangeExpr start end _ ->
+      list_append(expr_names(start), expr_names(end))
+  | ast.DoExpr steps _ -> do_steps_names(steps)
+  | ast.RecordExpr _ fields _ -> record_fields_names(fields)
+  | ast.GetFieldExpr target _ _ -> expr_names(target)
+
+fn fresh_where_tmp_name(body: ast.Expr, value: ast.Expr) -> String =
+  fresh_where_tmp_name_from(list_append(expr_names(body), expr_names(value)), 0)
+
+fn fresh_where_tmp_name_from(used: List String, index: Int) -> String =
+  if list_member(name, used) then fresh_where_tmp_name_from(used, index + 1)
+  else name
+  where
+    name = "__sprout_where_" ++ int_to_string(index)
+
+fn wrap_tuple_where_binding(inner: ast.Expr, value: ast.Expr, pattern: ast.Pattern, pos: source.SourcePos, tmp_name: String) -> ast.Expr =
+  ast.CallExpr(
+    ast.LambdaExpr(Cons(ast.Param(tmp_name, Nothing), Nil),
+      ast.MatchExpr(ast.VarExpr(tmp_name, pos),
+        Cons(ast.MatchBranch(pattern, inner), Nil), pos),
+      pos),
+    Cons(value, Nil), pos)
+
 fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.Expr =
   match binding with
   | (pattern, value) ->
@@ -920,12 +1007,7 @@ fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.
       | ast.WildcardPattern pos ->
           ast.CallExpr(ast.LambdaExpr(Cons(ast.Param("_w", Nothing), Nil), inner, pos), Cons(value, Nil), pos)
       | ast.TuplePattern _ pos ->
-          ast.CallExpr(
-            ast.LambdaExpr(Cons(ast.Param("__where_tup", Nothing), Nil),
-              ast.MatchExpr(ast.VarExpr("__where_tup", pos),
-                Cons(ast.MatchBranch(pattern, inner), Nil), pos),
-              pos),
-            Cons(value, Nil), pos)
+          wrap_tuple_where_binding(inner, value, pattern, pos, fresh_where_tmp_name(inner, value))
       | _ -> inner
 
 # ---------------------------------------------------------------------------

@@ -125,8 +125,14 @@ test-stdlib-stage1:
         echo "  LINK FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
-      out=$("$TMP_BIN" 2>&1) || true
-      echo "$out"
+      if out=$("$TMP_BIN" 2>&1); then
+        echo "$out"
+      else
+        status=$?
+        echo "$out"
+        echo "  RUN FAILED: exit $status"
+        total_failed=$((total_failed + 1)); continue
+      fi
       if echo "$out" | grep -q "^SUITE FAILED"; then
         total_failed=$((total_failed + 1))
       fi
@@ -174,8 +180,14 @@ test-stdlib-stage2:
         echo "  LINK FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
-      out=$("$TMP_BIN" 2>&1) || true
-      echo "$out"
+      if out=$("$TMP_BIN" 2>&1); then
+        echo "$out"
+      else
+        status=$?
+        echo "$out"
+        echo "  RUN FAILED: exit $status"
+        total_failed=$((total_failed + 1)); continue
+      fi
       if echo "$out" | grep -q "^SUITE FAILED"; then
         total_failed=$((total_failed + 1))
       fi
