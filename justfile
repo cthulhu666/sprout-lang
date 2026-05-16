@@ -62,6 +62,32 @@ run file:
 run-stdlib file:
   python3 -m sprout.cli run --with-stdlib {{file}}
 
+# Run all in-language stdlib unit tests (.spr/.sprout files under tests/stdlib/).
+# Greps each suite's output for "SUITE FAILED" to detect failures.
+test-stdlib:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  total_failed=0
+  for dir in tests/stdlib tests/stdlib/compiler; do
+    [ -d "$dir" ] || continue
+    for f in "$dir"/*.spr "$dir"/*.sprout; do
+      [ -f "$f" ] || continue
+      echo "==> $f"
+      out=$(python3 -m sprout.cli run --with-stdlib "$f" 2>&1)
+      echo "$out"
+      if echo "$out" | grep -q "^SUITE FAILED"; then
+        total_failed=$((total_failed + 1))
+      fi
+    done
+  done
+  if [ "$total_failed" -gt 0 ]; then
+    echo ""
+    echo "==> $total_failed test suite(s) FAILED"
+    exit 1
+  fi
+  echo ""
+  echo "==> All suites PASSED"
+
 compile file out:
   python3 -m sprout.cli compile {{file}} -o {{out}}
 

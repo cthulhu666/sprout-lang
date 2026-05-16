@@ -1,0 +1,52 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "concat", concat("foo", "bar"), "foobar")
+    assert_eq(state, "concat empty", concat("", "bar"), "bar")
+
+    assert_eq(state, "length hello", length("hello"), 5)
+    assert_eq(state, "length empty", length(""), 0)
+
+    assert_eq(state, "take", take("hello", 3), "hel")
+    assert_eq(state, "take zero", take("hello", 0), "")
+    assert_eq(state, "take all", take("hello", 5), "hello")
+
+    assert_eq(state, "drop", drop("hello", 2), "llo")
+    assert_eq(state, "drop zero", drop("hello", 0), "hello")
+    assert_eq(state, "drop all", drop("hello", 5), "")
+
+    assert_eq(state, "slice mid", slice("hello", 1, 3), "ell")
+    assert_eq(state, "slice start", slice("hello", 0, 2), "he")
+
+    assert_eq(state, "find found", find("hello", "ll"), 2)
+    assert_eq(state, "find not found", find("hello", "xyz"), -1)
+    assert_eq(state, "find empty needle", find("hello", ""), 0)
+
+    assert_true(state, "starts_with match", starts_with("hello", "hel"))
+    assert_false(state, "starts_with no match", starts_with("hello", "ell"))
+    assert_true(state, "starts_with empty", starts_with("hello", ""))
+
+    assert_true(state, "ends_with match", ends_with("hello", "llo"))
+    assert_false(state, "ends_with no match", ends_with("hello", "hel"))
+
+    assert_true(state, "contains match", contains("hello world", "world"))
+    assert_false(state, "contains no match", contains("hello", "xyz"))
+
+    assert_true(state, "is_empty empty", is_empty(""))
+    assert_false(state, "is_empty nonempty", is_empty("x"))
+
+    assert_eq(state, "trim both", trim("  hello  "), "hello")
+    assert_eq(state, "trim_left", trim_left("  hi"), "hi")
+    assert_eq(state, "trim_right", trim_right("hi  "), "hi")
+
+    assert_eq(state, "strip_prefix found", strip_prefix("hello", "hel"), Just("lo"))
+    assert_eq(state, "strip_prefix missing", strip_prefix("hello", "xyz"), Nothing)
+
+    assert_eq(state, "strip_suffix found", strip_suffix("hello", "llo"), Just("he"))
+    assert_eq(state, "strip_suffix missing", strip_suffix("hello", "xyz"), Nothing)
+
+    summary(state)

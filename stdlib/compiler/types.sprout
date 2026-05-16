@@ -261,3 +261,45 @@ export fn scheme_to_string(s: Scheme) -> String =
   match scheme_vars(s) with
   | Nil -> scheme_body(s)
   | vars -> scheme_to_string_renamed(vars, scheme_type(s), scheme_effects(s))
+
+# ---------------------------------------------------------------------------
+# Eq and ToString instances — required by stdlib.test assert_eq
+# ---------------------------------------------------------------------------
+
+instance Eq Effect {
+  fn eq(left: Effect, right: Effect) -> Bool =
+    match left with
+    | EffectPure   -> match right with | EffectPure   -> true | _ -> false
+    | EffectIO     -> match right with | EffectIO     -> true | _ -> false
+    | EffectRow ls -> match right with
+        | EffectRow rs -> ls == rs
+        | _ -> false
+    | EffectVar s  -> match right with | EffectVar t  -> s == t | _ -> false
+}
+
+instance Eq Type {
+  fn eq(left: Type, right: Type) -> Bool =
+    match left with
+    | TVar s      -> match right with | TVar t      -> s == t               | _ -> false
+    | TConst s    -> match right with | TConst t    -> s == t               | _ -> false
+    | TApp f a    -> match right with | TApp g b    -> eq(f, g) && eq(a, b) | _ -> false
+    | TFunc p r e -> match right with
+        | TFunc q s f -> eq(p, q) && eq(r, s) && eq(e, f)
+        | _ -> false
+    | TTuple ts   -> match right with | TTuple us   -> types_eq(ts, us)     | _ -> false
+}
+
+fn types_eq(left: List Type, right: List Type) -> Bool =
+  match left with
+  | Nil -> match right with | Nil -> true | Cons _ _ -> false
+  | Cons x xs -> match right with
+      | Nil -> false
+      | Cons y ys -> if eq(x, y) then types_eq(xs, ys) else false
+
+instance ToString Effect {
+  fn to_string(e: Effect) -> String = effect_to_string(e)
+}
+
+instance ToString Type {
+  fn to_string(t: Type) -> String = type_to_string(t)
+}

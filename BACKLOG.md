@@ -114,6 +114,16 @@ Definition of done:
   - **M6 manual stage-2 verified**: Sprout-owned codegen now emits enough LLVM IR for `compile_driver.sprout` to build a stage-1 native compiler via `compile_driver_bin --emit-ir` + `clang`; that compiler type-checks the 5-file bootstrap corpus successfully. The stage-2 `Int vs Int` / `Maybe vs Maybe` identity mismatch was fixed by preserving primitive ADT constructor field types in `codegen.sprout` so `TConst String` payload equality lowers to `str_eq` instead of packed pointer identity.
   - **string interpolation mirrored in bootstrap compiler (Phase 3)**: backtick template literals now parsed + desugared in the Sprout self-hosted pipeline: 5 new `TokenKind` variants in `token.sprout`; `scan_template_content`/`scan_interp_body` state machine in `lexer.sprout`; `parse_template`/`collect_template_parts` in `parser.sprout`; `desugar_program` + `desugar_template` pass wired into `checker.sprout`'s `check_program_with_env`/`typecheck_typed`; `StringTemplateExpr` exhaustiveness stubs in `infer.sprout` and `bundler.sprout`; `dump_expr` extended in `driver.sprout`; `string_template_basic.spr` added to parser + checker parity corpus; 26/26 checker parity tests pass. Conformance corpus: `stdlib_string_template_basic.spr` added (prefixed `stdlib_` so bundler injects the prelude's `Cons`/`Nil`/`to_string` needed by `string_concat_many` desugaring). `test_modules.py` exhaustiveness gaps fixed: `render_kind` in 3 test programs got `| _ -> "template"` catchall for the 5 `TokenTemplate*` constructors, and `describe_expr` got `| ast.StringTemplateExpr _ _ -> "template"` for the new constructor.
 
+### 7.3) In-Language Stdlib Test Framework
+
+- [x] `P1` Add `stdlib/test.sprout`: minimal HUnit-style framework (`TestState (Ref Int) (Ref Int)`, `new_state`, `assert_true`, `assert_false`, `assert_eq`, `summary`). `assert_eq` uses `where Eq a, ToString a` — correct class-based equality, `ToString` only for failure messages.
+- [x] `P1` Add `Eq (Maybe a) where Eq a`, `Eq (List a) where Eq a`, `Eq (Result e a) where Eq e, Eq a` instances to `stdlib/prelude.sprout`. `Eq (List a)` uses top-level `list_eq` helper to avoid self-referential instance-body `eq` call.
+- [x] `P1` Add `Eq Type`, `Eq Effect`, `ToString Type`, `ToString Effect` instances to `stdlib/compiler/types.sprout`. `Eq Type`'s `TTuple` case uses `types_eq` helper for the same reason.
+- [x] `P1` Add `tests/stdlib/test_math.spr` (27 assertions), `tests/stdlib/test_string.spr` (31 assertions), `tests/stdlib/compiler/test_types.spr` (20 assertions).
+- [x] `P1` Add `test-stdlib` recipe to `justfile`: pure-shell loop over `tests/stdlib/` and `tests/stdlib/compiler/`, greps for `SUITE FAILED`, exits 1 if any suite fails. No Python.
+- [ ] `P2` Add `tests/stdlib/test_collections.spr` once `Eq Vec`, `Eq Dict` instances exist.
+- [ ] `P2` Add law-oriented conformance tests via `assert_eq` once list/functor/monoid `Eq` instances are stable.
+
 ### 7.5) Type Classes (Collections First)
 
 - [x] `P0` Add class declarations and constrained function signatures (`class`, `where` constraints).

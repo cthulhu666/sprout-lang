@@ -552,6 +552,31 @@ instance Eq String {
   fn eq(left: String, right: String) -> Bool = left == right
 }
 
+instance Eq (Maybe a) where Eq a {
+  fn eq(left: Maybe a, right: Maybe a) -> Bool =
+    match left with
+    | Nothing -> match right with | Nothing -> true | Just _ -> false
+    | Just x  -> match right with | Nothing -> false | Just y -> eq(x, y)
+}
+
+fn list_eq(left: List a, right: List a) -> Bool where Eq a =
+  match left with
+  | Nil -> match right with | Nil -> true | Cons _ _ -> false
+  | Cons x xs -> match right with
+      | Nil -> false
+      | Cons y ys -> if eq(x, y) then list_eq(xs, ys) else false
+
+instance Eq (List a) where Eq a {
+  fn eq(left: List a, right: List a) -> Bool = list_eq(left, right)
+}
+
+instance Eq (Result e a) where Eq e, Eq a {
+  fn eq(left: Result e a, right: Result e a) -> Bool =
+    match left with
+    | Ok x  -> match right with | Ok y  -> eq(x, y) | Err _ -> false
+    | Err e -> match right with | Ok _  -> false     | Err f -> eq(e, f)
+}
+
 instance ToString Int {
   fn to_string(value: Int) -> String =
     int_to_string(value)

@@ -1,0 +1,83 @@
+module stdlib.test
+
+# ---------------------------------------------------------------------------
+# Minimal unit test framework for Sprout stdlib.
+#
+# Design mirrors HUnit (Haskell) and hspec: Eq a for the equality check,
+# ToString a for failure messages — two orthogonal constraints at the call site.
+#
+# Usage pattern:
+#
+#   import stdlib.test (TestState, new_state, assert_eq, assert_true,
+#                       assert_false, summary)
+#
+#   fn main() -> Unit !{IO} =
+#     do
+#       state <- new_state()
+#       assert_eq(state, "abs(-3)", abs(-3), 3)
+#       assert_true(state, "is_even 4", is_even(4))
+#       summary(state)
+#
+# Output: one "PASS: …" or "FAIL: …" line per assertion, then:
+#   "N passed, M failed"
+#   "SUITE PASSED"   ← or "SUITE FAILED" if M > 0
+#
+# The justfile test-stdlib recipe greps for "SUITE FAILED" to detect failures.
+# ---------------------------------------------------------------------------
+
+export type TestState =
+  | TestState (Ref Int) (Ref Int)
+  # TestState pass_count fail_count
+
+export fn new_state() -> TestState !{IO} =
+  do
+    p <- ref_new(0)
+    f <- ref_new(0)
+    TestState(p, f)
+
+export fn assert_true(state: TestState, label: String, condition: Bool) -> Unit !{IO} =
+  match state with
+  | TestState pass_ref fail_ref ->
+      if condition then
+        do
+          p <- ref_read(pass_ref)
+          ref_write(pass_ref, p + 1)
+          print("PASS: " ++ label)
+      else
+        do
+          f <- ref_read(fail_ref)
+          ref_write(fail_ref, f + 1)
+          print("FAIL: " ++ label)
+
+export fn assert_false(state: TestState, label: String, condition: Bool) -> Unit !{IO} =
+  assert_true(state, label, condition == false)
+
+# Eq a: used for the equality check (correct semantics).
+# ToString a: used only for failure messages (display).
+# Mirrors: HUnit assertEqual :: (Eq a, Show a) => String -> a -> a -> Assertion
+#          Rust assert_eq! requiring PartialEq + Debug
+export fn assert_eq(state: TestState, label: String, actual: a, expected: a) -> Unit !{IO} where Eq a, ToString a =
+  match state with
+  | TestState pass_ref fail_ref ->
+      if eq(actual, expected) then
+        do
+          p <- ref_read(pass_ref)
+          ref_write(pass_ref, p + 1)
+          print("PASS: " ++ label)
+      else
+        do
+          f <- ref_read(fail_ref)
+          ref_write(fail_ref, f + 1)
+          print("FAIL: " ++ label ++ " (expected " ++ to_string(expected) ++ ", got " ++ to_string(actual) ++ ")")
+
+# Prints pass/fail counts, then "SUITE PASSED" or "SUITE FAILED".
+# The justfile runner greps for "SUITE FAILED" to set the exit code.
+export fn summary(state: TestState) -> Unit !{IO} =
+  match state with
+  | TestState pass_ref fail_ref ->
+      do
+        p <- ref_read(pass_ref)
+        f <- ref_read(fail_ref)
+        print(int_to_string(p) ++ " passed, " ++ int_to_string(f) ++ " failed")
+        if f > 0 then print("SUITE FAILED")
+        else print("SUITE PASSED")
