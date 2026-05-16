@@ -919,8 +919,10 @@ long long sprout_gc_register_scan_root(void* slot, long long size_bytes) {
 /* GC temp-root pool: push/pop is always LIFO (stack discipline enforced by
  * codegen), so a static pool with a stack pointer is sufficient and avoids
  * malloc on every sprout_gc_push_i64_root call in the lexer hot path.
- * 65536 slots = 2 MiB BSS; more than enough for the deepest call chains. */
-#define SPROUT_ROOT_POOL_SIZE 65536
+ * 131072 slots = 4 MiB BSS; sized to handle deeply recursive compiler passes.
+ * NOTE: the real fix is TCO in recursive Sprout functions (scan_lines et al.);
+ * this is a safety margin for call chains that grow with stdlib size. */
+#define SPROUT_ROOT_POOL_SIZE 131072
 static RootNode g_root_pool[SPROUT_ROOT_POOL_SIZE];
 static size_t   g_root_pool_top = 0;
 
