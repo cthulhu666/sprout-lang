@@ -193,7 +193,12 @@ compile file out:
   python3 -m sprout.cli compile {{file}} -o {{out}}
 
 compile-native file out:
-  python3 -m sprout.cli compile {{file}} --native -o {{out}}
+  python3 -m sprout.cli compile {{file}} --with-stdlib --native -o {{out}}
+
+# Build compile_driver_bin (stage-0) from Python.
+# Output: compile_driver_bin — native binary produced by the Python compiler.
+build-stage0:
+  python3 -m sprout.cli compile stdlib/compiler/compile_driver.sprout --with-stdlib --native -o compile_driver_bin
 
 # Build compile_driver_bin_stage1 using Sprout-native IR emission (M6 bootstrap).
 # Requires compile_driver_bin (stage-0) to already exist.

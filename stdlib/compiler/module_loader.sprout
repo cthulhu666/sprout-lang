@@ -158,19 +158,40 @@ fn keys_to_pairs(d: Dict types.Scheme, keys: List String) -> List (String, types
 # ---------------------------------------------------------------------------
 # Env prefixing / selective filtering
 # ---------------------------------------------------------------------------
+#
+# @inst:, @class:, @fwd: keys are global internal markers used by the
+# checker for typeclass instance dispatch.  They must never be qualified
+# with an alias prefix or silently dropped during selective import.
 
+fn is_marker_key(k: String) -> Bool = str_starts_with(k, "@")
+
+fn collect_marker_pairs(pairs: List (String, types.Scheme)) -> List (String, types.Scheme) =
+  match pairs with
+  | Nil -> Nil
+  | Cons (k, v) rest ->
+      if is_marker_key(k) then Cons((k, v), collect_marker_pairs(rest))
+      else collect_marker_pairs(rest)
+
+# Pass @-keyed markers through unchanged; only prefix user-visible names.
 fn prefix_pairs(pairs: List (String, types.Scheme), pfx: String) -> List (String, types.Scheme) =
   match pairs with
   | Nil -> Nil
-  | Cons (k, v) rest -> Cons((str_concat(pfx, str_concat(".", k)), v), prefix_pairs(rest, pfx))
+  | Cons (k, v) rest ->
+      if is_marker_key(k) then Cons((k, v), prefix_pairs(rest, pfx))
+      else Cons((str_concat(pfx, str_concat(".", k)), v), prefix_pairs(rest, pfx))
 
+# Select explicitly-named pairs AND all marker pairs from the module so
+# that typeclass instances defined in the imported module remain available.
 fn select_pairs(pairs: List (String, types.Scheme), names: List String) -> List (String, types.Scheme) =
+  collect_marker_pairs(pairs) ++ select_named_pairs(pairs, names)
+
+fn select_named_pairs(pairs: List (String, types.Scheme), names: List String) -> List (String, types.Scheme) =
   match names with
   | Nil -> Nil
   | Cons name rest ->
       match find_pair(pairs, name) with
-      | Nothing      -> select_pairs(pairs, rest)
-      | Just scheme  -> Cons((name, scheme), select_pairs(pairs, rest))
+      | Nothing      -> select_named_pairs(pairs, rest)
+      | Just scheme  -> Cons((name, scheme), select_named_pairs(pairs, rest))
 
 fn find_pair(pairs: List (String, types.Scheme), name: String) -> Maybe types.Scheme =
   match pairs with
