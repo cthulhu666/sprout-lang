@@ -168,6 +168,8 @@ fn collect_decl_locations(
             Cons("alias", categories), Cons(name, names),
             Cons(source.position_line(pos) + line_offset, lines),
             Cons(source.position_column(pos), cols))
+      | ast.ExternFnDecl _ _ _ _ _ ->
+          collect_decl_locations(rest, line_offset, categories, names, lines, cols)
 
 fn empty_locations_json() -> json.Json =
   ok_response(json.JsonObject(

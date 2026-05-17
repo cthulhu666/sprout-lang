@@ -1756,9 +1756,12 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
               dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)),
             alias_env)
       | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
-          pre_scan_fn_decls(rest,
-            dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env),
-            alias_env)
+          match dict_get(name, env) with
+          | Just _ -> pre_scan_fn_decls(rest, env, alias_env)
+          | Nothing ->
+              pre_scan_fn_decls(rest,
+                dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env),
+                alias_env)
       | ast.AliasDecl name Nil rhs_te _ ->
           pre_scan_fn_decls(rest, env,
             dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
@@ -1823,9 +1826,13 @@ fn typecheck_decl(
               register_constrained_fn_markers(name, constraints,
                 dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
-      TypedDeclOk(
-        typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
-        dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
+      match dict_get(name, env) with
+      | Just _ ->
+          TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env)
+      | Nothing ->
+          TypedDeclOk(
+            typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
+            dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
   | ast.LetDecl name expr _ ->
       do
         r <- infer_expr(state, env, subst, eff_subst, expr)

@@ -1074,6 +1074,7 @@ def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> s
         and not isinstance(d, ast.ClassDecl)
         and not isinstance(d, ast.InstanceDecl)
         and not isinstance(d, ast.AliasDecl)
+        and not isinstance(d, ast.ExternFnDecl)
     ]
     if other:
         raise CodegenError("LLVM backend encountered unsupported top-level declaration")

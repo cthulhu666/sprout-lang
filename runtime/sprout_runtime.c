@@ -1189,7 +1189,8 @@ long long print_value(long long x) {
   printf("\n");
   return x;
 }
-long long parse_int(const char* s) {
+long long parse_int(long long s_val) {
+  const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("parse_int: null input");
   char* end = NULL;
   long long out = strtoll(s, &end, 10);
@@ -1425,7 +1426,8 @@ long long term_read_key(void) {
   buf[0] = (char)ch;
   return (long long)(uintptr_t)buf;
 }
-long long term_write(const char* text) {
+long long term_write(long long text_val) {
+  const char* text = (const char*)text_val;
   if (text == NULL) tcp_fail("term_write: null text");
   fputs(text, stdout);
   fflush(stdout);
@@ -2762,7 +2764,8 @@ static size_t sprout_utf8_byte_offset(const char* s, size_t codepoint_offset) {
   return i;
 }
 
-long long str_len(const char* s) {
+long long str_len(long long s_val) {
+  const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_len: null input");
   return (long long)sprout_utf8_codepoint_count(s);
 }
@@ -2811,7 +2814,8 @@ static void init_ascii_char_strs(void) {
   g_ascii_char_strs_init = 1;
 }
 
-long long str_char_at(const char* s, long long index) {
+long long str_char_at(long long s_val, long long index) {
+  const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_at: null input");
   if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   /* Scan forward to the index-th UTF-8 codepoint.  This avoids both the
@@ -2848,7 +2852,8 @@ long long str_char_at(const char* s, long long index) {
 /* str_split_lines: O(N) line splitting, replacing the O(N^2) split_lines_at
  * loop that called str_char_at + str_slice for each codepoint in the source.
  * Returns a Sprout List String; each line excludes the trailing newline. */
-long long str_split_lines(const char* s) {
+long long str_split_lines(long long s_val) {
+  const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_split_lines: null input");
   size_t total = strlen(s);
 
@@ -2894,7 +2899,8 @@ long long str_split_lines(const char* s) {
 
 /* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
  * Avoids the O(index) codepoint scan of str_char_at. */
-long long str_char_at_byte(const char* s, long long byte_pos) {
+long long str_char_at_byte(long long s_val, long long byte_pos) {
+  const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_at_byte: null input");
   if (byte_pos < 0)
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
@@ -2919,7 +2925,8 @@ long long str_char_at_byte(const char* s, long long byte_pos) {
 }
 
 /* str_char_width_at_byte: UTF-8 byte width of the char at byte_pos; 0 at end. O(1). */
-long long str_char_width_at_byte(const char* s, long long byte_pos) {
+long long str_char_width_at_byte(long long s_val, long long byte_pos) {
+  const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_width_at_byte: null input");
   if (byte_pos < 0) return 0;
   size_t len = strlen(s);
@@ -2929,14 +2936,17 @@ long long str_char_width_at_byte(const char* s, long long byte_pos) {
 }
 
 /* str_byte_len: byte length of the string (strlen). */
-long long str_byte_len(const char* s) {
+long long str_byte_len(long long s_val) {
+  const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_byte_len: null input");
   return (long long)strlen(s);
 }
 
 /* str_starts_with_at_byte: O(|prefix|) starts-with check from a byte offset.
  * Avoids the O(N) remaining-text allocation of match_string's old approach. */
-_Bool str_starts_with_at_byte(const char* s, long long byte_pos, const char* prefix) {
+_Bool str_starts_with_at_byte(long long s_val, long long byte_pos, long long prefix_val) {
+  const char* s = (const char*)s_val;
+  const char* prefix = (const char*)prefix_val;
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with_at_byte: null input");
   if (byte_pos < 0) return 0;
   size_t len = strlen(s);
@@ -2945,7 +2955,9 @@ _Bool str_starts_with_at_byte(const char* s, long long byte_pos, const char* pre
   return strncmp(s + pos, prefix, strlen(prefix)) == 0;
 }
 
-long long str_find(const char* haystack, const char* needle) {
+long long str_find(long long haystack_val, long long needle_val) {
+  const char* haystack = (const char*)haystack_val;
+  const char* needle = (const char*)needle_val;
   if (haystack == NULL || needle == NULL) tcp_fail("str_find: null input");
   const char* pos = strstr(haystack, needle);
   if (pos == NULL) return -1;
@@ -2959,13 +2971,17 @@ long long str_find(const char* haystack, const char* needle) {
   return (long long)count;
 }
 
-_Bool str_starts_with(const char* s, const char* prefix) {
+_Bool str_starts_with(long long s_val, long long prefix_val) {
+  const char* s = (const char*)s_val;
+  const char* prefix = (const char*)prefix_val;
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with: null input");
   size_t prefix_len = strlen(prefix);
   return strncmp(s, prefix, prefix_len) == 0;
 }
 
-long long str_compare(const char* left, const char* right) {
+long long str_compare(long long left_val, long long right_val) {
+  const char* left = (const char*)left_val;
+  const char* right = (const char*)right_val;
   if (left == NULL || right == NULL) tcp_fail("str_compare: null input");
   int cmp = strcmp(left, right);
   if (cmp < 0) return -1;
@@ -3708,7 +3724,8 @@ long long json_stringify(long long value) {
   return (long long)(uintptr_t)result;
 }
 
-long long json_parse(const char* raw) {
+long long json_parse(long long raw_val) {
+  const char* raw = (const char*)raw_val;
   if (raw == NULL) tcp_fail("json_parse expects String");
   const char* pos = raw;
   char* err_msg = NULL;
@@ -4942,7 +4959,8 @@ long long map_empty(void) {
   return 0; /* empty BST = null handle */
 }
 
-long long map_get(long long map_h, const char* key) {
+long long map_get(long long map_h, long long key_val) {
+  const char* key = (const char*)key_val;
   if (key == NULL) tcp_fail("map_get: null key");
   long long rm = map_h;
   SPROUT_GC_PUSH_I64_LOCAL(rm);
@@ -4954,7 +4972,8 @@ long long map_get(long long map_h, const char* key) {
   return out;
 }
 
-long long map_set(long long map_h, const char* key, long long value) {
+long long map_set(long long map_h, long long key_val, long long value) {
+  const char* key = (const char*)key_val;
   if (key == NULL) tcp_fail("map_set: null key");
   const char* ikey = intern_string(key); /* intern before any GC-triggering alloc */
   long long rm = map_h, rv = value;
@@ -4964,7 +4983,8 @@ long long map_set(long long map_h, const char* key, long long value) {
   return result;
 }
 
-long long map_remove(long long map_h, const char* key) {
+long long map_remove(long long map_h, long long key_val) {
+  const char* key = (const char*)key_val;
   if (key == NULL) tcp_fail("map_remove: null key");
   const char* ikey = intern_string(key);
   long long rm = map_h;
@@ -5009,7 +5029,8 @@ long long native_set_empty(void) {
   return 0; /* empty BST */
 }
 
-long long native_set_insert(const char* item, long long set_h) {
+long long native_set_insert(long long item_val, long long set_h) {
+  const char* item = (const char*)item_val;
   if (item == NULL) tcp_fail("native_set_insert: null item");
   const char* ikey = intern_string(item);
   long long rs = set_h;
@@ -5023,7 +5044,8 @@ long long native_set_insert(const char* item, long long set_h) {
   return result;
 }
 
-long long native_set_member(const char* item, long long set_h) {
+long long native_set_member(long long item_val, long long set_h) {
+  const char* item = (const char*)item_val;
   if (item == NULL) return 0;
   return bst_get(set_h, item) != LLONG_MIN ? 1 : 0;
 }
@@ -5107,7 +5129,8 @@ long long bytes_singleton(long long value) {
   return (long long)(uintptr_t)out;
 }
 
-long long bytes_from_utf8(const char* raw) {
+long long bytes_from_utf8(long long raw_val) {
+  const char* raw = (const char*)raw_val;
   if (raw == NULL) tcp_fail("bytes_from_utf8: null input");
   size_t len = strlen(raw);
   BytesVal* out = sprout_alloc_bytes_val("bytes_from_utf8: out of memory");

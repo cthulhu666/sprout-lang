@@ -2772,70 +2772,15 @@ fn emit_global_root_registration(name: String, ll: String, em: Emitter) -> Unit 
 # Section 20 — Extern signatures
 # ===========================================================================
 
-fn extern_sigs_dict() -> Dict FnSig =
-  dict_from_list(extern_sigs_list())
+# Compiler-internal C functions that are emitted by codegen directly via
+# hardcoded IR templates.  User-callable builtins are declared with
+# `extern fn` in stdlib/prelude.sprout instead.
+fn compiler_intrinsic_sigs_dict() -> Dict FnSig =
+  dict_from_list(compiler_intrinsic_sigs())
 
-fn extern_sigs_list() -> List (String, FnSig) =
-  [("print_int", FnSig("print_int", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("print_str", FnSig("print_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("print_text", FnSig("print_text", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("print_value", FnSig("print_value", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("print_value_part", FnSig("print_value_part", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("print_newline", FnSig("print_newline", Nil, ll_i64(), Nothing))
-  , ("read_file", FnSig("read_file", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("argv_get", FnSig("argv_get", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("parse_int", FnSig("parse_int", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("int_range", FnSig("int_range", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("int_range_start", FnSig("int_range_start", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("int_range_end", FnSig("int_range_end", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("int_to_string", FnSig("int_to_string", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("char_to_string", FnSig("char_to_string", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("str_concat", FnSig("str_concat", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("string_concat_many",   FnSig("string_concat_many",   Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("string_join_newlines", FnSig("string_join_newlines", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("str_len", FnSig("str_len", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("str_slice", FnSig("str_slice", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  , ("str_char_at", FnSig("str_char_at", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("str_eq", FnSig("str_eq", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
-  , ("str_find", FnSig("str_find", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
-  , ("str_starts_with", FnSig("str_starts_with", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
-  , ("str_compare", FnSig("str_compare", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
-  , ("str_split_lines", FnSig("str_split_lines", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("str_char_at_byte", FnSig("str_char_at_byte", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("str_char_width_at_byte", FnSig("str_char_width_at_byte", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("str_byte_len", FnSig("str_byte_len", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("str_starts_with_at_byte", FnSig("str_starts_with_at_byte", Cons(ll_ptr(), Cons(ll_i64(), Cons(ll_ptr(), Nil))), ll_i1(), Nothing))
-  , ("vector_empty", FnSig("vector_empty", Nil, ll_i64(), Nothing))
-  , ("vector_length", FnSig("vector_length", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("vector_get", FnSig("vector_get", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("vector_set", FnSig("vector_set", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  , ("vector_append", FnSig("vector_append", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("vector_from_list", FnSig("vector_from_list", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("vector_sort_by_int", FnSig("vector_sort_by_int", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("map_empty", FnSig("map_empty", Nil, ll_i64(), Nothing))
-  , ("map_get", FnSig("map_get", Cons(ll_i64(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
-  , ("map_set", FnSig("map_set", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  , ("map_remove", FnSig("map_remove", Cons(ll_i64(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
-  , ("map_size", FnSig("map_size", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("map_nth_key", FnSig("map_nth_key", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("map_nth_value", FnSig("map_nth_value", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("native_set_empty", FnSig("native_set_empty", Nil, ll_i64(), Nothing))
-  , ("native_set_insert", FnSig("native_set_insert", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("native_set_member", FnSig("native_set_member", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i1(), Nothing))
-  , ("native_set_to_list", FnSig("native_set_to_list", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("native_set_size", FnSig("native_set_size", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("bytes_empty", FnSig("bytes_empty", Nil, ll_i64(), Nothing))
-  , ("bytes_length", FnSig("bytes_length", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("bytes_get", FnSig("bytes_get", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("bytes_slice", FnSig("bytes_slice", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  , ("bytes_append", FnSig("bytes_append", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("bytes_singleton", FnSig("bytes_singleton", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("bytes_from_utf8", FnSig("bytes_from_utf8", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("bytes_to_utf8", FnSig("bytes_to_utf8", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("ref_new", FnSig("ref_new", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("ref_read", FnSig("ref_read", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("ref_write", FnSig("ref_write", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("sprout_make0", FnSig("sprout_make0", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+fn compiler_intrinsic_sigs() -> List (String, FnSig) =
+  # ADT boxing / unboxing (hardcoded in IR templates)
+  [("sprout_make0", FnSig("sprout_make0", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_make1", FnSig("sprout_make1", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_make2", FnSig("sprout_make2", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
   , ("sprout_make3", FnSig("sprout_make3", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil)))), ll_i64(), Nothing))
@@ -2848,19 +2793,21 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("sprout_nothing", FnSig("sprout_nothing", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_tag", FnSig("sprout_tag", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_field", FnSig("sprout_field", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("sprout_register_ctor", FnSig("sprout_register_ctor", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  , ("sprout_set_argv", FnSig("sprout_set_argv", Cons(ll_i64(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  , ("sprout_abort_match", FnSig("sprout_abort_match", Nil, ll_i64(), Nothing))
+  # Closure / tuple allocation
   , ("sprout_alloc_closure_env", FnSig("sprout_alloc_closure_env", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_alloc_tuple_blob", FnSig("sprout_alloc_tuple_blob", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("regex_replace_all_literal", FnSig("regex_replace_all_literal", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  , ("regex_escape", FnSig("regex_escape", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("tcp_read", FnSig("tcp_read", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("json_stringify", FnSig("json_stringify", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  , ("json_parse", FnSig("json_parse", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("term_read_key", FnSig("term_read_key", Nil, ll_i64(), Nothing))
-  , ("term_read_line", FnSig("term_read_line", Nil, ll_i64(), Nothing))
-  , ("term_write", FnSig("term_write", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
-  , ("crypto_base64_encode", FnSig("crypto_base64_encode", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  # Runtime startup (uses raw ptr for argv/ctor-name)
+  , ("sprout_register_ctor", FnSig("sprout_register_ctor", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
+  , ("sprout_set_argv", FnSig("sprout_set_argv", Cons(ll_i64(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  # String operations — called directly from codegen IR templates, must be declared even without prelude
+  , ("str_eq", FnSig("str_eq", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
+  , ("str_concat", FnSig("str_concat", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
+  , ("str_compare", FnSig("str_compare", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  # Print helpers — called with ptr/i64 operands from print codegen templates
+  , ("print_str", FnSig("print_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("print_value", FnSig("print_value", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  # GC root management — use raw ptr (stack slot addresses, not Sprout values)
   , ("sprout_gc_push_i64_root", FnSig("sprout_gc_push_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_push_ptr_root", FnSig("sprout_gc_push_ptr_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_push_scan_root", FnSig("sprout_gc_push_scan_root", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
@@ -2868,8 +2815,45 @@ fn extern_sigs_list() -> List (String, FnSig) =
   , ("sprout_gc_register_i64_root", FnSig("sprout_gc_register_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_ptr_root", FnSig("sprout_gc_register_ptr_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_scan_root", FnSig("sprout_gc_register_scan_root", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("sprout_abort_match", FnSig("sprout_abort_match", Nil, ll_i64(), Nothing))
   ]
+
+# Convert an AST type expression to an LLVM type string.
+# Used by build_extern_sigs_acc to derive LLVM types from extern fn declarations.
+fn ast_type_to_ll(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName name ->
+      if type_name_leaf_is(name, "Bool") then ll_i1() else ll_i64()
+  | ast.TypeArrow _ _ _ -> ll_ptr()
+  | ast.TypeApply _ _ -> ll_i64()
+  | ast.TypeEffect base _ -> ast_type_to_ll(base)
+  | ast.TupleType _ -> ll_i64()
+
+fn ast_param_to_ll(p: ast.Param) -> String =
+  match p with
+  | ast.Param _ Nothing -> ll_i64()
+  | ast.Param _ (Just te) -> ast_type_to_ll(te)
+
+fn extern_ret_ll(ret_ty: Maybe ast.TypeExpr) -> String =
+  match ret_ty with
+  | Nothing -> ll_i64()
+  | Just te -> ast_type_to_ll(te)
+
+# Build extern sigs from TExternFnDecl nodes, seeded with compiler intrinsics.
+fn build_extern_sigs_from_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Dict FnSig =
+  build_extern_sigs_acc(decls, env, compiler_intrinsic_sigs_dict())
+
+fn build_extern_sigs_acc(decls: List typed_ast.TypedDecl, env: Dict types.Scheme, acc: Dict FnSig) -> Dict FnSig =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | typed_ast.TExternFnDecl name params ret_ty _ ->
+          match extern_ret_ll(ret_ty) with
+          | ret_ll_ ->
+              build_extern_sigs_acc(rest, env,
+                dict_set(name, FnSig(name, list_map(ast_param_to_ll, params), ret_ll_, Nothing), acc))
+      | _ ->
+          build_extern_sigs_acc(rest, env, acc)
 
 # ===========================================================================
 # Section 21 — Program analysis
@@ -2972,28 +2956,6 @@ fn build_fn_sigs_acc(decls: List typed_ast.TypedDecl, env: Dict types.Scheme, ac
                       build_fn_sigs_acc(rest, env, dict_set(name, FnSig(name, extract_param_lls_from_type(body_ty, n_params_), extract_ret_ll_from_type(body_ty, n_params_), Nothing), acc))
       | _ ->
           build_fn_sigs_acc(rest, env, acc)
-
-# Build extern sigs from TExternFnDecl nodes, overlaid on the hardcoded fallback dict.
-fn build_extern_sigs_from_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Dict FnSig =
-  build_extern_sigs_acc(decls, env, extern_sigs_dict())
-
-fn build_extern_sigs_acc(decls: List typed_ast.TypedDecl, env: Dict types.Scheme, acc: Dict FnSig) -> Dict FnSig =
-  match decls with
-  | Nil -> acc
-  | Cons decl rest ->
-      match decl with
-      | typed_ast.TExternFnDecl name params _ _ ->
-          match dict_get(name, env) with
-          | Nothing ->
-              build_extern_sigs_acc(rest, env, dict_set(name, FnSig(name, list_map(\_ -> ll_i64(), params), ll_i64(), Nothing), acc))
-          | Just scheme ->
-              match list_length_params(params) with
-              | n_params_ ->
-                  match types.scheme_type(scheme) with
-                  | body_ty ->
-                      build_extern_sigs_acc(rest, env, dict_set(name, FnSig(name, extract_param_lls_from_type(body_ty, n_params_), extract_ret_ll_from_type(body_ty, n_params_), Nothing), acc))
-      | _ ->
-          build_extern_sigs_acc(rest, env, acc)
 
 # Separate let decls into const (evaluated at compile time) and runtime lets.
 fn classify_let_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> (Dict GlobalInfo, List (String, typed_ast.TypedExpr)) =

@@ -599,6 +599,10 @@ def _expand_type_aliases_in_program(program: ast.Program) -> None:
                 for param in method.params:
                     param.type_expr = expand(param.type_expr)
                 method.return_type = expand(method.return_type)
+        elif isinstance(decl, ast.ExternFnDecl):
+            for param in decl.params:
+                param.type_expr = expand(param.type_expr)
+            decl.return_type = expand(decl.return_type)
 
 
 def parse_type_expr(

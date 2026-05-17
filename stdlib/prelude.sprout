@@ -751,3 +751,100 @@ instance ToString (Result e a) where ToString e, ToString a {
     | Ok v -> "Ok(" ++ to_string(v) ++ ")"
     | Err e -> "Err(" ++ to_string(e) ++ ")"
 }
+
+# ---------------------------------------------------------------------------
+# Extern fn declarations for user-callable C builtins.
+# These give the codegen accurate LLVM types without a hardcoded table.
+# The type checker uses builtin_env() (checker.sprout) for these names, so
+# declarations here are skipped if the name is already seeded — the Sprout
+# types below only need to produce the correct LLVM mapping, not be exact.
+# ---------------------------------------------------------------------------
+
+# I/O
+extern fn print_int(n: Int) -> Int !{IO}
+extern fn read_file(path: String) -> String !{IO}
+extern fn argv_get(idx: Int) -> Maybe String !{IO}
+
+# Numeric / string conversions
+extern fn parse_int(s: String) -> Int
+extern fn int_to_string(n: Int) -> String
+extern fn char_to_string(c: Char) -> String
+
+# Integer ranges
+extern fn int_range(start: Int, end: Int) -> IntRange
+extern fn int_range_start(r: IntRange) -> Int
+extern fn int_range_end(r: IntRange) -> Int
+
+# String primitives
+extern fn str_concat(a: String, b: String) -> String
+extern fn string_concat_many(xs: List String) -> String
+extern fn string_join_newlines(xs: List String) -> String
+extern fn str_len(s: String) -> Int
+extern fn str_slice(s: String, from: Int, to: Int) -> String
+extern fn str_char_at(s: String, i: Int) -> Maybe Char
+extern fn str_find(haystack: String, needle: String) -> Int
+extern fn str_starts_with(s: String, prefix: String) -> Bool
+extern fn str_compare(a: String, b: String) -> Int
+extern fn str_split_lines(s: String) -> List String
+extern fn str_char_at_byte(s: String, byte: Int) -> Maybe Char
+extern fn str_char_width_at_byte(s: String, byte: Int) -> Int
+extern fn str_byte_len(s: String) -> Int
+extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
+
+# Raw vector (unboxed mutable array)
+extern fn vector_empty() -> Vector a
+extern fn vector_length(v: Vector a) -> Int
+extern fn vector_get(v: Vector a, i: Int) -> Maybe a
+extern fn vector_set(v: Vector a, i: Int, val: a) -> Vector a
+extern fn vector_append(v: Vector a, val: a) -> Vector a
+extern fn vector_from_list(xs: List a) -> Vector a
+
+# Raw map (string-keyed hash map)
+extern fn map_empty() -> Map v
+extern fn map_get(m: Map v, key: String) -> Maybe v
+extern fn map_set(m: Map v, key: String, val: v) -> Map v
+extern fn map_remove(m: Map v, key: String) -> Map v
+extern fn map_size(m: Map v) -> Int
+extern fn map_nth_key(m: Map v, n: Int) -> Maybe String
+extern fn map_nth_value(m: Map v, n: Int) -> Maybe v
+
+# Raw native set (string-keyed hash set)
+extern fn native_set_empty() -> NativeSet
+extern fn native_set_insert(key: String, s: NativeSet) -> NativeSet
+extern fn native_set_member(key: String, s: NativeSet) -> Bool
+extern fn native_set_to_list(s: NativeSet) -> List String
+extern fn native_set_size(s: NativeSet) -> Int
+
+# Bytes
+extern fn bytes_empty() -> Bytes
+extern fn bytes_length(b: Bytes) -> Int
+extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int
+extern fn bytes_slice(b: Bytes, from: Int, to: Int) -> Bytes
+extern fn bytes_append(b: Bytes, other: Bytes) -> Bytes
+extern fn bytes_singleton(val: Int) -> Bytes
+extern fn bytes_from_utf8(s: String) -> Bytes
+extern fn bytes_to_utf8(b: Bytes) -> String
+
+# Mutable references
+extern fn ref_new(val: a) -> Ref a !{IO}
+extern fn ref_read(r: Ref a) -> a !{IO}
+extern fn ref_write(r: Ref a, val: a) -> Unit !{IO}
+
+# Regex
+extern fn regex_replace_all_literal(s: String, pattern: String, replacement: String) -> String
+extern fn regex_escape(s: String) -> String
+
+# Network
+extern fn tcp_read(conn: Int) -> String !{IO}
+
+# JSON (return types use String as placeholder — real types come from builtin_env)
+extern fn json_stringify(j: String) -> String
+extern fn json_parse(s: String) -> String
+
+# Terminal
+extern fn term_read_key() -> String !{IO}
+extern fn term_read_line() -> Maybe String !{IO}
+extern fn term_write(text: String) -> Unit !{IO}
+
+# Crypto
+extern fn crypto_base64_encode(b: Bytes) -> String

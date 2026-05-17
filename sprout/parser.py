@@ -113,6 +113,8 @@ class Parser:
             return self.parse_class_decl()
         if self.check("KEYWORD", "instance"):
             return self.parse_instance_decl()
+        if self.check("KEYWORD", "extern"):
+            return self.parse_extern_fn_decl()
         if self.check("KEYWORD", "fn"):
             return self.parse_fn_decl()
         if self.check("KEYWORD", "let"):
@@ -206,6 +208,28 @@ class Parser:
             ),
             start,
         )
+
+    def parse_extern_fn_decl(self) -> ast.ExternFnDecl:
+        start = self.expect("KEYWORD", "extern")
+        self.expect("KEYWORD", "fn")
+        name = self.expect("IDENT", label="function name").value
+        self.expect("SYMBOL", "(")
+        params = []
+        if not self.check("SYMBOL", ")"):
+            params.append(self.parse_param())
+            while self.match("SYMBOL", ","):
+                params.append(self.parse_param())
+        self.expect("SYMBOL", ")")
+        return_type = None
+        effects = None
+        if self.match("SYMBOL", "->"):
+            return_type = self.parse_type_expr()
+            if isinstance(return_type, ast.TypeEffect):
+                effects = return_type.effects
+                return_type = return_type.base
+            else:
+                effects = self.parse_effect_annotation()
+        return self.mark(ast.ExternFnDecl(name=name, params=params, return_type=return_type, effects=effects), start)
 
     def parse_local_where_bindings(self) -> list[tuple[ast.Pattern, Token, ast.Expr]]:
         bindings: list[tuple[ast.Pattern, Token, ast.Expr]] = []

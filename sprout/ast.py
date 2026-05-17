@@ -67,6 +67,15 @@ class Param:
 
 
 @dataclass
+class ExternFnDecl:
+    name: str
+    params: "list[Param]"
+    return_type: "TypeExpr | None"
+    effects: "tuple[str, ...] | None"
+    annotations: "tuple[DeclAnnotation, ...]" = field(default_factory=tuple)
+
+
+@dataclass
 class LetDecl:
     name: str
     value: "Expr"
