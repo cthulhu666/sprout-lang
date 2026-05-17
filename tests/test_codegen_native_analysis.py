@@ -724,6 +724,42 @@ for line in sys.stdin:
             self.assertEqual(run.stdout.strip(), "1")
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_repl_diagnostics_in_source_survives_forced_gc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spr_path = tmp_path / "prog.sprout"
+            bin_path = tmp_path / "prog"
+            spr_path.write_text(
+                """
+                module main
+                import stdlib.compiler as compiler
+                fn main() -> Unit !{IO} =
+                  print(vec_length(compiler.diagnostics_in_source("module app.repl\n\nlet broken = missing")))
+                """,
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    str(spr_path),
+                    "--native",
+                    "-o",
+                    str(bin_path),
+                ],
+                check=True,
+            )
+            env = self._native_analysis_service_env()
+            env["SPROUT_GC_THRESHOLD"] = "1"
+            env["SPROUT_GC_ADAPT_RATIO"] = "0"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stderr, "")
+            self.assertEqual(run.stdout.strip(), "1")
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_native_repl_eval_expr_in_source_builtin_runs_via_analysis_service(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

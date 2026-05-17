@@ -253,7 +253,9 @@ static long long sprout_analysis_ok_string_result_from_response(char* response, 
   char* value = sprout_json_extract_string(response, value_key);
   free(response);
   if (value == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
-  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)value);
+  register_cstr(value);
+  SPROUT_HANDLE(h_value, (long long)(uintptr_t)value);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_value));
 }
 
 static long long sprout_analysis_ok_vec_string_result(VectorVal* items) {
@@ -275,17 +277,21 @@ static long long sprout_analysis_ok_vec_string_result_from_response(char* respon
 
 static long long sprout_analysis_ok_string_vec_pair_result(char* label, VectorVal* items) {
   if (label == NULL || items == NULL) return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  register_cstr(label);
+  SPROUT_HANDLE(h_label, (long long)(uintptr_t)label);
   long long rooted_items = (long long)(uintptr_t)items;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
   long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
   SPROUT_GC_PUSH_I64_LOCAL(items_vec);
   void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
-  uintptr_t* words = (uintptr_t*)tuple;
-  words[0] = (uintptr_t)label;
-  words[1] = (uintptr_t)items_vec;
-  SPROUT_GC_POP_LOCALS(2);
   long long pair = (long long)(uintptr_t)tuple;
-  return sprout_make1(find_ctor_tag_by_name("Ok"), pair);
+  SPROUT_GC_PUSH_I64_LOCAL(pair);
+  uintptr_t* words = (uintptr_t*)tuple;
+  words[0] = (uintptr_t)sprout_handle_get(h_label);
+  words[1] = (uintptr_t)items_vec;
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), pair);
+  SPROUT_GC_POP_LOCALS(3);
+  return out;
 }
 
 static long long sprout_analysis_ok_string_vec_pair_from_response(
@@ -311,16 +317,20 @@ static long long sprout_analysis_completion_tuple_or_fail(
   if (prefix == NULL || matches == NULL) {
     sprout_builtin_fail_detail(builtin_name, "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   }
+  register_cstr(prefix);
+  SPROUT_HANDLE(h_prefix, (long long)(uintptr_t)prefix);
   long long rooted_matches = (long long)(uintptr_t)matches;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
   long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
   SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
   void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+  long long tuple_h = (long long)(uintptr_t)tuple;
+  SPROUT_GC_PUSH_I64_LOCAL(tuple_h);
   uintptr_t* words = (uintptr_t*)tuple;
-  words[0] = (uintptr_t)prefix;
+  words[0] = (uintptr_t)sprout_handle_get(h_prefix);
   words[1] = (uintptr_t)matches_vec;
-  SPROUT_GC_POP_LOCALS(2);
-  return (long long)(uintptr_t)tuple;
+  SPROUT_GC_POP_LOCALS(3);
+  return tuple_h;
 }
 
 static long long sprout_analysis_ok_inventory_result(
@@ -338,18 +348,21 @@ static long long sprout_analysis_ok_inventory_result(
   SPROUT_GC_PUSH_I64_LOCAL(rooted_imported);
   SPROUT_GC_PUSH_I64_LOCAL(rooted_exported);
   long long declared_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_declared);
-  long long imported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_imported);
-  long long exported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_exported);
   SPROUT_GC_PUSH_I64_LOCAL(declared_vec);
+  long long imported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_imported);
   SPROUT_GC_PUSH_I64_LOCAL(imported_vec);
+  long long exported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_exported);
   SPROUT_GC_PUSH_I64_LOCAL(exported_vec);
   void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
+  long long tuple_h = (long long)(uintptr_t)tuple;
+  SPROUT_GC_PUSH_I64_LOCAL(tuple_h);
   uintptr_t* words = (uintptr_t*)tuple;
   words[0] = (uintptr_t)declared_vec;
   words[1] = (uintptr_t)imported_vec;
   words[2] = (uintptr_t)exported_vec;
-  SPROUT_GC_POP_LOCALS(6);
-  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)tuple);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), tuple_h);
+  SPROUT_GC_POP_LOCALS(7);
+  return out;
 }
 
 static long long sprout_analysis_ok_inventory_from_response(
@@ -359,10 +372,18 @@ static long long sprout_analysis_ok_inventory_from_response(
   const char* exported_key
 ) {
   VectorVal* declared = sprout_json_extract_string_array(response, declared_key);
+  long long rooted_declared = (long long)(uintptr_t)declared;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_declared);
   VectorVal* imported = sprout_json_extract_string_array(response, imported_key);
+  long long rooted_imported = (long long)(uintptr_t)imported;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_imported);
   VectorVal* exported = sprout_json_extract_string_array(response, exported_key);
+  long long rooted_exported = (long long)(uintptr_t)exported;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_exported);
   free(response);
-  return sprout_analysis_ok_inventory_result(declared, imported, exported);
+  long long out = sprout_analysis_ok_inventory_result(declared, imported, exported);
+  SPROUT_GC_POP_LOCALS(3);
+  return out;
 }
 
 static long long sprout_analysis_diagnostics_vec_or_fail(
@@ -373,6 +394,8 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
   const char* columns_key
 ) {
   VectorVal* messages = sprout_json_extract_string_array(response, messages_key);
+  long long rooted_messages = (long long)(uintptr_t)messages;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_messages);
   long long line_count = 0;
   long long column_count = 0;
   long long* lines = sprout_json_extract_int_array(response, lines_key, &line_count);
@@ -386,12 +409,11 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
   ) {
     if (lines != NULL) free(lines);
     if (columns != NULL) free(columns);
+    SPROUT_GC_POP_LOCALS(1);
     sprout_builtin_fail_detail(builtin_name, "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   }
   VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
-  long long rooted_messages = (long long)(uintptr_t)messages;
   long long rooted_out = (long long)(uintptr_t)out;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_messages);
   SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
   out->len = messages->len;
   out->cap = messages->len;
@@ -419,7 +441,11 @@ static long long sprout_analysis_ok_symbol_locations_from_response(
   const char* columns_key
 ) {
   VectorVal* categories = sprout_json_extract_string_array(response, categories_key);
+  long long rooted_categories = (long long)(uintptr_t)categories;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_categories);
   VectorVal* names = sprout_json_extract_string_array(response, names_key);
+  long long rooted_names = (long long)(uintptr_t)names;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_names);
   long long line_count = 0;
   long long column_count = 0;
   long long* lines = sprout_json_extract_int_array(response, lines_key, &line_count);
@@ -435,14 +461,11 @@ static long long sprout_analysis_ok_symbol_locations_from_response(
   ) {
     if (lines != NULL) free(lines);
     if (columns != NULL) free(columns);
+    SPROUT_GC_POP_LOCALS(2);
     return sprout_err_string_result("__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
   }
   VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
-  long long rooted_categories = (long long)(uintptr_t)categories;
-  long long rooted_names = (long long)(uintptr_t)names;
   long long rooted_out = (long long)(uintptr_t)out;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_categories);
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_names);
   SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
   out->len = categories->len;
   out->cap = categories->len;

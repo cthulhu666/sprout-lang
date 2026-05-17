@@ -346,7 +346,7 @@ def cmd_compile(
         with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False, encoding="utf-8") as tmp:
             tmp.write(llvm_ir)
             ll_path = Path(tmp.name)
-    embedded_analysis_service_cmd = default_analysis_service_cmd()
+    embedded_analysis_service_cmd = default_analysis_service_cmd("python3")
     runtime_c = """#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -572,6 +572,9 @@ static CtorMeta* find_ctor(long long tag);
 static char* alloc_cstr(size_t len, const char* ctx);
 static char* dup_slice(const char* start, size_t len);
 static char* dup_cstr(const char* s);
+static char* register_cstr(char* value);
+static char* dup_managed_slice(const char* start, size_t len, const char* ctx);
+static char* dup_managed_cstr(const char* s, const char* ctx);
 static void buf_init(ByteBuf* buf);
 static void buf_append_bytes(ByteBuf* buf, const char* data, size_t len);
 static void buf_append_cstr(ByteBuf* buf, const char* text);
@@ -775,13 +778,6 @@ static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, 
   if (g_debug_alloc_enabled) (*counter)++;
   void* out = realloc(ptr, size);
   if (out == NULL) tcp_fail(ctx);
-  return out;
-}
-
-static char* sprout_strdup_counted(long long* counter, const char* text, const char* ctx) {
-  size_t len = strlen(text);
-  char* out = (char*)sprout_alloc_counted(counter, len + 1, ctx);
-  memcpy(out, text, len + 1);
   return out;
 }
 
@@ -1262,10 +1258,6 @@ static void gc_mark_enqueue(ManagedNode* node) {
   g_gc_mark_worklist[g_gc_mark_wl_len++] = node;
 }
 
-static void sprout_gc_mark_node(ManagedNode* node) {
-  gc_mark_enqueue(node);
-}
-
 static void sprout_gc_mark_value(long long value) {
   gc_mark_enqueue(find_managed_ptr((void*)(uintptr_t)value));
 }
@@ -1693,7 +1685,9 @@ long long term_read_line(void) {
     len -= 1;
     line[len] = '\\0';
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)line);
+  register_cstr(line);
+  SPROUT_HANDLE(h_line, (long long)(uintptr_t)line);
+  return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_line));
 }
 _Bool term_is_interactive(void) {
   return isatty(fileno(stdin)) && isatty(fileno(stdout));
@@ -2011,14 +2005,16 @@ static VectorVal* sprout_json_extract_string_array(const char* text, const char*
   if (pos == NULL || *pos != '[') return NULL;
   pos++;
   VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
   out->len = 0;
   out->cap = 0;
   out->data = NULL;
   pos = sprout_json_skip_ws(pos);
-  if (*pos == ']') return out;
+  if (*pos == ']') return (VectorVal*)(uintptr_t)sprout_handle_get(h_out);
   while (*pos != '\\0') {
     char* item = sprout_json_parse_string(&pos);
-    if (item == NULL) return out;
+    if (item == NULL) return (VectorVal*)(uintptr_t)sprout_handle_get(h_out);
+    register_cstr(item);
     if (out->len == out->cap) {
       long long new_cap = out->cap == 0 ? 4 : (out->cap * 2);
       out->data = sprout_realloc_vector_data(out->data, (size_t)new_cap, "analysis service: out of memory");
@@ -2026,11 +2022,11 @@ static VectorVal* sprout_json_extract_string_array(const char* text, const char*
     }
     out->data[out->len++] = (long long)(uintptr_t)item;
     pos = sprout_json_skip_ws(pos);
-    if (*pos == ']') return out;
-    if (*pos != ',') return out;
+    if (*pos == ']') return (VectorVal*)(uintptr_t)sprout_handle_get(h_out);
+    if (*pos != ',') return (VectorVal*)(uintptr_t)sprout_handle_get(h_out);
     pos++;
   }
-  return out;
+  return (VectorVal*)(uintptr_t)sprout_handle_get(h_out);
 }
 static char* sprout_json_extract_string(const char* text, const char* key) {
   const char* pos = sprout_json_after_key(text, key);
@@ -2138,7 +2134,9 @@ static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_han
 }
 __SPROUT_ANALYSIS_BRIDGE_RUNTIME__
 static long long sprout_err_string_result(const char* message) {
-  return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)dup_cstr(message));
+  char* owned = dup_managed_cstr(message, "analysis service: out of memory");
+  SPROUT_HANDLE(h_message, (long long)(uintptr_t)owned);
+  return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_message));
 }
 __SPROUT_ANALYSIS_BRIDGE_REQUEST_HELPERS__
 __SPROUT_ANALYSIS_BRIDGE_RESPONSE_HELPERS__
@@ -2574,10 +2572,12 @@ long long str_concat(long long left_i, long long right_i) {
   SPROUT_HANDLE(h_left, left_i);
   SPROUT_HANDLE(h_right, right_i);
   sprout_gc_maybe_collect_threshold();
+  const char* left_now = (const char*)(uintptr_t)sprout_handle_get(h_left);
+  const char* right_now = (const char*)(uintptr_t)sprout_handle_get(h_right);
   char* out = (char*)malloc(left_len + right_len + 1);
   if (out == NULL) tcp_fail("str_concat: out of memory");
-  memcpy(out, left, left_len);
-  memcpy(out + left_len, right, right_len);
+  memcpy(out, left_now, left_len);
+  memcpy(out + left_len, right_now, right_len);
   out[left_len + right_len] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
@@ -2589,9 +2589,7 @@ long long string_concat_many(long long list_handle) {
   long long cons_tag = find_ctor_tag_by_name("Cons");
   /* First pass: compute total byte length. */
   size_t total = 0;
-  size_t elem_idx = 0;
   long long cur = list_handle;
-  const char* prev_s = NULL;
   while (sprout_tag(cur) != nil_tag) {
     if (sprout_tag(cur) != cons_tag) tcp_fail("string_concat_many: malformed list");
     const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
@@ -2599,9 +2597,7 @@ long long string_concat_many(long long list_handle) {
       tcp_fail("string_concat_many: null string element");
     }
     total += strlen(s);
-    prev_s = s;
     cur = sprout_field(cur, 1);
-    elem_idx++;
   }
   SPROUT_HANDLE(h_list, list_handle);
   sprout_gc_maybe_collect_threshold();
@@ -2700,23 +2696,20 @@ long long str_slice(long long s_i, long long start, long long length) {
   if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
   SPROUT_HANDLE(h_s, s_i);
   size_t total = sprout_utf8_codepoint_count(s);
-  if ((size_t)start >= total) {
-    sprout_gc_maybe_collect_threshold();
-    char* out = (char*)malloc(1);
-    if (out == NULL) tcp_fail("str_slice: out of memory");
-    out[0] = '\\0';
-    register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-    return (long long)(uintptr_t)out;
+  size_t start_byte = 0;
+  size_t take = 0;
+  if ((size_t)start < total) {
+    start_byte = sprout_utf8_byte_offset(s, (size_t)start);
+    size_t end_codepoint = (size_t)start + (size_t)length;
+    if (end_codepoint > total) end_codepoint = total;
+    size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
+    take = end_byte - start_byte;
   }
-  size_t start_byte = sprout_utf8_byte_offset(s, (size_t)start);
-  size_t end_codepoint = (size_t)start + (size_t)length;
-  if (end_codepoint > total) end_codepoint = total;
-  size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
-  size_t take = end_byte - start_byte;
   sprout_gc_maybe_collect_threshold();
+  const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
   char* out = (char*)malloc(take + 1);
   if (out == NULL) tcp_fail("str_slice: out of memory");
-  memcpy(out, s + start_byte, take);
+  if (take > 0) memcpy(out, slice_now + start_byte, take);
   out[take] = '\\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
@@ -2758,7 +2751,9 @@ long long str_char_at(const char* s, long long index) {
         if (!tmp) tcp_fail("str_char_at: out of memory");
         memcpy(tmp, s + byte_pos, width);
         tmp[width] = '\\0';
-        char_str = tmp;
+        register_cstr(tmp);
+        SPROUT_HANDLE(h_char, (long long)(uintptr_t)tmp);
+        return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_char));
       }
       return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
     }
@@ -2819,9 +2814,11 @@ long long str_split_lines(const char* s) {
  * Avoids the O(index) codepoint scan of str_char_at. */
 long long str_char_at_byte(const char* s, long long byte_pos) {
   if (s == NULL) tcp_fail("str_char_at_byte: null input");
-  if (byte_pos < 0 || s[(size_t)byte_pos] == '\\0')
+  if (byte_pos < 0)
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  size_t len = strlen(s);
   size_t pos = (size_t)byte_pos;
+  if (pos >= len) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
   const char* char_str;
   if (width == 1) {
@@ -2832,7 +2829,9 @@ long long str_char_at_byte(const char* s, long long byte_pos) {
     if (!tmp) tcp_fail("str_char_at_byte: out of memory");
     memcpy(tmp, s + pos, width);
     tmp[width] = '\\0';
-    char_str = tmp;
+    register_cstr(tmp);
+    SPROUT_HANDLE(h_char, (long long)(uintptr_t)tmp);
+    return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_char));
   }
   return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
 }
@@ -2840,8 +2839,11 @@ long long str_char_at_byte(const char* s, long long byte_pos) {
 /* str_char_width_at_byte: UTF-8 byte width of the char at byte_pos; 0 at end. O(1). */
 long long str_char_width_at_byte(const char* s, long long byte_pos) {
   if (s == NULL) tcp_fail("str_char_width_at_byte: null input");
-  if (byte_pos < 0 || s[(size_t)byte_pos] == '\\0') return 0;
-  return (long long)sprout_utf8_char_width((unsigned char)s[(size_t)byte_pos]);
+  if (byte_pos < 0) return 0;
+  size_t len = strlen(s);
+  size_t pos = (size_t)byte_pos;
+  if (pos >= len) return 0;
+  return (long long)sprout_utf8_char_width((unsigned char)s[pos]);
 }
 
 /* str_byte_len: byte length of the string (strlen). */
@@ -2855,7 +2857,10 @@ long long str_byte_len(const char* s) {
 _Bool str_starts_with_at_byte(const char* s, long long byte_pos, const char* prefix) {
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with_at_byte: null input");
   if (byte_pos < 0) return 0;
-  return strncmp(s + (size_t)byte_pos, prefix, strlen(prefix)) == 0;
+  size_t len = strlen(s);
+  size_t pos = (size_t)byte_pos;
+  if (pos > len) return 0;
+  return strncmp(s + pos, prefix, strlen(prefix)) == 0;
 }
 
 long long str_find(const char* haystack, const char* needle) {
@@ -2891,7 +2896,9 @@ long long regex_validate(const char* pattern) {
   regex_t compiled;
   char* error = NULL;
   if (!regex_compile_ere(pattern, &compiled, &error)) {
-    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)error);
+    register_cstr(error);
+    SPROUT_HANDLE(h_error, (long long)(uintptr_t)error);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_error));
   }
   regfree(&compiled);
   return sprout_make1(find_ctor_tag_by_name("Ok"), 0);
@@ -2929,7 +2936,8 @@ long long regex_find_range(const char* pattern, const char* text) {
   IntRangeVal* range = sprout_alloc_range_val("regex_find_range: out of memory");
   range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
   range->end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)range);
+  SPROUT_HANDLE(h_range, (long long)(uintptr_t)range);
+  return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_range));
 }
 
 long long regex_replace_all_literal(long long pattern_i, long long replacement_i, long long text_i) {
@@ -2943,14 +2951,17 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
   SPROUT_HANDLE(h_replacement, replacement_i);
   SPROUT_HANDLE(h_text, text_i);
   sprout_gc_maybe_collect_threshold();
+  const char* pattern_now = (const char*)(uintptr_t)sprout_handle_get(h_pattern);
+  const char* replacement_now = (const char*)(uintptr_t)sprout_handle_get(h_replacement);
+  const char* text_now = (const char*)(uintptr_t)sprout_handle_get(h_text);
   regex_t compiled;
   char* error = NULL;
-  if (!regex_compile_ere(pattern, &compiled, &error)) {
+  if (!regex_compile_ere(pattern_now, &compiled, &error)) {
     regex_builtin_fail("regex_replace_all_literal", error);
   }
   ByteBuf out;
   buf_init(&out);
-  const char* cursor = text;
+  const char* cursor = text_now;
   regmatch_t match;
   while (regexec(&compiled, cursor, 1, &match, 0) == 0) {
     if (match.rm_so < 0 || match.rm_eo < 0) {
@@ -2960,7 +2971,7 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
     size_t start = (size_t)match.rm_so;
     size_t end = (size_t)match.rm_eo;
     buf_append_bytes(&out, cursor, start);
-    buf_append_cstr(&out, replacement);
+    buf_append_cstr(&out, replacement_now);
     if (end == 0) {
       if (cursor[0] == '\\0') break;
       size_t width = sprout_utf8_char_width((unsigned char)cursor[0]);
@@ -2981,13 +2992,14 @@ long long regex_escape(long long raw_i) {
   if (raw == NULL) tcp_fail("regex_escape: null input");
   SPROUT_HANDLE(h_raw, raw_i);
   sprout_gc_maybe_collect_threshold();
+  const char* raw_now = (const char*)(uintptr_t)sprout_handle_get(h_raw);
   ByteBuf out;
   buf_init(&out);
-  for (size_t i = 0; raw[i] != '\\0'; i++) {
-    if (strchr(".^$*+?()[]{}|\\\\", raw[i]) != NULL) {
+  for (size_t i = 0; raw_now[i] != '\\0'; i++) {
+    if (strchr(".^$*+?()[]{}|\\\\", raw_now[i]) != NULL) {
       buf_append_char(&out, '\\\\');
     }
-    buf_append_char(&out, raw[i]);
+    buf_append_char(&out, raw_now[i]);
   }
   char* result = out.data == NULL ? dup_cstr("") : out.data;
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
@@ -3050,6 +3062,24 @@ static char* dup_slice(const char* start, size_t len) {
 
 static char* dup_cstr(const char* text) {
   return dup_slice(text, strlen(text));
+}
+
+static char* register_cstr(char* value) {
+  if (value != NULL && find_managed_ptr(value) == NULL) {
+    register_managed_ptr(value, SPROUT_HEAP_CSTR, 0);
+  }
+  return value;
+}
+
+static char* dup_managed_slice(const char* start, size_t len, const char* ctx) {
+  char* out = alloc_cstr(len, ctx);
+  memcpy(out, start, len);
+  out[len] = '\\0';
+  return register_cstr(out);
+}
+
+static char* dup_managed_cstr(const char* text, const char* ctx) {
+  return dup_managed_slice(text, strlen(text), ctx);
 }
 
 static char* regex_prefixed_error(const char* prefix, const char* detail) {
@@ -3203,12 +3233,28 @@ static long long http_err1(const char* ctor_name, long long payload) {
   return out;
 }
 
-static long long http_ok_response(long long status, const char* headers, const char* body) {
+static long long http_err_cstr(const char* ctor_name, char* payload) {
+  register_cstr(payload);
+  SPROUT_HANDLE(h_payload, (long long)(uintptr_t)payload);
+  SPROUT_HANDLE(h_err, sprout_make1(find_ctor_tag_by_name(ctor_name), sprout_handle_get(h_payload)));
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
+  return out;
+}
+
+static long long http_err_text(const char* ctor_name, const char* payload) {
+  return http_err_cstr(ctor_name, dup_managed_cstr(payload, "http_request: out of memory"));
+}
+
+static long long http_ok_response(long long status, char* headers, char* body) {
+  register_cstr(headers);
+  register_cstr(body);
+  SPROUT_HANDLE(h_headers, (long long)(uintptr_t)headers);
+  SPROUT_HANDLE(h_body, (long long)(uintptr_t)body);
   SPROUT_HANDLE(h_resp, sprout_make3(
     find_ctor_tag_by_name("stdlib.http.HttpResponse"),
     status,
-    (long long)(uintptr_t)headers,
-    (long long)(uintptr_t)body
+    sprout_handle_get(h_headers),
+    sprout_handle_get(h_body)
   ));
   long long out = sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_resp));
   return out;
@@ -3357,9 +3403,11 @@ static long long json_parse_ok_result(long long value) {
 }
 
 static long long json_parse_err_result(const char* message) {
+  char* owned = dup_managed_cstr(message, "json_parse: out of memory");
+  SPROUT_HANDLE(h_message, (long long)(uintptr_t)owned);
   SPROUT_HANDLE(h_err, sprout_make1(
     find_ctor_tag_by_name("stdlib.json.JsonDecode"),
-    (long long)(uintptr_t)dup_cstr(message)
+    sprout_handle_get(h_message)
   ));
   long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
   return out;
@@ -3453,17 +3501,18 @@ static long long json_parse_object(const char** pos_ptr, char** err_msg) {
       if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ':' after object key");
       return 0;
     }
-    pos = sprout_json_skip_ws(pos + 1);
-    long long value = json_parse_value(&pos, err_msg);
-    if (err_msg != NULL && *err_msg != NULL) {
-      free(key);
-      return 0;
-    }
     {
+      register_cstr(key);
+      SPROUT_HANDLE(h_key, (long long)(uintptr_t)key);
+      pos = sprout_json_skip_ws(pos + 1);
+      long long value = json_parse_value(&pos, err_msg);
+      if (err_msg != NULL && *err_msg != NULL) {
+        return 0;
+      }
       SPROUT_HANDLE(h_value, value);
       SPROUT_HANDLE_SET(h_reversed, sprout_make3(
         find_ctor_tag_by_name("stdlib.json.JsonObjectCons"),
-        (long long)(uintptr_t)key,
+        sprout_handle_get(h_key),
         sprout_handle_get(h_value),
         sprout_handle_get(h_reversed)
       ));
@@ -3531,7 +3580,9 @@ static long long json_parse_value(const char** pos_ptr, char** err_msg) {
       return 0;
     }
     *pos_ptr = pos;
-    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonString"), (long long)(uintptr_t)value);
+    register_cstr(value);
+    SPROUT_HANDLE(h_value, (long long)(uintptr_t)value);
+    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonString"), sprout_handle_get(h_value));
   }
   if (*pos == '{') {
     long long out = json_parse_object(&pos, err_msg);
@@ -3764,9 +3815,9 @@ static char* http_decode_chunked_body(const char* body, char** err) {
 static long long http_response_result(char* response_data) {
   if (response_data == NULL || response_data[0] == '\\0') {
     free(response_data);
-    return http_err1(
+    return http_err_text(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)dup_cstr("remote closed connection without response")
+      "remote closed connection without response"
     );
   }
 
@@ -3778,7 +3829,7 @@ static long long http_response_result(char* response_data) {
   }
   if (sep == NULL) {
     free(response_data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid http response"));
+    return http_err_text("stdlib.http.HttpDecode", "invalid http response");
   }
 
   const char* line_end = strstr(response_data, "\\r\\n");
@@ -3789,20 +3840,20 @@ static long long http_response_result(char* response_data) {
   }
   if (line_end == NULL || line_end > sep) {
     free(response_data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+    return http_err_text("stdlib.http.HttpDecode", "invalid status line");
   }
 
   const char* code_start = strchr(response_data, ' ');
   if (code_start == NULL || code_start >= line_end) {
     free(response_data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+    return http_err_text("stdlib.http.HttpDecode", "invalid status line");
   }
   code_start++;
   char* code_end = NULL;
   long long status = strtoll(code_start, &code_end, 10);
   if (code_end == code_start || code_end > line_end) {
     free(response_data);
-    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status code"));
+    return http_err_text("stdlib.http.HttpDecode", "invalid status code");
   }
   if (status >= 400) {
     free(response_data);
@@ -3821,7 +3872,7 @@ static long long http_response_result(char* response_data) {
       free(headers);
       free(body_out);
       free(response_data);
-      return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("unsupported content encoding"));
+      return http_err_text("stdlib.http.HttpDecode", "unsupported content encoding");
     }
     free(content_encoding);
   }
@@ -3835,14 +3886,14 @@ static long long http_response_result(char* response_data) {
         free(transfer_encoding);
         free(headers);
         free(response_data);
-        return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)chunk_err);
+        return http_err_cstr("stdlib.http.HttpDecode", chunk_err);
       }
     } else if (transfer_encoding[0] != '\\0') {
       free(transfer_encoding);
       free(headers);
       free(body_out);
       free(response_data);
-      return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("unsupported transfer encoding"));
+      return http_err_text("stdlib.http.HttpDecode", "unsupported transfer encoding");
     }
     free(transfer_encoding);
   }
@@ -4010,22 +4061,6 @@ static void tls_debug_log(const char* fmt, ...) {
   va_end(args);
 }
 
-static OSStatus tls_handshake(SSLContextRef ctx, TlsConn* conn) {
-  while (1) {
-    conn->last_errno = 0;
-    OSStatus status = SSLHandshake(ctx);
-    tls_debug_log("handshake status=%d errno=%d", (int)status, conn->last_errno);
-    if (status == noErr || tls_status_is_auth_event(status)) {
-      return noErr;
-    }
-    if (status == errSSLWouldBlock) {
-      if (tls_status_timed_out(conn)) return status;
-      continue;
-    }
-    return status;
-  }
-}
-
 static OSStatus tls_write_all(SSLContextRef ctx, TlsConn* conn, const char* data, size_t len) {
   size_t offset = 0;
   while (offset < len) {
@@ -4076,7 +4111,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
   struct addrinfo* infos = NULL;
   int gai = getaddrinfo(parsed->host, parsed->port, &hints, &infos);
   if (gai != 0) {
-    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
+    return http_err_text("stdlib.http.HttpNetwork", gai_strerror(gai));
   }
 
   int fd = -1;
@@ -4100,7 +4135,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
   freeaddrinfo(infos);
   if (fd < 0) {
     if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
-    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
+    return http_err_text("stdlib.http.HttpNetwork", strerror(last_errno));
   }
 
   TlsConn tls = {.fd = fd, .last_errno = 0};
@@ -4109,7 +4144,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
   SSLContextRef ctx = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
   if (ctx == NULL) {
     close(fd);
-    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr("tls context creation failed"));
+    return http_err_text("stdlib.http.HttpNetwork", "tls context creation failed");
   }
   OSStatus status = SSLSetIOFuncs(ctx, tls_read_func, tls_write_func);
   tls_debug_log("manual_trust=%d", use_custom_ca ? 1 : 0);
@@ -4144,9 +4179,9 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
         if (trust_status != noErr) {
           SSLDisposeContext(ctx);
           close(fd);
-          return http_err1(
+          return http_err_text(
             "stdlib.http.HttpNetwork",
-            (long long)(uintptr_t)dup_cstr("tls certificate verification failed")
+            "tls certificate verification failed"
           );
         }
         continue;
@@ -4157,9 +4192,9 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
   if (status != noErr) {
     SSLDisposeContext(ctx);
     close(fd);
-    return http_err1(
+    return http_err_cstr(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)tls_error_message("tls handshake failed", status, &tls)
+      tls_error_message("tls handshake failed", status, &tls)
     );
   }
 
@@ -4172,9 +4207,9 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
   if (status != noErr) {
     SSLDisposeContext(ctx);
     close(fd);
-    return http_err1(
+    return http_err_cstr(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)tls_error_message("tls write failed", status, &tls)
+      tls_error_message("tls write failed", status, &tls)
     );
   }
 
@@ -4189,9 +4224,9 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
   }
   if (status != noErr) {
     free(response.data);
-    return http_err1(
+    return http_err_cstr(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)tls_error_message("tls read failed", status, &tls)
+      tls_error_message("tls read failed", status, &tls)
     );
   }
   return http_response_result(response.data);
@@ -4246,7 +4281,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   HttpUrl parsed = {0};
   char* url_err = NULL;
   if (!parse_http_url(url, &parsed, &url_err)) {
-    long long out = http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)url_err);
+    long long out = http_err_cstr("stdlib.http.HttpDecode", url_err);
     return out;
   }
 
@@ -4284,9 +4319,9 @@ long long http_request(const char* method, const char* url, const char* headers_
   if (parsed.use_tls) {
     free(request.data);
     free_http_url(&parsed);
-    return http_err1(
+    return http_err_text(
       "stdlib.http.HttpNetwork",
-      (long long)(uintptr_t)dup_cstr("https unsupported on this platform")
+      "https unsupported on this platform"
     );
   }
 #endif
@@ -4300,7 +4335,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   if (gai != 0) {
     free(request.data);
     free_http_url(&parsed);
-    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
+    return http_err_text("stdlib.http.HttpNetwork", gai_strerror(gai));
   }
 
   int fd = -1;
@@ -4326,7 +4361,7 @@ long long http_request(const char* method, const char* url, const char* headers_
     free(request.data);
     free_http_url(&parsed);
     if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
-    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
+    return http_err_text("stdlib.http.HttpNetwork", strerror(last_errno));
   }
 
   if (!send_all(fd, request.data, request.len)) {
@@ -4335,7 +4370,7 @@ long long http_request(const char* method, const char* url, const char* headers_
     close(fd);
     free_http_url(&parsed);
     if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
-    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(send_errno)));
+    return http_err_text("stdlib.http.HttpNetwork", strerror(send_errno));
   }
   free(request.data);
 
@@ -4353,12 +4388,12 @@ long long http_request(const char* method, const char* url, const char* headers_
       free_http_url(&parsed);
       if (recv_errno == EAGAIN || recv_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
       if (recv_errno == ECONNRESET && saw_no_response) {
-        return http_err1(
+        return http_err_text(
           "stdlib.http.HttpNetwork",
-          (long long)(uintptr_t)dup_cstr("remote closed connection without response")
+          "remote closed connection without response"
         );
       }
-      return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(recv_errno)));
+      return http_err_text("stdlib.http.HttpNetwork", strerror(recv_errno));
     }
     buf_append_bytes(&response, chunk, (size_t)n);
   }
@@ -4367,7 +4402,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   return http_response_result(response.data);
 }
 
-long long vector_empty() {
+long long vector_empty(void) {
   VectorVal* v = sprout_alloc_vector_val("vector_empty: out of memory");
   v->len = 0;
   v->cap = 0;
@@ -4821,7 +4856,7 @@ static long long bst_to_list_acc(long long h, long long tail) {
   return result;
 }
 
-long long map_empty() {
+long long map_empty(void) {
   return 0; /* empty BST = null handle */
 }
 
@@ -4888,7 +4923,7 @@ long long map_nth_value(long long map_h, long long index) {
    SPROUT_HEAP_MAP nodes; GC sees value/left/right as children.
 */
 
-long long native_set_empty() {
+long long native_set_empty(void) {
   return 0; /* empty BST */
 }
 
@@ -4924,7 +4959,7 @@ long long native_set_size(long long set_h) {
   return (long long)bst_size(set_h);
 }
 
-long long bytes_empty() {
+long long bytes_empty(void) {
   BytesVal* out = sprout_alloc_bytes_val("bytes_empty: out of memory");
   out->len = 0;
   out->data = NULL;
@@ -5057,9 +5092,11 @@ long long bytes_to_utf8(long long bytes_h) {
   if (value == NULL) tcp_fail("bytes_to_utf8: null bytes");
   const char* reason = NULL;
   if (!utf8_validate(value->data, value->len, &reason)) {
+    char* message = dup_managed_cstr(reason, "bytes_to_utf8: out of memory");
+    SPROUT_HANDLE(h_message, (long long)(uintptr_t)message);
     long long err = sprout_make1(
       find_ctor_tag_by_name("stdlib.bytes.Utf8DecodeError"),
-      (long long)(uintptr_t)dup_cstr(reason)
+      sprout_handle_get(h_message)
     );
     SPROUT_GC_PUSH_I64_LOCAL(err);
     long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
@@ -5070,8 +5107,11 @@ long long bytes_to_utf8(long long bytes_h) {
   if (out == NULL) tcp_fail("bytes_to_utf8: out of memory");
   if (value->len > 0) memcpy(out, value->data, value->len);
   out[value->len] = '\\0';
+  register_cstr(out);
+  SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_out));
   SPROUT_GC_POP_LOCALS(1);
-  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  return result;
 }
 
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx) {
@@ -5489,7 +5529,9 @@ static int base64_decode_bytes(const char* text, unsigned char** out_data, size_
 }
 
 static long long crypto_err1(const char* ctor_name, const char* payload) {
-  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), (long long)(uintptr_t)dup_cstr(payload));
+  char* owned = dup_managed_cstr(payload, "crypto: out of memory");
+  SPROUT_HANDLE(h_payload, (long long)(uintptr_t)owned);
+  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), sprout_handle_get(h_payload));
   SPROUT_GC_PUSH_I64_LOCAL(err);
   long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
   SPROUT_GC_POP_LOCALS(1);

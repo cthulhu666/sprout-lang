@@ -989,6 +989,93 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
         self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1 for cycle in cycles))
 
+    def test_runtime_c_passes_gc_safety_linter(self) -> None:
+        run = subprocess.run(
+            [sys.executable, "scripts/gc_safety_check.py", "--strict"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(run.returncode, 0, msg=run.stdout + run.stderr)
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_gc_threshold_preserves_string_regex_and_range_payloads(self) -> None:
+        src = """
+        module main
+        import stdlib.collections (Maybe)
+        import stdlib.regex as regex
+        import stdlib.string as string
+
+        fn range_score(found: Maybe regex.Match) -> Int =
+          match found with
+          | Just(regex.Match start end) -> (start * 10) + end
+          | Nothing -> 0
+
+        fn main() -> Unit !{IO} =
+          match regex.compile("\\\\d+") with
+          | Ok re ->
+              print(
+                range_score(regex.find_first(re, "sprout-42"))
+                + string.length(string.concat(string.slice("sprout", 0, 3), "out"))
+                + string.length(regex.replace_all_literal(re, "ID", "x7y88"))
+                + string.length(regex.escape("(a+b)"))
+              )
+          | Err _ -> print(0)
+        """
+        with compiled_native_binary(self, src) as bin_path:
+            env = os.environ.copy()
+            env["SPROUT_DEBUG_GC"] = "1"
+            env["SPROUT_GC_THRESHOLD"] = "1"
+            env["SPROUT_GC_ADAPT_RATIO"] = "0"
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True, env=env)
+        self.assertEqual(run.stdout.strip(), "99")
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+        cycles = self._assert_gc_cycles_have_live_and_timing(run.stderr)
+        self.assertTrue(any(cycle["reason"] == "threshold" and cycle["threshold"] == 1 for cycle in cycles))
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_native_byte_offset_helpers_reject_out_of_range_indexes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            harness_c = tmp_path / "harness.c"
+            bin_path = tmp_path / "harness"
+            harness_c.write_text(
+                """
+                #include <stdio.h>
+                long long sprout_register_ctor(long long tag, const char* name, long long arity);
+                long long sprout_tag(long long h);
+                long long str_char_at_byte(const char* s, long long byte_pos);
+                long long str_char_width_at_byte(const char* s, long long byte_pos);
+                _Bool str_starts_with_at_byte(const char* s, long long byte_pos, const char* prefix);
+
+                int main(void) {
+                  long long huge = 922337203685477580LL;
+                  sprout_register_ctor(1, "Nothing", 0);
+                  sprout_register_ctor(2, "Just", 1);
+                  long long ch = str_char_at_byte("abc", huge);
+                  printf("%lld\\n", sprout_tag(ch) == 1 ? 0LL : 100LL);
+                  printf("%lld\\n", str_char_width_at_byte("abc", huge));
+                  printf("%d\\n", str_starts_with_at_byte("abc", huge, "a") ? 1000 : 0);
+                  return 0;
+                }
+                """,
+                encoding="utf-8",
+            )
+            clang_cmd = [
+                "clang",
+                "runtime/sprout_runtime.c",
+                str(harness_c),
+                "-O0",
+                "-o",
+                str(bin_path),
+            ]
+            if sys.platform == "darwin":
+                clang_cmd.extend(["-framework", "Security", "-framework", "CoreFoundation"])
+            subprocess.run(clang_cmd, check=True)
+            run = subprocess.run([str(bin_path)], check=False, capture_output=True, text=True)
+        self.assertEqual(run.stdout, "0\n0\n0\n")
+        self.assertEqual(run.returncode, 0, msg=run.stderr)
+
     def test_runtime_managed_bytes_error_paths_do_not_manually_free_gc_objects(self) -> None:
         runtime_src = Path(sprout_cli.__file__).read_text(encoding="utf-8")
         random_bytes_body = re.search(

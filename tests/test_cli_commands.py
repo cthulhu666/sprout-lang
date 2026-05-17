@@ -165,6 +165,33 @@ class CliCommandTests(unittest.TestCase):
             )
             self.assertEqual(run.returncode, 0, msg=run.stderr or run.stdout)
 
+    def test_emit_runtime_c_uses_portable_analysis_service_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "main.sprout"
+            runtime_c = root / "runtime.c"
+            src.write_text("fn main() -> Unit !{IO} = print(0)\n", encoding="utf-8")
+            run = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "sprout.cli",
+                    "compile",
+                    "--emit-runtime-c",
+                    str(runtime_c),
+                    "-o",
+                    "/dev/null",
+                    str(src),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run.returncode, 0, msg=run.stderr)
+            emitted = runtime_c.read_text(encoding="utf-8")
+            self.assertIn("python3 -m sprout.analysis_service_entrypoint", emitted)
+            self.assertNotIn(sys.executable, emitted)
+
     def test_run_passes_program_args_to_argv_get(self) -> None:
         src = """
         module main
