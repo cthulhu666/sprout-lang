@@ -350,6 +350,32 @@ build-stage2-asan:
   clang "$TMP_LL" runtime/sprout_runtime.c -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE2"
   echo "==> Built $STAGE2 (asan)"
 
+# Build the self-hosted analysis service binary (Phase 9).
+# Requires compile_driver_bin_stage1; build it first with: just build-stage1
+# Output: analysis_service_bin — JSON-over-stdio daemon used by the language server bridge.
+build-analysis-service:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE1="compile_driver_bin_stage1"
+  if [[ ! -x "./$STAGE1" ]]; then
+    echo "ERROR: $STAGE1 not found; run: just build-stage1" >&2
+    exit 1
+  fi
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/analysis_service_driver.sprout"
+  OUT="analysis_service_bin"
+  TMP_LL="/tmp/sprout_analysis_service_$$.ll"
+  trap 'rm -f "$TMP_LL"' EXIT
+  echo "==> Emitting LLVM IR for analysis service..."
+  "./$STAGE1" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Validating IR..."
+  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
+  echo "==> Linking with clang..."
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$OUT"
+  echo "==> Built $OUT"
+
 # Compile all examples to LLVM IR. Alias for compile-examples-stage1 (stage-1 self-hosted binary).
 # For the Python stage-0 path: just compile-examples-stage0
 compile-examples: compile-examples-stage1

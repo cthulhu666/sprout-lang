@@ -1,0 +1,348 @@
+module main
+import stdlib.json as json
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+# ---------------------------------------------------------------------------
+# Header stripping — mirrors compiler.sprout (strip_headers is not exported)
+
+fn is_header_line(s: String, pos: Int) -> Bool =
+  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
+  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
+
+fn next_line(s: String, pos: Int) -> Int =
+  if nl == -1 then str_len(s)
+  else pos + nl + 1
+  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+
+fn strip_headers(s: String, pos: Int) -> String =
+  if pos >= str_len(s) then ""
+  else if is_header_line(s, pos) then strip_headers(s, next_line(s, pos))
+  else str_slice(s, pos, str_len(s))
+
+fn count_header_lines(s: String, pos: Int, count: Int) -> Int =
+  if pos >= str_len(s) then count
+  else if is_header_line(s, pos) then count_header_lines(s, next_line(s, pos), count + 1)
+  else count
+
+# ---------------------------------------------------------------------------
+# JSON response construction
+
+fn ok_response(value: json.Json) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("ok", json.JsonBool(true),
+    json.JsonObjectCons("value", value,
+    json.JsonObjectNil)))
+
+fn error_response(msg: String) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("ok", json.JsonBool(false),
+    json.JsonObjectCons("error", json.JsonString(msg),
+    json.JsonObjectNil)))
+
+fn string_list_to_json(xs: List String) -> json.Json =
+  json.array_from_list(list_map(json.string, xs))
+
+fn int_list_to_json(xs: List Int) -> json.Json =
+  json.array_from_list(list_map(json.int, xs))
+
+fn not_implemented(op_name: String) -> json.Json =
+  error_response(string.concat("not yet implemented in self-hosted analysis service: ", op_name))
+
+fn empty_diags_response() -> json.Json =
+  ok_response(json.JsonObject(
+    json.JsonObjectCons("messages", json.array_from_list(Nil),
+    json.JsonObjectCons("lines", json.array_from_list(Nil),
+    json.JsonObjectCons("columns", json.array_from_list(Nil),
+    json.JsonObjectNil)))))
+
+fn require_string_field(req: json.Json, field: String) -> Result String String =
+  match json.json_get_field(req, field) with
+  | Nothing -> Err(string.concat("missing field: ", field))
+  | Just v ->
+      match json.json_get_string(v) with
+      | Nothing -> Err(string.concat("field must be a string: ", field))
+      | Just s -> Ok(s)
+
+# ---------------------------------------------------------------------------
+# AST name extraction
+
+fn ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
+  match ctors with
+  | Nil -> acc
+  | Cons ctor rest ->
+      match ctor with
+      | ast.TypeConstructor name _ -> ctor_names(rest, Cons(name, acc))
+
+fn method_sig_names(methods: List ast.ClassMethodSig, acc: List String) -> List String =
+  match methods with
+  | Nil -> acc
+  | Cons m rest ->
+      match m with
+      | ast.ClassMethodSig name _ _ _ -> method_sig_names(rest, Cons(name, acc))
+
+fn collect_decl_names(decls: List ast.Decl, acc: List String) -> List String =
+  match decls with
+  | Nil -> list_reverse(acc)
+  | Cons d rest ->
+      match d with
+      | ast.FnDecl name _ _ _ _ _ _ ->
+          collect_decl_names(rest, Cons(name, acc))
+      | ast.TypeDecl name _ ctors _ ->
+          collect_decl_names(rest, ctor_names(ctors, Cons(name, acc)))
+      | ast.RecordDecl name _ _ _ ->
+          collect_decl_names(rest, Cons(name, acc))
+      | ast.LetDecl name _ _ ->
+          collect_decl_names(rest, Cons(name, acc))
+      | ast.ClassDecl name _ methods _ _ ->
+          collect_decl_names(rest, method_sig_names(methods, Cons(name, acc)))
+      | ast.InstanceDecl _ _ _ _ ->
+          collect_decl_names(rest, acc)
+      | ast.AliasDecl name _ _ _ ->
+          collect_decl_names(rest, Cons(name, acc))
+
+fn parse_decl_names(src: String) -> List String =
+  match lexer.tokenize(strip_headers(src, 0)) with
+  | Err _ -> Nil
+  | Ok tokens ->
+      match parser.parse_program(tokens) with
+      | Err _ -> Nil
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ -> collect_decl_names(decls, Nil)
+
+# ---------------------------------------------------------------------------
+# Symbol location extraction
+
+fn collect_decl_locations(
+  decls: List ast.Decl,
+  line_offset: Int,
+  categories: List String,
+  names: List String,
+  lines: List Int,
+  cols: List Int
+) -> (List String, List String, List Int, List Int) =
+  match decls with
+  | Nil ->
+      (list_reverse(categories), list_reverse(names), list_reverse(lines), list_reverse(cols))
+  | Cons d rest ->
+      match d with
+      | ast.FnDecl name _ _ _ _ _ pos ->
+          collect_decl_locations(rest, line_offset,
+            Cons("fn", categories), Cons(name, names),
+            Cons(source.position_line(pos) + line_offset, lines),
+            Cons(source.position_column(pos), cols))
+      | ast.TypeDecl name _ _ pos ->
+          collect_decl_locations(rest, line_offset,
+            Cons("type", categories), Cons(name, names),
+            Cons(source.position_line(pos) + line_offset, lines),
+            Cons(source.position_column(pos), cols))
+      | ast.RecordDecl name _ _ pos ->
+          collect_decl_locations(rest, line_offset,
+            Cons("type", categories), Cons(name, names),
+            Cons(source.position_line(pos) + line_offset, lines),
+            Cons(source.position_column(pos), cols))
+      | ast.LetDecl name _ pos ->
+          collect_decl_locations(rest, line_offset,
+            Cons("let", categories), Cons(name, names),
+            Cons(source.position_line(pos) + line_offset, lines),
+            Cons(source.position_column(pos), cols))
+      | ast.ClassDecl name _ _ _ pos ->
+          collect_decl_locations(rest, line_offset,
+            Cons("class", categories), Cons(name, names),
+            Cons(source.position_line(pos) + line_offset, lines),
+            Cons(source.position_column(pos), cols))
+      | ast.InstanceDecl _ _ _ _ ->
+          collect_decl_locations(rest, line_offset, categories, names, lines, cols)
+      | ast.AliasDecl name _ _ pos ->
+          collect_decl_locations(rest, line_offset,
+            Cons("alias", categories), Cons(name, names),
+            Cons(source.position_line(pos) + line_offset, lines),
+            Cons(source.position_column(pos), cols))
+
+fn empty_locations_json() -> json.Json =
+  ok_response(json.JsonObject(
+    json.JsonObjectCons("categories", json.array_from_list(Nil),
+    json.JsonObjectCons("names", json.array_from_list(Nil),
+    json.JsonObjectCons("lines", json.array_from_list(Nil),
+    json.JsonObjectCons("columns", json.array_from_list(Nil),
+    json.JsonObjectNil))))))
+
+fn parse_symbol_locations(src: String) -> json.Json =
+  match lexer.tokenize(strip_headers(src, 0)) with
+  | Err _ -> empty_locations_json()
+  | Ok tokens ->
+      match parser.parse_program(tokens) with
+      | Err _ -> empty_locations_json()
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match collect_decl_locations(decls, count_header_lines(src, 0, 0), Nil, Nil, Nil, Nil) with
+              | (cats, loc_names, loc_lines, loc_cols) ->
+                  ok_response(json.JsonObject(
+                    json.JsonObjectCons("categories", string_list_to_json(cats),
+                    json.JsonObjectCons("names", string_list_to_json(loc_names),
+                    json.JsonObjectCons("lines", int_list_to_json(loc_lines),
+                    json.JsonObjectCons("columns", int_list_to_json(loc_cols),
+                    json.JsonObjectNil))))))
+
+# ---------------------------------------------------------------------------
+# Import name extraction (for symbol_inventory imported list)
+
+fn import_spec_names(spec: module_loader.ImportSpec) -> List String =
+  match spec with
+  | module_loader.ImportAlias _ alias -> Cons(alias, Nil)
+  | module_loader.ImportSelective _ names -> names
+
+fn collect_import_names(specs: List module_loader.ImportSpec, acc: List String) -> List String =
+  match specs with
+  | Nil -> list_reverse(acc)
+  | Cons s rest ->
+      collect_import_names(rest, list_append(list_reverse(import_spec_names(s)), acc))
+
+fn exported_names_from_src(src: String) -> List String =
+  match bundler.scan_source_info(src) with
+  | (_, exported, _) -> exported
+
+# ---------------------------------------------------------------------------
+# Diagnostic formatting
+
+fn collect_diag_fields(
+  diags: List compiler.Diagnostic,
+  msgs: List String,
+  lines: List Int,
+  cols: List Int
+) -> (List String, List Int, List Int) =
+  match diags with
+  | Nil -> (list_reverse(msgs), list_reverse(lines), list_reverse(cols))
+  | Cons d rest ->
+      match d with
+      | compiler.DiagError msg ->
+          collect_diag_fields(rest, Cons(msg, msgs), Cons(0, lines), Cons(0, cols))
+      | compiler.DiagWarning msg ->
+          collect_diag_fields(rest, Cons(msg, msgs), Cons(0, lines), Cons(0, cols))
+
+fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
+  match collect_diag_fields(diags, Nil, Nil, Nil) with
+  | (msgs, diag_lines, diag_cols) ->
+      ok_response(json.JsonObject(
+        json.JsonObjectCons("messages", string_list_to_json(msgs),
+        json.JsonObjectCons("lines", int_list_to_json(diag_lines),
+        json.JsonObjectCons("columns", int_list_to_json(diag_cols),
+        json.JsonObjectNil)))))
+
+# ---------------------------------------------------------------------------
+# Op handlers
+
+fn op_check_source(src: String, stdlib_root: String) -> json.Json !{IO} =
+  do
+    result <- compiler.compile_source_with_root(src, stdlib_root)
+    match result with
+    | compiler.CompileOk _ -> ok_response(json.JsonNull)
+    | compiler.CompileFail diags ->
+        match diags with
+        | Nil -> error_response("check failed")
+        | Cons d _ ->
+            match d with
+            | compiler.DiagError msg -> error_response(msg)
+            | compiler.DiagWarning msg -> error_response(msg)
+
+fn op_diagnostics_in_source(src: String, stdlib_root: String) -> json.Json !{IO} =
+  do
+    result <- compiler.compile_source_with_root(src, stdlib_root)
+    match result with
+    | compiler.CompileOk _ -> empty_diags_response()
+    | compiler.CompileFail diags -> diags_to_json(diags)
+
+fn op_declared_names_in_source(src: String) -> json.Json =
+  ok_response(string_list_to_json(parse_decl_names(src)))
+
+fn op_exported_names_in_source(src: String) -> json.Json =
+  ok_response(string_list_to_json(exported_names_from_src(src)))
+
+fn op_symbol_inventory_in_source(src: String) -> json.Json =
+  ok_response(json.JsonObject(
+    json.JsonObjectCons("declared", string_list_to_json(parse_decl_names(src)),
+    json.JsonObjectCons("imported", string_list_to_json(collect_import_names(module_loader.collect_imports(src), Nil)),
+    json.JsonObjectCons("exported", string_list_to_json(exported_names_from_src(src)),
+    json.JsonObjectNil)))))
+
+fn op_symbol_locations_in_source(src: String) -> json.Json =
+  parse_symbol_locations(src)
+
+# ---------------------------------------------------------------------------
+# Request dispatch
+
+fn dispatch_op(op: String, req: json.Json, stdlib_root: String) -> json.Json !{IO} =
+  if op == "check_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src ->
+        if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
+        else op_check_source(src, stdlib_root)
+  else if op == "diagnostics_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src ->
+        if stdlib_root == "" then empty_diags_response()
+        else op_diagnostics_in_source(src, stdlib_root)
+  else if op == "declared_names_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src -> op_declared_names_in_source(src)
+  else if op == "exported_names_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src -> op_exported_names_in_source(src)
+  else if op == "symbol_inventory_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src -> op_symbol_inventory_in_source(src)
+  else if op == "symbol_locations_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src -> op_symbol_locations_in_source(src)
+  else if op == "type_of_in_source" then not_implemented(op)
+  else if op == "instances_in_source" then not_implemented(op)
+  else if op == "eval_expr_in_source" then not_implemented(op)
+  else if op == "complete_in_state" then not_implemented(op)
+  else error_response(string.concat("unknown op: ", op))
+
+fn dispatch(req: json.Json, stdlib_root: String) -> json.Json !{IO} =
+  match json.json_get_field(req, "op") with
+  | Nothing -> error_response("missing 'op' field")
+  | Just op_val ->
+      match json.json_get_string(op_val) with
+      | Nothing -> error_response("'op' must be a string")
+      | Just op -> dispatch_op(op, req, stdlib_root)
+
+fn dispatch_line(line: String, stdlib_root: String) -> json.Json !{IO} =
+  match json.parse(line) with
+  | Err (json.JsonDecode msg) -> error_response(string.concat("invalid JSON: ", msg))
+  | Ok req -> dispatch(req, stdlib_root)
+
+# ---------------------------------------------------------------------------
+# Service loop
+
+fn service_loop(stdlib_root: String) -> Unit !{IO} =
+  match term_read_line(()) with
+  | Nothing -> ()
+  | Just line ->
+      if string.is_empty(line) then service_loop(stdlib_root)
+      else
+        do
+          response <- dispatch_line(line, stdlib_root)
+          term_write(json.stringify(response) ++ "\n")
+          service_loop(stdlib_root)
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing -> service_loop("")
+  | Just stdlib_root -> service_loop(stdlib_root)

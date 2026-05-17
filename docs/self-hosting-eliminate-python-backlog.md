@@ -261,16 +261,26 @@ Definition of done:
 
 ### Phase 9: Self-Hosted Evaluation and Compiler Services
 
-- [ ] Replace Python-backed analysis-service responsibilities with a Sprout
+- [x] Replace Python-backed analysis-service responsibilities with a Sprout
   compiler-service implementation over the new internal artifacts.
-- [ ] Move `type_of`, `declared_names`, `exported_names`, diagnostics,
+  *(2026-05-17: `stdlib/compiler/analysis_service_driver.sprout` is a JSON-over-stdio
+  daemon that handles `declared_names_in_source`, `exported_names_in_source`,
+  `symbol_inventory_in_source`, `symbol_locations_in_source`, `check_source`, and
+  `diagnostics_in_source`; built as `analysis_service_bin` via `just build-analysis-service`.
+  Root cause of crash fixed: `term_read_line`, `term_write`, `json_parse` added to
+  `extern_sigs_list()` in `codegen.sprout`. All 5 manual test cases pass.)*
+- [~] Move `type_of`, `declared_names`, `exported_names`, diagnostics,
   instances, symbol inventory, and evaluation requests onto self-hosted
   compiler services.
+  *(Structural ops complete; `type_of`, `instances`, `eval_expr` stub to `not_implemented`.)*
 - [ ] Ensure REPL, editor/language-service, and compiler CLI consumers share
   the same service boundary.
+  *(Blocked: binary needs stdlib-root passed as argv[0]; `SPROUT_ANALYSIS_SERVICE_CMD`
+  must include the path, e.g. `./analysis_service_bin /path/to/stdlib`.)*
 - [ ] Remove Python subprocess assumptions from native and interpreter tool
   flows.
 - [ ] Keep service behavior reproducible through snapshot-based contracts.
+  *(Parity test suite `test_analysis_service_parity.py` not yet written.)*
 
 Definition of done:
 - Python no longer owns interactive analysis/evaluation services
