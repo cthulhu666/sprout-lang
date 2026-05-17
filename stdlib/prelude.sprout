@@ -279,6 +279,7 @@ export fn vec_to_list(vec: Vec a) -> List a =
   vec_to_list_go(vec, vec_length(vec) - 1, Nil)
 
 fn add_ints(left: Int, right: Int) -> Int = left + right
+export fn negate(x: Int) -> Int = -x
 
 export fn vec_sum(vec: Vec Int) -> Int =
   vec_fold(add_ints, 0, vec)
