@@ -29,6 +29,12 @@ measure-gc-real:
 gc-safety-check *args:
   python3 scripts/gc_safety_check.py {{args}}
 
+# Regenerate runtime/sprout_runtime.c from the embedded template in sprout/cli.py.
+# Run this whenever sprout/cli.py's runtime_c string or analysis bridge changes.
+update-runtime:
+  python3 -m sprout.cli compile --emit-runtime-c runtime/sprout_runtime.c --with-stdlib -o /dev/null stdlib/compiler/compile_driver.sprout
+  @echo "runtime/sprout_runtime.c updated ($(wc -l < runtime/sprout_runtime.c) lines)"
+
 parse file:
   python3 -m sprout.cli parse {{file}}
 
@@ -102,13 +108,10 @@ test-stdlib-stage1:
     exit 1
   fi
   STDLIB_ROOT="$(pwd)/stdlib"
-  TMP_RT="/tmp/sprout_rt_$$.c"
   TMP_LL="/tmp/sprout_test_$$.ll"
   TMP_BIN="/tmp/sprout_testbin_$$"
   TMP_ERR="/tmp/sprout_testerr_$$.txt"
-  trap 'rm -f "$TMP_RT" "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_RT" --with-stdlib -o /dev/null stdlib/compiler/compile_driver.sprout
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   total_failed=0
@@ -121,7 +124,7 @@ test-stdlib-stage1:
         echo "  COMPILE FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
-      if ! clang "$TMP_LL" "$TMP_RT" -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
+      if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
         echo "  LINK FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
@@ -157,13 +160,10 @@ test-stdlib-stage2:
     exit 1
   fi
   STDLIB_ROOT="$(pwd)/stdlib"
-  TMP_RT="/tmp/sprout_rt_$$.c"
   TMP_LL="/tmp/sprout_test_$$.ll"
   TMP_BIN="/tmp/sprout_testbin_$$"
   TMP_ERR="/tmp/sprout_testerr_$$.txt"
-  trap 'rm -f "$TMP_RT" "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_RT" --with-stdlib -o /dev/null stdlib/compiler/compile_driver.sprout
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   total_failed=0
@@ -176,7 +176,7 @@ test-stdlib-stage2:
         echo "  COMPILE FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
-      if ! clang "$TMP_LL" "$TMP_RT" -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
+      if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
         echo "  LINK FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
@@ -215,7 +215,6 @@ compile file out:
 
 # Compile {{file}} to a native binary using stage-1 IR emission + clang link.
 # Requires compile_driver_bin_stage1; build it first with: just build-stage1
-# Python is still used for --emit-runtime-c (C runtime extraction).
 compile-native file out:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -225,13 +224,11 @@ compile-native file out:
   fi
   STDLIB_ROOT="$(pwd)/stdlib"
   TMP_LL="/tmp/sprout_compile_$$.ll"
-  TMP_C="/tmp/sprout_runtime_$$.c"
-  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  trap 'rm -f "$TMP_LL"' EXIT
   ./compile_driver_bin_stage1 --emit-ir "$STDLIB_ROOT" {{file}} > "$TMP_LL"
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null {{file}}
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o {{out}}
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o {{out}}
 
 # Build compile_driver_bin (stage-0) from Python.
 # Output: compile_driver_bin — native binary produced by the Python compiler.
@@ -252,18 +249,15 @@ build-stage1:
   DRIVER="stdlib/compiler/compile_driver.sprout"
   STAGE1="compile_driver_bin_stage1"
   TMP_LL="/tmp/sprout_stage1_$$.ll"
-  TMP_C="/tmp/sprout_runtime_$$.c"
-  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR via Sprout-native codegen..."
   ./compile_driver_bin --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
   echo "==> Linking with clang..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o "$STAGE1"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$STAGE1"
   echo "==> Built $STAGE1"
 
 build-stage2:
@@ -274,8 +268,7 @@ build-stage2:
   STAGE1="compile_driver_bin_stage1"
   STAGE2="compile_driver_bin_stage2"
   TMP_LL="/tmp/sprout_stage2_$$.ll"
-  TMP_C="/tmp/sprout_runtime_$$.c"
-  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  trap 'rm -f "$TMP_LL"' EXIT
   if [[ ! -x "$STAGE1" ]]; then
     echo "ERROR: $STAGE1 not found; run: just build-stage1" >&2
     exit 1
@@ -284,12 +277,10 @@ build-stage2:
   "./$STAGE1" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
   echo "==> Linking with clang..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o "$STAGE2"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$STAGE2"
   echo "==> Built $STAGE2"
 
 build-stage3:
@@ -300,8 +291,7 @@ build-stage3:
   STAGE2="compile_driver_bin_stage2"
   STAGE3="compile_driver_bin_stage3"
   TMP_LL="/tmp/sprout_stage3_$$.ll"
-  TMP_C="/tmp/sprout_runtime_$$.c"
-  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  trap 'rm -f "$TMP_LL"' EXIT
   if [[ ! -x "$STAGE2" ]]; then
     echo "ERROR: $STAGE2 not found; run: just build-stage2" >&2
     exit 1
@@ -310,12 +300,10 @@ build-stage3:
   "./$STAGE2" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
   echo "==> Linking with clang..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o "$STAGE3"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$STAGE3"
   echo "==> Built $STAGE3"
 
 build-stage1-asan:
@@ -331,16 +319,13 @@ build-stage1-asan:
   DRIVER="stdlib/compiler/compile_driver.sprout"
   STAGE1="compile_driver_bin_stage1_asan"
   TMP_LL="/tmp/sprout_stage1_asan_$$.ll"
-  TMP_C="/tmp/sprout_runtime_asan_$$.c"
-  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR via Sprout-native codegen..."
   ./compile_driver_bin --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
   echo "==> Linking with clang + ASan/UBSan..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" "$TMP_C" -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE1"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE1"
   echo "==> Built $STAGE1 (asan)"
 
 build-stage2-asan:
@@ -352,20 +337,17 @@ build-stage2-asan:
   STAGE1="compile_driver_bin_stage1"
   STAGE2="compile_driver_bin_stage2_asan"
   TMP_LL="/tmp/sprout_stage2_asan_$$.ll"
-  TMP_C="/tmp/sprout_runtime_asan_$$.c"
-  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  trap 'rm -f "$TMP_LL"' EXIT
   if [[ ! -x "$STAGE1" ]]; then
     echo "ERROR: $STAGE1 not found; run: just build-stage1" >&2
     exit 1
   fi
   echo "==> Emitting LLVM IR via stage-1 Sprout-native codegen..."
   "./$STAGE1" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null "$DRIVER"
   echo "==> Linking with clang + ASan/UBSan..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" "$TMP_C" -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE2"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE2"
   echo "==> Built $STAGE2 (asan)"
 
 # Compile all examples to LLVM IR. Alias for compile-examples-stage1 (stage-1 self-hosted binary).
@@ -411,13 +393,10 @@ compile-examples-stage1:
     exit 1
   fi
   STDLIB_ROOT="$(pwd)/stdlib"
-  TMP_RT="/tmp/sprout_rt_$$.c"
   TMP_LL="/tmp/sprout_ex_$$.ll"
   TMP_BIN="/tmp/sprout_exbin_$$"
   TMP_ERR="/tmp/sprout_exerr_$$.txt"
-  trap 'rm -f "$TMP_RT" "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_RT" --with-stdlib -o /dev/null stdlib/compiler/compile_driver.sprout
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   total_failed=0
@@ -428,7 +407,7 @@ compile-examples-stage1:
       echo "  COMPILE FAILED:"; cat "$TMP_ERR"
       total_failed=$((total_failed + 1)); continue
     fi
-    if ! clang "$TMP_LL" "$TMP_RT" -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
+    if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
       echo "  LINK FAILED:"; cat "$TMP_ERR"
       total_failed=$((total_failed + 1)); continue
     fi
@@ -453,13 +432,10 @@ compile-examples-stage2:
     exit 1
   fi
   STDLIB_ROOT="$(pwd)/stdlib"
-  TMP_RT="/tmp/sprout_rt_$$.c"
   TMP_LL="/tmp/sprout_ex_$$.ll"
   TMP_BIN="/tmp/sprout_exbin_$$"
   TMP_ERR="/tmp/sprout_exerr_$$.txt"
-  trap 'rm -f "$TMP_RT" "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_RT" --with-stdlib -o /dev/null stdlib/compiler/compile_driver.sprout
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   total_failed=0
@@ -470,7 +446,7 @@ compile-examples-stage2:
       echo "  COMPILE FAILED:"; cat "$TMP_ERR"
       total_failed=$((total_failed + 1)); continue
     fi
-    if ! clang "$TMP_LL" "$TMP_RT" -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
+    if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
       echo "  LINK FAILED:"; cat "$TMP_ERR"
       total_failed=$((total_failed + 1)); continue
     fi
@@ -495,13 +471,10 @@ compile-examples-stage3:
     exit 1
   fi
   STDLIB_ROOT="$(pwd)/stdlib"
-  TMP_RT="/tmp/sprout_rt_$$.c"
   TMP_LL="/tmp/sprout_ex_$$.ll"
   TMP_BIN="/tmp/sprout_exbin_$$"
   TMP_ERR="/tmp/sprout_exerr_$$.txt"
-  trap 'rm -f "$TMP_RT" "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
-  echo "==> Extracting C runtime..."
-  python3 -m sprout.cli compile --emit-runtime-c "$TMP_RT" --with-stdlib -o /dev/null stdlib/compiler/compile_driver.sprout
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   total_failed=0
@@ -512,7 +485,7 @@ compile-examples-stage3:
       echo "  COMPILE FAILED:"; cat "$TMP_ERR"
       total_failed=$((total_failed + 1)); continue
     fi
-    if ! clang "$TMP_LL" "$TMP_RT" -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
+    if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
       echo "  LINK FAILED:"; cat "$TMP_ERR"
       total_failed=$((total_failed + 1)); continue
     fi

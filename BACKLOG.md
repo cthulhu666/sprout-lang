@@ -83,7 +83,7 @@ Definition of done:
 
 ### 7) Tooling and Developer UX
 
-- [ ] `P2` Extract the C runtime out of the `runtime_c = """..."""` string in `sprout/cli.py` into a standalone `sprout/runtime.c` source file. `cli.py` would read and concatenate it with the dynamic analysis-bridge piece at compile time. Benefits: proper C tooling (clang-format, clang-tidy, LSP), cleaner diffs, and `scripts/gc_safety_check.py` can run directly on the source instead of an extracted copy.
+- [x] `P2` Extract the C runtime out of the `runtime_c = """..."""` string in `sprout/cli.py` into a standalone `runtime/sprout_runtime.c` source file (2026-05-17). All `build-stage*`, `test-stdlib-stage*`, `compile-examples-stage*`, and `compile-native` justfile recipes now link `runtime/sprout_runtime.c` directly — no Python invocation needed for the C runtime. `just update-runtime` regenerates the file when the embedded template in `cli.py` changes. `scripts/gc_safety_check.py` updated to read the file directly (now reports correct line numbers). Remaining dynamic piece (analysis bridge with embedded Python executable path) is still rendered by `cli.py` for native REPL builds only.
 
 - [x] `P1` Add REPL (parse/typecheck/eval loop).
 - [x] `P1` Add better diagnostics for module/import/export errors with source context.

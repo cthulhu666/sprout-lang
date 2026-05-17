@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GC safety linter for the Sprout C runtime embedded in sprout/cli.py.
+GC safety linter for the Sprout C runtime (runtime/sprout_runtime.c).
 
 Detects C functions where sprout_gc_maybe_collect_threshold() fires while
 const char* / char* locals or parameters are live but not yet registered
@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CLI_PY = ROOT / "sprout" / "cli.py"
+RUNTIME_C = ROOT / "runtime" / "sprout_runtime.c"
 
 # Matches the first line of a C function definition:
 #   [static] [const] [unsigned] <type> <name>(<params>) {
@@ -50,14 +50,12 @@ _FN_SIG_RE = re.compile(
 )
 
 
-def extract_c_runtime(cli_py: Path) -> str:
-    """Extract the embedded C runtime string from cli.py."""
-    text = cli_py.read_text(encoding="utf-8")
-    m = re.search(r'runtime_c\s*=\s*"""(.*?)"""', text, re.DOTALL)
-    if not m:
-        print("ERROR: could not find runtime_c in cli.py", file=sys.stderr)
+def extract_c_runtime(runtime_c: Path) -> str:
+    """Read the C runtime from runtime/sprout_runtime.c."""
+    if not runtime_c.exists():
+        print(f"ERROR: {runtime_c} not found; run: just update-runtime", file=sys.stderr)
         sys.exit(2)
-    return m.group(1)
+    return runtime_c.read_text(encoding="utf-8")
 
 
 def split_into_functions(c: str) -> list[tuple[str, str, int]]:
@@ -153,7 +151,7 @@ def check_gc_safety(fn_name: str, body: str, lineno: int) -> list[str]:
     for var in sorted(suspect):
         if re.search(r"\b" + re.escape(var) + r"\b", after):
             issues.append(
-                f"  cli.py ~line {lineno}: {fn_name}(): "
+                f"  sprout_runtime.c ~line {lineno}: {fn_name}(): "
                 f"'{var}' (char* heap ptr) used after sprout_gc_maybe_collect_threshold()"
             )
     return issues
@@ -163,7 +161,7 @@ def main() -> int:
     verbose = "--verbose" in sys.argv
     strict = "--strict" in sys.argv
 
-    c = extract_c_runtime(CLI_PY)
+    c = extract_c_runtime(RUNTIME_C)
     functions = split_into_functions(c)
 
     all_issues: list[str] = []
@@ -177,7 +175,7 @@ def main() -> int:
     if all_issues:
         prefix = "WARN" if not strict else "FAIL"
         print(
-            f"{prefix}: GC safety issues in {CLI_PY.relative_to(ROOT)} "
+            f"{prefix}: GC safety issues in {RUNTIME_C.relative_to(ROOT)} "
             f"({len(all_issues)} found):"
         )
         for issue in all_issues:

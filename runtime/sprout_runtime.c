@@ -1,0 +1,5912 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <string.h>
+#include <regex.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <errno.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <termios.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#include <Security/SecureTransport.h>
+#include <Security/SecTrust.h>
+#include <Security/SecCertificate.h>
+#endif
+
+typedef struct {
+  long long tag;
+  long long f0;
+  long long f1;
+  long long f2;
+  long long f3;
+  long long f4;
+  long long f5;
+  long long f6;
+  long long f7;
+  long long f8;
+} SproutObj;
+
+typedef enum {
+  SPROUT_HEAP_OBJ = 1,
+  SPROUT_HEAP_CLOSURE = 2,
+  SPROUT_HEAP_VECTOR = 3,
+  SPROUT_HEAP_MAP = 4,
+  SPROUT_HEAP_BYTES = 5,
+  SPROUT_HEAP_BUILDER = 6,
+  SPROUT_HEAP_TUPLE = 7,
+  SPROUT_HEAP_RANGE = 8,
+  SPROUT_HEAP_REF = 9,
+  SPROUT_HEAP_CSTR = 10
+} SproutHeapKind;
+
+typedef struct ManagedNode {
+  void* ptr;
+  SproutHeapKind kind;
+  size_t aux_slots;
+  int marked;
+  struct ManagedNode* next;
+  struct ManagedNode* hash_next;
+} ManagedNode;
+
+typedef enum {
+  SPROUT_ROOT_I64 = 1,
+  SPROUT_ROOT_PTR = 2,
+  SPROUT_ROOT_SCAN = 3
+} SproutRootKind;
+
+typedef struct RootNode {
+  void* slot;
+  SproutRootKind kind;
+  size_t aux_words;
+  struct RootNode* next;
+} RootNode;
+
+typedef struct {
+  long long tag;
+  const char* name;
+  long long arity;
+} CtorMeta;
+
+typedef struct {
+  long long len;
+  long long cap;
+  long long* data;
+} VectorVal;
+
+typedef struct InternBucket { char* str; struct InternBucket* next; } InternBucket;
+
+typedef struct {
+  const char* key;    /* interned string — permanent, never freed */
+  long long   value;  /* Sprout handle (GC child at index 0) */
+  long long   left;   /* left child handle, or 0 (GC child at index 1) */
+  long long   right;  /* right child handle, or 0 (GC child at index 2) */
+  int         height; /* AVL height: 1 for leaf */
+  int         size;   /* subtree size for O(log n) nth-key/nth-value */
+} BSTNode;
+
+typedef struct {
+  char* data;
+  size_t len;
+  size_t cap;
+} ByteBuf;
+
+typedef struct {
+  size_t len;
+  unsigned char* data;
+} BytesVal;
+
+typedef struct {
+  size_t len;
+  size_t count;
+  BytesVal** chunks;
+} BuilderVal;
+
+typedef struct {
+  long long start;
+  long long end;
+} IntRangeVal;
+
+typedef struct {
+  long long value;
+} RefVal;
+
+typedef struct {
+  char* host;
+  char* port;
+  char* path;
+  int use_tls;
+} HttpUrl;
+
+static ManagedNode* g_heap_nodes = NULL;
+static ManagedNode* g_heap_index[131071];
+static InternBucket* g_intern_table[65537];
+static RootNode* g_root_nodes = NULL;
+static RootNode* g_temp_root_nodes = NULL;
+static SproutObj* g_nothing_singleton = NULL;
+static CtorMeta g_ctor_meta[2048];
+static long long g_ctor_meta_len = 0;
+static int g_listener_fd[2048];
+static int g_listener_used[2048];
+static int g_conn_fd[2048];
+static int g_conn_used[2048];
+
+static long long alloc_listener_handle(void) {
+  for (long long h = 1; h < 2048; h++) {
+    if (!g_listener_used[h]) return h;
+  }
+  return -1;
+}
+
+static long long alloc_conn_handle(void) {
+  for (long long h = 1; h < 2048; h++) {
+    if (!g_conn_used[h]) return h;
+  }
+  return -1;
+}
+static int g_sprout_argc = 0;
+static char** g_sprout_argv = NULL;
+static int g_debug_alloc_enabled = 0;
+static int g_debug_alloc_report_registered = 0;
+static int g_debug_gc_enabled = 0;
+static int g_gc_collect_registered = 0;
+static int g_gc_active = 0;
+static long long g_debug_alloc_sprout_obj = 0;
+static long long g_debug_alloc_closure = 0;
+static long long g_debug_alloc_vector = 0;
+static long long g_debug_alloc_map = 0;
+static long long g_debug_alloc_bytes = 0;
+static long long g_debug_alloc_builder = 0;
+static long long g_debug_gc_swept = 0;
+static long long g_gc_cycle_count = 0;
+static long long g_managed_heap_count = 0;
+static long long g_managed_alloc_since_gc = 0;
+static long long g_gc_threshold = 4096;
+static long long g_gc_marked_count = 0;
+/* Per-type live counts and CSTR bytes after each sweep (logged with SPROUT_DEBUG_GC). */
+static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
+static long long g_gc_live_map = 0, g_gc_live_bytes = 0, g_gc_live_builder = 0;
+static long long g_gc_live_tuple = 0, g_gc_live_range = 0, g_gc_live_ref = 0;
+static long long g_gc_live_cstr = 0, g_gc_live_cstr_bytes = 0;
+static double g_gc_adapt_ratio = 0.2;   /* fraction of heap swept below which threshold grows; 0 disables */
+static double g_gc_adapt_factor = 2.0;  /* multiplier applied to threshold when adapting */
+static long long g_gc_adapt_cap = 0;    /* uncapped; BST map is O(1) unmanaged payload per node */
+/* Livelock detection: track consecutive cycles that sweep almost nothing. */
+static long long g_gc_consecutive_bad_cycles = 0;
+static int       g_gc_livelock_warned = 0;
+static double    g_gc_livelock_ratio = 0.05;  /* sweep efficiency below which a cycle is "bad" */
+static long long g_gc_livelock_cycles = 1000; /* consecutive bad cycles before triggering */
+static int       g_gc_livelock_action = 1;    /* 0=off  1=warn  2=abort */
+/* Crash attribution: name of the function currently being compiled to IR. */
+static const char* g_sprout_current_fn = NULL;
+
+static void sprout_crash_handler(int sig) {
+  const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : "SIGABRT";
+  if (g_sprout_current_fn != NULL)
+    fprintf(stderr, "[sprout] %s while emitting IR for: %s\n", sig_name, g_sprout_current_fn);
+  else
+    fprintf(stderr, "[sprout] %s (no current function set)\n", sig_name);
+  fflush(stderr);
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
+long long sprout_set_current_fn(const char* fn_name) {
+  g_sprout_current_fn = fn_name;
+  return 0;
+}
+
+static void tcp_fail(const char* msg);
+long long sprout_abort_match(void);
+long long sprout_make0(long long tag);
+long long sprout_make1(long long tag, long long a0);
+long long sprout_make2(long long tag, long long a0, long long a1);
+long long sprout_make3(long long tag, long long a0, long long a1, long long a2);
+long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3);
+long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4);
+long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5);
+long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6);
+long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7);
+long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8);
+long long sprout_tag(long long h);
+long long sprout_field(long long h, long long idx);
+static CtorMeta* find_ctor(long long tag);
+static char* alloc_cstr(size_t len, const char* ctx);
+static char* dup_slice(const char* start, size_t len);
+static char* dup_cstr(const char* s);
+static void buf_init(ByteBuf* buf);
+static void buf_append_bytes(ByteBuf* buf, const char* data, size_t len);
+static void buf_append_cstr(ByteBuf* buf, const char* text);
+static void buf_append_char(ByteBuf* buf, char ch);
+static void regex_builtin_fail(const char* builtin, const char* detail);
+static int regex_compile_ere(const char* pattern, regex_t* out_regex, char** out_error);
+static size_t sprout_utf8_char_width(unsigned char lead);
+static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_limit);
+static void json_append_value(ByteBuf* out, long long value);
+static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
+static IntRangeVal* sprout_alloc_range_val(const char* ctx);
+static void sha256_digest(const unsigned char* data, size_t len, unsigned char out[32]);
+static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]);
+static char* base64_encode_bytes(const unsigned char* data, size_t len);
+static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err);
+static void sprout_gc_collect(void);
+static void sprout_gc_collect_with_reason(const char* reason);
+static long long sprout_now_micros(void);
+
+static int sprout_debug_alloc_truthy(const char* value) {
+  if (value == NULL || value[0] == '\0') return 0;
+  if (strcmp(value, "0") == 0) return 0;
+  if (strcmp(value, "false") == 0) return 0;
+  if (strcmp(value, "off") == 0) return 0;
+  return 1;
+}
+
+static void sprout_debug_alloc_report(void) {
+  if (!g_debug_alloc_enabled) return;
+  fprintf(
+    stderr,
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld gc_swept=%lld\n",
+    g_debug_alloc_sprout_obj,
+    g_debug_alloc_closure,
+    g_debug_alloc_vector,
+    g_debug_alloc_map,
+    g_debug_alloc_bytes,
+    g_debug_alloc_builder,
+    g_debug_gc_swept
+  );
+}
+
+static void sprout_debug_alloc_maybe_enable(void) {
+  if (g_debug_alloc_enabled) return;
+  if (!sprout_debug_alloc_truthy(getenv("SPROUT_DEBUG_ALLOC"))) return;
+  g_debug_alloc_enabled = 1;
+  if (!g_debug_alloc_report_registered) {
+    atexit(sprout_debug_alloc_report);
+    g_debug_alloc_report_registered = 1;
+  }
+}
+
+static void sprout_debug_gc_maybe_enable(void) {
+  if (g_debug_gc_enabled) return;
+  if (!sprout_debug_alloc_truthy(getenv("SPROUT_DEBUG_GC"))) return;
+  g_debug_gc_enabled = 1;
+}
+
+static void sprout_gc_threshold_maybe_enable(void) {
+  const char* raw = getenv("SPROUT_GC_THRESHOLD");
+  if (raw == NULL || raw[0] == '\0') return;
+  if (!sprout_debug_alloc_truthy(raw)) {
+    g_gc_threshold = 0;
+    return;
+  }
+  char* end = NULL;
+  long long parsed = strtoll(raw, &end, 10);
+  if (end == raw || *end != '\0' || parsed <= 0) {
+    tcp_fail("SPROUT_GC_THRESHOLD: expected positive integer");
+  }
+  g_gc_threshold = parsed;
+}
+
+static void sprout_gc_adapt_maybe_enable(void) {
+  /* SPROUT_GC_ADAPT_RATIO: swept/heap fraction below which threshold is grown.
+     Default is 0.2 (grow when less than 20%% of the heap was freed).
+     Set to 0 to disable adaptive GC entirely. */
+  const char* ratio_raw = getenv("SPROUT_GC_ADAPT_RATIO");
+  if (ratio_raw != NULL && ratio_raw[0] != '\0') {
+    char* end = NULL;
+    double parsed = strtod(ratio_raw, &end);
+    if (end == ratio_raw || *end != '\0' || parsed < 0.0 || parsed > 1.0)
+      tcp_fail("SPROUT_GC_ADAPT_RATIO: expected float in [0, 1]");
+    g_gc_adapt_ratio = parsed;
+  }
+  /* SPROUT_GC_ADAPT_FACTOR: factor by which threshold is multiplied when the
+     swept fraction is below SPROUT_GC_ADAPT_RATIO. Must be > 1. Default 2.0. */
+  const char* factor_raw = getenv("SPROUT_GC_ADAPT_FACTOR");
+  if (factor_raw != NULL && factor_raw[0] != '\0') {
+    char* end = NULL;
+    double parsed = strtod(factor_raw, &end);
+    if (end == factor_raw || *end != '\0' || parsed <= 1.0)
+      tcp_fail("SPROUT_GC_ADAPT_FACTOR: expected float > 1");
+    g_gc_adapt_factor = parsed;
+  }
+  /* SPROUT_GC_ADAPT_CAP: maximum value the threshold may grow to.
+     0 (the default) means no cap. */
+  const char* cap_raw = getenv("SPROUT_GC_ADAPT_CAP");
+  if (cap_raw != NULL && cap_raw[0] != '\0') {
+    char* end = NULL;
+    long long parsed = strtoll(cap_raw, &end, 10);
+    if (end == cap_raw || *end != '\0' || parsed < 0)
+      tcp_fail("SPROUT_GC_ADAPT_CAP: expected non-negative integer");
+    g_gc_adapt_cap = parsed;
+  }
+}
+
+static void sprout_gc_livelock_maybe_enable(void) {
+  const char* ratio_raw = getenv("SPROUT_GC_LIVELOCK_RATIO");
+  if (ratio_raw != NULL && ratio_raw[0] != '\0') {
+    char* end = NULL;
+    double parsed = strtod(ratio_raw, &end);
+    if (end == ratio_raw || *end != '\0' || parsed < 0.0 || parsed > 1.0)
+      tcp_fail("SPROUT_GC_LIVELOCK_RATIO: expected float in [0, 1]");
+    g_gc_livelock_ratio = parsed;
+  }
+  const char* cycles_raw = getenv("SPROUT_GC_LIVELOCK_CYCLES");
+  if (cycles_raw != NULL && cycles_raw[0] != '\0') {
+    char* end = NULL;
+    long long parsed = strtoll(cycles_raw, &end, 10);
+    if (end == cycles_raw || *end != '\0' || parsed < 0)
+      tcp_fail("SPROUT_GC_LIVELOCK_CYCLES: expected non-negative integer");
+    g_gc_livelock_cycles = parsed;
+  }
+  const char* action_raw = getenv("SPROUT_GC_LIVELOCK_ACTION");
+  if (action_raw != NULL && action_raw[0] != '\0') {
+    if (strcmp(action_raw, "off") == 0 || strcmp(action_raw, "0") == 0)
+      g_gc_livelock_action = 0;
+    else if (strcmp(action_raw, "warn") == 0)
+      g_gc_livelock_action = 1;
+    else if (strcmp(action_raw, "abort") == 0)
+      g_gc_livelock_action = 2;
+    else
+      tcp_fail("SPROUT_GC_LIVELOCK_ACTION: expected off, warn, or abort");
+  }
+}
+
+static void sprout_gc_maybe_register(void) {
+  if (g_gc_collect_registered) return;
+  atexit(sprout_gc_collect);
+  g_gc_collect_registered = 1;
+}
+
+static long long sprout_now_micros(void) {
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) != 0) return 0;
+  return ((long long)tv.tv_sec * 1000000LL) + (long long)tv.tv_usec;
+}
+
+static void sprout_gc_log_cycle(
+  const char* reason,
+  long long heap_before,
+  long long heap_after,
+  long long root_count,
+  long long marked_count,
+  long long alloc_since_gc,
+  long long swept_delta,
+  long long elapsed_us
+) {
+  if (!g_debug_gc_enabled) return;
+  fprintf(
+    stderr,
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld\n",
+    g_gc_cycle_count,
+    reason,
+    g_gc_threshold,
+    heap_before,
+    heap_after,
+    heap_after,
+    root_count,
+    marked_count,
+    alloc_since_gc,
+    swept_delta,
+    elapsed_us
+  );
+  fprintf(
+    stderr,
+    "[sprout gc]   types: obj=%lld closure=%lld vec=%lld map=%lld ref=%lld cstr=%lld(%.1fKB) bytes=%lld builder=%lld tuple=%lld range=%lld\n",
+    g_gc_live_obj, g_gc_live_closure, g_gc_live_vec, g_gc_live_map,
+    g_gc_live_ref, g_gc_live_cstr, (double)g_gc_live_cstr_bytes / 1024.0,
+    g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple, g_gc_live_range
+  );
+}
+
+static int g_gc_stress = -1;
+static void sprout_gc_maybe_collect_threshold(void) {
+  if (g_gc_stress < 0) { const char* e = getenv("SPROUT_GC_STRESS"); g_gc_stress = (e && e[0]=='1') ? 1 : 0; }
+  if (g_gc_stress || (g_gc_threshold > 0 && !g_gc_active && g_managed_heap_count >= g_gc_threshold)) {
+    sprout_gc_collect_with_reason("threshold");
+  }
+}
+
+static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
+  if (g_debug_alloc_enabled) (*counter)++;
+  void* out = malloc(size);
+  if (out == NULL) tcp_fail(ctx);
+  return out;
+}
+
+static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, const char* ctx) {
+  if (g_debug_alloc_enabled) (*counter)++;
+  void* out = realloc(ptr, size);
+  if (out == NULL) tcp_fail(ctx);
+  return out;
+}
+
+static char* sprout_strdup_counted(long long* counter, const char* text, const char* ctx) {
+  size_t len = strlen(text);
+  char* out = (char*)sprout_alloc_counted(counter, len + 1, ctx);
+  memcpy(out, text, len + 1);
+  return out;
+}
+
+static long long box_ptr(SproutObj* p) {
+  return (long long)(uintptr_t)p;
+}
+
+static SproutObj* unbox_ptr(long long h) {
+  return (SproutObj*)(uintptr_t)h;
+}
+
+static size_t sprout_managed_ptr_hash(void* ptr) {
+  uintptr_t value = (uintptr_t)ptr;
+  value ^= value >> 33;
+  value *= (uintptr_t)0xff51afd7ed558ccdULL;
+  value ^= value >> 33;
+  return (size_t)(value % (uintptr_t)(sizeof(g_heap_index) / sizeof(g_heap_index[0])));
+}
+
+static void sprout_managed_index_insert(ManagedNode* node) {
+  size_t bucket = sprout_managed_ptr_hash(node->ptr);
+  node->hash_next = g_heap_index[bucket];
+  g_heap_index[bucket] = node;
+}
+
+static void sprout_managed_index_remove(ManagedNode* node) {
+  size_t bucket = sprout_managed_ptr_hash(node->ptr);
+  ManagedNode* prev = NULL;
+  ManagedNode* current = g_heap_index[bucket];
+  while (current != NULL) {
+    if (current == node) {
+      if (prev == NULL) {
+        g_heap_index[bucket] = current->hash_next;
+      } else {
+        prev->hash_next = current->hash_next;
+      }
+      node->hash_next = NULL;
+      return;
+    }
+    prev = current;
+    current = current->hash_next;
+  }
+}
+
+static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slots) {
+  ManagedNode* n = (ManagedNode*)malloc(sizeof(ManagedNode));
+  if (n == NULL) tcp_fail("register_managed_ptr: out of memory");
+  n->ptr = ptr;
+  n->kind = kind;
+  n->aux_slots = aux_slots;
+  n->marked = 0;
+  n->next = g_heap_nodes;
+  n->hash_next = NULL;
+  g_heap_nodes = n;
+  sprout_managed_index_insert(n);
+  g_managed_heap_count++;
+  g_managed_alloc_since_gc++;
+}
+
+static ManagedNode* find_managed_ptr(void* ptr) {
+  size_t bucket = sprout_managed_ptr_hash(ptr);
+  for (ManagedNode* n = g_heap_index[bucket]; n != NULL; n = n->hash_next) {
+    if (n->ptr == ptr) return n;
+  }
+  return NULL;
+}
+
+static void register_root_slot(void* slot, SproutRootKind kind, size_t aux_words) {
+  RootNode* node = (RootNode*)malloc(sizeof(RootNode));
+  if (node == NULL) tcp_fail("register_root_slot: out of memory");
+  node->slot = slot;
+  node->kind = kind;
+  node->aux_words = aux_words;
+  node->next = g_root_nodes;
+  g_root_nodes = node;
+}
+
+static void register_obj(SproutObj* p) {
+  register_managed_ptr(p, SPROUT_HEAP_OBJ, 0);
+}
+
+static SproutObj* sprout_alloc_obj_raw(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
+  return (SproutObj*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(SproutObj), ctx);
+}
+
+static SproutObj* sprout_init_obj(SproutObj* obj, long long tag, long long f0, long long f1, long long f2) {
+  obj->tag = tag;
+  obj->f0 = f0;
+  obj->f1 = f1;
+  obj->f2 = f2;
+  obj->f3 = 0;
+  obj->f4 = 0;
+  obj->f5 = 0;
+  obj->f6 = 0;
+  obj->f7 = 0;
+  obj->f8 = 0;
+  return obj;
+}
+
+static long long sprout_box_registered_obj(SproutObj* obj) {
+  register_obj(obj);
+  return box_ptr(obj);
+}
+
+static long long sprout_make_registered_obj(long long tag, long long f0, long long f1, long long f2, const char* ctx) {
+  return sprout_box_registered_obj(sprout_init_obj(sprout_alloc_obj_raw(ctx), tag, f0, f1, f2));
+}
+
+long long sprout_alloc_closure_env(long long size) {
+  if (size < 0) tcp_fail("sprout_alloc_closure_env: size must be >= 0");
+  sprout_gc_maybe_collect_threshold();
+  void* out = sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
+  size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
+  register_managed_ptr(out, SPROUT_HEAP_CLOSURE, slots);
+  return (long long)(uintptr_t)out;
+}
+
+long long sprout_gc_register_i64_root(void* slot) {
+  register_root_slot(slot, SPROUT_ROOT_I64, 0);
+  return 0;
+}
+
+long long sprout_gc_register_ptr_root(void* slot) {
+  register_root_slot(slot, SPROUT_ROOT_PTR, 0);
+  return 0;
+}
+
+long long sprout_gc_register_scan_root(void* slot, long long size_bytes) {
+  if (size_bytes < 0) tcp_fail("sprout_gc_register_scan_root: size must be >= 0");
+  register_root_slot(slot, SPROUT_ROOT_SCAN, ((size_t)size_bytes) / sizeof(uintptr_t));
+  return 0;
+}
+
+/* GC temp-root pool: push/pop is always LIFO (stack discipline enforced by
+ * codegen), so a static pool with a stack pointer is sufficient and avoids
+ * malloc on every sprout_gc_push_i64_root call in the lexer hot path.
+ * 131072 slots = 4 MiB BSS; sized to handle deeply recursive compiler passes.
+ * NOTE: the real fix is TCO in recursive Sprout functions (scan_lines et al.);
+ * this is a safety margin for call chains that grow with stdlib size. */
+#define SPROUT_ROOT_POOL_SIZE 131072
+static RootNode g_root_pool[SPROUT_ROOT_POOL_SIZE];
+static size_t   g_root_pool_top = 0;
+
+static long long sprout_gc_push_root(void* slot, SproutRootKind kind, size_t aux_words) {
+  if (g_root_pool_top >= SPROUT_ROOT_POOL_SIZE)
+    tcp_fail("sprout_gc_push_root: GC root pool exhausted");
+  RootNode* node = &g_root_pool[g_root_pool_top++];
+  node->slot = slot;
+  node->kind = kind;
+  node->aux_words = aux_words;
+  node->next = g_temp_root_nodes;
+  g_temp_root_nodes = node;
+  return 0;
+}
+
+long long sprout_gc_push_i64_root(void* slot) {
+  return sprout_gc_push_root(slot, SPROUT_ROOT_I64, 0);
+}
+
+long long sprout_gc_push_ptr_root(void* slot) {
+  return sprout_gc_push_root(slot, SPROUT_ROOT_PTR, 0);
+}
+
+long long sprout_gc_push_scan_root(void* slot, long long size_bytes) {
+  if (size_bytes < 0) tcp_fail("sprout_gc_push_scan_root: size must be >= 0");
+  return sprout_gc_push_root(slot, SPROUT_ROOT_SCAN, ((size_t)size_bytes) / sizeof(uintptr_t));
+}
+
+long long sprout_gc_pop_roots(long long count) {
+  if (count < 0) tcp_fail("sprout_gc_pop_roots: count must be >= 0");
+  for (long long i = 0; i < count; i++) {
+    if (g_temp_root_nodes == NULL) tcp_fail("sprout_gc_pop_roots: root stack underflow");
+    if (g_root_pool_top == 0) tcp_fail("sprout_gc_pop_roots: root pool underflow");
+    RootNode* next = g_temp_root_nodes->next;
+    g_root_pool_top--;
+    g_temp_root_nodes = next;
+  }
+  return 0;
+}
+
+#define SPROUT_GC_PUSH_I64_LOCAL(slot_name) do {   long long sprout_gc_tmp_ignored = sprout_gc_push_i64_root(&(slot_name));   (void)sprout_gc_tmp_ignored; } while (0)
+
+#define SPROUT_GC_PUSH_PTR_LOCAL(slot_name) do {   long long sprout_gc_tmp_ignored = sprout_gc_push_ptr_root(&(slot_name));   (void)sprout_gc_tmp_ignored; } while (0)
+
+#define SPROUT_GC_POP_LOCALS(count_value) do {   long long sprout_gc_tmp_ignored = sprout_gc_pop_roots((count_value));   (void)sprout_gc_tmp_ignored; } while (0)
+
+/* ── GC Handle Table ─────────────────────────────────────────────────────
+ * Handles root GC-managed values in C builtins without manual push/pop
+ * accounting.  A SproutHandle is an index into a fixed table; the GC scans
+ * all in-use slots during mark_roots.  Handles are released automatically
+ * via __attribute__((cleanup)) when the C variable goes out of scope —
+ * on ALL exit paths including early returns and error branches.
+ *
+ * Moving-GC path: update g_handle_table[h].value on object relocation;
+ * all reads through sprout_handle_get() see the new address automatically.
+ * The shadow root stack (sprout_gc_push_i64_root / sprout_gc_pop_roots)
+ * remains in use for generated Sprout IR code; handles are for C builtins.
+ */
+#define SPROUT_HANDLE_TABLE_SIZE 1024
+typedef int32_t SproutHandle;
+#define SPROUT_INVALID_HANDLE ((SproutHandle)-1)
+
+typedef struct { long long value; uint8_t in_use; } SproutHandleSlot;
+
+static SproutHandleSlot g_handle_table[SPROUT_HANDLE_TABLE_SIZE];
+static SproutHandle     g_handle_freelist[SPROUT_HANDLE_TABLE_SIZE];
+static int              g_handle_freelist_top = 0;
+
+static void sprout_handle_table_init(void) {
+  for (int i = 0; i < SPROUT_HANDLE_TABLE_SIZE; i++) {
+    g_handle_table[i].in_use = 0;
+    g_handle_freelist[i] = (SproutHandle)(SPROUT_HANDLE_TABLE_SIZE - 1 - i);
+  }
+  g_handle_freelist_top = SPROUT_HANDLE_TABLE_SIZE;
+}
+
+__attribute__((constructor))
+static void sprout_handle_table_ctor(void) { sprout_handle_table_init(); }
+
+static SproutHandle sprout_handle_new(long long value) {
+  if (g_handle_freelist_top == 0)
+    tcp_fail("sprout_handle_new: handle table exhausted");
+  SproutHandle h = g_handle_freelist[--g_handle_freelist_top];
+  g_handle_table[h].value  = value;
+  g_handle_table[h].in_use = 1;
+  return h;
+}
+
+static long long sprout_handle_get(SproutHandle h) {
+  return g_handle_table[h].value;
+}
+
+static void sprout_handle_set(SproutHandle h, long long value) {
+  g_handle_table[h].value = value;
+}
+
+static void sprout_handle_release(SproutHandle h) {
+  g_handle_table[h].in_use = 0;
+  g_handle_freelist[g_handle_freelist_top++] = h;
+}
+
+static void sprout_handle_cleanup(SproutHandle* hp) {
+  if (*hp != SPROUT_INVALID_HANDLE) sprout_handle_release(*hp);
+}
+
+/* SPROUT_HANDLE(name, val): declare a scoped GC root; released automatically
+ *   on scope exit (including early returns and error paths).
+ * SPROUT_HANDLE_SET(h, val): update a handle's value in place (required when
+ *   the handle holds a mutable accumulator built up in a loop).
+ * For raw pointer values (char*, VectorVal*): store as (long long)(uintptr_t)ptr;
+ *   mark_roots calls sprout_gc_mark_value which calls find_managed_ptr,
+ *   correctly handling both boxed object pointers and unboxed managed CSTRs. */
+#define SPROUT_HANDLE(name, val)   SproutHandle name     __attribute__((cleanup(sprout_handle_cleanup)))     = sprout_handle_new(val)
+#define SPROUT_HANDLE_SET(h, val) sprout_handle_set((h), (val))
+
+long long sprout_alloc_tuple_blob(long long size_bytes) {
+  if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
+  sprout_gc_maybe_collect_threshold();
+  void* out = sprout_alloc_counted(&g_debug_alloc_sprout_obj, (size_t)size_bytes, "sprout_alloc_tuple_blob: out of memory");
+  register_managed_ptr(out, SPROUT_HEAP_TUPLE, ((size_t)size_bytes) / sizeof(uintptr_t));
+  return (long long)(uintptr_t)out;
+}
+
+static VectorVal* sprout_alloc_vector_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
+  VectorVal* out = (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_VECTOR, 0);
+  return out;
+}
+
+static long long* sprout_alloc_vector_data(size_t count, const char* ctx) {
+  return count == 0 ? NULL : (long long*)sprout_alloc_counted(&g_debug_alloc_vector, count * sizeof(long long), ctx);
+}
+
+static long long* sprout_realloc_vector_data(long long* data, size_t count, const char* ctx) {
+  return (long long*)sprout_realloc_counted(&g_debug_alloc_vector, data, count * sizeof(long long), ctx);
+}
+
+static BSTNode* sprout_alloc_bst_node(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
+  BSTNode* out = (BSTNode*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(BSTNode), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_MAP, 0);
+  return out;
+}
+
+static size_t sprout_intern_hash(const char* s) {
+  size_t h = 5381;
+  for (unsigned char c; (c = (unsigned char)*s) != 0; s++)
+    h = (h << 5) + h + c;
+  return h % 65537;
+}
+
+static const char* intern_string(const char* s) {
+  if (s == NULL) return NULL;
+  size_t bucket = sprout_intern_hash(s);
+  for (InternBucket* b = g_intern_table[bucket]; b != NULL; b = b->next)
+    if (strcmp(b->str, s) == 0) return b->str;
+  InternBucket* entry = (InternBucket*)malloc(sizeof(InternBucket));
+  if (!entry) tcp_fail("intern_string: out of memory");
+  size_t len = strlen(s);
+  entry->str = (char*)malloc(len + 1);
+  if (!entry->str) tcp_fail("intern_string: out of memory for string");
+  memcpy(entry->str, s, len + 1);
+  entry->next = g_intern_table[bucket];
+  g_intern_table[bucket] = entry;
+  return entry->str;
+}
+
+static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
+  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_BYTES, 0);
+  return out;
+}
+
+static unsigned char* sprout_alloc_bytes_data(size_t count, const char* ctx) {
+  return count == 0 ? NULL : (unsigned char*)sprout_alloc_counted(&g_debug_alloc_bytes, count, ctx);
+}
+
+static BuilderVal* sprout_alloc_builder_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
+  BuilderVal* out = (BuilderVal*)sprout_alloc_counted(&g_debug_alloc_builder, sizeof(BuilderVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_BUILDER, 0);
+  return out;
+}
+
+static BytesVal** sprout_alloc_builder_chunks(size_t count, const char* ctx) {
+  return count == 0 ? NULL : (BytesVal**)sprout_alloc_counted(&g_debug_alloc_builder, count * sizeof(BytesVal*), ctx);
+}
+
+static IntRangeVal* sprout_alloc_range_val(const char* ctx) {
+  sprout_gc_maybe_collect_threshold();
+  IntRangeVal* out = (IntRangeVal*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(IntRangeVal), ctx);
+  register_managed_ptr(out, SPROUT_HEAP_RANGE, 0);
+  return out;
+}
+
+long long ref_new(long long value) {
+  sprout_gc_maybe_collect_threshold();
+  RefVal* r = (RefVal*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(RefVal), "ref_new: out of memory");
+  r->value = value;
+  register_managed_ptr(r, SPROUT_HEAP_REF, 0);
+  return box_ptr((SproutObj*)r);
+}
+
+long long ref_read(long long ref) {
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)ref);
+  if (node == NULL || node->kind != SPROUT_HEAP_REF) tcp_fail("ref_read: not a Ref");
+  return ((RefVal*)node->ptr)->value;
+}
+
+long long ref_write(long long ref, long long value) {
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)ref);
+  if (node == NULL || node->kind != SPROUT_HEAP_REF) tcp_fail("ref_write: not a Ref");
+  ((RefVal*)node->ptr)->value = value;
+  return 0;
+}
+
+static int is_obj_handle(long long h) {
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)h);
+  return node != NULL && node->kind == SPROUT_HEAP_OBJ;
+}
+
+static size_t sprout_heap_child_count(ManagedNode* node) {
+  if (node == NULL) return 0;
+  switch (node->kind) {
+    case SPROUT_HEAP_OBJ: {
+      CtorMeta* meta = find_ctor(((SproutObj*)node->ptr)->tag);
+      return meta == NULL || meta->arity < 0 ? 0 : (size_t)meta->arity;
+    }
+    case SPROUT_HEAP_CLOSURE:
+      return node->aux_slots;
+    case SPROUT_HEAP_VECTOR:
+      return (size_t)((VectorVal*)node->ptr)->len;
+    case SPROUT_HEAP_MAP:
+      return 3; /* value, left, right */
+    case SPROUT_HEAP_BYTES:
+      return 0;
+    case SPROUT_HEAP_BUILDER:
+      return ((BuilderVal*)node->ptr)->count;
+    case SPROUT_HEAP_TUPLE:
+      return node->aux_slots;
+    case SPROUT_HEAP_RANGE:
+      return 0;
+    case SPROUT_HEAP_REF:
+      return 1;
+    case SPROUT_HEAP_CSTR:
+      return 0;
+  }
+  return 0;
+}
+
+static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
+  if (node == NULL) tcp_fail("sprout_heap_child_value: null node");
+  switch (node->kind) {
+    case SPROUT_HEAP_OBJ: {
+      SproutObj* obj = (SproutObj*)node->ptr;
+      if (index == 0) return obj->f0;
+      if (index == 1) return obj->f1;
+      if (index == 2) return obj->f2;
+      if (index == 3) return obj->f3;
+      if (index == 4) return obj->f4;
+      if (index == 5) return obj->f5;
+      if (index == 6) return obj->f6;
+      if (index == 7) return obj->f7;
+      if (index == 8) return obj->f8;
+      break;
+    }
+    case SPROUT_HEAP_CLOSURE: {
+      long long* slots = (long long*)node->ptr;
+      return slots[index + 1];
+    }
+    case SPROUT_HEAP_VECTOR:
+      return ((VectorVal*)node->ptr)->data[index];
+    case SPROUT_HEAP_MAP: {
+      BSTNode* bst = (BSTNode*)node->ptr;
+      if (index == 0) return bst->value;
+      if (index == 1) return bst->left;
+      if (index == 2) return bst->right;
+      break;
+    }
+    case SPROUT_HEAP_BYTES:
+      break;
+    case SPROUT_HEAP_BUILDER:
+      return (long long)(uintptr_t)((BuilderVal*)node->ptr)->chunks[index];
+    case SPROUT_HEAP_TUPLE: {
+      uintptr_t word = 0;
+      memcpy(&word, (char*)node->ptr + (index * sizeof(uintptr_t)), sizeof(uintptr_t));
+      return (long long)word;
+    }
+    case SPROUT_HEAP_RANGE:
+      break;
+    case SPROUT_HEAP_REF:
+      if (index == 0) return ((RefVal*)node->ptr)->value;
+      break;
+    case SPROUT_HEAP_CSTR:
+      break;
+  }
+  tcp_fail("sprout_heap_child_value: index out of range");
+  return 0;
+}
+
+/* ── Iterative GC mark (replaces recursive sprout_gc_mark_node) ──────────
+ * The old design called sprout_gc_mark_node recursively for each heap child,
+ * which overflows the C stack for large heaps (long linked-list chains from
+ * import-pair lists, type substitution dicts, etc.).  This version maintains
+ * an explicit grey-set worklist on the C heap so mark depth is O(1) stack
+ * regardless of heap graph depth.
+ */
+static ManagedNode** g_gc_mark_worklist = NULL;
+static size_t g_gc_mark_wl_len = 0;
+static size_t g_gc_mark_wl_cap = 0;
+
+static void gc_mark_enqueue(ManagedNode* node) {
+  if (node == NULL || node->marked) return;
+  node->marked = 1;
+  g_gc_marked_count++;
+  if (g_gc_mark_wl_len >= g_gc_mark_wl_cap) {
+    size_t new_cap = g_gc_mark_wl_cap < 1024 ? 1024 : g_gc_mark_wl_cap * 2;
+    ManagedNode** new_wl = (ManagedNode**)realloc(g_gc_mark_worklist, new_cap * sizeof(ManagedNode*));
+    if (!new_wl) tcp_fail("GC mark: out of memory for worklist");
+    g_gc_mark_worklist = new_wl;
+    g_gc_mark_wl_cap = new_cap;
+  }
+  g_gc_mark_worklist[g_gc_mark_wl_len++] = node;
+}
+
+static void sprout_gc_mark_node(ManagedNode* node) {
+  gc_mark_enqueue(node);
+}
+
+static void sprout_gc_mark_value(long long value) {
+  gc_mark_enqueue(find_managed_ptr((void*)(uintptr_t)value));
+}
+
+static void sprout_gc_mark_ptr(void* ptr) {
+  gc_mark_enqueue(find_managed_ptr(ptr));
+}
+
+/* Drain the grey-set worklist: expand each grey node (marked but children
+ * not yet processed) into its children until all reachable nodes are black.
+ * Must be called after sprout_gc_mark_roots() and before sprout_gc_sweep(). */
+static void sprout_gc_drain_marks(void) {
+  while (g_gc_mark_wl_len > 0) {
+    ManagedNode* node = g_gc_mark_worklist[--g_gc_mark_wl_len];
+    size_t child_count = sprout_heap_child_count(node);
+    for (size_t i = 0; i < child_count; i++) {
+      long long child_val = sprout_heap_child_value(node, i);
+      gc_mark_enqueue(find_managed_ptr((void*)(uintptr_t)child_val));
+    }
+  }
+  free(g_gc_mark_worklist);
+  g_gc_mark_worklist = NULL;
+  g_gc_mark_wl_len = 0;
+  g_gc_mark_wl_cap = 0;
+}
+
+static long long sprout_gc_root_count(void) {
+  long long count = 0;
+  for (RootNode* root = g_root_nodes; root != NULL; root = root->next) count++;
+  for (RootNode* root = g_temp_root_nodes; root != NULL; root = root->next) count++;
+  return count;
+}
+
+static void sprout_gc_mark_roots(void) {
+  for (RootNode* root = g_root_nodes; root != NULL; root = root->next) {
+    if (root->kind == SPROUT_ROOT_I64) {
+      sprout_gc_mark_value(*(long long*)root->slot);
+    } else if (root->kind == SPROUT_ROOT_PTR) {
+      sprout_gc_mark_ptr(*(void**)root->slot);
+    } else {
+      for (size_t i = 0; i < root->aux_words; i++) {
+        uintptr_t word = 0;
+        memcpy(&word, (char*)root->slot + (i * sizeof(uintptr_t)), sizeof(uintptr_t));
+        sprout_gc_mark_ptr((void*)word);
+      }
+    }
+  }
+  for (RootNode* root = g_temp_root_nodes; root != NULL; root = root->next) {
+    if (root->kind == SPROUT_ROOT_I64) {
+      sprout_gc_mark_value(*(long long*)root->slot);
+    } else if (root->kind == SPROUT_ROOT_PTR) {
+      sprout_gc_mark_ptr(*(void**)root->slot);
+    } else {
+      for (size_t i = 0; i < root->aux_words; i++) {
+        uintptr_t word = 0;
+        memcpy(&word, (char*)root->slot + (i * sizeof(uintptr_t)), sizeof(uintptr_t));
+        sprout_gc_mark_ptr((void*)word);
+      }
+    }
+  }
+  for (int i = 0; i < SPROUT_HANDLE_TABLE_SIZE; i++) {
+    if (g_handle_table[i].in_use)
+      sprout_gc_mark_value(g_handle_table[i].value);
+  }
+}
+
+static void sprout_gc_free_payload(ManagedNode* node) {
+  switch (node->kind) {
+    case SPROUT_HEAP_OBJ:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_CLOSURE:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_VECTOR: {
+      VectorVal* value = (VectorVal*)node->ptr;
+      free(value->data);
+      free(value);
+      return;
+    }
+    case SPROUT_HEAP_MAP:
+      free(node->ptr); /* key is interned (permanent); left/right handled by GC */
+      return;
+    case SPROUT_HEAP_BYTES: {
+      BytesVal* value = (BytesVal*)node->ptr;
+      free(value->data);
+      free(value);
+      return;
+    }
+    case SPROUT_HEAP_BUILDER: {
+      BuilderVal* value = (BuilderVal*)node->ptr;
+      free(value->chunks);
+      free(value);
+      return;
+    }
+    case SPROUT_HEAP_TUPLE:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_RANGE:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_REF:
+      free(node->ptr);
+      return;
+    case SPROUT_HEAP_CSTR:
+      free(node->ptr);
+      return;
+  }
+}
+
+static void sprout_gc_sweep(void) {
+  ManagedNode* prev = NULL;
+  ManagedNode* node = g_heap_nodes;
+  /* Reset per-type live counters before recomputing. */
+  g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
+  g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
+  g_gc_live_tuple = g_gc_live_range = g_gc_live_ref = 0;
+  g_gc_live_cstr = g_gc_live_cstr_bytes = 0;
+  while (node != NULL) {
+    ManagedNode* next = node->next;
+    if (!node->marked) {
+      if (node->ptr == g_nothing_singleton) g_nothing_singleton = NULL;
+      sprout_managed_index_remove(node);
+      sprout_gc_free_payload(node);
+      if (prev == NULL) {
+        g_heap_nodes = next;
+      } else {
+        prev->next = next;
+      }
+      free(node);
+      g_debug_gc_swept++;
+      g_managed_heap_count--;
+    } else {
+      node->marked = 0;
+      prev = node;
+      if (g_debug_gc_enabled) {
+        switch (node->kind) {
+          case SPROUT_HEAP_OBJ:     g_gc_live_obj++;     break;
+          case SPROUT_HEAP_CLOSURE: g_gc_live_closure++;  break;
+          case SPROUT_HEAP_VECTOR:  g_gc_live_vec++;      break;
+          case SPROUT_HEAP_MAP:     g_gc_live_map++;      break;
+          case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
+          case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
+          case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
+          case SPROUT_HEAP_RANGE:   g_gc_live_range++;    break;
+          case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
+          case SPROUT_HEAP_CSTR:
+            g_gc_live_cstr++;
+            if (node->ptr) g_gc_live_cstr_bytes += (long long)strlen((const char*)node->ptr);
+            break;
+        }
+      }
+    }
+    node = next;
+  }
+}
+
+static void sprout_gc_collect(void) {
+  sprout_gc_collect_with_reason("atexit");
+}
+
+static void sprout_gc_collect_with_reason(const char* reason) {
+  if (g_gc_active) return;
+  g_gc_active = 1;
+  long long started_us = sprout_now_micros();
+  long long heap_before = g_managed_heap_count;
+  long long root_count = sprout_gc_root_count();
+  long long alloc_since_gc = g_managed_alloc_since_gc;
+  long long swept_before = g_debug_gc_swept;
+  g_gc_cycle_count++;
+  g_gc_marked_count = 0;
+  sprout_gc_mark_roots();
+  sprout_gc_drain_marks();
+  sprout_gc_sweep();
+  long long finished_us = sprout_now_micros();
+  long long elapsed_us = 0;
+  if (finished_us >= started_us) elapsed_us = finished_us - started_us;
+  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
+  /* Adaptive threshold: if the swept fraction is below the configured ratio,
+     multiply the threshold to avoid repeated near-useless GC cycles. */
+  if (g_gc_adapt_ratio > 0.0 && heap_before > 0) {
+    double swept_fraction = (double)(heap_before - g_managed_heap_count) / (double)heap_before;
+    if (swept_fraction < g_gc_adapt_ratio) {
+      long long new_threshold = (long long)((double)g_gc_threshold * g_gc_adapt_factor);
+      if (g_gc_adapt_cap > 0 && new_threshold > g_gc_adapt_cap) new_threshold = g_gc_adapt_cap;
+      if (new_threshold > g_gc_threshold) g_gc_threshold = new_threshold;
+    }
+  }
+  g_managed_alloc_since_gc = 0;
+  /* Livelock detection: warn (or abort) when consecutive cycles sweep almost nothing. */
+  if (g_gc_livelock_action > 0 && g_gc_livelock_cycles > 0) {
+    double sweep_efficiency = heap_before > 0
+      ? (double)(heap_before - g_managed_heap_count) / (double)heap_before
+      : 1.0;
+    if (sweep_efficiency < g_gc_livelock_ratio) {
+      g_gc_consecutive_bad_cycles++;
+      if (g_gc_consecutive_bad_cycles >= g_gc_livelock_cycles && !g_gc_livelock_warned) {
+        fprintf(stderr,
+          "[sprout gc] livelock: %lld consecutive cycles sweeping %.1f%% < %.1f%%"
+          "; heap=%lld roots=%lld threshold=%lld\n",
+          g_gc_consecutive_bad_cycles,
+          sweep_efficiency * 100.0, g_gc_livelock_ratio * 100.0,
+          g_managed_heap_count, root_count, g_gc_threshold);
+        g_gc_livelock_warned = 1;
+        if (g_gc_livelock_action == 2) {
+          fprintf(stderr, "[sprout gc] livelock: aborting (SPROUT_GC_LIVELOCK_ACTION=abort)\n");
+          abort();
+        }
+      }
+    } else {
+      g_gc_consecutive_bad_cycles = 0;
+      g_gc_livelock_warned = 0;
+    }
+  }
+  g_gc_active = 0;
+}
+
+static CtorMeta* find_ctor(long long tag) {
+  for (long long i = 0; i < g_ctor_meta_len; i++) {
+    if (g_ctor_meta[i].tag == tag) return &g_ctor_meta[i];
+  }
+  return NULL;
+}
+
+static long long find_ctor_tag_by_name(const char* name) {
+  for (long long i = 0; i < g_ctor_meta_len; i++) {
+    if (strcmp(g_ctor_meta[i].name, name) == 0) return g_ctor_meta[i].tag;
+  }
+  tcp_fail("constructor metadata not registered");
+  return -1;
+}
+
+static void print_inline_value(long long v);
+
+static void print_inline_obj(SproutObj* o) {
+  CtorMeta* m = find_ctor(o->tag);
+  if (m == NULL) {
+    printf("Ctor%lld", o->tag);
+    return;
+  }
+  printf("%s", m->name);
+  if (m->arity <= 0) return;
+  printf("(");
+  print_inline_value(o->f0);
+  if (m->arity > 1) { printf(", "); print_inline_value(o->f1); }
+  if (m->arity > 2) { printf(", "); print_inline_value(o->f2); }
+  if (m->arity > 3) { printf(", "); print_inline_value(o->f3); }
+  if (m->arity > 4) { printf(", "); print_inline_value(o->f4); }
+  if (m->arity > 5) { printf(", "); print_inline_value(o->f5); }
+  if (m->arity > 6) { printf(", "); print_inline_value(o->f6); }
+  printf(")");
+}
+
+static void print_inline_value(long long v) {
+  ManagedNode* node = find_managed_ptr((void*)(uintptr_t)v);
+  if (node != NULL && node->kind == SPROUT_HEAP_CSTR) {
+    printf("%s", (const char*)node->ptr);
+  } else if (node != NULL && node->kind == SPROUT_HEAP_RANGE) {
+    IntRangeVal* value = (IntRangeVal*)node->ptr;
+    printf("%lld..%lld", value->start, value->end);
+  } else if (is_obj_handle(v)) {
+    print_inline_obj(unbox_ptr(v));
+  } else {
+    printf("%lld", v);
+  }
+}
+
+long long print_int(long long x) {
+  printf("%lld\n", x);
+  return x;
+}
+long long print_str(const char* s) {
+  printf("%s\n", s);
+  return 0;
+}
+long long print_text(const char* s) {
+  printf("%s", s);
+  return 0;
+}
+long long print_value_part(long long x) {
+  print_inline_value(x);
+  return x;
+}
+long long print_newline(void) {
+  printf("\n");
+  return 0;
+}
+long long print_value(long long x) {
+  print_inline_value(x);
+  printf("\n");
+  return x;
+}
+long long parse_int(const char* s) {
+  if (s == NULL) tcp_fail("parse_int: null input");
+  char* end = NULL;
+  long long out = strtoll(s, &end, 10);
+  if (end == s || *end != '\0') tcp_fail("parse_int: invalid integer");
+  return out;
+}
+long long int_to_string(long long value) {
+  char buf[32];
+  int written = snprintf(buf, sizeof(buf), "%lld", value);
+  if (written < 0) tcp_fail("int_to_string: formatting failed");
+  size_t size = (size_t)written + 1;
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(size);
+  if (out == NULL) tcp_fail("int_to_string: out of memory");
+  memcpy(out, buf, size);
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
+long long int_range(long long start, long long end) {
+  IntRangeVal* out = sprout_alloc_range_val("int_range: out of memory");
+  out->start = start;
+  out->end = end;
+  return (long long)(uintptr_t)out;
+}
+long long int_range_start(long long range_h) {
+  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
+  ManagedNode* node = find_managed_ptr(value);
+  if (value == NULL || node == NULL || node->kind != SPROUT_HEAP_RANGE) tcp_fail("int_range_start: expected IntRange");
+  return value->start;
+}
+long long int_range_end(long long range_h) {
+  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
+  ManagedNode* node = find_managed_ptr(value);
+  if (value == NULL || node == NULL || node->kind != SPROUT_HEAP_RANGE) tcp_fail("int_range_end: expected IntRange");
+  return value->end;
+}
+long long env_get(const char* name) {
+  if (name == NULL) tcp_fail("env_get: null name");
+  const char* value = getenv(name);
+  if (value == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)value);
+}
+long long sprout_set_argv(int argc, char** argv) {
+  g_sprout_argc = argc;
+  g_sprout_argv = argv;
+  signal(SIGSEGV, sprout_crash_handler);
+  signal(SIGABRT, sprout_crash_handler);
+  sprout_debug_alloc_maybe_enable();
+  sprout_debug_gc_maybe_enable();
+  sprout_gc_threshold_maybe_enable();
+  sprout_gc_adapt_maybe_enable();
+  sprout_gc_livelock_maybe_enable();
+  sprout_gc_maybe_register();
+  return 0;
+}
+long long sprout_nothing(long long tag) {
+  if (g_nothing_singleton == NULL) {
+    g_nothing_singleton = sprout_init_obj(sprout_alloc_obj_raw("sprout_nothing: out of memory"), tag, 0, 0, 0);
+    register_obj(g_nothing_singleton);
+  }
+  return box_ptr(g_nothing_singleton);
+}
+long long argv_get(long long index) {
+  if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  if (g_sprout_argv == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  if (index >= (long long)(g_sprout_argc - 1)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)g_sprout_argv[index + 1]);
+}
+long long read_file(long long path_i) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  if (path == NULL) tcp_fail("read_file: null path");
+  FILE* f = NULL;
+  int close_after = 0;
+  if (strcmp(path, "-") == 0) {
+    f = stdin;
+  } else {
+    f = fopen(path, "rb");
+    if (f == NULL) tcp_fail("read_file: cannot open file");
+    close_after = 1;
+  }
+
+  size_t cap = 4096;
+  size_t len = 0;
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(cap);
+  if (out == NULL) {
+    if (close_after) fclose(f);
+    tcp_fail("read_file: out of memory");
+  }
+
+  char buf[4096];
+  while (1) {
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    if (n > 0) {
+      while (len + n + 1 > cap) {
+        size_t new_cap = cap * 2;
+        char* grown = (char*)realloc(out, new_cap);
+        if (grown == NULL) {
+          if (close_after) fclose(f);
+          tcp_fail("read_file: out of memory");
+        }
+        out = grown;
+        cap = new_cap;
+      }
+      memcpy(out + len, buf, n);
+      len += n;
+    }
+    if (n < sizeof(buf)) {
+      if (feof(f)) break;
+      if (ferror(f)) {
+        if (close_after) fclose(f);
+        tcp_fail("read_file: read error");
+      }
+    }
+  }
+
+  if (close_after) fclose(f);
+  out[len] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
+long long term_read_line(void) {
+  char* line = NULL;
+  size_t cap = 0;
+  ssize_t len = getline(&line, &cap, stdin);
+  if (len < 0) {
+    free(line);
+    if (feof(stdin)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    tcp_fail("term_read_line: read error");
+  }
+  while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+    len -= 1;
+    line[len] = '\0';
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)line);
+}
+_Bool term_is_interactive(void) {
+  return isatty(fileno(stdin)) && isatty(fileno(stdout));
+}
+long long term_clear(void) {
+  fputs("[2J[H", stdout);
+  fflush(stdout);
+  return 0;
+}
+long long term_move(long long row, long long col) {
+  fprintf(stdout, "[%lld;%lldH", row, col);
+  fflush(stdout);
+  return 0;
+}
+long long term_hide_cursor(void) {
+  fputs("[?25l", stdout);
+  fflush(stdout);
+  return 0;
+}
+long long term_show_cursor(void) {
+  fputs("[?25h", stdout);
+  fflush(stdout);
+  return 0;
+}
+long long term_read_key(void) {
+  static char buf[2] = {0, 0};
+  static const char* token_ctrl_a = "ctrl-a";
+  static const char* token_ctrl_b = "ctrl-b";
+  static const char* token_ctrl_d = "ctrl-d";
+  static const char* token_ctrl_e = "ctrl-e";
+  static const char* token_ctrl_f = "ctrl-f";
+  static const char* token_backspace = "backspace";
+  static const char* token_down = "down";
+  static const char* token_escape = "escape";
+  static const char* token_enter = "enter";
+  static const char* token_left = "left";
+  static const char* token_right = "right";
+  static const char* token_tab = "tab";
+  static const char* token_up = "up";
+  buf[0] = '\0';
+  buf[1] = '\0';
+  int ch = EOF;
+  if (!isatty(STDIN_FILENO)) {
+    ch = getchar();
+  } else {
+    struct termios oldt;
+    if (tcgetattr(STDIN_FILENO, &oldt) != 0) {
+      ch = getchar();
+    } else {
+      struct termios raw = oldt;
+      raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+      raw.c_cc[VMIN] = 1;
+      raw.c_cc[VTIME] = 0;
+      if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+        ch = getchar();
+      } else {
+        char byte = '\0';
+        ssize_t count = read(STDIN_FILENO, &byte, 1);
+        if (count > 0) {
+          ch = (unsigned char)byte;
+          if (ch == 27) {
+            struct termios raw_more = raw;
+            raw_more.c_cc[VMIN] = 0;
+            raw_more.c_cc[VTIME] = 1;
+            if (tcsetattr(STDIN_FILENO, TCSANOW, &raw_more) == 0) {
+              char next = '\0';
+              char third = '\0';
+              ssize_t next_count = read(STDIN_FILENO, &next, 1);
+              if (next_count > 0 && next == '[') {
+                ssize_t third_count = read(STDIN_FILENO, &third, 1);
+                if (third_count > 0) {
+                  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+                  if (third == 'A') return (long long)(uintptr_t)token_up;
+                  if (third == 'B') return (long long)(uintptr_t)token_down;
+                  if (third == 'C') return (long long)(uintptr_t)token_right;
+                  if (third == 'D') return (long long)(uintptr_t)token_left;
+                }
+              }
+            }
+          }
+        }
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+      }
+    }
+  }
+  if (ch == EOF) return (long long)(uintptr_t)buf;
+  if (ch == 1) return (long long)(uintptr_t)token_ctrl_a;
+  if (ch == 2) return (long long)(uintptr_t)token_ctrl_b;
+  if (ch == 4) return (long long)(uintptr_t)token_ctrl_d;
+  if (ch == 5) return (long long)(uintptr_t)token_ctrl_e;
+  if (ch == 6) return (long long)(uintptr_t)token_ctrl_f;
+  if (ch == 8 || ch == 127) return (long long)(uintptr_t)token_backspace;
+  if (ch == 27) return (long long)(uintptr_t)token_escape;
+  if (ch == '\n' || ch == '\r') return (long long)(uintptr_t)token_enter;
+  if (ch == '\t') return (long long)(uintptr_t)token_tab;
+  buf[0] = (char)ch;
+  return (long long)(uintptr_t)buf;
+}
+long long term_write(const char* text) {
+  if (text == NULL) tcp_fail("term_write: null text");
+  fputs(text, stdout);
+  fflush(stdout);
+  return 0;
+}
+static char* sprout_json_escape(const char* text) {
+  if (text == NULL) tcp_fail("analysis service: null json text");
+  size_t extra = 0;
+  for (const unsigned char* p = (const unsigned char*)text; *p != '\0'; ++p) {
+    switch (*p) {
+      case '\\':
+      case '"':
+      case '\n':
+      case '\r':
+      case '\t':
+        extra += 1;
+        break;
+      default:
+        break;
+    }
+  }
+  size_t len = strlen(text);
+  char* out = alloc_cstr(len + extra, "analysis service: out of memory");
+  size_t idx = 0;
+  for (const unsigned char* p = (const unsigned char*)text; *p != '\0'; ++p) {
+    switch (*p) {
+      case '\\':
+        out[idx++] = '\\';
+        out[idx++] = '\\';
+        break;
+      case '"':
+        out[idx++] = '\\';
+        out[idx++] = '"';
+        break;
+      case '\n':
+        out[idx++] = '\\';
+        out[idx++] = 'n';
+        break;
+      case '\r':
+        out[idx++] = '\\';
+        out[idx++] = 'r';
+        break;
+      case '\t':
+        out[idx++] = '\\';
+        out[idx++] = 't';
+        break;
+      default:
+        out[idx++] = (char)*p;
+        break;
+    }
+  }
+  out[idx] = '\0';
+  return out;
+}
+static const char* sprout_json_after_key(const char* text, const char* key) {
+  if (text == NULL || key == NULL) return NULL;
+  size_t key_len = strlen(key);
+  size_t pattern_len = key_len + 2;
+  char* pattern = alloc_cstr(pattern_len, "analysis service: out of memory");
+  pattern[0] = '"';
+  memcpy(pattern + 1, key, key_len);
+  pattern[key_len + 1] = '"';
+  pattern[key_len + 2] = '\0';
+  const char* pos = strstr(text, pattern);
+  free(pattern);
+  if (pos == NULL) return NULL;
+  pos += pattern_len;
+  while (*pos == ' ' || *pos == '\n' || *pos == '\r' || *pos == '\t') pos++;
+  if (*pos != ':') return NULL;
+  pos++;
+  while (*pos == ' ' || *pos == '\n' || *pos == '\r' || *pos == '\t') pos++;
+  return pos;
+}
+static int sprout_json_field_is_true(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  return pos != NULL && strncmp(pos, "true", 4) == 0;
+}
+static const char* sprout_json_skip_ws(const char* pos) {
+  if (pos == NULL) return NULL;
+  while (*pos == ' ' || *pos == '\n' || *pos == '\r' || *pos == '\t') pos++;
+  return pos;
+}
+static int sprout_json_parse_hex4(const char* pos, unsigned int* out) {
+  if (strlen(pos) < 4) return 0;
+  unsigned int value = 0;
+  for (int i = 0; i < 4; i++) {
+    unsigned char ch = (unsigned char)pos[i];
+    value <<= 4;
+    if (ch >= '0' && ch <= '9') {
+      value |= (unsigned int)(ch - '0');
+    } else if (ch >= 'a' && ch <= 'f') {
+      value |= (unsigned int)(10 + ch - 'a');
+    } else if (ch >= 'A' && ch <= 'F') {
+      value |= (unsigned int)(10 + ch - 'A');
+    } else {
+      return 0;
+    }
+  }
+  *out = value;
+  return 1;
+}
+static size_t sprout_json_append_utf8(char* out, size_t idx, unsigned int codepoint) {
+  if (codepoint <= 0x7f) {
+    out[idx++] = (char)codepoint;
+  } else if (codepoint <= 0x7ff) {
+    out[idx++] = (char)(0xc0 | ((codepoint >> 6) & 0x1f));
+    out[idx++] = (char)(0x80 | (codepoint & 0x3f));
+  } else if (codepoint <= 0xffff) {
+    out[idx++] = (char)(0xe0 | ((codepoint >> 12) & 0x0f));
+    out[idx++] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+    out[idx++] = (char)(0x80 | (codepoint & 0x3f));
+  } else {
+    out[idx++] = (char)(0xf0 | ((codepoint >> 18) & 0x07));
+    out[idx++] = (char)(0x80 | ((codepoint >> 12) & 0x3f));
+    out[idx++] = (char)(0x80 | ((codepoint >> 6) & 0x3f));
+    out[idx++] = (char)(0x80 | (codepoint & 0x3f));
+  }
+  return idx;
+}
+static char* sprout_json_parse_string_impl(const char** pos_ptr, const char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  if (pos == NULL || *pos != '"') return NULL;
+  pos++;
+  size_t cap = strlen(pos) + 1;
+  char* out = alloc_cstr(cap, "analysis service: out of memory");
+  size_t idx = 0;
+  while (*pos != '\0') {
+    if (*pos == '"') {
+      out[idx] = '\0';
+      *pos_ptr = pos + 1;
+      return out;
+    }
+    if ((unsigned char)*pos < 0x20) {
+      if (err_msg != NULL) *err_msg = "invalid control character in string";
+      free(out);
+      return NULL;
+    }
+    if (*pos == '\\') {
+      pos++;
+      if (*pos == '\0') {
+        if (err_msg != NULL) *err_msg = "unterminated escape sequence";
+        free(out);
+        return NULL;
+      }
+      switch (*pos) {
+        case '\\':
+        case '"':
+        case '/':
+          out[idx++] = *pos;
+          break;
+        case 'b':
+          out[idx++] = '\b';
+          break;
+        case 'f':
+          out[idx++] = '\f';
+          break;
+        case 'n':
+          out[idx++] = '\n';
+          break;
+        case 'r':
+          out[idx++] = '\r';
+          break;
+        case 't':
+          out[idx++] = '\t';
+          break;
+        case 'u': {
+          unsigned int codepoint = 0;
+          if (!sprout_json_parse_hex4(pos + 1, &codepoint)) {
+            if (err_msg != NULL) *err_msg = "invalid unicode escape";
+            free(out);
+            return NULL;
+          }
+          pos += 4;
+          if (codepoint >= 0xd800 && codepoint <= 0xdbff) {
+            if (pos[1] != '\\' || pos[2] != 'u') {
+              if (err_msg != NULL) *err_msg = "missing low surrogate";
+              free(out);
+              return NULL;
+            }
+            unsigned int low = 0;
+            if (!sprout_json_parse_hex4(pos + 3, &low) || low < 0xdc00 || low > 0xdfff) {
+              if (err_msg != NULL) *err_msg = "invalid low surrogate";
+              free(out);
+              return NULL;
+            }
+            codepoint = 0x10000 + (((codepoint - 0xd800) << 10) | (low - 0xdc00));
+            pos += 6;
+          } else if (codepoint >= 0xdc00 && codepoint <= 0xdfff) {
+            if (err_msg != NULL) *err_msg = "unexpected low surrogate";
+            free(out);
+            return NULL;
+          }
+          idx = sprout_json_append_utf8(out, idx, codepoint);
+          break;
+        }
+        default:
+          if (err_msg != NULL) *err_msg = "invalid escape sequence";
+          free(out);
+          return NULL;
+      }
+      pos++;
+      continue;
+    }
+    out[idx++] = *pos;
+    pos++;
+  }
+  free(out);
+  return NULL;
+}
+static char* sprout_json_parse_string(const char** pos_ptr) {
+  return sprout_json_parse_string_impl(pos_ptr, NULL);
+}
+static VectorVal* sprout_json_extract_string_array(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  pos = sprout_json_skip_ws(pos);
+  if (pos == NULL || *pos != '[') return NULL;
+  pos++;
+  VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  out->len = 0;
+  out->cap = 0;
+  out->data = NULL;
+  pos = sprout_json_skip_ws(pos);
+  if (*pos == ']') return out;
+  while (*pos != '\0') {
+    char* item = sprout_json_parse_string(&pos);
+    if (item == NULL) return out;
+    if (out->len == out->cap) {
+      long long new_cap = out->cap == 0 ? 4 : (out->cap * 2);
+      out->data = sprout_realloc_vector_data(out->data, (size_t)new_cap, "analysis service: out of memory");
+      out->cap = new_cap;
+    }
+    out->data[out->len++] = (long long)(uintptr_t)item;
+    pos = sprout_json_skip_ws(pos);
+    if (*pos == ']') return out;
+    if (*pos != ',') return out;
+    pos++;
+  }
+  return out;
+}
+static char* sprout_json_extract_string(const char* text, const char* key) {
+  const char* pos = sprout_json_after_key(text, key);
+  return pos == NULL ? NULL : sprout_json_parse_string(&pos);
+}
+static long long* sprout_json_extract_int_array(const char* text, const char* key, long long* out_len) {
+  const char* pos = sprout_json_after_key(text, key);
+  pos = sprout_json_skip_ws(pos);
+  if (out_len != NULL) *out_len = 0;
+  if (pos == NULL || *pos != '[') return NULL;
+  pos++;
+  long long cap = 0;
+  long long len = 0;
+  long long* out = NULL;
+  pos = sprout_json_skip_ws(pos);
+  if (*pos == ']') return out;
+  while (*pos != '\0') {
+    char* end = NULL;
+    long long value = strtoll(pos, &end, 10);
+    if (end == pos) {
+      if (out != NULL) free(out);
+      return NULL;
+    }
+    if (len == cap) {
+      long long new_cap = cap == 0 ? 4 : (cap * 2);
+      long long* grown = realloc(out, sizeof(long long) * (size_t)new_cap);
+      if (grown == NULL) {
+        if (out != NULL) free(out);
+        tcp_fail("analysis service: out of memory");
+      }
+      out = grown;
+      cap = new_cap;
+    }
+    out[len++] = value;
+    pos = sprout_json_skip_ws(end);
+    if (*pos == ']') {
+      if (out_len != NULL) *out_len = len;
+      return out;
+    }
+    if (*pos != ',') break;
+    pos = sprout_json_skip_ws(pos + 1);
+  }
+  if (out != NULL) free(out);
+  return NULL;
+}
+static void sprout_builtin_fail_detail(const char* builtin_name, const char* detail) {
+  size_t len = strlen(builtin_name) + strlen(detail) + 2;
+  char* msg = alloc_cstr(len, "analysis service: out of memory");
+  snprintf(msg, len + 1, "%s: %s", builtin_name, detail);
+  tcp_fail(msg);
+}
+static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_handle_ptr, const char* builtin_name, const char* label) {
+  long long vec_handle = (long long)(uintptr_t)vec_handle_ptr;
+  ManagedNode* vec_node = find_managed_ptr((void*)(uintptr_t)vec_handle);
+  if (vec_node == NULL || vec_node->kind != SPROUT_HEAP_OBJ) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
+    sprout_builtin_fail_detail(builtin_name, detail);
+  }
+  if (sprout_tag(vec_handle) != find_ctor_tag_by_name("Vec")) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
+    sprout_builtin_fail_detail(builtin_name, detail);
+  }
+  long long raw_handle = sprout_field(vec_handle, 0);
+  ManagedNode* raw_node = find_managed_ptr((void*)(uintptr_t)raw_handle);
+  if (raw_node == NULL || raw_node->kind != SPROUT_HEAP_VECTOR) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
+    sprout_builtin_fail_detail(builtin_name, detail);
+  }
+  VectorVal* raw = (VectorVal*)(uintptr_t)raw_handle;
+  size_t count = raw->len < 0 ? 0 : (size_t)raw->len;
+  char** escaped_items = count == 0 ? NULL : (char**)malloc(sizeof(char*) * count);
+  if (count != 0 && escaped_items == NULL) tcp_fail("analysis service: out of memory");
+  size_t total_len = 2;
+  for (size_t i = 0; i < count; i++) {
+    const char* item = (const char*)(uintptr_t)raw->data[i];
+    if (item == NULL) {
+      if (escaped_items != NULL) free(escaped_items);
+      char detail[128];
+      snprintf(detail, sizeof(detail), "expects %s to contain only String values", label);
+      sprout_builtin_fail_detail(builtin_name, detail);
+    }
+    escaped_items[i] = sprout_json_escape(item);
+    total_len += strlen(escaped_items[i]) + 2;
+    if (i + 1 < count) total_len += 1;
+  }
+  char* out = alloc_cstr(total_len, "analysis service: out of memory");
+  size_t cursor = 0;
+  out[cursor++] = '[';
+  for (size_t i = 0; i < count; i++) {
+    size_t item_len = strlen(escaped_items[i]);
+    out[cursor++] = '"';
+    memcpy(out + cursor, escaped_items[i], item_len);
+    cursor += item_len;
+    out[cursor++] = '"';
+    if (i + 1 < count) out[cursor++] = ',';
+    free(escaped_items[i]);
+  }
+  if (escaped_items != NULL) free(escaped_items);
+  out[cursor++] = ']';
+  out[cursor] = '\0';
+  return out;
+}
+
+static FILE* sprout_analysis_service_in = NULL;
+static FILE* sprout_analysis_service_out = NULL;
+static pid_t sprout_analysis_service_pid = -1;
+static int sprout_analysis_service_atexit_registered = 0;
+static int sprout_analysis_service_sigpipe_ignored = 0;
+static int sprout_analysis_service_last_status = 0;
+static int sprout_analysis_service_last_status_valid = 0;
+static void sprout_record_analysis_service_status(int status) {
+  sprout_analysis_service_last_status = status;
+  sprout_analysis_service_last_status_valid = 1;
+}
+static int sprout_analysis_service_command_not_found(void) {
+  return sprout_analysis_service_last_status_valid
+    && WIFEXITED(sprout_analysis_service_last_status)
+    && WEXITSTATUS(sprout_analysis_service_last_status) == 127;
+}
+static void sprout_close_analysis_service(void) {
+  if (sprout_analysis_service_in != NULL) {
+    fclose(sprout_analysis_service_in);
+    sprout_analysis_service_in = NULL;
+  }
+  if (sprout_analysis_service_out != NULL) {
+    fclose(sprout_analysis_service_out);
+    sprout_analysis_service_out = NULL;
+  }
+  if (sprout_analysis_service_pid > 0) {
+    int status = 0;
+    if (waitpid(sprout_analysis_service_pid, &status, 0) == sprout_analysis_service_pid) {
+      sprout_record_analysis_service_status(status);
+    }
+    sprout_analysis_service_pid = -1;
+  }
+}
+static int sprout_analysis_service_is_stale(void) {
+  if (sprout_analysis_service_pid <= 0) return 0;
+  int status = 0;
+  pid_t waited = waitpid(sprout_analysis_service_pid, &status, WNOHANG);
+  if (waited == 0) return 0;
+  if (waited == sprout_analysis_service_pid) {
+    sprout_record_analysis_service_status(status);
+    sprout_analysis_service_pid = -1;
+    return 1;
+  }
+  return 0;
+}
+static int sprout_ensure_analysis_service(char** error_out) {
+  if (!sprout_analysis_service_sigpipe_ignored) {
+    signal(SIGPIPE, SIG_IGN);
+    sprout_analysis_service_sigpipe_ignored = 1;
+  }
+  if (sprout_analysis_service_is_stale()) {
+    sprout_close_analysis_service();
+  }
+  if (sprout_analysis_service_in != NULL && sprout_analysis_service_out != NULL && sprout_analysis_service_pid > 0) {
+    return 1;
+  }
+  sprout_analysis_service_last_status_valid = 0;
+  const char* cmd = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
+  if (cmd == NULL || *cmd == '\0') cmd = "/Users/cthulhu/.local/share/mise/installs/python/3.12.13/bin/python3 -m sprout.analysis_service_entrypoint";
+  int request_pipe[2] = {-1, -1};
+  int response_pipe[2] = {-1, -1};
+  if (pipe(request_pipe) != 0 || pipe(response_pipe) != 0) {
+    if (request_pipe[0] >= 0) close(request_pipe[0]);
+    if (request_pipe[1] >= 0) close(request_pipe[1]);
+    if (response_pipe[0] >= 0) close(response_pipe[0]);
+    if (response_pipe[1] >= 0) close(response_pipe[1]);
+    *error_out = dup_cstr("analysis service: unable to create pipes");
+    return 0;
+  }
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(request_pipe[0]);
+    close(request_pipe[1]);
+    close(response_pipe[0]);
+    close(response_pipe[1]);
+    *error_out = dup_cstr("analysis service: unable to fork");
+    return 0;
+  }
+  if (pid == 0) {
+    dup2(request_pipe[0], STDIN_FILENO);
+    dup2(response_pipe[1], STDOUT_FILENO);
+    freopen("/dev/null", "w", stderr);
+    close(request_pipe[0]);
+    close(request_pipe[1]);
+    close(response_pipe[0]);
+    close(response_pipe[1]);
+    execl("/bin/sh", "sh", "-lc", cmd, (char*)NULL);
+    _exit(127);
+  }
+  close(request_pipe[0]);
+  close(response_pipe[1]);
+  FILE* in_file = fdopen(request_pipe[1], "w");
+  FILE* out_file = fdopen(response_pipe[0], "r");
+  if (in_file == NULL || out_file == NULL) {
+    if (in_file != NULL) fclose(in_file);
+    else close(request_pipe[1]);
+    if (out_file != NULL) fclose(out_file);
+    else close(response_pipe[0]);
+    close(request_pipe[0]);
+    close(response_pipe[1]);
+    waitpid(pid, NULL, 0);
+    *error_out = dup_cstr("analysis service: unable to open pipes");
+    return 0;
+  }
+  setvbuf(in_file, NULL, _IOLBF, 0);
+  sprout_analysis_service_in = in_file;
+  sprout_analysis_service_out = out_file;
+  sprout_analysis_service_pid = pid;
+  if (!sprout_analysis_service_atexit_registered) {
+    atexit(sprout_close_analysis_service);
+    sprout_analysis_service_atexit_registered = 1;
+  }
+  return 1;
+}
+static int sprout_run_analysis_service(const char* request_json, int retry_once, char** response_out, char** error_out) {
+  int max_attempts = retry_once ? 2 : 1;
+  for (int attempt = 0; attempt < max_attempts; attempt++) {
+    if (!sprout_ensure_analysis_service(error_out)) return 0;
+    if (fputs(request_json, sprout_analysis_service_in) == EOF || fflush(sprout_analysis_service_in) != 0) {
+      sprout_close_analysis_service();
+      if (attempt + 1 < max_attempts) continue;
+      *error_out = dup_cstr("analysis service: request failed");
+      return 0;
+    }
+    char* response = NULL;
+    size_t response_cap = 0;
+    ssize_t response_len = getline(&response, &response_cap, sprout_analysis_service_out);
+    if (response_len < 0) {
+      if (response != NULL) free(response);
+      sprout_close_analysis_service();
+      if (attempt + 1 < max_attempts) continue;
+      if (sprout_analysis_service_command_not_found()) *error_out = dup_cstr("analysis service: command failed to start; check SPROUT_ANALYSIS_SERVICE_CMD");
+      else *error_out = dup_cstr("analysis service: empty response");
+      return 0;
+    }
+    if (response_len > 0 && response[response_len - 1] == '\n') {
+      response[response_len - 1] = '\0';
+    }
+    *response_out = response;
+    return 1;
+  }
+  *error_out = dup_cstr("analysis service: request failed");
+  return 0;
+}
+static int sprout_analysis_service_retry_allowed(const char* op) {
+  return strcmp(op, "check_source") == 0
+    || strcmp(op, "type_of_in_source") == 0
+    || strcmp(op, "declared_names_in_source") == 0
+    || strcmp(op, "exported_names_in_source") == 0
+    || strcmp(op, "symbol_inventory_in_source") == 0
+    || strcmp(op, "diagnostics_in_source") == 0
+    || strcmp(op, "symbol_locations_in_source") == 0
+    || strcmp(op, "instances_in_source") == 0
+    || strcmp(op, "complete_in_state") == 0;
+}
+
+static long long sprout_err_string_result(const char* message) {
+  return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)dup_cstr(message));
+}
+
+static char* sprout_analysis_request_source_only(const char* op, const char* module_source) {
+  char* escaped_source = sprout_json_escape(module_source);
+  size_t request_len = strlen(op) + strlen(escaped_source) + 48;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\"op\":\"%s\",\"module_source\":\"%s\"}\n",
+    op,
+    escaped_source
+  );
+  free(escaped_source);
+  return request;
+}
+
+static char* sprout_analysis_request_source_field(
+  const char* op,
+  const char* module_source,
+  const char* field_name,
+  const char* field_value
+) {
+  char* escaped_source = sprout_json_escape(module_source);
+  char* escaped_value = sprout_json_escape(field_value);
+  size_t request_len = strlen(op) + strlen(escaped_source) + strlen(field_name) + strlen(escaped_value) + 64;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\"op\":\"%s\",\"module_source\":\"%s\",\"%s\":\"%s\"}\n",
+    op,
+    escaped_source,
+    field_name,
+    escaped_value
+  );
+  free(escaped_source);
+  free(escaped_value);
+  return request;
+}
+
+static long long sprout_analysis_error_from_response(char* response) {
+  char* error = sprout_json_extract_string(response, "error");
+  free(response);
+  long long out = sprout_err_string_result(error != NULL ? error : "analysis service: invalid response");
+  if (error != NULL) free(error);
+  return out;
+}
+
+static long long sprout_analysis_ok_string_result_from_response(char* response, const char* value_key) {
+  char* value = sprout_json_extract_string(response, value_key);
+  free(response);
+  if (value == NULL) return sprout_err_string_result("analysis service: invalid response");
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)value);
+}
+
+static long long sprout_analysis_ok_vec_string_result(VectorVal* items) {
+  if (items == NULL) return sprout_err_string_result("analysis service: invalid response");
+  long long rooted_items = (long long)(uintptr_t)items;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
+  long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
+  SPROUT_GC_PUSH_I64_LOCAL(items_vec);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), items_vec);
+  SPROUT_GC_POP_LOCALS(2);
+  return out;
+}
+
+static long long sprout_analysis_ok_vec_string_result_from_response(char* response, const char* value_key) {
+  VectorVal* items = sprout_json_extract_string_array(response, value_key);
+  free(response);
+  return sprout_analysis_ok_vec_string_result(items);
+}
+
+static long long sprout_analysis_ok_string_vec_pair_result(char* label, VectorVal* items) {
+  if (label == NULL || items == NULL) return sprout_err_string_result("analysis service: invalid response");
+  long long rooted_items = (long long)(uintptr_t)items;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
+  long long items_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_items);
+  SPROUT_GC_PUSH_I64_LOCAL(items_vec);
+  void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+  uintptr_t* words = (uintptr_t*)tuple;
+  words[0] = (uintptr_t)label;
+  words[1] = (uintptr_t)items_vec;
+  SPROUT_GC_POP_LOCALS(2);
+  long long pair = (long long)(uintptr_t)tuple;
+  return sprout_make1(find_ctor_tag_by_name("Ok"), pair);
+}
+
+static long long sprout_analysis_ok_string_vec_pair_from_response(
+  char* response,
+  const char* string_key,
+  const char* array_key
+) {
+  char* label = sprout_json_extract_string(response, string_key);
+  VectorVal* items = sprout_json_extract_string_array(response, array_key);
+  free(response);
+  return sprout_analysis_ok_string_vec_pair_result(label, items);
+}
+
+static long long sprout_analysis_completion_tuple_or_fail(
+  const char* builtin_name,
+  char* response,
+  const char* string_key,
+  const char* array_key
+) {
+  char* prefix = sprout_json_extract_string(response, string_key);
+  VectorVal* matches = sprout_json_extract_string_array(response, array_key);
+  free(response);
+  if (prefix == NULL || matches == NULL) {
+    sprout_builtin_fail_detail(builtin_name, "analysis service: invalid response");
+  }
+  long long rooted_matches = (long long)(uintptr_t)matches;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
+  long long matches_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_matches);
+  SPROUT_GC_PUSH_I64_LOCAL(matches_vec);
+  void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 2));
+  uintptr_t* words = (uintptr_t*)tuple;
+  words[0] = (uintptr_t)prefix;
+  words[1] = (uintptr_t)matches_vec;
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)tuple;
+}
+
+static long long sprout_analysis_ok_inventory_result(
+  VectorVal* declared,
+  VectorVal* imported,
+  VectorVal* exported
+) {
+  if (declared == NULL || imported == NULL || exported == NULL) {
+    return sprout_err_string_result("analysis service: invalid response");
+  }
+  long long rooted_declared = (long long)(uintptr_t)declared;
+  long long rooted_imported = (long long)(uintptr_t)imported;
+  long long rooted_exported = (long long)(uintptr_t)exported;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_declared);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_imported);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_exported);
+  long long declared_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_declared);
+  long long imported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_imported);
+  long long exported_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_exported);
+  SPROUT_GC_PUSH_I64_LOCAL(declared_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(imported_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(exported_vec);
+  void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
+  uintptr_t* words = (uintptr_t*)tuple;
+  words[0] = (uintptr_t)declared_vec;
+  words[1] = (uintptr_t)imported_vec;
+  words[2] = (uintptr_t)exported_vec;
+  SPROUT_GC_POP_LOCALS(6);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)tuple);
+}
+
+static long long sprout_analysis_ok_inventory_from_response(
+  char* response,
+  const char* declared_key,
+  const char* imported_key,
+  const char* exported_key
+) {
+  VectorVal* declared = sprout_json_extract_string_array(response, declared_key);
+  VectorVal* imported = sprout_json_extract_string_array(response, imported_key);
+  VectorVal* exported = sprout_json_extract_string_array(response, exported_key);
+  free(response);
+  return sprout_analysis_ok_inventory_result(declared, imported, exported);
+}
+
+static long long sprout_analysis_diagnostics_vec_or_fail(
+  const char* builtin_name,
+  char* response,
+  const char* messages_key,
+  const char* lines_key,
+  const char* columns_key
+) {
+  VectorVal* messages = sprout_json_extract_string_array(response, messages_key);
+  long long line_count = 0;
+  long long column_count = 0;
+  long long* lines = sprout_json_extract_int_array(response, lines_key, &line_count);
+  long long* columns = sprout_json_extract_int_array(response, columns_key, &column_count);
+  free(response);
+  if (
+    messages == NULL ||
+    line_count != messages->len ||
+    column_count != messages->len ||
+    (messages->len > 0 && (lines == NULL || columns == NULL))
+  ) {
+    if (lines != NULL) free(lines);
+    if (columns != NULL) free(columns);
+    sprout_builtin_fail_detail(builtin_name, "analysis service: invalid response");
+  }
+  VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  long long rooted_messages = (long long)(uintptr_t)messages;
+  long long rooted_out = (long long)(uintptr_t)out;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_messages);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
+  out->len = messages->len;
+  out->cap = messages->len;
+  out->data = messages->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)messages->len, "analysis service: out of memory");
+  for (long long i = 0; i < messages->len; i++) {
+    void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
+    uintptr_t* words = (uintptr_t*)tuple;
+    words[0] = (uintptr_t)messages->data[i];
+    words[1] = (uintptr_t)lines[i];
+    words[2] = (uintptr_t)columns[i];
+    out->data[i] = (long long)(uintptr_t)tuple;
+  }
+  if (lines != NULL) free(lines);
+  if (columns != NULL) free(columns);
+  long long out_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_out);
+  SPROUT_GC_POP_LOCALS(2);
+  return out_vec;
+}
+
+static long long sprout_analysis_ok_symbol_locations_from_response(
+  char* response,
+  const char* categories_key,
+  const char* names_key,
+  const char* lines_key,
+  const char* columns_key
+) {
+  VectorVal* categories = sprout_json_extract_string_array(response, categories_key);
+  VectorVal* names = sprout_json_extract_string_array(response, names_key);
+  long long line_count = 0;
+  long long column_count = 0;
+  long long* lines = sprout_json_extract_int_array(response, lines_key, &line_count);
+  long long* columns = sprout_json_extract_int_array(response, columns_key, &column_count);
+  free(response);
+  if (
+    categories == NULL ||
+    names == NULL ||
+    categories->len != names->len ||
+    line_count != categories->len ||
+    column_count != categories->len ||
+    (categories->len > 0 && (lines == NULL || columns == NULL))
+  ) {
+    if (lines != NULL) free(lines);
+    if (columns != NULL) free(columns);
+    return sprout_err_string_result("analysis service: invalid response");
+  }
+  VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  long long rooted_categories = (long long)(uintptr_t)categories;
+  long long rooted_names = (long long)(uintptr_t)names;
+  long long rooted_out = (long long)(uintptr_t)out;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_categories);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_names);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
+  out->len = categories->len;
+  out->cap = categories->len;
+  out->data = categories->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)categories->len, "analysis service: out of memory");
+  for (long long i = 0; i < categories->len; i++) {
+    void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 4));
+    uintptr_t* words = (uintptr_t*)tuple;
+    words[0] = (uintptr_t)categories->data[i];
+    words[1] = (uintptr_t)names->data[i];
+    words[2] = (uintptr_t)lines[i];
+    words[3] = (uintptr_t)columns[i];
+    out->data[i] = (long long)(uintptr_t)tuple;
+  }
+  if (lines != NULL) free(lines);
+  if (columns != NULL) free(columns);
+  long long rooted_vec_raw = (long long)(uintptr_t)out;
+  long long out_vec = sprout_make1(find_ctor_tag_by_name("Vec"), rooted_vec_raw);
+  SPROUT_GC_PUSH_I64_LOCAL(out_vec);
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), out_vec);
+  SPROUT_GC_POP_LOCALS(4);
+  return result;
+}
+
+
+static long long sprout_analysis_check_source_result(const char* op, const char* module_source) {
+  char* request = sprout_analysis_request_source_only(op, module_source);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    free(response);
+    return sprout_make1(find_ctor_tag_by_name("Ok"), 0);
+  }
+  return sprout_analysis_error_from_response(response);
+}
+static long long sprout_analysis_type_result(const char* op, const char* module_source, const char* expr) {
+  char* request = sprout_analysis_request_source_field(op, module_source, "expr", expr);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_string_result_from_response(response, "value");
+  }
+  return sprout_analysis_error_from_response(response);
+}
+static long long sprout_analysis_instances_result(const char* op, const char* module_source, const char* query) {
+  char* request = sprout_analysis_request_source_field(op, module_source, "query", query);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_string_vec_pair_from_response(response, "query_type", "matches");
+  }
+  return sprout_analysis_error_from_response(response);
+}
+static long long sprout_analysis_vec_string_result(const char* op, const char* module_source, const char* expr) {
+  char* request = sprout_analysis_request_source_field(op, module_source, "expr", expr);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_vec_string_result_from_response(response, "value");
+  }
+  return sprout_analysis_error_from_response(response);
+}
+static long long sprout_analysis_string_array_result(const char* op, const char* module_source) {
+  char* request = sprout_analysis_request_source_only(op, module_source);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_vec_string_result_from_response(response, "value");
+  }
+  return sprout_analysis_error_from_response(response);
+}
+static long long sprout_analysis_inventory_result(const char* op, const char* module_source) {
+  char* request = sprout_analysis_request_source_only(op, module_source);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_inventory_from_response(
+      response,
+      "declared",
+      "imported",
+      "exported"
+    );
+  }
+  return sprout_analysis_error_from_response(response);
+}
+static long long sprout_analysis_diagnostics_result(const char* op, const char* module_source) {
+  char* request = sprout_analysis_request_source_only(op, module_source);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    sprout_builtin_fail_detail(op, error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_diagnostics_vec_or_fail(
+      op,
+      response,
+      "messages",
+      "lines",
+      "columns"
+    );
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  sprout_builtin_fail_detail(op, error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  return 0;
+}
+static long long sprout_analysis_symbol_locations_result(const char* op, const char* module_source) {
+  char* request = sprout_analysis_request_source_only(op, module_source);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed(op), &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_symbol_locations_from_response(
+      response,
+      "categories",
+      "names",
+      "lines",
+      "columns"
+    );
+  }
+  return sprout_analysis_error_from_response(response);
+}
+static long long sprout_analysis_completion_result(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
+  char* escaped_line_buffer = sprout_json_escape(line_buffer);
+  char* imports_json = sprout_json_encode_string_array_from_vec_handle(imports_handle, "analysis_complete_in_state", "imports");
+  char* declarations_json = sprout_json_encode_string_array_from_vec_handle(declarations_handle, "analysis_complete_in_state", "declarations");
+  size_t request_len = strlen(escaped_line_buffer) + strlen(imports_json) + strlen(declarations_json) + 88;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(
+    request,
+    request_len + 1,
+    "{\"op\":\"complete_in_state\",\"line_buffer\":\"%s\",\"imports\":%s,\"declarations\":%s}\n",
+    escaped_line_buffer,
+    imports_json,
+    declarations_json
+  );
+  free(escaped_line_buffer);
+  free(imports_json);
+  free(declarations_json);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, sprout_analysis_service_retry_allowed("complete_in_state"), &response, &error)) {
+    free(request);
+    sprout_builtin_fail_detail("analysis_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_REQUEST_FAILED__");
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_completion_tuple_or_fail(
+      "analysis_complete_in_state",
+      response,
+      "prefix",
+      "matches"
+    );
+  }
+  error = sprout_json_extract_string(response, "error");
+  free(response);
+  sprout_builtin_fail_detail("analysis_complete_in_state", error != NULL ? error : "__SPROUT_ANALYSIS_SERVICE_INVALID_RESPONSE__");
+  return 0;
+}
+long long repl_add_import(const char* source) {
+  (void)source;
+  tcp_fail("repl_add_import: not supported in native backend");
+  return 0;
+}
+long long repl_add_declaration(const char* source) {
+  (void)source;
+  tcp_fail("repl_add_declaration: not supported in native backend");
+  return 0;
+}
+long long repl_eval_expr(const char* source) {
+  (void)source;
+  tcp_fail("repl_eval_expr: not supported in native backend");
+  return 0;
+}
+long long analysis_eval_expr_in_source(const char* module_source, const char* expr) {
+  return sprout_analysis_vec_string_result("eval_expr_in_source", module_source, expr);
+}
+long long repl_eval_expr_in_source(const char* module_source, const char* expr) {
+  return analysis_eval_expr_in_source(module_source, expr);
+}
+long long repl_check_source(const char* module_source) {
+  return sprout_analysis_check_source_result("check_source", module_source);
+}
+long long analysis_check_source(const char* module_source) {
+  return sprout_analysis_check_source_result("check_source", module_source);
+}
+long long repl_declared_names_in_source(const char* module_source) {
+  return sprout_analysis_string_array_result("declared_names_in_source", module_source);
+}
+long long analysis_declared_names_in_source(const char* module_source) {
+  return sprout_analysis_string_array_result("declared_names_in_source", module_source);
+}
+long long repl_exported_names_in_source(const char* module_source) {
+  return sprout_analysis_string_array_result("exported_names_in_source", module_source);
+}
+long long analysis_exported_names_in_source(const char* module_source) {
+  return sprout_analysis_string_array_result("exported_names_in_source", module_source);
+}
+long long repl_symbol_inventory_in_source(const char* module_source) {
+  return sprout_analysis_inventory_result("symbol_inventory_in_source", module_source);
+}
+long long analysis_symbol_inventory_in_source(const char* module_source) {
+  return sprout_analysis_inventory_result("symbol_inventory_in_source", module_source);
+}
+long long analysis_symbol_locations_in_source(const char* module_source) {
+  return sprout_analysis_symbol_locations_result("symbol_locations_in_source", module_source);
+}
+long long repl_diagnostics_in_source(const char* module_source) {
+  return sprout_analysis_diagnostics_result("diagnostics_in_source", module_source);
+}
+long long analysis_diagnostics_in_source(const char* module_source) {
+  return sprout_analysis_diagnostics_result("diagnostics_in_source", module_source);
+}
+long long repl_type_of(const char* source) {
+  (void)source;
+  tcp_fail("repl_type_of: not supported in native backend");
+  return 0;
+}
+long long repl_type_of_in_source(const char* module_source, const char* expr) {
+  return sprout_analysis_type_result("type_of_in_source", module_source, expr);
+}
+long long analysis_type_of_in_source(const char* module_source, const char* expr) {
+  return sprout_analysis_type_result("type_of_in_source", module_source, expr);
+}
+long long repl_instances(const char* source) {
+  (void)source;
+  tcp_fail("repl_instances: not supported in native backend");
+  return 0;
+}
+long long repl_instances_in_source(const char* module_source, const char* type_expr_source) {
+  return sprout_analysis_instances_result("instances_in_source", module_source, type_expr_source);
+}
+long long analysis_instances_in_source(const char* module_source, const char* type_expr_source) {
+  return sprout_analysis_instances_result("instances_in_source", module_source, type_expr_source);
+}
+long long repl_complete(const char* source) {
+  (void)source;
+  tcp_fail("repl_complete: not supported in native backend");
+  return 0;
+}
+long long analysis_complete_in_state(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
+  return sprout_analysis_completion_result(line_buffer, imports_handle, declarations_handle);
+}
+long long repl_complete_in_state(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
+  return analysis_complete_in_state(line_buffer, imports_handle, declarations_handle);
+}
+long long repl_reset_session(void) {
+  return 0;
+}
+long long read_int_lines(const char* path) {
+  if (path == NULL) tcp_fail("read_int_lines: null path");
+  FILE* f = fopen(path, "r");
+  if (f == NULL) tcp_fail("read_int_lines: cannot open file");
+  VectorVal* v = sprout_alloc_vector_val("read_int_lines: out of memory");
+  SPROUT_HANDLE(h_v, (long long)(uintptr_t)v);
+  v->len = 0;
+  v->cap = 0;
+  v->data = NULL;
+
+  char buf[4096];
+  while (fgets(buf, sizeof(buf), f) != NULL) {
+    size_t n = strlen(buf);
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
+      buf[n - 1] = '\0';
+      n--;
+    }
+    if (n == 0) continue;
+    char* end = NULL;
+    long long value = strtoll(buf, &end, 10);
+    if (end == buf || *end != '\0') tcp_fail("read_int_lines: invalid integer line");
+    if (v->len == v->cap) {
+      long long new_cap = v->cap == 0 ? 8 : (v->cap * 2);
+      long long* new_data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "read_int_lines: out of memory");
+      v->data = new_data;
+      v->cap = new_cap;
+    }
+    v->data[v->len] = value;
+    v->len++;
+  }
+  fclose(f);
+  return sprout_handle_get(h_v);
+}
+long long sprout_register_ctor(long long tag, const char* name, long long arity) {
+  g_ctor_meta[g_ctor_meta_len].tag = tag;
+  g_ctor_meta[g_ctor_meta_len].name = name;
+  g_ctor_meta[g_ctor_meta_len].arity = arity;
+  g_ctor_meta_len++;
+  return 0;
+}
+long long sprout_make0(long long tag) {
+  CtorMeta* meta = find_ctor(tag);
+  if (meta != NULL && strcmp(meta->name, "Nothing") == 0) {
+    if (g_nothing_singleton == NULL) {
+      g_nothing_singleton = sprout_init_obj(sprout_alloc_obj_raw("sprout_make0: out of memory"), tag, 0, 0, 0);
+      register_obj(g_nothing_singleton);
+    }
+    return box_ptr(g_nothing_singleton);
+  }
+  return sprout_make_registered_obj(tag, 0, 0, 0, "sprout_make0: out of memory");
+}
+long long sprout_make1(long long tag, long long a0) {
+  return sprout_make_registered_obj(tag, a0, 0, 0, "sprout_make1: out of memory");
+}
+long long sprout_make2(long long tag, long long a0, long long a1) {
+  return sprout_make_registered_obj(tag, a0, a1, 0, "sprout_make2: out of memory");
+}
+long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
+  return sprout_make_registered_obj(tag, a0, a1, a2, "sprout_make3: out of memory");
+}
+long long sprout_tag(long long h) {
+  if (h == 0) {
+    fprintf(stderr, "[sprout] sprout_tag: null pointer");
+    if (g_sprout_current_fn != NULL)
+      fprintf(stderr, " (in: %s)", g_sprout_current_fn);
+    fprintf(stderr, "\n");
+    fflush(stderr);
+    abort();
+  }
+  SproutObj* obj = unbox_ptr(h);
+  return obj->tag;
+}
+long long sprout_field(long long h, long long idx) {
+  SproutObj* o = unbox_ptr(h);
+  if (idx == 0) return o->f0;
+  if (idx == 1) {
+    return o->f1;
+  }
+  if (idx == 2) return o->f2;
+  if (idx == 3) return o->f3;
+  if (idx == 4) return o->f4;
+  if (idx == 5) return o->f5;
+  if (idx == 6) return o->f6;
+  if (idx == 7) return o->f7;
+  return o->f8;
+}
+long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make4: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make5: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make6: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make7: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  obj->f6 = a6;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make8: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  obj->f6 = a6;
+  obj->f7 = a7;
+  return sprout_box_registered_obj(obj);
+}
+long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8) {
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make9: out of memory"), tag, a0, a1, a2);
+  obj->f3 = a3;
+  obj->f4 = a4;
+  obj->f5 = a5;
+  obj->f6 = a6;
+  obj->f7 = a7;
+  obj->f8 = a8;
+  return sprout_box_registered_obj(obj);
+}
+
+long long sprout_abort_match(void) {
+  fprintf(stderr, "runtime error: non-exhaustive match\n");
+  exit(1);
+}
+static void tcp_fail(const char* msg) {
+  const char* colon = strchr(msg, ':');
+  if (colon != NULL) {
+    size_t name_len = (size_t)(colon - msg);
+    const char* detail = colon + 1;
+    while (*detail == ' ') detail++;
+    fprintf(stderr, "runtime error: builtin `%.*s`: %s\n", (int)name_len, msg, detail);
+  } else {
+    fprintf(stderr, "runtime error: %s\n", msg);
+  }
+  exit(1);
+}
+
+long long str_concat(long long left_i, long long right_i) {
+  const char* left = (const char*)(uintptr_t)left_i;
+  const char* right = (const char*)(uintptr_t)right_i;
+  if (left == NULL || right == NULL) tcp_fail("str_concat: null input");
+  size_t left_len = strlen(left);
+  size_t right_len = strlen(right);
+  SPROUT_HANDLE(h_left, left_i);
+  SPROUT_HANDLE(h_right, right_i);
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(left_len + right_len + 1);
+  if (out == NULL) tcp_fail("str_concat: out of memory");
+  memcpy(out, left, left_len);
+  memcpy(out + left_len, right, right_len);
+  out[left_len + right_len] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
+
+/* string_concat_many: concatenate a List String into a single String. */
+long long string_concat_many(long long list_handle) {
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  /* First pass: compute total byte length. */
+  size_t total = 0;
+  size_t elem_idx = 0;
+  long long cur = list_handle;
+  const char* prev_s = NULL;
+  while (sprout_tag(cur) != nil_tag) {
+    if (sprout_tag(cur) != cons_tag) tcp_fail("string_concat_many: malformed list");
+    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
+    if (s == NULL) {
+      tcp_fail("string_concat_many: null string element");
+    }
+    total += strlen(s);
+    prev_s = s;
+    cur = sprout_field(cur, 1);
+    elem_idx++;
+  }
+  SPROUT_HANDLE(h_list, list_handle);
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(total + 1);
+  if (out == NULL) tcp_fail("string_concat_many: out of memory");
+  /* Second pass: copy bytes. */
+  size_t pos = 0;
+  cur = sprout_handle_get(h_list);
+  while (sprout_tag(cur) != nil_tag) {
+    const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
+    size_t slen = strlen(elem);
+    memcpy(out + pos, elem, slen);
+    pos += slen;
+    cur = sprout_field(cur, 1);
+  }
+  out[total] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
+
+/* string_join_newlines: join a List String appending '\n' after each element.
+ * Two-pass: compute total length, malloc once, copy. No GC inside traversal. */
+long long string_join_newlines(long long list_handle) {
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  size_t total = 0;
+  long long cur = list_handle;
+  while (sprout_tag(cur) != nil_tag) {
+    if (sprout_tag(cur) != cons_tag) tcp_fail("string_join_newlines: malformed list");
+    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
+    if (s == NULL) tcp_fail("string_join_newlines: null string element");
+    total += strlen(s) + 1;
+    cur = sprout_field(cur, 1);
+  }
+  SPROUT_HANDLE(h_list, list_handle);
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(total + 1);
+  if (out == NULL) tcp_fail("string_join_newlines: out of memory");
+  size_t pos = 0;
+  cur = sprout_handle_get(h_list);
+  while (sprout_tag(cur) != nil_tag) {
+    const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
+    size_t slen = strlen(elem);
+    memcpy(out + pos, elem, slen);
+    pos += slen;
+    out[pos++] = '\n';
+    cur = sprout_field(cur, 1);
+  }
+  out[pos] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
+
+static size_t sprout_utf8_char_width(unsigned char lead) {
+  if ((lead & 0x80) == 0) return 1;
+  if ((lead & 0xE0) == 0xC0) return 2;
+  if ((lead & 0xF0) == 0xE0) return 3;
+  if ((lead & 0xF8) == 0xF0) return 4;
+  tcp_fail("str_len: invalid UTF-8 lead byte");
+  return 1;
+}
+
+static size_t sprout_utf8_codepoint_count(const char* s) {
+  size_t count = 0;
+  size_t i = 0;
+  while (s[i] != '\0') {
+    i += sprout_utf8_char_width((unsigned char)s[i]);
+    count++;
+  }
+  return count;
+}
+
+static size_t sprout_utf8_byte_offset(const char* s, size_t codepoint_offset) {
+  size_t i = 0;
+  size_t count = 0;
+  while (s[i] != '\0' && count < codepoint_offset) {
+    i += sprout_utf8_char_width((unsigned char)s[i]);
+    count++;
+  }
+  return i;
+}
+
+long long str_len(const char* s) {
+  if (s == NULL) tcp_fail("str_len: null input");
+  return (long long)sprout_utf8_codepoint_count(s);
+}
+
+_Bool str_eq(const char* left, const char* right) {
+  if (left == NULL || right == NULL) tcp_fail("str_eq: null input");
+  return strcmp(left, right) == 0;
+}
+
+long long str_slice(long long s_i, long long start, long long length) {
+  const char* s = (const char*)(uintptr_t)s_i;
+  if (s == NULL) tcp_fail("str_slice: null input");
+  if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
+  SPROUT_HANDLE(h_s, s_i);
+  size_t total = sprout_utf8_codepoint_count(s);
+  if ((size_t)start >= total) {
+    sprout_gc_maybe_collect_threshold();
+    char* out = (char*)malloc(1);
+    if (out == NULL) tcp_fail("str_slice: out of memory");
+    out[0] = '\0';
+    register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+    return (long long)(uintptr_t)out;
+  }
+  size_t start_byte = sprout_utf8_byte_offset(s, (size_t)start);
+  size_t end_codepoint = (size_t)start + (size_t)length;
+  if (end_codepoint > total) end_codepoint = total;
+  size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
+  size_t take = end_byte - start_byte;
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(take + 1);
+  if (out == NULL) tcp_fail("str_slice: out of memory");
+  memcpy(out, s + start_byte, take);
+  out[take] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
+
+/* Pre-allocated one-byte C strings for each ASCII codepoint (0-127).
+ * str_char_at returns a pointer into this table for ASCII characters,
+ * completely avoiding malloc for the common case in Sprout source files. */
+static char g_ascii_char_strs[128][2];
+static int  g_ascii_char_strs_init = 0;
+
+static void init_ascii_char_strs(void) {
+  for (int i = 0; i < 128; i++) {
+    g_ascii_char_strs[i][0] = (char)i;
+    g_ascii_char_strs[i][1] = '\0';
+  }
+  g_ascii_char_strs_init = 1;
+}
+
+long long str_char_at(const char* s, long long index) {
+  if (s == NULL) tcp_fail("str_char_at: null input");
+  if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  /* Scan forward to the index-th UTF-8 codepoint.  This avoids both the
+   * separate sprout_utf8_codepoint_count() pass (O(N) just for bounds) and
+   * the str_slice() call (O(N) + malloc).  For ASCII the returned char string
+   * comes from a static table so no allocation occurs at all. */
+  size_t byte_pos = 0;
+  long long cp_idx = 0;
+  while (s[byte_pos] != '\0') {
+    if (cp_idx == index) {
+      size_t width = sprout_utf8_char_width((unsigned char)s[byte_pos]);
+      const char* char_str;
+      if (width == 1) {
+        if (!g_ascii_char_strs_init) init_ascii_char_strs();
+        char_str = g_ascii_char_strs[(unsigned char)s[byte_pos]];
+      } else {
+        /* Multi-byte codepoint: rare in Sprout source files. */
+        char* tmp = (char*)malloc(width + 1);
+        if (!tmp) tcp_fail("str_char_at: out of memory");
+        memcpy(tmp, s + byte_pos, width);
+        tmp[width] = '\0';
+        char_str = tmp;
+      }
+      return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
+    }
+    byte_pos += sprout_utf8_char_width((unsigned char)s[byte_pos]);
+    cp_idx++;
+  }
+  return sprout_make0(find_ctor_tag_by_name("Nothing"));
+}
+
+/* str_split_lines: O(N) line splitting, replacing the O(N^2) split_lines_at
+ * loop that called str_char_at + str_slice for each codepoint in the source.
+ * Returns a Sprout List String; each line excludes the trailing newline. */
+long long str_split_lines(const char* s) {
+  if (s == NULL) tcp_fail("str_split_lines: null input");
+  size_t total = strlen(s);
+
+  /* One forward pass to collect (start_byte, end_byte) spans. */
+  typedef struct { size_t start; size_t end; } Span;
+  Span* spans = NULL;
+  size_t nspans = 0, cap = 0;
+  size_t line_start = 0;
+  for (size_t i = 0; i <= total; i++) {
+    if (s[i] == '\n' || s[i] == '\0') {
+      if (nspans >= cap) {
+        cap = (cap < 64) ? 64 : cap * 2;
+        Span* tmp = (Span*)realloc(spans, cap * sizeof(Span));
+        if (!tmp) { free(spans); tcp_fail("str_split_lines: out of memory"); }
+        spans = tmp;
+      }
+      spans[nspans++] = (Span){ line_start, i };
+      line_start = i + 1;
+    }
+  }
+
+  /* Build Cons list from back to front (last span prepended first, head at front). */
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  SPROUT_HANDLE(h_s, (long long)(uintptr_t)s);
+  SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
+  for (size_t k = nspans; k-- > 0;) {
+    size_t slen = spans[k].end - spans[k].start;
+    char* line = (char*)malloc(slen + 1);
+    if (!line) { free(spans); tcp_fail("str_split_lines: out of memory"); }
+    memcpy(line, s + spans[k].start, slen);
+    line[slen] = '\0';
+    register_managed_ptr(line, SPROUT_HEAP_CSTR, 0);
+    {
+      SPROUT_HANDLE(h_line, (long long)(uintptr_t)line);
+      SPROUT_HANDLE_SET(h_list, sprout_make2(cons_tag, sprout_handle_get(h_line), sprout_handle_get(h_list)));
+    }
+  }
+
+  free(spans);
+  return sprout_handle_get(h_list);
+}
+
+/* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
+ * Avoids the O(index) codepoint scan of str_char_at. */
+long long str_char_at_byte(const char* s, long long byte_pos) {
+  if (s == NULL) tcp_fail("str_char_at_byte: null input");
+  if (byte_pos < 0 || s[(size_t)byte_pos] == '\0')
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  size_t pos = (size_t)byte_pos;
+  size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
+  const char* char_str;
+  if (width == 1) {
+    if (!g_ascii_char_strs_init) init_ascii_char_strs();
+    char_str = g_ascii_char_strs[(unsigned char)s[pos]];
+  } else {
+    char* tmp = (char*)malloc(width + 1);
+    if (!tmp) tcp_fail("str_char_at_byte: out of memory");
+    memcpy(tmp, s + pos, width);
+    tmp[width] = '\0';
+    char_str = tmp;
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
+}
+
+/* str_char_width_at_byte: UTF-8 byte width of the char at byte_pos; 0 at end. O(1). */
+long long str_char_width_at_byte(const char* s, long long byte_pos) {
+  if (s == NULL) tcp_fail("str_char_width_at_byte: null input");
+  if (byte_pos < 0 || s[(size_t)byte_pos] == '\0') return 0;
+  return (long long)sprout_utf8_char_width((unsigned char)s[(size_t)byte_pos]);
+}
+
+/* str_byte_len: byte length of the string (strlen). */
+long long str_byte_len(const char* s) {
+  if (s == NULL) tcp_fail("str_byte_len: null input");
+  return (long long)strlen(s);
+}
+
+/* str_starts_with_at_byte: O(|prefix|) starts-with check from a byte offset.
+ * Avoids the O(N) remaining-text allocation of match_string's old approach. */
+_Bool str_starts_with_at_byte(const char* s, long long byte_pos, const char* prefix) {
+  if (s == NULL || prefix == NULL) tcp_fail("str_starts_with_at_byte: null input");
+  if (byte_pos < 0) return 0;
+  return strncmp(s + (size_t)byte_pos, prefix, strlen(prefix)) == 0;
+}
+
+long long str_find(const char* haystack, const char* needle) {
+  if (haystack == NULL || needle == NULL) tcp_fail("str_find: null input");
+  const char* pos = strstr(haystack, needle);
+  if (pos == NULL) return -1;
+  size_t prefix_len = (size_t)(pos - haystack);
+  size_t count = 0;
+  size_t i = 0;
+  while (i < prefix_len) {
+    i += sprout_utf8_char_width((unsigned char)haystack[i]);
+    count++;
+  }
+  return (long long)count;
+}
+
+_Bool str_starts_with(const char* s, const char* prefix) {
+  if (s == NULL || prefix == NULL) tcp_fail("str_starts_with: null input");
+  size_t prefix_len = strlen(prefix);
+  return strncmp(s, prefix, prefix_len) == 0;
+}
+
+long long str_compare(const char* left, const char* right) {
+  if (left == NULL || right == NULL) tcp_fail("str_compare: null input");
+  int cmp = strcmp(left, right);
+  if (cmp < 0) return -1;
+  if (cmp > 0) return 1;
+  return 0;
+}
+
+long long regex_validate(const char* pattern) {
+  if (pattern == NULL) tcp_fail("regex_validate: null input");
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)error);
+  }
+  regfree(&compiled);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), 0);
+}
+
+_Bool regex_is_match(const char* pattern, const char* text) {
+  if (pattern == NULL || text == NULL) tcp_fail("regex_is_match: null input");
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    regex_builtin_fail("regex_is_match", error);
+  }
+  regmatch_t match;
+  int status = regexec(&compiled, text, 1, &match, 0);
+  regfree(&compiled);
+  return status == 0;
+}
+
+long long regex_find_range(const char* pattern, const char* text) {
+  if (pattern == NULL || text == NULL) tcp_fail("regex_find_range: null input");
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    regex_builtin_fail("regex_find_range", error);
+  }
+  regmatch_t match;
+  int status = regexec(&compiled, text, 1, &match, 0);
+  regfree(&compiled);
+  if (status == REG_NOMATCH) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  if (status != 0 || match.rm_so < 0 || match.rm_eo < 0) {
+    tcp_fail("regex_find_range: regexec failed");
+  }
+  IntRangeVal* range = sprout_alloc_range_val("regex_find_range: out of memory");
+  range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
+  range->end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)range);
+}
+
+long long regex_replace_all_literal(long long pattern_i, long long replacement_i, long long text_i) {
+  const char* pattern = (const char*)(uintptr_t)pattern_i;
+  const char* replacement = (const char*)(uintptr_t)replacement_i;
+  const char* text = (const char*)(uintptr_t)text_i;
+  if (pattern == NULL || replacement == NULL || text == NULL) {
+    tcp_fail("regex_replace_all_literal: null input");
+  }
+  SPROUT_HANDLE(h_pattern, pattern_i);
+  SPROUT_HANDLE(h_replacement, replacement_i);
+  SPROUT_HANDLE(h_text, text_i);
+  sprout_gc_maybe_collect_threshold();
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    regex_builtin_fail("regex_replace_all_literal", error);
+  }
+  ByteBuf out;
+  buf_init(&out);
+  const char* cursor = text;
+  regmatch_t match;
+  while (regexec(&compiled, cursor, 1, &match, 0) == 0) {
+    if (match.rm_so < 0 || match.rm_eo < 0) {
+      regfree(&compiled);
+      tcp_fail("regex_replace_all_literal: regexec failed");
+    }
+    size_t start = (size_t)match.rm_so;
+    size_t end = (size_t)match.rm_eo;
+    buf_append_bytes(&out, cursor, start);
+    buf_append_cstr(&out, replacement);
+    if (end == 0) {
+      if (cursor[0] == '\0') break;
+      size_t width = sprout_utf8_char_width((unsigned char)cursor[0]);
+      buf_append_bytes(&out, cursor, width);
+      cursor += width;
+    } else {
+      cursor += end;
+    }
+  }
+  buf_append_cstr(&out, cursor);
+  regfree(&compiled);
+  register_managed_ptr(out.data, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out.data;
+}
+
+long long regex_escape(long long raw_i) {
+  const char* raw = (const char*)(uintptr_t)raw_i;
+  if (raw == NULL) tcp_fail("regex_escape: null input");
+  SPROUT_HANDLE(h_raw, raw_i);
+  sprout_gc_maybe_collect_threshold();
+  ByteBuf out;
+  buf_init(&out);
+  for (size_t i = 0; raw[i] != '\0'; i++) {
+    if (strchr(".^$*+?()[]{}|\\", raw[i]) != NULL) {
+      buf_append_char(&out, '\\');
+    }
+    buf_append_char(&out, raw[i]);
+  }
+  char* result = out.data == NULL ? dup_cstr("") : out.data;
+  register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)result;
+}
+
+long long char_to_string(long long ch_i) {
+  const char* ch = (const char*)(uintptr_t)ch_i;
+  if (ch == NULL) tcp_fail("char_to_string: null input");
+  return ch_i;
+}
+
+static void buf_init(ByteBuf* buf) {
+  buf->data = NULL;
+  buf->len = 0;
+  buf->cap = 0;
+}
+
+static void buf_reserve(ByteBuf* buf, size_t want) {
+  if (want <= buf->cap) return;
+  size_t next = buf->cap == 0 ? 256 : buf->cap;
+  while (next < want) next *= 2;
+  char* grown = (char*)realloc(buf->data, next);
+  if (grown == NULL) tcp_fail("http_request: out of memory");
+  buf->data = grown;
+  buf->cap = next;
+}
+
+static void buf_append_bytes(ByteBuf* buf, const char* data, size_t len) {
+  buf_reserve(buf, buf->len + len + 1);
+  memcpy(buf->data + buf->len, data, len);
+  buf->len += len;
+  buf->data[buf->len] = '\0';
+}
+
+static void buf_append_cstr(ByteBuf* buf, const char* text) {
+  buf_append_bytes(buf, text, strlen(text));
+}
+
+static void buf_append_char(ByteBuf* buf, char ch) {
+  buf_reserve(buf, buf->len + 2);
+  buf->data[buf->len] = ch;
+  buf->len += 1;
+  buf->data[buf->len] = '\0';
+}
+
+static char* alloc_cstr(size_t len, const char* ctx) {
+  char* out = (char*)malloc(len + 1);
+  if (out == NULL) tcp_fail(ctx);
+  out[0] = '\0';
+  return out;
+}
+
+static char* dup_slice(const char* start, size_t len) {
+  char* out = alloc_cstr(len, "http_request: out of memory");
+  memcpy(out, start, len);
+  out[len] = '\0';
+  return out;
+}
+
+static char* dup_cstr(const char* text) {
+  return dup_slice(text, strlen(text));
+}
+
+static char* regex_prefixed_error(const char* prefix, const char* detail) {
+  size_t prefix_len = strlen(prefix);
+  size_t detail_len = strlen(detail);
+  char* out = alloc_cstr(prefix_len + detail_len, "regex_validate: out of memory");
+  memcpy(out, prefix, prefix_len);
+  memcpy(out + prefix_len, detail, detail_len);
+  out[prefix_len + detail_len] = '\0';
+  return out;
+}
+
+static void regex_builtin_fail(const char* builtin, const char* detail) {
+  size_t builtin_len = strlen(builtin);
+  size_t detail_len = strlen(detail);
+  char* out = alloc_cstr(builtin_len + 2 + detail_len, "regex_validate: out of memory");
+  memcpy(out, builtin, builtin_len);
+  out[builtin_len] = ':';
+  out[builtin_len + 1] = ' ';
+  memcpy(out + builtin_len + 2, detail, detail_len);
+  out[builtin_len + 2 + detail_len] = '\0';
+  tcp_fail(out);
+}
+
+static int regex_translate_pattern(const char* pattern, char** out_pattern, char** out_error) {
+  ByteBuf out;
+  buf_init(&out);
+  int in_class = 0;
+  for (size_t i = 0; pattern[i] != '\0';) {
+    char ch = pattern[i];
+    if (ch == '\\') {
+      char esc = pattern[i + 1];
+      if (esc == '\0') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("invalid regex pattern: trailing escape");
+        return 0;
+      }
+      if (esc >= '0' && esc <= '9') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: backreferences");
+        return 0;
+      }
+      if (esc == 'd') {
+        if (in_class) buf_append_cstr(&out, "0-9");
+        else buf_append_cstr(&out, "[0-9]");
+      } else if (esc == 'w') {
+        if (in_class) buf_append_cstr(&out, "A-Za-z0-9_");
+        else buf_append_cstr(&out, "[A-Za-z0-9_]");
+      } else if (esc == 's') {
+        if (in_class) {
+          buf_append_cstr(&out, " \t\r\n");
+        } else {
+          buf_append_cstr(&out, "[ \t\r\n]");
+        }
+      } else if (strchr("\\.^$*+?()[]|{}-", esc) != NULL) {
+        buf_append_char(&out, '\\');
+        buf_append_char(&out, esc);
+      } else {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = regex_prefixed_error("unsupported regex feature: escape \\", (char[]){esc, '\0'});
+        return 0;
+      }
+      i += 2;
+      continue;
+    }
+    if (!in_class) {
+      if (ch == '[') {
+        in_class = 1;
+        buf_append_char(&out, ch);
+      } else if (ch == '{' || ch == '}') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: counted repetition");
+        return 0;
+      } else if ((ch == '*' || ch == '+' || ch == '?') && pattern[i + 1] == '?') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: non-greedy quantifiers");
+        return 0;
+      } else if (ch == '(' && pattern[i + 1] == '?') {
+        if (out.data != NULL) free(out.data);
+        *out_pattern = NULL;
+        *out_error = dup_cstr("unsupported regex feature: extended group syntax");
+        return 0;
+      } else {
+        buf_append_char(&out, ch);
+      }
+    } else {
+      if (ch == ']') in_class = 0;
+      buf_append_char(&out, ch);
+    }
+    i += 1;
+  }
+  if (out.data == NULL) out.data = alloc_cstr(0, "regex_validate: out of memory");
+  *out_pattern = out.data;
+  *out_error = NULL;
+  return 1;
+}
+
+static int regex_compile_ere(const char* pattern, regex_t* out_regex, char** out_error) {
+  char* translated = NULL;
+  char* translation_error = NULL;
+  if (!regex_translate_pattern(pattern, &translated, &translation_error)) {
+    *out_error = translation_error;
+    return 0;
+  }
+  int status = regcomp(out_regex, translated, REG_EXTENDED);
+  free(translated);
+  if (status != 0) {
+    char errbuf[256];
+    regerror(status, out_regex, errbuf, sizeof(errbuf));
+    *out_error = regex_prefixed_error("invalid regex pattern: ", errbuf);
+    return 0;
+  }
+  *out_error = NULL;
+  return 1;
+}
+
+static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_limit) {
+  size_t count = 0;
+  size_t i = 0;
+  while (s[i] != '\0' && i < byte_limit) {
+    i += sprout_utf8_char_width((unsigned char)s[i]);
+    count += 1;
+  }
+  return (long long)count;
+}
+
+static char* upper_copy(const char* text) {
+  size_t len = strlen(text);
+  char* out = dup_slice(text, len);
+  for (size_t i = 0; i < len; i++) {
+    if (out[i] >= 'a' && out[i] <= 'z') out[i] = (char)(out[i] - 'a' + 'A');
+  }
+  return out;
+}
+
+static long long http_err0(const char* ctor_name) {
+  SPROUT_HANDLE(h_err, sprout_make0(find_ctor_tag_by_name(ctor_name)));
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
+  return out;
+}
+
+static long long http_err1(const char* ctor_name, long long payload) {
+  SPROUT_HANDLE(h_payload, payload);
+  SPROUT_HANDLE(h_err, sprout_make1(find_ctor_tag_by_name(ctor_name), sprout_handle_get(h_payload)));
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
+  return out;
+}
+
+static long long http_ok_response(long long status, const char* headers, const char* body) {
+  SPROUT_HANDLE(h_resp, sprout_make3(
+    find_ctor_tag_by_name("stdlib.http.HttpResponse"),
+    status,
+    (long long)(uintptr_t)headers,
+    (long long)(uintptr_t)body
+  ));
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_resp));
+  return out;
+}
+
+static void json_append_hex4(ByteBuf* out, unsigned char value) {
+  static const char* hex = "0123456789abcdef";
+  char escaped[6];
+  escaped[0] = '\\';
+  escaped[1] = 'u';
+  escaped[2] = '0';
+  escaped[3] = '0';
+  escaped[4] = hex[(value >> 4) & 0x0f];
+  escaped[5] = hex[value & 0x0f];
+  buf_append_bytes(out, escaped, sizeof(escaped));
+}
+
+static void json_append_escaped_string(ByteBuf* out, const char* raw) {
+  if (raw == NULL) tcp_fail("json_stringify: null string");
+  char quote = '"';
+  buf_append_bytes(out, &quote, 1);
+  for (const unsigned char* p = (const unsigned char*)raw; *p != '\0'; p++) {
+    unsigned char ch = *p;
+    if (ch == '"') {
+      const char escaped_quote[2] = {'\\', '"'};
+      buf_append_bytes(out, escaped_quote, 2);
+    } else if (ch == '\\') {
+      const char escaped_slash[2] = {'\\', '\\'};
+      buf_append_bytes(out, escaped_slash, 2);
+    } else if (ch == '\b') {
+      const char escaped_backspace[2] = {'\\', 'b'};
+      buf_append_bytes(out, escaped_backspace, 2);
+    } else if (ch == '\f') {
+      const char escaped_formfeed[2] = {'\\', 'f'};
+      buf_append_bytes(out, escaped_formfeed, 2);
+    } else if (ch == '\n') {
+      const char escaped_newline[2] = {'\\', 'n'};
+      buf_append_bytes(out, escaped_newline, 2);
+    } else if (ch == '\r') {
+      const char escaped_return[2] = {'\\', 'r'};
+      buf_append_bytes(out, escaped_return, 2);
+    } else if (ch == '\t') {
+      const char escaped_tab[2] = {'\\', 't'};
+      buf_append_bytes(out, escaped_tab, 2);
+    } else if (ch < 0x20) {
+      json_append_hex4(out, ch);
+    } else {
+      buf_append_bytes(out, (const char*)p, 1);
+    }
+  }
+  buf_append_bytes(out, &quote, 1);
+}
+
+static const char* json_ctor_name(long long value) {
+  if (!is_obj_handle(value)) return NULL;
+  CtorMeta* meta = find_ctor(unbox_ptr(value)->tag);
+  return meta == NULL ? NULL : meta->name;
+}
+
+static int json_ctor_is(const char* ctor_name, const char* leaf_name) {
+  if (ctor_name == NULL) return 0;
+  if (strcmp(ctor_name, leaf_name) == 0) return 1;
+  size_t ctor_len = strlen(ctor_name);
+  size_t leaf_len = strlen(leaf_name);
+  if (ctor_len <= leaf_len) return 0;
+  if (strcmp(ctor_name + ctor_len - leaf_len, leaf_name) != 0) return 0;
+  return ctor_name[ctor_len - leaf_len - 1] == '.';
+}
+
+static void json_append_array(ByteBuf* out, long long value) {
+  const char* ctor_name = json_ctor_name(value);
+  if (!json_ctor_is(ctor_name, "JsonArray")) {
+    tcp_fail("json_stringify: expects JsonArray");
+  }
+  buf_append_cstr(out, "[");
+  long long cursor = sprout_field(value, 0);
+  int first = 1;
+  while (1) {
+    const char* cursor_name = json_ctor_name(cursor);
+    if (cursor_name == NULL) tcp_fail("json_stringify: expects JsonArray");
+    if (json_ctor_is(cursor_name, "JsonArrayNil")) break;
+    if (!json_ctor_is(cursor_name, "JsonArrayCons")) {
+      tcp_fail("json_stringify: expects JsonArray");
+    }
+    if (!first) buf_append_cstr(out, ",");
+    json_append_value(out, sprout_field(cursor, 0));
+    cursor = sprout_field(cursor, 1);
+    first = 0;
+  }
+  buf_append_cstr(out, "]");
+}
+
+static void json_append_object(ByteBuf* out, long long value) {
+  const char* ctor_name = json_ctor_name(value);
+  if (!json_ctor_is(ctor_name, "JsonObject")) {
+    tcp_fail("json_stringify: expects JsonObject");
+  }
+  buf_append_cstr(out, "{");
+  long long cursor = sprout_field(value, 0);
+  int first = 1;
+  while (1) {
+    const char* cursor_name = json_ctor_name(cursor);
+    if (cursor_name == NULL) tcp_fail("json_stringify: expects JsonObject");
+    if (json_ctor_is(cursor_name, "JsonObjectNil")) break;
+    if (!json_ctor_is(cursor_name, "JsonObjectCons")) {
+      tcp_fail("json_stringify: expects JsonObject");
+    }
+    if (!first) buf_append_cstr(out, ",");
+    json_append_escaped_string(out, (const char*)(uintptr_t)sprout_field(cursor, 0));
+    buf_append_cstr(out, ":");
+    json_append_value(out, sprout_field(cursor, 1));
+    cursor = sprout_field(cursor, 2);
+    first = 0;
+  }
+  buf_append_cstr(out, "}");
+}
+
+static void json_append_value(ByteBuf* out, long long value) {
+  const char* ctor_name = json_ctor_name(value);
+  if (ctor_name == NULL) tcp_fail("json_stringify: expects Json");
+  if (json_ctor_is(ctor_name, "JsonNull")) {
+    buf_append_cstr(out, "null");
+  } else if (json_ctor_is(ctor_name, "JsonBool")) {
+    buf_append_cstr(out, sprout_field(value, 0) != 0 ? "true" : "false");
+  } else if (json_ctor_is(ctor_name, "JsonInt")) {
+    char int_buf[64];
+    snprintf(int_buf, sizeof(int_buf), "%lld", sprout_field(value, 0));
+    buf_append_cstr(out, int_buf);
+  } else if (json_ctor_is(ctor_name, "JsonString")) {
+    json_append_escaped_string(out, (const char*)(uintptr_t)sprout_field(value, 0));
+  } else if (json_ctor_is(ctor_name, "JsonArray")) {
+    json_append_array(out, value);
+  } else if (json_ctor_is(ctor_name, "JsonObject")) {
+    json_append_object(out, value);
+  } else {
+    tcp_fail("json_stringify: expects Json");
+  }
+}
+
+static long long json_parse_value(const char** pos_ptr, char** err_msg);
+
+static long long json_parse_ok_result(long long value) {
+  SPROUT_HANDLE(h_value, value);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_value));
+  return out;
+}
+
+static long long json_parse_err_result(const char* message) {
+  SPROUT_HANDLE(h_err, sprout_make1(
+    find_ctor_tag_by_name("stdlib.json.JsonDecode"),
+    (long long)(uintptr_t)dup_cstr(message)
+  ));
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
+  return out;
+}
+
+static long long json_parse_reverse_array_items(long long reversed) {
+  SPROUT_HANDLE(h_reversed, reversed);
+  SPROUT_HANDLE(h_out, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil")));
+  long long cursor = reversed;
+  while (json_ctor_is(json_ctor_name(cursor), "JsonArrayCons")) {
+    long long value = sprout_field(cursor, 0);
+    SPROUT_HANDLE_SET(h_out, sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), value, sprout_handle_get(h_out)));
+    cursor = sprout_field(cursor, 1);
+  }
+  return sprout_handle_get(h_out);
+}
+
+static long long json_parse_reverse_object_items(long long reversed) {
+  SPROUT_HANDLE(h_reversed, reversed);
+  SPROUT_HANDLE(h_out, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil")));
+  long long cursor = reversed;
+  while (json_ctor_is(json_ctor_name(cursor), "JsonObjectCons")) {
+    long long key = sprout_field(cursor, 0);
+    long long value = sprout_field(cursor, 1);
+    SPROUT_HANDLE_SET(h_out, sprout_make3(find_ctor_tag_by_name("stdlib.json.JsonObjectCons"), key, value, sprout_handle_get(h_out)));
+    cursor = sprout_field(cursor, 2);
+  }
+  return sprout_handle_get(h_out);
+}
+
+static long long json_parse_array(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  pos++;
+  SPROUT_HANDLE(h_reversed, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonArrayNil")));
+  pos = sprout_json_skip_ws(pos);
+  if (*pos == ']') {
+    SPROUT_HANDLE(h_list, json_parse_reverse_array_items(sprout_handle_get(h_reversed)));
+    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), sprout_handle_get(h_list));
+    *pos_ptr = pos + 1;
+    return out;
+  }
+  while (*pos != '\0') {
+    long long value = json_parse_value(&pos, err_msg);
+    if (err_msg != NULL && *err_msg != NULL) {
+      return 0;
+    }
+    {
+      SPROUT_HANDLE(h_value, value);
+      SPROUT_HANDLE_SET(h_reversed, sprout_make2(find_ctor_tag_by_name("stdlib.json.JsonArrayCons"), sprout_handle_get(h_value), sprout_handle_get(h_reversed)));
+    }
+    pos = sprout_json_skip_ws(pos);
+    if (*pos == ']') {
+      SPROUT_HANDLE(h_list, json_parse_reverse_array_items(sprout_handle_get(h_reversed)));
+      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonArray"), sprout_handle_get(h_list));
+      *pos_ptr = pos + 1;
+      return out;
+    }
+    if (*pos != ',') {
+      if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ',' or ']'");
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos + 1);
+  }
+  if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unterminated array");
+  return 0;
+}
+
+static long long json_parse_object(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  pos++;
+  SPROUT_HANDLE(h_reversed, sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonObjectNil")));
+  pos = sprout_json_skip_ws(pos);
+  if (*pos == '}') {
+    SPROUT_HANDLE(h_list, json_parse_reverse_object_items(sprout_handle_get(h_reversed)));
+    long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), sprout_handle_get(h_list));
+    *pos_ptr = pos + 1;
+    return out;
+  }
+  while (*pos != '\0') {
+    const char* parse_string_err = NULL;
+    char* key = sprout_json_parse_string_impl(&pos, &parse_string_err);
+    if (key == NULL) {
+      if (err_msg != NULL && *err_msg == NULL) {
+        *err_msg = dup_cstr(parse_string_err != NULL ? parse_string_err : "expected string key");
+      }
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos);
+    if (*pos != ':') {
+      free(key);
+      if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ':' after object key");
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos + 1);
+    long long value = json_parse_value(&pos, err_msg);
+    if (err_msg != NULL && *err_msg != NULL) {
+      free(key);
+      return 0;
+    }
+    {
+      SPROUT_HANDLE(h_value, value);
+      SPROUT_HANDLE_SET(h_reversed, sprout_make3(
+        find_ctor_tag_by_name("stdlib.json.JsonObjectCons"),
+        (long long)(uintptr_t)key,
+        sprout_handle_get(h_value),
+        sprout_handle_get(h_reversed)
+      ));
+    }
+    pos = sprout_json_skip_ws(pos);
+    if (*pos == '}') {
+      SPROUT_HANDLE(h_list, json_parse_reverse_object_items(sprout_handle_get(h_reversed)));
+      long long out = sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonObject"), sprout_handle_get(h_list));
+      *pos_ptr = pos + 1;
+      return out;
+    }
+    if (*pos != ',') {
+      if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("expected ',' or '}'");
+      return 0;
+    }
+    pos = sprout_json_skip_ws(pos + 1);
+  }
+  if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unterminated object");
+  return 0;
+}
+
+static long long json_parse_number(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  const char* start = pos;
+  if (*pos == '-') pos++;
+  if (*pos == '0') {
+    pos++;
+  } else if (*pos >= '1' && *pos <= '9') {
+    while (*pos >= '0' && *pos <= '9') pos++;
+  } else {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("invalid number");
+    return 0;
+  }
+  if (*pos == '.' || *pos == 'e' || *pos == 'E') {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("only integer JSON numbers are supported");
+    return 0;
+  }
+  size_t len = (size_t)(pos - start);
+  char* raw = dup_slice(start, len);
+  char* end = NULL;
+  long long parsed = strtoll(raw, &end, 10);
+  int valid = end != NULL && *end == '\0';
+  free(raw);
+  if (!valid) {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("invalid number");
+    return 0;
+  }
+  *pos_ptr = pos;
+  return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonInt"), parsed);
+}
+
+static long long json_parse_value(const char** pos_ptr, char** err_msg) {
+  const char* pos = sprout_json_skip_ws(*pos_ptr);
+  if (pos == NULL || *pos == '\0') {
+    if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unexpected end of input");
+    return 0;
+  }
+  if (*pos == '"') {
+    const char* parse_string_err = NULL;
+    char* value = sprout_json_parse_string_impl(&pos, &parse_string_err);
+    if (value == NULL) {
+      if (err_msg != NULL && *err_msg == NULL) {
+        *err_msg = dup_cstr(parse_string_err != NULL ? parse_string_err : "invalid string");
+      }
+      return 0;
+    }
+    *pos_ptr = pos;
+    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonString"), (long long)(uintptr_t)value);
+  }
+  if (*pos == '{') {
+    long long out = json_parse_object(&pos, err_msg);
+    if (err_msg == NULL || *err_msg == NULL) *pos_ptr = pos;
+    return out;
+  }
+  if (*pos == '[') {
+    long long out = json_parse_array(&pos, err_msg);
+    if (err_msg == NULL || *err_msg == NULL) *pos_ptr = pos;
+    return out;
+  }
+  if (strncmp(pos, "true", 4) == 0) {
+    *pos_ptr = pos + 4;
+    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonBool"), 1);
+  }
+  if (strncmp(pos, "false", 5) == 0) {
+    *pos_ptr = pos + 5;
+    return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonBool"), 0);
+  }
+  if (strncmp(pos, "null", 4) == 0) {
+    *pos_ptr = pos + 4;
+    return sprout_make0(find_ctor_tag_by_name("stdlib.json.JsonNull"));
+  }
+  if (*pos == '-' || (*pos >= '0' && *pos <= '9')) {
+    long long out = json_parse_number(&pos, err_msg);
+    if (err_msg == NULL || *err_msg == NULL) *pos_ptr = pos;
+    return out;
+  }
+  if (err_msg != NULL && *err_msg == NULL) *err_msg = dup_cstr("unexpected token");
+  return 0;
+}
+
+long long json_stringify(long long value) {
+  SPROUT_HANDLE(h_value, value);
+  sprout_gc_maybe_collect_threshold();
+  ByteBuf out;
+  buf_init(&out);
+  json_append_value(&out, sprout_handle_get(h_value));
+  char* result = out.data == NULL ? dup_cstr("") : out.data;
+  register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)result;
+}
+
+long long json_parse(const char* raw) {
+  if (raw == NULL) tcp_fail("json_parse expects String");
+  const char* pos = raw;
+  char* err_msg = NULL;
+  long long value = json_parse_value(&pos, &err_msg);
+  if (err_msg != NULL) {
+    long long out = json_parse_err_result(err_msg);
+    free(err_msg);
+    return out;
+  }
+  pos = sprout_json_skip_ws(pos);
+  if (pos == NULL || *pos != '\0') {
+    return json_parse_err_result("unexpected trailing characters");
+  }
+  return json_parse_ok_result(value);
+}
+
+static int parse_http_url(const char* url, HttpUrl* out, char** err) {
+  const char* http_prefix = "http://";
+  const char* https_prefix = "https://";
+  size_t prefix_len = 0;
+  if (strncmp(url, http_prefix, strlen(http_prefix)) == 0) {
+    out->use_tls = 0;
+    prefix_len = strlen(http_prefix);
+  } else if (strncmp(url, https_prefix, strlen(https_prefix)) == 0) {
+    out->use_tls = 1;
+    prefix_len = strlen(https_prefix);
+  } else {
+    *err = dup_cstr("unsupported url scheme");
+    return 0;
+  }
+  const char* rest = url + prefix_len;
+  const char* slash = strchr(rest, '/');
+  const char* host_end = slash != NULL ? slash : rest + strlen(rest);
+  if (host_end == rest) {
+    *err = dup_cstr("missing host");
+    return 0;
+  }
+  const char* colon = NULL;
+  for (const char* p = rest; p < host_end; p++) {
+    if (*p == ':') colon = p;
+  }
+  if (colon != NULL) {
+    if (colon == rest || colon + 1 >= host_end) {
+      *err = dup_cstr("invalid host or port");
+      return 0;
+    }
+    out->host = dup_slice(rest, (size_t)(colon - rest));
+    out->port = dup_slice(colon + 1, (size_t)(host_end - colon - 1));
+  } else {
+    out->host = dup_slice(rest, (size_t)(host_end - rest));
+    out->port = dup_cstr(out->use_tls ? "443" : "80");
+  }
+  out->path = slash != NULL ? dup_cstr(slash) : dup_cstr("/");
+  return 1;
+}
+
+static void free_http_url(HttpUrl* url) {
+  free(url->host);
+  free(url->port);
+  free(url->path);
+}
+
+static char ascii_lower_char(char ch) {
+  if (ch >= 'A' && ch <= 'Z') return (char)(ch - 'A' + 'a');
+  return ch;
+}
+
+static int ascii_ieq_char(char left, char right) {
+  return ascii_lower_char(left) == ascii_lower_char(right);
+}
+
+static int ascii_contains_token_ci(const char* text, const char* token) {
+  if (text == NULL || token == NULL || token[0] == '\0') return 0;
+  size_t token_len = strlen(token);
+  const char* cursor = text;
+  while (*cursor != '\0') {
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == ',') cursor++;
+    const char* start = cursor;
+    while (*cursor != '\0' && *cursor != ',') cursor++;
+    const char* end = cursor;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t')) end--;
+    if ((size_t)(end - start) == token_len) {
+      size_t i = 0;
+      while (i < token_len && ascii_ieq_char(start[i], token[i])) i++;
+      if (i == token_len) return 1;
+    }
+    if (*cursor == ',') cursor++;
+  }
+  return 0;
+}
+
+static char* http_header_value_ci(const char* headers, const char* key) {
+  if (headers == NULL || key == NULL) return NULL;
+  size_t key_len = strlen(key);
+  const char* line = headers;
+  while (*line != '\0') {
+    const char* end = line;
+    while (*end != '\0' && *end != '\n' && *end != '\r') end++;
+    const char* colon = NULL;
+    for (const char* p = line; p < end; p++) {
+      if (*p == ':') {
+        colon = p;
+        break;
+      }
+    }
+    if (colon != NULL) {
+      const char* key_start = line;
+      while (key_start < colon && (*key_start == ' ' || *key_start == '\t')) key_start++;
+      const char* key_end = colon;
+      while (key_end > key_start && (key_end[-1] == ' ' || key_end[-1] == '\t')) key_end--;
+      if ((size_t)(key_end - key_start) == key_len) {
+        size_t i = 0;
+        while (i < key_len && ascii_ieq_char(key_start[i], key[i])) i++;
+        if (i == key_len) {
+          const char* value_start = colon + 1;
+          while (value_start < end && (*value_start == ' ' || *value_start == '\t')) value_start++;
+          const char* value_end = end;
+          while (value_end > value_start && (value_end[-1] == ' ' || value_end[-1] == '\t')) value_end--;
+          return dup_slice(value_start, (size_t)(value_end - value_start));
+        }
+      }
+    }
+    while (*end == '\r' || *end == '\n') end++;
+    line = end;
+  }
+  return NULL;
+}
+
+static int hex_digit_value(char ch) {
+  if (ch >= '0' && ch <= '9') return ch - '0';
+  if (ch >= 'a' && ch <= 'f') return 10 + (ch - 'a');
+  if (ch >= 'A' && ch <= 'F') return 10 + (ch - 'A');
+  return -1;
+}
+
+static char* http_decode_chunked_body(const char* body, char** err) {
+  ByteBuf out;
+  buf_init(&out);
+  const char* cursor = body;
+  while (1) {
+    while (*cursor == '\r' || *cursor == '\n') cursor++;
+    const char* size_start = cursor;
+    while (*cursor != '\0' && *cursor != '\r' && *cursor != '\n' && *cursor != ';') cursor++;
+    const char* size_end = cursor;
+    if (size_start == size_end) {
+      free(out.data);
+      *err = dup_cstr("invalid chunk size");
+      return NULL;
+    }
+    size_t chunk_size = 0;
+    for (const char* p = size_start; p < size_end; p++) {
+      int digit = hex_digit_value(*p);
+      if (digit < 0) {
+        free(out.data);
+        *err = dup_cstr("invalid chunk size");
+        return NULL;
+      }
+      chunk_size = (chunk_size * 16u) + (size_t)digit;
+    }
+    while (*cursor != '\0' && *cursor != '\n') cursor++;
+    if (*cursor == '\n') cursor++;
+    if (chunk_size == 0) {
+      while (*cursor == '\r' || *cursor == '\n') cursor++;
+      break;
+    }
+    if (strlen(cursor) < chunk_size) {
+      free(out.data);
+      *err = dup_cstr("truncated chunk data");
+      return NULL;
+    }
+    buf_append_bytes(&out, cursor, chunk_size);
+    cursor += chunk_size;
+    if (cursor[0] == '\r' && cursor[1] == '\n') {
+      cursor += 2;
+    } else if (cursor[0] == '\n') {
+      cursor += 1;
+    } else {
+      free(out.data);
+      *err = dup_cstr("invalid chunk terminator");
+      return NULL;
+    }
+  }
+  return out.data != NULL ? out.data : dup_cstr("");
+}
+
+static long long http_response_result(char* response_data) {
+  if (response_data == NULL || response_data[0] == '\0') {
+    free(response_data);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("remote closed connection without response")
+    );
+  }
+
+  const char* sep = strstr(response_data, "\r\n\r\n");
+  size_t sep_len = 4;
+  if (sep == NULL) {
+    sep = strstr(response_data, "\n\n");
+    sep_len = 2;
+  }
+  if (sep == NULL) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid http response"));
+  }
+
+  const char* line_end = strstr(response_data, "\r\n");
+  size_t line_sep_len = 2;
+  if (line_end == NULL || line_end > sep) {
+    line_end = strstr(response_data, "\n");
+    line_sep_len = 1;
+  }
+  if (line_end == NULL || line_end > sep) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+  }
+
+  const char* code_start = strchr(response_data, ' ');
+  if (code_start == NULL || code_start >= line_end) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status line"));
+  }
+  code_start++;
+  char* code_end = NULL;
+  long long status = strtoll(code_start, &code_end, 10);
+  if (code_end == code_start || code_end > line_end) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("invalid status code"));
+  }
+  if (status >= 400) {
+    free(response_data);
+    return http_err1("stdlib.http.HttpBadStatus", status);
+  }
+
+  const char* headers_start = line_end + line_sep_len;
+  char* headers = dup_slice(headers_start, (size_t)(sep - headers_start));
+  char* body_out = dup_cstr(sep + sep_len);
+  char* transfer_encoding = http_header_value_ci(headers, "Transfer-Encoding");
+  char* content_encoding = http_header_value_ci(headers, "Content-Encoding");
+  if (content_encoding != NULL) {
+    if (content_encoding[0] != '\0' && !ascii_contains_token_ci(content_encoding, "identity")) {
+      free(content_encoding);
+      free(transfer_encoding);
+      free(headers);
+      free(body_out);
+      free(response_data);
+      return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("unsupported content encoding"));
+    }
+    free(content_encoding);
+  }
+  if (transfer_encoding != NULL) {
+    if (ascii_contains_token_ci(transfer_encoding, "chunked")) {
+      char* chunk_err = NULL;
+      char* decoded = http_decode_chunked_body(body_out, &chunk_err);
+      free(body_out);
+      body_out = decoded;
+      if (chunk_err != NULL) {
+        free(transfer_encoding);
+        free(headers);
+        free(response_data);
+        return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)chunk_err);
+      }
+    } else if (transfer_encoding[0] != '\0') {
+      free(transfer_encoding);
+      free(headers);
+      free(body_out);
+      free(response_data);
+      return http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)dup_cstr("unsupported transfer encoding"));
+    }
+    free(transfer_encoding);
+  }
+  free(response_data);
+  return http_ok_response(status, headers, body_out);
+}
+
+#ifdef __APPLE__
+static unsigned char* read_binary_file(const char* path, size_t* out_len) {
+  FILE* f = fopen(path, "rb");
+  if (f == NULL) return NULL;
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  long size = ftell(f);
+  if (size < 0) {
+    fclose(f);
+    return NULL;
+  }
+  if (fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  unsigned char* data = (unsigned char*)malloc((size_t)size);
+  if (size > 0 && data == NULL) {
+    fclose(f);
+    return NULL;
+  }
+  size_t got = fread(data, 1, (size_t)size, f);
+  fclose(f);
+  if (got != (size_t)size) {
+    free(data);
+    return NULL;
+  }
+  if (out_len != NULL) *out_len = got;
+  return data;
+}
+
+static OSStatus tls_configure_peer_trust(SecTrustRef trust) {
+  const char* anchor_path = getenv("SPROUT_HTTP_CA_CERT");
+  if (anchor_path == NULL || anchor_path[0] == '\0') {
+    return noErr;
+  }
+  size_t cert_len = 0;
+  unsigned char* cert_data = read_binary_file(anchor_path, &cert_len);
+  if (cert_data == NULL) return errSecIO;
+  CFDataRef cf_data = CFDataCreate(kCFAllocatorDefault, cert_data, cert_len);
+  free(cert_data);
+  if (cf_data == NULL) return errSecAllocate;
+  SecCertificateRef cert = SecCertificateCreateWithData(kCFAllocatorDefault, cf_data);
+  CFRelease(cf_data);
+  if (cert == NULL) return errSecDecode;
+  const void* values[1] = {cert};
+  CFArrayRef anchors = CFArrayCreate(kCFAllocatorDefault, values, 1, &kCFTypeArrayCallBacks);
+  if (anchors == NULL) {
+    CFRelease(cert);
+    return errSecAllocate;
+  }
+  OSStatus status = SecTrustSetAnchorCertificates(trust, anchors);
+  if (status == noErr) {
+    status = SecTrustSetAnchorCertificatesOnly(trust, true);
+  }
+  CFRelease(anchors);
+  CFRelease(cert);
+  return status;
+}
+
+static int tls_uses_custom_ca_anchor(void) {
+  const char* anchor_path = getenv("SPROUT_HTTP_CA_CERT");
+  return anchor_path != NULL && anchor_path[0] != '\0';
+}
+
+typedef struct {
+  int fd;
+  int last_errno;
+} TlsConn;
+
+static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* dataLength) {
+  TlsConn* conn = (TlsConn*)(uintptr_t)connection;
+  if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
+  size_t requested = *dataLength;
+  if (requested == 0) {
+    *dataLength = 0;
+    return noErr;
+  }
+  ssize_t n;
+  while (1) {
+    n = recv(conn->fd, data, requested, 0);
+    if (n >= 0) break;
+    if (errno == EINTR) continue;
+    conn->last_errno = errno;
+    *dataLength = 0;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    return errSSLClosedAbort;
+  }
+  conn->last_errno = 0;
+  if (n == 0) {
+    *dataLength = 0;
+    return errSSLClosedGraceful;
+  }
+  *dataLength = (size_t)n;
+  if ((size_t)n < requested) return errSSLWouldBlock;
+  return noErr;
+}
+
+static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, size_t* dataLength) {
+  TlsConn* conn = (TlsConn*)(uintptr_t)connection;
+  if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
+  size_t requested = *dataLength;
+  if (requested == 0) {
+    *dataLength = 0;
+    return noErr;
+  }
+  ssize_t n;
+  while (1) {
+    n = send(conn->fd, data, requested, 0);
+    if (n >= 0) break;
+    if (errno == EINTR) continue;
+    conn->last_errno = errno;
+    *dataLength = 0;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    return errSSLClosedAbort;
+  }
+  conn->last_errno = 0;
+  if (n == 0) {
+    *dataLength = 0;
+    return errSSLClosedAbort;
+  }
+  *dataLength = (size_t)n;
+  if ((size_t)n < requested) return errSSLWouldBlock;
+  return noErr;
+}
+
+static int tls_status_timed_out(const TlsConn* conn) {
+  return conn != NULL && (conn->last_errno == EAGAIN || conn->last_errno == EWOULDBLOCK);
+}
+
+static int tls_status_is_auth_event(OSStatus status) {
+  return status == errSSLPeerAuthCompleted || status == errSSLServerAuthCompleted;
+}
+
+static char* tls_error_message(const char* prefix, OSStatus status, const TlsConn* conn) {
+  char detail[256];
+  if (conn != NULL && conn->last_errno != 0) {
+    snprintf(detail, sizeof(detail), "%s (status=%d, errno=%d: %s)", prefix, (int)status, conn->last_errno, strerror(conn->last_errno));
+  } else {
+    snprintf(detail, sizeof(detail), "%s (status=%d)", prefix, (int)status);
+  }
+  return dup_cstr(detail);
+}
+
+static int tls_debug_enabled(void) {
+  const char* raw = getenv("SPROUT_HTTP_TLS_DEBUG");
+  return raw != NULL && raw[0] != '\0' && strcmp(raw, "0") != 0;
+}
+
+static void tls_debug_log(const char* fmt, ...) {
+  if (!tls_debug_enabled()) return;
+  va_list args;
+  va_start(args, fmt);
+  fprintf(stderr, "[sprout tls] ");
+  vfprintf(stderr, fmt, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+}
+
+static OSStatus tls_handshake(SSLContextRef ctx, TlsConn* conn) {
+  while (1) {
+    conn->last_errno = 0;
+    OSStatus status = SSLHandshake(ctx);
+    tls_debug_log("handshake status=%d errno=%d", (int)status, conn->last_errno);
+    if (status == noErr || tls_status_is_auth_event(status)) {
+      return noErr;
+    }
+    if (status == errSSLWouldBlock) {
+      if (tls_status_timed_out(conn)) return status;
+      continue;
+    }
+    return status;
+  }
+}
+
+static OSStatus tls_write_all(SSLContextRef ctx, TlsConn* conn, const char* data, size_t len) {
+  size_t offset = 0;
+  while (offset < len) {
+    size_t written = len - offset;
+    conn->last_errno = 0;
+    OSStatus status = SSLWrite(ctx, data + offset, len - offset, &written);
+    tls_debug_log("write status=%d wrote=%zu remaining=%zu errno=%d", (int)status, written, len - offset, conn->last_errno);
+    offset += written;
+    if (status == noErr) continue;
+    if (tls_status_is_auth_event(status)) continue;
+    if (status == errSSLWouldBlock) {
+      if (written == 0 && tls_status_timed_out(conn)) return status;
+      continue;
+    }
+    return status;
+  }
+  return noErr;
+}
+
+static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* response) {
+  char chunk[4096];
+  while (1) {
+    size_t chunk_len = sizeof(chunk);
+    conn->last_errno = 0;
+    OSStatus status = SSLRead(ctx, chunk, sizeof(chunk), &chunk_len);
+    tls_debug_log("read status=%d chunk_len=%zu errno=%d", (int)status, chunk_len, conn->last_errno);
+    if (chunk_len > 0) {
+      buf_append_bytes(response, chunk, chunk_len);
+    }
+    if (status == noErr) continue;
+    if (tls_status_is_auth_event(status)) continue;
+    if (status == errSSLClosedGraceful || status == errSSLClosedNoNotify || status == errSSLClosedAbort) {
+      return response->len > 0 ? noErr : status;
+    }
+    if (status == errSSLWouldBlock) {
+      if (chunk_len == 0 && tls_status_timed_out(conn)) return status;
+      continue;
+    }
+    return status;
+  }
+}
+
+static long long http_request_tls(HttpUrl* parsed, const char* request_data, size_t request_len, long long timeout_ms) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  struct addrinfo* infos = NULL;
+  int gai = getaddrinfo(parsed->host, parsed->port, &hints, &infos);
+  if (gai != 0) {
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
+  }
+
+  int fd = -1;
+  int last_errno = 0;
+  for (struct addrinfo* it = infos; it != NULL; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd < 0) {
+      last_errno = errno;
+      continue;
+    }
+    struct timeval tv;
+    tv.tv_sec = (time_t)(timeout_ms / 1000);
+    tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
+    last_errno = errno;
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(infos);
+  if (fd < 0) {
+    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
+  }
+
+  TlsConn tls = {.fd = fd, .last_errno = 0};
+  int use_custom_ca = tls_uses_custom_ca_anchor();
+  tls_debug_log("connect host=%s port=%s timeout_ms=%lld custom_ca=%s", parsed->host, parsed->port, timeout_ms, use_custom_ca ? "yes" : "no");
+  SSLContextRef ctx = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
+  if (ctx == NULL) {
+    close(fd);
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr("tls context creation failed"));
+  }
+  OSStatus status = SSLSetIOFuncs(ctx, tls_read_func, tls_write_func);
+  tls_debug_log("manual_trust=%d", use_custom_ca ? 1 : 0);
+  if (status == noErr && use_custom_ca) status = SSLSetSessionOption(ctx, kSSLSessionOptionBreakOnServerAuth, true);
+  if (status == noErr) status = SSLSetConnection(ctx, (SSLConnectionRef)&tls);
+  if (status == noErr) status = SSLSetPeerDomainName(ctx, parsed->host, strlen(parsed->host));
+  if (status == noErr) {
+    while (1) {
+      tls.last_errno = 0;
+      status = SSLHandshake(ctx);
+      if (status == noErr) break;
+      if (status == errSSLWouldBlock) {
+        if (tls_status_timed_out(&tls)) {
+          SSLDisposeContext(ctx);
+          close(fd);
+          return http_err0("stdlib.http.HttpTimeout");
+        }
+        continue;
+      }
+      if (use_custom_ca && tls_status_is_auth_event(status)) {
+        SecTrustRef trust = NULL;
+        OSStatus trust_status = SSLCopyPeerTrust(ctx, &trust);
+        if (trust_status == noErr && trust != NULL) {
+          trust_status = tls_configure_peer_trust(trust);
+          if (trust_status == noErr && !SecTrustEvaluateWithError(trust, NULL)) {
+            trust_status = errSecNotTrusted;
+          }
+        } else if (trust_status == noErr) {
+          trust_status = errSecIO;
+        }
+        if (trust != NULL) CFRelease(trust);
+        if (trust_status != noErr) {
+          SSLDisposeContext(ctx);
+          close(fd);
+          return http_err1(
+            "stdlib.http.HttpNetwork",
+            (long long)(uintptr_t)dup_cstr("tls certificate verification failed")
+          );
+        }
+        continue;
+      }
+      break;
+    }
+  }
+  if (status != noErr) {
+    SSLDisposeContext(ctx);
+    close(fd);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)tls_error_message("tls handshake failed", status, &tls)
+    );
+  }
+
+  status = tls_write_all(ctx, &tls, request_data, request_len);
+  if (status == errSSLWouldBlock && tls_status_timed_out(&tls)) {
+    SSLDisposeContext(ctx);
+    close(fd);
+    return http_err0("stdlib.http.HttpTimeout");
+  }
+  if (status != noErr) {
+    SSLDisposeContext(ctx);
+    close(fd);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)tls_error_message("tls write failed", status, &tls)
+    );
+  }
+
+  ByteBuf response;
+  buf_init(&response);
+  status = tls_read_append(ctx, &tls, &response);
+  SSLDisposeContext(ctx);
+  close(fd);
+  if (status == errSSLWouldBlock && tls_status_timed_out(&tls)) {
+    free(response.data);
+    return http_err0("stdlib.http.HttpTimeout");
+  }
+  if (status != noErr) {
+    free(response.data);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)tls_error_message("tls read failed", status, &tls)
+    );
+  }
+  return http_response_result(response.data);
+}
+#pragma clang diagnostic pop
+#endif
+
+static void append_header_block(ByteBuf* out, const char* raw) {
+  const char* line = raw;
+  while (*line != '\0') {
+    const char* end = line;
+    while (*end != '\0' && *end != '\n' && *end != '\r') end++;
+    const char* content_end = end;
+    while (content_end > line && (content_end[-1] == ' ' || content_end[-1] == '\t')) content_end--;
+    const char* content_start = line;
+    while (content_start < content_end && (*content_start == ' ' || *content_start == '\t')) content_start++;
+    if (content_start < content_end) {
+      const char* colon = NULL;
+      for (const char* p = content_start; p < content_end; p++) {
+        if (*p == ':') {
+          colon = p;
+          break;
+        }
+      }
+      if (colon == NULL) tcp_fail("http_request: headers must be 'Name: Value' lines");
+      if (colon == content_start) tcp_fail("http_request: header name cannot be empty");
+      buf_append_bytes(out, content_start, (size_t)(content_end - content_start));
+      buf_append_cstr(out, "\r\n");
+    }
+    while (*end == '\r' || *end == '\n') end++;
+    line = end;
+  }
+}
+
+static int send_all(int fd, const char* data, size_t len) {
+  while (len > 0) {
+    ssize_t wrote = send(fd, data, len, 0);
+    if (wrote <= 0) return 0;
+    data += wrote;
+    len -= (size_t)wrote;
+  }
+  return 1;
+}
+
+long long http_request(const char* method, const char* url, const char* headers_raw, const char* body, long long timeout_ms) {
+  if (method == NULL) tcp_fail("http_request: null method");
+  if (url == NULL) tcp_fail("http_request: null url");
+  if (headers_raw == NULL) tcp_fail("http_request: null headers");
+  if (body == NULL) tcp_fail("http_request: null body");
+  if (timeout_ms < 1) tcp_fail("http_request: timeout_ms must be >= 1");
+
+  HttpUrl parsed = {0};
+  char* url_err = NULL;
+  if (!parse_http_url(url, &parsed, &url_err)) {
+    long long out = http_err1("stdlib.http.HttpDecode", (long long)(uintptr_t)url_err);
+    return out;
+  }
+
+  ByteBuf header_block;
+  buf_init(&header_block);
+  append_header_block(&header_block, headers_raw);
+
+  ByteBuf request;
+  buf_init(&request);
+  char* method_upper = upper_copy(method);
+  buf_append_cstr(&request, method_upper);
+  buf_append_cstr(&request, " ");
+  buf_append_cstr(&request, parsed.path);
+  buf_append_cstr(&request, " HTTP/1.1\r\nHost: ");
+  buf_append_cstr(&request, parsed.host);
+  buf_append_cstr(&request, "\r\nConnection: close\r\n");
+  buf_append_bytes(&request, header_block.data == NULL ? "" : header_block.data, header_block.len);
+  char content_len[64];
+  snprintf(content_len, sizeof(content_len), "Content-Length: %zu\r\n", strlen(body));
+  buf_append_cstr(&request, content_len);
+  buf_append_cstr(&request, "\r\n");
+  buf_append_cstr(&request, body);
+
+  free(method_upper);
+  free(header_block.data);
+
+#ifdef __APPLE__
+  if (parsed.use_tls) {
+    long long out = http_request_tls(&parsed, request.data, request.len, timeout_ms);
+    free(request.data);
+    free_http_url(&parsed);
+    return out;
+  }
+#else
+  if (parsed.use_tls) {
+    free(request.data);
+    free_http_url(&parsed);
+    return http_err1(
+      "stdlib.http.HttpNetwork",
+      (long long)(uintptr_t)dup_cstr("https unsupported on this platform")
+    );
+  }
+#endif
+
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  struct addrinfo* infos = NULL;
+  int gai = getaddrinfo(parsed.host, parsed.port, &hints, &infos);
+  if (gai != 0) {
+    free(request.data);
+    free_http_url(&parsed);
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(gai_strerror(gai)));
+  }
+
+  int fd = -1;
+  int last_errno = 0;
+  for (struct addrinfo* it = infos; it != NULL; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd < 0) {
+      last_errno = errno;
+      continue;
+    }
+    struct timeval tv;
+    tv.tv_sec = (time_t)(timeout_ms / 1000);
+    tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
+    last_errno = errno;
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(infos);
+  if (fd < 0) {
+    free(request.data);
+    free_http_url(&parsed);
+    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(last_errno)));
+  }
+
+  if (!send_all(fd, request.data, request.len)) {
+    int send_errno = errno;
+    free(request.data);
+    close(fd);
+    free_http_url(&parsed);
+    if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+    return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(send_errno)));
+  }
+  free(request.data);
+
+  ByteBuf response;
+  buf_init(&response);
+  while (1) {
+    char chunk[4096];
+    ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
+    if (n == 0) break;
+    if (n < 0) {
+      int recv_errno = errno;
+      int saw_no_response = response.len == 0;
+      free(response.data);
+      close(fd);
+      free_http_url(&parsed);
+      if (recv_errno == EAGAIN || recv_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
+      if (recv_errno == ECONNRESET && saw_no_response) {
+        return http_err1(
+          "stdlib.http.HttpNetwork",
+          (long long)(uintptr_t)dup_cstr("remote closed connection without response")
+        );
+      }
+      return http_err1("stdlib.http.HttpNetwork", (long long)(uintptr_t)dup_cstr(strerror(recv_errno)));
+    }
+    buf_append_bytes(&response, chunk, (size_t)n);
+  }
+  close(fd);
+  free_http_url(&parsed);
+  return http_response_result(response.data);
+}
+
+long long vector_empty() {
+  VectorVal* v = sprout_alloc_vector_val("vector_empty: out of memory");
+  v->len = 0;
+  v->cap = 0;
+  v->data = NULL;
+  return (long long)(uintptr_t)v;
+}
+
+long long vector_length(long long vec) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_length: null vector");
+  return v->len;
+}
+
+long long vector_get(long long vec, long long index) {
+  long long rooted_vec = vec;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_get: null vector");
+  if (index < 0 || index >= v->len) {
+    SPROUT_GC_POP_LOCALS(1);
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  long long out = sprout_make1(find_ctor_tag_by_name("Just"), v->data[index]);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+long long vector_set(long long vec, long long index, long long value) {
+  long long rooted_vec = vec;
+  long long rooted_value = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
+  VectorVal* src = (VectorVal*)(uintptr_t)vec;
+  if (src == NULL) tcp_fail("vector_set: null vector");
+  VectorVal* out = sprout_alloc_vector_val("vector_set: out of memory");
+  out->len = src->len;
+  out->cap = src->len;
+  if (out->cap == 0) {
+    out->data = NULL;
+    SPROUT_GC_POP_LOCALS(2);
+    return (long long)(uintptr_t)out;
+  }
+  out->data = sprout_alloc_vector_data((size_t)out->cap, "vector_set: out of memory");
+  memcpy(out->data, src->data, (size_t)out->len * sizeof(long long));
+  if (index >= 0 && index < out->len) {
+    out->data[index] = rooted_value;
+  }
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)out;
+}
+
+long long vector_append(long long vec, long long value) {
+  long long rooted_vec = vec;
+  long long rooted_value = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
+  VectorVal* src = (VectorVal*)(uintptr_t)vec;
+  if (src == NULL) tcp_fail("vector_append: null vector");
+  VectorVal* out = sprout_alloc_vector_val("vector_append: out of memory");
+  out->len = src->len + 1;
+  out->cap = out->len;
+  out->data = sprout_alloc_vector_data((size_t)out->cap, "vector_append: out of memory");
+  if (src->len > 0) {
+    memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
+  }
+  out->data[src->len] = rooted_value;
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)out;
+}
+
+long long vector_from_list(long long list_handle) {
+  /* Build a Vec<a> from a forward-ordered List<a> in O(n) time and space. */
+  long long nil_tag = find_ctor_tag_by_name("Nil");
+  /* First pass: count elements (no allocation, no GC risk). */
+  long long count = 0;
+  long long cur = list_handle;
+  while (sprout_tag(cur) != nil_tag) {
+    count++;
+    cur = sprout_field(cur, 1);
+  }
+  /* Root the list while we allocate. */
+  long long rooted_list = list_handle;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
+  VectorVal* v = sprout_alloc_vector_val("vector_from_list: out of memory");
+  v->len = count;
+  v->cap = count;
+  if (count == 0) {
+    v->data = NULL;
+    SPROUT_GC_POP_LOCALS(1);
+    return (long long)(uintptr_t)v;
+  }
+  v->data = sprout_alloc_vector_data((size_t)count, "vector_from_list: out of memory");
+  /* Second pass: fill Vec front-to-back (list head → index 0). */
+  cur = rooted_list;
+  for (long long i = 0; i < count; i++) {
+    v->data[i] = sprout_field(cur, 0);
+    cur = sprout_field(cur, 1);
+  }
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)v;
+}
+
+typedef struct {
+  long long key;
+  long long index;
+  long long value;
+} SortItem;
+
+static int sort_item_cmp(const void* left, const void* right) {
+  const SortItem* a = (const SortItem*)left;
+  const SortItem* b = (const SortItem*)right;
+  if (a->key < b->key) return -1;
+  if (a->key > b->key) return 1;
+  if (a->index < b->index) return -1;
+  if (a->index > b->index) return 1;
+  return 0;
+}
+
+long long vector_sort_by_int(long long decorated_list) {
+  long long rooted_list = decorated_list;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
+
+  size_t len = 0;
+  size_t cap = 0;
+  SortItem* items = NULL;
+  long long cursor = decorated_list;
+  while (1) {
+    ManagedNode* node = find_managed_ptr((void*)(uintptr_t)cursor);
+    if (node == NULL || node->kind != SPROUT_HEAP_OBJ) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: expected List");
+    }
+    SproutObj* obj = (SproutObj*)node->ptr;
+    CtorMeta* meta = find_ctor(obj->tag);
+    if (meta == NULL) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: missing list constructor metadata");
+    }
+    if (strcmp(meta->name, "Nil") == 0) {
+      break;
+    }
+    if (strcmp(meta->name, "Cons") != 0) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: expected List");
+    }
+    ManagedNode* tuple_node = find_managed_ptr((void*)(uintptr_t)obj->f0);
+    if (tuple_node == NULL || tuple_node->kind != SPROUT_HEAP_TUPLE || tuple_node->aux_slots != 3) {
+      free(items);
+      SPROUT_GC_POP_LOCALS(1);
+      tcp_fail("vector_sort_by_int: expected decorated (Int, Int, a) tuples");
+    }
+    if (len == cap) {
+      size_t new_cap = cap == 0 ? 16 : cap * 2;
+      SortItem* new_items = (SortItem*)realloc(items, new_cap * sizeof(SortItem));
+      if (new_items == NULL) {
+        free(items);
+        SPROUT_GC_POP_LOCALS(1);
+        tcp_fail("vector_sort_by_int: out of memory");
+      }
+      items = new_items;
+      cap = new_cap;
+    }
+    items[len].key = sprout_heap_child_value(tuple_node, 0);
+    items[len].index = sprout_heap_child_value(tuple_node, 1);
+    items[len].value = sprout_heap_child_value(tuple_node, 2);
+    len++;
+    cursor = obj->f1;
+  }
+
+  qsort(items, len, sizeof(SortItem), sort_item_cmp);
+  VectorVal* out = sprout_alloc_vector_val("vector_sort_by_int: out of memory");
+  out->len = (long long)len;
+  out->cap = (long long)len;
+  out->data = len == 0 ? NULL : sprout_alloc_vector_data(len, "vector_sort_by_int: out of memory");
+  for (size_t i = 0; i < len; i++) {
+    out->data[i] = items[i].value;
+  }
+  free(items);
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+/* ─── Persistent AVL BST map ────────────────────────────────────────────────
+ * Each BST node is an independent SPROUT_HEAP_MAP managed object.
+ * Empty map = handle 0 (no allocation needed).
+ * Keys are interned strings (permanent, never freed by map sweep).
+ * Subtree size enables O(log n) nth-key/nth-value.
+ * Structural sharing: O(log n) new nodes per insert/remove.
+ */
+
+static int bst_height(long long h) {
+  return h == 0 ? 0 : ((BSTNode*)(uintptr_t)h)->height;
+}
+static int bst_size(long long h) {
+  return h == 0 ? 0 : ((BSTNode*)(uintptr_t)h)->size;
+}
+static void bst_update(BSTNode* n) {
+  int lh = bst_height(n->left), rh = bst_height(n->right);
+  n->height = 1 + (lh > rh ? lh : rh);
+  n->size   = 1 + bst_size(n->left) + bst_size(n->right);
+}
+static int bst_bf(long long h) {
+  if (h == 0) return 0;
+  BSTNode* n = (BSTNode*)(uintptr_t)h;
+  return bst_height(n->left) - bst_height(n->right);
+}
+
+/* forward declaration — bst_balance calls both rotations */
+static long long bst_rotate_left(long long h);
+
+static long long bst_rotate_right(long long h) {
+  /* Creates 2 new nodes; caller must ensure h is GC-reachable. */
+  long long a = h, b = ((BSTNode*)(uintptr_t)a)->left;
+  long long b_right = ((BSTNode*)(uintptr_t)b)->right;
+  long long a_right = ((BSTNode*)(uintptr_t)a)->right;
+  long long b_left  = ((BSTNode*)(uintptr_t)b)->left;
+  long long new_a = 0, new_b = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(a);       SPROUT_GC_PUSH_I64_LOCAL(b);
+  SPROUT_GC_PUSH_I64_LOCAL(b_right); SPROUT_GC_PUSH_I64_LOCAL(a_right);
+  SPROUT_GC_PUSH_I64_LOCAL(b_left);  SPROUT_GC_PUSH_I64_LOCAL(new_a);
+  SPROUT_GC_PUSH_I64_LOCAL(new_b);
+  { BSTNode* na = sprout_alloc_bst_node("bst_rotate_right: oom");
+    BSTNode* oa = (BSTNode*)(uintptr_t)a;
+    na->key = oa->key; na->value = oa->value;
+    na->left = b_right; na->right = a_right;
+    bst_update(na); new_a = (long long)(uintptr_t)na; }
+  { BSTNode* nb = sprout_alloc_bst_node("bst_rotate_right: oom");
+    BSTNode* ob = (BSTNode*)(uintptr_t)b;
+    nb->key = ob->key; nb->value = ob->value;
+    nb->left = b_left; nb->right = new_a;
+    bst_update(nb); new_b = (long long)(uintptr_t)nb; }
+  SPROUT_GC_POP_LOCALS(7);
+  return new_b;
+}
+
+static long long bst_rotate_left(long long h) {
+  long long a = h, b = ((BSTNode*)(uintptr_t)a)->right;
+  long long b_left  = ((BSTNode*)(uintptr_t)b)->left;
+  long long a_left  = ((BSTNode*)(uintptr_t)a)->left;
+  long long b_right = ((BSTNode*)(uintptr_t)b)->right;
+  long long new_a = 0, new_b = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(a);      SPROUT_GC_PUSH_I64_LOCAL(b);
+  SPROUT_GC_PUSH_I64_LOCAL(b_left); SPROUT_GC_PUSH_I64_LOCAL(a_left);
+  SPROUT_GC_PUSH_I64_LOCAL(b_right); SPROUT_GC_PUSH_I64_LOCAL(new_a);
+  SPROUT_GC_PUSH_I64_LOCAL(new_b);
+  { BSTNode* na = sprout_alloc_bst_node("bst_rotate_left: oom");
+    BSTNode* oa = (BSTNode*)(uintptr_t)a;
+    na->key = oa->key; na->value = oa->value;
+    na->left = a_left; na->right = b_left;
+    bst_update(na); new_a = (long long)(uintptr_t)na; }
+  { BSTNode* nb = sprout_alloc_bst_node("bst_rotate_left: oom");
+    BSTNode* ob = (BSTNode*)(uintptr_t)b;
+    nb->key = ob->key; nb->value = ob->value;
+    nb->left = new_a; nb->right = b_right;
+    bst_update(nb); new_b = (long long)(uintptr_t)nb; }
+  SPROUT_GC_POP_LOCALS(7);
+  return new_b;
+}
+
+static long long bst_balance(long long h) {
+  if (h == 0) return 0;
+  long long rooted_h = h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_h);
+  int bf = bst_bf(rooted_h);
+  long long result;
+  if (bf > 1) {
+    long long left_h = ((BSTNode*)(uintptr_t)rooted_h)->left;
+    if (bst_bf(left_h) < 0) { /* LR case */
+      long long new_left = 0, new_h = 0;
+      SPROUT_GC_PUSH_I64_LOCAL(new_left); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+      new_left = bst_rotate_left(left_h);
+      { BSTNode* na = sprout_alloc_bst_node("bst_balance: oom");
+        BSTNode* old = (BSTNode*)(uintptr_t)rooted_h;
+        na->key = old->key; na->value = old->value;
+        na->left = new_left; na->right = old->right;
+        bst_update(na); new_h = (long long)(uintptr_t)na; }
+      result = bst_rotate_right(new_h);
+      SPROUT_GC_POP_LOCALS(2);
+    } else { /* LL case */
+      result = bst_rotate_right(rooted_h);
+    }
+  } else if (bf < -1) {
+    long long right_h = ((BSTNode*)(uintptr_t)rooted_h)->right;
+    if (bst_bf(right_h) > 0) { /* RL case */
+      long long new_right = 0, new_h = 0;
+      SPROUT_GC_PUSH_I64_LOCAL(new_right); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+      new_right = bst_rotate_right(right_h);
+      { BSTNode* na = sprout_alloc_bst_node("bst_balance: oom");
+        BSTNode* old = (BSTNode*)(uintptr_t)rooted_h;
+        na->key = old->key; na->value = old->value;
+        na->left = old->left; na->right = new_right;
+        bst_update(na); new_h = (long long)(uintptr_t)na; }
+      result = bst_rotate_left(new_h);
+      SPROUT_GC_POP_LOCALS(2);
+    } else { /* RR case */
+      result = bst_rotate_left(rooted_h);
+    }
+  } else {
+    result = rooted_h;
+  }
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+static long long bst_insert_node(long long h, const char* ikey, long long value) {
+  if (h == 0) { /* allocate leaf */
+    long long rv = value, new_h = 0;
+    SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    n->key = ikey; n->value = rv; n->left = 0; n->right = 0;
+    n->height = 1; n->size = 1;
+    new_h = (long long)(uintptr_t)n;
+    SPROUT_GC_POP_LOCALS(2);
+    return new_h;
+  }
+  BSTNode* node = (BSTNode*)(uintptr_t)h;
+  int cmp = strcmp(ikey, node->key);
+  if (cmp == 0) { /* update value, same structure */
+    long long rh = h, rv = value, new_h = 0;
+    SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = rv; n->left = old->left; n->right = old->right;
+    n->height = old->height; n->size = old->size;
+    new_h = (long long)(uintptr_t)n;
+    SPROUT_GC_POP_LOCALS(3);
+    return new_h;
+  }
+  long long rh = h, rv = value, new_child = 0, new_h = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rv);
+  SPROUT_GC_PUSH_I64_LOCAL(new_child); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+  if (cmp < 0) {
+    new_child = bst_insert_node(((BSTNode*)(uintptr_t)rh)->left, ikey, rv);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = new_child; n->right = old->right;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  } else {
+    new_child = bst_insert_node(((BSTNode*)(uintptr_t)rh)->right, ikey, rv);
+    BSTNode* n = sprout_alloc_bst_node("bst_insert: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = old->left; n->right = new_child;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  }
+  long long balanced = bst_balance(new_h);
+  SPROUT_GC_POP_LOCALS(4);
+  return balanced;
+}
+
+static BSTNode* bst_find_min(long long h) {
+  /* Pure read — no allocation; h must be GC-reachable at call site. */
+  BSTNode* n = (BSTNode*)(uintptr_t)h;
+  while (n && n->left) n = (BSTNode*)(uintptr_t)n->left;
+  return n;
+}
+
+static long long bst_remove_min(long long h) {
+  if (h == 0) return 0;
+  BSTNode* node = (BSTNode*)(uintptr_t)h;
+  if (node->left == 0) return node->right;
+  long long rh = h, new_left = 0, new_h = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_left); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+  new_left = bst_remove_min(((BSTNode*)(uintptr_t)rh)->left);
+  BSTNode* n = sprout_alloc_bst_node("bst_remove_min: oom");
+  BSTNode* old = (BSTNode*)(uintptr_t)rh;
+  n->key = old->key; n->value = old->value; n->left = new_left; n->right = old->right;
+  bst_update(n); new_h = (long long)(uintptr_t)n;
+  long long balanced = bst_balance(new_h);
+  SPROUT_GC_POP_LOCALS(3);
+  return balanced;
+}
+
+static long long bst_remove_node(long long h, const char* ikey) {
+  if (h == 0) return 0;
+  BSTNode* node = (BSTNode*)(uintptr_t)h;
+  int cmp = strcmp(ikey, node->key);
+  if (cmp == 0) {
+    if (node->left == 0) return node->right;
+    if (node->right == 0) return node->left;
+    /* two children: replace with in-order successor */
+    long long rh = h, new_right = 0, new_h = 0;
+    SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_right); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+    BSTNode* succ = bst_find_min(((BSTNode*)(uintptr_t)rh)->right);
+    const char* succ_key = succ->key;
+    long long succ_value = succ->value; /* alive: reachable from rh */
+    new_right = bst_remove_min(((BSTNode*)(uintptr_t)rh)->right);
+    BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = succ_key; n->value = succ_value; n->left = old->left; n->right = new_right;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+    long long balanced = bst_balance(new_h);
+    SPROUT_GC_POP_LOCALS(3);
+    return balanced;
+  }
+  long long rh = h, new_child = 0, new_h = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_child); SPROUT_GC_PUSH_I64_LOCAL(new_h);
+  if (cmp < 0) {
+    new_child = bst_remove_node(((BSTNode*)(uintptr_t)rh)->left, ikey);
+    BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = new_child; n->right = old->right;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  } else {
+    new_child = bst_remove_node(((BSTNode*)(uintptr_t)rh)->right, ikey);
+    BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
+    BSTNode* old = (BSTNode*)(uintptr_t)rh;
+    n->key = old->key; n->value = old->value; n->left = old->left; n->right = new_child;
+    bst_update(n); new_h = (long long)(uintptr_t)n;
+  }
+  long long balanced = bst_balance(new_h);
+  SPROUT_GC_POP_LOCALS(3);
+  return balanced;
+}
+
+static long long bst_get(long long h, const char* key) {
+  while (h != 0) {
+    BSTNode* node = (BSTNode*)(uintptr_t)h;
+    int cmp = strcmp(key, node->key);
+    if (cmp == 0) return node->value;
+    h = (cmp < 0) ? node->left : node->right;
+  }
+  return LLONG_MIN; /* sentinel: not found */
+}
+
+static BSTNode* bst_nth_node(long long h, long long n) {
+  while (h != 0) {
+    BSTNode* node = (BSTNode*)(uintptr_t)h;
+    long long ls = (long long)bst_size(node->left);
+    if (n < ls) { h = node->left; }
+    else if (n == ls) { return node; }
+    else { n -= ls + 1; h = node->right; }
+  }
+  return NULL;
+}
+
+/* In-order accumulation: appends BST keys (sorted) to tail, returning full list. */
+static long long bst_to_list_acc(long long h, long long tail) {
+  if (h == 0) return tail;
+  long long rh = h, rtail = tail, acc = 0;
+  SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rtail); SPROUT_GC_PUSH_I64_LOCAL(acc);
+  acc = bst_to_list_acc(((BSTNode*)(uintptr_t)rh)->right, rtail);
+  { BSTNode* node = (BSTNode*)(uintptr_t)rh;
+    long long kv = (long long)(uintptr_t)node->key;
+    long long cons = sprout_make2(find_ctor_tag_by_name("Cons"), kv, acc);
+    acc = cons; }
+  long long result = bst_to_list_acc(((BSTNode*)(uintptr_t)rh)->left, acc);
+  SPROUT_GC_POP_LOCALS(3);
+  return result;
+}
+
+long long map_empty() {
+  return 0; /* empty BST = null handle */
+}
+
+long long map_get(long long map_h, const char* key) {
+  if (key == NULL) tcp_fail("map_get: null key");
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  long long found = bst_get(rm, key);
+  long long out = (found == LLONG_MIN)
+    ? sprout_make0(find_ctor_tag_by_name("Nothing"))
+    : sprout_make1(find_ctor_tag_by_name("Just"), found);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+long long map_set(long long map_h, const char* key, long long value) {
+  if (key == NULL) tcp_fail("map_set: null key");
+  const char* ikey = intern_string(key); /* intern before any GC-triggering alloc */
+  long long rm = map_h, rv = value;
+  SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rv);
+  long long result = bst_insert_node(rm, ikey, rv);
+  SPROUT_GC_POP_LOCALS(2);
+  return result;
+}
+
+long long map_remove(long long map_h, const char* key) {
+  if (key == NULL) tcp_fail("map_remove: null key");
+  const char* ikey = intern_string(key);
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  long long result = bst_remove_node(rm, ikey);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long map_size(long long map_h) {
+  return (long long)bst_size(map_h);
+}
+
+long long map_nth_key(long long map_h, long long index) {
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  BSTNode* node = bst_nth_node(rm, index);
+  long long out = (node == NULL)
+    ? sprout_make0(find_ctor_tag_by_name("Nothing"))
+    : sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)node->key);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+long long map_nth_value(long long map_h, long long index) {
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
+  BSTNode* node = bst_nth_node(rm, index);
+  long long out = (node == NULL)
+    ? sprout_make0(find_ctor_tag_by_name("Nothing"))
+    : sprout_make1(find_ctor_tag_by_name("Just"), node->value);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+/* ── NativeSet ─────────────────────────────────────────────────────────────
+   Backed by the persistent BST with value=0 (dummy). Keys are interned.
+   SPROUT_HEAP_MAP nodes; GC sees value/left/right as children.
+*/
+
+long long native_set_empty() {
+  return 0; /* empty BST */
+}
+
+long long native_set_insert(const char* item, long long set_h) {
+  if (item == NULL) tcp_fail("native_set_insert: null item");
+  const char* ikey = intern_string(item);
+  long long rs = set_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rs);
+  if (bst_get(rs, ikey) != LLONG_MIN) { /* already present */
+    SPROUT_GC_POP_LOCALS(1);
+    return rs;
+  }
+  long long result = bst_insert_node(rs, ikey, 0LL);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long native_set_member(const char* item, long long set_h) {
+  if (item == NULL) return 0;
+  return bst_get(set_h, item) != LLONG_MIN ? 1 : 0;
+}
+
+long long native_set_to_list(long long set_h) {
+  long long rs = set_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rs);
+  long long list_nil = sprout_make0(find_ctor_tag_by_name("Nil"));
+  long long result = bst_to_list_acc(rs, list_nil);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long native_set_size(long long set_h) {
+  return (long long)bst_size(set_h);
+}
+
+long long bytes_empty() {
+  BytesVal* out = sprout_alloc_bytes_val("bytes_empty: out of memory");
+  out->len = 0;
+  out->data = NULL;
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_length(long long bytes_h) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_length: null bytes");
+  return (long long)value->len;
+}
+
+long long bytes_get(long long bytes_h, long long index) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_get: null bytes");
+  if (index < 0 || (size_t)index >= value->len) {
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)value->data[index]);
+}
+
+long long bytes_slice(long long bytes_h, long long start, long long count) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_slice: null bytes");
+  if (start < 0 || count < 0) tcp_fail("bytes_slice: start/count must be >= 0");
+  size_t s = (size_t)start;
+  size_t c = (size_t)count;
+  if (s > value->len) s = value->len;
+  if (s + c > value->len) c = value->len - s;
+  BytesVal* out = sprout_alloc_bytes_val("bytes_slice: out of memory");
+  out->len = c;
+  out->data = sprout_alloc_bytes_data(c, "bytes_slice: out of memory");
+  if (c > 0) memcpy(out->data, value->data + s, c);
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_append(long long left_h, long long right_h) {
+  long long rooted_left = left_h;
+  long long rooted_right = right_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_left);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
+  BytesVal* left = (BytesVal*)(uintptr_t)left_h;
+  BytesVal* right = (BytesVal*)(uintptr_t)right_h;
+  if (left == NULL || right == NULL) tcp_fail("bytes_append: null bytes");
+  BytesVal* out = sprout_alloc_bytes_val("bytes_append: out of memory");
+  out->len = left->len + right->len;
+  out->data = sprout_alloc_bytes_data(out->len, "bytes_append: out of memory");
+  if (left->len > 0) memcpy(out->data, left->data, left->len);
+  if (right->len > 0) memcpy(out->data + left->len, right->data, right->len);
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_singleton(long long value) {
+  if (value < 0 || value > 255) tcp_fail("bytes_singleton: byte out of range");
+  BytesVal* out = sprout_alloc_bytes_val("bytes_singleton: out of memory");
+  out->len = 1;
+  out->data = sprout_alloc_bytes_data(1, "bytes_singleton: out of memory");
+  out->data[0] = (unsigned char)value;
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_from_utf8(const char* raw) {
+  if (raw == NULL) tcp_fail("bytes_from_utf8: null input");
+  size_t len = strlen(raw);
+  BytesVal* out = sprout_alloc_bytes_val("bytes_from_utf8: out of memory");
+  out->len = len;
+  out->data = sprout_alloc_bytes_data(len, "bytes_from_utf8: out of memory");
+  if (len > 0) memcpy(out->data, raw, len);
+  return (long long)(uintptr_t)out;
+}
+
+static int utf8_validate(const unsigned char* data, size_t len, const char** reason) {
+  size_t i = 0;
+  while (i < len) {
+    unsigned char b0 = data[i];
+    if (b0 == 0) {
+      *reason = "decoded string contains NUL byte";
+      return 0;
+    }
+    if (b0 <= 0x7F) {
+      i += 1;
+      continue;
+    }
+    if ((b0 & 0xE0) == 0xC0) {
+      if (i + 1 >= len) { *reason = "truncated UTF-8 sequence"; return 0; }
+      unsigned char b1 = data[i + 1];
+      if ((b1 & 0xC0) != 0x80 || b0 < 0xC2) { *reason = "invalid UTF-8 sequence"; return 0; }
+      i += 2;
+      continue;
+    }
+    if ((b0 & 0xF0) == 0xE0) {
+      if (i + 2 >= len) { *reason = "truncated UTF-8 sequence"; return 0; }
+      unsigned char b1 = data[i + 1];
+      unsigned char b2 = data[i + 2];
+      if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) { *reason = "invalid UTF-8 sequence"; return 0; }
+      if ((b0 == 0xE0 && b1 < 0xA0) || (b0 == 0xED && b1 >= 0xA0)) { *reason = "invalid UTF-8 sequence"; return 0; }
+      i += 3;
+      continue;
+    }
+    if ((b0 & 0xF8) == 0xF0) {
+      if (i + 3 >= len) { *reason = "truncated UTF-8 sequence"; return 0; }
+      unsigned char b1 = data[i + 1];
+      unsigned char b2 = data[i + 2];
+      unsigned char b3 = data[i + 3];
+      if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80) {
+        *reason = "invalid UTF-8 sequence";
+        return 0;
+      }
+      if ((b0 == 0xF0 && b1 < 0x90) || (b0 == 0xF4 && b1 >= 0x90) || b0 > 0xF4) {
+        *reason = "invalid UTF-8 sequence";
+        return 0;
+      }
+      i += 4;
+      continue;
+    }
+    *reason = "invalid UTF-8 sequence";
+    return 0;
+  }
+  return 1;
+}
+
+long long bytes_to_utf8(long long bytes_h) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_to_utf8: null bytes");
+  const char* reason = NULL;
+  if (!utf8_validate(value->data, value->len, &reason)) {
+    long long err = sprout_make1(
+      find_ctor_tag_by_name("stdlib.bytes.Utf8DecodeError"),
+      (long long)(uintptr_t)dup_cstr(reason)
+    );
+    SPROUT_GC_PUSH_I64_LOCAL(err);
+    long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+    SPROUT_GC_POP_LOCALS(2);
+    return out;
+  }
+  char* out = (char*)malloc(value->len + 1);
+  if (out == NULL) tcp_fail("bytes_to_utf8: out of memory");
+  if (value->len > 0) memcpy(out, value->data, value->len);
+  out[value->len] = '\0';
+  SPROUT_GC_POP_LOCALS(1);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+}
+
+static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx) {
+  BytesVal* out = sprout_alloc_bytes_val(ctx);
+  out->len = len;
+  out->data = sprout_alloc_bytes_data(len, ctx);
+  if (len > 0) memcpy(out->data, data, len);
+  return out;
+}
+
+static BuilderVal* builder_alloc(size_t len, size_t count) {
+  BuilderVal* out = sprout_alloc_builder_val("bytes_builder: out of memory");
+  out->len = len;
+  out->count = count;
+  out->chunks = sprout_alloc_builder_chunks(count, "bytes_builder: out of memory");
+  return out;
+}
+
+static long long sprout_div_floor(long long left, long long right) {
+  long long q = left / right;
+  long long r = left % right;
+  if (r != 0 && ((r > 0) != (right > 0))) q -= 1;
+  return q;
+}
+
+long long bytes_builder_empty(void) {
+  return (long long)(uintptr_t)builder_alloc(0, 0);
+}
+
+long long bytes_builder_bytes(long long bytes_h) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_builder_bytes: null bytes");
+  BuilderVal* out = builder_alloc(value->len, value->len == 0 ? 0 : 1);
+  if (out->count == 1) out->chunks[0] = value;
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_byte(long long value) {
+  if (value < 0 || value > 255) tcp_fail("bytes_builder_byte: byte out of range");
+  unsigned char data[1] = {(unsigned char)value};
+  BytesVal* chunk = bytes_from_chunk_bytes(data, 1, "bytes_builder_byte: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(chunk);
+  BuilderVal* out = builder_alloc(1, 1);
+  out->chunks[0] = chunk;
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+static unsigned char builder_mod_256(long long value) {
+  long long q = sprout_div_floor(value, 256);
+  return (unsigned char)(value - q * 256);
+}
+
+long long bytes_builder_u16_be(long long value) {
+  unsigned char data[2];
+  data[0] = builder_mod_256(sprout_div_floor(value, 256));
+  data[1] = builder_mod_256(value);
+  BytesVal* chunk = bytes_from_chunk_bytes(data, 2, "bytes_builder_u16_be: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(chunk);
+  BuilderVal* out = builder_alloc(2, 1);
+  out->chunks[0] = chunk;
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_u32_be(long long value) {
+  unsigned char data[4];
+  data[0] = builder_mod_256(sprout_div_floor(value, 16777216));
+  data[1] = builder_mod_256(sprout_div_floor(value, 65536));
+  data[2] = builder_mod_256(sprout_div_floor(value, 256));
+  data[3] = builder_mod_256(value);
+  BytesVal* chunk = bytes_from_chunk_bytes(data, 4, "bytes_builder_u32_be: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(chunk);
+  BuilderVal* out = builder_alloc(4, 1);
+  out->chunks[0] = chunk;
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_append(long long left_h, long long right_h) {
+  long long rooted_left = left_h;
+  long long rooted_right = right_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_left);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
+  BuilderVal* left = (BuilderVal*)(uintptr_t)left_h;
+  BuilderVal* right = (BuilderVal*)(uintptr_t)right_h;
+  if (left == NULL || right == NULL) tcp_fail("bytes_builder_append: null builder");
+  if (left->count == 0) {
+    SPROUT_GC_POP_LOCALS(2);
+    return right_h;
+  }
+  if (right->count == 0) {
+    SPROUT_GC_POP_LOCALS(2);
+    return left_h;
+  }
+  BuilderVal* out = builder_alloc(left->len + right->len, left->count + right->count);
+  for (size_t i = 0; i < left->count; i++) out->chunks[i] = left->chunks[i];
+  for (size_t i = 0; i < right->count; i++) out->chunks[left->count + i] = right->chunks[i];
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)out;
+}
+
+long long bytes_builder_build(long long builder_h) {
+  long long rooted_builder = builder_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_builder);
+  BuilderVal* value = (BuilderVal*)(uintptr_t)builder_h;
+  if (value == NULL) tcp_fail("bytes_builder_build: null builder");
+  BytesVal* out = sprout_alloc_bytes_val("bytes_builder_build: out of memory");
+  out->len = value->len;
+  out->data = sprout_alloc_bytes_data(out->len, "bytes_builder_build: out of memory");
+  size_t offset = 0;
+  for (size_t i = 0; i < value->count; i++) {
+    BytesVal* chunk = value->chunks[i];
+    if (chunk == NULL) tcp_fail("bytes_builder_build: null chunk");
+    if (chunk->len > 0) memcpy(out->data + offset, chunk->data, chunk->len);
+    offset += chunk->len;
+  }
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+static uint32_t crypto_rotr32(uint32_t x, uint32_t n) {
+  return (x >> n) | (x << (32 - n));
+}
+
+static uint32_t crypto_ch(uint32_t x, uint32_t y, uint32_t z) {
+  return (x & y) ^ (~x & z);
+}
+
+static uint32_t crypto_maj(uint32_t x, uint32_t y, uint32_t z) {
+  return (x & y) ^ (x & z) ^ (y & z);
+}
+
+static uint32_t crypto_sig0(uint32_t x) {
+  return crypto_rotr32(x, 7) ^ crypto_rotr32(x, 18) ^ (x >> 3);
+}
+
+static uint32_t crypto_sig1(uint32_t x) {
+  return crypto_rotr32(x, 17) ^ crypto_rotr32(x, 19) ^ (x >> 10);
+}
+
+static uint32_t crypto_ep0(uint32_t x) {
+  return crypto_rotr32(x, 2) ^ crypto_rotr32(x, 13) ^ crypto_rotr32(x, 22);
+}
+
+static uint32_t crypto_ep1(uint32_t x) {
+  return crypto_rotr32(x, 6) ^ crypto_rotr32(x, 11) ^ crypto_rotr32(x, 25);
+}
+
+typedef struct {
+  uint32_t state[8];
+  uint64_t bitlen;
+  unsigned char data[64];
+  size_t datalen;
+} Sha256Ctx;
+
+static const uint32_t SHA256_K[64] = {
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+  0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+  0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+  0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+  0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+  0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+static void sha256_transform(Sha256Ctx* ctx, const unsigned char data[64]) {
+  uint32_t m[64];
+  for (size_t i = 0; i < 16; i++) {
+    m[i] =
+      ((uint32_t)data[i * 4] << 24) |
+      ((uint32_t)data[i * 4 + 1] << 16) |
+      ((uint32_t)data[i * 4 + 2] << 8) |
+      ((uint32_t)data[i * 4 + 3]);
+  }
+  for (size_t i = 16; i < 64; i++) {
+    m[i] = crypto_sig1(m[i - 2]) + m[i - 7] + crypto_sig0(m[i - 15]) + m[i - 16];
+  }
+
+  uint32_t a = ctx->state[0];
+  uint32_t b = ctx->state[1];
+  uint32_t c = ctx->state[2];
+  uint32_t d = ctx->state[3];
+  uint32_t e = ctx->state[4];
+  uint32_t f = ctx->state[5];
+  uint32_t g = ctx->state[6];
+  uint32_t h = ctx->state[7];
+
+  for (size_t i = 0; i < 64; i++) {
+    uint32_t t1 = h + crypto_ep1(e) + crypto_ch(e, f, g) + SHA256_K[i] + m[i];
+    uint32_t t2 = crypto_ep0(a) + crypto_maj(a, b, c);
+    h = g;
+    g = f;
+    f = e;
+    e = d + t1;
+    d = c;
+    c = b;
+    b = a;
+    a = t1 + t2;
+  }
+
+  ctx->state[0] += a;
+  ctx->state[1] += b;
+  ctx->state[2] += c;
+  ctx->state[3] += d;
+  ctx->state[4] += e;
+  ctx->state[5] += f;
+  ctx->state[6] += g;
+  ctx->state[7] += h;
+}
+
+static void sha256_init(Sha256Ctx* ctx) {
+  ctx->bitlen = 0;
+  ctx->datalen = 0;
+  ctx->state[0] = 0x6a09e667;
+  ctx->state[1] = 0xbb67ae85;
+  ctx->state[2] = 0x3c6ef372;
+  ctx->state[3] = 0xa54ff53a;
+  ctx->state[4] = 0x510e527f;
+  ctx->state[5] = 0x9b05688c;
+  ctx->state[6] = 0x1f83d9ab;
+  ctx->state[7] = 0x5be0cd19;
+}
+
+static void sha256_update(Sha256Ctx* ctx, const unsigned char* data, size_t len) {
+  for (size_t i = 0; i < len; i++) {
+    ctx->data[ctx->datalen++] = data[i];
+    if (ctx->datalen == 64) {
+      sha256_transform(ctx, ctx->data);
+      ctx->bitlen += 512;
+      ctx->datalen = 0;
+    }
+  }
+}
+
+static void sha256_final(Sha256Ctx* ctx, unsigned char out[32]) {
+  size_t i = ctx->datalen;
+  ctx->bitlen += (uint64_t)ctx->datalen * 8;
+  ctx->data[i++] = 0x80;
+
+  if (i > 56) {
+    while (i < 64) ctx->data[i++] = 0x00;
+    sha256_transform(ctx, ctx->data);
+    i = 0;
+  }
+
+  while (i < 56) ctx->data[i++] = 0x00;
+  for (int j = 7; j >= 0; j--) {
+    ctx->data[i++] = (unsigned char)((ctx->bitlen >> (j * 8)) & 0xff);
+  }
+  sha256_transform(ctx, ctx->data);
+
+  for (size_t j = 0; j < 8; j++) {
+    out[j * 4] = (unsigned char)((ctx->state[j] >> 24) & 0xff);
+    out[j * 4 + 1] = (unsigned char)((ctx->state[j] >> 16) & 0xff);
+    out[j * 4 + 2] = (unsigned char)((ctx->state[j] >> 8) & 0xff);
+    out[j * 4 + 3] = (unsigned char)(ctx->state[j] & 0xff);
+  }
+}
+
+static void sha256_digest(const unsigned char* data, size_t len, unsigned char out[32]) {
+  Sha256Ctx ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, data, len);
+  sha256_final(&ctx, out);
+}
+
+static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]) {
+  unsigned char key_block[64];
+  unsigned char inner[32];
+  unsigned char key_hash[32];
+  if (key_len > 64) {
+    sha256_digest(key, key_len, key_hash);
+    key = key_hash;
+    key_len = 32;
+  }
+  memset(key_block, 0, sizeof(key_block));
+  if (key_len > 0) memcpy(key_block, key, key_len);
+  for (size_t i = 0; i < 64; i++) key_block[i] ^= 0x36;
+
+  Sha256Ctx ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, key_block, 64);
+  sha256_update(&ctx, msg, msg_len);
+  sha256_final(&ctx, inner);
+
+  memset(key_block, 0, sizeof(key_block));
+  memcpy(key_block, key, key_len);
+  for (size_t i = 0; i < 64; i++) key_block[i] ^= 0x5c;
+  sha256_init(&ctx);
+  sha256_update(&ctx, key_block, 64);
+  sha256_update(&ctx, inner, 32);
+  sha256_final(&ctx, out);
+}
+
+static char* base64_encode_bytes(const unsigned char* data, size_t len) {
+  static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t out_len = 4 * ((len + 2) / 3);
+  char* out = (char*)malloc(out_len + 1);
+  if (out == NULL) return NULL;
+  size_t j = 0;
+  for (size_t i = 0; i < len;) {
+    size_t remaining = len - i;
+    unsigned char a = data[i++];
+    unsigned char b = remaining > 1 ? data[i++] : 0;
+    unsigned char c = remaining > 2 ? data[i++] : 0;
+    out[j++] = table[(a >> 2) & 0x3f];
+    out[j++] = table[((a & 0x03) << 4) | (b >> 4)];
+    out[j++] = remaining > 1 ? table[((b & 0x0f) << 2) | (c >> 6)] : '=';
+    out[j++] = remaining > 2 ? table[c & 0x3f] : '=';
+  }
+  out[j] = '\0';
+  return out;
+}
+
+static int base64_value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+static int base64_decode_bytes(const char* text, unsigned char** out_data, size_t* out_len, const char** err) {
+  size_t len = strlen(text);
+  if (len % 4 != 0) {
+    *err = "invalid base64 length";
+    return 0;
+  }
+
+  size_t size = len / 4 * 3;
+  if (len >= 1 && text[len - 1] == '=') size--;
+  if (len >= 2 && text[len - 2] == '=') size--;
+
+  unsigned char* out = size == 0 ? NULL : (unsigned char*)sprout_alloc_counted(
+    &g_debug_alloc_bytes,
+    size,
+    "crypto_base64_decode: out of memory"
+  );
+  if (size > 0 && out == NULL) {
+    *err = "out of memory";
+    return 0;
+  }
+
+  size_t j = 0;
+  for (size_t i = 0; i < len; i += 4) {
+    char c0 = text[i];
+    char c1 = text[i + 1];
+    char c2 = text[i + 2];
+    char c3 = text[i + 3];
+    int v0 = base64_value(c0);
+    int v1 = base64_value(c1);
+    if (v0 < 0 || v1 < 0) {
+      free(out);
+      *err = "invalid base64 character";
+      return 0;
+    }
+    if (c2 == '=') {
+      if (c3 != '=') {
+        free(out);
+        *err = "invalid base64 padding";
+        return 0;
+      }
+      if (i + 4 != len) {
+        free(out);
+        *err = "invalid base64 padding";
+        return 0;
+      }
+      out[j++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+      break;
+    }
+    int v2 = base64_value(c2);
+    if (v2 < 0) {
+      free(out);
+      *err = "invalid base64 character";
+      return 0;
+    }
+    if (c3 == '=') {
+      if (i + 4 != len) {
+        free(out);
+        *err = "invalid base64 padding";
+        return 0;
+      }
+      out[j++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+      out[j++] = (unsigned char)(((v1 & 0x0f) << 4) | (v2 >> 2));
+      break;
+    }
+    int v3 = base64_value(c3);
+    if (v3 < 0) {
+      free(out);
+      *err = "invalid base64 character";
+      return 0;
+    }
+    out[j++] = (unsigned char)((v0 << 2) | (v1 >> 4));
+    out[j++] = (unsigned char)(((v1 & 0x0f) << 4) | (v2 >> 2));
+    out[j++] = (unsigned char)(((v2 & 0x03) << 6) | v3);
+  }
+
+  *out_data = out;
+  *out_len = size;
+  return 1;
+}
+
+static long long crypto_err1(const char* ctor_name, const char* payload) {
+  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), (long long)(uintptr_t)dup_cstr(payload));
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+static long long crypto_err2(const char* ctor_name, long long a0, long long a1) {
+  long long rooted_a0 = a0;
+  long long rooted_a1 = a1;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_a0);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_a1);
+  long long err = sprout_make2(find_ctor_tag_by_name(ctor_name), a0, a1);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(3);
+  return out;
+}
+
+long long crypto_sha256(long long bytes_h) {
+  long long rooted_bytes = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("crypto_sha256: null bytes");
+  unsigned char digest[32];
+  sha256_digest(value->data, value->len, digest);
+  BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_sha256: out of memory");
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long crypto_hmac_sha256(long long key_h, long long msg_h) {
+  long long rooted_key = key_h;
+  long long rooted_msg = msg_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_key);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_msg);
+  BytesVal* key = (BytesVal*)(uintptr_t)key_h;
+  BytesVal* msg = (BytesVal*)(uintptr_t)msg_h;
+  if (key == NULL || msg == NULL) tcp_fail("crypto_hmac_sha256: null bytes");
+  unsigned char digest[32];
+  hmac_sha256_digest(key->data, key->len, msg->data, msg->len, digest);
+  BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_hmac_sha256: out of memory");
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)out;
+}
+
+long long crypto_base64_encode(long long bytes_h) {
+  long long rooted_bytes_h = bytes_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes_h);
+  BytesVal* value = (BytesVal*)(uintptr_t)rooted_bytes_h;
+  if (value == NULL) tcp_fail("crypto_base64_encode: null bytes");
+  sprout_gc_maybe_collect_threshold();
+  char* out = base64_encode_bytes(value->data, value->len);
+  if (out == NULL) tcp_fail("crypto_base64_encode: out of memory");
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long crypto_base64_decode(const char* raw) {
+  if (raw == NULL) tcp_fail("crypto_base64_decode: null input");
+  unsigned char* data = NULL;
+  size_t len = 0;
+  const char* err = NULL;
+  if (!base64_decode_bytes(raw, &data, &len, &err)) {
+    return crypto_err1("stdlib.crypto.Base64DecodeError", err);
+  }
+  BytesVal* out = sprout_alloc_bytes_val("crypto_base64_decode: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
+  out->len = len;
+  out->data = len == 0 ? NULL : data;
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long crypto_bytes_xor(long long left_h, long long right_h) {
+  long long rooted_left = left_h;
+  long long rooted_right = right_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_left);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
+  BytesVal* left = (BytesVal*)(uintptr_t)left_h;
+  BytesVal* right = (BytesVal*)(uintptr_t)right_h;
+  if (left == NULL || right == NULL) tcp_fail("crypto_bytes_xor: null bytes");
+  if (left->len != right->len) {
+    SPROUT_GC_POP_LOCALS(2);
+    return crypto_err2("stdlib.crypto.BytesXorLengthMismatch", (long long)left->len, (long long)right->len);
+  }
+  BytesVal* out = sprout_alloc_bytes_val("crypto_bytes_xor: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
+  out->len = left->len;
+  out->data = sprout_alloc_bytes_data(out->len, "crypto_bytes_xor: out of memory");
+  for (size_t i = 0; i < out->len; i++) out->data[i] = left->data[i] ^ right->data[i];
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(3);
+  return result;
+}
+
+long long crypto_random_bytes(long long count) {
+  if (count < 0) {
+    return crypto_err1("stdlib.crypto.CryptoInvalidArgument", "count must be >= 0");
+  }
+  size_t len = (size_t)count;
+  BytesVal* out = sprout_alloc_bytes_val("crypto_random_bytes: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
+  out->len = len;
+  out->data = sprout_alloc_bytes_data(len, "crypto_random_bytes: out of memory");
+  if (len > 0) {
+    FILE* fp = fopen("/dev/urandom", "rb");
+    if (fp == NULL) {
+      SPROUT_GC_POP_LOCALS(1);
+      return crypto_err1("stdlib.crypto.CryptoUnavailable", strerror(errno));
+    }
+    size_t got = fread(out->data, 1, len, fp);
+    if (got != len || ferror(fp)) {
+      int saved_errno = errno;
+      fclose(fp);
+      SPROUT_GC_POP_LOCALS(1);
+      return crypto_err1(
+        "stdlib.crypto.CryptoUnavailable",
+        saved_errno != 0 ? strerror(saved_errno) : "failed to read random bytes"
+      );
+    }
+    fclose(fp);
+  }
+  long long result = sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long tcp_listen(long long port) {
+  if (port < 1 || port > 65535) tcp_fail("tcp_listen: port out of range");
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) tcp_fail("tcp_listen: socket failed");
+  int one = 1;
+  if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
+    close(fd);
+    tcp_fail("tcp_listen: setsockopt failed");
+  }
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((unsigned short)port);
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    close(fd);
+    tcp_fail("tcp_listen: bind failed");
+  }
+  if (listen(fd, 16) < 0) {
+    close(fd);
+    tcp_fail("tcp_listen: listen failed");
+  }
+  long long h = alloc_listener_handle();
+  if (h < 0) {
+    close(fd);
+    tcp_fail("tcp_listen: handle table full");
+  }
+  g_listener_fd[h] = fd;
+  g_listener_used[h] = 1;
+  return h;
+}
+
+static long long tcp_net_ok(long long payload) {
+  long long rooted_payload = payload;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_payload);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+static long long tcp_net_err0(const char* ctor_name) {
+  long long err = sprout_make0(find_ctor_tag_by_name(ctor_name));
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+static long long tcp_net_err1(const char* ctor_name, long long payload) {
+  long long rooted_payload = payload;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_payload);
+  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(2);
+  return out;
+}
+
+long long tcp_connect(const char* host, long long port) {
+  if (host == NULL) tcp_fail("tcp_connect: null host");
+  if (port < 1 || port > 65535) {
+    return tcp_net_err1(
+      "stdlib.net.TcpInvalidArgument",
+      (long long)(uintptr_t)"port must be in 1..65535"
+    );
+  }
+  char port_buf[16];
+  snprintf(port_buf, sizeof(port_buf), "%lld", port);
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo* resolved = NULL;
+  int gai = getaddrinfo(host, port_buf, &hints, &resolved);
+  if (gai != 0) {
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)gai_strerror(gai));
+  }
+
+  int fd = -1;
+  const char* error_msg = "connect failed";
+  for (struct addrinfo* it = resolved; it != NULL; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd < 0) continue;
+    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
+      error_msg = NULL;
+      break;
+    }
+    error_msg = strerror(errno);
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(resolved);
+
+  if (fd < 0) {
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)error_msg);
+  }
+
+  long long h = alloc_conn_handle();
+  if (h < 0) {
+    close(fd);
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)"connection table full");
+  }
+  g_conn_fd[h] = fd;
+  g_conn_used[h] = 1;
+  return tcp_net_ok(h);
+}
+
+long long tcp_accept(long long listener) {
+  if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
+    tcp_fail("tcp_accept: unknown listener handle");
+  }
+  int fd = accept(g_listener_fd[listener], NULL, NULL);
+  if (fd < 0) tcp_fail("tcp_accept: accept failed");
+  long long h = alloc_conn_handle();
+  if (h < 0) {
+    close(fd);
+    tcp_fail("tcp_accept: connection table full");
+  }
+  g_conn_fd[h] = fd;
+  g_conn_used[h] = 1;
+  return h;
+}
+
+long long tcp_read(long long conn) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_read: unknown connection handle");
+  sprout_gc_maybe_collect_threshold();
+  char* buf = (char*)malloc(65537);
+  if (buf == NULL) tcp_fail("tcp_read: out of memory");
+  ssize_t n = recv(g_conn_fd[conn], buf, 65536, 0);
+  if (n < 0) {
+    free(buf);
+    tcp_fail("tcp_read: recv failed");
+  }
+  buf[n] = '\0';
+  register_managed_ptr(buf, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)buf;
+}
+
+long long tcp_read_exact(long long conn, long long count) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  if (count < 0) {
+    return tcp_net_err1(
+      "stdlib.net.TcpInvalidArgument",
+      (long long)(uintptr_t)"count must be >= 0"
+    );
+  }
+  BytesVal* out = sprout_alloc_bytes_val("tcp_read_exact: out of memory");
+  SPROUT_GC_PUSH_PTR_LOCAL(out);
+  out->len = (size_t)count;
+  out->data = sprout_alloc_bytes_data((size_t)count, "tcp_read_exact: out of memory");
+  size_t received = 0;
+  while (received < (size_t)count) {
+    ssize_t n = recv(g_conn_fd[conn], out->data + received, (size_t)count - received, 0);
+    if (n == 0) {
+      SPROUT_GC_POP_LOCALS(1);
+      return tcp_net_err0("stdlib.net.TcpEndOfStream");
+    }
+    if (n < 0) {
+      SPROUT_GC_POP_LOCALS(1);
+      return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
+    }
+    received += (size_t)n;
+  }
+  long long result = tcp_net_ok((long long)(uintptr_t)out);
+  SPROUT_GC_POP_LOCALS(1);
+  return result;
+}
+
+long long tcp_write(long long conn, const char* payload) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_write: unknown connection handle");
+  if (payload == NULL) tcp_fail("tcp_write: null payload");
+  size_t len = strlen(payload);
+  const char* p = payload;
+  while (len > 0) {
+    ssize_t n = send(g_conn_fd[conn], p, len, 0);
+    if (n <= 0) tcp_fail("tcp_write: send failed");
+    p += n;
+    len -= (size_t)n;
+  }
+  return 0;
+}
+
+long long tcp_write_all(long long conn, long long payload_h) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
+  if (payload == NULL) tcp_fail("tcp_write_all: null payload");
+  size_t len = payload->len;
+  const unsigned char* p = payload->data;
+  while (len > 0) {
+    ssize_t n = send(g_conn_fd[conn], p, len, 0);
+    if (n <= 0) {
+      return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
+    }
+    p += n;
+    len -= (size_t)n;
+  }
+  return tcp_net_ok((long long)payload->len);
+}
+
+long long tcp_close(long long conn) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_close: unknown connection handle");
+  close(g_conn_fd[conn]);
+  g_conn_used[conn] = 0;
+  g_conn_fd[conn] = -1;
+  return 0;
+}
+
+long long tcp_close_listener(long long listener) {
+  if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
+    tcp_fail("tcp_close_listener: unknown listener handle");
+  }
+  close(g_listener_fd[listener]);
+  g_listener_used[listener] = 0;
+  g_listener_fd[listener] = -1;
+  return 0;
+}
+
+long long tcp_echo_serve(long long port, long long max_connections) {
+  if (max_connections < 1) tcp_fail("tcp_echo_serve: max_connections must be >= 1");
+  long long listener = tcp_listen(port);
+  long long served = 0;
+  while (served < max_connections) {
+    long long conn = tcp_accept(listener);
+    long long payload_i = tcp_read(conn);
+    const char* payload = (const char*)(uintptr_t)payload_i;
+    tcp_write(conn, payload);
+    tcp_close(conn);
+    served++;
+  }
+  tcp_close_listener(listener);
+  return 0;
+}
