@@ -62,11 +62,27 @@ check file:
 check-stdlib file:
   python3 -m sprout.cli check --with-stdlib {{file}}
 
+# Compile {{file}} with stage-1 and run the resulting binary (always includes stdlib).
+# Requires compile_driver_bin_stage1; build it first with: just build-stage1
 run file:
-  python3 -m sprout.cli run {{file}}
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just build-stage1" >&2
+    exit 1
+  fi
+  STDLIB_ROOT="$(pwd)/stdlib"
+  TMP_LL="/tmp/sprout_run_$$.ll"
+  TMP_BIN="/tmp/sprout_run_$$"
+  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
+  ./compile_driver_bin_stage1 --emit-ir "$STDLIB_ROOT" {{file}} > "$TMP_LL"
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN"
+  "$TMP_BIN"
 
-run-stdlib file:
-  python3 -m sprout.cli run --with-stdlib {{file}}
+# Alias for `run`: stage-1 always includes stdlib, so run-stdlib is equivalent.
+run-stdlib file: (run file)
 
 # Run all in-language stdlib unit tests (.spr/.sprout files under tests/stdlib/).
 # Alias for test-stdlib-stage0 (stage-0 Python compiler).
@@ -375,6 +391,31 @@ build-analysis-service:
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$OUT"
   echo "==> Built $OUT"
+
+# Run the self-hosted analysis service binary in foreground (for manual testing / smoke checks).
+# Requires analysis_service_bin; build it first with: just build-analysis-service
+# The binary reads JSON requests from stdin and writes JSON responses to stdout.
+# Example: echo '{"op":"declared_names_in_source","module_source":"fn foo() -> Int = 1"}' | just run-analysis-service
+run-analysis-service:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  BIN="./analysis_service_bin"
+  if [[ ! -x "$BIN" ]]; then
+    echo "ERROR: analysis_service_bin not found; run: just build-analysis-service" >&2
+    exit 1
+  fi
+  STDLIB_ROOT="$(pwd)/stdlib"
+  exec "$BIN" "$STDLIB_ROOT"
+
+# Start an interactive Sprout REPL (interpreter-backed).
+repl:
+  python3 -m sprout.cli repl
+
+# Start the native Sprout REPL (compiled binary, analysis-service-backed).
+# Uses analysis_service_bin for analysis if present; falls back to Python analysis service.
+# Requires clang on PATH. Build analysis_service_bin first with: just build-analysis-service
+repl-native:
+  python3 -m sprout.cli repl --native
 
 # Compile all examples to LLVM IR. Alias for compile-examples-stage1 (stage-1 self-hosted binary).
 # For the Python stage-0 path: just compile-examples-stage0

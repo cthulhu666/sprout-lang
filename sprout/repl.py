@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from .typechecker import typecheck_program
 
 __all__ = [
     "cmd_repl",
+    "default_analysis_service_bin_cmd",
 ]
 
 
@@ -60,6 +62,37 @@ def _native_repl_cache_key() -> str:
 
 def _native_repl_binary_path() -> Path:
     return _native_repl_cache_dir() / f"repl-{_native_repl_cache_key()}"
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _stdlib_root() -> Path:
+    return _project_root() / "stdlib"
+
+
+def _analysis_service_bin() -> Path | None:
+    """Return the path to analysis_service_bin if it exists and is executable."""
+    candidate = _project_root() / "analysis_service_bin"
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return candidate
+    return None
+
+
+def default_analysis_service_bin_cmd(stdlib_root: Path | None = None) -> str | None:
+    """Return a shell command string for the self-hosted analysis service binary.
+
+    Returns None if analysis_service_bin is not present.  The stdlib_root
+    argument is passed as the binary's first positional argument (argv[0] in
+    Sprout) so that check_source / diagnostics_in_source can locate stdlib.
+    """
+    bin_path = _analysis_service_bin()
+    if bin_path is None:
+        return None
+    root = _stdlib_root() if stdlib_root is None else stdlib_root
+    return f"{shlex.quote(str(bin_path))} {shlex.quote(str(root))}"
+
 
 def _summarize_native_repl_build_error(exc: subprocess.CalledProcessError) -> str:
     stderr = (exc.stderr or "").strip()
@@ -107,7 +140,17 @@ def _ensure_native_repl_binary() -> Path:
 def cmd_repl(*, native: bool = False) -> int:
     if native:
         out = _ensure_native_repl_binary()
-        run = subprocess.run([str(out)], check=False)
+        env = os.environ.copy()
+        # Wire the self-hosted analysis service binary when available.
+        # SPROUT_ANALYSIS_SERVICE_CMD is a shell command string consumed by the
+        # analysis-bridge C runtime (execl("/bin/sh", "sh", "-lc", cmd, NULL)).
+        # analysis_service_bin requires the stdlib root as its first argument
+        # (argv_get(0) in Sprout), so the command is "<binary> <stdlib_root>".
+        if "SPROUT_ANALYSIS_SERVICE_CMD" not in env:
+            native_cmd = default_analysis_service_bin_cmd()
+            if native_cmd is not None:
+                env["SPROUT_ANALYSIS_SERVICE_CMD"] = native_cmd
+        run = subprocess.run([str(out)], env=env, check=False)
         return run.returncode
 
     reset_hosted_repl_session()

@@ -7,6 +7,7 @@ import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
+import stdlib.compiler.types as types
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -282,6 +283,40 @@ fn op_symbol_locations_in_source(src: String) -> json.Json =
   parse_symbol_locations(src)
 
 # ---------------------------------------------------------------------------
+# type_of_in_source — infer the type of an expression in a source context
+#
+# Strategy (mirrors Python's infer_type_in_source):
+#   1. Append a sentinel let-binding to the source:
+#        let __repl_source_value = <expr>
+#   2. Run compile_source_with_root on the augmented source.
+#   3. Look up "__repl_source_value" in the resulting env.
+#   4. Render the Scheme with types.scheme_to_string.
+#
+# The sentinel name is guaranteed not to collide with user code because
+# double-underscore prefixes are not valid Sprout identifiers in surface syntax.
+
+fn sentinel_name() -> String = "__repl_source_value"
+
+fn augment_source(src: String, expr: String) -> String =
+  src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr
+
+fn op_type_of_in_source(src: String, expr: String, stdlib_root: String) -> json.Json !{IO} =
+  do
+    result <- compiler.compile_source_with_root(augment_source(src, expr), stdlib_root)
+    match result with
+    | compiler.CompileFail diags ->
+        match diags with
+        | Nil -> error_response("type_of_in_source: typecheck failed")
+        | Cons d _ ->
+            match d with
+            | compiler.DiagError msg -> error_response(msg)
+            | compiler.DiagWarning msg -> error_response(msg)
+    | compiler.CompileOk env ->
+        match dict_get(sentinel_name(), env) with
+        | Nothing -> error_response("type_of_in_source: could not infer type of expression")
+        | Just scheme -> ok_response(json.JsonString(types.scheme_to_string(scheme)))
+
+# ---------------------------------------------------------------------------
 # Request dispatch
 
 fn dispatch_op(op: String, req: json.Json, stdlib_root: String) -> json.Json !{IO} =
@@ -313,7 +348,15 @@ fn dispatch_op(op: String, req: json.Json, stdlib_root: String) -> json.Json !{I
     match require_string_field(req, "module_source") with
     | Err msg -> error_response(msg)
     | Ok src -> op_symbol_locations_in_source(src)
-  else if op == "type_of_in_source" then not_implemented(op)
+  else if op == "type_of_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src ->
+        match require_string_field(req, "expr") with
+        | Err msg -> error_response(msg)
+        | Ok expr ->
+            if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
+            else op_type_of_in_source(src, expr, stdlib_root)
   else if op == "instances_in_source" then not_implemented(op)
   else if op == "eval_expr_in_source" then not_implemented(op)
   else if op == "complete_in_state" then not_implemented(op)

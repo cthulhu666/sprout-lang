@@ -272,11 +272,18 @@ Definition of done:
 - [~] Move `type_of`, `declared_names`, `exported_names`, diagnostics,
   instances, symbol inventory, and evaluation requests onto self-hosted
   compiler services.
-  *(Structural ops complete; `type_of`, `instances`, `eval_expr` stub to `not_implemented`.)*
-- [ ] Ensure REPL, editor/language-service, and compiler CLI consumers share
+  *(Structural ops complete; `type_of` implemented (2026-05-17); `instances`, `eval_expr` still stub to `not_implemented`.
+  `type_of_in_source` appends a sentinel let-binding to the source, runs `compile_source_with_root`,
+  looks up the name in the `Dict Scheme` env, and renders via `types.scheme_to_string`.
+  Request: `{op, module_source, expr}`. Response: `{ok:true, value:"<type string>"}`.)*
+- [x] Ensure REPL, editor/language-service, and compiler CLI consumers share
   the same service boundary.
-  *(Blocked: binary needs stdlib-root passed as argv[0]; `SPROUT_ANALYSIS_SERVICE_CMD`
-  must include the path, e.g. `./analysis_service_bin /path/to/stdlib`.)*
+  *(2026-05-17: `cmd_repl(native=True)` in `sprout/repl.py` auto-detects
+  `analysis_service_bin` at the project root and sets
+  `SPROUT_ANALYSIS_SERVICE_CMD="<bin> <stdlib_root>"` before launching the
+  native REPL binary; `SPROUT_ANALYSIS_SERVICE_CMD` in the environment is
+  respected as an explicit override. `just repl-native` and
+  `just run-analysis-service` recipes added.)*
 - [ ] Remove Python subprocess assumptions from native and interpreter tool
   flows.
 - [ ] Keep service behavior reproducible through snapshot-based contracts.
@@ -339,14 +346,21 @@ Definition of done:
 
 ### Phase 12: Remove Python Compatibility Layers
 
-- [ ] Delete superseded Python entrypoints once equivalent Sprout paths are the
+- [~] Delete superseded Python entrypoints once equivalent Sprout paths are the
   default and verified.
+  *(2026-05-17: `just run` and `just run-stdlib` no longer invoke Python — they
+  use `compile_driver_bin_stage1 --emit-ir` → clang → execute. `just compile`
+  and `just compile-native` also Python-free since Phase 10. Remaining Python
+  entrypoints: `parse`, `fmt`, `lint`, `check`, `test-stdlib-stage0`,
+  `update-runtime`, `build-stage0`.)*
 - [ ] Remove compatibility wrappers such as hidden CLI fallback surfaces that
   only exist to preserve Python ownership.
 - [ ] Migrate or delete Python-based build/test/dev scripts that still assume
   Python as the project control plane.
-- [ ] Update docs, examples, and contributor workflows so Sprout-first tooling
+- [~] Update docs, examples, and contributor workflows so Sprout-first tooling
   is the documented default.
+  *(2026-05-17: `just run` is now Sprout-first; `just compile` and
+  `just compile-native` flipped in Phase 10.)*
 - [ ] Add a policy check that blocks new production-path Python ownership from
   re-entering the repository.
 
