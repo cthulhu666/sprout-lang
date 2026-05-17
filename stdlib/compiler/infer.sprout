@@ -463,28 +463,52 @@ fn infer_call(
   args: List ast.Expr,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
+  match callee with
+  | ast.VarExpr name cpos ->
+      match dict_get(name, env) with
+      | Nothing -> InferErr("Unknown variable: " ++ name)
+      | Just scheme ->
+          do
+            (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
+            infer_call_inner(state, env, subst, eff_subst, callee,
+              typed_ast.TVar(name, t, cpos), types.EffectPure, prog_to_fresh, args, pos)
+  | _ ->
+      do
+        cr <- infer_expr(state, env, subst, eff_subst, callee)
+        match cr with
+        | InferErr e -> InferErr(e)
+        | InferOk typed_callee s1 es1 callee_eff ->
+            infer_call_inner(state, env, s1, es1, callee, typed_callee, callee_eff, dict_empty(), args, pos)
+
+fn infer_call_inner(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  callee: ast.Expr,
+  typed_callee: typed_ast.TypedExpr,
+  callee_eff: types.Effect,
+  prog_to_fresh: Dict types.Type,
+  args: List ast.Expr,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
   do
-    cr <- infer_expr(state, env, subst, eff_subst, callee)
-    match cr with
-    | InferErr e -> InferErr(e)
-    | InferOk typed_callee s1 es1 callee_eff ->
+    ar <- infer_args_acc(state, env, subst, eff_subst, args, Nil, types.EffectPure)
+    match ar with
+    | ArgsErr e -> InferErr(e)
+    | ArgsOk typed_args s2 es2 args_eff ->
         do
-          ar <- infer_args_acc(state, env, s1, es1, args, Nil, types.EffectPure)
-          match ar with
-          | ArgsErr e -> InferErr(e)
-          | ArgsOk typed_args s2 es2 args_eff ->
-              do
-                v <- unifier.fresh(state)
-                r <- infer_call_resolve(
-                  s2, es2,
-                  typed_ast.typed_expr_type(typed_callee),
-                  list_map(\e -> typed_ast.typed_expr_type(e), typed_args),
-                  types.TVar(v),
-                  merge_effects(callee_eff, args_eff))
-                match r with
-                | CallErr e -> InferErr(e)
-                | CallOk ret_t s3 es3 call_eff ->
-                    check_call_constraint(callee, typed_callee, typed_args, s3, env, ret_t, s3, es3, call_eff, pos)
+          v <- unifier.fresh(state)
+          r <- infer_call_resolve(
+            s2, es2,
+            typed_ast.typed_expr_type(typed_callee),
+            list_map(\e -> typed_ast.typed_expr_type(e), typed_args),
+            types.TVar(v),
+            merge_effects(callee_eff, args_eff))
+          match r with
+          | CallErr e -> InferErr(e)
+          | CallOk ret_t s3 es3 call_eff ->
+              check_call_constraint(callee, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos, prog_to_fresh)
 
 fn infer_call_resolve(
   subst: Dict types.Type,
@@ -521,13 +545,14 @@ fn check_call_constraint(
   s3: Dict types.Type,
   es3: Dict types.Effect,
   call_eff: types.Effect,
-  pos: source.SourcePos
+  pos: source.SourcePos,
+  prog_to_fresh: Dict types.Type
 ) -> InferResult !{IO} =
   match callee with
   | ast.VarExpr method_name _ ->
       match dict_get("@class:" ++ method_name, env) with
       | Nothing ->
-          inject_constrained_fn_dicts(method_name, 0, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+          inject_constrained_fn_dicts(method_name, 0, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
       | Just class_marker ->
           check_instance_for_marker(class_marker, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
   | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
@@ -771,9 +796,40 @@ fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
   if str_len(s) < str_len(suffix) then false
   else str_slice(s, str_len(s) - str_len(suffix), str_len(s)) == suffix
 
+# resolve_obligation: the principled path for constrained regular-function dict injection.
+# Uses prog_to_fresh (the instantiation mapping from programmer vars to fresh TVars) to
+# find the concrete type for the constraint variable, then looks up the instance.
+# Falls back to heuristic resolution if prog_var is not in prog_to_fresh (check2 path,
+# or non-VarExpr callee) or if the constraint is still polymorphic after s3 is applied.
+fn resolve_obligation(
+  class_name: String,
+  prog_var: String,
+  prog_to_fresh: Dict types.Type,
+  s3: Dict types.Type,
+  user_args: List typed_ast.TypedExpr,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  match dict_get(prog_var, prog_to_fresh) with
+  | Nothing ->
+      resolve_one_constraint_tdict(class_name, user_args, s3, env, pos)
+  | Just fresh_t ->
+      match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
+      | Just head_str ->
+          match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+          | Just _ ->
+              Just(typed_ast.TDict(
+                ast.TypeConstraint(class_name, Cons(ast.TypeName(head_str), Nil)),
+                types.TConst(class_name), pos))
+          | Nothing ->
+              resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
+      | Nothing ->
+          resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
+
 fn inject_constrained_fn_dicts(
   name: String,
   idx: Int,
+  prog_to_fresh: Dict types.Type,
   env: Dict types.Scheme,
   typed_callee: typed_ast.TypedExpr,
   typed_args: List typed_ast.TypedExpr,
@@ -789,14 +845,20 @@ fn inject_constrained_fn_dicts(
       InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
   | Just class_marker ->
       match class_marker with
+      | types.Scheme _ _ (types.TApp (types.TConst class_name) (types.TConst prog_var)) _ ->
+          match resolve_obligation(class_name, prog_var, prog_to_fresh, s3, user_typed_args(typed_args), env, pos) with
+          | Nothing ->
+              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+          | Just tdict ->
+              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, Cons(tdict, typed_args), subst, ret_t, s3, es3, call_eff, pos)
       | types.Scheme _ _ (types.TConst class_name) _ ->
           match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos) with
           | Nothing ->
-              inject_constrained_fn_dicts(name, idx + 1, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
           | Just tdict ->
-              inject_constrained_fn_dicts(name, idx + 1, env, typed_callee, Cons(tdict, typed_args), subst, ret_t, s3, es3, call_eff, pos)
+              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, Cons(tdict, typed_args), subst, ret_t, s3, es3, call_eff, pos)
       | _ ->
-          inject_constrained_fn_dicts(name, idx + 1, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+          inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
 
 # --- Forward marker helpers ---
 #
@@ -2068,10 +2130,16 @@ fn register_constrained_fn_markers_acc(name: String, constraints: List ast.TypeC
   | Nil -> env
   | Cons c rest ->
       match c with
-      | ast.TypeConstraint class_name _ ->
-          register_constrained_fn_markers_acc(name, rest, idx + 1,
-            dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                     types.mono(types.TConst(class_name)), env))
+      | ast.TypeConstraint class_name type_args ->
+          match type_args with
+          | Cons (ast.TypeName prog_var) _ ->
+              register_constrained_fn_markers_acc(name, rest, idx + 1,
+                dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
+                         types.mono(types.TApp(types.TConst(class_name), types.TConst(prog_var))), env))
+          | _ ->
+              register_constrained_fn_markers_acc(name, rest, idx + 1,
+                dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
+                         types.mono(types.TConst(class_name)), env))
 
 # ---------------------------------------------------------------------------
 # InstanceDecl: instance marker registration
