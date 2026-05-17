@@ -322,3 +322,9 @@ fn build_import_pairs_acc(specs: List ImportSpec, stdlib_root: String, cache: Mo
 
 export fn build_import_pairs(specs: List ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
   build_import_pairs_acc(specs, stdlib_root, cache, Nil)
+
+# Load the prelude's exported name→scheme pairs (unqualified, same as how the
+# Python CLI exposes them via with_prelude).  Always call before build_import_pairs
+# so the cache is warm for any module that transitively imports the prelude.
+export fn load_prelude_pairs(stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
+  load_module("stdlib.prelude", stdlib_root, cache)

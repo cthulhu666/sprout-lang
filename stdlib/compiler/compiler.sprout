@@ -97,12 +97,13 @@ export fn compile_source(src: String) -> CompileResult !{IO} =
 export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileResult !{IO} =
   do
     cache <- module_loader.new_cache()
+    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
     import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
     match lex_parse(strip_headers(src, 0)) with
     | LexParseFail diags -> CompileFail(diags)
     | LexParseOk prog ->
         do
-          result <- checker.check_program_with_env(prog, import_pairs)
+          result <- checker.check_program_with_env(prog, prelude_pairs ++ import_pairs)
           match result with
           | checker.CheckErr msg -> CompileFail(Cons (DiagError("check: " ++ msg), Nil))
           | checker.CheckOk env -> CompileOk(env)

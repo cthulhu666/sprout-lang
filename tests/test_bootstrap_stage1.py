@@ -1,5 +1,5 @@
 """
-Bootstrap stage-1/stage-2 parity tests.
+Bootstrap stage-1/stage-2/stage-3 parity tests.
 
 Stage-1 (BootstrapStage1Tests, M5):
   Verifies that compile_driver_bin (stage-0, Python-compiled) produces the same
@@ -15,9 +15,19 @@ Stage-2 (BootstrapStage2Tests, M6):
   Build compile_driver_bin_stage1 with:
     just build-stage1
 
+Stage-3 (BootstrapStage3Tests, M7):
+  Verifies that compile_driver_bin_stage2 (compiled by stage-1, fully Sprout-native
+  round-trip) produces the same output as the Python-hosted driver.  Confirms the
+  compiler is self-hosting: stage-1 compiles the compiler source and the resulting
+  binary is behaviourally identical to the Python reference.
+
+  Build compile_driver_bin_stage2 with:
+    just build-stage2
+
 Notes:
   - compile_driver_bin must exist at ROOT/compile_driver_bin.
   - compile_driver_bin_stage1 must exist at ROOT/compile_driver_bin_stage1.
+  - compile_driver_bin_stage2 must exist at ROOT/compile_driver_bin_stage2.
   - Tests are skipped if the required binary is absent.
 """
 from __future__ import annotations
@@ -35,6 +45,7 @@ IMPORT_CORPUS_DIR = ROOT / "tests" / "conformance" / "parity_import"
 COMPILE_DRIVER = ROOT / "stdlib" / "compiler" / "compile_driver.sprout"
 NATIVE_BINARY = ROOT / "compile_driver_bin"
 STAGE1_BINARY = ROOT / "compile_driver_bin_stage1"
+STAGE2_BINARY = ROOT / "compile_driver_bin_stage2"
 
 # Corpus shared with test_checker_parity — same files, same expectations.
 CORPUS = [
@@ -76,6 +87,7 @@ def _parse_batch_output(stdout: str) -> dict[str, list[str]]:
 _PYTHON_CACHE: dict[str, list[str]] | None = None
 _NATIVE_CACHE: dict[str, list[str]] | None = None
 _STAGE2_CACHE: dict[str, list[str]] | None = None
+_STAGE3_CACHE: dict[str, list[str]] | None = None
 
 
 def _all_paths() -> list[Path]:
@@ -279,6 +291,92 @@ for _corpus_file in IMPORT_CORPUS:
     _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
     setattr(BootstrapStage2Tests, _test_name,
             _make_stage2_test(_corpus_file, corpus_dir=IMPORT_CORPUS_DIR))
+
+
+def _ensure_stage3_cache() -> dict[str, list[str]] | None:
+    """Return None if compile_driver_bin_stage2 doesn't exist (tests will be skipped)."""
+    global _STAGE3_CACHE
+    if _STAGE3_CACHE is not None:
+        return _STAGE3_CACHE
+    if not STAGE2_BINARY.exists():
+        return None
+    stdlib_root = str(ROOT / "stdlib")
+    paths = [str(p) for p in _all_paths() if p.exists()]
+    env = os.environ.copy()
+    env.setdefault("SPROUT_GC_LIVELOCK_ACTION", "abort")
+    result = subprocess.run(
+        [str(STAGE2_BINARY), stdlib_root, *paths],
+        capture_output=True, text=True, cwd=str(ROOT), env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"compile_driver_bin_stage2 failed:\n{result.stderr}\n{result.stdout}"
+        )
+    raw = _parse_batch_output(result.stdout)
+    _STAGE3_CACHE = {
+        k: (v[1:] if v and v[0] == "OK" else v) for k, v in raw.items()
+    }
+    return _STAGE3_CACHE
+
+
+# ---------------------------------------------------------------------------
+# Stage-3 test class (M7): stage2 binary vs Python reference
+# ---------------------------------------------------------------------------
+
+class BootstrapStage3Tests(unittest.TestCase):
+    pass
+
+
+def _make_stage3_test(corpus_file: str, corpus_dir: Path = CORPUS_DIR):
+    def test(self: unittest.TestCase) -> None:
+        if not STAGE2_BINARY.exists():
+            self.skipTest(
+                f"compile_driver_bin_stage2 not found at {STAGE2_BINARY}; "
+                "build with: just build-stage2"
+            )
+
+        path = corpus_dir / corpus_file
+        if not path.exists():
+            self.skipTest(f"Corpus file not found: {path}")
+
+        try:
+            py_cache = _ensure_python_cache()
+            stage3_cache = _ensure_stage3_cache()
+        except RuntimeError as e:
+            self.fail(str(e))
+
+        if stage3_cache is None:
+            self.skipTest("compile_driver_bin_stage2 not found")
+
+        key = str(path)
+        py_lines = py_cache.get(key, [])
+        stage3_lines = stage3_cache.get(key, [])
+
+        if py_lines != stage3_lines:
+            diff_lines = []
+            for i, (p, s) in enumerate(zip(py_lines, stage3_lines)):
+                if p != s:
+                    diff_lines.append(f"  line {i+1}: python={p!r} stage3={s!r}")
+            if len(py_lines) != len(stage3_lines):
+                diff_lines.append(
+                    f"  length: python={len(py_lines)} stage3={len(stage3_lines)}"
+                )
+            self.fail(
+                f"{corpus_file}: stage3 output differs from Python output:\n"
+                + textwrap.indent("\n".join(diff_lines or ["(no detailed diff)"]), "  ")
+            )
+
+    return test
+
+
+for _corpus_file in CORPUS:
+    _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
+    setattr(BootstrapStage3Tests, _test_name, _make_stage3_test(_corpus_file))
+
+for _corpus_file in IMPORT_CORPUS:
+    _test_name = "test_" + _corpus_file.replace(".", "_").replace("-", "_")
+    setattr(BootstrapStage3Tests, _test_name,
+            _make_stage3_test(_corpus_file, corpus_dir=IMPORT_CORPUS_DIR))
 
 
 if __name__ == "__main__":
