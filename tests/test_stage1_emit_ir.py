@@ -141,6 +141,19 @@ SHAPES: dict[str, str] = {
             let t = Node(Node(Leaf, 1, Leaf), 2, Node(Leaf, 3, Leaf))
             print(sum_tree(t))
     """),
+    # Exercises Ord k constraint resolution via function codomain (a -> k).
+    # The key type k=Int appears only as the return type of the lambda; no
+    # argument has k as its head type.  Pins resolve_obligation() in
+    # inject_constrained_fn_dicts, which applies s3 to prog_to_fresh[k] to
+    # find Int and looks up @inst:Ord:Int — bypassing the heuristic arg scan.
+    # vec_length wraps the result so the native runtime prints an Int (not a
+    # raw Vec pointer).  The IR test proves the constrained call type-checks;
+    # the execution test proves it runs and returns the right element count.
+    "sort_by_key": textwrap.dedent("""\
+        module main
+        fn main() -> Unit !{IO} =
+          print(vec_length(vec_sort_by(\\x -> 0 - x, vec_append(3, vec_append(1, vec_append(2, vec_empty()))))))
+    """),
 }
 
 # Expected stdout (stripped) for each shape when compiled and executed.
@@ -155,6 +168,7 @@ SHAPE_OUTPUTS: dict[str, str] = {
     "codegen_do_bind": "6",          # chain(10,2,1): 10/2=5, 5/1=5, 5+1=6
     "codegen_nested_lambda": "20",   # g(5) = f(5*2) = f(10) = 10+10 = 20
     "codegen_match_patterns": "6",   # sum_tree: 1+2+3 = 6
+    "sort_by_key": "3",              # vec_length of 3-element sorted result
 }
 
 # ---------------------------------------------------------------------------

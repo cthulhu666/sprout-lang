@@ -184,6 +184,22 @@ class TypeclassLoweringTests(unittest.TestCase):
         run_program(lowered, stdout=out)
         self.assertEqual(out.getvalue().strip(), "Vec([Box(3), Box(2), Box(1)])")
 
+    def test_lowering_resolves_ord_constraint_from_key_function_codomain(self) -> None:
+        # Ord k where k appears only as the codomain of the key fn (a -> k),
+        # not as the head type of any argument. vec_sort_by(\x -> 0 - x, xs):
+        # k=Int is the lambda's return type; the arg xs: Vec Int has head Vec.
+        src = """
+        fn main() -> Unit !{IO} =
+          print(vec_sort_by(\\x -> 0 - x, vec_append(3, vec_append(1, vec_append(2, vec_empty())))))
+        """
+        program = parse(with_prelude(src))
+        typecheck_program(program)
+        lowered = lower_typeclasses(program)
+        typecheck_program(lowered)
+        out = io.StringIO()
+        run_program(lowered, stdout=out)
+        self.assertEqual(out.getvalue().strip(), "Vec([3, 2, 1])")
+
     def test_lowering_errors_for_vec_sort_by_without_ord_instance(self) -> None:
         src = """
         type Box =
