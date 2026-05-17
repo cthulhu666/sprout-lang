@@ -1077,6 +1077,17 @@ fn parse_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl
     (final_body, i11) <- parse_optional_where_body(tokens, i10, body)
     Ok((ast.FnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, list_reverse(constraints), final_body, cur_pos(tokens, i)), i11))
 
+fn parse_extern_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("extern", tokens, i)
+    (_, i3) <- expected_keyword("fn", tokens, i2)
+    (name_tok, i4) <- expected_ident("extern function name", tokens, i3)
+    (_, i5) <- expected_symbol("(", tokens, i4)
+    (params, i6) <- collect_params(tokens, i5, Nil)
+    (_, i7) <- expected_symbol(")", tokens, i6)
+    (return_type, effects, i8) <- parse_optional_return_type(tokens, i7)
+    Ok((ast.ExternFnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, cur_pos(tokens, i)), i8))
+
 fn parse_optional_return_type(tokens: Vec token.Token, i: Int) -> Result ParseError (Maybe ast.TypeExpr, Maybe (List String), Int) =
   match match_symbol(tokens, i, "->") with
   | Nothing -> Ok((Nothing, Nothing, i))
@@ -1230,7 +1241,8 @@ fn skip_export(tokens: Vec token.Token, i: Int) -> Int =
   | Nothing -> i
 
 fn parse_decl_body(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "fn") then parse_fn_decl(tokens, i)
+  if tok_is_keyword(tok_at(tokens, i), "extern") then parse_extern_fn_decl(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "fn") then parse_fn_decl(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "let") then parse_let_decl(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "class") then parse_class_decl(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "instance") then parse_instance_decl(tokens, i)

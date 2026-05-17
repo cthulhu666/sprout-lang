@@ -245,6 +245,8 @@ fn lower_one_decl(
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       (user_rev, wrapper_rev,
        prepend_decls(generate_instance_fns(constraint, inst_constraints, methods, env), inst_rev))
+  | typed_ast.TExternFnDecl name params ret_ty effects ->
+      (Cons(ast.ExternFnDecl(name, params, ret_ty, effects, dummy_pos()), user_rev), wrapper_rev, inst_rev)
 
 fn prepend_decls(new_decls: List ast.Decl, acc: List ast.Decl) -> List ast.Decl =
   match new_decls with

@@ -2973,6 +2973,28 @@ fn build_fn_sigs_acc(decls: List typed_ast.TypedDecl, env: Dict types.Scheme, ac
       | _ ->
           build_fn_sigs_acc(rest, env, acc)
 
+# Build extern sigs from TExternFnDecl nodes, overlaid on the hardcoded fallback dict.
+fn build_extern_sigs_from_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Dict FnSig =
+  build_extern_sigs_acc(decls, env, extern_sigs_dict())
+
+fn build_extern_sigs_acc(decls: List typed_ast.TypedDecl, env: Dict types.Scheme, acc: Dict FnSig) -> Dict FnSig =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | typed_ast.TExternFnDecl name params _ _ ->
+          match dict_get(name, env) with
+          | Nothing ->
+              build_extern_sigs_acc(rest, env, dict_set(name, FnSig(name, list_map(\_ -> ll_i64(), params), ll_i64(), Nothing), acc))
+          | Just scheme ->
+              match list_length_params(params) with
+              | n_params_ ->
+                  match types.scheme_type(scheme) with
+                  | body_ty ->
+                      build_extern_sigs_acc(rest, env, dict_set(name, FnSig(name, extract_param_lls_from_type(body_ty, n_params_), extract_ret_ll_from_type(body_ty, n_params_), Nothing), acc))
+      | _ ->
+          build_extern_sigs_acc(rest, env, acc)
+
 # Separate let decls into const (evaluated at compile time) and runtime lets.
 fn classify_let_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> (Dict GlobalInfo, List (String, typed_ast.TypedExpr)) =
   classify_let_decls_acc(decls, env, dict_empty(), Nil)
@@ -3109,11 +3131,11 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
   | typed_ast.TypedProgram decls ->
       do
         em <- new_emitter()
-        let externs = extern_sigs_dict()
+        let fn_sigs_ = build_fn_sigs_from_decls(decls, env)
+        let externs = build_extern_sigs_from_decls(decls, env)
         let ctor_adt_pair = build_ctor_sigs_from_decls(decls)
         let ctor_sigs_ = match ctor_adt_pair with | (cs, _) -> cs
         let adt_names_ = match ctor_adt_pair with | (_, an) -> an
-        let fn_sigs_ = build_fn_sigs_from_decls(decls, env)
         let gi_rt_pair = classify_let_decls(decls, env)
         let gi = match gi_rt_pair with | (g, _) -> g
         let runtime_lets = match gi_rt_pair with | (_, r) -> r
@@ -3186,11 +3208,11 @@ export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Sche
   | typed_ast.TypedProgram decls ->
       do
         em <- new_emitter()
-        let externs = extern_sigs_dict()
+        let fn_sigs_ = build_fn_sigs_from_decls(decls, env)
+        let externs = build_extern_sigs_from_decls(decls, env)
         let ctor_adt_pair = build_ctor_sigs_from_decls(decls)
         let ctor_sigs_ = match ctor_adt_pair with | (cs, _) -> cs
         let adt_names_ = match ctor_adt_pair with | (_, an) -> an
-        let fn_sigs_ = build_fn_sigs_from_decls(decls, env)
         let gi_rt_pair = classify_let_decls(decls, env)
         let gi = match gi_rt_pair with | (g, _) -> g
         let runtime_lets = match gi_rt_pair with | (_, r) -> r

@@ -689,10 +689,11 @@ fn dump_typed_decl_names(decls: List typed_ast.TypedDecl, env: Dict types.Scheme
   | Cons d rest ->
       do
         match d with
-        | typed_ast.TFnDecl name _ _ _ _ _ -> print_name_scheme(name, env)
-        | typed_ast.TLetDecl name _        -> print_name_scheme(name, env)
-        | typed_ast.TInstanceDecl _ _ _    -> ()
-        | typed_ast.TPassThrough _         -> ()
+        | typed_ast.TFnDecl name _ _ _ _ _  -> print_name_scheme(name, env)
+        | typed_ast.TExternFnDecl name _ _ _ -> print_name_scheme(name, env)
+        | typed_ast.TLetDecl name _         -> print_name_scheme(name, env)
+        | typed_ast.TInstanceDecl _ _ _     -> ()
+        | typed_ast.TPassThrough _          -> ()
         dump_typed_decl_names(rest, env)
 
 export fn builtin_entries() -> List (String, types.Scheme) =

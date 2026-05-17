@@ -104,6 +104,7 @@ export type InstanceMethodImpl (..) =
 
 export type Decl (..) =
   | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr source.SourcePos
+  | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) source.SourcePos
   | TypeDecl String (List String) (List TypeConstructor) source.SourcePos
   | RecordDecl String (List String) (List RecordFieldDecl) source.SourcePos
   | LetDecl String Expr source.SourcePos

@@ -101,6 +101,7 @@ export type TypedInstanceMethod (..) =
 
 export type TypedDecl (..) =
   | TFnDecl String (List ast.Param) (Maybe ast.TypeExpr) (Maybe (List String)) (List ast.TypeConstraint) TypedExpr
+  | TExternFnDecl String (List ast.Param) (Maybe ast.TypeExpr) (Maybe (List String))
   | TLetDecl String TypedExpr
   | TInstanceDecl ast.TypeConstraint (List ast.TypeConstraint) (List TypedInstanceMethod)
   | TPassThrough ast.Decl
