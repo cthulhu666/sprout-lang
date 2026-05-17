@@ -87,6 +87,18 @@ This file tracks open design, implementation, and tooling follow-up work.
    Motivation: self-hosted parser combinators (Phase 6 self-hosting) need a principled "try this, else try that" primitive. The current workaround is a list-based `try_ops` helper in `stdlib/compiler/lexer.sprout`.
    Initial scope: `class Alternative f { fn alt(left: f a, right: f a) -> f a }` with a `Maybe` instance. A `<|>` infix operator would make call sites readable but requires tokenizer and parser changes (new 3-char token not currently in the language).
    First milestone constraints: `Maybe` instance only to start; decide on `<|>` operator vs named `alt` before widening; no `Applicative`/`Functor` hierarchy requirement in the initial slice.
-11. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
+11. Add algebraic effect handlers (phase 1: one-shot linear handlers).
+   Design doc: [effect-system-handlers-draft.md](./effect-system-handlers-draft.md).
+   Motivation: eliminate explicit `TestState` threading in stdlib tests and establish the
+   handler infrastructure that richer effect patterns (async, generators, capability
+   injection) will build on.
+   Initial scope: `effect` declarations, `handle`/`with` expressions, implicit perform,
+   multi-label effect rows (`!{IO, Test}`), one-shot linear codegen via handler-record
+   passing (no heap continuations or setjmp). Native compiler only — Python reference
+   compiler untouched.
+   First milestone constraints: one-shot handlers only (no multi-shot resumption), no
+   open effect row polymorphism, no constrained effect operations, backwards-compatible
+   (old `TestState` API stays in `stdlib/test.sprout` alongside new `run_tests`).
+12. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
    Design doc: [observability-guard-rails.md](./observability-guard-rails.md).
    These features are not scheduled, but the design constraints in that doc must be respected in all Stage 2+ self-hosted compiler code so they remain practical to add. The six constraints — source locations first-class, explicit typed passes, explicit capability passing, no premature pass fusion, type survival into typed core, accurate effect annotations — are active guard rails, not future work items.
