@@ -276,7 +276,9 @@ Definition of done:
   ~15× higher than stage-0's, which still needs investigation. Remaining
   work is to land that profile fix, automate stage-2/stage-3 in the
   bootstrap test suite, and make artifact production policy explicit.
-- [ ] Make the Sprout-owned compiler pipeline the default build path.
+- [x] Make the Sprout-owned compiler pipeline the default build path.
+  *(2026-05-17: `just compile` and `just compile-native` now use `compile_driver_bin_stage1` for IR emission;
+  `just compile-examples` defaults to stage-1. Python remains only for `--emit-runtime-c`.)*
 
 Definition of done:
 - Python is no longer the compiler launcher/control plane

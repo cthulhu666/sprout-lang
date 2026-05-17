@@ -201,11 +201,37 @@ test-stdlib-stage2:
   echo ""
   echo "==> All suites PASSED"
 
+# Emit LLVM IR for {{file}} using the stage-1 self-hosted binary (always includes stdlib).
+# Requires compile_driver_bin_stage1; build it first with: just build-stage1
+# For the Python stage-0 path: python3 -m sprout.cli compile {{file}} -o {{out}}
 compile file out:
-  python3 -m sprout.cli compile {{file}} -o {{out}}
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just build-stage1" >&2
+    exit 1
+  fi
+  ./compile_driver_bin_stage1 --emit-ir "$(pwd)/stdlib" {{file}} > {{out}}
 
+# Compile {{file}} to a native binary using stage-1 IR emission + clang link.
+# Requires compile_driver_bin_stage1; build it first with: just build-stage1
+# Python is still used for --emit-runtime-c (C runtime extraction).
 compile-native file out:
-  python3 -m sprout.cli compile {{file}} --with-stdlib --native -o {{out}}
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just build-stage1" >&2
+    exit 1
+  fi
+  STDLIB_ROOT="$(pwd)/stdlib"
+  TMP_LL="/tmp/sprout_compile_$$.ll"
+  TMP_C="/tmp/sprout_runtime_$$.c"
+  trap 'rm -f "$TMP_LL" "$TMP_C"' EXIT
+  ./compile_driver_bin_stage1 --emit-ir "$STDLIB_ROOT" {{file}} > "$TMP_LL"
+  python3 -m sprout.cli compile --emit-runtime-c "$TMP_C" --with-stdlib -o /dev/null {{file}}
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" "$TMP_C" -O2 $CLANG_EXTRA -o {{out}}
 
 # Build compile_driver_bin (stage-0) from Python.
 # Output: compile_driver_bin — native binary produced by the Python compiler.
@@ -342,8 +368,9 @@ build-stage2-asan:
   clang "$TMP_LL" "$TMP_C" -O1 -fsanitize=address,undefined $CLANG_EXTRA -o "$STAGE2"
   echo "==> Built $STAGE2 (asan)"
 
-# Compile all examples to LLVM IR. Alias for compile-examples-stage0.
-compile-examples: compile-examples-stage0
+# Compile all examples to LLVM IR. Alias for compile-examples-stage1 (stage-1 self-hosted binary).
+# For the Python stage-0 path: just compile-examples-stage0
+compile-examples: compile-examples-stage1
 
 # Run compile-examples for every available compiler stage (0-3).
 compile-examples-all: compile-examples-stage0 compile-examples-stage1 compile-examples-stage2 compile-examples-stage3
