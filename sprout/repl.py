@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -111,6 +112,14 @@ def _ensure_native_repl_binary() -> Path:
     root = _project_root()
     driver = root / "compile_driver_bin_stage1"
     runtime_c = root / "runtime" / "sprout_runtime.c"
+    if not driver.is_file() or not os.access(driver, os.X_OK):
+        raise CodegenError(
+            f"compile_driver_bin_stage1 not found at {driver}; build it first: just build-stage1"
+        )
+    if shutil.which("clang") is None:
+        raise CodegenError(
+            "clang not found in PATH; install Xcode Command Line Tools or LLVM"
+        )
     with tempfile.TemporaryDirectory(dir=out.parent) as tmp:
         tmp_ll = Path(tmp) / "repl.ll"
         tmp_out = Path(tmp) / "sprout-repl"
@@ -121,7 +130,7 @@ def _ensure_native_repl_binary() -> Path:
             )
         except subprocess.CalledProcessError as exc:
             raise CodegenError(_summarize_native_repl_build_error(exc)) from exc
-        tmp_ll.write_text(result.stdout)
+        tmp_ll.write_text(result.stdout, encoding="utf-8")
         clang_cmd = ["clang", str(tmp_ll), str(runtime_c), "-O2", "-o", str(tmp_out)]
         if sys.platform == "darwin":
             clang_cmd += ["-framework", "Security", "-framework", "CoreFoundation"]

@@ -75,7 +75,7 @@ run file:
   TMP_LL="/tmp/sprout_run_$$.ll"
   TMP_BIN="/tmp/sprout_run_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  ./compile_driver_bin_stage1 --emit-ir "$STDLIB_ROOT" {{file}} > "$TMP_LL"
+  ./compile_driver_bin_stage1 --emit-ir "$STDLIB_ROOT" {{quote(file)}} > "$TMP_LL"
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN"
@@ -227,7 +227,7 @@ compile file out:
     echo "ERROR: compile_driver_bin_stage1 not found; run: just build-stage1" >&2
     exit 1
   fi
-  ./compile_driver_bin_stage1 --emit-ir "$(pwd)/stdlib" {{file}} > {{out}}
+  ./compile_driver_bin_stage1 --emit-ir "$(pwd)/stdlib" {{quote(file)}} > {{quote(out)}}
 
 # Compile {{file}} to a native binary using stage-1 IR emission + clang link.
 # Requires compile_driver_bin_stage1; build it first with: just build-stage1
@@ -241,10 +241,10 @@ compile-native file out:
   STDLIB_ROOT="$(pwd)/stdlib"
   TMP_LL="/tmp/sprout_compile_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
-  ./compile_driver_bin_stage1 --emit-ir "$STDLIB_ROOT" {{file}} > "$TMP_LL"
+  ./compile_driver_bin_stage1 --emit-ir "$STDLIB_ROOT" {{quote(file)}} > "$TMP_LL"
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o {{out}}
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o {{quote(out)}}
 
 # Build compile_driver_bin (stage-0) from Python.
 # Output: compile_driver_bin — native binary produced by the Python compiler.

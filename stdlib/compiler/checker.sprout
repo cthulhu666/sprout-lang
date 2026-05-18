@@ -1026,8 +1026,12 @@ fn term_ext_entries() -> List (String, types.Scheme) =
   ]
 
 # Analysis bridge builtins — C functions provided by sprout_runtime.c analysis bridge.
-# Used by stdlib/compiler.sprout. The extern fn declarations live in stdlib/prelude.sprout;
-# these builtin_entries() entries override those declarations with the accurate polymorphic types.
+# Used by stdlib/compiler.sprout.
+# These functions are intentionally NOT declared as `extern fn` in prelude.sprout.
+# build_extern_sigs_from_decls overwrites compiler_intrinsic_sigs() entries via dict_set,
+# so an `extern fn String` declaration would replace the ll_ptr() intrinsic entry with an
+# ll_i64() entry, breaking the const char* calling convention. Intrinsics only win when
+# there is no matching extern fn declaration for the same name.
 fn analysis_entries() -> List (String, types.Scheme) =
   [ ("analysis_check_source",
       bt_mono(bt_io(bt_str(), bt_result(bt_str(), bt_unit()))))

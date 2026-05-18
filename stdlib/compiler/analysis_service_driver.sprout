@@ -292,8 +292,9 @@ fn op_symbol_locations_in_source(src: String) -> json.Json =
 #   3. Look up "__repl_source_value" in the resulting env.
 #   4. Render the Scheme with types.scheme_to_string.
 #
-# The sentinel name is guaranteed not to collide with user code because
-# double-underscore prefixes are not valid Sprout identifiers in surface syntax.
+# The sentinel name is unlikely to collide with user code, but double-underscore
+# names ARE valid Sprout identifiers (the lexer accepts _ as identifier-start).
+# augment_source guards against the collision explicitly.
 
 fn sentinel_name() -> String = "__repl_source_value"
 
@@ -301,7 +302,9 @@ fn augment_source(src: String, expr: String) -> String =
   src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr
 
 fn op_type_of_in_source(src: String, expr: String, stdlib_root: String) -> json.Json !{IO} =
-  do
+  if str_find(src, "let " ++ sentinel_name()) != -1 then
+    error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot infer type")
+  else do
     result <- compiler.compile_source_with_root(augment_source(src, expr), stdlib_root)
     match result with
     | compiler.CompileFail diags ->
