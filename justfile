@@ -317,6 +317,81 @@ build-stage3:
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$STAGE3"
   echo "==> Built $STAGE3"
 
+# Copy the current stage-1 binary as the macOS arm64 bootstrap seed.
+# Requires compile_driver_bin_stage1; build it first with: just build-stage1
+# Output: bootstrap/compile_driver-darwin-arm64
+build-seed-macos:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just build-stage1" >&2
+    exit 1
+  fi
+  mkdir -p bootstrap
+  cp compile_driver_bin_stage1 bootstrap/compile_driver-darwin-arm64
+  echo "==> bootstrap/compile_driver-darwin-arm64:"
+  file bootstrap/compile_driver-darwin-arm64
+  ls -lh bootstrap/compile_driver-darwin-arm64
+
+# Build the Linux arm64 bootstrap seed binary via Docker (ubuntu:24.04, native arm64).
+# Starts a throwaway container, builds stage-0 from Python then stage-1 inside it, copies the
+# resulting ELF binary back to bootstrap/compile_driver-linux-aarch64.
+# Requires: Docker on PATH and running.
+build-seed-linux:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p bootstrap
+  docker run --rm \
+    --workdir /repo \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -v "$(pwd):/repo:ro" \
+    -v "$(pwd)/bootstrap:/out" \
+    ubuntu:24.04 \
+    bash -euo pipefail -c '
+      apt-get update -qq && apt-get install -y -q clang llvm python3 >&2
+      echo "==> stage-0: Python compiler → native binary" >&2
+      python3 -m sprout.cli compile \
+        stdlib/compiler/compile_driver.sprout \
+        --with-stdlib --native -o /tmp/stage0
+      echo "==> stage-1: stage-0 IR → clang link" >&2
+      /tmp/stage0 --emit-ir /repo/stdlib stdlib/compiler/compile_driver.sprout > /tmp/stage1.ll
+      clang /tmp/stage1.ll runtime/sprout_runtime.c -O2 -o /out/compile_driver-linux-aarch64
+      echo "==> Done" >&2
+    '
+  chmod +x bootstrap/compile_driver-linux-aarch64
+  echo "==> bootstrap/compile_driver-linux-aarch64:"
+  file bootstrap/compile_driver-linux-aarch64
+  ls -lh bootstrap/compile_driver-linux-aarch64
+
+# Build bootstrap seed binaries for all supported platforms (darwin-arm64 + linux-aarch64).
+build-seeds: build-seed-macos build-seed-linux
+
+# Bootstrap compile_driver_bin_stage1 from the committed platform seed — no Python required.
+# Detects the current platform via uname and selects bootstrap/compile_driver-<os>-<arch>.
+# Output: compile_driver_bin_stage1
+bootstrap-from-seed:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+  SEED="bootstrap/compile_driver-$PLATFORM"
+  if [[ ! -x "$SEED" ]]; then
+    echo "ERROR: No seed binary for platform $PLATFORM at $SEED" >&2
+    echo "       Run: just build-seeds  (or build-seed-linux / build-seed-macos)" >&2
+    exit 1
+  fi
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/compile_driver.sprout"
+  TMP_LL="/tmp/sprout_bootstrap_$$.ll"
+  trap 'rm -f "$TMP_LL"' EXIT
+  echo "==> Using seed: $SEED ($(file -b "$SEED"))"
+  echo "==> Emitting LLVM IR..."
+  "$SEED" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Linking with clang..."
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o compile_driver_bin_stage1
+  echo "==> Built compile_driver_bin_stage1 from seed (Python-free)"
+
 build-stage1-asan:
   #!/usr/bin/env bash
   set -euo pipefail
