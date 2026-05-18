@@ -63,6 +63,18 @@ fn skip_after_comma(s: String, i: Int) -> Int =
         else if ch == ',' then i + 1
         else skip_after_comma(s, i + 1)
 
+fn module_last_segment_go(s: String, i: Int, last_dot: Int) -> String =
+  if i >= str_len(s) then str_slice(s, last_dot, str_len(s))
+  else
+    match str_char_at(s, i) with
+    | Nothing -> str_slice(s, last_dot, str_len(s))
+    | Just ch ->
+        if ch == '.' then module_last_segment_go(s, i + 1, i + 1)
+        else module_last_segment_go(s, i + 1, last_dot)
+
+fn module_last_segment(module_name: String) -> String =
+  module_last_segment_go(module_name, 0, 0)
+
 fn parse_import_after_module(rest: String, module_name: String, i: Int) -> Maybe ImportSpec =
   match read_word(rest, i) with
   | ("as", i2) ->
@@ -72,7 +84,7 @@ fn parse_import_after_module(rest: String, module_name: String, i: Int) -> Maybe
   | _ ->
       if str_starts_with(str_slice(rest, skip_spaces(rest, i), str_len(rest)), "(") then
         Just(ImportSelective(module_name, parse_selective_names_acc(rest, skip_spaces(rest, i) + 1, Nil)))
-      else Nothing
+      else Just(ImportAlias(module_name, module_last_segment(module_name)))
 
 export fn parse_import_line(line: String) -> Maybe ImportSpec =
   if str_starts_with(line, "import ") then

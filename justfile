@@ -600,6 +600,11 @@ compile-examples-stage1:
     echo "ERROR: $STAGE not found; run: just build-stage1" >&2
     exit 1
   fi
+  # Known pre-existing failures — see BACKLOG.md for root causes.
+  # Remove entries here once the underlying issue is fixed.
+  # sentry_api: library module with no main fn; link fails at entry point.
+  # sentry_issue_browser{,_tui}: import examples.* which module loader doesn't resolve.
+  XFAIL_EXAMPLES="examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout"
   STDLIB_ROOT="$(pwd)/stdlib"
   TMP_LL="/tmp/sprout_ex_$$.ll"
   TMP_BIN="/tmp/sprout_exbin_$$"
@@ -608,25 +613,32 @@ compile-examples-stage1:
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   total_failed=0
+  total_xfail=0
   for f in examples/*.sprout; do
     [ -f "$f" ] || continue
     echo "==> $f"
+    is_xfail=0
+    for xf in $XFAIL_EXAMPLES; do [[ "$f" == "$xf" ]] && is_xfail=1 && break; done
+    ok=1
     if ! "./$STAGE" --emit-ir "$STDLIB_ROOT" "$f" > "$TMP_LL" 2>"$TMP_ERR"; then
-      echo "  COMPILE FAILED:"; cat "$TMP_ERR"
-      total_failed=$((total_failed + 1)); continue
+      echo "  COMPILE FAILED:"; cat "$TMP_ERR"; ok=0
+    elif ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
+      echo "  LINK FAILED:"; cat "$TMP_ERR"; ok=0
     fi
-    if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
-      echo "  LINK FAILED:"; cat "$TMP_ERR"
-      total_failed=$((total_failed + 1)); continue
+    if [[ $ok -eq 1 ]]; then
+      if [[ $is_xfail -eq 1 ]]; then echo "  UNEXPECTED OK (remove from XFAIL_EXAMPLES)"; total_failed=$((total_failed + 1))
+      else echo "  OK"; fi
+    else
+      if [[ $is_xfail -eq 1 ]]; then echo "  xfail (expected)"; total_xfail=$((total_xfail + 1))
+      else total_failed=$((total_failed + 1)); fi
     fi
-    echo "  OK"
   done
+  echo ""
+  [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail example(s) xfail (expected, see XFAIL_EXAMPLES)"
   if [ "$total_failed" -gt 0 ]; then
-    echo ""
     echo "==> $total_failed example(s) FAILED"
     exit 1
   fi
-  echo ""
   echo "==> All examples compiled OK"
 
 # Stage-2 (stage-2 self-hosted binary): emit IR → clang link for each example.

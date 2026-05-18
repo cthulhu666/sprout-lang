@@ -172,6 +172,7 @@ Definition of done:
 - [x] `P1` Add issue detail panel.
 - [ ] `P1` Add filtering/sorting controls.
 - [ ] `P2` Add search and pagination UI.
+- [ ] `P2` `compile-examples-stage1` xfail: `sentry_api` has no `fn main` (library module, links fail at entry point); `sentry_issue_browser` and `sentry_issue_browser_tui` import from `examples.*` which the stage-1 module loader does not resolve (only `stdlib.*` is handled). Fix requires a design decision on cross-example module resolution. Tracked in `XFAIL_EXAMPLES` in the `compile-examples-stage1` justfile task.
 
 ## Minimum Viable Path to Escape Python
 

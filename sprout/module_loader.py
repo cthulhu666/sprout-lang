@@ -10,7 +10,7 @@ from .parser import extract_decl_annotations
 
 MODULE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 DECL_RE = re.compile(r"^\s*(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
-EXPORT_DECL_RE = re.compile(r"^\s*export\s+(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
+EXPORT_DECL_RE = re.compile(r"^\s*export\s+(?:extern\s+)?(fn|type|let|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 EXPORT_TYPE_ALL_CTORS_RE = re.compile(r"^(\s*)export\s+type\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\.\.\)")
 MODULE_COMPAT_VALUES: dict[str, dict[str, str]] = {
     "stdlib.collections": {

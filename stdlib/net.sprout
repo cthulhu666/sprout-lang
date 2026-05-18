@@ -2,15 +2,15 @@ module stdlib.net
 
 import stdlib.bytes (Utf8Error, from_string, to_string)
 
-extern fn tcp_listen(port: Int) -> Int !{IO}
-extern fn tcp_accept(listener: Int) -> Int !{IO}
-extern fn tcp_read(conn: Int) -> String !{IO}
-extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
+export extern fn tcp_listen(port: Int) -> Int !{IO}
+export extern fn tcp_accept(listener: Int) -> Int !{IO}
+export extern fn tcp_read(conn: Int) -> String !{IO}
+export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
 extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
 extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
-extern fn tcp_close(conn: Int) -> Unit !{IO}
-extern fn tcp_close_listener(listener: Int) -> Unit !{IO}
+export extern fn tcp_close(conn: Int) -> Unit !{IO}
+export extern fn tcp_close_listener(listener: Int) -> Unit !{IO}
 extern fn tcp_echo_serve(port: Int, max_connections: Int) -> Unit !{IO}
 
 export type TcpError(..) =

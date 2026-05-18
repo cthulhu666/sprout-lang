@@ -1,5 +1,5 @@
 module examples.repl_hosted
 import stdlib.repl
 
-fn main() -> Unit !{IO} =
-  repl.main()
+# stdlib.repl provides fn main() directly; this module delegates to it via import.
+# Run: python3 -m sprout.cli run examples/repl_hosted.sprout

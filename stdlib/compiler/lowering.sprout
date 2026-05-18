@@ -507,7 +507,7 @@ fn class_methods_for(class_name: String, class_order: Dict (List String)) -> Lis
 fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
   match c with
   | ast.TypeConstraint class_name type_args ->
-      constraint_key_str(class_name, type_args)
+      constraint_key_str(strip_module_prefix(class_name), type_args)
 
 fn constraint_key_str(class_name: String, type_args: List ast.TypeExpr) -> String =
   match type_args with

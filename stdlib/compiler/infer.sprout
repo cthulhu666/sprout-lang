@@ -1720,7 +1720,7 @@ fn infer_range(
                   | Ok s4 ->
                       InferOk(
                         typed_ast.TRange(typed_lo, typed_hi,
-                          types.TApp(types.TConst("List"), types.type_int()), pos),
+                          types.TConst("IntRange"), pos),
                         s4, es2, merge_effects(lo_eff, hi_eff))
 
 # ---------------------------------------------------------------------------
