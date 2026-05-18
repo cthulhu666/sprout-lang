@@ -3,6 +3,22 @@ module stdlib.bytes
 export type Utf8Error(..) =
   | Utf8DecodeError String
 
+extern fn bytes_empty() -> Bytes
+extern fn bytes_singleton(val: Int) -> Bytes
+extern fn bytes_length(b: Bytes) -> Int
+extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int
+extern fn bytes_slice(b: Bytes, from: Int, to: Int) -> Bytes
+extern fn bytes_append(a: Bytes, b: Bytes) -> Bytes
+extern fn bytes_from_utf8(s: String) -> Bytes
+extern fn bytes_to_utf8(b: Bytes) -> Result Utf8Error String
+extern fn bytes_builder_empty() -> Builder
+extern fn bytes_builder_bytes(b: Bytes) -> Builder
+extern fn bytes_builder_byte(val: Int) -> Builder
+extern fn bytes_builder_u16_be(val: Int) -> Builder
+extern fn bytes_builder_u32_be(val: Int) -> Builder
+extern fn bytes_builder_append(a: Builder, b: Builder) -> Builder
+extern fn bytes_builder_build(b: Builder) -> Bytes
+
 export fn empty() -> Bytes =
   bytes_empty()
 

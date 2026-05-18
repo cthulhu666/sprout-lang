@@ -41,6 +41,9 @@ export fn int(value: Int) -> Json =
 export fn string(value: String) -> Json =
   JsonString(value)
 
+extern fn json_parse(raw: String) -> Result JsonError Json
+extern fn json_stringify(value: Json) -> String
+
 export fn encode(value: a) -> Json where JsonEncode a =
   encode_json(value)
 

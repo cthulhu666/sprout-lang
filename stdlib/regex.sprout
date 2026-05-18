@@ -10,6 +10,12 @@ export type Regex =
 export type Match(..) =
   | Match Int Int
 
+extern fn regex_validate(pattern: String) -> Result String Unit
+extern fn regex_is_match(pattern: String, text: String) -> Bool
+extern fn regex_find_range(pattern: String, text: String) -> Maybe IntRange
+extern fn regex_replace_all_literal(pattern: String, replacement: String, text: String) -> String
+extern fn regex_escape(raw: String) -> String
+
 let unsupported_prefix = "unsupported regex feature: "
 
 fn raw_pattern(re: Regex) -> String =

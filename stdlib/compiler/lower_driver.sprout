@@ -58,6 +58,7 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
   do
     src <- read_file(path)
     cache <- module_loader.new_cache()
+    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
     import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
     match lexer.tokenize(strip_headers(src, 0)) with
     | Err e -> print(lex_err_msg(e))
@@ -66,7 +67,7 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
         | Err e -> print(parse_err_msg(e))
         | Ok prog ->
             do
-              tc_result <- checker.typecheck_typed(prog, import_pairs)
+              tc_result <- checker.typecheck_typed(prog, prelude_pairs ++ import_pairs)
               match tc_result with
               | typed_ast.TypedErr msg -> print("ERROR: check: " ++ msg)
               | typed_ast.TypedOk typed_prog _ ->

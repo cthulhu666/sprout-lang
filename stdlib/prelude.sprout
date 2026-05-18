@@ -757,15 +757,18 @@ instance ToString (Result e a) where ToString e, ToString a {
 # ---------------------------------------------------------------------------
 # Extern fn declarations for user-callable C builtins.
 # These give the codegen accurate LLVM types without a hardcoded table.
-# The type checker uses builtin_env() (checker.sprout) for these names, so
-# declarations here are skipped if the name is already seeded — the Sprout
-# types below only need to produce the correct LLVM mapping, not be exact.
+# extern fn declarations below are the authoritative type signatures for the
+# Sprout type checker (checker.sprout no longer seeds these in builtin_entries).
 # ---------------------------------------------------------------------------
 
 # I/O
+extern fn print(val: a) -> Unit !{IO}
 extern fn print_int(n: Int) -> Int !{IO}
 extern fn read_file(path: String) -> String !{IO}
+extern fn read_lines(path: String) -> List String !{IO}
+extern fn read_int_lines(path: String) -> Vector Int !{IO}
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
+extern fn env_get(name: String) -> Maybe String !{IO}
 
 # Numeric / string conversions
 extern fn parse_int(s: String) -> Int
@@ -792,6 +795,7 @@ extern fn str_char_at_byte(s: String, byte: Int) -> Maybe Char
 extern fn str_char_width_at_byte(s: String, byte: Int) -> Int
 extern fn str_byte_len(s: String) -> Int
 extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
+extern fn split_words(s: String) -> List String
 
 # Raw vector (unboxed mutable array)
 extern fn vector_empty() -> Vector a
@@ -825,7 +829,6 @@ extern fn bytes_slice(b: Bytes, from: Int, to: Int) -> Bytes
 extern fn bytes_append(b: Bytes, other: Bytes) -> Bytes
 extern fn bytes_singleton(val: Int) -> Bytes
 extern fn bytes_from_utf8(s: String) -> Bytes
-extern fn bytes_to_utf8(b: Bytes) -> String
 
 # Mutable references
 extern fn ref_new(val: a) -> Ref a !{IO}
@@ -833,15 +836,14 @@ extern fn ref_read(r: Ref a) -> a !{IO}
 extern fn ref_write(r: Ref a, val: a) -> Unit !{IO}
 
 # Regex
+extern fn regex_validate(pattern: String) -> Result String Unit
+extern fn regex_is_match(pattern: String, text: String) -> Bool
+extern fn regex_find_range(pattern: String, text: String) -> Maybe IntRange
 extern fn regex_replace_all_literal(s: String, pattern: String, replacement: String) -> String
 extern fn regex_escape(s: String) -> String
 
 # Network
 extern fn tcp_read(conn: Int) -> String !{IO}
-
-# JSON (return types use String as placeholder — real types come from builtin_env)
-extern fn json_stringify(j: String) -> String
-extern fn json_parse(s: String) -> String
 
 # Terminal
 extern fn term_clear() -> Unit !{IO}
@@ -855,4 +857,6 @@ extern fn term_write(text: String) -> Unit !{IO}
 
 
 # Crypto
+extern fn crypto_sha256(b: Bytes) -> Bytes
+extern fn crypto_hmac_sha256(key: Bytes, msg: Bytes) -> Bytes
 extern fn crypto_base64_encode(b: Bytes) -> String

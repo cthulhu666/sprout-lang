@@ -1,6 +1,8 @@
 module stdlib.http_client
 import stdlib.http (Result, HttpError, HttpResponse)
 
+extern fn http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO}
+
 type alias HttpResult = Result HttpError HttpResponse
 
 # Cost is dominated by `http_request`: request/response size and network latency.

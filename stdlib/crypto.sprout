@@ -10,6 +10,13 @@ export type Base64Error(..) =
 export type BytesOpError(..) =
   | BytesXorLengthMismatch Int Int
 
+extern fn crypto_sha256(b: Bytes) -> Bytes
+extern fn crypto_hmac_sha256(key: Bytes, msg: Bytes) -> Bytes
+extern fn crypto_base64_encode(b: Bytes) -> String
+extern fn crypto_base64_decode(raw: String) -> Result Base64Error Bytes
+extern fn crypto_bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes
+extern fn crypto_random_bytes(count: Int) -> Result CryptoError Bytes !{IO}
+
 export fn sha256(value: Bytes) -> Bytes =
   crypto_sha256(value)
 

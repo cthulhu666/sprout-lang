@@ -137,7 +137,9 @@ export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
     | bundler.BundleErr msg -> FullFail(Cons (DiagError("bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
-          tc_result <- checker.typecheck_typed(prog, Nil)
+          cache <- module_loader.new_cache()
+          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          tc_result <- checker.typecheck_typed(prog, prelude_pairs)
           match tc_result with
           | typed_ast.TypedErr msg -> FullFail(Cons (DiagError("check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog env ->
@@ -192,7 +194,9 @@ export fn compile_phase_check(path: String, stdlib_root: String) -> typed_ast.Ty
     | bundler.BundleErr msg -> typed_ast.TypedErr("bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
-          result <- checker.typecheck_typed(prog, Nil)
+          cache <- module_loader.new_cache()
+          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          result <- checker.typecheck_typed(prog, prelude_pairs)
           match result with
           | typed_ast.TypedErr msg -> typed_ast.TypedErr("check: " ++ msg)
           | ok -> ok
@@ -214,7 +218,9 @@ export fn compile_phase_recheck(path: String, stdlib_root: String) -> typed_ast.
     | lowering.LowerErr msg -> typed_ast.TypedErr(msg)
     | lowering.LowerOk lowered ->
         do
-          result <- checker.typecheck_typed(lowered, Nil)
+          cache <- module_loader.new_cache()
+          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          result <- checker.typecheck_typed(lowered, prelude_pairs)
           match result with
           | typed_ast.TypedErr msg -> typed_ast.TypedErr("check2: " ++ msg)
           | ok -> ok

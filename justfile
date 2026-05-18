@@ -29,11 +29,6 @@ measure-gc-real:
 gc-safety-check *args:
   python3 scripts/gc_safety_check.py {{args}}
 
-# Regenerate runtime/sprout_runtime.c from the embedded template in sprout/cli.py.
-# Run this whenever sprout/cli.py's runtime_c string or analysis bridge changes.
-update-runtime:
-  python3 -m sprout.cli compile --emit-runtime-c runtime/sprout_runtime.c --with-stdlib -o /dev/null stdlib/compiler/compile_driver.sprout
-  @echo "runtime/sprout_runtime.c updated ($(wc -l < runtime/sprout_runtime.c) lines)"
 
 parse file:
   python3 -m sprout.cli parse {{file}}

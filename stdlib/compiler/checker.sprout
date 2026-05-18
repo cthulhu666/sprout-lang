@@ -697,84 +697,9 @@ fn dump_typed_decl_names(decls: List typed_ast.TypedDecl, env: Dict types.Scheme
         dump_typed_decl_names(rest, env)
 
 export fn builtin_entries() -> List (String, types.Scheme) =
-  ctor_entries() ++
-  str_entries() ++
-  list_entries() ++
-  dict_builtin_entries() ++
-  set_entries() ++
-  vec_entries() ++
-  ref_entries() ++
   string_module_entries() ++
-  raw_range_entries() ++
-  raw_vector_entries() ++
-  raw_map_entries() ++
-  raw_native_set_entries() ++
-  raw_str_entries() ++
-  semigroup_markers() ++
-  prelude_ext_entries() ++
-  io_extra_entries() ++
-  json_entries() ++
-  regex_ext_entries() ++
-  bytes_ext_entries() ++
-  crypto_ext_entries() ++
-  tcp_ext_entries() ++
-  http_ext_entries() ++
-  term_ext_entries() ++
   analysis_entries()
 
-fn raw_range_entries() -> List (String, types.Scheme) =
-  [ ("int_range",       bt_mono(bt_fn2(bt_int(), bt_int(), bt_intrange())))
-  , ("int_range_start", bt_mono(bt_fn(bt_intrange(), bt_int())))
-  , ("int_range_end",   bt_mono(bt_fn(bt_intrange(), bt_int())))
-  ]
-
-fn raw_vector_entries() -> List (String, types.Scheme) =
-  [ ("vector_empty",    bt_poly1("a", bt_vector(bt_a())))
-  , ("vector_length",   bt_poly1("a", bt_fn(bt_vector(bt_a()), bt_int())))
-  , ("vector_get",      bt_poly1("a", bt_fn2(bt_vector(bt_a()), bt_int(), bt_maybe(bt_a()))))
-  , ("vector_set",      bt_poly1("a", bt_fn3(bt_vector(bt_a()), bt_int(), bt_a(), bt_vector(bt_a()))))
-  , ("vector_append",   bt_poly1("a", bt_fn2(bt_vector(bt_a()), bt_a(), bt_vector(bt_a()))))
-  , ("vector_from_list",bt_poly1("a", bt_fn(bt_list(bt_a()), bt_vector(bt_a()))))
-  ]
-
-fn raw_map_entries() -> List (String, types.Scheme) =
-  [ ("map_empty",     bt_poly1("v", bt_map(bt_v())))
-  , ("map_get",       bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_str(), bt_maybe(bt_v()))))
-  , ("map_set",       bt_poly1("v", bt_fn3(bt_map(bt_v()), bt_str(), bt_v(), bt_map(bt_v()))))
-  , ("map_remove",    bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_str(), bt_map(bt_v()))))
-  , ("map_size",      bt_poly1("v", bt_fn(bt_map(bt_v()), bt_int())))
-  , ("map_nth_key",   bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_int(), bt_maybe(bt_str()))))
-  , ("map_nth_value", bt_poly1("v", bt_fn2(bt_map(bt_v()), bt_int(), bt_maybe(bt_v()))))
-  ]
-
-fn raw_native_set_entries() -> List (String, types.Scheme) =
-  [ ("native_set_empty",   bt_mono(bt_native_set()))
-  , ("native_set_insert",  bt_mono(bt_fn2(bt_str(), bt_native_set(), bt_native_set())))
-  , ("native_set_member",  bt_mono(bt_fn2(bt_str(), bt_native_set(), bt_bool())))
-  , ("native_set_to_list", bt_mono(bt_fn(bt_native_set(), bt_list(bt_str()))))
-  , ("native_set_size",    bt_mono(bt_fn(bt_native_set(), bt_int())))
-  ]
-
-fn raw_str_entries() -> List (String, types.Scheme) =
-  [ ("split_words",              bt_mono(bt_fn(bt_str(), bt_list(bt_str()))))
-  , ("str_char_at",              bt_mono(bt_fn2(bt_str(), bt_int(), bt_maybe(bt_char()))))
-  , ("str_split_lines",          bt_mono(bt_fn(bt_str(), bt_list(bt_str()))))
-  , ("str_char_at_byte",         bt_mono(bt_fn2(bt_str(), bt_int(), bt_maybe(bt_char()))))
-  , ("str_char_width_at_byte",   bt_mono(bt_fn2(bt_str(), bt_int(), bt_int())))
-  , ("str_byte_len",             bt_mono(bt_fn(bt_str(), bt_int())))
-  , ("str_starts_with_at_byte",  bt_mono(bt_fn3(bt_str(), bt_int(), bt_str(), bt_bool())))
-  ]
-
-fn semigroup_markers() -> List (String, types.Scheme) =
-  [ ("@class:append",          types.mono(types.TConst("Semigroup")))
-  , ("@inst:Semigroup:String", types.mono(types.TConst("Unit")))
-  , ("@inst:Semigroup:List",   types.mono(types.TConst("Unit")))
-  , ("@inst:Semigroup:Vec",    types.mono(types.TConst("Unit")))
-  , ("@inst:Semigroup:Dict",   types.mono(types.TConst("Unit")))
-  ]
-
-fn builtin_env() -> Dict types.Scheme =
-  dict_from_list(builtin_entries())
 
 # -- Type shortcuts ----------------------------------------------------------
 
@@ -792,11 +717,6 @@ fn bt_maybe(t: types.Type)  -> types.Type = types.TApp(types.TConst("Maybe"), t)
 fn bt_list(t: types.Type)   -> types.Type = types.TApp(types.TConst("List"), t)
 fn bt_dict(t: types.Type)   -> types.Type = types.TApp(types.TConst("Dict"), t)
 fn bt_vec(t: types.Type)     -> types.Type = types.TApp(types.TConst("Vec"), t)
-fn bt_set()                  -> types.Type = types.TConst("Set")
-fn bt_vector(t: types.Type)  -> types.Type = types.TApp(types.TConst("Vector"), t)
-fn bt_map(t: types.Type)     -> types.Type = types.TApp(types.TConst("Map"), t)
-fn bt_native_set()           -> types.Type = types.TConst("NativeSet")
-fn bt_intrange()             -> types.Type = types.TConst("IntRange")
 fn bt_result(e: types.Type, a: types.Type) -> types.Type =
   types.TApp(types.TApp(types.TConst("Result"), e), a)
 
@@ -813,84 +733,10 @@ fn bt_fn3(a: types.Type, b: types.Type, c: types.Type, d: types.Type) -> types.T
 
 fn bt_mono(t: types.Type) -> types.Scheme =
   types.Scheme(Nil, Nil, t, types.EffectPure)
-fn bt_mono_io(t: types.Type) -> types.Scheme =
-  types.Scheme(Nil, Nil, t, types.EffectIO)
 fn bt_poly1(v: String, t: types.Type) -> types.Scheme =
   types.Scheme(Cons(v, Nil), Nil, t, types.EffectPure)
 fn bt_poly2(v1: String, v2: String, t: types.Type) -> types.Scheme =
   types.Scheme(Cons(v1, Cons(v2, Nil)), Nil, t, types.EffectPure)
-
-# -- Seeding helpers ---------------------------------------------------------
-
-fn ctor_entries() -> List (String, types.Scheme) =
-  [ ("Just",    bt_poly1("a", bt_fn(bt_a(), bt_maybe(bt_a()))))
-  , ("Nothing", bt_poly1("a", bt_maybe(bt_a())))
-  , ("Cons",    bt_poly1("a", bt_fn(bt_a(), bt_fn(bt_list(bt_a()), bt_list(bt_a())))))
-  , ("Nil",     bt_poly1("a", bt_list(bt_a())))
-  , ("Ok",      bt_poly2("e", "a", bt_fn(bt_a(), bt_result(bt_e(), bt_a()))))
-  , ("Err",     bt_poly2("e", "a", bt_fn(bt_e(), bt_result(bt_e(), bt_a()))))
-  ]
-
-fn str_entries() -> List (String, types.Scheme) =
-  [ ("print",           bt_poly1("a", bt_io(bt_a(), bt_unit())))
-  , ("str_len",         bt_mono(bt_fn(bt_str(), bt_int())))
-  , ("str_slice",       bt_mono(bt_fn3(bt_str(), bt_int(), bt_int(), bt_str())))
-  , ("str_find",        bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
-  , ("str_starts_with", bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
-  , ("str_compare",     bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
-  , ("str_concat",      bt_mono(bt_fn2(bt_str(), bt_str(), bt_str())))
-  , ("string_concat_many",   bt_mono(bt_fn(bt_list(bt_str()), bt_str())))
-  , ("string_join_newlines", bt_mono(bt_fn(bt_list(bt_str()), bt_str())))
-  , ("append",          bt_poly1("t", bt_fn2(types.TVar("t"), types.TVar("t"), types.TVar("t"))))
-  , ("int_to_string",   bt_mono(bt_fn(bt_int(), bt_str())))
-  , ("parse_int",       bt_mono(bt_fn(bt_str(), bt_int())))
-  , ("char_to_string",  bt_mono(bt_fn(bt_char(), bt_str())))
-  , ("read_file",       bt_mono(bt_io(bt_str(), bt_str())))
-  , ("argv_get",        bt_mono(bt_io(bt_int(), bt_maybe(bt_str()))))
-  ]
-
-fn list_entries() -> List (String, types.Scheme) =
-  [ ("list_reverse", bt_poly1("a", bt_fn(bt_list(bt_a()), bt_list(bt_a()))))
-  , ("list_append",  bt_poly1("a", bt_fn2(bt_list(bt_a()), bt_list(bt_a()), bt_list(bt_a()))))
-  , ("list_map",     bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_list(bt_a()), bt_list(bt_b()))))
-  , ("list_fold",    bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_list(bt_a()), bt_b())))
-  , ("filter",       bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_list(bt_a()), bt_list(bt_a()))))
-  ]
-
-fn dict_builtin_entries() -> List (String, types.Scheme) =
-  [ ("dict_empty",  bt_poly1("v", bt_dict(bt_v())))
-  , ("dict_get",    bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_maybe(bt_v()))))
-  , ("dict_set",    bt_poly1("v", bt_fn3(bt_str(), bt_v(), bt_dict(bt_v()), bt_dict(bt_v()))))
-  , ("dict_remove", bt_poly1("v", bt_fn2(bt_str(), bt_dict(bt_v()), bt_dict(bt_v()))))
-  , ("dict_keys",   bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_str()))))
-  , ("dict_values", bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_v()))))
-  ]
-
-fn set_entries() -> List (String, types.Scheme) =
-  [ ("set_empty",   bt_mono(bt_set()))
-  , ("set_insert",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_set())))
-  , ("set_member",  bt_mono(bt_fn2(bt_str(), bt_set(), bt_bool())))
-  , ("set_to_list", bt_mono(bt_fn(bt_set(), bt_list(bt_str()))))
-  , ("set_size",    bt_mono(bt_fn(bt_set(), bt_int())))
-  ]
-
-fn bt_vec_a() -> types.Type = bt_vec(bt_a())
-fn bt_ref(t: types.Type) -> types.Type = types.TApp(types.TConst("Ref"), t)
-
-fn vec_entries() -> List (String, types.Scheme) =
-  [ ("vec_empty",    bt_poly1("a", bt_vec_a()))
-  , ("vec_append",   bt_poly1("a", bt_fn2(bt_a(), bt_vec_a(), bt_vec_a())))
-  , ("vec_get",      bt_poly1("a", bt_fn2(bt_int(), bt_vec_a(), bt_maybe(bt_a()))))
-  , ("vec_length",   bt_poly1("a", bt_fn(bt_vec_a(), bt_int())))
-  , ("vec_slice",    bt_poly1("a", bt_fn3(bt_int(), bt_int(), bt_vec_a(), bt_vec_a())))
-  , ("vec_from_list",bt_poly1("a", bt_fn(bt_list(bt_a()), bt_vec_a())))
-  ]
-
-fn ref_entries() -> List (String, types.Scheme) =
-  [ ("ref_new",   bt_poly1("a", bt_io(bt_a(), bt_ref(bt_a()))))
-  , ("ref_read",  bt_poly1("a", bt_io(bt_ref(bt_a()), bt_a())))
-  , ("ref_write", bt_poly1("a", bt_io(bt_ref(bt_a()), bt_fn(bt_a(), bt_unit()))))
-  ]
 
 # Seeded entries for "import stdlib.string as string" usage.
 # Maps "string.X" → the type of X from stdlib/string.sprout.
@@ -911,11 +757,6 @@ fn string_module_entries() -> List (String, types.Scheme) =
   , ("string.is_ident_continue", bt_mono(bt_fn(bt_char(), bt_bool())))
   ]
 
-# Prelude functions that stdlib modules use without an explicit import.
-# These are defined in stdlib/prelude.sprout but must be visible when the
-# module_loader checks stdlib/*.sprout files in isolation (no bundler step).
-# filter_own_pairs strips these from a module's own exports, so they don't
-# pollute the namespace.
 fn bt_pair(a: types.Type, b: types.Type) -> types.Type =
   types.TTuple(Cons(a, Cons(b, Nil)))
 
@@ -925,105 +766,6 @@ fn bt_triple(a: types.Type, b: types.Type, c: types.Type) -> types.Type =
 fn bt_quad(a: types.Type, b: types.Type, c: types.Type, d: types.Type) -> types.Type =
   types.TTuple(Cons(a, Cons(b, Cons(c, Cons(d, Nil)))))
 
-fn prelude_ext_entries() -> List (String, types.Scheme) =
-  [ ("dict_entries",   bt_poly1("v", bt_fn(bt_dict(bt_v()), bt_vec(bt_pair(bt_str(), bt_v())))))
-  , ("dict_from_list", bt_poly1("v", bt_fn(bt_list(bt_pair(bt_str(), bt_v())), bt_dict(bt_v()))))
-  , ("vec_to_list",    bt_poly1("a", bt_fn(bt_vec_a(), bt_list(bt_a()))))
-  , ("vec_singleton",  bt_poly1("a", bt_fn(bt_a(), bt_vec_a())))
-  , ("vec_map",        bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_vec_a(), bt_vec(bt_b()))))
-  , ("vec_fold",       bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_vec_a(), bt_b())))
-  , ("vec_filter",     bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_vec_a())))
-  , ("vec_reverse",    bt_poly1("a", bt_fn(bt_vec_a(), bt_vec_a())))
-  , ("vec_any",        bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_bool())))
-  , ("vec_all",        bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_bool())))
-  , ("vec_count",      bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_bool()), bt_vec_a(), bt_int())))
-  , ("vec_sum",        bt_mono(bt_fn(bt_vec(bt_int()), bt_int())))
-  , ("vec_sum_by",     bt_poly1("a", bt_fn2(bt_fn(bt_a(), bt_int()), bt_vec_a(), bt_int())))
-  , ("vec_filter_map", bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_maybe(bt_b())), bt_vec_a(), bt_vec(bt_b()))))
-  , ("pipe_apply",     bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_a(), bt_b())))
-  , ("list_length",    bt_poly1("a", bt_fn(bt_list(bt_a()), bt_int())))
-  , ("fold",           bt_poly2("a", "b", bt_fn3(bt_fn2(bt_b(), bt_a(), bt_b()), bt_b(), bt_list(bt_a()), bt_b())))
-  , ("map",            bt_poly2("a", "b", bt_fn2(bt_fn(bt_a(), bt_b()), bt_list(bt_a()), bt_list(bt_b()))))
-  , ("split_ints",     bt_mono(bt_fn(bt_str(), bt_list(bt_int()))))
-  ]
-
-fn bt_bytes()   -> types.Type = types.TConst("Bytes")
-fn bt_builder() -> types.Type = types.TConst("Builder")
-
-fn io_extra_entries() -> List (String, types.Scheme) =
-  [ ("print_int",      bt_mono(bt_io(bt_int(), bt_int())))
-  , ("read_lines",     bt_mono(bt_io(bt_str(), bt_list(bt_str()))))
-  , ("read_int_lines", bt_mono(bt_io(bt_str(), bt_vector(bt_int()))))
-  , ("env_get",        bt_mono(bt_io(bt_str(), bt_maybe(bt_str()))))
-  ]
-
-fn json_entries() -> List (String, types.Scheme) =
-  [ ("json_parse",     bt_mono(bt_fn(bt_str(), bt_result(types.TConst("stdlib.json.JsonError"), types.TConst("stdlib.json.Json")))))
-  , ("json_stringify", bt_mono(bt_fn(types.TConst("stdlib.json.Json"), bt_str())))
-  ]
-
-fn regex_ext_entries() -> List (String, types.Scheme) =
-  [ ("regex_validate",            bt_mono(bt_fn(bt_str(), bt_result(bt_str(), bt_unit()))))
-  , ("regex_is_match",            bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
-  , ("regex_find_range",          bt_mono(bt_fn2(bt_str(), bt_str(), bt_maybe(bt_intrange()))))
-  , ("regex_replace_all_literal", bt_mono(bt_fn3(bt_str(), bt_str(), bt_str(), bt_str())))
-  , ("regex_escape",              bt_mono(bt_fn(bt_str(), bt_str())))
-  ]
-
-fn bytes_ext_entries() -> List (String, types.Scheme) =
-  [ ("bytes_empty",          bt_mono(bt_bytes()))
-  , ("bytes_length",         bt_mono(bt_fn(bt_bytes(), bt_int())))
-  , ("bytes_get",            bt_mono(bt_fn2(bt_bytes(), bt_int(), bt_maybe(bt_int()))))
-  , ("bytes_slice",          bt_mono(bt_fn3(bt_bytes(), bt_int(), bt_int(), bt_bytes())))
-  , ("bytes_append",         bt_mono(bt_fn2(bt_bytes(), bt_bytes(), bt_bytes())))
-  , ("bytes_singleton",      bt_mono(bt_fn(bt_int(), bt_bytes())))
-  , ("bytes_from_utf8",      bt_mono(bt_fn(bt_str(), bt_bytes())))
-  , ("bytes_to_utf8",        bt_mono(bt_fn(bt_bytes(), bt_result(types.TConst("stdlib.bytes.Utf8Error"), bt_str()))))
-  , ("bytes_builder_empty",  bt_mono(bt_builder()))
-  , ("bytes_builder_bytes",  bt_mono(bt_fn(bt_bytes(), bt_builder())))
-  , ("bytes_builder_byte",   bt_mono(bt_fn(bt_int(), bt_builder())))
-  , ("bytes_builder_u16_be", bt_mono(bt_fn(bt_int(), bt_builder())))
-  , ("bytes_builder_u32_be", bt_mono(bt_fn(bt_int(), bt_builder())))
-  , ("bytes_builder_append", bt_mono(bt_fn2(bt_builder(), bt_builder(), bt_builder())))
-  , ("bytes_builder_build",  bt_mono(bt_fn(bt_builder(), bt_bytes())))
-  ]
-
-fn crypto_ext_entries() -> List (String, types.Scheme) =
-  [ ("crypto_sha256",        bt_mono(bt_fn(bt_bytes(), bt_bytes())))
-  , ("crypto_hmac_sha256",   bt_mono(bt_fn2(bt_bytes(), bt_bytes(), bt_bytes())))
-  , ("crypto_base64_encode", bt_mono(bt_fn(bt_bytes(), bt_str())))
-  , ("crypto_base64_decode", bt_mono(bt_fn(bt_str(), bt_result(types.TConst("stdlib.crypto.Base64Error"), bt_bytes()))))
-  , ("crypto_bytes_xor",     bt_mono(bt_fn2(bt_bytes(), bt_bytes(), bt_result(types.TConst("stdlib.crypto.BytesOpError"), bt_bytes()))))
-  , ("crypto_random_bytes",  bt_mono(bt_io(bt_int(), bt_result(types.TConst("stdlib.crypto.CryptoError"), bt_bytes()))))
-  ]
-
-fn tcp_ext_entries() -> List (String, types.Scheme) =
-  [ ("tcp_listen",         bt_mono(bt_io(bt_int(), bt_int())))
-  , ("tcp_accept",         bt_mono(bt_io(bt_int(), bt_int())))
-  , ("tcp_read",           bt_mono(bt_io(bt_int(), bt_str())))
-  , ("tcp_write",          bt_mono(bt_fn(bt_int(), bt_io(bt_str(), bt_unit()))))
-  , ("tcp_connect",        bt_mono(bt_fn(bt_str(), bt_io(bt_int(), bt_result(types.TConst("stdlib.net.TcpError"), bt_int())))))
-  , ("tcp_read_exact",     bt_mono(bt_fn(bt_int(), bt_io(bt_int(), bt_result(types.TConst("stdlib.net.TcpError"), bt_bytes())))))
-  , ("tcp_write_all",      bt_mono(bt_fn(bt_int(), bt_io(bt_bytes(), bt_result(types.TConst("stdlib.net.TcpError"), bt_int())))))
-  , ("tcp_close",          bt_mono(bt_io(bt_int(), bt_unit())))
-  , ("tcp_close_listener", bt_mono(bt_io(bt_int(), bt_unit())))
-  , ("tcp_echo_serve",     bt_mono(bt_fn(bt_int(), bt_io(bt_int(), bt_unit()))))
-  ]
-
-fn http_ext_entries() -> List (String, types.Scheme) =
-  [ ("http_request", bt_mono(bt_fn(bt_str(), bt_fn(bt_str(), bt_fn(bt_str(), bt_fn(bt_str(), bt_io(bt_int(), bt_result(types.TConst("stdlib.http.HttpError"), types.TConst("stdlib.http.HttpResponse")))))))))
-  ]
-
-fn term_ext_entries() -> List (String, types.Scheme) =
-  [ ("term_clear",          bt_mono_io(bt_unit()))
-  , ("term_move",           bt_mono(bt_fn(bt_int(), bt_io(bt_int(), bt_unit()))))
-  , ("term_hide_cursor",    bt_mono_io(bt_unit()))
-  , ("term_show_cursor",    bt_mono_io(bt_unit()))
-  , ("term_read_key",       bt_mono_io(bt_str()))
-  , ("term_read_line",      bt_mono_io(bt_maybe(bt_str())))
-  , ("term_is_interactive", bt_mono_io(bt_bool()))
-  , ("term_write",          bt_mono(bt_io(bt_str(), bt_unit())))
-  ]
 
 # Analysis bridge builtins — C functions provided by sprout_runtime.c analysis bridge.
 # Used by stdlib/compiler.sprout.

@@ -2898,6 +2898,49 @@ long long str_split_lines(long long s_val) {
   return sprout_handle_get(h_list);
 }
 
+/* split_words: split a string on ASCII whitespace (space, tab, \n, \r),
+ * returning a Sprout List String.  Runs in O(N) with one forward pass. */
+long long split_words(const char* s) {
+  if (s == NULL) tcp_fail("split_words: null input");
+  size_t total = strlen(s);
+
+  typedef struct { size_t start; size_t end; } WSpan;
+  WSpan* spans = NULL;
+  size_t nspans = 0, cap = 0;
+  size_t i = 0;
+  while (i < total) {
+    while (i < total && (s[i]==' '||s[i]=='\t'||s[i]=='\n'||s[i]=='\r')) i++;
+    if (i >= total) break;
+    size_t wstart = i;
+    while (i < total && !(s[i]==' '||s[i]=='\t'||s[i]=='\n'||s[i]=='\r')) i++;
+    if (nspans >= cap) {
+      cap = (cap < 64) ? 64 : cap * 2;
+      WSpan* tmp = (WSpan*)realloc(spans, cap * sizeof(WSpan));
+      if (!tmp) { free(spans); tcp_fail("split_words: out of memory"); }
+      spans = tmp;
+    }
+    spans[nspans++] = (WSpan){ wstart, i };
+  }
+
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
+  for (size_t k = nspans; k-- > 0;) {
+    size_t slen = spans[k].end - spans[k].start;
+    char* word = (char*)malloc(slen + 1);
+    if (!word) { free(spans); tcp_fail("split_words: out of memory"); }
+    memcpy(word, s + spans[k].start, slen);
+    word[slen] = '\0';
+    register_managed_ptr(word, SPROUT_HEAP_CSTR, 0);
+    {
+      SPROUT_HANDLE(h_word, (long long)(uintptr_t)word);
+      SPROUT_HANDLE_SET(h_list, sprout_make2(cons_tag, sprout_handle_get(h_word), sprout_handle_get(h_list)));
+    }
+  }
+  free(spans);
+  return sprout_handle_get(h_list);
+}
+
 /* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
  * Avoids the O(index) codepoint scan of str_char_at. */
 long long str_char_at_byte(long long s_val, long long byte_pos) {
