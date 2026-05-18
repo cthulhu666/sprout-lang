@@ -363,7 +363,35 @@ build-seed-linux:
   file bootstrap/compile_driver-linux-aarch64
   ls -lh bootstrap/compile_driver-linux-aarch64
 
-# Build bootstrap seed binaries for all supported platforms (darwin-arm64 + linux-aarch64).
+# Build the Linux x86_64 bootstrap seed binary — run this natively on a Linux x86_64 host.
+# Requires compile_driver_bin (stage-0) and clang on PATH.
+# Output: bootstrap/compile_driver-linux-x86_64
+build-seed-linux-amd64:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin" ]]; then
+    echo "ERROR: compile_driver_bin not found; run: just build-stage0" >&2
+    exit 1
+  fi
+  mkdir -p bootstrap
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/compile_driver.sprout"
+  OUT="bootstrap/compile_driver-linux-x86_64"
+  TMP_LL="/tmp/sprout_seed_amd64_$$.ll"
+  trap 'rm -f "$TMP_LL"' EXIT
+  echo "==> Emitting LLVM IR via stage-0..."
+  ./compile_driver_bin --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  echo "==> Validating IR..."
+  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
+  echo "==> Linking with clang..."
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 -o "$OUT"
+  chmod +x "$OUT"
+  echo "==> $OUT:"
+  file "$OUT"
+  ls -lh "$OUT"
+
+# Build bootstrap seed binaries for Mac-buildable platforms (darwin-arm64 + linux-aarch64 via Docker).
+# For linux-x86_64, run: just build-seed-linux-amd64  (on a Linux x86_64 host)
 build-seeds: build-seed-macos build-seed-linux
 
 # Bootstrap compile_driver_bin_stage1 from the committed platform seed — no Python required.
