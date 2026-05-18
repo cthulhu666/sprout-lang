@@ -346,7 +346,7 @@ class RuntimeTests(unittest.TestCase):
                   plus1,
                   result_pipe(
                     twice,
-                    Ok(pipe(plus1, 20))
+                    Ok(pipe_apply(plus1, 20))
                   )
                 )
               )

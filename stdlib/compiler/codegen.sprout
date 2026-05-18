@@ -2815,6 +2815,18 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("sprout_gc_register_i64_root", FnSig("sprout_gc_register_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_ptr_root", FnSig("sprout_gc_register_ptr_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_scan_root", FnSig("sprout_gc_register_scan_root", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
+  # Analysis bridge — C functions take const char* (ptr), not i64; extern fn String would give i64 ABI
+  , ("analysis_check_source", FnSig("analysis_check_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("analysis_declared_names_in_source", FnSig("analysis_declared_names_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("analysis_exported_names_in_source", FnSig("analysis_exported_names_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("analysis_symbol_inventory_in_source", FnSig("analysis_symbol_inventory_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("analysis_diagnostics_in_source", FnSig("analysis_diagnostics_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("analysis_symbol_locations_in_source", FnSig("analysis_symbol_locations_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("analysis_type_of_in_source", FnSig("analysis_type_of_in_source", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  , ("analysis_eval_expr_in_source", FnSig("analysis_eval_expr_in_source", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  , ("analysis_instances_in_source", FnSig("analysis_instances_in_source", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  # Vec String params are Sprout heap handles (i64 pointer values); C side receives them as const void*
+  , ("analysis_complete_in_state", FnSig("analysis_complete_in_state", Cons(ll_ptr(), Cons(ll_ptr(), Cons(ll_ptr(), Nil))), ll_i64(), Nothing))
   ]
 
 # Convert an AST type expression to an LLVM type string.

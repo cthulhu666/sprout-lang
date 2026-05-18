@@ -682,7 +682,9 @@ fn dict_from_list_loop(pairs: List (String, v), acc: Dict v) -> Dict v =
       match head with
       | (k, val) -> dict_from_list_loop(rest, dict_set(k, val, acc))
 
-export fn pipe(f: a -> b, value: a) -> b =
+# Renamed from `pipe` to avoid colliding with POSIX pipe() in linked C code.
+# The |> operator desugars via the parser, not through this function.
+export fn pipe_apply(f: a -> b, value: a) -> b =
   f(value)
 
 export fn result_map(f: a -> b, r: Result e a) -> Result e b =
@@ -842,9 +844,15 @@ extern fn json_stringify(j: String) -> String
 extern fn json_parse(s: String) -> String
 
 # Terminal
+extern fn term_clear() -> Unit !{IO}
+extern fn term_move(row: Int, col: Int) -> Unit !{IO}
+extern fn term_hide_cursor() -> Unit !{IO}
+extern fn term_show_cursor() -> Unit !{IO}
+extern fn term_is_interactive() -> Bool !{IO}
 extern fn term_read_key() -> String !{IO}
 extern fn term_read_line() -> Maybe String !{IO}
 extern fn term_write(text: String) -> Unit !{IO}
+
 
 # Crypto
 extern fn crypto_base64_encode(b: Bytes) -> String

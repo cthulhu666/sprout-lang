@@ -24,7 +24,7 @@ __all__ = [
 
 
 def _native_repl_entry() -> Path:
-    return Path(__file__).resolve().parent.parent / "examples" / "repl_hosted.sprout"
+    return Path(__file__).resolve().parent.parent / "stdlib" / "repl.sprout"
 
 
 def _native_repl_cache_dir() -> Path:
@@ -37,26 +37,21 @@ def _native_repl_cache_dir() -> Path:
 def _native_repl_cache_key() -> str:
     root = Path(__file__).resolve().parent.parent
     digest = hashlib.sha256()
-    digest.update(sys.executable.encode("utf-8"))
-    digest.update(b"\0")
-    digest.update(sys.version.encode("utf-8"))
-    digest.update(b"\0")
     digest.update(sys.platform.encode("utf-8"))
     digest.update(b"\0")
-    for path in sorted((root / "sprout").glob("*.py")):
+    driver = root / "compile_driver_bin_stage1"
+    if driver.exists():
+        digest.update(driver.read_bytes())
+        digest.update(b"\0")
+    runtime_c = root / "runtime" / "sprout_runtime.c"
+    if runtime_c.exists():
+        digest.update(runtime_c.read_bytes())
+        digest.update(b"\0")
+    for path in sorted((root / "stdlib").rglob("*.sprout")):
         digest.update(path.name.encode("utf-8"))
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
-    for path in sorted((root / "stdlib").glob("*.sprout")):
-        digest.update(path.name.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    entry = _native_repl_entry()
-    digest.update(entry.name.encode("utf-8"))
-    digest.update(b"\0")
-    digest.update(entry.read_bytes())
     return digest.hexdigest()[:16]
 
 
@@ -113,24 +108,25 @@ def _ensure_native_repl_binary() -> Path:
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
     entry = _native_repl_entry()
+    root = _project_root()
+    driver = root / "compile_driver_bin_stage1"
+    runtime_c = root / "runtime" / "sprout_runtime.c"
     with tempfile.TemporaryDirectory(dir=out.parent) as tmp:
+        tmp_ll = Path(tmp) / "repl.ll"
         tmp_out = Path(tmp) / "sprout-repl"
         try:
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "sprout.cli",
-                    "compile",
-                    str(entry),
-                    "--native",
-                    "-o",
-                    str(tmp_out),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
+            result = subprocess.run(
+                [str(driver), "--emit-ir", str(_stdlib_root()), str(entry)],
+                check=True, capture_output=True, text=True,
             )
+        except subprocess.CalledProcessError as exc:
+            raise CodegenError(_summarize_native_repl_build_error(exc)) from exc
+        tmp_ll.write_text(result.stdout)
+        clang_cmd = ["clang", str(tmp_ll), str(runtime_c), "-O2", "-o", str(tmp_out)]
+        if sys.platform == "darwin":
+            clang_cmd += ["-framework", "Security", "-framework", "CoreFoundation"]
+        try:
+            subprocess.run(clang_cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as exc:
             raise CodegenError(_summarize_native_repl_build_error(exc)) from exc
         os.replace(tmp_out, out)

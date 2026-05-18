@@ -190,7 +190,7 @@ static int       g_gc_livelock_action = 1;    /* 0=off  1=warn  2=abort */
 static const char* g_sprout_current_fn = NULL;
 
 static void sprout_crash_handler(int sig) {
-  const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : "SIGABRT";
+  const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : (sig == SIGBUS) ? "SIGBUS" : "SIGABRT";
   if (g_sprout_current_fn != NULL)
     fprintf(stderr, "[sprout] %s while emitting IR for: %s\n", sig_name, g_sprout_current_fn);
   else
@@ -1238,6 +1238,7 @@ long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argv = argv;
   signal(SIGSEGV, sprout_crash_handler);
   signal(SIGABRT, sprout_crash_handler);
+  signal(SIGBUS, sprout_crash_handler);
   sprout_debug_alloc_maybe_enable();
   sprout_debug_gc_maybe_enable();
   sprout_gc_threshold_maybe_enable();

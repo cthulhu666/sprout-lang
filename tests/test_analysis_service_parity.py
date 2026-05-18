@@ -94,7 +94,7 @@ class AnalysisServiceProtocolTests(unittest.TestCase):
         self.assertFalse(responses[2]["ok"])
 
     def test_not_implemented_ops_return_structured_error(self) -> None:
-        for op in ("eval_expr_in_source", "type_of_in_source", "instances_in_source", "complete_in_state"):
+        for op in ("eval_expr_in_source", "instances_in_source", "complete_in_state"):
             with self.subTest(op=op):
                 [resp] = _query([{"op": op, "module_source": _SIMPLE_SOURCE}])
                 self.assertFalse(resp["ok"])
@@ -217,4 +217,42 @@ class AnalysisServiceCheckSourceTests(unittest.TestCase):
 
     def test_parse_error_returns_failure(self) -> None:
         [resp] = _query([_req("check_source", _INVALID_SOURCE)])
+        self.assertFalse(resp["ok"], resp)
+
+
+@_skip_if_no_bin
+class AnalysisServiceTypeOfTests(unittest.TestCase):
+    """Tests for type_of_in_source op."""
+
+    def _type_of(self, source: str, expr: str) -> dict:
+        [resp] = _query([{"op": "type_of_in_source", "module_source": source, "expr": expr}])
+        return resp
+
+    def test_literal_int(self) -> None:
+        resp = self._type_of(_SIMPLE_SOURCE, "42")
+        self.assertTrue(resp["ok"], resp)
+        self.assertEqual(resp["value"], "Int")
+
+    def test_literal_bool(self) -> None:
+        resp = self._type_of(_SIMPLE_SOURCE, "true")
+        self.assertTrue(resp["ok"], resp)
+        self.assertEqual(resp["value"], "Bool")
+
+    def test_defined_function(self) -> None:
+        # bar : Int -> Int (one-arg function — has an arrow type)
+        resp = self._type_of(_SIMPLE_SOURCE, "bar")
+        self.assertTrue(resp["ok"], resp)
+        self.assertIn("->", resp["value"])
+
+    def test_polymorphic_nil(self) -> None:
+        resp = self._type_of(_SIMPLE_SOURCE, "Nil")
+        self.assertTrue(resp["ok"], resp)
+        self.assertIn("List", resp["value"])
+
+    def test_undefined_name_returns_error(self) -> None:
+        resp = self._type_of(_SIMPLE_SOURCE, "undefined_xyz")
+        self.assertFalse(resp["ok"], resp)
+
+    def test_missing_expr_field_returns_error(self) -> None:
+        [resp] = _query([{"op": "type_of_in_source", "module_source": _SIMPLE_SOURCE}])
         self.assertFalse(resp["ok"], resp)
