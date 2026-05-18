@@ -697,7 +697,6 @@ fn dump_typed_decl_names(decls: List typed_ast.TypedDecl, env: Dict types.Scheme
         dump_typed_decl_names(rest, env)
 
 export fn builtin_entries() -> List (String, types.Scheme) =
-  string_module_entries() ++
   analysis_entries()
 
 
@@ -705,17 +704,8 @@ export fn builtin_entries() -> List (String, types.Scheme) =
 
 fn bt_str()  -> types.Type = types.TConst("String")
 fn bt_int()  -> types.Type = types.TConst("Int")
-fn bt_bool() -> types.Type = types.TConst("Bool")
 fn bt_unit() -> types.Type = types.TConst("Unit")
-fn bt_char() -> types.Type = types.TConst("Char")
-fn bt_a()    -> types.Type = types.TVar("a")
-fn bt_b()    -> types.Type = types.TVar("b")
-fn bt_e()    -> types.Type = types.TVar("e")
-fn bt_v()    -> types.Type = types.TVar("v")
 
-fn bt_maybe(t: types.Type)  -> types.Type = types.TApp(types.TConst("Maybe"), t)
-fn bt_list(t: types.Type)   -> types.Type = types.TApp(types.TConst("List"), t)
-fn bt_dict(t: types.Type)   -> types.Type = types.TApp(types.TConst("Dict"), t)
 fn bt_vec(t: types.Type)     -> types.Type = types.TApp(types.TConst("Vec"), t)
 fn bt_result(e: types.Type, a: types.Type) -> types.Type =
   types.TApp(types.TApp(types.TConst("Result"), e), a)
@@ -724,38 +714,9 @@ fn bt_fn(a: types.Type, b: types.Type) -> types.Type =
   types.TFunc(a, b, types.EffectPure)
 fn bt_io(a: types.Type, b: types.Type) -> types.Type =
   types.TFunc(a, b, types.EffectIO)
-fn bt_fn2(a: types.Type, b: types.Type, c: types.Type) -> types.Type =
-  bt_fn(a, bt_fn(b, c))
-fn bt_fn3(a: types.Type, b: types.Type, c: types.Type, d: types.Type) -> types.Type =
-  bt_fn(a, bt_fn2(b, c, d))
-
-# -- Scheme shortcuts --------------------------------------------------------
 
 fn bt_mono(t: types.Type) -> types.Scheme =
   types.Scheme(Nil, Nil, t, types.EffectPure)
-fn bt_poly1(v: String, t: types.Type) -> types.Scheme =
-  types.Scheme(Cons(v, Nil), Nil, t, types.EffectPure)
-fn bt_poly2(v1: String, v2: String, t: types.Type) -> types.Scheme =
-  types.Scheme(Cons(v1, Cons(v2, Nil)), Nil, t, types.EffectPure)
-
-# Seeded entries for "import stdlib.string as string" usage.
-# Maps "string.X" → the type of X from stdlib/string.sprout.
-fn string_module_entries() -> List (String, types.Scheme) =
-  [ ("string.concat",            bt_mono(bt_fn2(bt_str(), bt_str(), bt_str())))
-  , ("string.length",            bt_mono(bt_fn(bt_str(), bt_int())))
-  , ("string.slice",             bt_mono(bt_fn3(bt_str(), bt_int(), bt_int(), bt_str())))
-  , ("string.drop",              bt_mono(bt_fn2(bt_str(), bt_int(), bt_str())))
-  , ("string.find",              bt_mono(bt_fn2(bt_str(), bt_str(), bt_int())))
-  , ("string.starts_with",       bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
-  , ("string.contains",          bt_mono(bt_fn2(bt_str(), bt_str(), bt_bool())))
-  , ("string.char_at",           bt_mono(bt_fn2(bt_str(), bt_int(), bt_maybe(bt_char()))))
-  , ("string.char_at_or",        bt_mono(bt_fn3(bt_str(), bt_int(), bt_char(), bt_char())))
-  , ("string.string_from_char",  bt_mono(bt_fn(bt_char(), bt_str())))
-  , ("string.is_ascii_whitespace", bt_mono(bt_fn(bt_char(), bt_bool())))
-  , ("string.is_ascii_digit",    bt_mono(bt_fn(bt_char(), bt_bool())))
-  , ("string.is_ident_start",    bt_mono(bt_fn(bt_char(), bt_bool())))
-  , ("string.is_ident_continue", bt_mono(bt_fn(bt_char(), bt_bool())))
-  ]
 
 fn bt_pair(a: types.Type, b: types.Type) -> types.Type =
   types.TTuple(Cons(a, Cons(b, Nil)))
