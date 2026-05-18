@@ -522,6 +522,49 @@ compile-examples: compile-examples-stage1
 # Run compile-examples for every available compiler stage (0-3).
 compile-examples-all: compile-examples-stage0 compile-examples-stage1 compile-examples-stage2 compile-examples-stage3
 
+# Compile all examples using the committed platform bootstrap seed binary.
+# Detects the current platform (e.g. darwin-arm64, linux-x86_64) and selects bootstrap/compile_driver-<os>-<arch>.
+# Useful for verifying that the committed seed still correctly compiles all examples.
+compile-examples-bootstrap:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+  STAGE="bootstrap/compile_driver-$PLATFORM"
+  if [[ ! -x "./$STAGE" ]]; then
+    echo "ERROR: No seed binary for platform $PLATFORM at $STAGE" >&2
+    echo "       Run: just build-seeds  (or build-seed-macos / build-seed-linux / build-seed-linux-amd64)" >&2
+    exit 1
+  fi
+  echo "==> Using seed: $STAGE ($(file -b "$STAGE"))"
+  STDLIB_ROOT="$(pwd)/stdlib"
+  TMP_LL="/tmp/sprout_ex_$$.ll"
+  TMP_BIN="/tmp/sprout_exbin_$$"
+  TMP_ERR="/tmp/sprout_exerr_$$.txt"
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  total_failed=0
+  for f in examples/*.sprout; do
+    [ -f "$f" ] || continue
+    echo "==> $f"
+    if ! "./$STAGE" --emit-ir "$STDLIB_ROOT" "$f" > "$TMP_LL" 2>"$TMP_ERR"; then
+      echo "  COMPILE FAILED:"; cat "$TMP_ERR"
+      total_failed=$((total_failed + 1)); continue
+    fi
+    if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o "$TMP_BIN" 2>"$TMP_ERR"; then
+      echo "  LINK FAILED:"; cat "$TMP_ERR"
+      total_failed=$((total_failed + 1)); continue
+    fi
+    echo "  OK"
+  done
+  if [ "$total_failed" -gt 0 ]; then
+    echo ""
+    echo "==> $total_failed example(s) FAILED"
+    exit 1
+  fi
+  echo ""
+  echo "==> All examples compiled OK (bootstrap/$PLATFORM)"
+
 # Stage-0 (Python CLI): compile each example to LLVM IR via python3 -m sprout.cli compile.
 compile-examples-stage0:
   #!/usr/bin/env bash

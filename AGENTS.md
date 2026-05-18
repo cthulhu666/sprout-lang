@@ -96,11 +96,12 @@ For coding tasks, work is done only when:
 8. The entire test suite has been run via `mise exec -- just test` with no explicit test filter for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
 9. During implementation, the faster local loop should usually use targeted parallel runs such as `mise exec -- just test tests.test_parser tests.test_typechecker` or `SPROUT_TESTS="tests.test_parser tests.test_typechecker" mise exec -- just test`; use `mise exec -- just test-serial` only when the task specifically requires serial/full-suite debugging earlier.
 10. Docs-only or examples-only changes may skip the full suite when they do not modify `sprout/`, `stdlib/`, test expectations, or the normative spec, but they must still be verified in a way that matches the change, such as re-running documented commands or executing the updated examples.
-11. If sandbox or environment restrictions block required full-suite verification, rerun it with escalated permissions rather than accepting partial verification.
-12. Required verification passes.
-13. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
-14. The changes are committed.
-15. A self-review has been performed before handoff.
+11. After the test suite passes, `mise exec -- just compile-examples-stage1` must also pass (or the failing examples must exactly match the pre-existing known-broken set). Run this after every change that touches `stdlib/`, `sprout/`, the runtime, or any example file.
+12. If sandbox or environment restrictions block required full-suite verification, rerun it with escalated permissions rather than accepting partial verification.
+13. Required verification passes.
+14. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
+15. The changes are committed.
+16. A self-review has been performed before handoff.
 
 ## Directory Conventions
 

@@ -1,4 +1,7 @@
-# One-shot TCP echo server (interpreter runtime builtins).
+module examples.tcp_echo_once
+import stdlib.net (tcp_listen, tcp_accept, tcp_read, tcp_write, tcp_close, tcp_close_listener)
+
+# One-shot TCP echo server using raw stdlib.net handles.
 # Run and connect once to localhost:8081.
 
 fn then_io(effect: Unit !{IO}, value: a) -> a !{IO} =

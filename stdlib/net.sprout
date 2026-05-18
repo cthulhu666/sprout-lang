@@ -4,6 +4,7 @@ import stdlib.bytes (Utf8Error, from_string, to_string)
 
 extern fn tcp_listen(port: Int) -> Int !{IO}
 extern fn tcp_accept(listener: Int) -> Int !{IO}
+extern fn tcp_read(conn: Int) -> String !{IO}
 extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
 extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
@@ -44,21 +45,21 @@ fn tcp_listener_handle(listener: TcpListener) -> Int =
   | TcpListener handle -> handle
 
 # Cost is dominated by the underlying network connect attempt.
-export fn connect(host: String, port: Int) -> TcpResult TcpConnection !{IO} =
+export fn connect(host: String, port: Int) -> Result TcpError TcpConnection !{IO} =
   do
     handle <- tcp_connect(host, port)
     Ok(TcpConnection(handle))
 
 # O(count) once bytes arrive: fills a fresh buffer of the requested size.
-export fn read_exact(conn: TcpConnection, count: Int) -> TcpResult Bytes !{IO} =
+export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError Bytes !{IO} =
   tcp_read_exact(tcp_connection_handle(conn), count)
 
 # O(|payload|): writes the full payload, retrying partial sends as needed.
-export fn write_all(conn: TcpConnection, payload: Bytes) -> TcpResult Int !{IO} =
+export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
   tcp_write_all(tcp_connection_handle(conn), payload)
 
 # O(count): reads bytes, then validates and copies the UTF-8 payload.
-export fn read_exact_utf8(conn: TcpConnection, count: Int) -> TcpResult String !{IO} =
+export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String !{IO} =
   do
     payload <- read_exact(conn, count)
     match to_string(payload) with
@@ -66,7 +67,7 @@ export fn read_exact_utf8(conn: TcpConnection, count: Int) -> TcpResult String !
     | Err utf8_err -> Err(TcpReadFailed(utf8_error_message(utf8_err)))
 
 # O(|payload|): UTF-8 encoding copy plus the full network write.
-export fn write_all_utf8(conn: TcpConnection, payload: String) -> TcpResult Int !{IO} =
+export fn write_all_utf8(conn: TcpConnection, payload: String) -> Result TcpError Int !{IO} =
   write_all(conn, from_string(payload))
 
 export fn close(conn: TcpConnection) -> Unit !{IO} =

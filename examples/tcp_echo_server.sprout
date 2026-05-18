@@ -1,4 +1,7 @@
-# Multi-connection TCP echo server.
+module examples.tcp_echo_server
+import stdlib.net (tcp_echo_serve)
+
+# Multi-connection TCP echo server using stdlib.net.
 # Runtime model is selected by SPROUT_NET_MODEL:
 # - reactor (default)
 # - blocking
