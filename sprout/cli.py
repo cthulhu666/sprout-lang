@@ -68,7 +68,7 @@ def _validate_executable_entrypoint(program: ast.Program, typed: dict[str, str],
         raise TypeCheckError(_missing_entrypoint_message(entry_main_name))
     if len(main_decl.params) != 0:
         raise TypeCheckError(_entrypoint_arity_message(entry_main_name))
-    if main_type != "Unit !{IO}":
+    if main_type not in ("Unit !{IO}", "Int !{IO}"):
         raise TypeCheckError(_entrypoint_type_message(entry_main_name, main_type))
 
 

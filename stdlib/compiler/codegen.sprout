@@ -2562,7 +2562,8 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
                        then "i32 %argc, ptr %argv"
                        else build_fn_params(fn_params(sig), params, 0)
       let emit_name = emitted_fn_name(name)
-      emit_template(em, `define ${fn_ret(sig)} @${emit_name}(${params_str}) {`)
+      let define_ret = if is_entry then "i32" else fn_ret(sig)
+      emit_template(em, `define ${define_ret} @${emit_name}(${params_str}) {`)
       emit_label(em, "entry")
       rooted <- if is_entry then
         do
@@ -2586,7 +2587,13 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
       coerced_result <- if is_entry then result else coerce_value(result, fn_ret(sig), em)
       pop_temp_roots(rooted, em)
       if is_entry then
-        emit_line(em, "  ret i64 0")
+        match typed_ast.typed_expr_type(body) with
+        | types.TConst "Int" ->
+            do
+              exit_reg <- fresh_tmp(em)
+              emit_template(em, `  ${exit_reg} = trunc i64 ${val_ir(result)} to i32`)
+              emit_template(em, `  ret i32 ${exit_reg}`)
+        | _ -> emit_line(em, "  ret i32 0")
       else
         emit_template(em, `  ret ${fn_ret(sig)} ${val_ir(coerced_result)}`)
       emit_line(em, "}")
