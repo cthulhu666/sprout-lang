@@ -852,6 +852,7 @@ Example classification:
 - `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
 - `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
 - `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
+- `examples/string_templates.sprout` is a runnable experimental string-template demo showing templates in both `String` contexts (`string_concat_many` instead of `++` chains) and `StringTemplate` contexts (structured parts passed to a sink).
 
 Load stdlib prelude explicitly for standalone files:
 
@@ -871,6 +872,8 @@ There is no `--with-http-stdlib` CLI compatibility mode.
   `python3 -m sprout.cli run examples/text_demo.sprout "zażółć gęślą jaźń"`
 - Example regex demo:
   `python3 -m sprout.cli run examples/regex_demo.sprout "ticket=AB-42 owner=ada"`
+- Example string templates demo:
+  `python3 -m sprout.cli run examples/string_templates.sprout Ada 3`
 - Sentry issue browser:
   `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token python3 -m sprout.cli run examples/sentry_issue_browser.sprout`
   Interactive terminals use arrow keys or `j`/`k` to move, `Enter` to open details, `r` to refresh, and `q` to quit. Non-interactive runs fall back to the plain issue list.
