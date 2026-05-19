@@ -1314,6 +1314,15 @@ long long read_file(long long path_i) {
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
 }
+long long write_file(long long path_i, long long content_i) {
+  const char *path    = (const char *)(uintptr_t)path_i;
+  const char *content = (const char *)(uintptr_t)content_i;
+  FILE *f = fopen(path, "wb");
+  if (!f) { fprintf(stderr, "write_file: cannot open %s\n", path); exit(1); }
+  fwrite(content, 1, strlen(content), f);
+  fclose(f);
+  return 0LL;
+}
 long long term_read_line(void) {
   char* line = NULL;
   size_t cap = 0;
