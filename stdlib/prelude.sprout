@@ -533,6 +533,14 @@ export fn map(f: a -> b, xs: c a) -> c b where Functor c =
 export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
   fold_values(step, init, xs)
 
+# O(n): fold exposing the 0-based element index to the step function.
+export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Foldable f =
+  match fold(fold_indexed_step(f), (0, init), xs) with
+  | (_, result) -> result
+
+fn fold_indexed_step(f: b -> Int -> a -> b) =
+  \(acc, x) -> match acc with | (i, r) -> (i + 1, f(r, i, x))
+
 export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
   fold(\(acc, x) -> acc ++ x, empty(), xs)
 
