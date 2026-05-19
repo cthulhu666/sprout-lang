@@ -1,5 +1,5 @@
 module stdlib.string
-import stdlib.collections (List, Vec, vec_empty, vec_append, vec_get)
+import stdlib.collections (List, Vec, vec_empty, vec_append)
 
 export fn words(raw: String) -> List String =
   split_words(raw)
@@ -119,16 +119,22 @@ export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
   else if find(raw, sep) < 0 then Nothing
   else Just((take(raw, find(raw, sep)), drop(raw, find(raw, sep) + length(sep))))
 
-# O(total output bytes): repeated `str_concat` grows the accumulated result.
-export fn join_with(separator: String, lines: Vec String) -> String =
-  join_with_from(separator, lines, 0, "")
+fn join_step(sep: String, acc: List String, s: String) -> List String =
+  match acc with
+  | Nil -> Cons(s, Nil)
+  | _   -> Cons(s, Cons(sep, acc))
 
-fn join_with_from(separator: String, lines: Vec String, index: Int, acc: String) -> String =
-  match vec_get(index, lines) with
-  | Just line ->
-      if index == 0 then join_with_from(separator, lines, index + 1, line)
-      else join_with_from(separator, lines, index + 1, str_concat(str_concat(acc, separator), line))
-  | Nothing -> acc
+# O(n + total_bytes): one O(n) fold building reversed interleaved list + O(B) concat.
+export fn join(sep: String, xs: f String) -> String where Foldable f =
+  string_concat_many(list_reverse(fold(\(acc, s) -> join_step(sep, acc, s), Nil, xs)))
+
+export fn repeat(s: String, n: Int) -> String =
+  if n <= 0 then "" else s ++ repeat(s, n - 1)
+
+export fn replace_all(s: String, from: String, to: String) -> String =
+  match split_once(s, from) with
+  | Nothing -> s
+  | Just (before, after) -> before ++ to ++ replace_all(after, from, to)
 
 fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)

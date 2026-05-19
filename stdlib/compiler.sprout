@@ -44,12 +44,12 @@ fn append_nonempty_chunk(chunk: String, chunks: Vec String) -> Vec String =
 export fn session_source(session: CompilerSession) -> String =
   match session with
   | CompilerSession imports declarations ->
-      string.join_with(
+      string.join(
         "\n\n",
         append_nonempty_chunk(
-          string.join_with("\n\n", declarations),
+          string.join("\n\n", declarations),
           append_nonempty_chunk(
-            string.join_with("\n\n", imports),
+            string.join("\n\n", imports),
             vec_append("module app.session", vec_empty())
           )
         )
