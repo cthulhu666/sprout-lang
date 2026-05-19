@@ -127,9 +127,17 @@ v0 execution note:
 
 ## Tooling (mise + just)
 
-This repo uses [`mise`](https://mise.jdx.dev/) to pin tools and [`just`](https://github.com/casey/just) as task runner.
+This repo uses [`mise`](https://mise.jdx.dev/) to pin the Python/`just` toolchain and [`just`](https://github.com/casey/just) as task runner.
 
-1. Install tools from `mise.toml`:
+Prerequisites:
+
+- `mise`, for repository-managed Python and `just`.
+- `clang` on `PATH`, for native builds and stage-1 example compilation.
+- C standard library headers for the active platform. On macOS, install Xcode Command Line Tools or Xcode so `xcrun --show-sdk-path` works; on Linux, install the distro C development package such as `build-essential` or equivalent.
+
+Setup:
+
+1. Install repository-managed tools from `mise.toml`:
    `mise install`
 2. Run commands through mise:
    `mise exec -- just test`
