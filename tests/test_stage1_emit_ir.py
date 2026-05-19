@@ -291,7 +291,7 @@ for _name, _src in SHAPES.items():
 class Stage0SelfCompileIrTests(unittest.TestCase):
     """compile_driver_bin self-compile IR regression tests."""
 
-    def test_recheck_does_not_reinject_template_tostring_dicts(self) -> None:
+    def _self_compile_ir(self) -> str:
         if not NATIVE_BINARY.exists():
             self.skipTest(f"compile_driver_bin not found at {NATIVE_BINARY}")
         compile_driver = ROOT / "stdlib" / "compiler" / "compile_driver.sprout"
@@ -308,11 +308,20 @@ class Stage0SelfCompileIrTests(unittest.TestCase):
                 "stage-0/self-compile: emit-ir exited "
                 f"{result.returncode}\nstderr: {result.stderr[:2000]}"
             )
+        return result.stdout
+
+    def test_recheck_does_not_reinject_template_tostring_dicts(self) -> None:
+        stdout = self._self_compile_ir()
         self.assertNotIn(
             "call i64 @to_string(i64 0, i64 %",
-            result.stdout,
+            stdout,
             msg="lowered TDict evidence was passed as Unit before the user argument",
         )
+
+    def test_sprout_set_argv_abi_matches_emitted_main_call(self) -> None:
+        stdout = self._self_compile_ir()
+        self.assertIn("declare i64 @sprout_set_argv(i32, ptr)", stdout)
+        self.assertIn("call i64 @sprout_set_argv(i32 %argc, ptr %argv)", stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +330,68 @@ class Stage0SelfCompileIrTests(unittest.TestCase):
 
 class Stage1EmitIrTests(unittest.TestCase):
     """compile_driver_bin_stage1 --emit-ir smoke tests (requires just build-stage1)."""
+
+    def test_scan_info_string_append_uses_user_operands_before_witnesses(self) -> None:
+        if not STAGE1_BINARY.exists():
+            self.skipTest(
+                f"compile_driver_bin_stage1 not found at {STAGE1_BINARY}; "
+                "run: just build-stage1"
+            )
+        result = subprocess.run(
+            [
+                str(STAGE1_BINARY),
+                "--phase",
+                "scan-info",
+                str(STDLIB),
+                str(STDLIB / "compiler" / "ast.sprout"),
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stage-1/scan-info exited {result.returncode}\nstderr: {result.stderr[:1000]}",
+        )
+        self.assertIn("module: stdlib.compiler.ast", result.stdout)
+        self.assertIn("export: TypeExpr", result.stdout)
+
+    def test_tuple_where_binding_desugars_without_stage1_parser_abort(self) -> None:
+        if not STAGE1_BINARY.exists():
+            self.skipTest(
+                f"compile_driver_bin_stage1 not found at {STAGE1_BINARY}; "
+                "run: just build-stage1"
+            )
+        source = textwrap.dedent("""\
+            module main
+            fn pair() -> (Int, Int) = (1, 2)
+            fn f() -> Int = a + b
+            where
+              (a, b) = pair()
+            fn main() -> Unit !{IO} = print(f())
+        """)
+        result = subprocess.run(
+            [
+                str(STAGE1_BINARY),
+                "--phase",
+                "check",
+                str(STDLIB),
+                "-",
+            ],
+            input=source,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stage-1/tuple-where exited {result.returncode}\nstderr: {result.stderr[:1000]}",
+        )
+        self.assertIn("main.f : Int", result.stdout)
 
 
 def _make_stage1_test(shape_name: str, source: str):

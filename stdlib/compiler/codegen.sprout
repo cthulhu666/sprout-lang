@@ -152,6 +152,7 @@ export type IrLinesResult (..) =
 # ===========================================================================
 
 fn ll_i64() -> String = "i64"
+fn ll_i32() -> String = "i32"
 fn ll_i1() -> String = "i1"
 fn ll_ptr() -> String = "ptr"
 
@@ -2151,7 +2152,13 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
 
 fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   match args with
-  | Cons _ (Cons left (Cons right _)) ->
+  | Cons (typed_ast.TDict _ _ _) (Cons left (Cons right _)) ->
+      emit_append_operands(left, right, ty, ctx, locals, em)
+  | Cons left (Cons right _) ->
+      emit_append_operands(left, right, ty, ctx, locals, em)
+  | _ -> zero_val(type_to_ll(ty))
+
+fn emit_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
       if is_string_type(typed_ast.typed_expr_type(left)) || is_string_type(ty) then
         do
           lv <- emit_expr(ctx, locals, em, Nothing, left)
@@ -2167,7 +2174,6 @@ fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, 
         emit_regular_direct_call("list_append", FnSig("list_append", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing), Cons(left, Cons(right, Nil)), type_to_ll(ty), ctx, locals, em)
       else
         zero_val(type_to_ll(ty))
-  | _ -> zero_val(type_to_ll(ty))
 
 fn emit_ctor_call_expr(ctor: CtorSig, args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   if n_arity == 0 then
@@ -2799,7 +2805,7 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("sprout_alloc_tuple_blob", FnSig("sprout_alloc_tuple_blob", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   # Runtime startup (uses raw ptr for argv/ctor-name)
   , ("sprout_register_ctor", FnSig("sprout_register_ctor", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  , ("sprout_set_argv", FnSig("sprout_set_argv", Cons(ll_i64(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
+  , ("sprout_set_argv", FnSig("sprout_set_argv", Cons(ll_i32(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
   # String operations — called directly from codegen IR templates, must be declared even without prelude
   , ("str_eq", FnSig("str_eq", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
   , ("str_concat", FnSig("str_concat", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
