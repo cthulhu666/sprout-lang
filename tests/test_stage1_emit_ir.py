@@ -288,6 +288,33 @@ for _name, _src in SHAPES.items():
     setattr(Stage0EmitIrTests, f"test_{_name}", _make_stage0_test(_name, _src))
 
 
+class Stage0SelfCompileIrTests(unittest.TestCase):
+    """compile_driver_bin self-compile IR regression tests."""
+
+    def test_recheck_does_not_reinject_template_tostring_dicts(self) -> None:
+        if not NATIVE_BINARY.exists():
+            self.skipTest(f"compile_driver_bin not found at {NATIVE_BINARY}")
+        compile_driver = ROOT / "stdlib" / "compiler" / "compile_driver.sprout"
+        result = subprocess.run(
+            [str(NATIVE_BINARY), "--emit-ir", str(STDLIB), str(compile_driver)],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(ROOT),
+            timeout=120,
+        )
+        if result.returncode != 0:
+            self.fail(
+                "stage-0/self-compile: emit-ir exited "
+                f"{result.returncode}\nstderr: {result.stderr[:2000]}"
+            )
+        self.assertNotIn(
+            "call i64 @to_string(i64 0, i64 %",
+            result.stdout,
+            msg="lowered TDict evidence was passed as Unit before the user argument",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Stage-1 emit-IR tests (compile_driver_bin_stage1)
 # ---------------------------------------------------------------------------

@@ -1765,8 +1765,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       match decl with
       | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
           pre_scan_fn_decls(rest,
-            register_constrained_fn_markers(name, constraints,
-              dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)),
+            register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env),
             alias_env)
       | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
           match dict_get(name, env) with
@@ -1842,8 +1841,7 @@ fn typecheck_decl(
         | typed_ast.BodyOk typed_body ->
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
-              register_constrained_fn_markers(name, constraints,
-                dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
+              register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env))
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
       match dict_get(name, env) with
       | Just _ ->
@@ -2158,6 +2156,31 @@ fn register_superclass_markers(class_name: String, superclasses: List ast.TypeCo
 
 fn register_constrained_fn_markers(name: String, constraints: List ast.TypeConstraint, env: Dict types.Scheme) -> Dict types.Scheme =
   register_constrained_fn_markers_acc(name, constraints, 0, env)
+
+fn register_fn_decl_scheme(
+  name: String,
+  params: List ast.Param,
+  ret_type_maybe: Maybe ast.TypeExpr,
+  effects_maybe: Maybe (List String),
+  constraints: List ast.TypeConstraint,
+  alias_env: Dict types.Type,
+  env: Dict types.Scheme
+) -> Dict types.Scheme =
+  match constraints with
+  | Nil ->
+      remove_constrained_fn_markers(name, 0,
+        dict_remove("@class:" ++ name,
+          dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
+  | _ ->
+      register_constrained_fn_markers(name, constraints,
+        dict_remove("@class:" ++ name,
+          dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
+
+fn remove_constrained_fn_markers(name: String, idx: Int, env: Dict types.Scheme) -> Dict types.Scheme =
+  match dict_get(key, env) with
+  | Nothing -> env
+  | Just _ -> remove_constrained_fn_markers(name, idx + 1, dict_remove(key, env))
+  where key = "@constrained_" ++ int_to_string(idx) ++ ":" ++ name
 
 fn register_constrained_fn_markers_acc(name: String, constraints: List ast.TypeConstraint, idx: Int, env: Dict types.Scheme) -> Dict types.Scheme =
   match constraints with
