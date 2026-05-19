@@ -765,6 +765,7 @@ instance ToString (Result e a) where ToString e, ToString a {
 extern fn print(val: a) -> Unit !{IO}
 extern fn print_int(n: Int) -> Int !{IO}
 extern fn read_file(path: String) -> String !{IO}
+extern fn write_file(path: String, content: String) -> Unit !{IO}
 extern fn read_lines(path: String) -> List String !{IO}
 extern fn read_int_lines(path: String) -> Vector Int !{IO}
 extern fn argv_get(idx: Int) -> Maybe String !{IO}

@@ -801,6 +801,7 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         "print_int",
         "read_lines",
         "read_file",
+        "write_file",
         "read_int_lines",
         "env_get",
         "argv_get",
