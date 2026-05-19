@@ -1396,7 +1396,8 @@ def _emit_fn(
         emitted_params = ["i32 %argc", "ptr %argv"]
     else:
         emitted_params = params
-    emitter.emit(f"define {sig.ret.text} @{emitted_name}({', '.join(emitted_params)}) {{")
+    define_ret = "i32" if is_entry_main else sig.ret.text
+    emitter.emit(f"define {define_ret} @{emitted_name}({', '.join(emitted_params)}) {{")
     emitter.label("entry")
     rooted = 0
     if is_entry_main:
@@ -1421,8 +1422,13 @@ def _emit_fn(
     if ret.typ != sig.ret:
         raise CodegenError(f"Function {fn.name} body type mismatch in backend: {ret.typ.text} vs {sig.ret.text}")
     _emit_pop_temp_roots(rooted, emitter)
-    if is_entry_main and _is_effectful_unit(fn.return_type, fn.effects):
-        emitter.emit("  ret i64 0")
+    if is_entry_main:
+        if _is_effectful_unit(fn.return_type, fn.effects):
+            emitter.emit("  ret i32 0")
+        else:
+            exit_reg = emitter.tmp()
+            emitter.emit(f"  {exit_reg} = trunc i64 {ret.ir} to i32")
+            emitter.emit(f"  ret i32 {exit_reg}")
     else:
         emitter.emit(f"  ret {ret.typ.text} {ret.ir}")
     emitter.emit("}")
