@@ -91,6 +91,7 @@ Definition of done:
 - [x] `P1` Add better diagnostics for module/import/export errors with source context.
 - [x] `P2` Add formatter/linter baseline.
 - [ ] `P2` Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
+- [ ] `P2` Move `lower_typeclasses` into `run_program` so callers never need to apply it manually: every production call site (cli.py, repl.py, analysis_execution_backend.py) already lowers before calling `run_program`, but tests that call `run_program` directly on an unlowered program silently break whenever new code uses a Foldable/typeclass-constrained function. Verify no caller double-lowers (lowering should be idempotent, but confirm first), then absorb the step inside `run_program` and remove the redundant `lower_typeclasses` calls at each call site.
 - [~] `P1` Execute the staged self-hosting plan in [docs/self-hosting-eliminate-python-backlog.md](./docs/self-hosting-eliminate-python-backlog.md), with the end goal that compiler/tooling ownership moves from Python into Sprout and the Python path becomes compatibility-only before removal.
   - bootstrap lexer (`stdlib/compiler/source`, `token`, `lexer`) is at Python tokenizer parity
   - bootstrap parser AST types and parser exist in `stdlib/compiler/ast`, `parser`
