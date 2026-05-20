@@ -39,7 +39,7 @@ fn main() -> Unit !{IO} =
     let unread = parse_int(raw_unread)
     let template_rendered = template_status_string(user, unread)
     let concat_rendered = concat_status_string(user, unread)
-    print(`Hello, ${user}!`)
+    print(`Hello, ${user} ! `)
     print(`template status: ${template_rendered}`)
     print(`concat equivalent: ${concat_rendered}`)
     emit_buffered(`buffered line: %tmp = add i64 ${unread}, ${unread + 1}`)

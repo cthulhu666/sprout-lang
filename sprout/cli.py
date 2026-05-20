@@ -282,8 +282,8 @@ def cmd_run(
     typed = typecheck_program(lowered)
     _validate_typed_program(lowered)
     _validate_executable_entrypoint(lowered, typed, entry_main_name)
-    run_program(lowered, argv=program_args)
-    return 0
+    exit_code = run_program(lowered, argv=program_args)
+    return exit_code if exit_code is not None else 0
 
 
 def cmd_compile(

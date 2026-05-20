@@ -285,7 +285,7 @@ export fn vec_sum(vec: Vec Int) -> Int =
   vec_fold(add_ints, 0, vec)
 
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
-  vec_fold(\(acc, x) -> acc + f(x), 0, vec)
+  vec_fold(\ (acc, x) -> acc + f(x), 0, vec)
 
 export class Eq a {
   fn eq(left: a, right: a) -> Bool
@@ -550,7 +550,7 @@ export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Folda
   fold_indexed_unwrap(fold(fold_indexed_advance(f), FoldIndexedState(0, init), xs))
 
 export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
-  fold(\(acc, x) -> acc ++ x, empty(), xs)
+  fold(\ (acc, x) -> acc ++ x, empty(), xs)
 
 instance Semigroup String {
   fn append(left: String, right: String) -> String =
@@ -686,7 +686,7 @@ instance Semigroup (Dict v) {
 }
 
 export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
-  vec_from_list(list_reverse_go(fold(\(acc, x) -> Cons(x, acc), Nil, xs), Nil))
+  vec_from_list(list_reverse_go(fold(\ (acc, x) -> Cons(x, acc), Nil, xs), Nil))
 
 export fn dict_from_list(pairs: List (String, v)) -> Dict v =
   dict_from_list_loop(pairs, dict_empty())
@@ -760,7 +760,7 @@ fn list_to_string_go(strs: List String, acc: String) -> String =
 
 instance ToString (List a) where ToString a {
   fn to_string(xs: List a) -> String =
-    "[" ++ list_to_string_go(list_map(\(v) -> to_string(v), xs), "") ++ "]"
+    "[" ++ list_to_string_go(list_map(\ (v) -> to_string(v), xs), "") ++ "]"
 }
 
 instance ToString (Result e a) where ToString e, ToString a {

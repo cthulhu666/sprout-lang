@@ -20,7 +20,7 @@ class CodegenLlvmTests(CodegenTestCase):
         ir = compile_to_llvm(program)
 
         self.assertIn("define i64 @fact(i64 %n)", ir)
-        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
+        self.assertIn("define i32 @main(i32 %argc, ptr %argv)", ir)
         self.assertIn("icmp eq i64", ir)
         self.assertIn("call i64 @fact", ir)
 
@@ -129,7 +129,7 @@ class CodegenLlvmTests(CodegenTestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("define i64 @pair_sum(i64 %left, i64 %right)", ir)
-        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
+        self.assertIn("define i32 @main(i32 %argc, ptr %argv)", ir)
 
     def test_compile_int_range_helpers_to_llvm(self) -> None:
         src = """
@@ -151,7 +151,7 @@ class CodegenLlvmTests(CodegenTestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
+        self.assertIn("define i32 @main(i32 %argc, ptr %argv)", ir)
         self.assertIn("call i64 @print_str(ptr", ir)
 
     def test_compile_adt_match(self) -> None:
@@ -236,7 +236,7 @@ class CodegenLlvmTests(CodegenTestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        main_ir = ir.split("define i64 @main", 1)[1]
+        main_ir = ir.split("define i32 @main", 1)[1]
         self.assertIn("call i64 @sprout_make1(i64 0, i64 42)", main_ir)
         self.assertIn("call i64 @sprout_nothing(i64 1)", main_ir)
         self.assertNotIn("call i64 @sprout_tag", main_ir)
@@ -261,7 +261,7 @@ class CodegenLlvmTests(CodegenTestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        main_ir = ir.split("define i64 @main", 1)[1]
+        main_ir = ir.split("define i32 @main", 1)[1]
         self.assertIn("call i64 @classify(i1 1)", main_ir)
         self.assertIn("call i64 @sprout_tag", main_ir)
 
@@ -279,7 +279,7 @@ class CodegenLlvmTests(CodegenTestCase):
         program = parse(src)
         typecheck_program(program)
         ir = compile_to_llvm(program)
-        main_ir = ir.split("define i64 @main", 1)[1]
+        main_ir = ir.split("define i32 @main", 1)[1]
         self.assertNotIn("call i64 @sprout_make1(i64 0, i64 42)", main_ir)
         self.assertNotIn("call i64 @sprout_tag", main_ir)
         self.assertNotIn("call i64 @sprout_field", main_ir)
@@ -576,7 +576,7 @@ class CodegenLlvmTests(CodegenTestCase):
         typecheck_program(program)
         ir = compile_to_llvm(program)
         self.assertIn("icmp eq i64", ir)
-        self.assertIn("ret i64 0", ir)
+        self.assertIn("ret i32 0", ir)
 
     def test_compile_bytes_builtins_to_llvm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -830,7 +830,7 @@ class CodegenLlvmTests(CodegenTestCase):
         self.assertGreaterEqual(ir.count("call i64 @sprout_register_ctor(i64 14"), 2)
         self.assertIn("declare i64 @argv_get(i64)", ir)
         self.assertIn("declare i64 @sprout_set_argv(i32, ptr)", ir)
-        self.assertIn("define i64 @main(i32 %argc, ptr %argv)", ir)
+        self.assertIn("define i32 @main(i32 %argc, ptr %argv)", ir)
         self.assertIn("declare i64 @sprout_make3(i64, i64, i64, i64)", ir)
         self.assertIn("call i64 @sprout_field(i64 %resp, i64 2)", ir)
 

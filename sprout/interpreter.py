@@ -630,7 +630,7 @@ def match_pattern(pattern: ast.Pattern, value: object) -> dict[str, object] | No
     return None
 
 
-def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[str] | None = None) -> None:
+def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[str] | None = None) -> int | None:
     import sys as _sys
     # The bootstrap typechecker is deeply recursive when interpreted; give it
     # more headroom than the default 1000 frames.
@@ -2258,6 +2258,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if isinstance(decl, ast.LetDecl):
             env.set(decl.name, eval_expr(decl.value, env))
 
+    exit_code: int | None = None
     try:
         entry_name = "main" if "main" in env.values else next(
             (name for name in env.values if name.endswith(".main")),
@@ -2270,8 +2271,11 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
                 if isinstance(result, PartialFunction):
                     total_arity = len(result.args) + result.remaining_arity
                     raise rt_error(f"Function {main.name} expects {total_arity} args, got 0", main)
+                if isinstance(result, int):
+                    exit_code = result
     finally:
         for conn in connections.values():
             conn.close()
         for listener in listeners.values():
             listener.close()
+    return exit_code

@@ -693,7 +693,7 @@ fn emit_str_ptr(em: Emitter, s: String) -> Value !{IO} =
   do
     (gname, len) <- string_const(em, s)
     tmp <- fresh_tmp(em)
-    emit_template(em, `  ${tmp} = getelementptr inbounds [${int_to_string (len)} x i8], ptr ${gname}, i64 0, i64 0`)
+    emit_template(em, tmp = getelementptr inbounds[int_to_string(len) x i8], ptr gname, i64 0, i64 0)
     Value(ll_ptr(), tmp, Nothing, Nothing, Nothing)
 
 # ===========================================================================
@@ -703,9 +703,9 @@ fn emit_str_ptr(em: Emitter, s: String) -> Value !{IO} =
 fn sizeof_struct(struct_type: String, em: Emitter) -> String !{IO} =
   do
     size_ptr <- fresh_tmp(em)
-    emit_template(em, `  ${size_ptr} = getelementptr ${struct_type}, ptr null, i32 1`)
+    emit_template(em, size_ptr = getelementptr struct_type, ptr null, i32 1)
     size <- fresh_tmp(em)
-    emit_template(em, `  ${size} = ptrtoint ptr ${size_ptr} to i64`)
+    emit_template(em, size = ptrtoint ptr size_ptr to i64)
     size
 
 # ===========================================================================
@@ -718,28 +718,28 @@ fn push_temp_root(v: Value, em: Emitter) -> Int !{IO} =
   if val_is_i64(v) then
     do
       slot <- fresh_tmp(em)
-      emit_template(em, `  ${slot} = alloca i64`)
-      emit_template(em, `  store i64 ${val_ir (v)}, ptr ${slot}`)
+      emit_template(em, slot = alloca i64)
+      emit_template(em, store i64 val_ir (v), ptr slot)
       reg <- fresh_tmp(em)
-      emit_template(em, `  ${reg} = call i64 @sprout_gc_push_i64_root(ptr ${slot})`)
+      emit_template(em,   reg = call i64 @sprout_gc_push_i64_root(ptr slot))
       1
   else if val_is_ptr(v) then
     do
       slot <- fresh_tmp(em)
-      emit_template(em, `  ${slot} = alloca ptr`)
-      emit_template(em, `  store ptr ${val_ir (v)}, ptr ${slot}`)
+      emit_template(em, slot = alloca ptr)
+      emit_template(em, store ptr val_ir (v), ptr slot)
       reg <- fresh_tmp(em)
-      emit_template(em, `  ${reg} = call i64 @sprout_gc_push_ptr_root(ptr ${slot})`)
+      emit_template(em,   reg = call i64 @sprout_gc_push_ptr_root(ptr slot))
       1
   else if val_is_tuple(v) then
     do
       let ll = val_ll(v)
       slot <- fresh_tmp(em)
-      emit_template(em, `  ${slot} = alloca ${ll}`)
-      emit_template(em, `  store ${ll} ${val_ir (v)}, ptr ${slot}`)
+      emit_template(em, slot = alloca ll)
+      emit_template(em, store ll val_ir (v), ptr slot)
       sz <- sizeof_struct(ll, em)
       reg <- fresh_tmp(em)
-      emit_template(em, `  ${reg} = call i64 @sprout_gc_push_scan_root(ptr ${slot}, i64 ${sz})`)
+      emit_template(em,   reg = call i64 @sprout_gc_push_scan_root(ptr slot, i64 sz))
       1
   else
     0  # i1 (Bool) — never a GC-managed heap pointer
@@ -749,7 +749,7 @@ fn pop_temp_roots(count: Int, em: Emitter) -> Unit !{IO} =
   else
     do
       reg <- fresh_tmp(em)
-      emit_template(em, `  ${reg} = call i64 @sprout_gc_pop_roots(i64 ${int_to_string (count)})`)
+      emit_template(em,   reg = call i64 @sprout_gc_pop_roots(i64 int_to_string (count)))
 
 # Push temp roots for each value in the list; return total root count.
 fn push_roots_list(vals: List Value, em: Emitter) -> Int !{IO} =
@@ -771,12 +771,12 @@ fn pack_to_i64(v: Value, em: Emitter) -> String !{IO} =
   else if val_is_i1(v) then
     do
       w <- fresh_tmp(em)
-      emit_template(em, `  ${w} = zext i1 ${val_ir (v)} to i64`)
+      emit_template(em, w = zext i1 val_ir (v) to i64)
       w
   else if val_is_ptr(v) then
     do
       w <- fresh_tmp(em)
-      emit_template(em, `  ${w} = ptrtoint ptr ${val_ir (v)} to i64`)
+      emit_template(em, w = ptrtoint ptr val_ir (v) to i64)
       w
   else if val_is_tuple(v) then
     do
@@ -784,10 +784,10 @@ fn pack_to_i64(v: Value, em: Emitter) -> String !{IO} =
       rooted <- push_temp_root(v, em)
       sz <- sizeof_struct(ll, em)
       raw_i64 <- fresh_tmp(em)
-      emit_template(em, `  ${raw_i64} = call i64 @sprout_alloc_tuple_blob(i64 ${sz})`)
+      emit_template(em,   raw_i64 = call i64 @sprout_alloc_tuple_blob(i64 sz))
       raw_ptr <- fresh_tmp(em)
-      emit_template(em, `  ${raw_ptr} = inttoptr i64 ${raw_i64} to ptr`)
-      emit_template(em, `  store ${ll} ${val_ir (v)}, ptr ${raw_ptr}`)
+      emit_template(em, raw_ptr = inttoptr i64 raw_i64 to ptr)
+      emit_template(em, store ll val_ir (v), ptr raw_ptr)
       pop_temp_roots(rooted, em)
       raw_i64
   else
@@ -805,19 +805,19 @@ fn coerce_value(v: Value, target: String, em: Emitter) -> Value !{IO} =
   else if val_ll(v) == ll_i64() && str_starts_with(target, "{ ") then
     do
       ptr <- fresh_tmp(em)
-      emit_template(em, `  ${ptr} = inttoptr i64 ${val_ir (v)} to ptr`)
+      emit_template(em, ptr = inttoptr i64 val_ir (v) to ptr)
       out <- fresh_tmp(em)
-      emit_template(em, `  ${out} = load ${target}, ptr ${ptr}`)
+      emit_template(em, out = load target, ptr ptr)
       val_with_tuple_items(val_make(target, out), tuple_items_from_ll(target))
   else if val_ll(v) == ll_i64() && target == ll_i1() then
     do
       out <- fresh_tmp(em)
-      emit_template(em, `  ${out} = trunc i64 ${val_ir (v)} to i1`)
+      emit_template(em, out = trunc i64 val_ir (v) to i1)
       val_make(ll_i1(), out)
   else if val_ll(v) == ll_i64() && target == ll_ptr() then
     do
       out <- fresh_tmp(em)
-      emit_template(em, `  ${out} = inttoptr i64 ${val_ir (v)} to ptr`)
+      emit_template(em, out = inttoptr i64 val_ir (v) to ptr)
       val_make(ll_ptr(), out)
   else
     v  # best-effort fallback
@@ -882,32 +882,32 @@ fn emit_pattern_test(pat: ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) ->
   | ast.IntPattern n _ ->
       do
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = icmp eq i64 ${val_ir (scrut)}, ${int_to_string (n)}`)
+        emit_template(em, tmp = icmp eq i64 val_ir (scrut), int_to_string(n))
         val_make(ll_i1(), tmp)
   | ast.BoolPattern b _ ->
       do
         let lit = if b then "1" else "0"
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = icmp eq i1 ${val_ir (scrut)}, ${lit}`)
+        emit_template(em, tmp = icmp eq i1 val_ir (scrut), lit)
         val_make(ll_i1(), tmp)
   | ast.StringPattern s _ ->
       do
         lit_v <- emit_str_ptr(em, s)
         scrut_ptr <- coerce_value(scrut, ll_ptr(), em)
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = call i1 @str_eq(ptr ${val_ir (scrut_ptr)}, ptr ${val_ir (lit_v)})`)
+        emit_template(em,   tmp = call i1 @str_eq(ptr val_ir (scrut_ptr), ptr val_ir (lit_v)))
         val_make(ll_i1(), tmp)
   | ast.CharPattern ch _ ->
       do
         lit_v <- emit_str_ptr(em, char_to_string(ch))
         scrut_ptr <- coerce_value(scrut, ll_ptr(), em)
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = call i1 @str_eq(ptr ${val_ir (scrut_ptr)}, ptr ${val_ir (lit_v)})`)
+        emit_template(em,   tmp = call i1 @str_eq(ptr val_ir (scrut_ptr), ptr val_ir (lit_v)))
         val_make(ll_i1(), tmp)
   | ast.UnitPattern _ ->
       do
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = icmp eq i64 ${val_ir (scrut)}, 0`)
+        emit_template(em, tmp = icmp eq i64 val_ir (scrut), 0)
         val_make(ll_i1(), tmp)
   | ast.TuplePattern items _ ->
       emit_tuple_pattern_test(items, scrut, ctx, em, 0, val_make(ll_i1(), "1"))
@@ -922,7 +922,7 @@ fn emit_tuple_pattern_test(items: List ast.Pattern, scrut: Value, ctx: CgCtx, em
         field <- emit_tuple_field_by_idx(scrut, idx, em)
         test <- emit_pattern_test(item, field, ctx, em)
         and_t <- fresh_tmp(em)
-        emit_template(em, `  ${and_t} = and i1 ${val_ir (acc)}, ${val_ir (test)}`)
+        emit_template(em, and_t = and i1 val_ir (acc), val_ir(test))
         emit_tuple_pattern_test(rest, scrut, ctx, em, idx + 1, val_make(ll_i1(), and_t))
 
 fn emit_ctor_pattern_test(name: String, args: List ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) -> Value !{IO} =
@@ -934,9 +934,9 @@ fn emit_ctor_pattern_test(name: String, args: List ast.Pattern, scrut: Value, ct
       | Just ctor ->
           do
             tag_t <- fresh_tmp(em)
-            emit_template(em, `  ${tag_t} = call i64 @sprout_tag(i64 ${val_ir (scrut)})`)
+            emit_template(em,   tag_t = call i64 @sprout_tag(i64 val_ir (scrut)))
             eq_t <- fresh_tmp(em)
-            emit_template(em, `  ${eq_t} = icmp eq i64 ${tag_t}, ${int_to_string (ctor_tag(ctor))}`)
+            emit_template(em, eq_t = icmp eq i64 tag_t, int_to_string(ctor_tag(ctor)))
             match args with
             | Nil -> val_make(ll_i1(), eq_t)
             | _ -> emit_ctor_args_test(eq_t, scrut, ctor, args, ctx, em)
@@ -946,15 +946,15 @@ fn emit_ctor_args_test(eq_tag: String, handle: Value, ctor: CtorSig, args: List 
     chk_lbl <- fresh_block(em, "ctor_chk")
     miss_lbl <- fresh_block(em, "ctor_miss")
     done_lbl <- fresh_block(em, "ctor_done")
-    emit_template(em, `  br i1 ${eq_tag}, label %${chk_lbl}, label %${miss_lbl}`)
+    emit_template(em,   br i1 eq_tag, label %chk_lbl, label %miss_lbl)
     emit_label(em, chk_lbl)
     last_ok <- emit_ctor_field_tests(args, ctor_arg_lls(ctor), handle, ctx, em, 0, miss_lbl)
-    emit_template(em, `  br label %${done_lbl}`)
+    emit_template(em,   br label %done_lbl)
     emit_label(em, miss_lbl)
-    emit_template(em, `  br label %${done_lbl}`)
+    emit_template(em,   br label %done_lbl)
     emit_label(em, done_lbl)
     phi <- fresh_tmp(em)
-    emit_template(em, `  ${phi} = phi i1 [ 1, %${last_ok} ], [ 0, %${miss_lbl} ]`)
+    emit_template(em,   phi = phi i1 [ 1, %last_ok ], [ 0, %miss_lbl ])
     val_make(ll_i1(), phi)
 
 fn emit_ctor_field_tests(args: List ast.Pattern, arg_lls: List String, handle: Value, ctx: CgCtx, em: Emitter, idx: Int, miss_lbl: String) -> String !{IO} =
@@ -974,7 +974,7 @@ fn emit_ctor_field_tests(args: List ast.Pattern, arg_lls: List String, handle: V
             field <- emit_ctor_field(val_ir(handle), idx, arg_ll, em)
             test <- emit_pattern_test(arg, field, ctx, em)
             next_lbl <- fresh_block(em, "ctor_next")
-            emit_template(em, `  br i1 ${val_ir (test)}, label %${next_lbl}, label %${miss_lbl}`)
+            emit_template(em,   br i1 val_ir (test), label %next_lbl, label %miss_lbl)
             emit_label(em, next_lbl)
             emit_ctor_field_tests(rest_args, rest_lls, handle, ctx, em, idx + 1, miss_lbl)
 
@@ -982,17 +982,17 @@ fn emit_ctor_field_tests(args: List ast.Pattern, arg_lls: List String, handle: V
 fn emit_ctor_field(handle_ir: String, idx: Int, ll: String, em: Emitter) -> Value !{IO} =
   do
     raw <- fresh_tmp(em)
-    emit_template(em, `  ${raw} = call i64 @sprout_field(i64 ${handle_ir}, i64 ${int_to_string (idx)})`)
+    emit_template(em,   raw = call i64 @sprout_field(i64 handle_ir, i64 int_to_string (idx)))
     if ll == ll_i64() then val_make(ll_i64(), raw)
     else if ll == ll_i1() then
       do
         out <- fresh_tmp(em)
-        emit_template(em, `  ${out} = trunc i64 ${raw} to i1`)
+        emit_template(em, out = trunc i64 raw to i1)
         val_make(ll_i1(), out)
     else if ll == ll_ptr() then
       do
         out <- fresh_tmp(em)
-        emit_template(em, `  ${out} = inttoptr i64 ${raw} to ptr`)
+        emit_template(em, out = inttoptr i64 raw to ptr)
         val_make(ll_ptr(), out)
     else
       val_make(ll_i64(), raw)  # struct fields stay as i64 (packed blob)
@@ -1006,11 +1006,11 @@ fn emit_tuple_field_by_idx(scrut: Value, idx: Int, em: Emitter) -> Value !{IO} =
         # Scrut is an i64 packed tuple blob — use getelementptr
         do
           ptr <- fresh_tmp(em)
-          emit_template(em, `  ${ptr} = inttoptr i64 ${val_ir (scrut)} to ptr`)
+          emit_template(em, ptr = inttoptr i64 val_ir (scrut) to ptr)
           gep <- fresh_tmp(em)
-          emit_template(em, `  ${gep} = getelementptr i64, ptr ${ptr}, i64 ${int_to_string (idx)}`)
+          emit_template(em, gep = getelementptr i64, ptr ptr, i64 int_to_string (idx))
           out <- fresh_tmp(em)
-          emit_template(em, `  ${out} = load i64, ptr ${gep}`)
+          emit_template(em, out = load i64, ptr gep)
           val_make(ll_i64(), out)
     | Just items ->
         match list_nth(items, idx) with
@@ -1018,7 +1018,7 @@ fn emit_tuple_field_by_idx(scrut: Value, idx: Int, em: Emitter) -> Value !{IO} =
         | Just item_ll ->
             do
               out <- fresh_tmp(em)
-              emit_template(em, `  ${out} = extractvalue ${ll} ${val_ir (scrut)}, ${int_to_string (idx)}`)
+              emit_template(em, out = extractvalue ll val_ir (scrut), int_to_string(idx))
               val_with_tuple_items(val_make(item_ll, out), tuple_items_from_ll(item_ll))
 
 # Emit pattern bindings.  Returns (new_bindings_as_list, gc_roots_pushed).
@@ -1082,10 +1082,10 @@ fn list_nth(xs: List String, n: Int) -> Maybe String =
   | Cons h t -> if n == 0 then Just(h) else list_nth(t, n - 1)
 
 fn list_length(xs: List String) -> Int =
-  list_fold(\(acc, _) -> acc + 1, 0, xs)
+  list_fold(\ (acc, _) -> acc + 1, 0, xs)
 
 fn list_length_vals(xs: List Value) -> Int =
-  list_fold(\(acc, _) -> acc + 1, 0, xs)
+  list_fold(\ (acc, _) -> acc + 1, 0, xs)
 
 # ===========================================================================
 # Section 11 — Free variable collection
@@ -1118,7 +1118,7 @@ fn collect_free_vars(e: typed_ast.TypedExpr, bound: Set, acc: List String, seen:
       match collect_free_vars(callee, bound, acc, seen) with
       | (a1, s1) -> collect_free_vars_list(args, bound, a1, s1)
   | typed_ast.TLambda params body _ _ ->
-      collect_free_vars(body, list_fold(\(s, p) -> match p with | ast.Param n _ -> set_insert(n, s), bound, params), acc, seen)
+      collect_free_vars(body, list_fold(\ (s, p) -> match p with | ast.Param n _ -> set_insert(n, s), bound, params), acc, seen)
   | typed_ast.TBinary _ l r _ _ ->
       match collect_free_vars(l, bound, acc, seen) with
       | (a1, s1) -> collect_free_vars(r, bound, a1, s1)
@@ -1145,7 +1145,7 @@ fn collect_free_vars_branches(branches: List typed_ast.TypedMatchBranch, bound: 
   match branches with
   | Nil -> (acc, seen)
   | Cons (typed_ast.TypedMatchBranch pat body) rest ->
-      match collect_free_vars(body, list_fold(\(s, n) -> set_insert(n, s), bound, pattern_bound_names(pat)), acc, seen) with
+      match collect_free_vars(body, list_fold(\ (s, n) -> set_insert(n, s), bound, pattern_bound_names(pat)), acc, seen) with
       | (a1, s1) -> collect_free_vars_branches(rest, bound, a1, s1)
 
 fn collect_free_vars_steps(steps: List typed_ast.TypedDoStep, bound: Set, acc: List String, seen: Set) -> (List String, Set) =
@@ -1161,7 +1161,7 @@ fn collect_free_vars_steps(steps: List typed_ast.TypedDoStep, bound: Set, acc: L
           | (a1, s1) -> collect_free_vars_steps(rest, set_insert(name, bound), a1, s1)
       | typed_ast.TDoBindStep pat e ->
           match collect_free_vars(e, bound, acc, seen) with
-          | (a1, s1) -> collect_free_vars_steps(rest, list_fold(\(s, n) -> set_insert(n, s), bound, pattern_bound_names(pat)), a1, s1)
+          | (a1, s1) -> collect_free_vars_steps(rest, list_fold(\ (s, n) -> set_insert(n, s), bound, pattern_bound_names(pat)), a1, s1)
 
 # ===========================================================================
 # Section 12 — Closure operations
@@ -1172,12 +1172,12 @@ fn emit_make_closure(code_ir: String, captures: List Value, em: Emitter) -> Valu
     rooted <- push_roots_list(captures, em)
     let n_slots = list_length_vals(captures) + 1
     sz <- fresh_tmp(em)
-    emit_template(em, `  ${sz} = add i64 ${int_to_string (n_slots * 8)}, 0`)
+    emit_template(em, sz = add i64 int_to_string (n_slots * 8), 0)
     raw_i64 <- fresh_tmp(em)
-    emit_template(em, `  ${raw_i64} = call i64 @sprout_alloc_closure_env(i64 ${sz})`)
+    emit_template(em,   raw_i64 = call i64 @sprout_alloc_closure_env(i64 sz))
     raw <- fresh_tmp(em)
-    emit_template(em, `  ${raw} = inttoptr i64 ${raw_i64} to ptr`)
-    emit_template(em, `  store ptr ${code_ir}, ptr ${raw}`)
+    emit_template(em, raw = inttoptr i64 raw_i64 to ptr)
+    emit_template(em, store ptr code_ir, ptr raw)
     store_captures(captures, raw, em, 1)
     pop_temp_roots(rooted, em)
     val_make(ll_ptr(), raw)
@@ -1189,17 +1189,17 @@ fn store_captures(caps: List Value, raw: String, em: Emitter, idx: Int) -> Unit 
       do
         packed <- pack_to_i64(cap, em)
         slot <- fresh_tmp(em)
-        emit_template(em, `  ${slot} = getelementptr i64, ptr ${raw}, i64 ${int_to_string (idx)}`)
-        emit_template(em, `  store i64 ${packed}, ptr ${slot}`)
+        emit_template(em, slot = getelementptr i64, ptr raw, i64 int_to_string (idx))
+        emit_template(em, store i64 packed, ptr slot)
         store_captures(rest, raw, em, idx + 1)
 
 fn emit_closure_call(callee: Value, sig: CallSig, args: List Value, em: Emitter) -> Value !{IO} =
   do
     code <- fresh_tmp(em)
-    emit_template(em, `  ${code} = load ptr, ptr ${val_ir (callee)}`)
+    emit_template(em, code = load ptr, ptr val_ir (callee))
     args_ir_str <- build_closure_args_ir(callee, sig_params(sig), args, em)
     out <- fresh_tmp(em)
-    emit_template(em, `  ${out} = call ${sig_ret (sig)} ${code}(${args_ir_str})`)
+    emit_template(em, out = call sig_ret (sig) code(args_ir_str))
     val_with_call_sig(val_for_ll(sig_ret(sig), out), sig_ret_sig(sig))
 
 fn build_closure_args_ir(callee: Value, param_lls: List String, args: List Value, em: Emitter) -> String !{IO} =
@@ -1339,7 +1339,7 @@ fn emit_lambda_helper(lam_name: String, params: List ast.Param, wire_lls: List S
     saved <- save_body(em)
     let params_str = build_wrapper_params(wire_lls, 0)
     emit_line(em, "; " ++ lam_name ++ " (in " ++ ctx_scope(ctx) ++ ")")
-    emit_template(em, `define ${ret_ll} @${lam_name}(ptr %env${params_str}) {`)
+    emit_template(em, define ret_ll @lam_name(ptr %envparams_str) {)
     emit_label(em, "entry")
     env_val <- push_temp_root(val_make(ll_ptr(), "%env"), em)
     (cap_locals, cap_rooted) <- load_captures(captures, capture_lls, em, 1)
@@ -1349,7 +1349,7 @@ fn emit_lambda_helper(lam_name: String, params: List ast.Param, wire_lls: List S
     body_val <- emit_expr(ctx, lam_locals, em, Nothing, body)
     coerced_body <- coerce_value(body_val, ret_ll, em)
     pop_temp_roots(total_rooted, em)
-    emit_template(em, `  ret ${ret_ll} ${val_ir (coerced_body)}`)
+    emit_template(em, ret ret_ll val_ir (coerced_body))
     emit_line(em, "}")
     fn_lines <- flush_body(em)
     emit_defs_list(fn_lines, em)
@@ -1365,9 +1365,9 @@ fn load_captures(names: List String, lls: List String, em: Emitter, idx: Int) ->
       | Cons ll rest_lls ->
           do
             slot <- fresh_tmp(em)
-            emit_template(em, `  ${slot} = getelementptr i64, ptr %env, i64 ${int_to_string (idx)}`)
+            emit_template(em,   slot = getelementptr i64, ptr %env, i64 int_to_string (idx))
             raw <- fresh_tmp(em)
-            emit_template(em, `  ${raw} = load i64, ptr ${slot}`)
+            emit_template(em, raw = load i64, ptr slot)
             v <- coerce_value(val_make(ll_i64(), raw), ll, em)
             rooted <- push_temp_root(v, em)
             (rest_binds, rest_rooted) <- load_captures(rest_names, rest_lls, em, idx + 1)
@@ -1465,9 +1465,9 @@ fn emit_tco_back_edge(tco: TcoCtx, new_args: List Value, extra_roots: Int, em: E
     store_tco_args(tco_slots(tco), new_args, em)
     let sp = tco_sp_save(tco)
     if str_len(sp) > 0 then
-      emit_template(em, `  call void @llvm.stackrestore(ptr ${sp})`)
+      emit_template(em,   call void @llvm.stackrestore(ptr sp))
     else ()
-    emit_template(em, `  br label %${tco_loop_lbl (tco)}`)
+    emit_template(em,   br label %tco_loop_lbl (tco))
 
 fn emit_pending_tco(tco_ctx: Maybe TcoCtx, v: Value, em: Emitter) -> Bool !{IO} =
   match tco_ctx with
@@ -1494,7 +1494,7 @@ fn store_tco_args(slots: List (String, String), vals: List Value, em: Emitter) -
       | Cons v rest_vals ->
           do
             cv <- coerce_value(v, ll, em)
-            emit_template(em, `  store ${ll} ${val_ir (cv)}, ptr ${slot_ir}`)
+            emit_template(em, store ll val_ir (cv), ptr slot_ir)
             store_tco_args(rest_slots, rest_vals, em)
 
 # ===========================================================================
@@ -1577,7 +1577,7 @@ fn build_struct_acc(tuple_ll_: String, items: List (Value, String), em: Emitter,
   | Cons (v, ll) rest ->
       do
         next <- fresh_tmp(em)
-        emit_template(em, `  ${next} = insertvalue ${tuple_ll_} ${current}, ${ll} ${val_ir (v)}, ${int_to_string (idx)}`)
+        emit_template(em, next = insertvalue tuple_ll_ current, ll val_ir (v), int_to_string(idx))
         build_struct_acc(tuple_ll_, rest, em, next, idx + 1)
 
 fn emit_var(name: String, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
@@ -1600,7 +1600,7 @@ fn emit_var(name: String, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Em
           | Just gi ->
               do
                 tmp <- fresh_tmp(em)
-                emit_template(em, `  ${tmp} = load ${gi_ll (gi)}, ptr @${name}`)
+                emit_template(em,   tmp = load gi_ll (gi), ptr @name)
                 val_with_call_sig(val_make(gi_ll(gi), tmp), gi_call_sig(gi))
           | Nothing ->
               match dict_get(name, ctx_ctor_sigs(ctx)) with
@@ -1610,7 +1610,7 @@ fn emit_var(name: String, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Em
                     do
                       tmp <- fresh_tmp(em)
                       let ctor_fn = if is_nothing_ctor(name) then "@sprout_nothing" else "@sprout_make0"
-                      emit_template(em, `  ${tmp} = call i64 ${ctor_fn}(i64 ${int_to_string (ctor_tag(ctor))})`)
+                      emit_template(em, tmp = call i64 ctor_fn (i64 int_to_string (ctor_tag(ctor))))
                       val_make(ll_i64(), tmp)
                   else
                     # Ctor applied to zero args but has arity > 0 → need partial closure
@@ -1655,7 +1655,7 @@ fn emit_ctor_closure_wrapper(wrap_name: String, ctor: CtorSig, em: Emitter) -> U
     let fake_fn_sig = FnSig(wrap_name, lls, ll_i64(), Nothing)
     saved <- save_body(em)
     let params_str = build_wrapper_params(lls, 0)
-    emit_template(em, `define i64 @${wrap_name}(ptr %env${params_str}) {`)
+    emit_template(em, define i64 @wrap_name(ptr %envparams_str) {)
     emit_label(em, "entry")
     let tag_str = int_to_string(ctor_tag(ctor))
     let n = list_length(lls)
@@ -1672,8 +1672,8 @@ fn pack_and_call_ctor_wrapper(lls: List String, n: Int, tag_str: String, em: Emi
     let args_ir = join_comma(list_map(\p -> "i64 " ++ p, pack_strs))
     ret <- fresh_tmp(em)
     let sep = if args_ir == "" then "" else ", "
-    emit_template(em, `  ${ret} = call i64 @sprout_make${int_to_string (n)}(i64 ${tag_str}${sep}${args_ir})`)
-    emit_template(em, `  ret i64 ${ret}`)
+    emit_template(em,   ret = call i64 @sprout_makeint_to_string (n)(i64 tag_strsepargs_ir))
+    emit_template(em, ret i64 ret)
 
 fn pack_args_from_env(lls: List String, idx: Int, em: Emitter) -> List String !{IO} =
   match lls with
@@ -1686,7 +1686,7 @@ fn pack_args_from_env(lls: List String, idx: Int, em: Emitter) -> List String !{
         Cons(packed, rest_packed)
 
 fn lambda_free_names(body: typed_ast.TypedExpr, params: List ast.Param) -> List String =
-  match collect_free_vars(body, list_fold(\(s, p) -> match p with | ast.Param n _ -> set_insert(n, s), set_empty(), params), Nil, set_empty()) with
+  match collect_free_vars(body, list_fold(\ (s, p) -> match p with | ast.Param n _ -> set_insert(n, s), set_empty(), params), Nil, set_empty()) with
   | (names, _) -> names
 
 fn emit_lambda_expr(params: List ast.Param, body: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
@@ -1740,7 +1740,7 @@ fn extract_ret_type(ty: types.Type, n: Int) -> types.Type =
     | _ -> ty
 
 fn list_length_params(params: List ast.Param) -> Int =
-  list_fold(\(acc, _) -> acc + 1, 0, params)
+  list_fold(\ (acc, _) -> acc + 1, 0, params)
 
 fn emit_unary(op: String, operand: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   do
@@ -1748,12 +1748,12 @@ fn emit_unary(op: String, operand: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict
     if op == "-" then
       do
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = sub i64 0, ${val_ir (v)}`)
+        emit_template(em, tmp = sub i64 0, val_ir(v))
         val_make(ll_i64(), tmp)
     else if op == "!" then
       do
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = xor i1 ${val_ir (v)}, true`)
+        emit_template(em, tmp = xor i1 val_ir (v), true)
         val_make(ll_i1(), tmp)
     else
       v
@@ -1763,7 +1763,7 @@ fn emit_range(start: typed_ast.TypedExpr, end_: typed_ast.TypedExpr, ctx: CgCtx,
     sv <- emit_expr(ctx, locals, em, Nothing, start)
     ev <- emit_expr(ctx, locals, em, Nothing, end_)
     tmp <- fresh_tmp(em)
-    emit_template(em, `  ${tmp} = call i64 @int_range(i64 ${val_ir (sv)}, i64 ${val_ir (ev)})`)
+    emit_template(em,   tmp = call i64 @int_range(i64 val_ir (sv), i64 val_ir (ev)))
     val_make(ll_i64(), tmp)
 
 fn compare_needs_ptr_dispatch(left_ty: types.Type, right_ty: types.Type) -> Bool =
@@ -1782,12 +1782,12 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
         do
           tmp <- fresh_tmp(em)
           let inst = if op == "+" then "add" else if op == "-" then "sub" else if op == "*" then "mul" else "sdiv"
-          emit_template(em, `  ${tmp} = ${inst} i64 ${val_ir (lv)}, ${val_ir (rv)}`)
+          emit_template(em, tmp = inst i64 val_ir (lv), val_ir(rv))
           val_make(ll_i64(), tmp)
       else if op == "%" then
         do
           tmp <- fresh_tmp(em)
-          emit_template(em, `  ${tmp} = srem i64 ${val_ir (lv)}, ${val_ir (rv)}`)
+          emit_template(em, tmp = srem i64 val_ir (lv), val_ir(rv))
           val_make(ll_i64(), tmp)
       else
         do
@@ -1810,21 +1810,21 @@ fn emit_str_binary_concat(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
     li <- coerce_value(lv, ll_i64(), em)
     ri <- coerce_value(rv, ll_i64(), em)
     tmp <- fresh_tmp(em)
-    emit_template(em, `  ${tmp} = call i64 @str_concat(i64 ${val_ir (li)}, i64 ${val_ir (ri)})`)
+    emit_template(em,   tmp = call i64 @str_concat(i64 val_ir (li), i64 val_ir (ri)))
     val_make(ll_i64(), tmp)
 
 fn emit_ptr_comparison(op: String, lp: Value, rp: Value, em: Emitter) -> Value !{IO} =
   if op == "==" then
     do
       eq_tmp <- fresh_tmp(em)
-      emit_template(em, `  ${eq_tmp} = call i1 @str_eq(ptr ${val_ir (lp)}, ptr ${val_ir (rp)})`)
+      emit_template(em,   eq_tmp = call i1 @str_eq(ptr val_ir (lp), ptr val_ir (rp)))
       val_make(ll_i1(), eq_tmp)
   else if op == "!=" then
     do
       eq_tmp <- fresh_tmp(em)
-      emit_template(em, `  ${eq_tmp} = call i1 @str_eq(ptr ${val_ir (lp)}, ptr ${val_ir (rp)})`)
+      emit_template(em,   eq_tmp = call i1 @str_eq(ptr val_ir (lp), ptr val_ir (rp)))
       not_tmp <- fresh_tmp(em)
-      emit_template(em, `  ${not_tmp} = xor i1 ${eq_tmp}, true`)
+      emit_template(em, not_tmp = xor i1 eq_tmp, true)
       val_make(ll_i1(), not_tmp)
   else
     do
@@ -1833,9 +1833,9 @@ fn emit_ptr_comparison(op: String, lp: Value, rp: Value, em: Emitter) -> Value !
                  else if op == ">" then "sgt"
                  else "sge"
       cmp_tmp <- fresh_tmp(em)
-      emit_template(em, `  ${cmp_tmp} = call i64 @str_compare(ptr ${val_ir (lp)}, ptr ${val_ir (rp)})`)
+      emit_template(em,   cmp_tmp = call i64 @str_compare(ptr val_ir (lp), ptr val_ir (rp)))
       result_tmp <- fresh_tmp(em)
-      emit_template(em, `  ${result_tmp} = icmp ${pred} i64 ${cmp_tmp}, 0`)
+      emit_template(em, result_tmp = icmp pred i64 cmp_tmp, 0)
       val_make(ll_i1(), result_tmp)
 
 fn emit_comparison(op: String, lv: Value, rv: Value, em: Emitter) -> Value !{IO} =
@@ -1857,7 +1857,7 @@ fn emit_comparison(op: String, lv: Value, rv: Value, em: Emitter) -> Value !{IO}
                  else "ne"
       let ll = val_ll(lv)
       tmp <- fresh_tmp(em)
-      emit_template(em, `  ${tmp} = icmp ${pred} ${ll} ${val_ir (lv)}, ${val_ir (rv)}`)
+      emit_template(em, tmp = icmp pred ll val_ir (lv), val_ir(rv))
       val_make(ll_i1(), tmp)
 
 fn emit_short_circuit(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
@@ -1876,10 +1876,10 @@ fn emit_short_circuit(op: String, left: typed_ast.TypedExpr, right: typed_ast.Ty
     raw_rv <- emit_expr(ctx, locals, em, Nothing, right)
     rv <- coerce_value(raw_rv, ll_i1(), em)
     rhs_end <- read_cur_blk_or(em, rhs_lbl)
-    emit_template(em, `  br label %${done_lbl}`)
+    emit_template(em,   br label %done_lbl)
     emit_label(em, done_lbl)
     phi <- fresh_tmp(em)
-    emit_template(em, `  ${phi} = phi i1 [ ${const_on_short}, %${left_blk} ], [ ${val_ir (rv)}, %${rhs_end} ]`)
+    emit_template(em,   phi = phi i1 [ const_on_short, %left_blk ], [ val_ir (rv), %rhs_end ])
     val_make(ll_i1(), phi)
 
 fn emit_if(cond: typed_ast.TypedExpr, thn: typed_ast.TypedExpr, els: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
@@ -1890,21 +1890,21 @@ fn emit_if(cond: typed_ast.TypedExpr, thn: typed_ast.TypedExpr, els: typed_ast.T
     then_lbl <- fresh_block(em, "if_then")
     else_lbl <- fresh_block(em, "if_else")
     done_lbl <- fresh_block(em, "if_done")
-    emit_template(em, `  br i1 ${val_ir (cv)}, label %${then_lbl}, label %${else_lbl}`)
+    emit_template(em,   br i1 val_ir (cv), label %then_lbl, label %else_lbl)
     emit_label(em, then_lbl)
     then_val <- emit_expr(ctx, locals, em, tco_ctx, thn)
     _ <- emit_pending_tco(tco_ctx, then_val, em)
     then_term <- is_terminated(em)
     then_coerced <- if then_term then then_val else coerce_value(then_val, out_ll, em)
     then_blk <- read_cur_blk_or(em, then_lbl)
-    if then_term == false then emit_template(em, `  br label %${done_lbl}`) else ()
+    if then_term == false then emit_template(em,   br label %done_lbl) else ()
     emit_label(em, else_lbl)
     else_val <- emit_expr(ctx, locals, em, tco_ctx, els)
     _ <- emit_pending_tco(tco_ctx, else_val, em)
     else_term <- is_terminated(em)
     else_coerced <- if else_term then else_val else coerce_value(else_val, out_ll, em)
     else_blk <- read_cur_blk_or(em, else_lbl)
-    if else_term == false then emit_template(em, `  br label %${done_lbl}`) else ()
+    if else_term == false then emit_template(em,   br label %done_lbl) else ()
     emit_label(em, done_lbl)
     if then_term && else_term then
       val_for_ll(out_ll, "undef")
@@ -1916,7 +1916,7 @@ fn emit_if(cond: typed_ast.TypedExpr, thn: typed_ast.TypedExpr, els: typed_ast.T
                     else if else_term
                     then "[ " ++ val_ir(then_coerced) ++ ", %" ++ then_blk ++ " ]"
                     else "[ " ++ val_ir(then_coerced) ++ ", %" ++ then_blk ++ " ], [ " ++ val_ir(else_coerced) ++ ", %" ++ else_blk ++ " ]"
-        emit_template(em, `  ${phi} = phi ${out_ll} ${parts}`)
+        emit_template(em, phi = phi out_ll parts)
         val_for_ll(out_ll, phi)
 
 fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
@@ -1934,13 +1934,13 @@ fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBra
         emit_label(em, done_lbl)
         phi <- fresh_tmp(em)
         let parts = join_comma(list_map(\p -> match p with | (v, blk) -> "[ " ++ val_ir(v) ++ ", %" ++ blk ++ " ]", branch_vals))
-        emit_template(em, `  ${phi} = phi ${out_ll} ${parts}`)
+        emit_template(em, phi = phi out_ll parts)
         val_for_ll(out_ll, phi)
 
 fn emit_match_abort(em: Emitter) -> Unit !{IO} =
   do
     tmp <- fresh_tmp(em)
-    emit_template(em, `  ${tmp} = call i64 @sprout_abort_match()`)
+    emit_template(em,   tmp = call i64 @sprout_abort_match())
     emit_line(em, "  unreachable")
 
 fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_type: types.Type, out_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
@@ -1955,11 +1955,11 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_
         next_lbl <- fresh_block(em, "match_next")
         let is_always_match = is_wildcard_or_var(pat)
         if is_always_match then
-          emit_template(em, `  br label %${branch_lbl}`)
+          emit_template(em,   br label %branch_lbl)
         else
           do
             test_v <- emit_pattern_test(pat, scrut, ctx, em)
-            emit_template(em, `  br i1 ${val_ir (test_v)}, label %${branch_lbl}, label %${next_lbl}`)
+            emit_template(em,   br i1 val_ir (test_v), label %branch_lbl, label %next_lbl)
         emit_label(em, branch_lbl)
         (new_binds, rooted) <- emit_pattern_bind(pat, scrut, Just(scrut_type), ctx, em)
         let branch_locals = extend_locals(locals, new_binds)
@@ -1985,7 +1985,7 @@ fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_
             coerced_body <- coerce_value(body_val, out_ll, em)
             end_blk <- read_cur_blk_or(em, branch_lbl)
             pop_temp_roots(rooted, em)
-            emit_template(em, `  br label %${done_lbl}`)
+            emit_template(em,   br label %done_lbl)
             emit_label(em, next_lbl)
             emit_branches(rest, scrut, scrut_type, out_ll, ctx, locals, em, tco_ctx, done_lbl, Cons((coerced_body, end_blk), acc))
 
@@ -2054,25 +2054,25 @@ fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Valu
         if val_is_ptr(v) then
           do
             tmp <- fresh_tmp(em)
-            emit_template(em, `  ${tmp} = call i64 @print_str(ptr ${val_ir (v)})`)
+            emit_template(em,   tmp = call i64 @print_str(ptr val_ir (v)))
             val_make(ll_i64(), tmp)
         else if val_is_i64(v) && (is_string_type(arg_ty) || is_char_type(arg_ty)) then
           do
             vp <- coerce_value(v, ll_ptr(), em)
             tmp <- fresh_tmp(em)
-            emit_template(em, `  ${tmp} = call i64 @print_str(ptr ${val_ir (vp)})`)
+            emit_template(em,   tmp = call i64 @print_str(ptr val_ir (vp)))
             val_make(ll_i64(), tmp)
         else if val_is_i64(v) then
           do
             tmp <- fresh_tmp(em)
-            emit_template(em, `  ${tmp} = call i64 @print_value(i64 ${val_ir (v)})`)
+            emit_template(em,   tmp = call i64 @print_value(i64 val_ir (v)))
             val_make(ll_i64(), tmp)
         else if val_is_i1(v) then
           do
             w <- fresh_tmp(em)
-            emit_template(em, `  ${w} = zext i1 ${val_ir (v)} to i64`)
+            emit_template(em, w = zext i1 val_ir (v) to i64)
             tmp <- fresh_tmp(em)
-            emit_template(em, `  ${tmp} = call i64 @print_value(i64 ${w})`)
+            emit_template(em,   tmp = call i64 @print_value(i64 w))
             val_make(ll_i64(), tmp)
         else
           val_make(ll_i64(), "0")
@@ -2137,7 +2137,7 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
                     | Just gi ->
                         do
                           tmp <- fresh_tmp(em)
-                          emit_template(em, `  ${tmp} = load ${gi_ll (gi)}, ptr @${name}`)
+                          emit_template(em,   tmp = load gi_ll (gi), ptr @name)
                           let gv = val_with_call_sig(val_make(gi_ll(gi), tmp), gi_call_sig(gi))
                           match gi_call_sig(gi) with
                           | Nothing -> gv
@@ -2168,7 +2168,7 @@ fn emit_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, t
           li <- coerce_value(lv, ll_i64(), em)
           ri <- coerce_value(rv, ll_i64(), em)
           tmp <- fresh_tmp(em)
-          emit_template(em, `  ${tmp} = call i64 @str_concat(i64 ${val_ir (li)}, i64 ${val_ir (ri)})`)
+          emit_template(em,   tmp = call i64 @str_concat(i64 val_ir (li), i64 val_ir (ri)))
           val_make(ll_i64(), tmp)
       else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(ty) then
         emit_regular_direct_call("list_append", FnSig("list_append", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing), Cons(left, Cons(right, Nil)), type_to_ll(ty), ctx, locals, em)
@@ -2180,7 +2180,7 @@ fn emit_ctor_call_expr(ctor: CtorSig, args: List typed_ast.TypedExpr, ctx: CgCtx
     do
       tmp <- fresh_tmp(em)
       let fn_name_ = if is_nothing_ctor(ctor_name(ctor)) then "@sprout_nothing" else "@sprout_make0"
-      emit_template(em, `  ${tmp} = call i64 ${fn_name_}(i64 ${int_to_string (ctor_tag(ctor))})`)
+      emit_template(em, tmp = call i64 fn_name_ (i64 int_to_string (ctor_tag(ctor))))
       val_make(ll_i64(), tmp)
   else if n_args < n_arity then
     # Partial constructor application
@@ -2203,7 +2203,7 @@ fn emit_ctor_call_expr(ctor: CtorSig, args: List typed_ast.TypedExpr, ctx: CgCtx
       let args_ir = join_comma(list_map(\p -> "i64 " ++ p, packed))
       tmp <- fresh_tmp(em)
       let sep = if args_ir == "" then "" else ", "
-      emit_template(em, `  ${tmp} = call i64 @sprout_make${int_to_string (n)}(i64 ${int_to_string (ctor_tag(ctor))}${sep}${args_ir})`)
+      emit_template(em,   tmp = call i64 @sprout_makeint_to_string (n)(i64 int_to_string (ctor_tag(ctor))separgs_ir))
       pop_temp_roots(rooted_packed, em)
       pop_temp_roots(rooted_args, em)
       val_make(ll_i64(), tmp)
@@ -2234,7 +2234,7 @@ fn emit_ctor_partial_wrapper(wrap_name: String, ctor: CtorSig, applied: Int, em:
     let rem_lls = list_drop(all_lls, applied)
     let params_str = build_wrapper_params(rem_lls, 0)
     saved <- save_body(em)
-    emit_template(em, `define i64 @${wrap_name}(ptr %env${params_str}) {`)
+    emit_template(em, define i64 @wrap_name(ptr %envparams_str) {)
     emit_label(em, "entry")
     applied_packed <- load_applied_from_env(all_lls, applied, em, 1)
     remain_packed <- pack_args_from_env(rem_lls, 0, em)
@@ -2243,8 +2243,8 @@ fn emit_ctor_partial_wrapper(wrap_name: String, ctor: CtorSig, applied: Int, em:
     let args_ir = join_comma(list_map(\p -> "i64 " ++ p, all_packed))
     ret <- fresh_tmp(em)
     let sep = if args_ir == "" then "" else ", "
-    emit_template(em, `  ${ret} = call i64 @sprout_make${int_to_string (n)}(i64 ${int_to_string (ctor_tag(ctor))}${sep}${args_ir})`)
-    emit_template(em, `  ret i64 ${ret}`)
+    emit_template(em,   ret = call i64 @sprout_makeint_to_string (n)(i64 int_to_string (ctor_tag(ctor))separgs_ir))
+    emit_template(em, ret i64 ret)
     emit_line(em, "}")
     fn_lines <- flush_body(em)
     emit_defs_list(fn_lines, em)
@@ -2259,9 +2259,9 @@ fn load_applied_from_env(lls: List String, n: Int, em: Emitter, slot_idx: Int) -
     | Cons ll rest ->
         do
           slot <- fresh_tmp(em)
-          emit_template(em, `  ${slot} = getelementptr i64, ptr %env, i64 ${int_to_string (slot_idx)}`)
+          emit_template(em,   slot = getelementptr i64, ptr %env, i64 int_to_string (slot_idx))
           raw <- fresh_tmp(em)
-          emit_template(em, `  ${raw} = load i64, ptr ${slot}`)
+          emit_template(em, raw = load i64, ptr slot)
           rest_packed <- load_applied_from_env(rest, n - 1, em, slot_idx + 1)
           Cons(raw, rest_packed)
 
@@ -2394,7 +2394,7 @@ fn list_is_nil_exprs(xs: List typed_ast.TypedExpr) -> Bool =
   match xs with | Nil -> true | _ -> false
 
 fn list_length_exprs(xs: List typed_ast.TypedExpr) -> Int =
-  list_fold(\(acc, _) -> acc + 1, 0, xs)
+  list_fold(\ (acc, _) -> acc + 1, 0, xs)
 
 fn emit_do(steps: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   match steps with
@@ -2441,19 +2441,19 @@ fn emit_do_maybe_bind(pat: ast.Pattern, v: Value, maybe_ty: types.Type, rest: Li
   do
     # Check if the value is Nothing
     tag_t <- fresh_tmp(em)
-    emit_template(em, `  ${tag_t} = call i64 @sprout_tag(i64 ${val_ir (v)})`)
+    emit_template(em,   tag_t = call i64 @sprout_tag(i64 val_ir (v)))
     # Find the Nothing tag from ctor_sigs
     let nothing_tag = find_nothing_tag(ctx_ctor_sigs(ctx))
     eq_t <- fresh_tmp(em)
-    emit_template(em, `  ${eq_t} = icmp eq i64 ${tag_t}, ${int_to_string (nothing_tag)}`)
+    emit_template(em, eq_t = icmp eq i64 tag_t, int_to_string(nothing_tag))
     nothing_lbl <- fresh_block(em, "do_nothing")
     just_lbl <- fresh_block(em, "do_just")
     done_lbl <- fresh_block(em, "do_done")
-    emit_template(em, `  br i1 ${eq_t}, label %${nothing_lbl}, label %${just_lbl}`)
+    emit_template(em,   br i1 eq_t, label %nothing_lbl, label %just_lbl)
     # Nothing branch: return Nothing of result type
     emit_label(em, nothing_lbl)
     nothing_v <- emit_nothing_value(nothing_tag, em)
-    emit_template(em, `  br label %${done_lbl}`)
+    emit_template(em,   br label %done_lbl)
     # Just branch: extract payload and continue
     emit_label(em, just_lbl)
     let inner_ll = match maybe_ty with
@@ -2469,7 +2469,7 @@ fn emit_do_maybe_bind(pat: ast.Pattern, v: Value, maybe_ty: types.Type, rest: Li
     if cont_term == false then
       do
         pop_temp_roots(rooted, em)
-        emit_template(em, `  br label %${done_lbl}`)
+        emit_template(em,   br label %done_lbl)
     else ()
     # Merge
     emit_label(em, done_lbl)
@@ -2479,26 +2479,26 @@ fn emit_do_maybe_bind(pat: ast.Pattern, v: Value, maybe_ty: types.Type, rest: Li
       do
         phi <- fresh_tmp(em)
         let out_ll = val_ll(cont_v)
-        emit_template(em, `  ${phi} = phi ${out_ll} [ ${val_ir (nothing_v)}, %${nothing_lbl} ], [ ${val_ir (cont_v)}, %${just_end} ]`)
+        emit_template(em,   phi = phi out_ll [ val_ir (nothing_v), %nothing_lbl ], [ val_ir (cont_v), %just_end ])
         val_make(out_ll, phi)
 
 fn emit_do_result_bind(pat: ast.Pattern, v: Value, result_ty_: types.Type, rest: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   do
     tag_t <- fresh_tmp(em)
-    emit_template(em, `  ${tag_t} = call i64 @sprout_tag(i64 ${val_ir (v)})`)
+    emit_template(em,   tag_t = call i64 @sprout_tag(i64 val_ir (v)))
     let err_tag = find_err_tag(ctx_ctor_sigs(ctx))
     eq_t <- fresh_tmp(em)
-    emit_template(em, `  ${eq_t} = icmp eq i64 ${tag_t}, ${int_to_string (err_tag)}`)
+    emit_template(em, eq_t = icmp eq i64 tag_t, int_to_string(err_tag))
     err_lbl <- fresh_block(em, "do_err")
     ok_lbl <- fresh_block(em, "do_ok")
     done_lbl <- fresh_block(em, "do_done")
-    emit_template(em, `  br i1 ${eq_t}, label %${err_lbl}, label %${ok_lbl}`)
+    emit_template(em,   br i1 eq_t, label %err_lbl, label %ok_lbl)
     # Err branch: propagate the Err
     emit_label(em, err_lbl)
     err_payload <- emit_ctor_field(val_ir(v), 0, ll_i64(), em)
     err_v <- fresh_tmp(em)
-    emit_template(em, `  ${err_v} = call i64 @sprout_make1(i64 ${int_to_string (err_tag)}, i64 ${val_ir (err_payload)})`)
-    emit_template(em, `  br label %${done_lbl}`)
+    emit_template(em,   err_v = call i64 @sprout_make1(i64 int_to_string (err_tag), i64 val_ir (err_payload)))
+    emit_template(em,   br label %done_lbl)
     # Ok branch: extract payload and continue
     emit_label(em, ok_lbl)
     let inner_ll = match result_ty_ with
@@ -2514,7 +2514,7 @@ fn emit_do_result_bind(pat: ast.Pattern, v: Value, result_ty_: types.Type, rest:
     if cont_term == false then
       do
         pop_temp_roots(rooted, em)
-        emit_template(em, `  br label %${done_lbl}`)
+        emit_template(em,   br label %done_lbl)
     else ()
     # Merge
     emit_label(em, done_lbl)
@@ -2524,7 +2524,7 @@ fn emit_do_result_bind(pat: ast.Pattern, v: Value, result_ty_: types.Type, rest:
       do
         phi <- fresh_tmp(em)
         let out_ll = val_ll(cont_v)
-        emit_template(em, `  ${phi} = phi ${out_ll} [ ${err_v}, %${err_lbl} ], [ ${val_ir (cont_v)}, %${ok_end} ]`)
+        emit_template(em,   phi = phi out_ll [ err_v, %err_lbl ], [ val_ir (cont_v), %ok_end ])
         val_make(out_ll, phi)
 
 fn find_nothing_tag(ctor_sigs_: Dict CtorSig) -> Int =
@@ -2546,7 +2546,7 @@ fn find_err_tag(ctor_sigs_: Dict CtorSig) -> Int =
 fn emit_nothing_value(nothing_tag: Int, em: Emitter) -> Value !{IO} =
   do
     tmp <- fresh_tmp(em)
-    emit_template(em, `  ${tmp} = call i64 @sprout_nothing(i64 ${int_to_string (nothing_tag)})`)
+    emit_template(em,   tmp = call i64 @sprout_nothing(i64 int_to_string (nothing_tag)))
     val_make(ll_i64(), tmp)
 
 # ===========================================================================
@@ -2563,12 +2563,12 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
                        else build_fn_params(fn_params(sig), params, 0)
       let emit_name = emitted_fn_name(name)
       let define_ret = if is_entry then "i32" else fn_ret(sig)
-      emit_template(em, `define ${define_ret} @${emit_name}(${params_str}) {`)
+      emit_template(em, define define_ret @emit_name (params_str) {)
       emit_label(em, "entry")
       rooted <- if is_entry then
         do
           init_argv <- fresh_tmp(em)
-          emit_template(em, `  ${init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)`)
+          emit_template(em,   init_argv = call i64 @sprout_set_argv(i32 %argc, ptr %argv))
           match runtime_lets with
           | Nil -> ()
           | _ -> emit_line(em, "  call void @__sprout_init_globals()")
@@ -2591,11 +2591,11 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
         | types.TConst "Int" ->
             do
               exit_reg <- fresh_tmp(em)
-              emit_template(em, `  ${exit_reg} = trunc i64 ${val_ir (result)} to i32`)
-              emit_template(em, `  ret i32 ${exit_reg}`)
+              emit_template(em, exit_reg = trunc i64 val_ir (result) to i32)
+              emit_template(em, ret i32 exit_reg)
         | _ -> emit_line(em, "  ret i32 0")
       else
-        emit_template(em, `  ret ${fn_ret (sig)} ${val_ir (coerced_result)}`)
+        emit_template(em, ret fn_ret (sig) val_ir(coerced_result))
       emit_line(em, "}")
   where sctx = ctx_with_scope(ctx, name)
 
@@ -2660,21 +2660,21 @@ fn emit_ctor_reg_aliases(aliases: List (String, Int, Int, Int), em: Emitter) -> 
   | Cons (gname, len, tag, arity) rest ->
       do
         ptr <- fresh_tmp(em)
-        emit_template(em, `  ${ptr} = getelementptr inbounds [${int_to_string (len)} x i8], ptr ${gname}, i64 0, i64 0`)
+        emit_template(em, ptr = getelementptr inbounds[int_to_string(len) x i8], ptr gname, i64 0, i64 0)
         reg <- fresh_tmp(em)
-        emit_template(em, `  ${reg} = call i64 @sprout_register_ctor(i64 ${int_to_string (tag)}, ptr ${ptr}, i64 ${int_to_string (arity)})`)
+        emit_template(em,   reg = call i64 @sprout_register_ctor(i64 int_to_string (tag), ptr ptr, i64 int_to_string (arity)))
         emit_ctor_reg_aliases(rest, em)
 
 fn emit_fn_tco(name: String, params: List ast.Param, body: typed_ast.TypedExpr, sig: FnSig, ctx: CgCtx, em: Emitter) -> Unit !{IO} =
   do
     let params_str = build_fn_params(fn_params(sig), params, 0)
-    emit_template(em, `define ${fn_ret (sig)} @${name}(${params_str}) {`)
+    emit_template(em, define fn_ret (sig) @name (params_str) {)
     emit_label(em, "entry")
     loop_lbl <- fresh_block(em, "tco_loop")
     (slots, n_roots) <- allocate_tco_slots(params, fn_params(sig), loop_lbl, em)
     sp_save <- fresh_tmp(em)
-    emit_template(em, `  ${sp_save} = call ptr @llvm.stacksave()`)
-    emit_template(em, `  br label %${loop_lbl}`)
+    emit_template(em,   sp_save = call ptr @llvm.stacksave())
+    emit_template(em,   br label %loop_lbl)
     emit_label(em, loop_lbl)
     tco_locals <- load_tco_params(params, slots, em)
     let tco = TcoCtx(name, loop_lbl, slots, fn_ret(sig), 0, sp_save)
@@ -2684,8 +2684,8 @@ fn emit_fn_tco(name: String, params: List ast.Param, body: typed_ast.TypedExpr, 
         do
           pop_temp_roots(n_roots, em)
           store_tco_args(slots, new_args, em)
-          emit_template(em, `  call void @llvm.stackrestore(ptr ${sp_save})`)
-          emit_template(em, `  br label %${loop_lbl}`)
+          emit_template(em,   call void @llvm.stackrestore(ptr sp_save))
+          emit_template(em,   br label %loop_lbl)
     | Nothing ->
         do
           is_term <- is_terminated(em)
@@ -2693,7 +2693,7 @@ fn emit_fn_tco(name: String, params: List ast.Param, body: typed_ast.TypedExpr, 
             do
               coerced_result <- coerce_value(result, fn_ret(sig), em)
               pop_temp_roots(n_roots, em)
-              emit_template(em, `  ret ${fn_ret (sig)} ${val_ir (coerced_result)}`)
+              emit_template(em, ret fn_ret (sig) val_ir(coerced_result))
           else ()
     emit_line(em, "}")
 
@@ -2709,17 +2709,17 @@ fn allocate_tco_slots_acc(params: List ast.Param, lls: List String, em: Emitter,
       | Cons ll rest_lls ->
           do
             slot <- fresh_tmp(em)
-            emit_template(em, `  ${slot} = alloca ${ll}`)
-            emit_template(em, `  store ${ll} %${name}, ptr ${slot}`)
+            emit_template(em, slot = alloca ll)
+            emit_template(em,   store ll %name, ptr slot)
             r <- if ll == ll_i64() then
                    do
                      reg <- fresh_tmp(em)
-                     emit_template(em, `  ${reg} = call i64 @sprout_gc_push_i64_root(ptr ${slot})`)
+                     emit_template(em,   reg = call i64 @sprout_gc_push_i64_root(ptr slot))
                      1
                  else if ll == ll_ptr() then
                    do
                      reg <- fresh_tmp(em)
-                     emit_template(em, `  ${reg} = call i64 @sprout_gc_push_ptr_root(ptr ${slot})`)
+                     emit_template(em,   reg = call i64 @sprout_gc_push_ptr_root(ptr slot))
                      1
                  else 0
             allocate_tco_slots_acc(rest_params, rest_lls, em, Cons((slot, ll), acc), rooted + r)
@@ -2736,7 +2736,7 @@ fn load_tco_params_acc(params: List ast.Param, slots: List (String, String), em:
       | Cons (slot, ll) rest_slots ->
           do
             tmp <- fresh_tmp(em)
-            emit_template(em, `  ${tmp} = load ${ll}, ptr ${slot}`)
+            emit_template(em, tmp = load ll, ptr slot)
             load_tco_params_acc(rest_params, rest_slots, em, dict_set(name, val_for_ll(ll, tmp), acc))
 
 # ===========================================================================
@@ -2761,7 +2761,7 @@ fn emit_global_lets(lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Em
         | Nothing -> ()
         | Just gi ->
             do
-              emit_template(em, `  store ${gi_ll (gi)} ${val_ir (v)}, ptr @${name}`)
+              emit_template(em,   store gi_ll (gi) val_ir (v), ptr @name)
               emit_global_root_registration(name, gi_ll(gi), em)
         emit_global_lets(rest, ctx, em)
 
@@ -2769,16 +2769,16 @@ fn emit_global_root_registration(name: String, ll: String, em: Emitter) -> Unit 
   if ll == ll_i64() then
     do
       reg <- fresh_tmp(em)
-      emit_template(em, `  ${reg} = call i64 @sprout_gc_register_i64_root(ptr @${name})`)
+      emit_template(em,   reg = call i64 @sprout_gc_register_i64_root(ptr @name))
   else if ll == ll_ptr() then
     do
       reg <- fresh_tmp(em)
-      emit_template(em, `  ${reg} = call i64 @sprout_gc_register_ptr_root(ptr @${name})`)
+      emit_template(em,   reg = call i64 @sprout_gc_register_ptr_root(ptr @name))
   else if str_starts_with(ll, "{ ") then
     do
       sz <- sizeof_struct(ll, em)
       reg <- fresh_tmp(em)
-      emit_template(em, `  ${reg} = call i64 @sprout_gc_register_scan_root(ptr @${name}, i64 ${sz})`)
+      emit_template(em,   reg = call i64 @sprout_gc_register_scan_root(ptr @name, i64 sz))
   else ()
 
 # ===========================================================================
@@ -3025,7 +3025,7 @@ fn emit_extern_decl_keys(keys: Vec String, externs: Dict FnSig, em: Emitter, idx
         | Just sig ->
             do
               let params_str = join_comma(fn_params(sig))
-              emit_template(em, `declare ${fn_ret (sig)} @${fn_name (sig)}(${params_str})`)
+              emit_template(em, declare fn_ret (sig) @fn_name (sig) (params_str))
               emit_extern_decl_keys(keys, externs, em, idx + 1)
 
 # Emit global variable declarations.

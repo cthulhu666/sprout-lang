@@ -280,7 +280,6 @@ fn needs_space(prev_prev: Maybe token.Token, prev: Maybe token.Token, curr: toke
       else if tok_is_punct(p, "(") then false
       else if tok_is_punct(p, "[") then false
       else if tok_is_punct(p, "{") then false
-      else if tok_is_punct(p, "\\") then false
       else
         match token.token_kind(curr) with
         | token.TokenKeywordKind -> true
@@ -470,10 +469,10 @@ fn lint_line(state: LintState, raw_line: String) -> LintState =
     lint_state_line_no(state) + 1)
 
 fn last_line_no(lines: List String) -> Int =
-  list_fold(\(acc, _) -> acc + 1, 0, lines)
+  list_fold(\ (acc, _) -> acc + 1, 0, lines)
 
 fn last_line_text(lines: List String) -> String =
-  list_fold(\(_, x) -> x, "", lines)
+  list_fold(\ (_, x) -> x, "", lines)
 
 fn add_missing_newline_issue(issues: List LintIssue, src: String, lines: List String) -> List LintIssue =
   if src == "" then issues

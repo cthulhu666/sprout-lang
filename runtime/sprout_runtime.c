@@ -1319,7 +1319,12 @@ long long write_file(long long path_i, long long content_i) {
   const char *content = (const char *)(uintptr_t)content_i;
   FILE *f = fopen(path, "wb");
   if (!f) { fprintf(stderr, "write_file: cannot open %s\n", path); exit(1); }
-  fwrite(content, 1, strlen(content), f);
+  size_t len = strlen(content);
+  if (fwrite(content, 1, len, f) != len) {
+    fprintf(stderr, "write_file: write error on %s\n", path);
+    fclose(f);
+    exit(1);
+  }
   fclose(f);
   return 0LL;
 }

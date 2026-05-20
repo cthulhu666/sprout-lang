@@ -126,15 +126,17 @@ fn join_step(sep: String, acc: List String, s: String) -> List String =
 
 # O(n + total_bytes): one O(n) fold building reversed interleaved list + O(B) concat.
 export fn join(sep: String, xs: f String) -> String where Foldable f =
-  string_concat_many(list_reverse(fold(\(acc, s) -> join_step(sep, acc, s), Nil, xs)))
+  string_concat_many(list_reverse(fold(\ (acc, s) -> join_step(sep, acc, s), Nil, xs)))
 
 export fn repeat(s: String, n: Int) -> String =
   if n <= 0 then "" else s ++ repeat(s, n - 1)
 
 export fn replace_all(s: String, from: String, to: String) -> String =
-  match split_once(s, from) with
-  | Nothing -> s
-  | Just (before, after) -> before ++ to ++ replace_all(after, from, to)
+  if str_len(from) == 0 then s
+  else
+    match split_once(s, from) with
+    | Nothing -> s
+    | Just (before, after) -> before ++ to ++ replace_all(after, from, to)
 
 fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)

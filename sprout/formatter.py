@@ -92,27 +92,44 @@ def _leading_indent(line: str) -> str:
 
 
 def _split_comment(line: str) -> tuple[str, str]:
-    in_string = False
-    escaped = False
-    for i, ch in enumerate(line):
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
+    n = len(line)
+    i = 0
+    while i < n:
+        ch = line[i]
         if ch == '"':
-            in_string = True
-            continue
-        if ch == "#":
+            i += 1
+            while i < n:
+                c = line[i]
+                if c == "\\":
+                    i += 2
+                elif c == '"':
+                    i += 1
+                    break
+                else:
+                    i += 1
+        elif ch == "'":
+            # Char literal: 'x' or '\x'; skip to the closing quote.
+            i += 1
+            if i < n and line[i] == "\\":
+                i += 3  # skip \, escape char, closing '
+            elif i < n:
+                i += 2  # skip char body and closing '
+        elif ch == "#":
             return line[:i], line[i:]
+        else:
+            i += 1
     return line, ""
 
 
 def _format_code(code: str) -> str:
-    tokens = [token for token in tokenize(code) if token.kind != "EOF"]
+    try:
+        tokens = [token for token in tokenize(code) if token.kind != "EOF"]
+    except Exception:
+        return code
+    # Template strings cannot be safely re-spaced without source-level reconstruction;
+    # pass the line through unchanged to avoid corrupting interpolations.
+    if any(t.kind.startswith("TEMPLATE") for t in tokens):
+        return code
     parts: list[str] = []
     prev_prev: Token | None = None
     prev: Token | None = None
@@ -151,6 +168,15 @@ def _render_token(token: Token) -> str:
     return token.value
 
 
+def _sym(token: Token) -> str:
+    """Return .value for SYMBOL tokens only; empty string for all other kinds.
+
+    Prevents STRING/CHAR tokens whose content matches punctuation (e.g. ")" or ":")
+    from triggering punctuation-specific spacing rules.
+    """
+    return token.value if token.kind == "SYMBOL" else ""
+
+
 def _needs_space(
     prev_prev: Token | None,
     prev: Token | None,
@@ -160,37 +186,39 @@ def _needs_space(
 ) -> bool:
     if prev is None:
         return False
-    if curr.value == "!" and prev.value not in {"(", "[", "{", ",", "|", "!"}:
+    cs = _sym(curr)
+    ps = _sym(prev)
+    if cs == "!" and ps not in {"(", "[", "{", ",", "|", "!"}:
         return True
-    if prev.value == "!":
-        return curr.value != "{"
-    if curr.value == ":":
+    if ps == "!":
+        return cs != "{"
+    if cs == ":":
         return False
-    if prev.value == ":":
+    if ps == ":":
         return True
-    if prev.value == "-" and _is_unary_minus(prev_prev):
+    if ps == "-" and _is_unary_minus(prev_prev):
         return False
-    if prev.value == ",":
+    if ps == ",":
         return True
-    if curr.value == ",":
+    if cs == ",":
         return False
-    if curr.value in {")", "]", "}"}:
+    if cs in {")", "]", "}"}:
         return False
-    if prev.value in {")", "]", "}"} and curr.kind in {"IDENT", "KEYWORD", "INT", "STRING", "CHAR"}:
+    if ps in {")", "]", "}"} and curr.kind in {"IDENT", "KEYWORD", "INT", "STRING", "CHAR"}:
         return True
-    if prev.value in {"(", "[", "{"}:
+    if ps in {"(", "[", "{"}:
         return False
-    if curr.kind == "KEYWORD" and prev.value not in {"(", "[", "{", "|"}:
+    if curr.kind == "KEYWORD" and ps not in {"(", "[", "{", "|"}:
         return True
-    if curr.value == "{":
+    if cs == "{":
         return True
-    if curr.value == "(":
+    if cs == "(":
         if _is_call_like(prev_prev, prev, next_token, has_equals_ahead):
             return False
         return True
-    if prev.value in INLINE_OPS or curr.value in INLINE_OPS:
+    if ps in INLINE_OPS or cs in INLINE_OPS:
         return True
-    if prev.value == "|" or curr.value == "|":
+    if ps == "|" or cs == "|":
         return True
     if _is_word_like(prev) and _is_word_like(curr):
         return True
@@ -207,21 +235,27 @@ def _is_call_like(
     next_token: Token | None,
     has_equals_ahead: bool,
 ) -> bool:
-    if prev.value in {")", "]", "}"}:
+    if _sym(prev) == ")":
+        # Uppercase type argument after ) is a type application, not a call: Ctor(A B)(C D)
+        if next_token is not None and next_token.kind == "IDENT" and next_token.value[:1].isupper():
+            return False
+        return True
+    if _sym(prev) in {"]", "}"}:
         return True
     if prev.kind != "IDENT":
         return False
     if prev_prev is None:
         return True
-    if prev_prev.value == "=":
+    pps = _sym(prev_prev)
+    if pps == "=":
         return True
     if prev_prev.kind == "KEYWORD" and prev_prev.value in {"then", "else"}:
         return True
     if prev_prev.kind == "KEYWORD" and prev_prev.value == "where":
         return False
-    if prev_prev.value == "|":
+    if pps == "|":
         return False
-    if prev_prev.value == "->":
+    if pps == "->":
         if not has_equals_ahead:
             return True
         return not _looks_like_type_group(prev, next_token)
@@ -229,11 +263,13 @@ def _is_call_like(
         return prev_prev.value not in {"import", "class", "instance", "type"}
     if prev_prev.kind in {"IDENT", "INT", "STRING", "CHAR"}:
         return False
-    if prev_prev.value in {")", "]", "}"}:
-        return True
+    # Check _looks_like_type_group BEFORE the ) branch so that
+    # "Type( ... ) TypeArg (" is not treated as a call site.
     if _looks_like_type_group(prev, next_token):
         return False
-    if prev_prev.value in {"|", "="} | INLINE_OPS | {",", "(", "[", "{"}:
+    if pps in {")", "]", "}"}:
+        return True
+    if pps in {"|", "="} | INLINE_OPS | {",", "(", "[", "{"}:
         return True
     return False
 
@@ -241,9 +277,10 @@ def _is_call_like(
 def _is_unary_minus(prev_prev: Token | None) -> bool:
     if prev_prev is None:
         return True
-    if prev_prev.value in {"(", "[", "{", ",", "|"}:
+    pps = _sym(prev_prev)
+    if pps in {"(", "[", "{", ",", "|"}:
         return True
-    if prev_prev.value in INLINE_OPS:
+    if pps in INLINE_OPS:
         return True
     if prev_prev.kind == "KEYWORD":
         return True
