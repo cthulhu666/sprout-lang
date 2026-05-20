@@ -1008,11 +1008,28 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
                 target = ctors.get(symbol)
                 if target is not None:
                     return target
+            mod_label = bundle.modules[target_path].header.module or str(target_path)
+            if symbol in target_symbols.value_locals:
+                types_without_ctors = sorted(
+                    t for t in target_symbols.exported_types
+                    if t not in target_symbols.exported_type_constructors
+                )
+                if symbol in types_without_ctors:
+                    hint = f"; type {symbol!r} is exported without its constructors — use 'export type {symbol} (..)'"
+                elif types_without_ctors:
+                    names = ", ".join(f"'{t}'" for t in types_without_ctors)
+                    hint = f"; types exported without constructors: {names} — add (..) to export constructors"
+                else:
+                    hint = ""
+                raise _node_module_error(
+                    bundle,
+                    node,
+                    f"Module {mod_label!r} defines {symbol!r} but does not export it{hint}",
+                )
             raise _node_module_error(
                 bundle,
                 node,
-                f"Module {bundle.modules[target_path].header.module or str(target_path)!r} "
-                f"does not export value {symbol!r}; "
+                f"Module {mod_label!r} does not export value {symbol!r}; "
                 f"exported values: {_fmt_names(set(target_symbols.exported_values))}",
             )
 

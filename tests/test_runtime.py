@@ -2197,8 +2197,9 @@ class RuntimeTests(unittest.TestCase):
             program = parse(bundle.source)
             resolve_program_names(program, bundle)
             typecheck_program(program)
+            lowered = lower_typeclasses(program)
             out = io.StringIO()
-            run_program(program, stdout=out)
+            run_program(lowered, stdout=out)
             self.assertEqual(
                 out.getvalue().strip(),
                 "\n".join(

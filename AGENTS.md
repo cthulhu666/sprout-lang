@@ -173,6 +173,10 @@ If you see `ll_ptr()` for String/Char in codegen, that is a regression. The cano
    ```
    All corpus files are expected to pass. If a file is newly broken in stage-1, add it to `XFAIL_FILES` in `test_bootstrap_identity.py` with a comment explaining the regression, and remove it once fixed.
 
+## Known Limitations
+
+See [README.md §Not Yet Supported](./README.md#not-yet-supported-common-gotchas) for language features that are planned but not yet implemented (`!expr` negation, `let..in` in pure functions, effectful list iteration), along with the standard workaround for each.
+
 ## Commit Guidance
 
 Use commit messages that explain intent, for example:

@@ -987,6 +987,33 @@ Commands:
   - lint baseline style issues: `python3 -m sprout.cli lint your_file.sprout`
   - current scope: whitespace-aware formatting, comment preservation, trailing-whitespace/tab/final-newline checks
 
+## Not Yet Supported (Common Gotchas)
+
+The following are planned features not yet implemented. Each has a standard workaround.
+
+**Boolean negation (`!expr`)**  
+`!` is used only for effect annotations (`!{IO}`). Negate by restructuring:
+```sprout
+-- instead of: !is_valid(x)
+if is_valid(x) then false else true
+```
+
+**`let x = e in body` in pure functions**  
+`let` bindings work only inside `do` (effectful) blocks. In pure functions, use `where`:
+```sprout
+-- instead of: let trimmed = string.trim(s) in string.length(trimmed)
+string.length(trimmed) where trimmed = string.trim(s)
+```
+
+**Effectful list iteration (`list_each`, `list_for_each`)**  
+No built-in IO-effectful list traversal exists yet. Write a tail-recursive helper:
+```sprout
+fn print_all(items: List String) -> Unit !{IO} =
+  match items with
+  | Nil -> ()
+  | Cons h t -> do print(h) ; print_all(t)
+```
+
 ## Backlog
 
 See [docs/backlog.md](./docs/backlog.md) for the current roadmap and follow-up work.
