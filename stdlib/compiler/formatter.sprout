@@ -21,6 +21,7 @@ type LintState =
 # ---------------------------------------------------------------------------
 # is_inline_op
 
+# list_member avoided: P1 codegen bug corrupts constrained recursive calls in if/else (see BACKLOG)
 fn is_inline_op(s: String) -> Bool =
   s == "=" || s == "->" || s == "<-" || s == "+" || s == "-" || s == "*" || s == "/" ||
   s == "==" || s == "!=" || s == "<" || s == "<=" || s == ">" || s == ">=" ||
