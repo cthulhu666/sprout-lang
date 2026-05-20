@@ -709,8 +709,8 @@ class CliCommandTests(unittest.TestCase):
             path.write_text(
                 """
                 module app.main
-                fn main() -> Int !{IO} =
-                  print_int(41)
+                fn main() -> String !{IO} =
+                  read_file("x")
                 """,
                 encoding="utf-8",
             )
@@ -721,8 +721,8 @@ class CliCommandTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(compile_proc.returncode, 1)
-            self.assertIn("Executable entrypoint `app.main.main` must have type Unit !{IO}", compile_proc.stdout)
-            self.assertIn("Int !{IO}", compile_proc.stdout)
+            self.assertIn("Executable entrypoint `app.main.main` must have type Unit !{IO} or Int !{IO}", compile_proc.stdout)
+            self.assertIn("String !{IO}", compile_proc.stdout)
             self.assertFalse(out.exists())
 
     def test_run_rejects_non_zero_arity_entrypoint(self) -> None:

@@ -49,7 +49,7 @@ def _entrypoint_arity_message(entry_main_name: str) -> str:
 
 
 def _entrypoint_type_message(entry_main_name: str, actual_type: str) -> str:
-    return f"Executable entrypoint `{entry_main_name}` must have type Unit !{{IO}}, got {actual_type}"
+    return f"Executable entrypoint `{entry_main_name}` must have type Unit !{{IO}} or Int !{{IO}}, got {actual_type}"
 
 
 def _validate_executable_entrypoint(program: ast.Program, typed: dict[str, str], entry_main_name: str) -> None:
