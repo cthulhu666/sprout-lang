@@ -801,6 +801,12 @@ fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
 # find the concrete type for the constraint variable, then looks up the instance.
 # Falls back to heuristic resolution if prog_var is not in prog_to_fresh (check2 path,
 # or non-VarExpr callee) or if the constraint is still polymorphic after s3 is applied.
+#
+# When prog_var is absent from prog_to_fresh (mono-scheme call — recursive self-call
+# inside a constrained fn body), @fwd forwarding is tried first so that the hidden
+# dict param is forwarded rather than incorrectly resolved to a concrete instance whose
+# type head happens to appear in one of the call arguments (e.g. the List in "List a"
+# being mistaken for an Eq (List a) instance instead of the forwarded Eq a param).
 fn resolve_obligation(
   class_name: String,
   prog_var: String,
@@ -812,7 +818,9 @@ fn resolve_obligation(
 ) -> Maybe typed_ast.TypedExpr =
   match dict_get(prog_var, prog_to_fresh) with
   | Nothing ->
-      resolve_one_constraint_tdict(class_name, user_args, s3, env, pos)
+      match resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos) with
+      | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos)
+      | fwd -> fwd
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
       | Just head_str ->

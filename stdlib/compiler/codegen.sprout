@@ -1584,59 +1584,61 @@ fn emit_var(name: String, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Em
   match dict_get(name, locals) with
   | Just v -> v
   | Nothing ->
-      match dict_get(name, ctx_fn_sigs(ctx)) with
-      | Just sig ->
-          do
-            fw <- es_fn_wrap(em)
-            let wrapper_opt = dict_get(name, fw)
-            match wrapper_opt with
-            | Nothing -> val_make(ll_ptr(), "null")  # no wrapper? return null closure
-            | Just wname ->
-                do
-                  closure <- emit_make_closure("@" ++ wname, Nil, em)
-                  val_with_call_sig(closure, Just(fn_sig_to_call_sig(sig)))
-      | Nothing ->
-          match dict_get(name, ctx_globals(ctx)) with
-          | Just gi ->
-              do
-                tmp <- fresh_tmp(em)
-                emit_template(em, `  ${tmp} = load ${gi_ll (gi)}, ptr @${name}`)
-                val_with_call_sig(val_make(gi_ll(gi), tmp), gi_call_sig(gi))
-          | Nothing ->
-              match dict_get(name, ctx_ctor_sigs(ctx)) with
-              | Just ctor ->
-                  if ctor_arity(ctor) == 0
-                  then
-                    do
-                      tmp <- fresh_tmp(em)
-                      let ctor_fn = if is_nothing_ctor(name) then "@sprout_nothing" else "@sprout_make0"
-                      emit_template(em, `  ${tmp} = call i64 ${ctor_fn}(i64 ${int_to_string (ctor_tag(ctor))})`)
-                      val_make(ll_i64(), tmp)
-                  else
-                    # Ctor applied to zero args but has arity > 0 → need partial closure
-                    # Build a wrapper for this ctor and make a closure
-                    do
-                      lam_idx <- fresh_lambda_idx(em)
-                      let wrap_name = "__sprout_ctor_" ++ name ++ "_" ++ int_to_string(lam_idx)
-                      emit_ctor_closure_wrapper(wrap_name, ctor, em)
-                      let sig = CallSig(ctor_arg_lls(ctor), ll_i64(), Nothing)
-                      closure <- emit_make_closure("@" ++ wrap_name, Nil, em)
-                      val_with_call_sig(closure, Just(sig))
+      do
+        match dict_get(name, ctx_fn_sigs(ctx)) with
+        | Just sig ->
+            do
+              fw <- es_fn_wrap(em)
+              let wrapper_opt = dict_get(name, fw)
+              match wrapper_opt with
               | Nothing ->
-                  # Extern or completely unknown
-                  match dict_get(name, ctx_extern_sigs(ctx)) with
-                  | Just ext_sig ->
+                  val_make(ll_ptr(), "null")  # no wrapper? return null closure
+              | Just wname ->
+                  do
+                    closure <- emit_make_closure("@" ++ wname, Nil, em)
+                    val_with_call_sig(closure, Just(fn_sig_to_call_sig(sig)))
+        | Nothing ->
+            match dict_get(name, ctx_globals(ctx)) with
+            | Just gi ->
+                do
+                  tmp <- fresh_tmp(em)
+                  emit_template(em, `  ${tmp} = load ${gi_ll (gi)}, ptr @${name}`)
+                  val_with_call_sig(val_make(gi_ll(gi), tmp), gi_call_sig(gi))
+            | Nothing ->
+                match dict_get(name, ctx_ctor_sigs(ctx)) with
+                | Just ctor ->
+                    if ctor_arity(ctor) == 0
+                    then
+                      do
+                        tmp <- fresh_tmp(em)
+                        let ctor_fn = if is_nothing_ctor(name) then "@sprout_nothing" else "@sprout_make0"
+                        emit_template(em, `  ${tmp} = call i64 ${ctor_fn}(i64 ${int_to_string (ctor_tag(ctor))})`)
+                        val_make(ll_i64(), tmp)
+                    else
+                      # Ctor applied to zero args but has arity > 0 → need partial closure
+                      # Build a wrapper for this ctor and make a closure
                       do
                         lam_idx <- fresh_lambda_idx(em)
-                        let wname = "__sprout_fn_closure_" ++ int_to_string(lam_idx)
-                        set_fn_wrapper(em, name, wname)
-                        let wrapper_lines = emit_named_fn_wrapper_lines(wname, name, ext_sig)
-                        emit_defs_list(wrapper_lines, em)
-                        add_def_line(em, "")
-                        closure <- emit_make_closure("@" ++ wname, Nil, em)
-                        val_with_call_sig(closure, Just(fn_sig_to_call_sig(ext_sig)))
-                  | Nothing ->
-                      zero_val(type_to_ll(ty))  # unknown — return zero
+                        let wrap_name = "__sprout_ctor_" ++ name ++ "_" ++ int_to_string(lam_idx)
+                        emit_ctor_closure_wrapper(wrap_name, ctor, em)
+                        let sig = CallSig(ctor_arg_lls(ctor), ll_i64(), Nothing)
+                        closure <- emit_make_closure("@" ++ wrap_name, Nil, em)
+                        val_with_call_sig(closure, Just(sig))
+                | Nothing ->
+                    # Extern or completely unknown
+                    match dict_get(name, ctx_extern_sigs(ctx)) with
+                    | Just ext_sig ->
+                        do
+                          lam_idx <- fresh_lambda_idx(em)
+                          let wname = "__sprout_fn_closure_" ++ int_to_string(lam_idx)
+                          set_fn_wrapper(em, name, wname)
+                          let wrapper_lines = emit_named_fn_wrapper_lines(wname, name, ext_sig)
+                          emit_defs_list(wrapper_lines, em)
+                          add_def_line(em, "")
+                          closure <- emit_make_closure("@" ++ wname, Nil, em)
+                          val_with_call_sig(closure, Just(fn_sig_to_call_sig(ext_sig)))
+                    | Nothing ->
+                        zero_val(type_to_ll(ty))  # unknown — return zero
 
 fn is_nothing_ctor(name: String) -> Bool =
   name == "Nothing" || (n >= 7 && str_slice(name, n - 7, n) == "Nothing")
