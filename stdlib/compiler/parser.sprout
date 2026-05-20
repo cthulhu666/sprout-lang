@@ -85,15 +85,15 @@ fn tok_is_template_end(t: token.Token) -> Bool =
   | token.TokenTemplateEnd -> true
   | _ -> false
 
-fn match_keyword(tokens: Vec token.Token, i: Int, kw: String) -> Maybe (token.Token, Int) =
+fn match_keyword(tokens: Vec token.Token, i: Int, kw: String) -> Maybe(token.Token, Int) =
   if tok_is_keyword(tok_at(tokens, i), kw) then Just((tok_at(tokens, i), i + 1))
   else Nothing
 
-fn match_symbol(tokens: Vec token.Token, i: Int, sym: String) -> Maybe (token.Token, Int) =
+fn match_symbol(tokens: Vec token.Token, i: Int, sym: String) -> Maybe(token.Token, Int) =
   if tok_is_symbol(tok_at(tokens, i), sym) then Just((tok_at(tokens, i), i + 1))
   else Nothing
 
-fn match_ident(tokens: Vec token.Token, i: Int) -> Maybe (token.Token, Int) =
+fn match_ident(tokens: Vec token.Token, i: Int) -> Maybe(token.Token, Int) =
   if tok_is_ident(tok_at(tokens, i)) then Just((tok_at(tokens, i), i + 1))
   else Nothing
 
@@ -184,7 +184,7 @@ fn parse_effect_annotation(tokens: Vec token.Token, i: Int) -> (Maybe (List Stri
       | Nothing -> (Nothing, i)
       | Just (_, i3) ->
           match match_symbol(tokens, i3, "}") with
-          | Just (_, i4) -> (Just(Nil), i4)
+          | Just (_, i4) -> (Just (Nil), i4)
           | Nothing ->
               match collect_effect_names(tokens, i3) with
               | (names, i4) ->
@@ -890,7 +890,7 @@ fn starts_where_binding(tokens: Vec token.Token, i: Int) -> Bool =
   (tok_is_ident(tok_at(tokens, i)) && tok_is_symbol(tok_at(tokens, i + 1), "=")) ||
   tok_is_symbol(tok_at(tokens, i), "(")
 
-fn collect_where_bindings(tokens: Vec token.Token, i: Int, acc: List (ast.Pattern, ast.Expr)) -> Result ParseError (List (ast.Pattern, ast.Expr), Int) =
+fn collect_where_bindings(tokens: Vec token.Token, i: Int, acc: List (ast.Pattern, ast.Expr)) -> Result ParseError (List(ast.Pattern, ast.Expr), Int) =
   if starts_where_binding(tokens, i) then
     do
       (pattern, i2) <- parse_pattern(tokens, i)

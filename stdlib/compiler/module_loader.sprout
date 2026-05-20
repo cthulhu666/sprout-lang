@@ -101,8 +101,8 @@ fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List 
         collect_imports_from_lines(rest, acc)
       else if str_starts_with(line, "import ") then
         match parse_import_line(line) with
-        | Nothing    -> collect_imports_from_lines(rest, acc)
-        | Just spec  -> collect_imports_from_lines(rest, Cons(spec, acc))
+        | Nothing -> collect_imports_from_lines(rest, acc)
+        | Just spec -> collect_imports_from_lines(rest, Cons(spec, acc))
       else
         list_reverse(acc)
 
@@ -154,7 +154,7 @@ fn vec_str_to_list(v: Vec String, i: Int) -> List String =
   else
     match vec_get(i, v) with
     | Nothing -> vec_str_to_list(v, i + 1)
-    | Just k  -> Cons(k, vec_str_to_list(v, i + 1))
+    | Just k -> Cons(k, vec_str_to_list(v, i + 1))
 
 fn dict_to_pairs(d: Dict types.Scheme) -> List (String, types.Scheme) =
   keys_to_pairs(d, vec_str_to_list(dict_keys(d), 0))
@@ -165,7 +165,7 @@ fn keys_to_pairs(d: Dict types.Scheme, keys: List String) -> List (String, types
   | Cons k rest ->
       match dict_get(k, d) with
       | Nothing -> keys_to_pairs(d, rest)
-      | Just v  -> Cons((k, v), keys_to_pairs(d, rest))
+      | Just v -> Cons((k, v), keys_to_pairs(d, rest))
 
 # ---------------------------------------------------------------------------
 # Env prefixing / selective filtering
@@ -202,8 +202,8 @@ fn select_named_pairs(pairs: List (String, types.Scheme), names: List String) ->
   | Nil -> Nil
   | Cons name rest ->
       match find_pair(pairs, name) with
-      | Nothing      -> select_named_pairs(pairs, rest)
-      | Just scheme  -> Cons((name, scheme), select_named_pairs(pairs, rest))
+      | Nothing -> select_named_pairs(pairs, rest)
+      | Just scheme -> Cons((name, scheme), select_named_pairs(pairs, rest))
 
 fn find_pair(pairs: List (String, types.Scheme), name: String) -> Maybe types.Scheme =
   match pairs with
@@ -259,7 +259,7 @@ fn strip_headers_ml(s: String, pos: Int) -> String =
 # The cache maps module_name → pairs from that module's check result.
 # Modules not in "stdlib.*" are skipped (they're pre-seeded in builtin_env).
 
-type alias ModuleCache = Ref (Dict (List (String, types.Scheme)))
+type alias ModuleCache = Ref(Dict (List (String, types.Scheme)))
 
 export fn new_cache() -> ModuleCache !{IO} =
   ref_new(dict_empty())

@@ -84,7 +84,7 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
 
 fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
   match argv_get(idx) with
-  | Nothing   -> ()
+  | Nothing -> ()
   | Just path ->
       do
         print("=== " ++ path ++ " ===")
@@ -93,5 +93,5 @@ fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing          -> print("ERROR: usage: lower-driver <stdlib-root> <file>...")
+  | Nothing -> print("ERROR: usage: lower-driver <stdlib-root> <file>...")
   | Just stdlib_root -> run_batch(stdlib_root, 1)

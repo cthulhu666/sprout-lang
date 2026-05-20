@@ -2,10 +2,10 @@ module stdlib.compiler
 import stdlib.string as string
 
 export type CompilerSession (..) =
-  | CompilerSession (Vec String)(Vec String)
+  | CompilerSession (Vec String) (Vec String)
 
 export type SymbolInventory (..) =
-  | SymbolInventory (Vec String)(Vec String)(Vec String)
+  | SymbolInventory (Vec String) (Vec String) (Vec String)
 
 export type Diagnostic (..) =
   | Diagnostic String Int Int
@@ -14,10 +14,10 @@ export type InstanceMatches (..) =
   | InstanceMatches String (Vec String)
 
 type ReportPayload =
-  | ReportPayload (Vec Diagnostic)(SymbolInventory)
+  | ReportPayload (Vec Diagnostic) (SymbolInventory)
 
 export type CompilerReport (..) =
-  | CompilerReport Bool (Maybe String)(ReportPayload)
+  | CompilerReport Bool (Maybe String) (ReportPayload)
 
 export fn empty_session() -> CompilerSession =
   CompilerSession(vec_empty(), vec_empty())

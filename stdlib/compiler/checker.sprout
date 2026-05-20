@@ -647,9 +647,9 @@ export fn dump_typed_names(decls: List ast.Decl, env: Dict types.Scheme) -> Unit
 fn dump_decl_name(d: ast.Decl, env: Dict types.Scheme) -> Unit !{IO} =
   match d with
   | ast.FnDecl name _ _ _ _ _ _ -> print_name_scheme(name, env)
-  | ast.LetDecl name _ _        -> print_name_scheme(name, env)
-  | ast.TypeDecl _ _ ctors _    -> dump_ctor_names(ctors, env)
-  | _                           -> ()
+  | ast.LetDecl name _ _ -> print_name_scheme(name, env)
+  | ast.TypeDecl _ _ ctors _ -> dump_ctor_names(ctors, env)
+  | _ -> ()
 
 fn dump_ctor_names(ctors: List ast.TypeConstructor, env: Dict types.Scheme) -> Unit !{IO} =
   match ctors with
@@ -662,7 +662,7 @@ fn dump_ctor_names(ctors: List ast.TypeConstructor, env: Dict types.Scheme) -> U
 
 fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =
   match dict_get(name, env) with
-  | Nothing     -> print(name ++ " : <not found>")
+  | Nothing -> print(name ++ " : <not found>")
   | Just scheme -> print(name ++ " : " ++ types.scheme_to_string(scheme))
 
 # ---------------------------------------------------------------------------
@@ -689,11 +689,11 @@ fn dump_typed_decl_names(decls: List typed_ast.TypedDecl, env: Dict types.Scheme
   | Cons d rest ->
       do
         match d with
-        | typed_ast.TFnDecl name _ _ _ _ _  -> print_name_scheme(name, env)
+        | typed_ast.TFnDecl name _ _ _ _ _ -> print_name_scheme(name, env)
         | typed_ast.TExternFnDecl name _ _ _ -> print_name_scheme(name, env)
-        | typed_ast.TLetDecl name _         -> print_name_scheme(name, env)
-        | typed_ast.TInstanceDecl _ _ _     -> ()
-        | typed_ast.TPassThrough _          -> ()
+        | typed_ast.TLetDecl name _ -> print_name_scheme(name, env)
+        | typed_ast.TInstanceDecl _ _ _ -> ()
+        | typed_ast.TPassThrough _ -> ()
         dump_typed_decl_names(rest, env)
 
 export fn builtin_entries() -> List (String, types.Scheme) =
@@ -702,11 +702,11 @@ export fn builtin_entries() -> List (String, types.Scheme) =
 
 # -- Type shortcuts ----------------------------------------------------------
 
-fn bt_str()  -> types.Type = types.TConst("String")
-fn bt_int()  -> types.Type = types.TConst("Int")
+fn bt_str() -> types.Type = types.TConst("String")
+fn bt_int() -> types.Type = types.TConst("Int")
 fn bt_unit() -> types.Type = types.TConst("Unit")
 
-fn bt_vec(t: types.Type)     -> types.Type = types.TApp(types.TConst("Vec"), t)
+fn bt_vec(t: types.Type) -> types.Type = types.TApp(types.TConst("Vec"), t)
 fn bt_result(e: types.Type, a: types.Type) -> types.Type =
   types.TApp(types.TApp(types.TConst("Result"), e), a)
 
@@ -736,7 +736,7 @@ fn bt_quad(a: types.Type, b: types.Type, c: types.Type, d: types.Type) -> types.
 # ll_i64() entry, breaking the const char* calling convention. Intrinsics only win when
 # there is no matching extern fn declaration for the same name.
 fn analysis_entries() -> List (String, types.Scheme) =
-  [ ("analysis_check_source",
+  [("analysis_check_source",
       bt_mono(bt_io(bt_str(), bt_result(bt_str(), bt_unit()))))
   , ("analysis_declared_names_in_source",
       bt_mono(bt_io(bt_str(), bt_result(bt_str(), bt_vec(bt_str())))))

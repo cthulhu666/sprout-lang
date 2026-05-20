@@ -1,0 +1,13 @@
+module stdlib.compiler.fmt_test_driver
+
+import stdlib.compiler.formatter as formatter
+
+fn format_and_write(p: String) -> Unit !{IO} =
+  do
+    src <- read_file(p)
+    write_file("/dev/stdout", formatter.format_source(src))
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing -> print("usage: fmt_test_driver <path>")
+  | Just p -> format_and_write(p)

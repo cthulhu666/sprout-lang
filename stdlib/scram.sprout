@@ -4,14 +4,14 @@ import stdlib.bytes as bytes
 import stdlib.crypto as crypto
 import stdlib.string as string
 
-export type ScramError(..) =
+export type ScramError (..) =
   | ScramInvalidMessage String
   | ScramInvalidIterationCount String
   | ScramInvalidNonce String
   | ScramBase64Error String
   | ScramBytesError String
 
-export type ScramServerFirst(..) =
+export type ScramServerFirst (..) =
   | ScramServerFirst String String String Int
 
 type alias ScramResult a = Result ScramError a

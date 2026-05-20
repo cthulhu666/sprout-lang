@@ -1,13 +1,13 @@
 module stdlib.regex
 
-export type RegexError(..) =
+export type RegexError (..) =
   | RegexInvalidPattern String
   | RegexUnsupportedFeature String
 
 export type Regex =
   | Regex String
 
-export type Match(..) =
+export type Match (..) =
   | Match Int Int
 
 extern fn regex_validate(pattern: String) -> Result String Unit
@@ -50,7 +50,7 @@ export fn find_first(re: Regex, text: String) -> Maybe Match =
 
 export fn split_first(re: Regex, text: String) -> Maybe (String, String) =
   match find_first(re, text) with
-  | Just(Match start end) ->
+  | Just (Match start end) ->
       Just((str_slice(text, 0, start), str_slice(text, end, str_len(text) - end)))
   | Nothing -> Nothing
 

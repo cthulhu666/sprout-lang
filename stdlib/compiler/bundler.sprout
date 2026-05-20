@@ -355,7 +355,7 @@ fn specs_to_paths(specs: List module_loader.ImportSpec, stdlib_root: String) -> 
 fn push_visit_items(paths: List String, stack: List WorkItem) -> List WorkItem =
   match paths with
   | Nil -> stack
-  | Cons path rest -> push_visit_items(rest, Cons(WIVisit(path), stack))
+  | Cons path rest -> push_visit_items(rest, Cons (WIVisit(path), stack))
 
 fn remove_str_from_list(s: String, lst: List String) -> List String =
   match lst with
@@ -418,7 +418,7 @@ fn process_wi_visit(
             let dep_paths = specs_to_paths(specs, stdlib_root)
             ref_write(visiting, Cons(path, visiting_list))
             stack_now <- ref_read(work)
-            ref_write(work, push_visit_items(list_reverse(dep_paths), Cons(WIFinalize(path, src, specs), Cons(WILeave(path), stack_now))))
+            ref_write(work, push_visit_items(list_reverse(dep_paths), Cons (WIFinalize(path, src, specs), Cons (WILeave(path), stack_now))))
             Nil
 
 fn process_wi_leave(path: String, visiting: Ref (List String)) -> List String !{IO} =
@@ -452,7 +452,7 @@ fn process_wi_finalize(
                     | ast.Program decls _ ->
                         do
                           ordered_now <- ref_read(ordered)
-                          ref_write(ordered, Cons(ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
+                          ref_write(ordered, Cons (ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
                           seen_now <- ref_read(seen)
                           ref_write(seen, Cons(path, seen_now))
                           Nil
@@ -464,7 +464,7 @@ fn visit_module_iter(
   ordered: Ref (List ParsedModule)
 ) -> List String !{IO} =
   do
-    work <- ref_new(Cons(WIVisit(entry_path), Nil))
+    work <- ref_new(Cons (WIVisit(entry_path), Nil))
     visiting <- ref_new(Nil)
     process_work(work, visiting, seen, ordered, stdlib_root)
 
@@ -497,7 +497,7 @@ fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, Li
                         | Ok prog ->
                             match prog with
                             | ast.Program decls _ ->
-                                (Nothing, Cons(ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
+                                (Nothing, Cons (ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
           else
             (Nothing, rev_mods)
 

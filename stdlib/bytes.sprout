@@ -1,6 +1,6 @@
 module stdlib.bytes
 
-export type Utf8Error(..) =
+export type Utf8Error (..) =
   | Utf8DecodeError String
 
 extern fn bytes_empty() -> Bytes

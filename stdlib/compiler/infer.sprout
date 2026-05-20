@@ -645,7 +645,7 @@ fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dic
   | Cons first_arg rest ->
       match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
       | Nothing -> first_concrete_typed_arg_str(rest, subst)
-      | Just s  -> Just(s)
+      | Just s -> Just(s)
 
 # Returns the outermost TVar name from the first arg whose head is a TVar after
 # substitution.  Scans all args so that function-typed leading arguments (e.g.
@@ -663,7 +663,7 @@ fn first_tvar_head_after_subst(typed_args: List typed_ast.TypedExpr, subst: Dict
   | Cons first_arg rest ->
       match tvar_head_of_type(typed_ast.typed_expr_type(first_arg)) with
       | Just name -> Just(name)
-      | Nothing   -> first_tvar_head_after_subst(rest, subst)
+      | Nothing -> first_tvar_head_after_subst(rest, subst)
 
 fn tvar_head_of_type(t: types.Type) -> Maybe String =
   match t with
@@ -845,7 +845,7 @@ fn inject_constrained_fn_dicts(
       InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
   | Just class_marker ->
       match class_marker with
-      | types.Scheme _ _ (types.TApp (types.TConst class_name) (types.TConst prog_var)) _ ->
+      | types.Scheme _ _ (types.TApp(types.TConst class_name)(types.TConst prog_var)) _ ->
           match resolve_obligation(class_name, prog_var, prog_to_fresh, s3, user_typed_args(typed_args), env, pos) with
           | Nothing ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)

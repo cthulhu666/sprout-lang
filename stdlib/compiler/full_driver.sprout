@@ -11,7 +11,7 @@ fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
   | Cons d rest ->
       do
         match d with
-        | compiler.DiagError msg   -> print("ERROR: " ++ msg)
+        | compiler.DiagError msg -> print("ERROR: " ++ msg)
         | compiler.DiagWarning msg -> print("WARNING: " ++ msg)
         print_diags(rest)
 
@@ -44,7 +44,7 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
 
 fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
   match argv_get(idx) with
-  | Nothing   -> ()
+  | Nothing -> ()
   | Just path ->
       do
         print("=== " ++ path ++ " ===")
@@ -53,5 +53,5 @@ fn run_batch(stdlib_root: String, idx: Int) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing          -> print("ERROR: usage: full-driver <stdlib-root> <file>...")
+  | Nothing -> print("ERROR: usage: full-driver <stdlib-root> <file>...")
   | Just stdlib_root -> run_batch(stdlib_root, 1)

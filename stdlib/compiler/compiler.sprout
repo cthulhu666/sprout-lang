@@ -164,7 +164,7 @@ export type IrFullResult (..) =
   | IrFullFail (List Diagnostic)
 
 export type IrFullLinesResult (..) =
-  | IrFullLinesOk (List String)(List String)(List String)
+  | IrFullLinesOk (List String) (List String) (List String)
   | IrFullLinesFail (List Diagnostic)
 
 # ---------------------------------------------------------------------------

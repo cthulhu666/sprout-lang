@@ -106,7 +106,7 @@ export type TypedDecl (..) =
   | TInstanceDecl ast.TypeConstraint (List ast.TypeConstraint) (List TypedInstanceMethod)
   | TPassThrough ast.Decl
 
-export type TypedProgram (..) = TypedProgram (List TypedDecl)
+export type TypedProgram (..) = TypedProgram(List TypedDecl)
 
 # ---------------------------------------------------------------------------
 # Result types for the typed pipeline

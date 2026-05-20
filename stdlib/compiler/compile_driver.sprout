@@ -82,8 +82,8 @@ fn dump_ast_decl_names(decls: List ast.Decl) -> Unit !{IO} =
       do
         match d with
         | ast.FnDecl name _ _ _ _ _ _ -> print(name)
-        | ast.LetDecl name _ _        -> print(name)
-        | _                           -> ()
+        | ast.LetDecl name _ _ -> print(name)
+        | _ -> ()
         dump_ast_decl_names(rest)
 
 fn run_file_bundle(path: String, stdlib_root: String) -> Unit !{IO} =

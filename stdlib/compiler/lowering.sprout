@@ -732,7 +732,7 @@ fn lower_do_step(step: typed_ast.TypedDoStep, ctx: LowerCtx) -> ast.DoStep =
   match step with
   | typed_ast.TDoBindStep pat e -> ast.DoBindStep(pat, lower_expr(e, ctx))
   | typed_ast.TDoLetStep name e -> ast.DoLetStep(name, lower_expr(e, ctx))
-  | typed_ast.TDoExprStep e    -> ast.DoExprStep(lower_expr(e, ctx))
+  | typed_ast.TDoExprStep e -> ast.DoExprStep(lower_expr(e, ctx))
 
 fn lower_record_fields(fields: List typed_ast.TypedRecordField, ctx: LowerCtx) -> List ast.RecordField =
   match fields with

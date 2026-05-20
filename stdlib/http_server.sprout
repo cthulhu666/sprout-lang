@@ -13,7 +13,7 @@ type HttpRequestMeta =
 export type HttpServerResponse =
   | HttpServerResponse Int (Dict String) String
 
-export type HttpServerError(..) =
+export type HttpServerError (..) =
   | HttpInvalidRequest String
   | HttpServerUnsupportedStatus Int
 

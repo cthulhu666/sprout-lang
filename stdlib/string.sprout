@@ -48,7 +48,7 @@ export fn char_at(raw: String, index: Int) -> Maybe Char =
 
 export fn char_at_or(raw: String, index: Int, fallback: Char) -> Char =
   match char_at(raw, index) with
-  | Just(ch) -> ch
+  | Just (ch) -> ch
   | Nothing -> fallback
 
 export fn string_from_char(ch: Char) -> String =
@@ -122,7 +122,7 @@ export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
 fn join_step(sep: String, acc: List String, s: String) -> List String =
   match acc with
   | Nil -> Cons(s, Nil)
-  | _   -> Cons(s, Cons(sep, acc))
+  | _ -> Cons(s, Cons(sep, acc))
 
 # O(n + total_bytes): one O(n) fold building reversed interleaved list + O(B) concat.
 export fn join(sep: String, xs: f String) -> String where Foldable f =

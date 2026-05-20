@@ -39,6 +39,12 @@ fn is_word_like(tok: token.Token) -> Bool =
   | token.TokenCharKind -> true
   | _ -> false
 
+fn tok_is_punct(tok: token.Token, s: String) -> Bool =
+  match token.token_kind(tok) with
+  | token.TokenStringKind -> false
+  | token.TokenCharKind -> false
+  | _ -> token.token_text(tok) == s
+
 # ---------------------------------------------------------------------------
 # leading_indent: extract leading whitespace, normalising tabs to "  "
 
@@ -70,6 +76,17 @@ fn split_comment_in_str(line: String, i: Int, total: Int, escaped: Bool) -> (Str
       else
         split_comment_in_str(line, i + 1, total, false)
 
+fn split_comment_in_char(line: String, i: Int, total: Int) -> (String, String) =
+  if i >= total then (line, "")
+  else
+    match str_char_at(line, i) with
+    | Nothing -> (line, "")
+    | Just ch ->
+        if ch == '\\' then
+          split_comment_loop(line, i + 3, total)
+        else
+          split_comment_loop(line, i + 2, total)
+
 fn split_comment_loop(line: String, i: Int, total: Int) -> (String, String) =
   if i >= total then (line, "")
   else
@@ -78,6 +95,8 @@ fn split_comment_loop(line: String, i: Int, total: Int) -> (String, String) =
     | Just ch ->
         if ch == '"' then
           split_comment_in_str(line, i + 1, total, false)
+        else if ch == '\'' then
+          split_comment_in_char(line, i + 1, total)
         else if ch == '#' then
           (str_slice(line, 0, i), str_slice(line, i, total - i))
         else
@@ -193,13 +212,13 @@ fn is_call_like(prev_prev: Maybe token.Token, prev: token.Token, next_tok: Maybe
 # needs_space helpers
 
 fn needs_space_word_or_op(p: token.Token, curr: token.Token, prev_prev: Maybe token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
-  if token.token_text(curr) == "{" then true
-  else if token.token_text(curr) == "(" then
+  if tok_is_punct(curr, "{") then true
+  else if tok_is_punct(curr, "(") then
     if is_call_like(prev_prev, p, next_tok, has_equals_ahead) then false else true
   else if is_inline_op(token.token_text(p)) then true
   else if is_inline_op(token.token_text(curr)) then true
-  else if token.token_text(curr) == "|" then true
-  else if token.token_text(p) == "|" then true
+  else if tok_is_punct(curr, "|") then true
+  else if tok_is_punct(p, "|") then true
   else if is_word_like(p) && is_word_like(curr) then true
   else false
 
@@ -212,21 +231,21 @@ fn needs_space_after_close(ck: token.TokenKind) -> Bool =
   | token.TokenCharKind -> true
   | _ -> false
 
-fn needs_space_curr_bang(pv: String) -> Bool =
-  if pv == "(" then false
-  else if pv == "[" then false
-  else if pv == "{" then false
-  else if pv == "," then false
-  else if pv == "|" then false
-  else if pv == "!" then false
+fn needs_space_curr_bang(p: token.Token) -> Bool =
+  if tok_is_punct(p, "(") then false
+  else if tok_is_punct(p, "[") then false
+  else if tok_is_punct(p, "{") then false
+  else if tok_is_punct(p, ",") then false
+  else if tok_is_punct(p, "|") then false
+  else if tok_is_punct(p, "!") then false
   else true
 
 fn needs_space_prev_minus(prev_prev: Maybe token.Token, curr: token.Token, p: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
   if is_unary_minus(prev_prev) then false
-  else if token.token_text(curr) == "," then false
-  else if token.token_text(curr) == ")" then false
-  else if token.token_text(curr) == "]" then false
-  else if token.token_text(curr) == "}" then false
+  else if tok_is_punct(curr, ",") then false
+  else if tok_is_punct(curr, ")") then false
+  else if tok_is_punct(curr, "]") then false
+  else if tok_is_punct(curr, "}") then false
   else
     match token.token_kind(curr) with
     | token.TokenKeywordKind -> true
@@ -240,27 +259,28 @@ fn needs_space(prev_prev: Maybe token.Token, prev: Maybe token.Token, curr: toke
   match prev with
   | Nothing -> false
   | Just p ->
-      if token.token_text(curr) == "!" then needs_space_curr_bang(token.token_text(p))
-      else if token.token_text(p) == "!" then
-        if token.token_text(curr) == "{" then false else true
-      else if token.token_text(curr) == ":" then false
-      else if token.token_text(p) == ":" then true
-      else if token.token_text(p) == "-" then
+      if tok_is_punct(curr, "!") then needs_space_curr_bang(p)
+      else if tok_is_punct(p, "!") then
+        if tok_is_punct(curr, "{") then false else true
+      else if tok_is_punct(curr, ":") then false
+      else if tok_is_punct(p, ":") then true
+      else if tok_is_punct(p, "-") then
         needs_space_prev_minus(prev_prev, curr, p, next_tok, has_equals_ahead)
-      else if token.token_text(p) == "," then true
-      else if token.token_text(curr) == "," then false
-      else if token.token_text(curr) == ")" then false
-      else if token.token_text(curr) == "]" then false
-      else if token.token_text(curr) == "}" then false
-      else if token.token_text(p) == ")" then
+      else if tok_is_punct(p, ",") then true
+      else if tok_is_punct(curr, ",") then false
+      else if tok_is_punct(curr, ")") then false
+      else if tok_is_punct(curr, "]") then false
+      else if tok_is_punct(curr, "}") then false
+      else if tok_is_punct(p, ")") then
         needs_space_after_close_full(p, curr, prev_prev, next_tok, has_equals_ahead)
-      else if token.token_text(p) == "]" then
+      else if tok_is_punct(p, "]") then
         needs_space_after_close_full(p, curr, prev_prev, next_tok, has_equals_ahead)
-      else if token.token_text(p) == "}" then
+      else if tok_is_punct(p, "}") then
         needs_space_after_close_full(p, curr, prev_prev, next_tok, has_equals_ahead)
-      else if token.token_text(p) == "(" then false
-      else if token.token_text(p) == "[" then false
-      else if token.token_text(p) == "{" then false
+      else if tok_is_punct(p, "(") then false
+      else if tok_is_punct(p, "[") then false
+      else if tok_is_punct(p, "{") then false
+      else if tok_is_punct(p, "\\") then false
       else
         match token.token_kind(curr) with
         | token.TokenKeywordKind -> true
@@ -466,7 +486,7 @@ fn add_format_issue(issues: List LintIssue, src: String) -> List LintIssue =
   else issues
 
 fn run_lint_fold(lines: List String) -> LintState =
-  list_fold(lint_line, LintState(Nil, 1), lines)
+  list_fold(lint_line, LintState (Nil, 1), lines)
 
 export fn lint_source(src: String) -> List LintIssue =
   list_reverse(add_format_issue(add_missing_newline_issue(lint_state_issues(run_lint_fold(lines)), src, lines), src))

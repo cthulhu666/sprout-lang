@@ -13,7 +13,7 @@ export extern fn tcp_close(conn: Int) -> Unit !{IO}
 export extern fn tcp_close_listener(listener: Int) -> Unit !{IO}
 extern fn tcp_echo_serve(port: Int, max_connections: Int) -> Unit !{IO}
 
-export type TcpError(..) =
+export type TcpError (..) =
   | TcpInvalidArgument String
   | TcpInvalidHandle
   | TcpConnectFailed String

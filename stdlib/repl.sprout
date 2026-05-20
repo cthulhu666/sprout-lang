@@ -77,7 +77,7 @@ fn ignore_key(value: String !{IO}) -> Unit !{IO} =
   term_noop()
 
 fn escape_token(second: String, third: String) -> String =
-  if second != "["then "escape"
+  if second != "[" then "escape"
   else if third == "A" then "up"
   else if third == "B" then "down"
   else if third == "C" then "right"
@@ -85,7 +85,7 @@ fn escape_token(second: String, third: String) -> String =
   else "escape"
 
 fn read_escape_token_second(second: String) -> String !{IO} =
-  if second == "["then
+  if second == "[" then
     do
       third <- term_read_key_once()
       escape_token(second, third)
@@ -253,7 +253,7 @@ fn append_csv_name_pair(acc: Vec String, pair: (String, String)) -> Vec String =
   | (head, tail) -> append_csv_names(append_unique_name(acc, trim(head)), tail)
 
 fn append_csv_names(acc: Vec String, raw: String) -> Vec String =
-  match string.split_once(raw, "," ) with
+  match string.split_once(raw, ",") with
   | Nothing -> append_unique_name(acc, trim(raw))
   | Just pair -> append_csv_name_pair(acc, pair)
 
@@ -592,7 +592,7 @@ fn render_compiler_instances_result(result: Result String compiler.InstanceMatch
       if vec_length(compiler.instance_match_names(payload)) == 0 then
         single_line("No instances for " ++ compiler.instance_query_type(payload))
       else
-        single_line("Instances for " ++ compiler.instance_query_type(payload) ++":" ) ++ compiler.instance_match_names(payload)
+        single_line("Instances for " ++ compiler.instance_query_type(payload) ++ ":") ++ compiler.instance_match_names(payload)
 
 fn first_diagnostic_message(lines: Vec compiler.Diagnostic) -> Maybe String =
   match vec_get(0, lines) with

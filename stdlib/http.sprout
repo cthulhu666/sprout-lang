@@ -3,22 +3,22 @@ module stdlib.http
 # Sprout HTTP helpers (v0)
 # Minimal helpers for request-line parsing and response formatting.
 
-export type HttpResponse(..) =
+export type HttpResponse (..) =
   | HttpResponse Int String String
 
-export type HttpError(..) =
+export type HttpError (..) =
   | HttpTimeout
   | HttpNetwork String
   | HttpBadStatus Int
   | HttpDecode String
 
-export type HttpStatusError(..) =
+export type HttpStatusError (..) =
   | HttpUnsupportedStatus Int
 
-export type RequestPathVersion(..) =
+export type RequestPathVersion (..) =
   | RequestPathVersion String String
 
-export type RequestLine(..) =
+export type RequestLine (..) =
   | RequestLine String RequestPathVersion
 
 type HttpStatusInfo =
