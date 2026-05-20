@@ -153,10 +153,10 @@ fn is_call_like_pp_other(prev: token.Token, pp: token.Token, next_tok: Maybe tok
     | token.TokenStringKind -> false
     | token.TokenCharKind -> false
     | _ ->
-        if token.token_text(pp) == ")" then true
+        if looks_like_type_group(prev, next_tok) then false
+        else if token.token_text(pp) == ")" then true
         else if token.token_text(pp) == "]" then true
         else if token.token_text(pp) == "}" then true
-        else if looks_like_type_group(prev, next_tok) then false
         else if token.token_text(pp) == "(" then true
         else if token.token_text(pp) == "[" then true
         else if token.token_text(pp) == "{" then true
@@ -175,7 +175,13 @@ fn is_call_like_ident(prev_prev: Maybe token.Token, prev: token.Token, next_tok:
         | _ -> is_call_like_pp_other(prev, pp, next_tok, has_equals_ahead)
 
 fn is_call_like(prev_prev: Maybe token.Token, prev: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
-  if token.token_text(prev) == ")" then true
+  if token.token_text(prev) == ")" then
+    match next_tok with
+    | Just nt ->
+        match token.token_kind(nt) with
+        | token.TokenIdentKind -> if first_char_is_upper(token.token_text(nt)) then false else true
+        | _ -> true
+    | Nothing -> true
   else if token.token_text(prev) == "]" then true
   else if token.token_text(prev) == "}" then true
   else
