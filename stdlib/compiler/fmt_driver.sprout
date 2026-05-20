@@ -1,0 +1,89 @@
+module stdlib.compiler.fmt_driver
+
+import stdlib.compiler.formatter as formatter
+import stdlib.string as string
+
+fn print_issues(path: String, issues: List formatter.LintIssue) -> Unit !{IO} =
+  match issues with
+  | Nil -> ()
+  | Cons h t ->
+      match h with
+      | formatter.LintIssue ln col msg ->
+          do
+            print(path ++ ":" ++ int_to_string(ln) ++ ":" ++ int_to_string(col) ++ ": " ++ msg)
+            print_issues(path, t)
+
+fn run_fmt_check(path: String) -> Int !{IO} =
+  do
+    src <- read_file(path)
+    let formatted = formatter.format_source(src)
+    let current = if string.ends_with(src, "\n") then src else src ++ "\n"
+    if formatted == current
+    then do
+      print("ok")
+      0
+    else do
+      print("needs formatting: " ++ path)
+      1
+
+fn run_fmt_write(path: String) -> Int !{IO} =
+  do
+    src <- read_file(path)
+    let formatted = formatter.format_source(src)
+    let current = if string.ends_with(src, "\n") then src else src ++ "\n"
+    if formatted == current
+    then do
+      print("ok: " ++ path)
+      0
+    else do
+      write_file(path, formatted)
+      print("formatted " ++ path)
+      0
+
+fn run_fmt() -> Int !{IO} =
+  match argv_get(1) with
+  | Nothing ->
+      do
+        print("fmt: missing path")
+        1
+  | Just "--check" ->
+      match argv_get(2) with
+      | Nothing ->
+          do
+            print("fmt --check: missing path")
+            1
+      | Just path -> run_fmt_check(path)
+  | Just path -> run_fmt_write(path)
+
+fn run_lint() -> Int !{IO} =
+  match argv_get(1) with
+  | Nothing ->
+      do
+        print("lint: missing path")
+        1
+  | Just path ->
+      do
+        src <- read_file(path)
+        let issues = formatter.lint_source(src)
+        match issues with
+        | Nil ->
+            do
+              print("ok")
+              0
+        | _ ->
+            do
+              print_issues(path, issues)
+              1
+
+fn main() -> Int !{IO} =
+  match argv_get(0) with
+  | Nothing ->
+      do
+        print("usage: fmt_bin [fmt|lint] <path>")
+        1
+  | Just "lint" -> run_lint()
+  | Just "fmt" -> run_fmt()
+  | Just cmd ->
+      do
+        print("unknown subcommand: " ++ cmd)
+        1

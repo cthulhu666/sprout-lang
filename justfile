@@ -51,6 +51,24 @@ lint:
 lint-file file:
   python3 -m sprout.cli lint {{file}}
 
+# Build the native formatter binary (fmt_bin) using the Python stage-0 compiler.
+build-fmt:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  DRIVER="stdlib/compiler/fmt_driver.sprout"
+  OUT="fmt_bin"
+  python3 -m sprout.cli compile --with-stdlib --native -o "$OUT" "$DRIVER"
+  echo "==> $OUT built"
+
+fmt-native file:
+  ./fmt_bin fmt {{quote(file)}}
+
+fmt-check-native file:
+  ./fmt_bin fmt --check {{quote(file)}}
+
+lint-native file:
+  ./fmt_bin lint {{quote(file)}}
+
 check file:
   python3 -m sprout.cli check {{file}}
 

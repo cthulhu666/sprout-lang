@@ -1,0 +1,467 @@
+module stdlib.compiler.formatter
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+import stdlib.string as string
+
+# ---------------------------------------------------------------------------
+# Public types
+
+export type LintIssue (..) =
+  | LintIssue Int Int String
+
+# ---------------------------------------------------------------------------
+# Internal state types (ADT — records not supported in LLVM backend)
+
+type CodeState =
+  | CodeState (List String) (Maybe token.Token) (Maybe token.Token)
+
+type LintState =
+  | LintState (List LintIssue) Int
+
+# ---------------------------------------------------------------------------
+# is_inline_op
+
+fn is_inline_op(s: String) -> Bool =
+  s == "=" || s == "->" || s == "<-" || s == "+" || s == "-" || s == "*" || s == "/" ||
+  s == "==" || s == "!=" || s == "<" || s == "<=" || s == ">" || s == ">=" ||
+  s == "&&" || s == "||" || s == ">>" || s == "<<" || s == "++" || s == "|>"
+
+# ---------------------------------------------------------------------------
+# is_word_like
+
+fn is_word_like(tok: token.Token) -> Bool =
+  match token.token_kind(tok) with
+  | token.TokenIdentKind -> true
+  | token.TokenKeywordKind -> true
+  | token.TokenIntKind -> true
+  | token.TokenStringKind -> true
+  | token.TokenCharKind -> true
+  | _ -> false
+
+# ---------------------------------------------------------------------------
+# leading_indent: extract leading whitespace, normalising tabs to "  "
+
+fn leading_indent_loop(line: String, i: Int, acc: List String) -> String =
+  match str_char_at(line, i) with
+  | Nothing -> string_concat_many(list_reverse(acc))
+  | Just ch ->
+      if ch == ' ' then leading_indent_loop(line, i + 1, Cons(" ", acc))
+      else if ch == '\t' then leading_indent_loop(line, i + 1, Cons("  ", acc))
+      else string_concat_many(list_reverse(acc))
+
+fn leading_indent(line: String) -> String =
+  leading_indent_loop(line, 0, Nil)
+
+# ---------------------------------------------------------------------------
+# split_comment: split code from trailing # comment
+# Returns (code_part, comment_part); if no comment, comment_part is ""
+
+fn split_comment_in_str(line: String, i: Int, total: Int, escaped: Bool) -> (String, String) =
+  match str_char_at(line, i) with
+  | Nothing -> (line, "")
+  | Just ch ->
+      if escaped then
+        split_comment_in_str(line, i + 1, total, false)
+      else if ch == '\\' then
+        split_comment_in_str(line, i + 1, total, true)
+      else if ch == '"' then
+        split_comment_loop(line, i + 1, total)
+      else
+        split_comment_in_str(line, i + 1, total, false)
+
+fn split_comment_loop(line: String, i: Int, total: Int) -> (String, String) =
+  if i >= total then (line, "")
+  else
+    match str_char_at(line, i) with
+    | Nothing -> (line, "")
+    | Just ch ->
+        if ch == '"' then
+          split_comment_in_str(line, i + 1, total, false)
+        else if ch == '#' then
+          (str_slice(line, 0, i), str_slice(line, i, total - i))
+        else
+          split_comment_loop(line, i + 1, total)
+
+fn split_comment(line: String) -> (String, String) =
+  split_comment_loop(line, 0, str_len(line))
+
+# ---------------------------------------------------------------------------
+# looks_like_type_group: detect Type( pattern
+
+fn is_ascii_upper_char(ch: Char) -> Bool =
+  string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch)) >= 0
+
+fn first_char_is_upper(s: String) -> Bool =
+  match str_char_at(s, 0) with
+  | Nothing -> false
+  | Just ch -> is_ascii_upper_char(ch)
+
+fn looks_like_type_group(prev_tok: token.Token, next_tok: Maybe token.Token) -> Bool =
+  if first_char_is_upper(token.token_text(prev_tok)) then
+    match next_tok with
+    | Nothing -> false
+    | Just nt ->
+        match token.token_kind(nt) with
+        | token.TokenIdentKind -> first_char_is_upper(token.token_text(nt))
+        | _ -> false
+  else false
+
+# ---------------------------------------------------------------------------
+# is_unary_minus
+
+fn is_unary_minus_pp(pp: token.Token) -> Bool =
+  if token.token_text(pp) == "(" then true
+  else if token.token_text(pp) == "[" then true
+  else if token.token_text(pp) == "{" then true
+  else if token.token_text(pp) == "," then true
+  else if token.token_text(pp) == "|" then true
+  else if is_inline_op(token.token_text(pp)) then true
+  else
+    match token.token_kind(pp) with
+    | token.TokenKeywordKind -> true
+    | _ -> false
+
+fn is_unary_minus(prev_prev: Maybe token.Token) -> Bool =
+  match prev_prev with
+  | Nothing -> true
+  | Just pp -> is_unary_minus_pp(pp)
+
+# ---------------------------------------------------------------------------
+# is_call_like
+
+fn is_call_like_pp_kw(ppv: String) -> Bool =
+  if ppv == "then" then true
+  else if ppv == "else" then true
+  else if ppv == "where" then false
+  else if ppv == "import" then false
+  else if ppv == "class" then false
+  else if ppv == "instance" then false
+  else if ppv == "type" then false
+  else true
+
+fn is_call_like_pp_other(prev: token.Token, pp: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
+  if token.token_text(pp) == "|" then false
+  else if token.token_text(pp) == "->" then
+    if has_equals_ahead then
+      if looks_like_type_group(prev, next_tok) then false else true
+    else true
+  else
+    match token.token_kind(pp) with
+    | token.TokenIdentKind -> false
+    | token.TokenIntKind -> false
+    | token.TokenStringKind -> false
+    | token.TokenCharKind -> false
+    | _ ->
+        if token.token_text(pp) == ")" then true
+        else if token.token_text(pp) == "]" then true
+        else if token.token_text(pp) == "}" then true
+        else if looks_like_type_group(prev, next_tok) then false
+        else if token.token_text(pp) == "(" then true
+        else if token.token_text(pp) == "[" then true
+        else if token.token_text(pp) == "{" then true
+        else if token.token_text(pp) == "," then true
+        else if is_inline_op(token.token_text(pp)) then true
+        else false
+
+fn is_call_like_ident(prev_prev: Maybe token.Token, prev: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
+  match prev_prev with
+  | Nothing -> true
+  | Just pp ->
+      if token.token_text(pp) == "=" then true
+      else
+        match token.token_kind(pp) with
+        | token.TokenKeywordKind -> is_call_like_pp_kw(token.token_text(pp))
+        | _ -> is_call_like_pp_other(prev, pp, next_tok, has_equals_ahead)
+
+fn is_call_like(prev_prev: Maybe token.Token, prev: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
+  if token.token_text(prev) == ")" then true
+  else if token.token_text(prev) == "]" then true
+  else if token.token_text(prev) == "}" then true
+  else
+    match token.token_kind(prev) with
+    | token.TokenIdentKind -> is_call_like_ident(prev_prev, prev, next_tok, has_equals_ahead)
+    | _ -> false
+
+# ---------------------------------------------------------------------------
+# needs_space helpers
+
+fn needs_space_word_or_op(p: token.Token, curr: token.Token, prev_prev: Maybe token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
+  if token.token_text(curr) == "{" then true
+  else if token.token_text(curr) == "(" then
+    if is_call_like(prev_prev, p, next_tok, has_equals_ahead) then false else true
+  else if is_inline_op(token.token_text(p)) then true
+  else if is_inline_op(token.token_text(curr)) then true
+  else if token.token_text(curr) == "|" then true
+  else if token.token_text(p) == "|" then true
+  else if is_word_like(p) && is_word_like(curr) then true
+  else false
+
+fn needs_space_after_close(ck: token.TokenKind) -> Bool =
+  match ck with
+  | token.TokenIdentKind -> true
+  | token.TokenKeywordKind -> true
+  | token.TokenIntKind -> true
+  | token.TokenStringKind -> true
+  | token.TokenCharKind -> true
+  | _ -> false
+
+fn needs_space_curr_bang(pv: String) -> Bool =
+  if pv == "(" then false
+  else if pv == "[" then false
+  else if pv == "{" then false
+  else if pv == "," then false
+  else if pv == "|" then false
+  else if pv == "!" then false
+  else true
+
+fn needs_space_prev_minus(prev_prev: Maybe token.Token, curr: token.Token, p: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
+  if is_unary_minus(prev_prev) then false
+  else if token.token_text(curr) == "," then false
+  else if token.token_text(curr) == ")" then false
+  else if token.token_text(curr) == "]" then false
+  else if token.token_text(curr) == "}" then false
+  else
+    match token.token_kind(curr) with
+    | token.TokenKeywordKind -> true
+    | _ -> needs_space_word_or_op(p, curr, prev_prev, next_tok, has_equals_ahead)
+
+fn needs_space_after_close_full(p: token.Token, curr: token.Token, prev_prev: Maybe token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
+  if needs_space_after_close(token.token_kind(curr)) then true
+  else needs_space_word_or_op(p, curr, prev_prev, next_tok, has_equals_ahead)
+
+fn needs_space(prev_prev: Maybe token.Token, prev: Maybe token.Token, curr: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
+  match prev with
+  | Nothing -> false
+  | Just p ->
+      if token.token_text(curr) == "!" then needs_space_curr_bang(token.token_text(p))
+      else if token.token_text(p) == "!" then
+        if token.token_text(curr) == "{" then false else true
+      else if token.token_text(curr) == ":" then false
+      else if token.token_text(p) == ":" then true
+      else if token.token_text(p) == "-" then
+        needs_space_prev_minus(prev_prev, curr, p, next_tok, has_equals_ahead)
+      else if token.token_text(p) == "," then true
+      else if token.token_text(curr) == "," then false
+      else if token.token_text(curr) == ")" then false
+      else if token.token_text(curr) == "]" then false
+      else if token.token_text(curr) == "}" then false
+      else if token.token_text(p) == ")" then
+        needs_space_after_close_full(p, curr, prev_prev, next_tok, has_equals_ahead)
+      else if token.token_text(p) == "]" then
+        needs_space_after_close_full(p, curr, prev_prev, next_tok, has_equals_ahead)
+      else if token.token_text(p) == "}" then
+        needs_space_after_close_full(p, curr, prev_prev, next_tok, has_equals_ahead)
+      else if token.token_text(p) == "(" then false
+      else if token.token_text(p) == "[" then false
+      else if token.token_text(p) == "{" then false
+      else
+        match token.token_kind(curr) with
+        | token.TokenKeywordKind -> true
+        | _ -> needs_space_word_or_op(p, curr, prev_prev, next_tok, has_equals_ahead)
+
+# ---------------------------------------------------------------------------
+# render_token
+
+fn render_char_escape(raw: String) -> String =
+  string.replace_all(
+    string.replace_all(
+      string.replace_all(
+        string.replace_all(
+          string.replace_all(raw, "\\", "\\\\"),
+        "'", "\\'"),
+      "\n", "\\n"),
+    "\r", "\\r"),
+  "\t", "\\t")
+
+fn render_string_escape(raw: String) -> String =
+  string.replace_all(
+    string.replace_all(
+      string.replace_all(
+        string.replace_all(
+          string.replace_all(raw, "\\", "\\\\"),
+        "\"", "\\\""),
+      "\n", "\\n"),
+    "\r", "\\r"),
+  "\t", "\\t")
+
+fn render_token(tok: token.Token) -> String =
+  match token.token_kind(tok) with
+  | token.TokenCharKind ->
+      string_concat_many(["'", render_char_escape(token.token_text(tok)), "'"])
+  | token.TokenStringKind ->
+      string_concat_many(["\"", render_string_escape(token.token_text(tok)), "\""])
+  | _ -> token.token_text(tok)
+
+# ---------------------------------------------------------------------------
+# format_code: tokenize → filter EOF → fold with spacing → concat
+
+fn tok_is_not_eof(tok: token.Token) -> Bool =
+  match token.token_kind(tok) with
+  | token.TokenEofKind -> false
+  | _ -> true
+
+fn tok_text_is_eq(tok: token.Token) -> Bool =
+  token.token_text(tok) == "="
+
+fn has_equals_from(toks: Vec token.Token, start: Int, total: Int) -> Bool =
+  if start >= total then false
+  else
+    match vec_get(start, toks) with
+    | Nothing -> false
+    | Just t ->
+        if tok_text_is_eq(t) then true
+        else has_equals_from(toks, start + 1, total)
+
+fn code_step_parts(add_space: Bool, rendered: String, parts: List String) -> List String =
+  if add_space then Cons(rendered, Cons(" ", parts))
+  else Cons(rendered, parts)
+
+fn code_state_parts(state: CodeState) -> List String =
+  match state with
+  | CodeState parts _ _ -> parts
+
+fn code_state_prev(state: CodeState) -> Maybe token.Token =
+  match state with
+  | CodeState _ _ prev -> prev
+
+fn code_state_prev_prev(state: CodeState) -> Maybe token.Token =
+  match state with
+  | CodeState _ pp _ -> pp
+
+fn format_code_step(toks: Vec token.Token, total: Int, state: CodeState, i: Int, tok: token.Token) -> CodeState =
+  CodeState(
+    code_step_parts(
+      needs_space(code_state_prev_prev(state), code_state_prev(state), tok, vec_get(i + 1, toks), has_equals_from(toks, i + 1, total)),
+      render_token(tok),
+      code_state_parts(state)),
+    code_state_prev(state),
+    Just(tok))
+
+fn init_code_state() -> CodeState =
+  CodeState(Nil, Nothing, Nothing)
+
+fn run_format_fold_go(non_eof: Vec token.Token, total: Int, state: CodeState, i: Int) -> CodeState =
+  if i >= total then state
+  else
+    match vec_get(i, non_eof) with
+    | Nothing -> state
+    | Just tok -> run_format_fold_go(non_eof, total, format_code_step(non_eof, total, state, i, tok), i + 1)
+
+fn run_format_fold(non_eof: Vec token.Token, total: Int) -> CodeState =
+  run_format_fold_go(non_eof, total, init_code_state(), 0)
+
+fn lint_state_issues(state: LintState) -> List LintIssue =
+  match state with
+  | LintState issues _ -> issues
+
+fn lint_state_line_no(state: LintState) -> Int =
+  match state with
+  | LintState _ line_no -> line_no
+
+fn format_code_from_tokens(toks: Vec token.Token) -> String =
+  string_concat_many(list_reverse(code_state_parts(run_format_fold(non_eof, vec_length(non_eof)))))
+  where
+    non_eof = vec_filter(tok_is_not_eof, toks)
+
+fn format_code(code: String) -> String =
+  match lexer.tokenize(code) with
+  | Err _ -> code
+  | Ok toks -> format_code_from_tokens(toks)
+
+# ---------------------------------------------------------------------------
+# format_line
+
+fn format_line_with_parts(indent: String, code: String, comment: String) -> String =
+  if code == "" then
+    string_concat_many([indent, string.trim_left(comment)])
+  else if comment == "" then
+    string_concat_many([indent, format_code(code)])
+  else
+    string_concat_many([indent, format_code(code), "  ", string.trim_left(comment)])
+
+fn format_line(line: String) -> String =
+  if string.trim(line) == "" then ""
+  else
+    match split_comment(line) with
+    | (code_part, comment_part) ->
+        format_line_with_parts(
+          leading_indent(line),
+          string.trim(code_part),
+          string.trim_right(comment_part))
+
+# ---------------------------------------------------------------------------
+# format_source
+#
+# str_split_lines includes a trailing empty string when src ends with "\n",
+# unlike Python's str.splitlines(). We normalise by dropping the trailing
+# empty-string element if present, to match Python behaviour.
+
+fn drop_trailing_empty(lines: List String) -> List String =
+  match list_reverse(lines) with
+  | Nil -> Nil
+  | Cons h t ->
+      if h == "" then list_reverse(t)
+      else lines
+
+export fn format_source(src: String) -> String =
+  string.join("\n", list_map(format_line, drop_trailing_empty(str_split_lines(src)))) ++ "\n"
+
+# ---------------------------------------------------------------------------
+# lint helpers
+
+fn find_tab_col(line: String, i: Int) -> Int =
+  match str_char_at(line, i) with
+  | Nothing -> i + 1
+  | Just ch -> if ch == '\t' then i + 1 else find_tab_col(line, i + 1)
+
+fn trailing_ws_col(line: String) -> Int =
+  str_len(string.trim_right(line)) + 1
+
+fn line_has_trailing_ws(line: String) -> Bool =
+  string.trim_right(line) != line
+
+# Issues are accumulated in reverse order then reversed by lint_source.
+# Python order: tab before trailing-ws. So we must prepend trailing-ws first
+# (so it ends up after tab after reversal), then tab (so it ends up first).
+fn lint_line_issues(raw_line: String, ln: Int, base: List LintIssue) -> List LintIssue =
+  trailing_then_tab(raw_line, ln, base)
+
+fn trailing_then_tab(raw_line: String, ln: Int, base: List LintIssue) -> List LintIssue =
+  if line_has_trailing_ws(raw_line) then
+    Cons(LintIssue(ln, trailing_ws_col(raw_line), "trailing whitespace"),
+      if string.contains(raw_line, "\t") then
+        Cons(LintIssue(ln, find_tab_col(raw_line, 0), "tab indentation is not allowed"), base)
+      else base)
+  else
+    if string.contains(raw_line, "\t") then
+      Cons(LintIssue(ln, find_tab_col(raw_line, 0), "tab indentation is not allowed"), base)
+    else base
+
+fn lint_line(state: LintState, raw_line: String) -> LintState =
+  LintState(
+    lint_line_issues(raw_line, lint_state_line_no(state), lint_state_issues(state)),
+    lint_state_line_no(state) + 1)
+
+fn last_line_no(lines: List String) -> Int =
+  list_fold(\(acc, _) -> acc + 1, 0, lines)
+
+fn last_line_text(lines: List String) -> String =
+  list_fold(\(_, x) -> x, "", lines)
+
+fn add_missing_newline_issue(issues: List LintIssue, src: String, lines: List String) -> List LintIssue =
+  if src == "" then issues
+  else if string.ends_with(src, "\n") then issues
+  else Cons(LintIssue(last_line_no(lines), str_len(last_line_text(lines)) + 1, "missing trailing newline"), issues)
+
+fn add_format_issue(issues: List LintIssue, src: String) -> List LintIssue =
+  if format_source(src) != (if string.ends_with(src, "\n") then src else src ++ "\n") then
+    Cons(LintIssue(1, 1, "file is not formatted"), issues)
+  else issues
+
+fn run_lint_fold(lines: List String) -> LintState =
+  list_fold(lint_line, LintState(Nil, 1), lines)
+
+export fn lint_source(src: String) -> List LintIssue =
+  list_reverse(add_format_issue(add_missing_newline_issue(lint_state_issues(run_lint_fold(lines)), src, lines), src))
+  where
+    lines = str_split_lines(src)
