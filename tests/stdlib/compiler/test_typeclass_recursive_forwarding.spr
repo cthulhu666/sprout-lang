@@ -1,0 +1,31 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+type AlwaysEqual =
+  | AlwaysEqual Int
+
+type NeverEqual =
+  | NeverEqual Int
+
+instance Eq AlwaysEqual {
+  fn eq(left: AlwaysEqual, right: AlwaysEqual) -> Bool = true
+}
+
+instance Eq NeverEqual {
+  fn eq(left: NeverEqual, right: NeverEqual) -> Bool = false
+}
+
+fn recursive_both_eq(left: a, right: b, depth: Int) -> Bool where Eq a, Eq b =
+  if depth == 0 then
+    if eq(left, left) then eq(right, right) == false
+    else false
+  else recursive_both_eq(left, right, depth - 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(
+      state,
+      "recursive call forwards distinct Eq a and Eq b dictionaries",
+      recursive_both_eq(AlwaysEqual(1), NeverEqual(2), 1)
+    )
+    summary(state)

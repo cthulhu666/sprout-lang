@@ -846,6 +846,33 @@ def _rewrite_expr(
             and expr.callee.name in method_aliases
             and not isinstance(getattr(expr, "resolved_constraint", None), ast.TypeConstraint)
         ):
+            method_name = expr.callee.name
+            # When multiple constraints expose the same method (e.g. both Eq a
+            # and Eq b expose "eq"), method_aliases holds only the last entry
+            # and would pick the wrong hidden param.  Disambiguate by matching
+            # the first argument's inferred type (set by the first typecheck
+            # pass) against tvar_prog_map to identify which constraint owns it.
+            bindings_for_method = [
+                (key, binding)
+                for key, binding in current_binding_by_constraint.items()
+                if method_name in binding
+            ]
+            if len(bindings_for_method) > 1 and expr.args and tvar_prog_map:
+                first_arg_inferred = getattr(expr.args[0], "inferred_type", None)
+                if isinstance(first_arg_inferred, ast.TypeName):
+                    prog_name = tvar_prog_map.get(first_arg_inferred.name)
+                    if prog_name is not None:
+                        for key, binding in bindings_for_method:
+                            if len(key[1]) == 1 and key[1][0] == prog_name:
+                                target = binding.get(method_name)
+                                if target is not None:
+                                    return _clone_with_loc(
+                                        ast.CallExpr(
+                                            callee=_clone_with_loc(ast.VarExpr(target), expr.callee),
+                                            args=rewritten_args,
+                                        ),
+                                        expr,
+                                    )
             return _clone_with_loc(ast.CallExpr(callee=rewritten_callee, args=rewritten_args), expr)
 
         if isinstance(expr.callee, ast.VarExpr) and expr.callee.name not in scope:
@@ -940,18 +967,31 @@ def _rewrite_expr(
                     method_source: dict[str, str] | None = None
 
                     # First, try forwarding from current function constraints.
-                    matches = [
-                        binding
-                        for have in current_constraints
-                        for key, binding in current_binding_by_constraint.items()
-                        if _constraint_matches_pattern(needed, have) and key == _constraint_key(have)
-                    ]
-                    if len(matches) > 1:
-                        raise TypeclassLoweringError(
-                            f"Ambiguous constraint forwarding for {needed.class_name} in call to {expr.callee.name}"
-                        )
-                    if len(matches) == 1:
-                        method_source = matches[0]
+                    # Prefer exact-key matching: when the same class appears twice (e.g.
+                    # Eq a and Eq b), pattern matching is ambiguous because type-variable
+                    # args act as wildcards.  Exact key lookup resolves the right binding
+                    # unambiguously for recursive self-calls.
+                    needed_key = _constraint_key(
+                        _translate_resolved_constraint(needed, tvar_prog_map) if tvar_prog_map else needed
+                    )
+                    exact_match = current_binding_by_constraint.get(needed_key)
+                    if exact_match is not None:
+                        method_source = exact_match
+                    else:
+                        # Fall back to pattern matching for cross-function forwarding where
+                        # programmer-name type variables differ between callee and caller.
+                        matches = [
+                            binding
+                            for have in current_constraints
+                            for key, binding in current_binding_by_constraint.items()
+                            if _constraint_matches_pattern(needed, have) and key == _constraint_key(have)
+                        ]
+                        if len(matches) > 1:
+                            raise TypeclassLoweringError(
+                                f"Ambiguous constraint forwarding for {needed.class_name} in call to {expr.callee.name}"
+                            )
+                        if len(matches) == 1:
+                            method_source = matches[0]
 
                     # Otherwise, try concrete instance methods.
                     needed_matched_subs: dict[str, ast.TypeExpr] = {}
