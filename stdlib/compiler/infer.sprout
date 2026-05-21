@@ -796,6 +796,41 @@ fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
   if str_len(s) < str_len(suffix) then false
   else str_slice(s, str_len(s) - str_len(suffix), str_len(s)) == suffix
 
+# When a function has multiple constraints for the same class (e.g. Eq a, Eq b), there are
+# two @fwd:*:Eq markers in env — one per prog_var.  resolve_via_fwd_or_scan picks the first
+# TVar-headed arg, which is always the same arg, so both obligations resolve to the same dict.
+# This function scans markers by prog_var so each constraint gets its own dict.
+fn resolve_via_fwd_for_prog_var(
+  class_name: String,
+  prog_var: String,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  scan_fwd_markers_for_prog_var(class_name, prog_var, vec_to_list(dict_entries(env)), pos)
+
+fn scan_fwd_markers_for_prog_var(
+  class_name: String,
+  prog_var: String,
+  entries: List (String, types.Scheme),
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  match entries with
+  | Nil -> Nothing
+  | Cons entry rest ->
+      match entry with
+      | (key, val) ->
+          if is_fwd_key_for_class(key, class_name)
+          then
+            match val with
+            | types.Scheme _ _ (types.TConst stored_prog_var) _ ->
+                if stored_prog_var == prog_var
+                then Just(typed_ast.TDict(
+                       ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
+                       types.TConst(class_name), pos))
+                else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
+            | _ -> scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
+          else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
+
 # resolve_obligation: the principled path for constrained regular-function dict injection.
 # Uses prog_to_fresh (the instantiation mapping from programmer vars to fresh TVars) to
 # find the concrete type for the constraint variable, then looks up the instance.
@@ -803,10 +838,10 @@ fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
 # or non-VarExpr callee) or if the constraint is still polymorphic after s3 is applied.
 #
 # When prog_var is absent from prog_to_fresh (mono-scheme call — recursive self-call
-# inside a constrained fn body), @fwd forwarding is tried first so that the hidden
-# dict param is forwarded rather than incorrectly resolved to a concrete instance whose
-# type head happens to appear in one of the call arguments (e.g. the List in "List a"
-# being mistaken for an Eq (List a) instance instead of the forwarded Eq a param).
+# inside a constrained fn body), resolve_via_fwd_for_prog_var is called so that the
+# correct @fwd marker is found by prog_var rather than by first-TVar-arg heuristic.
+# This matters when multiple constraints share a class (e.g. Eq a, Eq b): scanning by
+# prog_var finds the right marker for each obligation independently.
 fn resolve_obligation(
   class_name: String,
   prog_var: String,
@@ -818,7 +853,7 @@ fn resolve_obligation(
 ) -> Maybe typed_ast.TypedExpr =
   match dict_get(prog_var, prog_to_fresh) with
   | Nothing ->
-      match resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos) with
+      match resolve_via_fwd_for_prog_var(class_name, prog_var, env, pos) with
       | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos)
       | fwd -> fwd
   | Just fresh_t ->
