@@ -937,7 +937,7 @@ fn resolve_obligation(
           match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
           | Just _ ->
               Just(typed_ast.TDict(
-                ast.TypeConstraint(class_name, Cons(type_to_typeexpr(unifier.apply_subst(s3, fresh_t)), Nil)),
+                ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
                 types.TConst(class_name), pos))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)

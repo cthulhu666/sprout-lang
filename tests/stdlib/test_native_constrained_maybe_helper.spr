@@ -1,0 +1,17 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+fn same_value(x: a, y: a) -> Bool where Eq a =
+  eq(x, y)
+
+fn same_maybe_via_helper(x: Maybe a, y: Maybe a) -> Bool where Eq a =
+  same_value(x, y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(
+      state,
+      "constrained helper forwards Eq a through Maybe a",
+      same_maybe_via_helper(Just(1), Just(1))
+    )
+    summary(state)
