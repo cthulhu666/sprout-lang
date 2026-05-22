@@ -436,6 +436,15 @@ bootstrap-from-seed:
   echo "==> Using seed: $SEED ($(file -b "$SEED"))"
   echo "==> Emitting LLVM IR..."
   "$SEED" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  # Compat shim: seeds built before the llvm.stacksave/stackrestore declare fix don't emit
+  # these declarations. clang 16+ requires explicit declares; inject them if missing.
+  if ! grep -qF 'declare ptr @llvm.stacksave' "$TMP_LL"; then
+    TMP_PATCH="/tmp/sprout_bootstrap_patch_$$"
+    { head -3 "$TMP_LL"
+      printf 'declare ptr @llvm.stacksave()\ndeclare void @llvm.stackrestore(ptr)\n'
+      tail -n +4 "$TMP_LL"
+    } > "$TMP_PATCH" && mv "$TMP_PATCH" "$TMP_LL"
+  fi
   echo "==> Linking with clang..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
