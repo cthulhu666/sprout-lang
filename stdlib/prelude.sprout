@@ -533,21 +533,14 @@ export fn map(f: a -> b, xs: c a) -> c b where Functor c =
 export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
   fold_values(step, init, xs)
 
-# ADT accumulator for fold_indexed; avoids tuple-match on constrained fold result (HM inference issue).
-type FoldIndexedState b =
-  | FoldIndexedState Int b
-
-fn fold_indexed_unwrap(acc: FoldIndexedState b) -> b =
-  match acc with
-  | FoldIndexedState _ result -> result
-
-fn fold_indexed_advance(f: b -> Int -> a -> b, acc: FoldIndexedState b, x: a) -> FoldIndexedState b =
-  match acc with
-  | FoldIndexedState i r -> FoldIndexedState(i + 1)(f(r, i, x))
+fn fold_indexed_step(f: b -> Int -> a -> b, state: (Int, b), x: a) -> (Int, b) =
+  match state with
+  | (i, acc) -> (i + 1, f(acc, i, x))
 
 # O(n): fold exposing the 0-based element index to the step function.
 export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Foldable f =
-  fold_indexed_unwrap(fold(fold_indexed_advance(f), FoldIndexedState(0, init), xs))
+  match fold(fold_indexed_step(f), (0, init), xs) with
+  | (_, result) -> result
 
 export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
   fold(\ (acc, x) -> acc ++ x, empty(), xs)
