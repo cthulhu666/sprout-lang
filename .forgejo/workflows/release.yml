@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-linux-x86_64:
+    runs-on: [self-hosted, linux-x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+        with:
+          just-version: "1.39.0"
+
+      - name: Install Clang / LLVM
+        run: sudo apt-get install -y clang llvm
+
+      - name: Build stage-0 native binary
+        # memwatch.sh is macOS-only (sysctl/vm_stat); ulimit -v guards against OOM on Linux.
+        run: |
+          ulimit -v $((8 * 1024 * 1024))
+          python3 -m sprout.cli compile \
+            stdlib/compiler/compile_driver.sprout \
+            --with-stdlib --native \
+            -o compile_driver_bin
+
+      - name: Build stage-1 native binary
+        run: just build-stage1
+
+      - name: Verify examples (stage-1)
+        run: just compile-examples-stage1
+
+      - name: Stage release binary
+        run: cp compile_driver_bin_stage1 sprout-linux-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sprout-linux-x86_64
+          path: sprout-linux-x86_64
+
+  build-linux-aarch64:
+    runs-on: [self-hosted, linux-aarch64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+        with:
+          just-version: "1.39.0"
+
+      - name: Install Clang / LLVM
+        run: sudo apt-get install -y clang llvm
+
+      - name: Bootstrap stage-1 from committed aarch64 seed (Python-free)
+        # Uses bootstrap/compile_driver-linux-aarch64 to emit IR from current source,
+        # then links with clang. Equivalent to the Python path (enforced by
+        # test_bootstrap_identity.py) but skips the OOM-risky Python compilation.
+        run: just bootstrap-from-seed
+
+      - name: Verify examples (stage-1)
+        run: just compile-examples-stage1
+
+      - name: Stage release binary
+        run: cp compile_driver_bin_stage1 sprout-linux-aarch64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sprout-linux-aarch64
+          path: sprout-linux-aarch64
+
+  publish-release:
+    runs-on: [self-hosted, linux-x86_64]
+    needs: [build-linux-x86_64, build-linux-aarch64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sprout-linux-x86_64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sprout-linux-aarch64
+
+      - name: Stage darwin-arm64 seed as release binary
+        # Uses the committed bootstrap seed. WARNING: run `just build-seed-macos &&
+        # git commit bootstrap/compile_driver-darwin-arm64` before tagging to keep
+        # this current. There is no macOS CI runner available on GCE.
+        run: cp bootstrap/compile_driver-darwin-arm64 sprout-darwin-arm64
+
+      - name: Create Forgejo release
+        # softprops/action-gh-release reads GITHUB_API_URL, which Forgejo Actions
+        # injects as https://codeberg.org/api/v1 — works with Forgejo transparently.
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sprout-linux-x86_64
+            sprout-linux-aarch64
+            sprout-darwin-arm64
+          generate_release_notes: true

@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux-x86_64]
     steps:
       - uses: actions/checkout@v4
 
@@ -28,11 +28,19 @@ jobs:
         run: python3 scripts/run_parallel_tests.py
 
       - name: Build stage-0 native binary
+        # memwatch.sh is macOS-only (sysctl/vm_stat); ulimit -v guards against OOM on Linux.
         run: |
+          ulimit -v $((8 * 1024 * 1024))
           python3 -m sprout.cli compile \
+            stdlib/compiler/compile_driver.sprout \
             --with-stdlib --native \
-            -o compile_driver_bin \
-            stdlib/compiler/compile_driver.sprout
+            -o compile_driver_bin
 
       - name: Build stage-1 native binary
         run: just build-stage1
+
+      - name: Verify examples (stage-1)
+        run: just compile-examples-stage1
+
+      - name: GC safety check
+        run: just gc-safety-check --strict
