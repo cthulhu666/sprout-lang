@@ -686,6 +686,17 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
             return runtime_in.read()
         return Path(raw_path).read_text(encoding="utf-8")
 
+    def builtin_try_read_file(args: list[object]) -> object:
+        raw_path = args[0]
+        if not isinstance(raw_path, str):
+            return ADTValue(constructor="Nothing", args=())
+        try:
+            if raw_path == "-":
+                return ADTValue(constructor="Just", args=(runtime_in.read(),))
+            return ADTValue(constructor="Just", args=(Path(raw_path).read_text(encoding="utf-8"),))
+        except OSError:
+            return ADTValue(constructor="Nothing", args=())
+
     def builtin_write_file(args: list[object]) -> object:
         raw_path, content = args[0], args[1]
         if not isinstance(raw_path, str):
@@ -909,6 +920,12 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
         if not isinstance(value, str) or len(value) != 1:
             raise RuntimeError("char_to_string expects Char")
         return value
+
+    def builtin_char_to_str(args: list[object]) -> object:
+        codepoint = args[0]
+        if not isinstance(codepoint, int):
+            raise RuntimeError("char_to_str expects Int codepoint")
+        return chr(codepoint)
 
     def builtin_str_compare(args: list[object]) -> object:
         left = args[0]
@@ -2059,6 +2076,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("print_int", BuiltinFunction(name="print_int", arity=1, fn=builtin_print_int))
     env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
     env.set("read_file", BuiltinFunction(name="read_file", arity=1, fn=builtin_read_file))
+    env.set("try_read_file", BuiltinFunction(name="try_read_file", arity=1, fn=builtin_try_read_file))
     env.set("write_file", BuiltinFunction(name="write_file", arity=2, fn=builtin_write_file))
     env.set("read_int_lines", BuiltinFunction(name="read_int_lines", arity=1, fn=builtin_read_int_lines))
     env.set("env_get", BuiltinFunction(name="env_get", arity=1, fn=builtin_env_get))
@@ -2066,6 +2084,7 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("parse_int", BuiltinFunction(name="parse_int", arity=1, fn=builtin_parse_int))
     env.set("int_to_string", BuiltinFunction(name="int_to_string", arity=1, fn=builtin_int_to_string))
     env.set("char_to_string", BuiltinFunction(name="char_to_string", arity=1, fn=builtin_char_to_string))
+    env.set("char_to_str", BuiltinFunction(name="char_to_str", arity=1, fn=builtin_char_to_str))
     env.set("split_words", BuiltinFunction(name="split_words", arity=1, fn=builtin_split_words))
     env.set("int_range", BuiltinFunction(name="int_range", arity=2, fn=builtin_int_range))
     env.set("int_range_start", BuiltinFunction(name="int_range_start", arity=1, fn=builtin_int_range_start))

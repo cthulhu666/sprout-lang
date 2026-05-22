@@ -1326,6 +1326,58 @@ long long read_file(long long path_i) {
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
 }
+long long try_read_file(long long path_i) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  if (path == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  FILE* f = NULL;
+  int close_after = 0;
+  if (strcmp(path, "-") == 0) {
+    f = stdin;
+  } else {
+    f = fopen(path, "rb");
+    if (f == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    close_after = 1;
+  }
+  size_t cap = 4096;
+  size_t len = 0;
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(cap);
+  if (out == NULL) {
+    if (close_after) fclose(f);
+    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  }
+  char buf[4096];
+  while (1) {
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    if (n > 0) {
+      while (len + n + 1 > cap) {
+        size_t new_cap = cap * 2;
+        char* grown = (char*)realloc(out, new_cap);
+        if (grown == NULL) {
+          if (close_after) fclose(f);
+          free(out);
+          return sprout_make0(find_ctor_tag_by_name("Nothing"));
+        }
+        out = grown;
+        cap = new_cap;
+      }
+      memcpy(out + len, buf, n);
+      len += n;
+    }
+    if (n < sizeof(buf)) {
+      if (feof(f)) break;
+      if (ferror(f)) {
+        if (close_after) fclose(f);
+        free(out);
+        return sprout_make0(find_ctor_tag_by_name("Nothing"));
+      }
+    }
+  }
+  if (close_after) fclose(f);
+  out[len] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)out);
+}
 long long write_file(long long path_i, long long content_i) {
   const char *path    = (const char *)(uintptr_t)path_i;
   const char *content = (const char *)(uintptr_t)content_i;

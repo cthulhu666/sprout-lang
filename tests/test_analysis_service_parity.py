@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -94,7 +95,7 @@ class AnalysisServiceProtocolTests(unittest.TestCase):
         self.assertFalse(responses[2]["ok"])
 
     def test_not_implemented_ops_return_structured_error(self) -> None:
-        for op in ("eval_expr_in_source", "instances_in_source", "complete_in_state"):
+        for op in ("instances_in_source", "complete_in_state"):
             with self.subTest(op=op):
                 [resp] = _query([{"op": op, "module_source": _SIMPLE_SOURCE}])
                 self.assertFalse(resp["ok"])
@@ -256,3 +257,35 @@ class AnalysisServiceTypeOfTests(unittest.TestCase):
     def test_missing_expr_field_returns_error(self) -> None:
         [resp] = _query([{"op": "type_of_in_source", "module_source": _SIMPLE_SOURCE}])
         self.assertFalse(resp["ok"], resp)
+
+
+@_skip_if_no_bin
+class AnalysisServiceEvalExprTests(unittest.TestCase):
+    """Tests for eval_expr_in_source op."""
+
+    def _eval(self, source: str, expr: str) -> dict:
+        [resp] = _query([{"op": "eval_expr_in_source", "module_source": source, "expr": expr}])
+        return resp
+
+    def test_missing_expr_field_returns_error(self) -> None:
+        [resp] = _query([{"op": "eval_expr_in_source", "module_source": _SIMPLE_SOURCE}])
+        self.assertFalse(resp["ok"])
+        self.assertIn("missing field", resp["error"])
+
+    def test_missing_source_field_returns_error(self) -> None:
+        [resp] = _query([{"op": "eval_expr_in_source", "expr": "42"}])
+        self.assertFalse(resp["ok"])
+        self.assertIn("missing field", resp["error"])
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_pure_int_expression_prints_value(self) -> None:
+        resp = self._eval(_SIMPLE_SOURCE, "42")
+        self.assertTrue(resp["ok"], resp)
+        self.assertIsInstance(resp["value"], list)
+        self.assertEqual(resp["value"], ["42"])
+
+    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
+    def test_function_application_prints_result(self) -> None:
+        resp = self._eval(_SIMPLE_SOURCE, "foo()")
+        self.assertTrue(resp["ok"], resp)
+        self.assertEqual(resp["value"], ["42"])
