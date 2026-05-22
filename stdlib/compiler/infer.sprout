@@ -581,7 +581,7 @@ fn check_instance_for_marker(
                   InferOk(
                     typed_ast.TCall(typed_callee,
                       Cons(typed_ast.TDict(
-                        ast.TypeConstraint(class_name, Cons(ast.TypeName(head_str), Nil)),
+                        ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, typed_args, subst), Nil)),
                         types.TConst(class_name), pos),
                         typed_args),
                       ret_t, pos),
@@ -646,6 +646,46 @@ fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dic
       match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
       | Nothing -> first_concrete_typed_arg_str(rest, subst)
       | Just s -> Just(s)
+
+# Convert a concrete types.Type to an ast.TypeExpr.
+# Only TConst and TApp are meaningful here; anything else falls back to "_".
+fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
+  match t with
+  | types.TConst name -> ast.TypeName(strip_module_prefix(name))
+  | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base), type_to_typeexpr(arg))
+  | _ -> ast.TypeName("_")
+
+# Returns Just(te) if t has a concrete (TConst) head; Nothing if the head is a TVar.
+fn concrete_typeexpr(t: types.Type) -> Maybe ast.TypeExpr =
+  match t with
+  | types.TConst name -> Just(ast.TypeName(strip_module_prefix(name)))
+  | types.TApp base _ ->
+      match concrete_typeexpr(base) with
+      | Nothing -> Nothing
+      | Just _ -> Just(type_to_typeexpr(t))
+  | _ -> Nothing
+
+# Returns the full concrete ast.TypeExpr for the first concrete arg, or Nothing.
+fn first_concrete_typed_arg_typeexpr(
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type
+) -> Maybe ast.TypeExpr =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg rest ->
+      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Nothing -> first_concrete_typed_arg_typeexpr(rest, subst)
+      | Just te -> Just(te)
+
+# Return the full concrete typeexpr for the first typed arg, falling back to TypeName(head_str).
+fn first_concrete_arg_typeexpr_or_name(
+  head_str: String,
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type
+) -> ast.TypeExpr =
+  match first_concrete_typed_arg_typeexpr(typed_args, subst) with
+  | Just te -> te
+  | Nothing -> ast.TypeName(head_str)
 
 # Returns the outermost TVar name from the first arg whose head is a TVar after
 # substitution.  Scans all args so that function-typed leading arguments (e.g.
@@ -726,7 +766,7 @@ fn resolve_one_constraint_tdict(
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
           Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(ast.TypeName(head_str), Nil)),
+            ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst), Nil)),
             types.TConst(class_name), pos))
       | Nothing ->
           # Concrete type found but no instance for it (e.g., arg is List (k, Int, a)
@@ -862,7 +902,7 @@ fn resolve_obligation(
           match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
           | Just _ ->
               Just(typed_ast.TDict(
-                ast.TypeConstraint(class_name, Cons(ast.TypeName(head_str), Nil)),
+                ast.TypeConstraint(class_name, Cons(type_to_typeexpr(unifier.apply_subst(s3, fresh_t)), Nil)),
                 types.TConst(class_name), pos))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
@@ -893,13 +933,13 @@ fn inject_constrained_fn_dicts(
           | Nothing ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
           | Just tdict ->
-              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, Cons(tdict, typed_args), subst, ret_t, s3, es3, call_eff, pos)
+              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
       | types.Scheme _ _ (types.TConst class_name) _ ->
           match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos) with
           | Nothing ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
           | Just tdict ->
-              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, Cons(tdict, typed_args), subst, ret_t, s3, es3, call_eff, pos)
+              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
       | _ ->
           inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
 

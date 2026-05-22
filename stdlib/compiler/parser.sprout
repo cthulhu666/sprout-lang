@@ -1149,7 +1149,7 @@ fn parse_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl
     (_, i9) <- expected_symbol("=", tokens, i8)
     (body, i10) <- parse_expr(tokens, i9)
     (final_body, i11) <- parse_optional_where_body(tokens, i10, body)
-    Ok((ast.FnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, list_reverse(constraints), final_body, cur_pos(tokens, i)), i11))
+    Ok((ast.FnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, final_body, cur_pos(tokens, i)), i11))
 
 fn parse_extern_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
