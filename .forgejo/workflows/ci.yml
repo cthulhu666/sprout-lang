@@ -19,9 +19,6 @@ jobs:
       - name: Install Clang / LLVM
         run: sudo apt-get install -y clang llvm
 
-      - name: Run test suite
-        run: python3 scripts/run_parallel_tests.py
-
       - name: Build stage-0 native binary
         # memwatch.sh is macOS-only (sysctl/vm_stat); ulimit -v guards against OOM on Linux.
         run: |
@@ -33,6 +30,9 @@ jobs:
 
       - name: Build stage-1 native binary
         run: just build-stage1
+
+      - name: Run stdlib tests (stage-1)
+        run: just test-stdlib-stage1
 
       - name: Verify examples (stage-1)
         run: just compile-examples-stage1
