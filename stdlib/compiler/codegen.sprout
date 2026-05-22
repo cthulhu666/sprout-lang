@@ -2842,6 +2842,10 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("analysis_instances_in_source", FnSig("analysis_instances_in_source", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
   # Vec String params are Sprout heap handles (i64 pointer values); C side receives them as const void*
   , ("analysis_complete_in_state", FnSig("analysis_complete_in_state", Cons(ll_ptr(), Cons(ll_ptr(), Cons(ll_ptr(), Nil))), ll_i64(), Nothing))
+  # LLVM stack-save/restore intrinsics — must be explicitly declared so clang 16+ resolves them
+  # by signature rather than by name lookup (which changed with opaque-pointer intrinsic overloading).
+  , ("llvm.stacksave", FnSig("llvm.stacksave", Nil, ll_ptr(), Nothing))
+  , ("llvm.stackrestore", FnSig("llvm.stackrestore", Cons(ll_ptr(), Nil), "void", Nothing))
   ]
 
 # Convert an AST type expression to an LLVM type string.

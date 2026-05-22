@@ -16,7 +16,11 @@ jobs:
         run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
 
       - name: Install Clang / LLVM
-        run: sudo apt-get install -y clang llvm
+        # clang-16+ required: Sprout IR uses opaque ptr type (LLVM 16 default).
+        # clang-14 (Debian 12 default) cannot parse ptr in IR text.
+        run: |
+          sudo apt-get install -y clang-16 llvm-16
+          echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
 
       - name: Bootstrap stage-1 from committed seed (Python-free)
         run: just bootstrap-from-seed

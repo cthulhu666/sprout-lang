@@ -439,12 +439,7 @@ bootstrap-from-seed:
   echo "==> Linking with clang..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  # Seed IR uses opaque pointers (ptr type, emitted by clang 16+). Clang < 16 requires
-  # -opaque-pointers to accept this IR; clang 17+ removed the flag (opaque pointers always on).
-  CLANG_MAJOR=$(clang --version 2>&1 | grep -oE 'clang version [0-9]+' | grep -oE '[0-9]+$')
-  OPAQUE_FLAG=""
-  if [[ -n "$CLANG_MAJOR" && "$CLANG_MAJOR" -lt 16 ]]; then OPAQUE_FLAG="-opaque-pointers"; fi
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA $OPAQUE_FLAG -o compile_driver_bin_stage1
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o compile_driver_bin_stage1
   echo "==> Built compile_driver_bin_stage1 from seed (Python-free)"
 
 build-stage1-asan:
@@ -492,23 +487,28 @@ build-stage2-asan:
   echo "==> Built $STAGE2 (asan)"
 
 # Build the self-hosted analysis service binary (Phase 9).
-# Requires compile_driver_bin_stage1; build it first with: just build-stage1
+# Requires compile_driver_bin_stage2 (preferred) or compile_driver_bin_stage1 as fallback.
 # Output: analysis_service_bin — JSON-over-stdio daemon used by the language server bridge.
 build-analysis-service:
   #!/usr/bin/env bash
   set -euo pipefail
-  STAGE1="compile_driver_bin_stage1"
-  if [[ ! -x "./$STAGE1" ]]; then
-    echo "ERROR: $STAGE1 not found; run: just build-stage1" >&2
+  # Prefer stage2 (includes recent type-checker fixes); fall back to stage1.
+  if [[ -x "./compile_driver_bin_stage2" ]]; then
+    STAGE="compile_driver_bin_stage2"
+  elif [[ -x "./compile_driver_bin_stage1" ]]; then
+    STAGE="compile_driver_bin_stage1"
+  else
+    echo "ERROR: neither compile_driver_bin_stage2 nor compile_driver_bin_stage1 found" >&2
     exit 1
   fi
+  echo "==> Using compiler: $STAGE"
   STDLIB_ROOT="$(pwd)/stdlib"
   DRIVER="stdlib/compiler/analysis_service_driver.sprout"
   OUT="analysis_service_bin"
   TMP_LL="/tmp/sprout_analysis_service_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR for analysis service..."
-  "./$STAGE1" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  "./$STAGE" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
   echo "==> Linking with clang..."
