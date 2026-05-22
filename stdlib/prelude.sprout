@@ -780,6 +780,7 @@ extern fn env_get(name: String) -> Maybe String !{IO}
 extern fn parse_int(s: String) -> Int
 extern fn int_to_string(n: Int) -> String
 extern fn char_to_string(c: Char) -> String
+extern fn char_to_str(codepoint: Int) -> String
 
 # Integer ranges
 extern fn int_range(start: Int, end: Int) -> IntRange

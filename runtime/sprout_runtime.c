@@ -3365,6 +3365,33 @@ long long char_to_string(long long ch_i) {
   if (ch == NULL) tcp_fail("char_to_string: null input");
   return ch_i;
 }
+long long char_to_str(long long codepoint) {
+  unsigned int cp = (unsigned int)codepoint;
+  char buf[5];
+  size_t len;
+  if (cp <= 0x7f) {
+    buf[0] = (char)cp; len = 1;
+  } else if (cp <= 0x7ff) {
+    buf[0] = (char)(0xc0 | (cp >> 6));
+    buf[1] = (char)(0x80 | (cp & 0x3f)); len = 2;
+  } else if (cp <= 0xffff) {
+    buf[0] = (char)(0xe0 | (cp >> 12));
+    buf[1] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    buf[2] = (char)(0x80 | (cp & 0x3f)); len = 3;
+  } else {
+    buf[0] = (char)(0xf0 | (cp >> 18));
+    buf[1] = (char)(0x80 | ((cp >> 12) & 0x3f));
+    buf[2] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    buf[3] = (char)(0x80 | (cp & 0x3f)); len = 4;
+  }
+  buf[len] = '\0';
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(len + 1);
+  if (out == NULL) tcp_fail("char_to_str: out of memory");
+  memcpy(out, buf, len + 1);
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
 
 static void buf_init(ByteBuf* buf) {
   buf->data = NULL;

@@ -12,6 +12,26 @@ export fn hide_cursor() -> Unit !{IO} =
 export fn show_cursor() -> Unit !{IO} =
   term_show_cursor()
 
+let esc = char_to_str(27)
+
+export fn enter_alt_screen() -> Unit !{IO} =
+  term_write(esc ++ "[?1049h")
+
+export fn exit_alt_screen() -> Unit !{IO} =
+  term_write(esc ++ "[?1049l")
+
+export fn reset_style() -> Unit !{IO} =
+  term_write(esc ++ "[0m")
+
+export fn set_bold() -> Unit !{IO} =
+  term_write(esc ++ "[1m")
+
+export fn set_fg(r: Int, g: Int, b: Int) -> Unit !{IO} =
+  term_write(`${esc}[38;2;${int_to_string(r)};${int_to_string(g)};${int_to_string(b)}m`)
+
+export fn set_bg(r: Int, g: Int, b: Int) -> Unit !{IO} =
+  term_write(`${esc}[48;2;${int_to_string(r)};${int_to_string(g)};${int_to_string(b)}m`)
+
 export fn write(text: String) -> Unit !{IO} =
   term_write(text)
 
