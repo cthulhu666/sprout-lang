@@ -11,15 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install just
-        uses: extractions/setup-just@v2
-        with:
-          just-version: "1.39.0"
+      - name: Add mise shims to PATH
+        # mise manages Python 3.12 and just 1.39.0 on the self-hosted runner.
+        # actions/setup-python is not used — it requires a toolcache not present on host runners.
+        run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
 
       - name: Install Clang / LLVM
         run: sudo apt-get install -y clang llvm
