@@ -1,0 +1,15 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+fn add_idx(acc: Int, i: Int, x: Int) -> Int =
+  acc + (i * x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(
+      state,
+      "fold_indexed propagates accumulator updates",
+      fold_indexed(add_idx, 0, Cons(10, Cons(20, Cons(30, Nil)))),
+      80
+    )
+    summary(state)

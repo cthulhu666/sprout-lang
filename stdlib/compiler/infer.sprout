@@ -581,7 +581,7 @@ fn check_instance_for_marker(
                   InferOk(
                     typed_ast.TCall(typed_callee,
                       Cons(typed_ast.TDict(
-                        ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, typed_args, subst), Nil)),
+                        ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_fwd(head_str, class_name, typed_args, subst, env), Nil)),
                         types.TConst(class_name), pos),
                         typed_args),
                       ret_t, pos),
@@ -686,6 +686,41 @@ fn first_concrete_arg_typeexpr_or_name(
   match first_concrete_typed_arg_typeexpr(typed_args, subst) with
   | Just te -> te
   | Nothing -> ast.TypeName(head_str)
+
+# Like first_concrete_arg_typeexpr_or_name, but substitutes programmer type-variable
+# names recovered from @fwd markers when the type contains TVars.  This is needed when
+# calling a class method on a polymorphic container (e.g. eq(x, y) where x: Maybe a):
+# without it, TVar args become TypeName("_") and the lowering's fwd-dict lookup fails.
+fn first_concrete_arg_typeexpr_fwd(
+  head_str: String,
+  class_name: String,
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme
+) -> ast.TypeExpr =
+  match typed_args with
+  | Nil -> ast.TypeName(head_str)
+  | Cons first_arg rest ->
+      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Nothing -> first_concrete_arg_typeexpr_fwd(head_str, class_name, rest, subst, env)
+      | Just _ -> type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)), class_name, env)
+
+# Like type_to_typeexpr, but for each TVar looks up @fwd:name:class_name in env
+# to recover the programmer-visible variable name (e.g. "a") rather than emitting "_".
+fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict types.Scheme) -> ast.TypeExpr =
+  match t with
+  | types.TConst name -> ast.TypeName(strip_module_prefix(name))
+  | types.TApp base arg ->
+      ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, env),
+                    type_to_typeexpr_with_prog_vars(arg, class_name, env))
+  | types.TVar name ->
+      match dict_get("@fwd:" ++ name ++ ":" ++ class_name, env) with
+      | Just scheme ->
+          match scheme with
+          | types.Scheme _ _ (types.TConst prog_var) _ -> ast.TypeName(prog_var)
+          | _ -> ast.TypeName("_")
+      | Nothing -> ast.TypeName("_")
+  | _ -> ast.TypeName("_")
 
 # Returns the outermost TVar name from the first arg whose head is a TVar after
 # substitution.  Scans all args so that function-typed leading arguments (e.g.

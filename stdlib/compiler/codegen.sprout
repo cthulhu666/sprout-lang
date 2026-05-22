@@ -1701,7 +1701,7 @@ fn emit_lambda_expr(params: List ast.Param, body: typed_ast.TypedExpr, ty: types
     let capture_vals = get_capture_vals(captures, locals)
     let param_lls = extract_param_lls_from_type(ty, list_length_params(params))
     let wire_param_lls = list_map(normalize_lambda_param_ll, param_lls)
-    let ret_ll = extract_ret_ll_from_type(ty, list_length_params(params))
+    let ret_ll = normalize_lambda_param_ll(extract_ret_ll_from_type(ty, list_length_params(params)))
     let capture_lls = list_map(\v -> val_ll(v), capture_vals)
     emit_lambda_helper(lam_name, params, wire_param_lls, param_lls, body, ret_ll, captures, capture_lls, ctx, em)
     closure <- emit_make_closure("@" ++ lam_name, capture_vals, em)

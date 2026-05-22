@@ -1,0 +1,14 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+fn same_maybe(x: Maybe a, y: Maybe a) -> Bool where Eq a =
+  eq(x, y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(
+      state,
+      "parameterized Maybe Eq forwards polymorphic Eq a",
+      same_maybe(Just(1), Just(1))
+    )
+    summary(state)
