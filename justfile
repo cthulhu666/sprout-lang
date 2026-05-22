@@ -435,7 +435,12 @@ bootstrap-from-seed:
   echo "==> Linking with clang..."
   CLANG_EXTRA=""
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o compile_driver_bin_stage1
+  # Seed IR uses opaque pointers (ptr type, emitted by clang 16+). Clang < 16 requires
+  # -opaque-pointers to accept this IR; clang 17+ removed the flag (opaque pointers always on).
+  CLANG_MAJOR=$(clang --version 2>&1 | grep -oE 'clang version [0-9]+' | grep -oE '[0-9]+$')
+  OPAQUE_FLAG=""
+  if [[ -n "$CLANG_MAJOR" && "$CLANG_MAJOR" -lt 16 ]]; then OPAQUE_FLAG="-opaque-pointers"; fi
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA $OPAQUE_FLAG -o compile_driver_bin_stage1
   echo "==> Built compile_driver_bin_stage1 from seed (Python-free)"
 
 build-stage1-asan:
