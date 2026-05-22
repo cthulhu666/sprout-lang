@@ -9,6 +9,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.compiler.types as types
 import stdlib.string as string
+import stdlib.process as process
 
 # ---------------------------------------------------------------------------
 # Header stripping — mirrors compiler.sprout (strip_headers is not exported)
@@ -320,6 +321,118 @@ fn op_type_of_in_source(src: String, expr: String, stdlib_root: String) -> json.
         | Just scheme -> ok_response(json.JsonString(types.scheme_to_string(scheme)))
 
 # ---------------------------------------------------------------------------
+# eval_expr_in_source — compile and run an expression in a source context
+#
+# Strategy (mirrors Python's eval_expression_lines_in_source):
+#   1. Augment source with sentinel let-binding; compile to infer its type.
+#   2. Based on the inferred type:
+#      - Pure type T     → add fn main = print(sentinel); requires ToString T
+#      - Unit !{IO}      → add fn main = sentinel (runs the IO action directly)
+#      - Other T !{IO}   → error (cannot auto-print effectful non-Unit expressions)
+#   3. Write the full augmented source to a fixed /tmp path.
+#   4. Compile to LLVM IR via the internal compiler pipeline (compile_full_ir).
+#   5. Link IR + sprout_runtime.c with clang.
+#   6. Execute the binary, capture stdout, return as a JSON array of lines.
+#
+# Fixed /tmp paths work because the REPL is interactive: one expression at a time.
+# SPROUT_DARWIN_FRAMEWORKS=1 env var triggers the -framework flags needed on macOS.
+
+fn eval_source_path() -> String = "/tmp/sprout_eval_repl.sprout"
+fn eval_ir_path() -> String = "/tmp/sprout_eval_repl.ll"
+fn eval_bin_path() -> String = "/tmp/sprout_eval_repl_bin"
+
+fn runtime_c_path(stdlib_root: String) -> String =
+  stdlib_root ++ "/../runtime/sprout_runtime.c"
+
+fn clang_base_args(stdlib_root: String) -> List String =
+  ["clang", eval_ir_path(), runtime_c_path(stdlib_root), "-O2", "-o", eval_bin_path()]
+
+fn clang_darwin_extra() -> List String =
+  ["-framework", "Security", "-framework", "CoreFoundation"]
+
+fn clang_argv(stdlib_root: String, use_darwin: Bool) -> List String =
+  if use_darwin then list_append(clang_base_args(stdlib_root), clang_darwin_extra())
+  else clang_base_args(stdlib_root)
+
+fn make_eval_source(src: String, expr: String, type_str: String) -> Maybe String =
+  if string.ends_with(type_str, " !{IO}") then
+    if type_str == "Unit !{IO}" then
+      Just(src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr ++ "\nfn main() -> Unit !{IO} = " ++ sentinel_name())
+    else
+      Nothing
+  else
+    Just(src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr ++ "\nfn main() -> Unit !{IO} = print(" ++ sentinel_name() ++ ")")
+
+fn string_to_json(s: String) -> json.Json = json.JsonString(s)
+
+fn vec_strings_to_json_array(lines: Vec String) -> json.Json =
+  json.array_from_list(vec_to_list(vec_map(string_to_json, lines)))
+
+fn eval_output_lines(output: String) -> Vec String =
+  if output == "" then vec_empty() else string.string_lines(output)
+
+fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
+  if process.proc_ok(run_result) == false then
+    error_response("eval_expr_in_source: runtime error (exit " ++ int_to_string(process.proc_exit(run_result)) ++ "): " ++ process.proc_stderr(run_result))
+  else
+    ok_response(vec_strings_to_json_array(eval_output_lines(string.trim_right(process.proc_stdout(run_result)))))
+
+fn run_eval_binary(link_result: process.ProcResult) -> json.Json !{IO} =
+  if process.proc_ok(link_result) == false then
+    error_response("eval_expr_in_source: clang link failed: " ++ process.proc_stderr(link_result))
+  else do
+    run_result <- process.proc_run([eval_bin_path()])
+    collect_eval_output(run_result)
+
+fn darwin_frameworks_set() -> Bool !{IO} =
+  match env_get("SPROUT_DARWIN_FRAMEWORKS") with
+  | Just _ -> true
+  | Nothing -> false
+
+fn link_and_run_eval(ir_result: compiler.IrFullResult, stdlib_root: String) -> json.Json !{IO} =
+  match ir_result with
+  | compiler.IrFullFail _ -> error_response("eval_expr_in_source: codegen failed")
+  | compiler.IrFullOk ir_text ->
+      do
+        write_file(eval_ir_path(), ir_text)
+        use_darwin <- darwin_frameworks_set()
+        link_result <- process.proc_run(clang_argv(stdlib_root, use_darwin))
+        run_eval_binary(link_result)
+
+fn compile_and_run_eval(src: String, stdlib_root: String) -> json.Json !{IO} =
+  do
+    write_file(eval_source_path(), src)
+    ir_result <- compiler.compile_full_ir(eval_source_path(), stdlib_root)
+    link_and_run_eval(ir_result, stdlib_root)
+
+fn eval_with_scheme(src: String, expr: String, stdlib_root: String, scheme: types.Scheme) -> json.Json !{IO} =
+  match make_eval_source(src, expr, type_str) with
+  | Nothing -> error_response("eval_expr_in_source: cannot auto-print effectful non-Unit expression of type: " ++ type_str)
+  | Just full_src -> compile_and_run_eval(full_src, stdlib_root)
+  where type_str = types.scheme_to_string(scheme)
+
+fn eval_with_type_result(src: String, expr: String, stdlib_root: String, result: compiler.CompileResult) -> json.Json !{IO} =
+  match result with
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> error_response("eval_expr_in_source: typecheck failed")
+      | Cons d _ ->
+          match d with
+          | compiler.DiagError msg -> error_response(msg)
+          | compiler.DiagWarning msg -> error_response(msg)
+  | compiler.CompileOk env ->
+      match dict_get(sentinel_name(), env) with
+      | Nothing -> error_response("eval_expr_in_source: could not infer type of expression")
+      | Just scheme -> eval_with_scheme(src, expr, stdlib_root, scheme)
+
+fn op_eval_expr_in_source(src: String, expr: String, stdlib_root: String) -> json.Json !{IO} =
+  if str_find(src, "let " ++ sentinel_name()) != -1 then
+    error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot eval")
+  else do
+    type_result <- compiler.compile_source_with_root(augment_source(src, expr), stdlib_root)
+    eval_with_type_result(src, expr, stdlib_root, type_result)
+
+# ---------------------------------------------------------------------------
 # Request dispatch
 
 fn dispatch_op(op: String, req: json.Json, stdlib_root: String) -> json.Json !{IO} =
@@ -361,7 +474,15 @@ fn dispatch_op(op: String, req: json.Json, stdlib_root: String) -> json.Json !{I
             if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
             else op_type_of_in_source(src, expr, stdlib_root)
   else if op == "instances_in_source" then not_implemented(op)
-  else if op == "eval_expr_in_source" then not_implemented(op)
+  else if op == "eval_expr_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src ->
+        match require_string_field(req, "expr") with
+        | Err msg -> error_response(msg)
+        | Ok expr ->
+            if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
+            else op_eval_expr_in_source(src, expr, stdlib_root)
   else if op == "complete_in_state" then not_implemented(op)
   else error_response(string.concat("unknown op: ", op))
 
@@ -382,7 +503,7 @@ fn dispatch_line(line: String, stdlib_root: String) -> json.Json !{IO} =
 # Service loop
 
 fn service_loop(stdlib_root: String) -> Unit !{IO} =
-  match term_read_line(()) with
+  match term_read_line() with
   | Nothing -> ()
   | Just line ->
       if string.is_empty(line) then service_loop(stdlib_root)

@@ -155,6 +155,9 @@ def cmd_repl(*, native: bool = False) -> int:
             native_cmd = default_analysis_service_bin_cmd()
             if native_cmd is not None:
                 env["SPROUT_ANALYSIS_SERVICE_CMD"] = native_cmd
+        # Tell the analysis service to add -framework flags when linking eval binaries.
+        if sys.platform == "darwin":
+            env.setdefault("SPROUT_DARWIN_FRAMEWORKS", "1")
         run = subprocess.run([str(out)], env=env, check=False)
         return run.returncode
 
