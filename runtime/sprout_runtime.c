@@ -13,6 +13,8 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#include <poll.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <termios.h>
 #include <unistd.h>
@@ -1126,6 +1128,16 @@ static long long find_ctor_tag_by_name(const char* name) {
   for (long long i = 0; i < g_ctor_meta_len; i++) {
     if (strcmp(g_ctor_meta[i].name, name) == 0) return g_ctor_meta[i].tag;
   }
+  // Fallback: if only the qualified name was registered (e.g. "stdlib.process.ProcResult")
+  // but we're looking up the short name ("ProcResult"), match by suffix.
+  size_t name_len = strlen(name);
+  for (long long i = 0; i < g_ctor_meta_len; i++) {
+    const char* reg = g_ctor_meta[i].name;
+    size_t reg_len = strlen(reg);
+    if (reg_len > name_len && reg[reg_len - name_len - 1] == '.' &&
+        strcmp(reg + reg_len - name_len, name) == 0)
+      return g_ctor_meta[i].tag;
+  }
   tcp_fail("constructor metadata not registered");
   return -1;
 }
@@ -1328,6 +1340,191 @@ long long write_file(long long path_i, long long content_i) {
   fclose(f);
   return 0LL;
 }
+// ---- stdlib.process: proc_run / proc_run_stdin --------------------------------
+
+typedef struct { char* data; size_t len; size_t cap; } GrowBuf;
+
+static GrowBuf sprout_growbuf_new(void) {
+  GrowBuf b; b.cap = 4096; b.len = 0;
+  b.data = (char*)malloc(b.cap);
+  if (b.data) b.data[0] = '\0';
+  return b;
+}
+
+static void sprout_growbuf_append(GrowBuf* b, const char* p, size_t n) {
+  if (!n) return;
+  if (b->len + n + 1 > b->cap) {
+    while (b->len + n + 1 > b->cap) b->cap *= 2;
+    b->data = (char*)realloc(b->data, b->cap);
+  }
+  memcpy(b->data + b->len, p, n);
+  b->len += n;
+  b->data[b->len] = '\0';
+}
+
+// Build a Sprout ProcResult(Int, String, String) ADT value: (exit_code, stdout, stderr).
+// Takes GC ownership of out->data and err->data (both must be malloc'd).
+static long long sprout_make_proc_result(int exit_code, GrowBuf* out, GrowBuf* err) {
+  register_managed_ptr(out->data, SPROUT_HEAP_CSTR, 0);
+  long long rooted_out = (long long)(uintptr_t)out->data;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
+  register_managed_ptr(err->data, SPROUT_HEAP_CSTR, 0);
+  long long rooted_err = (long long)(uintptr_t)err->data;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_err);
+  long long tag = find_ctor_tag_by_name("stdlib.process.ProcResult");
+  long long obj = sprout_make_registered_obj(tag, (long long)exit_code,
+                                             rooted_out, rooted_err,
+                                             "proc_run: out of memory");
+  SPROUT_GC_POP_LOCALS(2);
+  return obj;
+}
+
+// Convert a Sprout Vec String (i64) to a NULL-terminated char** for execvp.
+// Caller must free() the returned array; the strings themselves are GC-managed.
+static char** sprout_vec_string_to_argv(long long vec_val) {
+  SproutObj* adt = (SproutObj*)(uintptr_t)vec_val;
+  VectorVal* vec = (VectorVal*)(uintptr_t)adt->f0;
+  long long  n   = vec->len;
+  char** argv = (char**)malloc((size_t)(n + 1) * sizeof(char*));
+  for (long long i = 0; i < n; i++)
+    argv[i] = (char*)(uintptr_t)vec->data[i];
+  argv[n] = NULL;
+  return argv;
+}
+
+// fork+exec with separate stdout/stderr capture via poll().
+// stdin_data=NULL means redirect stdin from /dev/null.
+static long long sprout_proc_run_impl(
+  char**      argv,
+  const char* stdin_data,
+  size_t      stdin_len
+) {
+  if (argv[0] == NULL) {
+    GrowBuf o = sprout_growbuf_new(), e = sprout_growbuf_new();
+    sprout_growbuf_append(&e, "proc_run: empty argv", 20);
+    return sprout_make_proc_result(1, &o, &e);
+  }
+  int out_fds[2] = {-1,-1}, err_fds[2] = {-1,-1}, in_fds[2] = {-1,-1};
+
+  if (pipe(out_fds) < 0 || pipe(err_fds) < 0 ||
+      (stdin_data && pipe(in_fds) < 0)) {
+    if (out_fds[0] >= 0) { close(out_fds[0]); close(out_fds[1]); }
+    if (err_fds[0] >= 0) { close(err_fds[0]); close(err_fds[1]); }
+    GrowBuf o = sprout_growbuf_new(), e = sprout_growbuf_new();
+    sprout_growbuf_append(&e, "proc_run: pipe() failed", 23);
+    return sprout_make_proc_result(1, &o, &e);
+  }
+
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(out_fds[0]); close(out_fds[1]);
+    close(err_fds[0]); close(err_fds[1]);
+    if (stdin_data) { close(in_fds[0]); close(in_fds[1]); }
+    GrowBuf o = sprout_growbuf_new(), e = sprout_growbuf_new();
+    sprout_growbuf_append(&e, "proc_run: fork() failed", 23);
+    return sprout_make_proc_result(1, &o, &e);
+  }
+
+  if (pid == 0) {
+    dup2(out_fds[1], STDOUT_FILENO);
+    dup2(err_fds[1], STDERR_FILENO);
+    close(out_fds[0]); close(out_fds[1]);
+    close(err_fds[0]); close(err_fds[1]);
+    if (stdin_data) {
+      dup2(in_fds[0], STDIN_FILENO);
+      close(in_fds[0]); close(in_fds[1]);
+    } else {
+      int dev = open("/dev/null", O_RDONLY);
+      if (dev >= 0) { dup2(dev, STDIN_FILENO); close(dev); }
+    }
+    execvp(argv[0], argv);
+    _exit(127);
+  }
+
+  // parent: close write ends of output pipes, read end of stdin pipe
+  close(out_fds[1]); out_fds[1] = -1;
+  close(err_fds[1]); err_fds[1] = -1;
+  if (stdin_data) {
+    close(in_fds[0]); in_fds[0] = -1;
+    // Empty stdin: close the write end immediately so the child sees EOF right
+    // away rather than blocking. Without this, stdin_done is pre-set to 1 but
+    // in_fds[1] stays open, causing a deadlock with any child that reads until
+    // EOF (e.g. cat, wc -c).
+    if (stdin_len == 0) { close(in_fds[1]); in_fds[1] = -1; }
+  }
+
+  GrowBuf out_buf = sprout_growbuf_new(), err_buf = sprout_growbuf_new();
+  char    tmp[4096];
+  size_t  stdin_written = 0;
+  int     stdin_done    = (!stdin_data || stdin_len == 0);
+
+  // Suppress SIGPIPE for the duration of the poll loop so write() returns EPIPE
+  // instead of killing the process if the child closes its stdin end early.
+  // execvp() resets SIG_IGN to SIG_DFL in the child, so subprocess disposition
+  // is unaffected. The suppress is scoped here (not at fork) so early pipe/fork
+  // error returns don't need to restore it.
+  struct sigaction sa_old_pipe;
+  struct sigaction sa_ign_pipe = {0};
+  sa_ign_pipe.sa_handler = SIG_IGN;
+  if (stdin_data) sigaction(SIGPIPE, &sa_ign_pipe, &sa_old_pipe);
+  // poll loop: drain stdout/stderr while optionally writing stdin
+  while (out_fds[0] >= 0 || err_fds[0] >= 0 || !stdin_done) {
+    struct pollfd pfds[3];
+    int n = 0, out_i = -1, err_i = -1, in_i = -1;
+    if (out_fds[0] >= 0) { pfds[n].fd=out_fds[0]; pfds[n].events=POLLIN; out_i=n++; }
+    if (err_fds[0] >= 0) { pfds[n].fd=err_fds[0]; pfds[n].events=POLLIN; err_i=n++; }
+    if (!stdin_done)      { pfds[n].fd=in_fds[1];  pfds[n].events=POLLOUT; in_i=n++; }
+    if (!n) break;
+    if (poll(pfds, (nfds_t)n, -1) < 0) break;
+    if (out_i >= 0 && (pfds[out_i].revents & (POLLIN|POLLHUP|POLLERR))) {
+      ssize_t nr = read(out_fds[0], tmp, sizeof(tmp));
+      if (nr > 0) sprout_growbuf_append(&out_buf, tmp, (size_t)nr);
+      else { close(out_fds[0]); out_fds[0] = -1; }
+    }
+    if (err_i >= 0 && (pfds[err_i].revents & (POLLIN|POLLHUP|POLLERR))) {
+      ssize_t nr = read(err_fds[0], tmp, sizeof(tmp));
+      if (nr > 0) sprout_growbuf_append(&err_buf, tmp, (size_t)nr);
+      else { close(err_fds[0]); err_fds[0] = -1; }
+    }
+    if (in_i >= 0 && (pfds[in_i].revents & (POLLOUT|POLLHUP|POLLERR))) {
+      ssize_t nw = write(in_fds[1], stdin_data + stdin_written,
+                         stdin_len - stdin_written);
+      if (nw > 0) stdin_written += (size_t)nw;
+      else { close(in_fds[1]); in_fds[1] = -1; stdin_done = 1; continue; }
+      if (stdin_written >= stdin_len) {
+        close(in_fds[1]); in_fds[1] = -1; stdin_done = 1;
+      }
+    }
+  }
+  if (out_fds[0] >= 0) close(out_fds[0]);
+  if (err_fds[0] >= 0) close(err_fds[0]);
+  if (in_fds[1]  >= 0) close(in_fds[1]);
+
+  int wstatus = 0;
+  waitpid(pid, &wstatus, 0);
+  if (stdin_data) sigaction(SIGPIPE, &sa_old_pipe, NULL);
+  int exit_code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : 1;
+  return sprout_make_proc_result(exit_code, &out_buf, &err_buf);
+}
+
+// Sprout extern fn proc_run_vec(argv: Vec String) -> ProcResult !{IO}
+long long proc_run_vec(long long argv_val) {
+  char** argv = sprout_vec_string_to_argv(argv_val);
+  long long result = sprout_proc_run_impl(argv, NULL, 0);
+  free(argv);
+  return result;
+}
+
+// Sprout extern fn proc_run_stdin_vec(argv: Vec String, stdin_data: String) -> ProcResult !{IO}
+long long proc_run_stdin_vec(long long argv_val, long long stdin_val) {
+  char**      argv       = sprout_vec_string_to_argv(argv_val);
+  const char* stdin_data = (const char*)(uintptr_t)stdin_val;
+  size_t      stdin_len  = strlen(stdin_data);
+  long long   result     = sprout_proc_run_impl(argv, stdin_data, stdin_len);
+  free(argv);
+  return result;
+}
+
 long long term_read_line(void) {
   char* line = NULL;
   size_t cap = 0;

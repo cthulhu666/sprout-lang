@@ -689,7 +689,7 @@ def _build_module_symbols(program: ast.Program, bundle: ModuleBundle) -> dict[Pa
         symbols = out[module_info.path]
         exported = getattr(decl, "name", None) in module_info.exported
         module_name = module_info.header.module
-        if isinstance(decl, ast.FnDecl) or isinstance(decl, ast.LetDecl):
+        if isinstance(decl, ast.FnDecl) or isinstance(decl, ast.LetDecl) or isinstance(decl, ast.ExternFnDecl):
             canonical = _qualify_name(module_name, decl.name)
             symbols.value_locals[decl.name] = canonical
             symbols.value_annotations[decl.name] = module_info.annotations.get(
@@ -941,8 +941,9 @@ def resolve_program_names(program: ast.Program, bundle: ModuleBundle) -> list[Co
         if module_info is None:
             continue
         symbols = module_symbols[module_info.path]
-        if isinstance(decl, ast.FnDecl) or isinstance(decl, ast.LetDecl):
-            decl.name = symbols.value_locals[decl.name]
+        if isinstance(decl, ast.FnDecl) or isinstance(decl, ast.LetDecl) or isinstance(decl, ast.ExternFnDecl):
+            if decl.name in symbols.value_locals:
+                decl.name = symbols.value_locals[decl.name]
         elif isinstance(decl, ast.TypeDecl):
             decl.name = symbols.type_locals[decl.name]
             for ctor in decl.constructors:

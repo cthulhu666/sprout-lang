@@ -3144,6 +3144,16 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
 fn build_ctor_reg_meta(ctor_sigs_: Dict CtorSig, em: Emitter) -> Dict (List (String, Int, Int, Int)) !{IO} =
   build_ctor_reg_meta_keys(dict_keys(ctor_sigs_), ctor_sigs_, em, 0, dict_empty())
 
+# Build the registration alias list: always the qualified name; add the leaf name when it differs.
+# Uses strip_module_prefix to get the leaf (the part after the last dot).
+fn ctor_reg_aliases(k: String, leaf: String, tag: Int, arity: Int, gname: String, gname_len: Int, em: Emitter) -> List (String, Int, Int, Int) !{IO} =
+  if leaf == k
+  then Cons((gname, gname_len, tag, arity), Nil)
+  else
+    do
+      (gname2, len2) <- string_const(em, leaf)
+      Cons((gname, gname_len, tag, arity), Cons((gname2, len2, tag, arity), Nil))
+
 fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emitter, idx: Int, acc: Dict (List (String, Int, Int, Int))) -> Dict (List (String, Int, Int, Int)) !{IO} =
   if idx >= vec_length(keys) then acc
   else
@@ -3154,8 +3164,8 @@ fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emit
         | Nothing -> build_ctor_reg_meta_keys(keys, ctor_sigs_, em, idx + 1, acc)
         | Just ctor ->
             do
-              (gname, len) <- string_const(em, k)
-              let aliases = Cons((gname, len, ctor_tag(ctor), ctor_arity(ctor)), Nil)
+              (gname, gname_len) <- string_const(em, k)
+              aliases <- ctor_reg_aliases(k, strip_module_prefix(k), ctor_tag(ctor), ctor_arity(ctor), gname, gname_len, em)
               build_ctor_reg_meta_keys(keys, ctor_sigs_, em, idx + 1, dict_set(k, aliases, acc))
 
 # Assemble the final IR from all sections.

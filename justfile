@@ -110,6 +110,10 @@ test-stdlib-stage0:
     [ -d "$dir" ] || continue
     for f in "$dir"/*.spr "$dir"/*.sprout; do
       [ -f "$f" ] || continue
+      if grep -q '^# native-only' "$f"; then
+        echo "==> $f (skipped: native-only)"
+        continue
+      fi
       echo "==> $f"
       out=$(python3 -m sprout.cli run --with-stdlib "$f" 2>&1)
       echo "$out"

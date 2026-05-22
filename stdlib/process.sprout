@@ -1,0 +1,27 @@
+module stdlib.process
+
+export type ProcResult(..) =
+  | ProcResult Int String String
+
+export fn proc_exit(r: ProcResult) -> Int =
+  match r with | ProcResult c _ _ -> c
+
+export fn proc_stdout(r: ProcResult) -> String =
+  match r with | ProcResult _ o _ -> o
+
+export fn proc_stderr(r: ProcResult) -> String =
+  match r with | ProcResult _ _ e -> e
+
+export fn proc_ok(r: ProcResult) -> Bool =
+  proc_exit(r) == 0
+
+# C ABI bridge: takes Vec String (native array representation)
+extern fn proc_run_vec(argv: Vec String) -> ProcResult !{IO}
+extern fn proc_run_stdin_vec(argv: Vec String, stdin_data: String) -> ProcResult !{IO}
+
+# Public API: takes List String so list literals work directly
+export fn proc_run(argv: List String) -> ProcResult !{IO} =
+  proc_run_vec(vec_from_list(argv))
+
+export fn proc_run_stdin(argv: List String, stdin_data: String) -> ProcResult !{IO} =
+  proc_run_stdin_vec(vec_from_list(argv), stdin_data)

@@ -1,0 +1,27 @@
+module examples.process_demo
+import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_ok, proc_stdout, proc_stderr, proc_exit)
+
+# Demonstrates stdlib.process: running subprocesses and capturing their output.
+#
+# Run:
+#   python3 -m sprout.cli run examples/process_demo.sprout
+#   just run examples/process_demo.sprout
+
+fn status_line(ok: Bool) -> String =
+  if ok then "OK" else "FAILED"
+
+fn show_result(label: String, r: ProcResult) -> Unit !{IO} =
+  do
+    print(label ++ " [" ++ status_line(proc_ok(r)) ++ "] exit=" ++ to_string(proc_exit(r)))
+    print("  stdout: " ++ proc_stdout(r))
+
+fn main() -> Unit !{IO} =
+  do
+    r1 <- proc_run(["uname", "-s"])
+    show_result("uname -s", r1)
+
+    r2 <- proc_run_stdin(["wc", "-w"], "the quick brown fox jumps over the lazy dog")
+    show_result("wc -w (via stdin)", r2)
+
+    r3 <- proc_run(["false"])
+    show_result("false (expect FAILED)", r3)

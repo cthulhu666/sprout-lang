@@ -660,6 +660,23 @@ def param_annotation_effects(param: ast.Param) -> Effect:
     return PURE_EFFECT
 
 
+def extern_fn_type_from_decl(decl: ast.ExternFnDecl) -> tuple[Type, Effect]:
+    local_vars: dict[str, TVar] = {}
+    param_types = []
+    for param in decl.params:
+        if param.type_expr is not None:
+            param_type, _ = parse_annotated_type_expr(
+                param.type_expr, local_vars, allow_implicit_type_vars=True
+            )
+            param_types.append(param_type)
+    ret = (
+        parse_type_expr(decl.return_type, local_vars, allow_implicit_type_vars=True)
+        if decl.return_type
+        else UNIT
+    )
+    return build_function_type(param_types, ret, effect_from_names(decl.effects))
+
+
 def fn_type_from_decl(decl: ast.FnDecl, state: InferState) -> tuple[Type, Effect]:
     local_vars: dict[str, TVar] = {}
     param_types = []
@@ -2275,6 +2292,14 @@ def typecheck_program(
         fn_types[fn_decl.name] = fn_t
         fn_decl_effects[fn_decl.name] = fn_effects
         env[fn_decl.name] = Scheme(vars=(), type=fn_t, effects=fn_effects)
+
+    for decl in program.declarations:
+        if not isinstance(decl, ast.ExternFnDecl):
+            continue
+        if decl.name in env:
+            continue  # already registered (e.g. prelude hardcoded builtins)
+        ext_t, ext_effects = extern_fn_type_from_decl(decl)
+        env[decl.name] = Scheme(vars=(), type=ext_t, effects=ext_effects)
 
     # Pre-generalize generated typeclass instance methods (__tc_*).  These fns
     # are emitted by the typeclass lowerer with fully-declared param types and

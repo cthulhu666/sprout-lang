@@ -52,6 +52,8 @@ EXTERN_SIGS: dict[str, FnSig] = {
     "write_file": FnSig(name="write_file", params=[I64, I64], ret=I64),
     "env_get": FnSig(name="env_get", params=[I8_PTR], ret=I64),
     "argv_get": FnSig(name="argv_get", params=[I64], ret=I64),
+    "proc_run_vec": FnSig(name="proc_run_vec", params=[I64], ret=I64),
+    "proc_run_stdin_vec": FnSig(name="proc_run_stdin_vec", params=[I64, I64], ret=I64),
     "read_int_lines": FnSig(name="read_int_lines", params=[I8_PTR], ret=I64),
     "parse_int": FnSig(name="parse_int", params=[I8_PTR], ret=I64),
     "int_range": FnSig(name="int_range", params=[I64, I64], ret=I64),
@@ -1010,7 +1012,10 @@ def _infer_expr_type(
     globals_info: dict[str, GlobalInfo],
     sigs: dict[str, FnSig],
     ctor_sigs: dict[str, CtorSig],
+    extern_sigs: "dict[str, FnSig] | None" = None,
 ) -> LLType:
+    if extern_sigs is None:
+        extern_sigs = EXTERN_SIGS
     if isinstance(expr, ast.IntExpr):
         return I64
     if isinstance(expr, ast.BoolExpr):
@@ -1020,7 +1025,7 @@ def _infer_expr_type(
     if isinstance(expr, ast.CharExpr):
         return I64
     if isinstance(expr, ast.TupleExpr):
-        return _tuple_lltype([_infer_expr_type(item, globals_info, sigs, ctor_sigs) for item in expr.items])
+        return _tuple_lltype([_infer_expr_type(item, globals_info, sigs, ctor_sigs, extern_sigs) for item in expr.items])
     if isinstance(expr, ast.VarExpr):
         if expr.name in globals_info:
             return globals_info[expr.name].typ
@@ -1038,7 +1043,7 @@ def _infer_expr_type(
     if isinstance(expr, ast.IntRangeExpr):
         return I64
     if isinstance(expr, ast.IfExpr):
-        return _infer_expr_type(expr.then_branch, globals_info, sigs, ctor_sigs)
+        return _infer_expr_type(expr.then_branch, globals_info, sigs, ctor_sigs, extern_sigs)
     if isinstance(expr, ast.CallExpr):
         if not isinstance(expr.callee, ast.VarExpr):
             raise CodegenError("Cannot infer top-level let type for indirect call")
@@ -1049,15 +1054,15 @@ def _infer_expr_type(
             return I64
         if name in sigs:
             return I8_PTR if len(expr.args) < len(sigs[name].params) else sigs[name].ret
-        if name in EXTERN_SIGS:
-            return I8_PTR if len(expr.args) < len(EXTERN_SIGS[name].params) else EXTERN_SIGS[name].ret
+        if name in extern_sigs:
+            return I8_PTR if len(expr.args) < len(extern_sigs[name].params) else extern_sigs[name].ret
         raise CodegenError(f"Cannot infer top-level let call type for {name}")
     if isinstance(expr, ast.LambdaExpr):
         return I8_PTR
     if isinstance(expr, ast.MatchExpr):
         if not expr.branches:
             raise CodegenError("Cannot infer top-level let type for empty match")
-        return _infer_expr_type(expr.branches[0].value, globals_info, sigs, ctor_sigs)
+        return _infer_expr_type(expr.branches[0].value, globals_info, sigs, ctor_sigs, extern_sigs)
     raise CodegenError("Cannot infer top-level let type for expression")
 
 
@@ -1082,6 +1087,37 @@ def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> s
 
     adt_names = {t.name for t in type_decls}
 
+    # Auto-derive LLVM sigs for extern fns declared in the AST.
+    # Non-prelude extern fns have qualified Sprout names (e.g. stdlib.process.proc_run_vec)
+    # but must call the unqualified C symbol (proc_run_vec). FnSig.name carries the C name.
+    extern_fn_decls = [d for d in program.declarations if isinstance(d, ast.ExternFnDecl)]
+    derived_extern_sigs: dict[str, FnSig] = {}
+    for _ext in extern_fn_decls:
+        leaf_name = _ext.name.rsplit(".", 1)[-1]  # C symbol / unqualified name
+        if leaf_name in EXTERN_SIGS:
+            # Already have a hand-written entry — just alias the qualified name to it.
+            if _ext.name != leaf_name:
+                derived_extern_sigs[_ext.name] = EXTERN_SIGS[leaf_name]
+            continue
+        if _ext.return_type is None:
+            continue
+        try:
+            _params = [_type_from_ast(p.type_expr, adt_names) for p in _ext.params if p.type_expr is not None]
+            _ret = _type_from_ast(_ext.return_type, adt_names)
+        except CodegenError:
+            continue
+        sig = FnSig(name=leaf_name, params=_params, ret=_ret)
+        derived_extern_sigs[_ext.name] = sig
+        derived_extern_sigs.setdefault(leaf_name, sig)
+    all_extern_sigs: dict[str, FnSig] = {**EXTERN_SIGS, **derived_extern_sigs}
+    # Deduplicated by C symbol name for declare emission.
+    _seen_c_names: set[str] = set()
+    extern_sigs_for_declare: list[FnSig] = []
+    for _sig in all_extern_sigs.values():
+        if _sig.name not in _seen_c_names:
+            _seen_c_names.add(_sig.name)
+            extern_sigs_for_declare.append(_sig)
+
     ctor_sigs: dict[str, CtorSig] = {}
     next_tag = 0
     for tdecl in type_decls:
@@ -1103,6 +1139,13 @@ def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> s
         params = [_check_param_type(p.type_expr, adt_names) for p in fn.params]
         ret = _type_from_ast(fn.return_type, adt_names)
         sigs[fn.name] = FnSig(fn.name, params, ret)
+    # Merge derived extern sigs into sigs for call-dispatch lookup.
+    # Qualified Sprout names (e.g. stdlib.process.proc_run_vec) must resolve to a
+    # FnSig whose .name carries the unqualified C symbol (proc_run_vec). The define
+    # emission loop iterates fn_decls (FnDecl nodes only) so these entries are
+    # never emitted as function bodies.
+    for _qname, _esig in derived_extern_sigs.items():
+        sigs.setdefault(_qname, _esig)
 
     globals_info: dict[str, GlobalInfo] = {}
     const_env: dict[str, GlobalConst] = {}
@@ -1119,7 +1162,7 @@ def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> s
                 const_value_ir=const_val.value_ir,
             )
         except CodegenError:
-            inferred = _infer_expr_type(let_decl.value, globals_info, sigs, ctor_sigs)
+            inferred = _infer_expr_type(let_decl.value, globals_info, sigs, ctor_sigs, all_extern_sigs)
             callable_sig: CallSig | None = None
             if isinstance(let_decl.value, ast.VarExpr) and let_decl.value.name in sigs:
                 fn_sig = sigs[let_decl.value.name]
@@ -1168,7 +1211,7 @@ def compile_to_llvm(program: ast.Program, *, entry_main_name: str = "main") -> s
     emitter.emit("; Generated by sprout LLVM backend (v0)")
     emitter.emit("target triple = \"unknown-unknown-unknown\"")
     emitter.emit("")
-    for ext in EXTERN_SIGS.values():
+    for ext in extern_sigs_for_declare:
         params = ", ".join(t.text for t in ext.params)
         emitter.emit(f"declare {ext.ret.text} @{ext.name}({params})")
     emitter.emit("")
@@ -2881,7 +2924,7 @@ def _emit_call(
         if len(args) < len(sig.params):
             wrapper_name = f"__sprout_partial_{emitter.next_lambda}"
             emitter.next_lambda += 1
-            emitter.lifted_defs.extend(_emit_partial_direct_wrapper(wrapper_name, fn_name, sig, len(args)))
+            emitter.lifted_defs.extend(_emit_partial_direct_wrapper(wrapper_name, sig.name, sig, len(args)))
             emitter.lifted_defs.append("")
             closure = _emit_make_closure(f"@{wrapper_name}", args, emitter)
             remaining_sig = CallSig(
@@ -2896,7 +2939,7 @@ def _emit_call(
                 coerced = _coerce_value(arg_val, param_type, emitter)
                 args_ir.append(f"{param_type.text} {coerced.ir}")
             tmp = emitter.tmp()
-            emitter.emit(f"  {tmp} = call {sig.ret.text} @{fn_name}({', '.join(args_ir)})")
+            emitter.emit(f"  {tmp} = call {sig.ret.text} @{sig.name}({', '.join(args_ir)})")
             out = Value(sig.ret, tmp, callable_sig=sig.ret_callable_sig)
         _emit_pop_temp_roots(rooted_args, emitter)
     else:
