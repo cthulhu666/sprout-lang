@@ -12,24 +12,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Add mise shims to PATH
-        # mise manages Python 3.12 and just 1.39.0 on the self-hosted runner.
-        # actions/setup-python is not used — it requires a toolcache not present on host runners.
+        # mise manages just 1.39.0 on the self-hosted runner.
         run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
 
       - name: Install Clang / LLVM
         run: sudo apt-get install -y clang llvm
 
-      - name: Build stage-0 native binary
-        # memwatch.sh is macOS-only (sysctl/vm_stat); ulimit -v guards against OOM on Linux.
-        run: |
-          ulimit -v $((8 * 1024 * 1024))
-          python3 -m sprout.cli compile \
-            stdlib/compiler/compile_driver.sprout \
-            --with-stdlib --native \
-            -o compile_driver_bin
-
-      - name: Build stage-1 native binary
-        run: just build-stage1
+      - name: Bootstrap stage-1 from committed seed (Python-free)
+        run: just bootstrap-from-seed
 
       - name: Run stdlib tests (stage-1)
         run: just test-stdlib-stage1
