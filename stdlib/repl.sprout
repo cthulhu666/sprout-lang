@@ -191,7 +191,9 @@ fn stdlib_module_completion_names() -> Vec String =
   append_space_names(vec_empty(), "bytes collections crypto http http_client math net string terminal")
 
 fn prelude_completion_names() -> Vec String !{IO} =
-  gather_exported_names(string.string_lines(read_file(module_path("stdlib.prelude"))), 0, false, vec_empty())
+  match read_file(module_path("stdlib.prelude")) with
+  | Err msg -> panic("read_file: prelude: " ++ msg)
+  | Ok content -> gather_exported_names(string.string_lines(content), 0, false, vec_empty())
 
 fn append_names_from_vec(acc: Vec String, names: Vec String, index: Int) -> Vec String =
   match vec_get(index, names) with
@@ -338,17 +340,17 @@ fn find_imported_namespace_ref(namespace: String, imports: Vec String, index: In
       else find_imported_namespace_ref(namespace, imports, index + 1)
   | Nothing -> Nothing
 
-fn names_from_module_source(ns: String, content_opt: Maybe String) -> Vec String =
-  match content_opt with
-  | Nothing -> vec_empty()
-  | Just content -> qualify_names(ns, gather_exported_names(string.string_lines(content), 0, false, vec_empty()), 0, vec_empty())
+fn names_from_module_source(ns: String, content_result: Result String String) -> Vec String =
+  match content_result with
+  | Err _ -> vec_empty()
+  | Ok content -> qualify_names(ns, gather_exported_names(string.string_lines(content), 0, false, vec_empty()), 0, vec_empty())
 
 fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec String !{IO} =
   match find_imported_namespace_ref(take_before(prefix, "."), imports, 0) with
   | Just namespace_ref ->
       names_from_module_source(
         take_before(namespace_ref, "|"),
-        try_read_file(module_path(take_after(namespace_ref, "|")))
+        read_file(module_path(take_after(namespace_ref, "|")))
       )
   | Nothing -> vec_empty()
 

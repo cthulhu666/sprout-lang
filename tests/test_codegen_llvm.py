@@ -709,7 +709,7 @@ class CodegenLlvmTests(CodegenTestCase):
             self.assertIn("declare i64 @crypto_random_bytes(i64)", ir)
 
     def test_native_runtime_roots_managed_args_in_key_allocating_helpers(self) -> None:
-        runtime_source = Path(sprout_cli.__file__).read_text(encoding="utf-8")
+        runtime_source = (Path(sprout_cli.__file__).parent.parent / "runtime" / "sprout_runtime.c").read_text(encoding="utf-8")
         self.assertIn("#define SPROUT_GC_PUSH_PTR_LOCAL(slot_name)", runtime_source)
         self.assertIn("long long rooted_vec = vec;", runtime_source)
         self.assertIn("long long rm = map_h;", runtime_source)  # BST map helpers use rm not rooted_map

@@ -323,14 +323,17 @@ fn strip_headers(s: String, pos: Int) -> String =
 # Entry point
 
 fn run_file(path: String) -> Unit !{IO} =
-  match lexer.tokenize(strip_headers(read_file(path), 0)) with
-  | Err e -> print(lex_err_msg(e))
-  | Ok tokens ->
-      match parser.parse_program(tokens) with
-      | Err e -> print(parse_err_msg(e))
-      | Ok prog ->
-          match prog with
-          | ast.Program decls _ -> dump_decls(decls)
+  match read_file(path) with
+  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Ok src ->
+      match lexer.tokenize(strip_headers(src, 0)) with
+      | Err e -> print(lex_err_msg(e))
+      | Ok tokens ->
+          match parser.parse_program(tokens) with
+          | Err e -> print(parse_err_msg(e))
+          | Ok prog ->
+              match prog with
+              | ast.Program decls _ -> dump_decls(decls)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with

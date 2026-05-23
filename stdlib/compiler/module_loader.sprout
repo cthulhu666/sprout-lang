@@ -286,27 +286,29 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
           match module_name_to_path(name, stdlib_root) with
           | Nothing -> Nil
           | Just path ->
-              do
-                src <- read_file(path)
-                import_pairs <- build_import_pairs(collect_imports(src), stdlib_root, cache)
-                prelude_pairs <- if name == "stdlib.prelude" then Nil else load_module("stdlib.prelude", stdlib_root, cache)
-                let base_pairs = prelude_pairs ++ import_pairs
-                match lexer.tokenize(strip_headers_ml(src, 0)) with
-                | Err _ -> Nil
-                | Ok tokens ->
-                    match parser.parse_program(tokens) with
+              match read_file(path) with
+              | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+              | Ok src ->
+                  do
+                    import_pairs <- build_import_pairs(collect_imports(src), stdlib_root, cache)
+                    prelude_pairs <- if name == "stdlib.prelude" then Nil else load_module("stdlib.prelude", stdlib_root, cache)
+                    let base_pairs = prelude_pairs ++ import_pairs
+                    match lexer.tokenize(strip_headers_ml(src, 0)) with
                     | Err _ -> Nil
-                    | Ok prog ->
-                        do
-                          result <- checker.check_program_with_env(prog, base_pairs)
-                          match result with
-                          | checker.CheckErr _ -> Nil
-                          | checker.CheckOk env ->
-                              do
-                                let exclude = dict_from_list(checker.builtin_entries() ++ base_pairs)
-                                let own_pairs = filter_own_pairs(dict_to_pairs(env), exclude)
-                                cache_put(cache, name, own_pairs)
-                                own_pairs
+                    | Ok tokens ->
+                        match parser.parse_program(tokens) with
+                        | Err _ -> Nil
+                        | Ok prog ->
+                            do
+                              result <- checker.check_program_with_env(prog, base_pairs)
+                              match result with
+                              | checker.CheckErr _ -> Nil
+                              | checker.CheckOk env ->
+                                  do
+                                    let exclude = dict_from_list(checker.builtin_entries() ++ base_pairs)
+                                    let own_pairs = filter_own_pairs(dict_to_pairs(env), exclude)
+                                    cache_put(cache, name, own_pairs)
+                                    own_pairs
 
 # Apply a single import spec: load the module and namespace/filter its pairs.
 fn apply_import_spec(spec: ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =

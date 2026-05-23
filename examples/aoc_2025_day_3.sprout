@@ -90,7 +90,9 @@ fn lines_to_banks_all(lines: Vec String) -> Vec (Vec Int) =
   lines_to_banks(lines, 0, vec_length(lines), vec_empty())
 
 fn stdin_banks() -> Vec (Vec Int) !{IO} =
-  parse_all_banks(read_file("-"))
+  match read_file("-") with
+  | Ok content -> parse_all_banks(content)
+  | Err msg -> panic("read_file: " ++ msg)
 
 fn solve_for_banks(banks: Vec (Vec Int)) -> Answers =
   Answers(part1, part2)

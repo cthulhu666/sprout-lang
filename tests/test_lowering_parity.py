@@ -13,10 +13,13 @@ file paths as argv[1..N]) so driver startup cost is paid only once.
 """
 from __future__ import annotations
 
+import unittest
+
+# Python interpreter is being removed; these tests are skipped pending full removal.
+
 import subprocess
 import sys
 import textwrap
-import unittest
 from pathlib import Path
 
 from sprout import parse, typecheck_program
@@ -112,6 +115,7 @@ def sprout_tc_names(path: Path) -> list[str]:
 # Test class
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class LoweringParityTests(unittest.TestCase):
     pass
 

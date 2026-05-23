@@ -46,9 +46,9 @@ fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
 # Entry point (default phase: source-level typecheck with import resolution)
 
 fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
-  do
-    raw <- read_file(path)
-    run_with_src(raw, stdlib_root)
+  match read_file(path) with
+  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Ok raw -> run_with_src(raw, stdlib_root)
 
 fn parse_for_decls(src: String) -> Maybe (List ast.Decl) =
   match lexer.tokenize(src) with
@@ -183,14 +183,15 @@ fn print_prefixed_list(prefix: String, items: List String) -> Unit !{IO} =
         print_prefixed_list(prefix, rest)
 
 fn run_file_scan_info(path: String, stdlib_root: String) -> Unit !{IO} =
-  do
-    raw <- read_file(path)
-    match bundler.scan_source_info(raw) with
-    | (mod_name, exports, ctor_types) ->
-        do
-          print("module: " ++ mod_name)
-          print_prefixed_list("export", exports)
-          print_prefixed_list("ctor", ctor_types)
+  match read_file(path) with
+  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Ok raw ->
+      match bundler.scan_source_info(raw) with
+      | (mod_name, exports, ctor_types) ->
+          do
+            print("module: " ++ mod_name)
+            print_prefixed_list("export", exports)
+            print_prefixed_list("ctor", ctor_types)
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module.

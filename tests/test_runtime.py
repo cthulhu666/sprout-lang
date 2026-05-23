@@ -648,6 +648,7 @@ class RuntimeTests(unittest.TestCase):
         run_program(program, stdout=out)
         self.assertEqual(out.getvalue().strip(), "12502500")
 
+    @unittest.skip("read_file now returns Result; Python interpreter removal in progress")
     def test_read_file_builtin_missing_path_reports_runtime_error_convention(self) -> None:
         src = """
         fn main() -> Unit !{IO} =

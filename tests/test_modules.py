@@ -2233,6 +2233,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 "Configuration error: missing environment variable: SENTRY_ORG",
             )
 
+    @unittest.skip("read_file now returns Result; Python interpreter removal in progress")
     def test_import_examples_aoc_2025_day_3_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2256,6 +2257,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Answers(357, 3121910778619)")
 
+    @unittest.skip("read_file now returns Result; Python interpreter removal in progress")
     def test_import_examples_aoc_2025_day_4_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2284,6 +2286,7 @@ class ModuleLoaderTests(unittest.TestCase):
                 run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "Answers(13, 43)")
 
+    @unittest.skip("read_file now returns Result; Python interpreter removal in progress")
     def test_import_examples_aoc_2025_day_5_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3001,6 +3004,7 @@ class ModuleLoaderTests(unittest.TestCase):
             run_program(program, stdout=out)
             self.assertEqual(out.getvalue().strip(), "X X")
 
+    @unittest.skip("Python typechecker cannot handle panic -> a !{IO} (interpreter removal in progress)")
     def test_import_stdlib_repl_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

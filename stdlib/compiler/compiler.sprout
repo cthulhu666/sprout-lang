@@ -110,7 +110,9 @@ export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileR
 
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: String) -> CompileResult !{IO} =
-  compile_source(strip_headers(read_file(path), 0))
+  match read_file(path) with
+  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Ok src -> compile_source(strip_headers(src, 0))
 
 # ---------------------------------------------------------------------------
 # Full pipeline: bundle → typecheck → lower (M4)

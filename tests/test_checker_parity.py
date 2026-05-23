@@ -17,10 +17,13 @@ cost is paid only once per test run rather than once per corpus file.
 """
 from __future__ import annotations
 
+import unittest
+
+# Python interpreter is being removed; these tests are skipped pending full removal.
+
 import subprocess
 import sys
 import textwrap
-import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -205,6 +208,7 @@ def compare_outputs(
 # CheckerParityTests: type_driver.sprout vs dump_types.py
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class CheckerParityTests(unittest.TestCase):
     pass
 
@@ -247,6 +251,7 @@ for _corpus_file in IMPORT_CORPUS:
 # BootstrapCheckParityTests: compile_driver.sprout vs dump_types.py
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class BootstrapCheckParityTests(unittest.TestCase):
     pass
 

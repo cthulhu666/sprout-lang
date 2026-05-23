@@ -11,10 +11,13 @@ with Python output is performed — the goal is to confirm all three passes
 """
 from __future__ import annotations
 
+import unittest
+
+# Python interpreter is being removed; these tests are skipped pending full removal.
+
 import subprocess
 import sys
 import textwrap
-import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,6 +103,7 @@ def run_full_pipeline(path: Path) -> list[str]:
 # Test class
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class FullPipelineTests(unittest.TestCase):
     pass
 

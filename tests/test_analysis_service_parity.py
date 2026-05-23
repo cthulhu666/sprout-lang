@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
 import shutil
 import subprocess
 import unittest
@@ -36,11 +38,15 @@ def _skip_if_no_bin(cls: type) -> type:
 
 
 def _query(requests: list[dict]) -> list[dict]:
+    env = dict(os.environ)
+    if platform.system() == "Darwin":
+        env["SPROUT_DARWIN_FRAMEWORKS"] = "1"
     proc = subprocess.Popen(
         [str(BIN), str(STDLIB)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
+        env=env,
     )
     stdin_text = "".join(json.dumps(r) + "\n" for r in requests)
     stdout, _ = proc.communicate(input=stdin_text, timeout=30)

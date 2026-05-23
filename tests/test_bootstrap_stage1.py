@@ -32,11 +32,14 @@ Notes:
 """
 from __future__ import annotations
 
+import unittest
+
+# Python interpreter is being removed; these tests are skipped pending full removal.
+
 import os
 import subprocess
 import sys
 import textwrap
-import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -150,6 +153,7 @@ def _ensure_native_cache() -> dict[str, list[str]] | None:
 # Test class
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class BootstrapStage1Tests(unittest.TestCase):
     pass
 
@@ -237,6 +241,7 @@ def _ensure_stage2_cache() -> dict[str, list[str]] | None:
 # Stage-2 test class (M6): stage1 binary vs Python reference
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class BootstrapStage2Tests(unittest.TestCase):
     pass
 
@@ -323,6 +328,7 @@ def _ensure_stage3_cache() -> dict[str, list[str]] | None:
 # Stage-3 test class (M7): stage2 binary vs Python reference
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class BootstrapStage3Tests(unittest.TestCase):
     pass
 

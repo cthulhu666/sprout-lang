@@ -1077,7 +1077,7 @@ class CodegenNativeRuntimeTests(CodegenTestCase):
         self.assertEqual(run.returncode, 0, msg=run.stderr)
 
     def test_runtime_managed_bytes_error_paths_do_not_manually_free_gc_objects(self) -> None:
-        runtime_src = Path(sprout_cli.__file__).read_text(encoding="utf-8")
+        runtime_src = (Path(sprout_cli.__file__).parent.parent / "runtime" / "sprout_runtime.c").read_text(encoding="utf-8")
         random_bytes_body = re.search(
             r"long long crypto_random_bytes\(long long count\) \{.*?^}",
             runtime_src,

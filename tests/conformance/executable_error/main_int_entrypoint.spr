@@ -1,2 +1,2 @@
-fn main() -> Int !{IO} =
-  print_int(41)
+fn main() -> String !{IO} =
+  "hello"

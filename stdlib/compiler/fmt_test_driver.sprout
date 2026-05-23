@@ -3,9 +3,12 @@ module stdlib.compiler.fmt_test_driver
 import stdlib.compiler.formatter as formatter
 
 fn format_and_write(p: String) -> Unit !{IO} =
-  do
-    src <- read_file(p)
-    write_file("/dev/stdout", formatter.format_source(src))
+  match read_file(p) with
+  | Err msg -> panic("read_file: " ++ p ++ ": " ++ msg)
+  | Ok src ->
+      match write_file("/dev/stdout", formatter.format_source(src)) with
+      | Err msg -> panic("write_file: /dev/stdout: " ++ msg)
+      | Ok _ -> ()
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with

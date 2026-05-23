@@ -301,6 +301,7 @@ fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List S
 fn is_header_line_b(s: String, pos: Int) -> Bool =
   str_starts_with_at_byte(s, pos, "module ") ||
   str_starts_with_at_byte(s, pos, "import ") ||
+  str_starts_with_at_byte(s, pos, "#") ||
   str_starts_with_at_byte(s, pos, "\n")
 
 fn next_line_b(s: String, pos: Int) -> Int =
@@ -412,14 +413,16 @@ fn process_wi_visit(
         if str_list_member(path, visiting_list) then
           Cons("Import cycle detected involving: " ++ path, Nil)
         else
-          do
-            src <- read_file(path)
-            let specs = module_loader.collect_imports(src)
-            let dep_paths = specs_to_paths(specs, stdlib_root)
-            ref_write(visiting, Cons(path, visiting_list))
-            stack_now <- ref_read(work)
-            ref_write(work, push_visit_items(list_reverse(dep_paths), Cons (WIFinalize(path, src, specs), Cons (WILeave(path), stack_now))))
-            Nil
+          match read_file(path) with
+          | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+          | Ok src ->
+              do
+                let specs = module_loader.collect_imports(src)
+                let dep_paths = specs_to_paths(specs, stdlib_root)
+                ref_write(visiting, Cons(path, visiting_list))
+                stack_now <- ref_read(work)
+                ref_write(work, push_visit_items(list_reverse(dep_paths), Cons (WIFinalize(path, src, specs), Cons (WILeave(path), stack_now))))
+                Nil
 
 fn process_wi_leave(path: String, visiting: Ref (List String)) -> List String !{IO} =
   do
@@ -481,23 +484,24 @@ fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, Li
           mods <- ref_read(ordered)
           let rev_mods = list_reverse(mods)
           if any_has_module_name(rev_mods) then
-            do
-              prelude_src <- read_file(prelude_path(stdlib_root))
-              match scan_source_info(prelude_src) with
-              | (_, prelude_exported, prelude_ctor_types) ->
-                  match lexer.tokenize(strip_headers_b(prelude_src, 0)) with
-                  | Err e ->
-                      match e with
-                      | token.TokenizeError msg _ -> (Just(str_concat("Lex error in prelude: ", msg)), Nil)
-                  | Ok tokens ->
-                      match parser.parse_program(tokens) with
-                        | Err e ->
-                            match e with
-                            | parser.ParseError msg _ -> (Just(str_concat("Parse error in prelude: ", msg)), Nil)
-                        | Ok prog ->
-                            match prog with
-                            | ast.Program decls _ ->
-                                (Nothing, Cons (ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
+            match read_file(prelude_path(stdlib_root)) with
+            | Err msg -> panic("read_file: prelude: " ++ msg)
+            | Ok prelude_src ->
+                match scan_source_info(prelude_src) with
+                  | (_, prelude_exported, prelude_ctor_types) ->
+                      match lexer.tokenize(strip_headers_b(prelude_src, 0)) with
+                      | Err e ->
+                          match e with
+                          | token.TokenizeError msg _ -> (Just(str_concat("Lex error in prelude: ", msg)), Nil)
+                      | Ok tokens ->
+                          match parser.parse_program(tokens) with
+                            | Err e ->
+                                match e with
+                                | parser.ParseError msg _ -> (Just(str_concat("Parse error in prelude: ", msg)), Nil)
+                            | Ok prog ->
+                                match prog with
+                                | ast.Program decls _ ->
+                                    (Nothing, Cons (ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
           else
             (Nothing, rev_mods)
 

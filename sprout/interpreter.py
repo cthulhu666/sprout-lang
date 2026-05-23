@@ -681,30 +681,29 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     def builtin_read_file(args: list[object]) -> object:
         raw_path = args[0]
         if not isinstance(raw_path, str):
-            raise RuntimeError("read_file expects String path")
-        if raw_path == "-":
-            return runtime_in.read()
-        return Path(raw_path).read_text(encoding="utf-8")
-
-    def builtin_try_read_file(args: list[object]) -> object:
-        raw_path = args[0]
-        if not isinstance(raw_path, str):
-            return ADTValue(constructor="Nothing", args=())
+            return ADTValue(constructor="Err", args=("null path",))
         try:
             if raw_path == "-":
-                return ADTValue(constructor="Just", args=(runtime_in.read(),))
-            return ADTValue(constructor="Just", args=(Path(raw_path).read_text(encoding="utf-8"),))
-        except OSError:
-            return ADTValue(constructor="Nothing", args=())
+                return ADTValue(constructor="Ok", args=(runtime_in.read(),))
+            return ADTValue(constructor="Ok", args=(Path(raw_path).read_text(encoding="utf-8"),))
+        except OSError as e:
+            return ADTValue(constructor="Err", args=(str(e),))
 
     def builtin_write_file(args: list[object]) -> object:
         raw_path, content = args[0], args[1]
         if not isinstance(raw_path, str):
-            raise RuntimeError("write_file expects String path")
+            return ADTValue(constructor="Err", args=("null path",))
         if not isinstance(content, str):
-            raise RuntimeError("write_file expects String content")
-        Path(raw_path).write_text(content, encoding="utf-8")
-        return None  # Unit
+            return ADTValue(constructor="Err", args=("null content",))
+        try:
+            Path(raw_path).write_text(content, encoding="utf-8")
+            return ADTValue(constructor="Ok", args=(None,))  # Ok(Unit)
+        except OSError as e:
+            return ADTValue(constructor="Err", args=(str(e),))
+
+    def builtin_runtime_fail(args: list[object]) -> object:
+        msg = args[0] if isinstance(args[0], str) else "runtime_fail"
+        raise RuntimeError(msg)
 
     def builtin_read_int_lines(args: list[object]) -> object:
         raw_path = args[0]
@@ -2076,8 +2075,8 @@ def run_program(program: ast.Program, stdout: TextIO | None = None, argv: list[s
     env.set("print_int", BuiltinFunction(name="print_int", arity=1, fn=builtin_print_int))
     env.set("read_lines", BuiltinFunction(name="read_lines", arity=1, fn=builtin_read_lines))
     env.set("read_file", BuiltinFunction(name="read_file", arity=1, fn=builtin_read_file))
-    env.set("try_read_file", BuiltinFunction(name="try_read_file", arity=1, fn=builtin_try_read_file))
     env.set("write_file", BuiltinFunction(name="write_file", arity=2, fn=builtin_write_file))
+    env.set("runtime_fail", BuiltinFunction(name="runtime_fail", arity=1, fn=builtin_runtime_fail))
     env.set("read_int_lines", BuiltinFunction(name="read_int_lines", arity=1, fn=builtin_read_int_lines))
     env.set("env_get", BuiltinFunction(name="env_get", arity=1, fn=builtin_env_get))
     env.set("argv_get", BuiltinFunction(name="argv_get", arity=1, fn=builtin_argv_get))

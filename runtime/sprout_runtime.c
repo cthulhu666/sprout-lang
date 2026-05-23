@@ -1275,67 +1275,18 @@ long long argv_get(long long index) {
 }
 long long read_file(long long path_i) {
   const char* path = (const char*)(uintptr_t)path_i;
-  if (path == NULL) tcp_fail("read_file: null path");
+  if (path == NULL)
+    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)"null path");
   FILE* f = NULL;
   int close_after = 0;
   if (strcmp(path, "-") == 0) {
     f = stdin;
   } else {
     f = fopen(path, "rb");
-    if (f == NULL) tcp_fail("read_file: cannot open file");
-    close_after = 1;
-  }
-
-  size_t cap = 4096;
-  size_t len = 0;
-  sprout_gc_maybe_collect_threshold();
-  char* out = (char*)malloc(cap);
-  if (out == NULL) {
-    if (close_after) fclose(f);
-    tcp_fail("read_file: out of memory");
-  }
-
-  char buf[4096];
-  while (1) {
-    size_t n = fread(buf, 1, sizeof(buf), f);
-    if (n > 0) {
-      while (len + n + 1 > cap) {
-        size_t new_cap = cap * 2;
-        char* grown = (char*)realloc(out, new_cap);
-        if (grown == NULL) {
-          if (close_after) fclose(f);
-          tcp_fail("read_file: out of memory");
-        }
-        out = grown;
-        cap = new_cap;
-      }
-      memcpy(out + len, buf, n);
-      len += n;
+    if (f == NULL) {
+      const char* fopen_err = intern_string(strerror(errno));
+      return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)fopen_err);
     }
-    if (n < sizeof(buf)) {
-      if (feof(f)) break;
-      if (ferror(f)) {
-        if (close_after) fclose(f);
-        tcp_fail("read_file: read error");
-      }
-    }
-  }
-
-  if (close_after) fclose(f);
-  out[len] = '\0';
-  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return (long long)(uintptr_t)out;
-}
-long long try_read_file(long long path_i) {
-  const char* path = (const char*)(uintptr_t)path_i;
-  if (path == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  FILE* f = NULL;
-  int close_after = 0;
-  if (strcmp(path, "-") == 0) {
-    f = stdin;
-  } else {
-    f = fopen(path, "rb");
-    if (f == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
     close_after = 1;
   }
   size_t cap = 4096;
@@ -1344,7 +1295,7 @@ long long try_read_file(long long path_i) {
   char* out = (char*)malloc(cap);
   if (out == NULL) {
     if (close_after) fclose(f);
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
+    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)"out of memory");
   }
   char buf[4096];
   while (1) {
@@ -1356,7 +1307,7 @@ long long try_read_file(long long path_i) {
         if (grown == NULL) {
           if (close_after) fclose(f);
           free(out);
-          return sprout_make0(find_ctor_tag_by_name("Nothing"));
+          return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)"out of memory");
         }
         out = grown;
         cap = new_cap;
@@ -1367,30 +1318,39 @@ long long try_read_file(long long path_i) {
     if (n < sizeof(buf)) {
       if (feof(f)) break;
       if (ferror(f)) {
+        const char* msg = intern_string(strerror(errno));
         if (close_after) fclose(f);
         free(out);
-        return sprout_make0(find_ctor_tag_by_name("Nothing"));
+        return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)msg);
       }
     }
   }
   if (close_after) fclose(f);
   out[len] = '\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)out);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
 }
 long long write_file(long long path_i, long long content_i) {
   const char *path    = (const char *)(uintptr_t)path_i;
   const char *content = (const char *)(uintptr_t)content_i;
   FILE *f = fopen(path, "wb");
-  if (!f) { fprintf(stderr, "write_file: cannot open %s\n", path); exit(1); }
+  if (!f) {
+    const char* msg = intern_string(strerror(errno));
+    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)msg);
+  }
   size_t len = strlen(content);
   if (fwrite(content, 1, len, f) != len) {
-    fprintf(stderr, "write_file: write error on %s\n", path);
+    const char* msg = intern_string(strerror(errno));
     fclose(f);
-    exit(1);
+    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)msg);
   }
   fclose(f);
-  return 0LL;
+  return sprout_make1(find_ctor_tag_by_name("Ok"), 0LL);
+}
+long long panic(long long msg_i) {
+  const char* msg = (const char*)(uintptr_t)msg_i;
+  tcp_fail(msg ? msg : "panic");
+  return 0LL; /* unreachable */
 }
 // ---- stdlib.process: proc_run / proc_run_stdin --------------------------------
 

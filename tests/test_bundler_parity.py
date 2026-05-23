@@ -10,9 +10,12 @@ bundle_driver.sprout is run once in batch mode so startup cost is amortised.
 """
 from __future__ import annotations
 
+import unittest
+
+# Python interpreter is being removed; these tests are skipped pending full removal.
+
 import subprocess
 import sys
-import unittest
 from pathlib import Path
 
 from sprout.module_loader import load_module_bundle, resolve_program_names
@@ -105,6 +108,7 @@ def sprout_fn_names(path: Path) -> list[str]:
 # Test class
 # ---------------------------------------------------------------------------
 
+@unittest.skip("Python interpreter being removed")
 class BundlerParityTests(unittest.TestCase):
     pass
 

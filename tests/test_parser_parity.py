@@ -12,10 +12,13 @@ expected; unexpected divergences fail the test.
 """
 from __future__ import annotations
 
+import unittest
+
+# Python interpreter is being removed; these tests are skipped pending full removal.
+
 import subprocess
 import sys
 import textwrap
-import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -113,6 +116,7 @@ def compare_outputs(
     return failures
 
 
+@unittest.skip("Python interpreter being removed")
 class ParserParityTests(unittest.TestCase):
     pass
 

@@ -95,7 +95,9 @@ fn solve_database(db: Database) -> Answers =
   | Database ranges ingredients -> solve_ranges(ranges, ingredients)
 
 export fn solve_stdin() -> Answers !{IO} =
-  solve_database(parse_database(string_lines(read_file("-")), 0, false, vec_empty(), vec_empty()))
+  match read_file("-") with
+  | Ok content -> solve_database(parse_database(string_lines(content), 0, false, vec_empty(), vec_empty()))
+  | Err msg -> panic("read_file: " ++ msg)
 
 fn main() -> Unit !{IO} =
   print(solve_stdin())

@@ -393,17 +393,21 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, stdlib_root: String) -> j
   match ir_result with
   | compiler.IrFullFail _ -> error_response("eval_expr_in_source: codegen failed")
   | compiler.IrFullOk ir_text ->
-      do
-        write_file(eval_ir_path(), ir_text)
-        use_darwin <- darwin_frameworks_set()
-        link_result <- process.proc_run(clang_argv(stdlib_root, use_darwin))
-        run_eval_binary(link_result)
+      match write_file(eval_ir_path(), ir_text) with
+      | Err msg -> panic("write_file: eval.ir: " ++ msg)
+      | Ok _ ->
+          do
+            use_darwin <- darwin_frameworks_set()
+            link_result <- process.proc_run(clang_argv(stdlib_root, use_darwin))
+            run_eval_binary(link_result)
 
 fn compile_and_run_eval(src: String, stdlib_root: String) -> json.Json !{IO} =
-  do
-    write_file(eval_source_path(), src)
-    ir_result <- compiler.compile_full_ir(eval_source_path(), stdlib_root)
-    link_and_run_eval(ir_result, stdlib_root)
+  match write_file(eval_source_path(), src) with
+  | Err msg -> panic("write_file: eval_source: " ++ msg)
+  | Ok _ ->
+      do
+        ir_result <- compiler.compile_full_ir(eval_source_path(), stdlib_root)
+        link_and_run_eval(ir_result, stdlib_root)
 
 fn eval_with_scheme(src: String, expr: String, stdlib_root: String, scheme: types.Scheme) -> json.Json !{IO} =
   match make_eval_source(src, expr, type_str) with

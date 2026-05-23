@@ -14,31 +14,38 @@ fn print_issues(path: String, issues: List formatter.LintIssue) -> Unit !{IO} =
             print_issues(path, t)
 
 fn run_fmt_check(path: String) -> Int !{IO} =
-  do
-    src <- read_file(path)
-    let formatted = formatter.format_source(src)
-    let current = if string.ends_with(src, "\n") then src else src ++ "\n"
-    if formatted == current
-    then do
-      print("ok")
-      0
-    else do
-      print("needs formatting: " ++ path)
-      1
+  match read_file(path) with
+  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Ok src ->
+      do
+        let formatted = formatter.format_source(src)
+        let current = if string.ends_with(src, "\n") then src else src ++ "\n"
+        if formatted == current
+        then do
+          print("ok")
+          0
+        else do
+          print("needs formatting: " ++ path)
+          1
 
 fn run_fmt_write(path: String) -> Int !{IO} =
-  do
-    src <- read_file(path)
-    let formatted = formatter.format_source(src)
-    let current = if string.ends_with(src, "\n") then src else src ++ "\n"
-    if formatted == current
-    then do
-      print("ok: " ++ path)
-      0
-    else do
-      write_file(path, formatted)
-      print("formatted " ++ path)
-      0
+  match read_file(path) with
+  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Ok src ->
+      do
+        let formatted = formatter.format_source(src)
+        let current = if string.ends_with(src, "\n") then src else src ++ "\n"
+        if formatted == current
+        then do
+          print("ok: " ++ path)
+          0
+        else
+          match write_file(path, formatted) with
+          | Err msg -> panic("write_file: " ++ path ++ ": " ++ msg)
+          | Ok _ ->
+              do
+                print("formatted " ++ path)
+                0
 
 fn run_fmt() -> Int !{IO} =
   match argv_get(1) with
@@ -62,18 +69,20 @@ fn run_lint() -> Int !{IO} =
         print("lint: missing path")
         1
   | Just path ->
-      do
-        src <- read_file(path)
-        let issues = formatter.lint_source(src)
-        match issues with
-        | Nil ->
-            do
-              print("ok")
-              0
-        | _ ->
-            do
-              print_issues(path, issues)
-              1
+      match read_file(path) with
+      | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+      | Ok src ->
+          do
+            let issues = formatter.lint_source(src)
+            match issues with
+            | Nil ->
+                do
+                  print("ok")
+                  0
+            | _ ->
+                do
+                  print_issues(path, issues)
+                  1
 
 fn main() -> Int !{IO} =
   match argv_get(0) with

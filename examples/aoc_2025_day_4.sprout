@@ -120,9 +120,9 @@ where
   part2 = remove_accessible_layers(grid, 0)
 
 export fn solve_stdin() -> Answers !{IO} =
-  read_file("-")
-  |> parse_grid
-  |> solve_grid
+  match read_file("-") with
+  | Ok content -> content |> parse_grid |> solve_grid
+  | Err msg -> panic("read_file: " ++ msg)
 
 fn main() -> Unit !{IO} =
   print(solve_stdin())

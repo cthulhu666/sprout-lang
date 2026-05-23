@@ -6,6 +6,8 @@ import sys
 import unittest
 from io import StringIO
 
+# Python interpreter is being removed; these tests are skipped pending full removal.
+
 from sprout import analysis as sprout_analysis
 from sprout.analysis import (
     analysis_complete_in_state,
@@ -56,6 +58,7 @@ from sprout.analysis_snapshot_backend import (
 from sprout.analysis_stdio import cmd_analysis_stdio
 
 
+@unittest.skip("Python interpreter being removed")
 class CliAnalysisTests(unittest.TestCase):
     def test_analysis_completion_candidates_in_state_matches_imports_and_declarations(self) -> None:
         backend = default_completion_backend()

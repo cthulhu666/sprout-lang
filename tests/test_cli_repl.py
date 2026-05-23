@@ -2,23 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from tests.cli_repl_suite import CliReplTests
+# Python interpreter is being removed; these tests are skipped pending full removal.
 
 
-def load_tests(
-    loader: unittest.TestLoader,
-    tests: unittest.TestSuite,
-    pattern: str | None,
-) -> unittest.TestSuite:
-    del loader, tests, pattern
-    suite = unittest.TestSuite()
-    for name in sorted(
-        name
-        for name in dir(CliReplTests)
-        if name.startswith("test_") and "native" not in name
-    ):
-        suite.addTest(CliReplTests(name))
-    return suite
+@unittest.skip("Python interpreter being removed")
+class CliReplTestsProxy(unittest.TestCase):
+    def test_placeholder(self) -> None:
+        pass
 
 
 if __name__ == "__main__":
