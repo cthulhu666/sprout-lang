@@ -59,17 +59,17 @@ fn main() -> Unit !{IO} =
     parent <- make_parents(6, 0, vec_empty())
 
     # Step 1: build three disjoint pairs
-    union(parent, 0, 1)   # {0,1}  {2}  {3}  {4}  {5}
-    union(parent, 2, 3)   # {0,1}  {2,3}  {4}  {5}
-    union(parent, 4, 5)   # {0,1}  {2,3}  {4,5}
+    union(parent, 0, 1)  # {0,1}  {2}  {3}  {4}  {5}
+    union(parent, 2, 3)  # {0,1}  {2,3}  {4}  {5}
+    union(parent, 4, 5)  # {0,1}  {2,3}  {4,5}
 
     # Step 2: bridge two components
-    union(parent, 1, 2)   # {0,1,2,3}  {4,5}
+    union(parent, 1, 2)  # {0,1,2,3}  {4,5}
 
     # Connectivity checks
-    c03 <- connected(parent, 0, 3)   # true  — same component after bridging
-    c04 <- connected(parent, 0, 4)   # false — different components
-    c45 <- connected(parent, 4, 5)   # true  — direct pair
+    c03 <- connected(parent, 0, 3)  # true  — same component after bridging
+    c04 <- connected(parent, 0, 4)  # false — different components
+    c45 <- connected(parent, 4, 5)  # true  — direct pair
 
     print(c03)
     print(c04)
@@ -78,4 +78,4 @@ fn main() -> Unit !{IO} =
     # Path compression: after find(0) the root chain 0->1->... is flattened
     r0 <- find(parent, 0)
     r3 <- find(parent, 3)
-    print(r0 == r3)   # true — same root confirms compression worked
+    print(r0 == r3)  # true — same root confirms compression worked

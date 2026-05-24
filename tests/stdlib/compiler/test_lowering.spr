@@ -1,0 +1,71 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
+
+fn run_lower(src: String) -> lowering.LowerResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> lowering.LowerErr("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> lowering.LowerErr("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr msg -> lowering.LowerErr("typecheck: " ++ msg)
+            | typed_ast.TypedOk typed_prog _ -> lowering.lower_program(typed_prog)
+
+fn is_lower_ok(r: lowering.LowerResult) -> Bool =
+  match r with
+  | lowering.LowerOk _ -> true
+  | lowering.LowerErr _ -> false
+
+fn has_tc_name_in(decls: List ast.Decl) -> Bool =
+  match decls with
+  | Nil -> false
+  | Cons d rest ->
+      match d with
+      | ast.FnDecl name _ _ _ _ _ _ ->
+          if str_starts_with(name, "__tc_") then true
+          else has_tc_name_in(rest)
+      | _ -> has_tc_name_in(rest)
+
+fn lower_has_tc_decl(r: lowering.LowerResult) -> Bool =
+  match r with
+  | lowering.LowerErr _ -> false
+  | lowering.LowerOk prog ->
+      match prog with
+      | ast.Program decls _ -> has_tc_name_in(decls)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Simple function — no typeclasses, passes through lowering unchanged
+    r1 <- run_lower("fn val() -> Int = 42")
+    assert_true(state, "simple fn lowers ok", is_lower_ok(r1))
+    assert_false(state, "simple fn has no tc decls", lower_has_tc_decl(r1))
+
+    # Two mutually-referencing functions
+    r2 <- run_lower("fn a() -> Int = 1\nfn b(x: Int) -> Int = a() + x")
+    assert_true(state, "two fns lower ok", is_lower_ok(r2))
+
+    # ADT with match — exercises TypeDecl pass-through and match lowering
+    r3 <- run_lower("type Color = Red | Green | Blue\nfn tag(c: Color) -> Int = match c with | Red -> 0 | Green -> 1 | Blue -> 2")
+    assert_true(state, "adt and match lower ok", is_lower_ok(r3))
+    assert_false(state, "adt program has no tc decls", lower_has_tc_decl(r3))
+
+    # Class + instance — lowering generates __tc_* dispatch functions
+    r4 <- run_lower("class Greet a {\n  fn greet(x: a) -> String\n}\ninstance Greet Int {\n  fn greet(x: Int) -> String = \"hi\"\n}")
+    assert_true(state, "class and instance lower ok", is_lower_ok(r4))
+    assert_true(state, "instance produces __tc_ decl", lower_has_tc_decl(r4))
+
+    # Error propagation — lex errors become LowerErr
+    r5 <- run_lower("@invalid syntax")
+    assert_false(state, "lex error propagates to LowerErr", is_lower_ok(r5))
+
+    summary(state)

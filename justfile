@@ -3,6 +3,11 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default:
   @just --list
 
+# Wire the tracked .githooks/ directory as the active hook path (run once after cloning).
+install-hooks:
+  git config core.hooksPath .githooks
+  @echo "Hooks installed — .githooks/pre-commit is now active."
+
 test *mods:
   python3 scripts/run_parallel_tests.py {{mods}}
 
@@ -37,24 +42,64 @@ parse file:
   python3 -m sprout.cli parse {{file}}
 
 fmt:
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 python3 -m sprout.cli fmt
+  [[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 ./fmt_bin fmt
 
 fmt-check:
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 python3 -m sprout.cli fmt --check
+  [[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 ./fmt_bin fmt --check
 
 fmt-file file:
-  python3 -m sprout.cli fmt {{file}}
+  [[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+  ./fmt_bin fmt {{quote(file)}}
 
 fmt-check-file file:
-  python3 -m sprout.cli fmt --check {{file}}
+  [[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+  ./fmt_bin fmt --check {{quote(file)}}
 
 lint:
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 python3 -m sprout.cli lint
+  [[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 ./fmt_bin lint
 
 lint-file file:
-  python3 -m sprout.cli lint {{file}}
+  [[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+  ./fmt_bin lint {{quote(file)}}
 
-# Build the native formatter binary (fmt_bin) using the Python stage-0 compiler.
+# Build fmt_bin from the committed platform bootstrap seed — no Python required.
+# Detects the current platform via uname and selects bootstrap/compile_driver-<os>-<arch>.
+# Output: fmt_bin
+build-fmt-from-seed:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+  SEED="bootstrap/compile_driver-$PLATFORM"
+  if [[ ! -x "$SEED" ]]; then
+    echo "ERROR: No seed binary for platform $PLATFORM at $SEED" >&2
+    echo "       Run: just build-seeds  (or build-seed-macos / build-seed-linux)" >&2
+    exit 1
+  fi
+  STDLIB_ROOT="$(pwd)/stdlib"
+  DRIVER="stdlib/compiler/fmt_driver.sprout"
+  TMP_LL="/tmp/sprout_fmt_$$.ll"
+  trap 'rm -f "$TMP_LL"' EXIT
+  echo "==> Using seed: $SEED ($(file -b "$SEED"))"
+  echo "==> Emitting LLVM IR for fmt_bin..."
+  "$SEED" --emit-ir "$STDLIB_ROOT" "$DRIVER" > "$TMP_LL"
+  # Compat shim: seeds built before the llvm.stacksave/stackrestore declare fix.
+  if ! grep -qF 'declare ptr @llvm.stacksave' "$TMP_LL"; then
+    TMP_PATCH="/tmp/sprout_fmt_patch_$$"
+    { head -3 "$TMP_LL"
+      printf 'declare ptr @llvm.stacksave()\ndeclare void @llvm.stackrestore(ptr)\n'
+      tail -n +4 "$TMP_LL"
+    } > "$TMP_PATCH" && mv "$TMP_PATCH" "$TMP_LL"
+  fi
+  echo "==> Linking with clang..."
+  CLANG_EXTRA=""
+  if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o fmt_bin
+  echo "==> Built fmt_bin"
+
+# Build fmt_bin using the Python stage-0 compiler (legacy; prefer build-fmt-from-seed).
 build-fmt:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -330,31 +375,37 @@ build-seed-macos:
   ls -lh bootstrap/compile_driver-darwin-arm64
 
 # Build the Linux arm64 bootstrap seed binary via Docker (ubuntu:24.04, native arm64).
-# Starts a throwaway container, builds stage-0 from Python then stage-1 inside it, copies the
-# resulting ELF binary back to bootstrap/compile_driver-linux-aarch64.
+# Uses the committed aarch64 seed to bootstrap inside the container — no Python required.
 # Requires: Docker on PATH and running.
 build-seed-linux:
   #!/usr/bin/env bash
   set -euo pipefail
   mkdir -p bootstrap
   docker run --rm \
+    --platform linux/arm64 \
     --workdir /repo \
-    -e PYTHONDONTWRITEBYTECODE=1 \
     -v "$(pwd):/repo:ro" \
     -v "$(pwd)/bootstrap:/out" \
     ubuntu:24.04 \
     bash -euo pipefail -c '
-      apt-get update -qq && apt-get install -y -q clang llvm python3 >&2
-      echo "==> stage-0: Python compiler → native binary" >&2
-      python3 -m sprout.cli compile \
-        stdlib/compiler/compile_driver.sprout \
-        --with-stdlib --native -o /tmp/stage0
-      echo "==> stage-1: stage-0 IR → clang link" >&2
-      /tmp/stage0 --emit-ir /repo/stdlib stdlib/compiler/compile_driver.sprout > /tmp/stage1.ll
-      clang /tmp/stage1.ll runtime/sprout_runtime.c -O2 -o /out/compile_driver-linux-aarch64
+      apt-get update -qq && apt-get install -y -q clang-16 >&2
+      SEED="/repo/bootstrap/compile_driver-linux-aarch64"
+      TMP_LL="/tmp/sprout_aarch64_$$.ll"
+      echo "==> Using seed: $SEED" >&2
+      echo "==> Emitting LLVM IR..." >&2
+      "$SEED" --emit-ir /repo/stdlib /repo/stdlib/compiler/compile_driver.sprout > "$TMP_LL"
+      if ! grep -qF "declare ptr @llvm.stacksave" "$TMP_LL"; then
+        TMP_PATCH="/tmp/sprout_aarch64_patch_$$.ll"
+        { head -3 "$TMP_LL"
+          printf "declare ptr @llvm.stacksave()\ndeclare void @llvm.stackrestore(ptr)\n"
+          tail -n +4 "$TMP_LL"
+        } > "$TMP_PATCH" && mv "$TMP_PATCH" "$TMP_LL"
+      fi
+      echo "==> Linking with clang-16..." >&2
+      clang-16 "$TMP_LL" /repo/runtime/sprout_runtime.c -O2 -o /out/compile_driver-linux-aarch64
+      chmod +x /out/compile_driver-linux-aarch64
       echo "==> Done" >&2
     '
-  chmod +x bootstrap/compile_driver-linux-aarch64
   echo "==> bootstrap/compile_driver-linux-aarch64:"
   file bootstrap/compile_driver-linux-aarch64
   ls -lh bootstrap/compile_driver-linux-aarch64
@@ -386,8 +437,24 @@ build-seed-linux-amd64:
   file "$OUT"
   ls -lh "$OUT"
 
+# Copy the current stage-1 binary as the Linux x86_64 bootstrap seed.
+# Run this natively on a Linux x86_64 host. Requires compile_driver_bin_stage1.
+# Output: bootstrap/compile_driver-linux-x86_64
+build-seed-linux-amd64-from-stage1:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
+    exit 1
+  fi
+  mkdir -p bootstrap
+  cp compile_driver_bin_stage1 bootstrap/compile_driver-linux-x86_64
+  echo "==> bootstrap/compile_driver-linux-x86_64:"
+  file bootstrap/compile_driver-linux-x86_64
+  ls -lh bootstrap/compile_driver-linux-x86_64
+
 # Build bootstrap seed binaries for Mac-buildable platforms (darwin-arm64 + linux-aarch64 via Docker).
-# For linux-x86_64, run: just build-seed-linux-amd64  (on a Linux x86_64 host)
+# For linux-x86_64, run: just build-seed-linux-amd64-from-stage1  (on a Linux x86_64 host)
 build-seeds: build-seed-macos build-seed-linux
 
 # Bootstrap compile_driver_bin_stage1 from the committed platform seed — no Python required.
@@ -615,7 +682,7 @@ compile-examples-stage1:
   # sentry_api: library module with no main fn; link fails at entry point.
   # sentry_issue_browser{,_tui}: import examples.* which module loader doesn't resolve.
   # ref_tutorial, text_demo: stage-1 parser chokes on these files (non-ASCII / syntax); parser bug.
-  XFAIL_EXAMPLES="examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/ref_tutorial.sprout examples/text_demo.sprout"
+  XFAIL_EXAMPLES="examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout"
   STDLIB_ROOT="$(pwd)/stdlib"
   TMP_LL="/tmp/sprout_ex_$$.ll"
   TMP_BIN="/tmp/sprout_exbin_$$"

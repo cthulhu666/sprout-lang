@@ -1,0 +1,96 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.codegen as codegen
+import stdlib.compiler.typed_ast as typed_ast
+
+# Full pipeline: lex → parse → typecheck → lower → re-typecheck → emit IR.
+# Two typecheck passes are needed: the second re-types the lowered AST so every
+# TypedExpr node carries a fully-resolved Type before codegen sees it.
+fn run_codegen(src: String) -> codegen.IrResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> codegen.IrErr("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> codegen.IrErr("parse error")
+      | Ok prog ->
+          do
+            tc1 <- checker.typecheck_typed(prog, Nil)
+            match tc1 with
+            | typed_ast.TypedErr msg -> codegen.IrErr("check1: " ++ msg)
+            | typed_ast.TypedOk typed_prog _ ->
+                match lowering.lower_program(typed_prog) with
+                | lowering.LowerErr msg -> codegen.IrErr("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    do
+                      tc2 <- checker.typecheck_typed(lowered, Nil)
+                      match tc2 with
+                      | typed_ast.TypedErr msg -> codegen.IrErr("check2: " ++ msg)
+                      | typed_ast.TypedOk typed_lowered env ->
+                          codegen.compile_to_ir(typed_lowered, env)
+
+fn ir_contains(ir: String, sub: String) -> Bool =
+  str_find(ir, sub) != -1
+
+fn codegen_ok(src: String) -> Bool !{IO} =
+  do
+    r <- run_codegen(src)
+    match r with
+    | codegen.IrOk _ -> true
+    | codegen.IrErr _ -> false
+
+fn get_ir(src: String) -> String !{IO} =
+  do
+    r <- run_codegen(src)
+    match r with
+    | codegen.IrOk ir -> ir
+    | codegen.IrErr msg -> "ERROR: " ++ msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Pipeline succeeds for well-typed programs
+    ok1 <- codegen_ok("fn val() -> Int = 42")
+    assert_true(state, "int fn compiles to IR", ok1)
+
+    ok2 <- codegen_ok("fn id(x: Int) -> Int = x")
+    assert_true(state, "one-param fn compiles to IR", ok2)
+
+    ok3 <- codegen_ok("fn always_true() -> Bool = true")
+    assert_true(state, "bool fn compiles to IR", ok3)
+
+    ok4 <- codegen_ok("fn greeting() -> String = \"hello\"")
+    assert_true(state, "string fn compiles to IR", ok4)
+
+    ok5 <- codegen_ok("fn add(a: Int, b: Int) -> Int = a + b")
+    assert_true(state, "two-param fn compiles to IR", ok5)
+
+    # Structural IR markers — Int return uses i64
+    ir1 <- get_ir("fn val() -> Int = 42")
+    assert_true(state, "int fn emits @val", ir_contains(ir1, "@val"))
+    assert_true(state, "int fn emits define", ir_contains(ir1, "define"))
+    assert_true(state, "int fn returns i64 42", ir_contains(ir1, "ret i64 42"))
+
+    # Bool return uses i1 (not i64)
+    ir2 <- get_ir("fn always_true() -> Bool = true")
+    assert_true(state, "bool fn has i1 type", ir_contains(ir2, "i1"))
+
+    # String return uses i64 (GC Option C — strings are i64 raw pointer)
+    ir3 <- get_ir("fn greeting() -> String = \"hello\"")
+    assert_true(state, "string return is i64 (GC Option C)", ir_contains(ir3, "define i64 @greeting"))
+
+    # Conditional generates a branch instruction
+    ir4 <- get_ir("fn cond(x: Int) -> Int = if x == 0 then 1 else 2")
+    assert_true(state, "if/then/else emits br", ir_contains(ir4, "br "))
+
+    # Error propagation
+    err1 <- codegen_ok("@invalid")
+    assert_false(state, "lex error fails codegen", err1)
+
+    err2 <- codegen_ok("fn val() -> Bool = 42")
+    assert_false(state, "type error fails codegen", err2)
+
+    summary(state)

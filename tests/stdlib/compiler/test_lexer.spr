@@ -1,0 +1,102 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+import stdlib.collections (Vec, vec_get)
+
+fn kind_str(t: token.Token) -> String =
+  match token.token_kind(t) with
+  | token.TokenIdentKind -> "ident"
+  | token.TokenKeywordKind -> "keyword"
+  | token.TokenIntKind -> "int"
+  | token.TokenCharKind -> "char"
+  | token.TokenStringKind -> "string"
+  | token.TokenSymbolKind -> "symbol"
+  | token.TokenEofKind -> "eof"
+  | token.TokenTemplateStart -> "template_start"
+  | token.TokenTemplateLit -> "template_lit"
+  | token.TokenTemplateInterpStart -> "template_interp_start"
+  | token.TokenTemplateInterpEnd -> "template_interp_end"
+  | token.TokenTemplateEnd -> "template_end"
+
+fn tok_kind_at(src: String, n: Int) -> String =
+  match lexer.tokenize(src) with
+  | Err _ -> "lex_error"
+  | Ok toks ->
+      match vec_get(n, toks) with
+      | Nothing -> "missing"
+      | Just t -> kind_str(t)
+
+fn tok_text_at(src: String, n: Int) -> String =
+  match lexer.tokenize(src) with
+  | Err _ -> "lex_error"
+  | Ok toks ->
+      match vec_get(n, toks) with
+      | Nothing -> "missing"
+      | Just t -> token.token_text(t)
+
+fn lex_ok(src: String) -> Bool =
+  match lexer.tokenize(src) with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Keywords
+    assert_eq(state, "fn kind", tok_kind_at("fn", 0), "keyword")
+    assert_eq(state, "fn text", tok_text_at("fn", 0), "fn")
+    assert_eq(state, "type keyword", tok_kind_at("type", 0), "keyword")
+    assert_eq(state, "match keyword", tok_kind_at("match", 0), "keyword")
+    assert_eq(state, "true keyword", tok_kind_at("true", 0), "keyword")
+    assert_eq(state, "false keyword", tok_kind_at("false", 0), "keyword")
+    assert_eq(state, "if keyword", tok_kind_at("if", 0), "keyword")
+    assert_eq(state, "do keyword", tok_kind_at("do", 0), "keyword")
+    assert_eq(state, "where keyword", tok_kind_at("where", 0), "keyword")
+    assert_eq(state, "let keyword", tok_kind_at("let", 0), "keyword")
+
+    # Identifiers
+    assert_eq(state, "ident kind", tok_kind_at("main", 0), "ident")
+    assert_eq(state, "ident text", tok_text_at("main", 0), "main")
+    assert_eq(state, "ident underscore", tok_kind_at("my_var", 0), "ident")
+
+    # Integer literals
+    assert_eq(state, "int kind", tok_kind_at("42", 0), "int")
+    assert_eq(state, "int text", tok_text_at("42", 0), "42")
+    assert_eq(state, "zero int", tok_kind_at("0", 0), "int")
+
+    # String literals
+    assert_eq(state, "string kind", tok_kind_at("\"hello\"", 0), "string")
+    assert_eq(state, "string text", tok_text_at("\"hello\"", 0), "hello")
+    assert_eq(state, "empty string kind", tok_kind_at("\"\"", 0), "string")
+    assert_eq(state, "empty string text", tok_text_at("\"\"", 0), "")
+
+    # Char literals
+    assert_eq(state, "char kind", tok_kind_at("'a'", 0), "char")
+    assert_eq(state, "char text", tok_text_at("'a'", 0), "a")
+
+    # Symbols
+    assert_eq(state, "arrow kind", tok_kind_at("->", 0), "symbol")
+    assert_eq(state, "arrow text", tok_text_at("->", 0), "->")
+    assert_eq(state, "equals kind", tok_kind_at("=", 0), "symbol")
+    assert_eq(state, "double equals kind", tok_kind_at("==", 0), "symbol")
+    assert_eq(state, "pipe kind", tok_kind_at("|", 0), "symbol")
+    assert_eq(state, "colon kind", tok_kind_at(":", 0), "symbol")
+    assert_eq(state, "backslash kind", tok_kind_at("\\", 0), "symbol")
+
+    # Two-token sequence
+    assert_eq(state, "fn main first kind", tok_kind_at("fn main", 0), "keyword")
+    assert_eq(state, "fn main second kind", tok_kind_at("fn main", 1), "ident")
+    assert_eq(state, "fn main second text", tok_text_at("fn main", 1), "main")
+
+    # EOF on empty input
+    assert_eq(state, "empty string eof", tok_kind_at("", 0), "eof")
+
+    # Comments are skipped
+    assert_eq(state, "comment skipped kind", tok_kind_at("# a comment\nfoo", 0), "ident")
+    assert_eq(state, "comment skipped text", tok_text_at("# a comment\nfoo", 0), "foo")
+
+    # Error case
+    assert_false(state, "at-sign is lex error", lex_ok("@"))
+
+    summary(state)

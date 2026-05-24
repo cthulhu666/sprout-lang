@@ -1,0 +1,63 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+
+fn run_check(src: String) -> checker.CheckResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> checker.CheckErr("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> checker.CheckErr("parse error")
+      | Ok prog -> checker.check_program(prog)
+
+fn is_check_ok(r: checker.CheckResult) -> Bool =
+  match r with
+  | checker.CheckOk _ -> true
+  | checker.CheckErr _ -> false
+
+fn is_check_err(r: checker.CheckResult) -> Bool =
+  match r with
+  | checker.CheckErr _ -> true
+  | checker.CheckOk _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Successful type checks
+    r1 <- run_check("fn val() -> Int = 42")
+    assert_true(state, "int literal typechecks", is_check_ok(r1))
+
+    r2 <- run_check("")
+    assert_true(state, "empty program typechecks", is_check_ok(r2))
+
+    r3 <- run_check("fn id(x: Int) -> Int = x")
+    assert_true(state, "identity function typechecks", is_check_ok(r3))
+
+    r4 <- run_check("fn add(a: Int, b: Int) -> Int = a + b")
+    assert_true(state, "binary add typechecks", is_check_ok(r4))
+
+    r5 <- run_check("fn always_true() -> Bool = true")
+    assert_true(state, "bool literal typechecks", is_check_ok(r5))
+
+    r6 <- run_check("fn greet() -> String = \"hello\"")
+    assert_true(state, "string literal typechecks", is_check_ok(r6))
+
+    r7 <- run_check("fn a() -> Int = 1\nfn b() -> Int = 2")
+    assert_true(state, "two functions typecheck", is_check_ok(r7))
+
+    r8 <- run_check("fn cond(x: Int) -> Int = if x == 0 then 1 else 2")
+    assert_true(state, "conditional typechecks", is_check_ok(r8))
+
+    # Type errors
+    r9 <- run_check("fn val() -> Bool = 42")
+    assert_true(state, "int body with bool annotation fails", is_check_err(r9))
+
+    r10 <- run_check("fn val() -> Int = true")
+    assert_true(state, "bool body with int annotation fails", is_check_err(r10))
+
+    r11 <- run_check("fn val() -> String = 42")
+    assert_true(state, "int body with string annotation fails", is_check_err(r11))
+
+    summary(state)

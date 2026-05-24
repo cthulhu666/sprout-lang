@@ -7,5 +7,5 @@ fn sum_tree(t: Tree) -> Int =
 
 fn main() -> Unit !{IO} =
   do
-    let t = Node(Node(Leaf, 1, Leaf), 2, Node(Leaf, 3, Leaf))
+    let t = Node(Node (Leaf, 1, Leaf), 2, Node (Leaf, 3, Leaf))
     print(sum_tree(t))

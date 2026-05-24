@@ -8,6 +8,6 @@ fn inc(x: Int) -> Int = x + 1
 
 fn main() -> Unit !{IO} = do
   let xs = Cons(1, Cons(2, Cons(3, Nil)))
-  check("list functor identity",     list_map(identity, xs) == xs)
-  check("list functor composition",  list_map(double >> inc, xs) == list_map(inc, list_map(double, xs)))
+  check("list functor identity", list_map(identity, xs) == xs)
+  check("list functor composition", list_map(double >> inc, xs) == list_map(inc, list_map(double, xs)))
   check("list functor identity nil", list_map(identity, Nil) == Nil)

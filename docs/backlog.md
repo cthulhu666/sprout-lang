@@ -33,6 +33,8 @@ This file tracks open design, implementation, and tooling follow-up work.
 5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
 6. Keep improving local test throughput beyond the current per-file parallel runner.
    Completed groundwork: `just test-parallel` now provides a materially faster local loop than serial `just test-serial`.
+   Completed: native Sprout test files for all six compiler stages now live in `tests/stdlib/compiler/` — `test_lexer.spr`, `test_bundler.spr`, `test_parser.spr`, `test_checker.spr`, `test_lowering.spr`, `test_codegen.spr`; run via `just test-stdlib-stage1`.
+   Completed: fixed bundler UTF-8 bug in `strip_headers_b` — byte offset was used as codepoint index in `str_slice`, causing parse failures on files (e.g. `stdlib/compiler/types.sprout`) with multi-byte characters in comment headers.
    Remaining follow-up:
    - migrate the repeated native compile/run scaffolding in `tests/test_codegen.py` onto the shared cached helper path so more native tests benefit from compile caching
    - measure whether `tests/test_cli.py` native REPL coverage is now dominated by process startup/analysis-service handshake overhead rather than compilation, and only then decide whether more fixture sharing is worth the complexity

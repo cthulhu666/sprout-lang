@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Pre-commit hook: fast compiler-health checks gated on what actually changed.
+set -euo pipefail
+
+CHANGED=$(git diff --cached --name-only 2>/dev/null || true)
+
+# ── 1. Emit-IR smoke tests ───────────────────────────────────────────────────
+# Runs when any compiler Sprout source or the Python runtime (cli.py) changes.
+# Tests compile_driver_bin --emit-ir on several code-shape snippets.
+if echo "$CHANGED" | grep -qE 'stdlib/compiler/|sprout/cli\.py'; then
+  echo "[pre-commit] compiler source changed — running emit-IR smoke tests..."
+  python3 -m unittest tests.test_stage1_emit_ir.Stage0EmitIrTests -v
+  echo "[pre-commit] emit-IR tests passed."
+fi
+
+# ── 2. Bundler parity tests ──────────────────────────────────────────────────
+# (test_bundler_parity.py was removed in e2a96ec with the Python cleanup;
+#  bundler correctness is now covered by tests/stdlib/compiler/test_bundler.spr)
+
+# ── 3. Bundle smoke tests on stage-0 binary ──────────────────────────────────
+# Runs when compiler Sprout source changes.
+# Checks that the existing stage-0 binary still produces valid qualified names
+# (no dot-prefix names, no ERROR lines) for the bootstrap corpus.
+# Skipped automatically if compile_driver_bin is absent.
+if echo "$CHANGED" | grep -qE 'stdlib/compiler/|sprout/cli\.py'; then
+  if [ -x "./compile_driver_bin" ]; then
+    echo "[pre-commit] running bundle smoke tests on stage-0 binary..."
+    python3 -m unittest tests.test_bootstrap_identity.Stage0BundleSmokeTests -v
+    echo "[pre-commit] bundle smoke tests passed."
+  else
+    echo "[pre-commit] compile_driver_bin not found — skipping bundle smoke tests."
+  fi
+fi
+
+# ── 4. In-language stdlib unit tests ─────────────────────────────────────────
+# Runs when the test framework, prelude Eq instances, tested stdlib modules,
+# or the test files themselves change.
+if echo "$CHANGED" | grep -qE 'stdlib/(prelude|test|math|string)\.sprout|stdlib/compiler/types\.sprout|tests/stdlib/'; then
+  echo "[pre-commit] stdlib sources changed — running in-language test suites..."
+  stdlib_failed=0
+  for dir in tests/stdlib tests/stdlib/compiler; do
+    [ -d "$dir" ] || continue
+    for f in "$dir"/*.spr "$dir"/*.sprout; do
+      [ -f "$f" ] || continue
+      out=$(python3 -m sprout.cli run --with-stdlib "$f" 2>&1) || true
+      if echo "$out" | grep -q "^SUITE FAILED"; then
+        echo "[pre-commit] FAILED: $f"
+        echo "$out"
+        stdlib_failed=$((stdlib_failed + 1))
+      fi
+    done
+  done
+  if [ "$stdlib_failed" -gt 0 ]; then
+    echo "[pre-commit] $stdlib_failed stdlib test suite(s) FAILED — commit blocked."
+    exit 1
+  fi
+  echo "[pre-commit] stdlib tests passed."
+fi
+
+# ── 5. Native compiler-stage tests (stage-1) ─────────────────────────────────
+# Runs when any stdlib/compiler source or compiler test file changes.
+# Verifies all six pipeline-stage tests (lexer→codegen) against the native binary.
+# Requires compile_driver_bin_stage1 — skipped if absent.
+if echo "$CHANGED" | grep -qE 'stdlib/compiler/|tests/stdlib/compiler/'; then
+  if [ -x "./compile_driver_bin_stage1" ]; then
+    echo "[pre-commit] compiler sources changed — running native compiler-stage tests..."
+    CS1_STDLIB="$(pwd)/stdlib"
+    CS1_CLANG_EXTRA=""
+    [[ "$(uname)" == "Darwin" ]] && CS1_CLANG_EXTRA="-framework Security -framework CoreFoundation"
+    CS1_LL=$(mktemp /tmp/sprout_hook_XXXXXX.ll)
+    CS1_BIN=$(mktemp /tmp/sprout_hook_XXXXXX)
+    CS1_ERR=$(mktemp /tmp/sprout_hook_XXXXXX.txt)
+    trap "rm -f $CS1_LL $CS1_BIN $CS1_ERR" EXIT
+    cs1_failed=0
+    for f in tests/stdlib/compiler/test_lexer.spr \
+              tests/stdlib/compiler/test_bundler.spr \
+              tests/stdlib/compiler/test_parser.spr \
+              tests/stdlib/compiler/test_checker.spr \
+              tests/stdlib/compiler/test_lowering.spr \
+              tests/stdlib/compiler/test_codegen.spr; do
+      [ -f "$f" ] || continue
+      if ! ./compile_driver_bin_stage1 --emit-ir "$CS1_STDLIB" "$f" > "$CS1_LL" 2>"$CS1_ERR"; then
+        echo "[pre-commit] compile error: $f"; cat "$CS1_ERR"
+        cs1_failed=$((cs1_failed + 1)); continue
+      fi
+      # shellcheck disable=SC2086
+      if ! clang "$CS1_LL" runtime/sprout_runtime.c -O2 $CS1_CLANG_EXTRA -o "$CS1_BIN" 2>"$CS1_ERR"; then
+        echo "[pre-commit] link error: $f"; cat "$CS1_ERR"
+        cs1_failed=$((cs1_failed + 1)); continue
+      fi
+      out=$("$CS1_BIN" 2>&1) || true
+      if echo "$out" | grep -q "^SUITE FAILED"; then
+        echo "[pre-commit] SUITE FAILED: $f"
+        echo "$out"
+        cs1_failed=$((cs1_failed + 1))
+      fi
+    done
+    [ "$cs1_failed" -gt 0 ] && { echo "[pre-commit] $cs1_failed compiler-stage test(s) FAILED — commit blocked."; exit 1; }
+    echo "[pre-commit] native compiler-stage tests passed."
+  else
+    echo "[pre-commit] compile_driver_bin_stage1 absent — skipping native compiler-stage tests."
+  fi
+fi
+
+# ── 6. GC safety linter (informational, non-blocking) ────────────────────────
+# Runs when cli.py changes. Warns about const char* params used after
+# sprout_gc_maybe_collect_threshold() without being rooted.
+# Does NOT fail the commit — use `just gc-safety-check --strict` to enforce.
+if echo "$CHANGED" | grep -qE 'sprout/cli\.py'; then
+  echo "[pre-commit] cli.py changed — running GC safety check (informational)..."
+  python3 scripts/gc_safety_check.py || true
+fi

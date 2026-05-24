@@ -6,7 +6,7 @@ import stdlib.string (char_at_or, concat, length, string_from_char, string_lines
 # part1 counts currently accessible rolls.
 # part2 repeatedly removes all currently accessible rolls until stable.
 
-export type Answers(..) =
+export type Answers (..) =
   | Answers Int Int
 
 fn bool_to_int(value: Bool) -> Int =

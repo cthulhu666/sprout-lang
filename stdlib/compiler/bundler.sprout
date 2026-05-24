@@ -310,7 +310,13 @@ fn next_line_b(s: String, pos: Int) -> Int =
 fn strip_headers_b(s: String, pos: Int) -> String =
   if pos >= str_byte_len(s) then ""
   else if is_header_line_b(s, pos) then strip_headers_b(s, next_line_b(s, pos))
-  else str_slice(s, pos, str_len(s))
+  else str_slice(s, cp, str_len(s) - cp)
+  where cp = byte_pos_to_cp_acc(s, 0, 0, pos)
+
+# Count codepoints in s up to byte offset limit (for converting byte→codepoint index).
+fn byte_pos_to_cp_acc(s: String, b: Int, cp: Int, limit: Int) -> Int =
+  if b >= limit then cp
+  else byte_pos_to_cp_acc(s, b + str_char_width_at_byte(s, b), cp + 1, limit)
 
 # ---------------------------------------------------------------------------
 # Topological DFS collection (iterative, using an explicit work stack)

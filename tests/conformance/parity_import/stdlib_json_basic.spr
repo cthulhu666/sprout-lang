@@ -2,21 +2,21 @@ import stdlib.json as json
 
 fn extract_int_field(key: String, src: String) -> Maybe Int =
   match json.parse(src) with
-  | Err _  -> Nothing
+  | Err _ -> Nothing
   | Ok obj ->
       match json.json_get_field(obj, key) with
-      | Nothing    -> Nothing
+      | Nothing -> Nothing
       | Just inner -> json.json_get_int(inner)
 
 fn extract_string_field(key: String, src: String) -> Maybe String =
   match json.parse(src) with
-  | Err _  -> Nothing
+  | Err _ -> Nothing
   | Ok obj ->
       match json.json_get_field(obj, key) with
-      | Nothing    -> Nothing
+      | Nothing -> Nothing
       | Just inner -> json.json_get_string(inner)
 
 fn main() -> Unit !{IO} =
   match extract_int_field("x", "{\"x\": 1}") with
   | Nothing -> print("missing")
-  | Just n  -> print(n)
+  | Just n -> print(n)
