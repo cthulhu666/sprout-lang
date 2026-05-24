@@ -150,7 +150,10 @@ _test-stdlib stage:
   TMP_LL="/tmp/sprout_test_$$.ll"
   TMP_BIN="/tmp/sprout_testbin_$$"
   TMP_ERR="/tmp/sprout_testerr_$$.txt"
-  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
+  TMP_RT="/tmp/sprout_runtime_$$.o"
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR" "$TMP_RT"' EXIT
+  # Pre-compile the runtime once; each test just links the resulting .o.
+  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_RT" 2>"$TMP_ERR" || { echo "ERROR: runtime compile failed"; cat "$TMP_ERR"; exit 1; }
   total_failed=0
   for dir in tests/stdlib tests/stdlib/compiler; do
     [ -d "$dir" ] || continue
@@ -161,7 +164,7 @@ _test-stdlib stage:
         echo "  COMPILE FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
-      if ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
+      if ! clang "$TMP_LL" "$TMP_RT" {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
         echo "  LINK FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
