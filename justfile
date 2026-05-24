@@ -3,6 +3,11 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default:
   @just --list
 
+# Wire the tracked .githooks/ directory as the active hook path (run once after cloning).
+install-hooks:
+  git config core.hooksPath .githooks
+  @echo "Hooks installed — .githooks/pre-commit is now active."
+
 test *mods:
   python3 scripts/run_parallel_tests.py {{mods}}
 
