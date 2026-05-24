@@ -12,10 +12,23 @@ install-hooks:
   git config core.hooksPath .githooks
   @echo "Hooks installed — .githooks/pre-commit is now active."
 
-# REPL: not yet available — a native launcher is planned (see BACKLOG.md under 'Native REPL').
+# Launch the interactive Sprout REPL.
+# Prerequisites: just build-repl && just build-analysis-service
 repl:
-  @echo "ERROR: The Sprout REPL requires a native launcher that is not yet implemented." >&2
-  @exit 1
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./repl_bin" ]]; then
+    echo "ERROR: repl_bin not found; run: just build-repl" >&2; exit 1
+  fi
+  if [[ ! -x "./analysis_service_bin" ]]; then
+    echo "ERROR: analysis_service_bin not found; run: just build-analysis-service" >&2; exit 1
+  fi
+  SPROUT_SERVICE_CMD="$(pwd)/analysis_service_bin {{stdlib_root}}"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" SPROUT_DARWIN_FRAMEWORKS=1 ./repl_bin
+  else
+    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" ./repl_bin
+  fi
 
 # ── Formatting & Linting ──────────────────────────────────────────────────────
 
@@ -287,9 +300,10 @@ _compile-examples stage xfail="":
   echo "==> All examples compiled OK"
 
 # Stage-1: emit IR → clang link for each example.
-# Known xfail: sentry_api (no main fn), sentry_issue_browser{,_tui} (import examples.* unresolved).
+# Known xfail: sentry_api (no main fn), sentry_issue_browser{,_tui} (import examples.* unresolved),
+#              repl_hosted (bundler relative-path bug; use `just build-repl` which passes an absolute path).
 [group('examples')]
-compile-examples-stage1: (_compile-examples "compile_driver_bin_stage1" "examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
+compile-examples-stage1: (_compile-examples "compile_driver_bin_stage1" "examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/repl_hosted.sprout")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
@@ -382,6 +396,26 @@ build-seed-linux-amd64:
 # For linux-x86_64, run just build-seed-linux-amd64 on a Linux x86_64 host.
 [group('bootstrap')]
 build-seeds: build-seed-macos build-seed-linux
+
+# ── REPL ──────────────────────────────────────────────────────────────────────
+
+# Build the REPL binary from examples/repl_hosted.sprout using stage-1.
+[group('build')]
+build-repl:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
+  fi
+  TMP_LL="/tmp/sprout_repl_$$.ll"
+  trap 'rm -f "$TMP_LL"' EXIT
+  echo "==> Emitting LLVM IR for repl_bin..."
+  ./compile_driver_bin_stage1 --emit-ir "{{stdlib_root}}" "{{justfile_directory()}}/examples/repl_hosted.sprout" > "$TMP_LL"
+  echo "==> Validating IR..."
+  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
+  echo "==> Linking with clang..."
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o repl_bin
+  echo "==> Built repl_bin"
 
 # ── Analysis Service ──────────────────────────────────────────────────────────
 
