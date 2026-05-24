@@ -8,7 +8,15 @@ install-hooks:
   git config core.hooksPath .githooks
   @echo "Hooks installed — .githooks/pre-commit is now active."
 
-test *mods:
+# Primary test target: native stdlib + compiler-stage tests (no Python required).
+# Runs all tests under tests/stdlib/ via compile_driver_bin_stage1.
+# For the legacy Python test suite: just test-python
+test: test-stdlib-stage1
+
+# Legacy Python test runner (requires Python + sprout package installed).
+# Tests the Python frontend (parser, typechecker, formatter, etc.).
+# Not required for the native compiler pipeline; kept for reference.
+test-python *mods:
   python3 scripts/run_parallel_tests.py {{mods}}
 
 test-serial:
@@ -38,6 +46,8 @@ gc-safety-check *args:
   python3 scripts/gc_safety_check.py {{args}}
 
 
+# Display the parse tree for a file.  Requires Python + sprout package (legacy).
+# For type-checking without Python: just check {{file}}
 parse file:
   python3 -m sprout.cli parse {{file}}
 
@@ -118,10 +128,15 @@ lint-native file:
   ./fmt_bin lint {{quote(file)}}
 
 check file:
-  python3 -m sprout.cli check {{file}}
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
+  fi
+  ./compile_driver_bin_stage1 --phase check "$(pwd)/stdlib" {{quote(file)}}
 
-check-stdlib file:
-  python3 -m sprout.cli check --with-stdlib {{file}}
+# stdlib is always included when a stdlib root is given; this alias exists for symmetry.
+check-stdlib file: (check file)
 
 # Compile {{file}} with stage-1 and run the resulting binary (always includes stdlib).
 # Requires compile_driver_bin_stage1; build it first with: just build-stage1
@@ -295,7 +310,7 @@ build-stage1:
   set -euo pipefail
   if find stdlib/compiler -name "*.sprout" -newer compile_driver_bin 2>/dev/null | grep -q .; then
     echo "WARNING: compiler sources are newer than compile_driver_bin (stage-0); edits won't be in this build." >&2
-    echo "WARNING: To include recent edits, rebuild stage-0 from Python first." >&2
+    echo "WARNING: Use just bootstrap-from-seed to build from current sources (produces compile_driver_bin_stage1)." >&2
   fi
   STDLIB_ROOT="$(pwd)/stdlib"
   DRIVER="stdlib/compiler/compile_driver.sprout"
@@ -497,7 +512,7 @@ build-stage1-asan:
   set -euo pipefail
   if find stdlib/compiler -name "*.sprout" -newer compile_driver_bin 2>/dev/null | grep -q .; then
     echo "WARNING: compiler sources are newer than compile_driver_bin (stage-0); edits won't be in this build." >&2
-    echo "WARNING: To include recent edits, rebuild stage-0 from Python first." >&2
+    echo "WARNING: Use just bootstrap-from-seed to build from current sources (produces compile_driver_bin_stage1)." >&2
   fi
   # Same as build-stage1 but links with AddressSanitizer + UBSan for crash attribution.
   # Use only for debugging; output binary is ~5x slower.
@@ -582,15 +597,20 @@ run-analysis-service:
   STDLIB_ROOT="$(pwd)/stdlib"
   exec "$BIN" "$STDLIB_ROOT"
 
-# Start an interactive Sprout REPL (native self-hosted binary; requires clang and compile_driver_bin_stage1).
+# REPL: not yet available without Python.
+# The Python-based REPL launcher has been removed; a native replacement is planned.
+# For now, run the analysis service manually:
+#   just build-analysis-service && just run-analysis-service
 repl:
-  python3 -m sprout.cli repl
+  @echo "ERROR: The Sprout REPL requires a native launcher that is not yet implemented." >&2
+  @echo "       Track progress in BACKLOG.md under 'Native REPL'." >&2
+  @exit 1
 
-# Start the native Sprout REPL (compiled binary, analysis-service-backed).
-# Uses analysis_service_bin for analysis if present; falls back to Python analysis service.
-# Requires clang on PATH. Build analysis_service_bin first with: just build-analysis-service
+# Same as above — the native REPL launcher is not yet implemented without Python.
 repl-native:
-  python3 -m sprout.cli repl --native
+  @echo "ERROR: The Sprout REPL requires a native launcher that is not yet implemented." >&2
+  @echo "       Track progress in BACKLOG.md under 'Native REPL'." >&2
+  @exit 1
 
 # Compile all examples to LLVM IR. Alias for compile-examples-stage1 (stage-1 self-hosted binary).
 # For the Python stage-0 path: just compile-examples-stage0

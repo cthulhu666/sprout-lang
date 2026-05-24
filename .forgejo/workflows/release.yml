@@ -15,19 +15,12 @@ jobs:
         run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
 
       - name: Install Clang / LLVM
-        run: sudo apt-get install -y clang llvm
-
-      - name: Build stage-0 native binary
-        # memwatch.sh is macOS-only (sysctl/vm_stat); ulimit -v guards against OOM on Linux.
         run: |
-          ulimit -v $((8 * 1024 * 1024))
-          python3 -m sprout.cli compile \
-            stdlib/compiler/compile_driver.sprout \
-            --with-stdlib --native \
-            -o compile_driver_bin
+          sudo apt-get install -y clang-16 llvm-16
+          echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
 
-      - name: Build stage-1 native binary
-        run: just build-stage1
+      - name: Bootstrap stage-1 from committed seed (Python-free)
+        run: just bootstrap-from-seed
 
       - name: Verify examples (stage-1)
         run: just compile-examples-stage1
