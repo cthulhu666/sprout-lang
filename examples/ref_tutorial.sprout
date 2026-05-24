@@ -32,12 +32,12 @@ fn part1() -> Unit !{IO} =
 
     ref_write(counter, 1)
     a <- ref_read(counter)
-    print(a)                      # 1
+    print(a)  # 1
 
     old <- ref_read(counter)
     ref_write(counter, old + 41)
     b <- ref_read(counter)
-    print(b)                      # 42
+    print(b)  # 42
 
 # ---------------------------------------------------------------------------
 # Part 2: sharing a cell across recursive calls
@@ -69,7 +69,7 @@ fn part2() -> Unit !{IO} =
     total <- ref_new(0)
     sum_ref(Cons(10, Cons(20, Cons(30, Nil))), total)
     result <- ref_read(total)
-    print(result)                 # 60
+    print(result)  # 60
 
 # ---------------------------------------------------------------------------
 # Part 3: two independent cells in one traversal
@@ -93,13 +93,13 @@ fn track_list(xs: List Int, total: Ref Int, maximum: Ref Int) -> Unit !{IO} =
 fn part3() -> Unit !{IO} =
   do
     print("--- part 3: two cells, one traversal ---")
-    total   <- ref_new(0)
+    total <- ref_new(0)
     maximum <- ref_new(0)
     track_list(Cons(3, Cons(7, Cons(2, Cons(9, Cons(4, Nil))))), total, maximum)
     t <- ref_read(total)
     m <- ref_read(maximum)
-    print(t)                      # 25
-    print(m)                      # 9
+    print(t)  # 25
+    print(m)  # 9
 
 # ---------------------------------------------------------------------------
 # Part 4: Ref holds any type — including heap values
@@ -136,11 +136,11 @@ fn part4() -> Unit !{IO} =
     stack_push(stack, 20)
     stack_push(stack, 30)
 
-    a <- stack_pop(stack)   # 30 (LIFO)
-    b <- stack_pop(stack)   # 20
+    a <- stack_pop(stack)  # 30 (LIFO)
+    b <- stack_pop(stack)  # 20
     stack_push(stack, 99)
-    c <- stack_pop(stack)   # 99
-    d <- stack_pop(stack)   # 10
+    c <- stack_pop(stack)  # 99
+    d <- stack_pop(stack)  # 10
 
     print(a)
     print(b)
@@ -214,7 +214,7 @@ fn part5() -> Unit !{IO} =
 
     # Before any unification: each variable is distinct
     eq_01_before <- same_var(vars, 0, 1)
-    print(eq_01_before)           # False
+    print(eq_01_before)  # False
 
     # Unify t0 = t1, then t1 = t2
     unify_vars(vars, 0, 1)
@@ -224,9 +224,9 @@ fn part5() -> Unit !{IO} =
     eq_01 <- same_var(vars, 0, 1)
     eq_02 <- same_var(vars, 0, 2)
     eq_12 <- same_var(vars, 1, 2)
-    print(eq_01)                  # True
-    print(eq_02)                  # True
-    print(eq_12)                  # True
+    print(eq_01)  # True
+    print(eq_02)  # True
+    print(eq_12)  # True
 
 fn main() -> Unit !{IO} =
   do

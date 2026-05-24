@@ -6,7 +6,7 @@ type Point = {
   y: Int
 }
 
-fn make_point(x: Int, y: Int) -> Point = Point { x = x, y = y }
+fn make_point(x: Int, y: Int) -> Point = Point {x = x, y = y}
 
 fn get_x(p: Point) -> Int = get p x
 

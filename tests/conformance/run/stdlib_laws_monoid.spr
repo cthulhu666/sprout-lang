@@ -6,12 +6,12 @@ fn check(label: String, ok: Bool) -> Unit !{IO} =
   else print(label ++ ": FAIL")
 
 fn main() -> Unit !{IO} = do
-  check("str left identity",  (str_empty() ++ "hello") == "hello")
+  check("str left identity", (str_empty() ++ "hello") == "hello")
   check("str right identity", ("hello" ++ str_empty()) == "hello")
-  check("str associativity",  (("foo" ++ "bar") ++ "baz") == ("foo" ++ ("bar" ++ "baz")))
+  check("str associativity", (("foo" ++ "bar") ++ "baz") == ("foo" ++ ("bar" ++ "baz")))
   let xs = Cons(1, Cons(2, Cons(3, Nil)))
   let ys = Cons(4, Cons(5, Nil))
   let zs = Cons(6, Nil)
-  check("list left identity",  (list_int_empty() ++ xs) == xs)
+  check("list left identity", (list_int_empty() ++ xs) == xs)
   check("list right identity", (xs ++ list_int_empty()) == xs)
-  check("list associativity",  ((xs ++ ys) ++ zs) == (xs ++ (ys ++ zs)))
+  check("list associativity", ((xs ++ ys) ++ zs) == (xs ++ (ys ++ zs)))

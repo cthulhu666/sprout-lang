@@ -6,10 +6,10 @@ import stdlib.string (split_once, string_lines, trim)
 # part1 counts how many available ingredient IDs are fresh.
 # part2 counts how many total ingredient IDs are covered by the fresh ranges.
 
-export type Answers(..) =
+export type Answers (..) =
   | Answers Int Int
 
-export type Database(..) =
+export type Database (..) =
   | Database (Vec IntRange) (Vec Int)
 
 fn parse_range(raw: String) -> IntRange =

@@ -27,5 +27,5 @@ fn main() -> Unit !{IO} = do
   say(is_pos(-1))
   say(is_pos(Just(5)))
   say(is_pos(nothing_int()))
-  say(is_pos(Just(Just(3))))
-  say(is_pos(Just(Just(-1))))
+  say(is_pos(Just (Just(3))))
+  say(is_pos(Just (Just(-1))))

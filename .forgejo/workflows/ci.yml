@@ -25,6 +25,12 @@ jobs:
       - name: Bootstrap stage-1 from committed seed (Python-free)
         run: just bootstrap-from-seed
 
+      - name: Build fmt_bin from seed (Python-free)
+        run: just build-fmt-from-seed
+
+      - name: Check formatting
+        run: just fmt-check
+
       - name: Run stdlib tests (stage-1)
         run: just test-stdlib-stage1
 

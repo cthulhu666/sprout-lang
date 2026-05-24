@@ -1,6 +1,6 @@
 module stdlib.process
 
-export type ProcResult(..) =
+export type ProcResult (..) =
   | ProcResult Int String String
 
 export fn proc_exit(r: ProcResult) -> Int =

@@ -21,7 +21,7 @@ fn render_match(raw: String, start: Int, end: Int, replaced: String, escaped: St
 
 fn summarize_found(re: regex.Regex, raw: String) -> String =
   match regex.find_first(re, raw) with
-  | Just(regex.Match start end) ->
+  | Just (regex.Match start end) ->
       render_match(
         raw,
         start,
