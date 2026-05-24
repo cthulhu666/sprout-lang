@@ -231,7 +231,9 @@ Builtin effect convention:
 - `print(x) -> Unit !{IO}`
 - `print_int(x: Int) -> Int !{IO}` (prints and returns `x`, useful for native backend subset)
 - `read_lines(path: String) -> List String !{IO}`
-- `read_file(path: String) -> String !{IO}`
+- `read_file(path: String) -> Result String String !{IO}`
+- `write_file(path: String, content: String) -> Result String Unit !{IO}`
+- `panic(msg: String) -> a !{IO}`
 - `read_int_lines(path: String) -> Vector Int !{IO}`
 - `env_get(name: String) -> Maybe String !{IO}`
 - `argv_get(index: Int) -> Maybe String !{IO}` (`0` is the first user-supplied program argument)

@@ -1934,9 +1934,24 @@ def typecheck_program(
         ),
         "read_file": Scheme(
             vars=(),
-            type=TFunc(TConst("String"), TConst("String"), IO_EFFECT),
+            type=TFunc(
+                TConst("String"),
+                TApp(TApp(TConst("Result"), TConst("String")), TConst("String")),
+                IO_EFFECT,
+            ),
         ),
-        "write_file": builtin_scheme([TConst("String"), TConst("String")], UNIT, effects=IO_EFFECT),
+        "write_file": Scheme(
+            vars=(),
+            type=TFunc(
+                TConst("String"),
+                TFunc(
+                    TConst("String"),
+                    TApp(TApp(TConst("Result"), TConst("String")), UNIT),
+                    IO_EFFECT,
+                ),
+                PURE_EFFECT,
+            ),
+        ),
         "read_int_lines": Scheme(
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("Vector"), INT), IO_EFFECT),

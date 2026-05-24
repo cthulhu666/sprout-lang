@@ -18,6 +18,9 @@ test-parallel *mods:
 test-integration:
   python3 -m unittest discover -s tests -p 'test_integration_io.py' -v
 
+c-runtime-test:
+  bash tests/c_runtime/run.sh
+
 measure-gc-thresholds:
   python3 scripts/measure_gc_thresholds.py
 

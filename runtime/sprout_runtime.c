@@ -1275,8 +1275,11 @@ long long argv_get(long long index) {
 }
 long long read_file(long long path_i) {
   const char* path = (const char*)(uintptr_t)path_i;
-  if (path == NULL)
-    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)"null path");
+  if (path == NULL) {
+    char* msg = dup_managed_cstr("null path", "read_file: out of memory");
+    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
+  }
   FILE* f = NULL;
   int close_after = 0;
   if (strcmp(path, "-") == 0) {
@@ -1284,8 +1287,9 @@ long long read_file(long long path_i) {
   } else {
     f = fopen(path, "rb");
     if (f == NULL) {
-      const char* fopen_err = intern_string(strerror(errno));
-      return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)fopen_err);
+      char* msg = dup_managed_cstr(strerror(errno), "read_file: out of memory");
+      SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+      return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
     }
     close_after = 1;
   }
@@ -1295,7 +1299,9 @@ long long read_file(long long path_i) {
   char* out = (char*)malloc(cap);
   if (out == NULL) {
     if (close_after) fclose(f);
-    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)"out of memory");
+    char* msg = dup_managed_cstr("out of memory", "read_file: out of memory");
+    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
   }
   char buf[4096];
   while (1) {
@@ -1307,7 +1313,9 @@ long long read_file(long long path_i) {
         if (grown == NULL) {
           if (close_after) fclose(f);
           free(out);
-          return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)"out of memory");
+          char* msg = dup_managed_cstr("out of memory", "read_file: out of memory");
+          SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+          return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
         }
         out = grown;
         cap = new_cap;
@@ -1318,31 +1326,45 @@ long long read_file(long long path_i) {
     if (n < sizeof(buf)) {
       if (feof(f)) break;
       if (ferror(f)) {
-        const char* msg = intern_string(strerror(errno));
+        char* msg = dup_managed_cstr(strerror(errno), "read_file: out of memory");
         if (close_after) fclose(f);
         free(out);
-        return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)msg);
+        SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+        return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
       }
     }
   }
   if (close_after) fclose(f);
   out[len] = '\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
-  return sprout_make1(find_ctor_tag_by_name("Ok"), (long long)(uintptr_t)out);
+  SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
+  return sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_out));
 }
 long long write_file(long long path_i, long long content_i) {
   const char *path    = (const char *)(uintptr_t)path_i;
   const char *content = (const char *)(uintptr_t)content_i;
+  if (path == NULL) {
+    char* msg = dup_managed_cstr("null path", "write_file: out of memory");
+    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
+  }
+  if (content == NULL) {
+    char* msg = dup_managed_cstr("null content", "write_file: out of memory");
+    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
+  }
   FILE *f = fopen(path, "wb");
   if (!f) {
-    const char* msg = intern_string(strerror(errno));
-    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)msg);
+    char* msg = dup_managed_cstr(strerror(errno), "write_file: out of memory");
+    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
   }
   size_t len = strlen(content);
   if (fwrite(content, 1, len, f) != len) {
-    const char* msg = intern_string(strerror(errno));
+    char* msg = dup_managed_cstr(strerror(errno), "write_file: out of memory");
     fclose(f);
-    return sprout_make1(find_ctor_tag_by_name("Err"), (long long)(uintptr_t)msg);
+    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
   }
   fclose(f);
   return sprout_make1(find_ctor_tag_by_name("Ok"), 0LL);
@@ -1359,15 +1381,25 @@ typedef struct { char* data; size_t len; size_t cap; } GrowBuf;
 static GrowBuf sprout_growbuf_new(void) {
   GrowBuf b; b.cap = 4096; b.len = 0;
   b.data = (char*)malloc(b.cap);
-  if (b.data) b.data[0] = '\0';
+  if (b.data == NULL) tcp_fail("proc_run: out of memory");
+  b.data[0] = '\0';
   return b;
 }
 
 static void sprout_growbuf_append(GrowBuf* b, const char* p, size_t n) {
   if (!n) return;
   if (b->len + n + 1 > b->cap) {
-    while (b->len + n + 1 > b->cap) b->cap *= 2;
-    b->data = (char*)realloc(b->data, b->cap);
+    if (n > SIZE_MAX - b->len - 1) tcp_fail("proc_run: output too large");
+    size_t needed = b->len + n + 1;
+    size_t new_cap = b->cap;
+    while (needed > new_cap) {
+      if (new_cap > SIZE_MAX / 2) tcp_fail("proc_run: output too large");
+      new_cap *= 2;
+    }
+    char* grown = (char*)realloc(b->data, new_cap);
+    if (grown == NULL) tcp_fail("proc_run: out of memory");
+    b->data = grown;
+    b->cap = new_cap;
   }
   memcpy(b->data + b->len, p, n);
   b->len += n;
@@ -2757,6 +2789,9 @@ long long read_int_lines(const char* path) {
   return sprout_handle_get(h_v);
 }
 long long sprout_register_ctor(long long tag, const char* name, long long arity) {
+  if (g_ctor_meta_len >= (long long)(sizeof(g_ctor_meta) / sizeof(g_ctor_meta[0]))) {
+    tcp_fail("sprout_register_ctor: constructor metadata table full");
+  }
   g_ctor_meta[g_ctor_meta_len].tag = tag;
   g_ctor_meta[g_ctor_meta_len].name = name;
   g_ctor_meta[g_ctor_meta_len].arity = arity;
