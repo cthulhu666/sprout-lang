@@ -583,6 +583,46 @@ instance Eq (Result e a) where Eq e, Eq a {
     | Err e -> match right with | Ok _ -> false | Err f -> eq(e, f)
 }
 
+fn vec_eq_from(left: Vec a, right: Vec a, i: Int, total: Int) -> Bool where Eq a =
+  if i == total then true
+  else
+    match vec_get(i, left) with
+    | Nothing -> false
+    | Just lv ->
+        match vec_get(i, right) with
+        | Nothing -> false
+        | Just rv ->
+            if eq(lv, rv) then vec_eq_from(left, right, i + 1, total)
+            else false
+
+instance Eq (Vec a) where Eq a {
+  fn eq(left: Vec a, right: Vec a) -> Bool =
+    if vec_length(left) != vec_length(right) then false
+    else vec_eq_from(left, right, 0, vec_length(left))
+}
+
+fn dict_entries_eq(le: Vec (String, v), re: Vec (String, v), i: Int, total: Int) -> Bool where Eq v =
+  if i == total then true
+  else
+    match vec_get(i, le) with
+    | Nothing -> false
+    | Just (lk, lv) ->
+        match vec_get(i, re) with
+        | Nothing -> false
+        | Just (rk, rv) ->
+            if lk == rk && eq(lv, rv)
+            then dict_entries_eq(le, re, i + 1, total)
+            else false
+
+fn dict_eq(le: Vec (String, v), re: Vec (String, v)) -> Bool where Eq v =
+  if vec_length(le) != vec_length(re) then false
+  else dict_entries_eq(le, re, 0, vec_length(le))
+
+instance Eq (Dict v) where Eq v {
+  fn eq(left: Dict v, right: Dict v) -> Bool =
+    dict_eq(dict_entries(left), dict_entries(right))
+}
+
 instance ToString Int {
   fn to_string(value: Int) -> String =
     int_to_string(value)
@@ -757,6 +797,38 @@ instance ToString (Result e a) where ToString e, ToString a {
     match x with
     | Ok v -> "Ok(" ++ to_string(v) ++ ")"
     | Err e -> "Err(" ++ to_string(e) ++ ")"
+}
+
+fn vec_to_string_go(vec: Vec a, i: Int, total: Int, acc: String) -> String where ToString a =
+  if i == total then acc
+  else
+    match vec_get(i, vec) with
+    | Nothing -> acc
+    | Just v ->
+        vec_to_string_go(vec, i + 1, total,
+          if acc == "" then to_string(v) else acc ++ ", " ++ to_string(v))
+
+instance ToString (Vec a) where ToString a {
+  fn to_string(vec: Vec a) -> String =
+    "[" ++ vec_to_string_go(vec, 0, vec_length(vec), "") ++ "]"
+}
+
+fn dict_to_string_go(entries: Vec (String, v), i: Int, total: Int, acc: String) -> String where ToString v =
+  if i == total then acc
+  else
+    match vec_get(i, entries) with
+    | Nothing -> acc
+    | Just (k, v) ->
+        dict_to_string_go(entries, i + 1, total,
+          if acc == "" then k ++ ": " ++ to_string(v)
+          else acc ++ ", " ++ k ++ ": " ++ to_string(v))
+
+fn dict_entries_to_string(entries: Vec (String, v)) -> String where ToString v =
+  dict_to_string_go(entries, 0, vec_length(entries), "")
+
+instance ToString (Dict v) where ToString v {
+  fn to_string(dict: Dict v) -> String =
+    "{" ++ dict_entries_to_string(dict_entries(dict)) ++ "}"
 }
 
 # ---------------------------------------------------------------------------
