@@ -1,0 +1,6 @@
+module main
+fn contains(x: Int, xs: List Int) -> Bool =
+  match xs with
+  | Nil      -> false
+  | Cons h t -> if h == x then true else contains(x, t)
+fn main() -> Unit !{IO} = print(contains(1, Cons(1, Nil)))

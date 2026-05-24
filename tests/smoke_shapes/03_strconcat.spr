@@ -1,0 +1,2 @@
+fn cat(a: String, b: String) -> String = a ++ b
+fn main() -> Unit !{IO} = print(cat("hello", "world"))

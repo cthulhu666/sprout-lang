@@ -1,0 +1,2 @@
+fn val() -> Int = 42
+fn main() -> Unit !{IO} = print(val())
