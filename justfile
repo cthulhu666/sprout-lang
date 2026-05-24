@@ -8,48 +8,18 @@ install-hooks:
   git config core.hooksPath .githooks
   @echo "Hooks installed — .githooks/pre-commit is now active."
 
-# Primary test target: native stdlib + compiler-stage tests (no Python required).
-# Runs all tests under tests/stdlib/ via compile_driver_bin_stage1.
-# For the legacy Python test suite: just test-python
+# Run all stdlib + compiler-stage tests (native, no Python required).
 test: test-stdlib-stage1
-
-# Legacy Python test runner (requires Python + sprout package installed).
-# Tests the Python frontend (parser, typechecker, formatter, etc.).
-# Not required for the native compiler pipeline; kept for reference.
-test-python *mods:
-  python3 scripts/run_parallel_tests.py {{mods}}
-
-test-serial:
-  python3 -m unittest discover -s tests -v
-
-test-all:
-  python3 -m unittest discover -s tests -v
-
-test-parallel *mods:
-  python3 scripts/run_parallel_tests.py {{mods}}
-
-test-integration:
-  python3 -m unittest discover -s tests -p 'test_integration_io.py' -v
 
 c-runtime-test:
   bash tests/c_runtime/run.sh
 
-measure-gc-thresholds:
-  python3 scripts/measure_gc_thresholds.py
-
-measure-gc-real:
-  python3 scripts/measure_gc_thresholds.py --include-real
-
 # Lint the C runtime for GC safety: const char* params used after gc_maybe_collect.
 # Use --strict to exit 1 on findings (CI gate).
 gc-safety-check *args:
-  python3 scripts/gc_safety_check.py {{args}}
+  bash scripts/gc_safety_check.sh {{args}}
 
 
-# Display the parse tree for a file.  Requires Python + sprout package (legacy).
-# For type-checking without Python: just check {{file}}
-parse file:
-  python3 -m sprout.cli parse {{file}}
 
 fmt:
   [[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
@@ -109,14 +79,6 @@ build-fmt-from-seed:
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o fmt_bin
   echo "==> Built fmt_bin"
 
-# Build fmt_bin using the Python stage-0 compiler (legacy; prefer build-fmt-from-seed).
-build-fmt:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  DRIVER="stdlib/compiler/fmt_driver.sprout"
-  OUT="fmt_bin"
-  python3 -m sprout.cli compile --with-stdlib --native -o "$OUT" "$DRIVER"
-  echo "==> $OUT built"
 
 fmt-native file:
   ./fmt_bin fmt {{quote(file)}}
@@ -270,7 +232,6 @@ test-stdlib-stage2:
 
 # Emit LLVM IR for {{file}} using the stage-1 self-hosted binary (always includes stdlib).
 # Requires compile_driver_bin_stage1; build it first with: just build-stage1
-# For the Python stage-0 path: python3 -m sprout.cli compile {{file}} -o {{out}}
 compile file out:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -297,10 +258,6 @@ compile-native file out:
   if [[ "$(uname)" == "Darwin" ]]; then CLANG_EXTRA="-framework Security -framework CoreFoundation"; fi
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 $CLANG_EXTRA -o {{quote(out)}}
 
-# Build compile_driver_bin (stage-0) from Python.
-# Output: compile_driver_bin — native binary produced by the Python compiler.
-build-stage0:
-  python3 -m sprout.cli compile stdlib/compiler/compile_driver.sprout --with-stdlib --native -o compile_driver_bin
 
 # Build compile_driver_bin_stage1 using Sprout-native IR emission (M6 bootstrap).
 # Requires compile_driver_bin (stage-0) to already exist.
@@ -432,7 +389,7 @@ build-seed-linux-amd64:
   #!/usr/bin/env bash
   set -euo pipefail
   if [[ ! -x "./compile_driver_bin" ]]; then
-    echo "ERROR: compile_driver_bin not found; run: just build-stage0" >&2
+    echo "ERROR: compile_driver_bin not found; run: just bootstrap-from-seed, then copy compile_driver_bin_stage1 to compile_driver_bin" >&2
     exit 1
   fi
   mkdir -p bootstrap
@@ -613,11 +570,10 @@ repl-native:
   @exit 1
 
 # Compile all examples to LLVM IR. Alias for compile-examples-stage1 (stage-1 self-hosted binary).
-# For the Python stage-0 path: just compile-examples-stage0
 compile-examples: compile-examples-stage1
 
-# Run compile-examples for every available compiler stage (0-3).
-compile-examples-all: compile-examples-stage0 compile-examples-stage1 compile-examples-stage2 compile-examples-stage3
+# Run compile-examples for every available compiler stage (1-3).
+compile-examples-all: compile-examples-stage1 compile-examples-stage2 compile-examples-stage3
 
 # Compile all examples using the committed platform bootstrap seed binary.
 # Detects the current platform (e.g. darwin-arm64, linux-x86_64) and selects bootstrap/compile_driver-<os>-<arch>.
@@ -662,30 +618,6 @@ compile-examples-bootstrap:
   echo ""
   echo "==> All examples compiled OK (bootstrap/$PLATFORM)"
 
-# Stage-0 (Python CLI): compile each example to LLVM IR via python3 -m sprout.cli compile.
-compile-examples-stage0:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  total_failed=0
-  for f in examples/*.sprout; do
-    [ -f "$f" ] || continue
-    flags=""
-    if [ "$f" = "examples/result_demo.sprout" ]; then flags="--with-stdlib"; fi
-    out="/tmp/$(basename "$f" .sprout).ll"
-    if python3 -m sprout.cli compile $flags "$f" -o "$out"; then
-      echo "OK $f"
-    else
-      echo "FAILED $f"
-      total_failed=$((total_failed + 1))
-    fi
-  done
-  if [ "$total_failed" -gt 0 ]; then
-    echo ""
-    echo "==> $total_failed example(s) FAILED to compile"
-    exit 1
-  fi
-  echo ""
-  echo "==> All examples compiled OK"
 
 # Stage-1 (native self-hosted binary): emit IR → clang link for each example.
 # Requires compile_driver_bin_stage1; build it first with: just build-stage1
