@@ -3397,7 +3397,7 @@ long long regex_escape(long long raw_i) {
   ByteBuf out;
   buf_init(&out);
   for (size_t i = 0; raw_now[i] != '\0'; i++) {
-    if (strchr(".^$*+?()[]{}|\\", raw_now[i]) != NULL) {
+    if (strchr(".^$*+?()[]{}|\\-", raw_now[i]) != NULL) {
       buf_append_char(&out, '\\');
     }
     buf_append_char(&out, raw_now[i]);

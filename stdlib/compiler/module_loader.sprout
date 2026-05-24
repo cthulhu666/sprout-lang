@@ -97,7 +97,7 @@ fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List 
   match lines with
   | Nil -> list_reverse(acc)
   | Cons line rest ->
-      if str_starts_with(line, "module ") || line == "" then
+      if str_starts_with(line, "module ") || line == "" || str_starts_with(line, "#") then
         collect_imports_from_lines(rest, acc)
       else if str_starts_with(line, "import ") then
         match parse_import_line(line) with

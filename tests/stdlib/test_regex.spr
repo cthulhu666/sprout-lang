@@ -3,21 +3,21 @@ import stdlib.regex as regex
 
 fn compile_ok(pattern: String) -> Bool =
   match regex.compile(pattern) with
-  | Ok _ -> True
-  | Err _ -> False
+  | Ok _ -> true
+  | Err _ -> false
 
 fn is_match(pattern: String, text: String) -> Bool =
   match regex.compile(pattern) with
   | Ok re -> regex.is_match(re, text)
-  | Err _ -> False
+  | Err _ -> false
 
 fn find_some(pattern: String, text: String) -> Bool =
   match regex.compile(pattern) with
   | Ok re ->
       match regex.find_first(re, text) with
-      | Just _ -> True
-      | Nothing -> False
-  | Err _ -> False
+      | Just _ -> true
+      | Nothing -> false
+  | Err _ -> false
 
 fn replace(pattern: String, replacement: String, text: String) -> String =
   match regex.compile(pattern) with
