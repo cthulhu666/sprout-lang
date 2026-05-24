@@ -102,3 +102,21 @@ This file tracks open design, implementation, and tooling follow-up work.
 12. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
    Design doc: [observability-guard-rails.md](./observability-guard-rails.md).
    These features are not scheduled, but the design constraints in that doc must be respected in all Stage 2+ self-hosted compiler code so they remain practical to add. The six constraints — source locations first-class, explicit typed passes, explicit capability passing, no premature pass fusion, type survival into typed core, accurate effect annotations — are active guard rails, not future work items.
+13. Add a source-level debugger for compiled user programs (v1).
+   Design doc: [debugger-v1-draft.md](./debugger-v1-draft.md).
+   Approach: emit LLVM DWARF debug metadata from the codegen pass (opt-in via `--debug`
+   flag), then use `lldb`/`gdb` as the debugger UI.  Every `TypedExpr` already carries
+   `SourcePos(index, line, col)` — the foundation is in place.
+   Three milestones:
+   - M1: DWARF emission in `codegen.sprout`; 4th IR section for debug metadata; `--debug`
+     flag wired through the compile driver.  Delivers `b file.spr:N`, `n`, `s`, `bt` in
+     `lldb` at Sprout source granularity for user-module functions.
+   - M2: Extended `SproutCtorMeta` with `field_kinds` descriptor; ADT pretty-printer tool
+     under `tools/` (implementation language — LLDB Lua / standalone C binary / format
+     strings — decided at M2 kickoff; no Python).  Delivers human-readable ADT values at
+     breakpoints.
+   - M3: `just build-debug` / `just debug-run` recipes; README §Debugging section.
+   First milestone constraints: debug metadata is strictly opt-in; release builds are
+   unchanged; M1 scopes `!dbg` to user-module functions only (not stdlib/prelude) to
+   avoid misleading source attribution in multi-file bundles; full multi-file DWARF is a
+   post-M1 follow-up.
