@@ -1,0 +1,50 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.regex as regex
+
+fn compile_ok(pattern: String) -> Bool =
+  match regex.compile(pattern) with
+  | Ok _ -> True
+  | Err _ -> False
+
+fn is_match(pattern: String, text: String) -> Bool =
+  match regex.compile(pattern) with
+  | Ok re -> regex.is_match(re, text)
+  | Err _ -> False
+
+fn find_some(pattern: String, text: String) -> Bool =
+  match regex.compile(pattern) with
+  | Ok re ->
+      match regex.find_first(re, text) with
+      | Just _ -> True
+      | Nothing -> False
+  | Err _ -> False
+
+fn replace(pattern: String, replacement: String, text: String) -> String =
+  match regex.compile(pattern) with
+  | Ok re -> regex.replace_all_literal(re, replacement, text)
+  | Err _ -> "compile-error"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(state, "compile valid digit pattern", compile_ok("[0-9]+"))
+    assert_true(state, "compile valid word pattern", compile_ok("[A-Za-z_][A-Za-z0-9_]*"))
+    assert_false(state, "compile invalid unclosed bracket", compile_ok("[invalid"))
+
+    assert_true(state, "is_match digits found", is_match("[0-9]+", "abc 42 def"))
+    assert_false(state, "is_match digits not found", is_match("[0-9]+", "hello world"))
+    assert_true(state, "is_match uppercase ticket id", is_match("[A-Z][A-Z]-[0-9]+", "ticket=AB-42"))
+    assert_false(state, "is_match no ticket id", is_match("[A-Z][A-Z]-[0-9]+", "no match here"))
+
+    assert_true(state, "find_first found", find_some("[0-9]+", "abc 42 def"))
+    assert_false(state, "find_first not found", find_some("[0-9]+", "hello"))
+
+    assert_eq(state, "replace_all single", replace("[0-9]+", "NUM", "foo 42 baz"), "foo NUM baz")
+    assert_eq(state, "replace_all multiple", replace("[0-9]+", "NUM", "a 1 b 22 c 333"), "a NUM b NUM c NUM")
+    assert_eq(state, "replace_all no match", replace("[0-9]+", "NUM", "no digits"), "no digits")
+
+    assert_eq(state, "escape literal chars", regex.escape("[A-Z]+"), "\\[A\\-Z\\]\\+")
+    assert_eq(state, "escape plain string unchanged", regex.escape("hello"), "hello")
+
+    summary(state)

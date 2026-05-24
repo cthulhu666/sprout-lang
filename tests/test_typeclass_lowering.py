@@ -1,81 +1,13 @@
 from __future__ import annotations
 
-import io
 import unittest
 
-from sprout import parse, run_program, typecheck_program
+from sprout import parse, typecheck_program
 from sprout.stdlib import with_prelude
 from sprout.typeclass_lowering import TypeclassLoweringError, lower_typeclasses
 
 
 class TypeclassLoweringTests(unittest.TestCase):
-    def test_lowering_preserves_do_until_later_elaboration(self) -> None:
-        src = """
-        fn pair_sum(left: Maybe Int, right: Maybe Int) -> Maybe Int =
-          do
-            a <- left
-            b <- right
-            Just(a + b)
-
-        fn main() -> Unit !{IO} =
-          print(pair_sum(Just(20), Just(22)))
-        """
-        program = parse(with_prelude(src))
-        typecheck_program(program)
-        lowered = lower_typeclasses(program)
-        typecheck_program(lowered)
-        out = io.StringIO()
-        run_program(lowered, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "Just(42)")
-
-    def test_lowering_runs_concrete_constraint_program(self) -> None:
-        src = """
-        class Renderable t {
-          fn render(x: t) -> Int
-        }
-        type Box =
-          | Box Int
-        instance Renderable Box {
-          fn render(x: Box) -> Int =
-            match x with
-            | Box n -> n
-        }
-        fn show_box(x: Box) -> Int where Renderable Box =
-          render(x)
-        fn main() -> Unit !{IO} =
-          print(show_box(Box(42)))
-        """
-        program = parse(src)
-        typecheck_program(program)
-        lowered = lower_typeclasses(program)
-        typecheck_program(lowered)
-        out = io.StringIO()
-        run_program(lowered, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "42")
-
-    def test_lowering_supports_polymorphic_constraint_with_concrete_wrapper(self) -> None:
-        src = """
-        class Renderable t {
-          fn render(x: t) -> Int
-        }
-        instance Renderable Int {
-          fn render(x: Int) -> Int = x
-        }
-        fn show_any(x: a) -> Int where Renderable a =
-          render(x)
-        fn show_int(x: Int) -> Int where Renderable Int =
-          show_any(x)
-        fn main() -> Unit !{IO} =
-          print(show_int(42))
-        """
-        program = parse(src)
-        typecheck_program(program)
-        lowered = lower_typeclasses(program)
-        typecheck_program(lowered)
-        out = io.StringIO()
-        run_program(lowered, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "42")
-
     def test_lowering_errors_when_call_site_cannot_resolve_constraint(self) -> None:
         src = """
         class Renderable t {
@@ -90,35 +22,6 @@ class TypeclassLoweringTests(unittest.TestCase):
         typecheck_program(program)
         with self.assertRaises(TypeclassLoweringError):
             lower_typeclasses(program)
-
-    def test_lowering_supports_parametric_instance_head(self) -> None:
-        src = """
-        type List a =
-          | Cons a (List a)
-          | Nil
-        class Semigroup t {
-          fn append(x: t, y: t) -> t
-        }
-        fn list_append(left: List a, right: List a) -> List a =
-          match left with
-          | Nil -> right
-          | Cons x rest -> Cons(x, list_append(rest, right))
-        instance Semigroup (List a) {
-          fn append(x: List a, y: List a) -> List a =
-            list_append(x, y)
-        }
-        fn combine(xs: List Int, ys: List Int) -> List Int where Semigroup (List Int) =
-          append(xs, ys)
-        fn main() -> Unit !{IO} =
-          print(combine(Cons(1, Nil), Cons(2, Nil)))
-        """
-        program = parse(src)
-        typecheck_program(program)
-        lowered = lower_typeclasses(program)
-        typecheck_program(lowered)
-        out = io.StringIO()
-        run_program(lowered, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "Cons(1, Cons(2, Nil))")
 
     def test_lowering_resolves_concrete_constraint_from_call_argument_types(self) -> None:
         src = """
@@ -152,54 +55,6 @@ class TypeclassLoweringTests(unittest.TestCase):
         lowered = lower_typeclasses(program)
         typecheck_program(lowered)
 
-    def test_lowering_supports_vec_sort_by_with_ord_instance(self) -> None:
-        src = """
-        type Box =
-          | Box Int
-
-        fn key(x: Box) -> Int =
-          match x with
-          | Box n -> 0 - n
-
-        instance Eq Box {
-          fn eq(left: Box, right: Box) -> Bool =
-            match left with
-            | Box l -> match right with
-                | Box r -> l == r
-        }
-
-        instance Ord Box {
-          fn compare(x: Box, y: Box) -> Int =
-            compare(key(x), key(y))
-        }
-
-        fn main() -> Unit !{IO} =
-          print(vec_sort(vec_append(Box(3), vec_append(Box(1), vec_append(Box(2), vec_empty())))))
-        """
-        program = parse(with_prelude(src))
-        typecheck_program(program)
-        lowered = lower_typeclasses(program)
-        typecheck_program(lowered)
-        out = io.StringIO()
-        run_program(lowered, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "Vec([Box(3), Box(2), Box(1)])")
-
-    def test_lowering_resolves_ord_constraint_from_key_function_codomain(self) -> None:
-        # Ord k where k appears only as the codomain of the key fn (a -> k),
-        # not as the head type of any argument. vec_sort_by(\x -> 0 - x, xs):
-        # k=Int is the lambda's return type; the arg xs: Vec Int has head Vec.
-        src = """
-        fn main() -> Unit !{IO} =
-          print(vec_sort_by(\\x -> 0 - x, vec_append(3, vec_append(1, vec_append(2, vec_empty())))))
-        """
-        program = parse(with_prelude(src))
-        typecheck_program(program)
-        lowered = lower_typeclasses(program)
-        typecheck_program(lowered)
-        out = io.StringIO()
-        run_program(lowered, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "Vec([3, 2, 1])")
-
     def test_lowering_errors_for_vec_sort_by_without_ord_instance(self) -> None:
         src = """
         type Box =
@@ -212,22 +67,6 @@ class TypeclassLoweringTests(unittest.TestCase):
         typecheck_program(program)
         with self.assertRaises(TypeclassLoweringError):
             lower_typeclasses(program)
-
-    def test_lowering_supports_show_to_string(self) -> None:
-        src = """
-        fn render(x: a) -> String where ToString a =
-          to_string(x)
-
-        fn main() -> Unit !{IO} =
-          print(render(42))
-        """
-        program = parse(with_prelude(src))
-        typecheck_program(program)
-        lowered = lower_typeclasses(program)
-        typecheck_program(lowered)
-        out = io.StringIO()
-        run_program(lowered, stdout=out)
-        self.assertEqual(out.getvalue().strip(), "42")
 
 
 if __name__ == "__main__":

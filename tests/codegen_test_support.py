@@ -14,7 +14,7 @@ import sys
 
 from sprout import CodegenError, compile_to_llvm, parse, typecheck_program
 from sprout import cli as sprout_cli
-from sprout.analysis_service_python import default_analysis_service_cmd
+from sprout.repl import default_analysis_service_bin_cmd
 from sprout.module_loader import load_module_bundle, resolve_program_names
 from tests.integration_support import compiled_native_binary, running_https_server, running_tcp_fixture
 
@@ -24,7 +24,11 @@ from tests.integration_support import compiled_native_binary, running_https_serv
 class CodegenTestCase(unittest.TestCase):
     def _native_analysis_service_env(self) -> dict[str, str]:
         env = dict(os.environ)
-        env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
+        cmd = default_analysis_service_bin_cmd()
+        if cmd is not None:
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = cmd
+        if sys.platform == "darwin":
+            env.setdefault("SPROUT_DARWIN_FRAMEWORKS", "1")
         return env
 
     def _load_module_program(self, source: str, *, filename: str = "main.sprout"):

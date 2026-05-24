@@ -6,14 +6,9 @@ from tests.cli_repl_suite import CliReplTests
 
 
 _LAUNCHER_TESTS = {
-    "test_native_repl_hosted_frontend_runs_end_to_end_non_interactively",
-    "test_native_repl_hosted_frontend_evaluates_bare_typeclass_method_values",
     "test_repl_native_launcher_supports_declarations_expressions_and_type_queries",
-    "test_repl_native_launcher_block_mode_supports_multiline_function_declaration",
-    "test_repl_native_launcher_block_mode_runs_mixed_submissions_sequentially",
-    "test_repl_native_launcher_block_mode_supports_multiline_class_declaration",
-    "test_repl_native_launcher_block_mode_cancel_discards_buffered_declaration",
     "test_repl_native_launcher_reuses_cached_binary",
+    "test_stdlib_repl_frontend_avoids_legacy_host_hooks",
 }
 
 

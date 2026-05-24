@@ -98,37 +98,8 @@ run file:
 run-stdlib file: (run file)
 
 # Run all in-language stdlib unit tests (.spr/.sprout files under tests/stdlib/).
-# Alias for test-stdlib-stage0 (stage-0 Python compiler).
-test-stdlib: test-stdlib-stage0
-
-# Stage-0 (Python CLI): run stdlib unit tests via python3 -m sprout.cli run --with-stdlib.
-test-stdlib-stage0:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  total_failed=0
-  for dir in tests/stdlib tests/stdlib/compiler; do
-    [ -d "$dir" ] || continue
-    for f in "$dir"/*.spr "$dir"/*.sprout; do
-      [ -f "$f" ] || continue
-      if grep -q '^# native-only' "$f"; then
-        echo "==> $f (skipped: native-only)"
-        continue
-      fi
-      echo "==> $f"
-      out=$(python3 -m sprout.cli run --with-stdlib "$f" 2>&1)
-      echo "$out"
-      if echo "$out" | grep -q "^SUITE FAILED"; then
-        total_failed=$((total_failed + 1))
-      fi
-    done
-  done
-  if [ "$total_failed" -gt 0 ]; then
-    echo ""
-    echo "==> $total_failed test suite(s) FAILED"
-    exit 1
-  fi
-  echo ""
-  echo "==> All suites PASSED"
+# Alias for test-stdlib-stage1 (native self-hosted binary).
+test-stdlib: test-stdlib-stage1
 
 # Stage-1 (native self-hosted binary): emit IR → clang link → run for each test file.
 # Requires compile_driver_bin_stage1; build it first with: just build-stage1
@@ -541,7 +512,7 @@ run-analysis-service:
   STDLIB_ROOT="$(pwd)/stdlib"
   exec "$BIN" "$STDLIB_ROOT"
 
-# Start an interactive Sprout REPL (interpreter-backed).
+# Start an interactive Sprout REPL (native self-hosted binary; requires clang and compile_driver_bin_stage1).
 repl:
   python3 -m sprout.cli repl
 

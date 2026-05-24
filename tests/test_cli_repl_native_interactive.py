@@ -8,7 +8,6 @@ import tempfile
 import unittest
 
 from tests.cli_repl_suite import CliReplTests
-from sprout.analysis_service_python import default_analysis_service_cmd
 
 
 _NATIVE_REPL_CACHE_DIR: str | None = None
@@ -19,15 +18,12 @@ def setUpModule() -> None:
     _NATIVE_REPL_CACHE_DIR = tempfile.mkdtemp(prefix="sprout-native-repl-interactive-")
     os.environ["SPROUT_NATIVE_REPL_CACHE_DIR"] = _NATIVE_REPL_CACHE_DIR
 
-    env = dict(os.environ)
-    env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
     warmup = subprocess.run(
         [sys.executable, "-m", "sprout.cli", "repl", "--native"],
         check=False,
         capture_output=True,
         text=True,
         input=":quit\n",
-        env=env,
     )
     if warmup.returncode != 0:
         raise RuntimeError(

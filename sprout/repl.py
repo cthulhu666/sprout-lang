@@ -10,13 +10,6 @@ import tempfile
 from pathlib import Path
 
 from .codegen_llvm import CodegenError
-from .interpreter import run_program
-from .module_loader import load_module_bundle, resolve_program_names
-from .parser import parse
-from .repl_host import reset_hosted_repl_session
-from .surface_checks import validate_public_surface
-from .typeclass_lowering import lower_typeclasses
-from .typechecker import typecheck_program
 
 __all__ = [
     "cmd_repl",
@@ -99,7 +92,7 @@ def _summarize_native_repl_build_error(exc: subprocess.CalledProcessError) -> st
     first_line = detail.splitlines()[0]
     return (
         f"native REPL startup failed while building cached binary {_native_repl_binary_path()}: {first_line}. "
-        "Use `python -m sprout.cli repl` for the interpreter-backed REPL."
+        "Build the stage-1 binary first: just build-stage1"
     )
 
 
@@ -143,32 +136,19 @@ def _ensure_native_repl_binary() -> Path:
 
 
 def cmd_repl(*, native: bool = False) -> int:
-    if native:
-        out = _ensure_native_repl_binary()
-        env = os.environ.copy()
-        # Wire the self-hosted analysis service binary when available.
-        # SPROUT_ANALYSIS_SERVICE_CMD is a shell command string consumed by the
-        # analysis-bridge C runtime (execl("/bin/sh", "sh", "-lc", cmd, NULL)).
-        # analysis_service_bin requires the stdlib root as its first argument
-        # (argv_get(0) in Sprout), so the command is "<binary> <stdlib_root>".
-        if "SPROUT_ANALYSIS_SERVICE_CMD" not in env:
-            native_cmd = default_analysis_service_bin_cmd()
-            if native_cmd is not None:
-                env["SPROUT_ANALYSIS_SERVICE_CMD"] = native_cmd
-        # Tell the analysis service to add -framework flags when linking eval binaries.
-        if sys.platform == "darwin":
-            env.setdefault("SPROUT_DARWIN_FRAMEWORKS", "1")
-        run = subprocess.run([str(out)], env=env, check=False)
-        return run.returncode
-
-    reset_hosted_repl_session()
-    entry = Path(__file__).resolve().parent.parent / "stdlib" / "repl.sprout"
-    bundle = load_module_bundle(entry)
-    tree = parse(bundle.source)
-    resolve_program_names(tree, bundle)
-    validate_public_surface(tree, bundle)
-    typecheck_program(tree)
-    lowered = lower_typeclasses(tree)
-    typecheck_program(lowered)
-    run_program(lowered)
-    return 0
+    out = _ensure_native_repl_binary()
+    env = os.environ.copy()
+    # Wire the self-hosted analysis service binary when available.
+    # SPROUT_ANALYSIS_SERVICE_CMD is a shell command string consumed by the
+    # analysis-bridge C runtime (execl("/bin/sh", "sh", "-lc", cmd, NULL)).
+    # analysis_service_bin requires the stdlib root as its first argument
+    # (argv_get(0) in Sprout), so the command is "<binary> <stdlib_root>".
+    if "SPROUT_ANALYSIS_SERVICE_CMD" not in env:
+        native_cmd = default_analysis_service_bin_cmd()
+        if native_cmd is not None:
+            env["SPROUT_ANALYSIS_SERVICE_CMD"] = native_cmd
+    # Tell the analysis service to add -framework flags when linking eval binaries.
+    if sys.platform == "darwin":
+        env.setdefault("SPROUT_DARWIN_FRAMEWORKS", "1")
+    run = subprocess.run([str(out)], env=env, check=False)
+    return run.returncode

@@ -1,0 +1,38 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.collections (Vec, Dict, foldable_to_vec, vec_get_or, vec_reverse, vec_slice, vec_sum_by, dict_keys, dict_values, dict_remove)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    let v = foldable_to_vec([10, 20, 30, 40])
+
+    assert_eq(state, "vec_get_or index 0", vec_get_or(0, -1, v), 10)
+    assert_eq(state, "vec_get_or index 2", vec_get_or(2, -1, v), 30)
+    assert_eq(state, "vec_get_or out of bounds", vec_get_or(99, -1, v), -1)
+
+    let rev = vec_reverse(v)
+    assert_eq(state, "vec_reverse first", vec_get_or(0, -1, rev), 40)
+    assert_eq(state, "vec_reverse last", vec_get_or(3, -1, rev), 10)
+
+    let sliced = vec_slice(1, 2, v)
+    assert_eq(state, "vec_slice length", vec_get_or(0, -1, sliced), 20)
+    assert_eq(state, "vec_slice second", vec_get_or(1, -1, sliced), 30)
+    assert_eq(state, "vec_slice oob", vec_get_or(2, -1, sliced), -1)
+
+    assert_eq(state, "vec_sum_by identity", vec_sum_by(\x -> x, v), 100)
+    assert_eq(state, "vec_sum_by halved", vec_sum_by(\x -> x / 10, v), 10)
+
+    let d = {alpha: 1, beta: 2, gamma: 3}
+    let keys = dict_keys(d)
+    let vals = dict_values(d)
+
+    assert_eq(state, "dict_keys count", vec_sum_by(\_ -> 1, keys), 3)
+    assert_eq(state, "dict_values sum", vec_sum_by(\x -> x, vals), 6)
+
+    let d2 = dict_remove("beta", d)
+    let vals2 = dict_values(d2)
+    assert_eq(state, "dict_remove reduces count", vec_sum_by(\_ -> 1, vals2), 2)
+    assert_eq(state, "dict_remove reduces sum", vec_sum_by(\x -> x, vals2), 4)
+
+    summary(state)

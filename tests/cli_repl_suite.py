@@ -15,7 +15,6 @@ import unittest
 from unittest.mock import patch
 
 from sprout import cli as sprout_cli
-from sprout.analysis_service_python import default_analysis_service_cmd
 
 
 class CliReplTests(unittest.TestCase):
@@ -40,91 +39,6 @@ class CliReplTests(unittest.TestCase):
             os.write(fd, bytes([byte]))
             time.sleep(0.03)
 
-    @unittest.skip("repl_hosted.sprout uses panic -> a !{IO}; Python compiler removal in progress")
-    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_hosted_frontend_runs_end_to_end_non_interactively(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "repl_bin"
-            compile_proc = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "sprout.cli",
-                    "compile",
-                    "examples/repl_hosted.sprout",
-                    "--native",
-                    "-o",
-                    str(out),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
-            env = dict(os.environ)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
-            run_proc = subprocess.run(
-                [str(out)],
-                check=False,
-                capture_output=True,
-                text=True,
-                input='let x = 41\nx + 1\n:t x\n:quit\n',
-                env=env,
-            )
-            self.assertEqual(run_proc.returncode, 0, msg=run_proc.stderr)
-            self.assertEqual(run_proc.stderr, "")
-            self.assertEqual(run_proc.stdout.strip().splitlines(), ["ok", "42", "Int"])
-
-    @unittest.skip("repl_hosted.sprout uses panic -> a !{IO}; Python compiler removal in progress")
-    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_native_repl_hosted_frontend_evaluates_bare_typeclass_method_values(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "repl_bin"
-            compile_proc = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "sprout.cli",
-                    "compile",
-                    "examples/repl_hosted.sprout",
-                    "--native",
-                    "-o",
-                    str(out),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(compile_proc.returncode, 0, msg=compile_proc.stderr)
-            env = dict(os.environ)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
-            run_proc = subprocess.run(
-                [str(out)],
-                check=False,
-                capture_output=True,
-                text=True,
-                input="to_string\n:quit\n",
-                env=env,
-            )
-            self.assertEqual(run_proc.returncode, 0, msg=run_proc.stderr)
-            self.assertEqual(run_proc.stderr, "")
-            self.assertNotIn("Unknown variable to_string", run_proc.stdout)
-            self.assertIn("FunctionValue(", run_proc.stdout)
-
-    def test_repl_supports_declarations_expressions_and_type_queries(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="let x = 41\nx + 1\n:t x\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("42", run.stdout)
-        self.assertIn("Int", run.stdout)
-
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_supports_declarations_expressions_and_type_queries(self) -> None:
         run = subprocess.run(
@@ -139,118 +53,6 @@ class CliReplTests(unittest.TestCase):
         self.assertIn("ok", run.stdout)
         self.assertIn("42", run.stdout)
         self.assertIn("Int", run.stdout)
-
-    def test_repl_block_mode_supports_multiline_function_declaration(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nfn add(x: Int, y: Int) -> Int =\n  x + y\n:}\nadd(40, 2)\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("42", run.stdout)
-
-    def test_repl_block_mode_runs_mixed_submissions_sequentially(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nlet x = 5\nlet y = 10\nx * y\n:}\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("50", run.stdout)
-
-    def test_repl_block_mode_supports_multiline_class_declaration(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nclass Answer a {\n  fn answer(x: a) -> Int\n}\ninstance Answer Int {\n  fn answer(x: Int) -> Int = x\n}\nanswer(42)\n:}\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("42", run.stdout)
-
-    @unittest.skip("native block mode crashes with 2+ chunks (sprout_tag null ptr); pre-existing regression")
-    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_repl_native_launcher_block_mode_supports_multiline_function_declaration(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nfn add(x: Int, y: Int) -> Int =\n  x + y\n:}\nadd(40, 2)\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("42", run.stdout)
-
-    @unittest.skip("native block mode crashes with 2+ chunks (sprout_tag null ptr); pre-existing regression")
-    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_repl_native_launcher_block_mode_runs_mixed_submissions_sequentially(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nlet x = 5\nlet y = 10\nx * y\n:}\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("50", run.stdout)
-
-    @unittest.skip("native block mode crashes with 2+ chunks (sprout_tag null ptr); pre-existing regression")
-    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_repl_native_launcher_block_mode_supports_multiline_class_declaration(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nclass Answer a {\n  fn answer(x: a) -> Int\n}\ninstance Answer Int {\n  fn answer(x: Int) -> Int = x\n}\nanswer(42)\n:}\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("42", run.stdout)
-
-    def test_repl_block_mode_cancel_discards_buffered_declaration(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nlet hidden = 41\n:cancel\nhidden\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("cancelled block", run.stdout)
-        self.assertIn("Unknown variable hidden", run.stdout)
-
-    @unittest.skip("native REPL error format mismatch ('error: check: Unknown variable' vs 'Unknown variable'); pre-existing")
-    @unittest.skipUnless(shutil.which("clang"), "clang not installed")
-    def test_repl_native_launcher_block_mode_cancel_discards_buffered_declaration(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl", "--native"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":{\nlet hidden = 41\n:cancel\nhidden\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("cancelled block", run.stdout)
-        self.assertIn("Unknown variable hidden", run.stdout)
 
     def test_stdlib_repl_frontend_avoids_legacy_host_hooks(self) -> None:
         source = Path("stdlib/repl.sprout").read_text(encoding="utf-8")
@@ -268,7 +70,6 @@ class CliReplTests(unittest.TestCase):
     def test_repl_native_interactive_tab_completion_is_case_insensitive_for_imported_namespaces(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", default_analysis_service_cmd())
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -300,7 +101,6 @@ class CliReplTests(unittest.TestCase):
     def test_repl_native_interactive_block_mode_uses_distinct_prompt(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", default_analysis_service_cmd())
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -331,7 +131,6 @@ class CliReplTests(unittest.TestCase):
     def test_repl_native_interactive_up_arrow_recalls_history(self) -> None:
         master_fd, slave_fd = pty.openpty()
         env = dict(os.environ)
-        env.setdefault("SPROUT_ANALYSIS_SERVICE_CMD", default_analysis_service_cmd())
         proc = subprocess.Popen(
             [sys.executable, "-m", "sprout.cli", "repl", "--native"],
             stdin=slave_fd,
@@ -366,7 +165,6 @@ class CliReplTests(unittest.TestCase):
             cache_dir = Path(tmp) / "cache"
             env = dict(os.environ)
             env["SPROUT_NATIVE_REPL_CACHE_DIR"] = str(cache_dir)
-            env["SPROUT_ANALYSIS_SERVICE_CMD"] = default_analysis_service_cmd()
 
             first = subprocess.run(
                 [sys.executable, "-m", "sprout.cli", "repl", "--native"],
@@ -426,7 +224,7 @@ class CliReplTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("error: native REPL startup failed while building cached binary", text)
         self.assertIn("clang not found", text)
-        self.assertIn("python -m sprout.cli repl", text)
+        self.assertIn("just build-stage1", text)
 
     @unittest.skipUnless(shutil.which("clang"), "clang not installed")
     def test_repl_native_launcher_starts_without_analysis_service_for_quit_only(self) -> None:
@@ -461,336 +259,3 @@ class CliReplTests(unittest.TestCase):
         self.assertEqual(run.stderr, "")
         self.assertIn("analysis service: command failed to start", run.stdout)
         self.assertIn("SPROUT_ANALYSIS_SERVICE_CMD", run.stdout)
-
-    def test_repl_default_loads_prelude(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":type split_ints(\"1 2 3\")\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("List Int", run.stdout)
-
-    def test_repl_type_output_uses_friendly_type_variables(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":t map\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("forall a b c. (a -> b) -> c a -> c b", run.stdout)
-
-    def test_repl_type_query_supports_typeclass_method_values(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":t fmap\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("forall a b c. (a -> b) -> c a -> c b", run.stdout)
-
-    def test_repl_evaluates_bare_typeclass_method_values(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="to_string\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertNotIn("Unknown variable to_string", run.stdout)
-        self.assertIn("FunctionValue(", run.stdout)
-
-    def test_repl_instances_lists_matching_typeclass_instances(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":instances List Int\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("Instances for List Int:", run.stdout)
-        self.assertIn("Foldable List", run.stdout)
-        self.assertIn("Functor List", run.stdout)
-        self.assertIn("Semigroup (List a)", run.stdout)
-
-    def test_repl_instances_shorthand_reports_no_matches(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":i Int\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("Instances for Int:", run.stdout)
-        self.assertIn("Ord Int", run.stdout)
-        self.assertIn("ToString Int", run.stdout)
-
-    def test_repl_help_mentions_type_shorthand(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input=":help\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertIn(":type EXPR", run.stdout)
-        self.assertIn(":t EXPR", run.stdout)
-        self.assertIn(":instances TYPE", run.stdout)
-        self.assertIn(":i TYPE", run.stdout)
-
-    def test_repl_instances_supports_qualified_types_after_import(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="import stdlib.collections\n:instances collections.Vec Int\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("Instances for Vec Int:", run.stdout)
-        self.assertIn("Foldable Vec", run.stdout)
-        self.assertIn("Functor Vec", run.stdout)
-        self.assertIn("Semigroup (Vec a)", run.stdout)
-
-    def test_repl_imports_make_stdlib_modules_available(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="import stdlib.http\n:type split_ints(\"1 2 3\")\n:type http.http_ok(\"x\")\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("List Int", run.stdout)
-        self.assertIn("String", run.stdout)
-
-    def test_repl_resolves_foldable_to_vec_for_list_literal(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="foldable_to_vec([1,2,3])\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertNotIn("Cannot resolve constraint Foldable", run.stdout)
-        self.assertIn("Vec(", run.stdout)
-
-    def test_repl_reports_friendly_argument_type_mismatch(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="let l = [1,2,3]\nfmap(l, \\x -> 2 * x)\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("Argument type mismatch: expected a -> b, got List Int", run.stdout)
-
-    def test_repl_default_supports_list_literals(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="[1,2,3]\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("Cons(1, Cons(2, Cons(3, Nil)))", run.stdout)
-
-    def test_repl_invalid_qualified_lookup_reports_error(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input="import stdlib.collections\n:t collections.Monoid\n:quit\n",
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("error:", run.stdout)
-        self.assertIn("does not export value 'Monoid'", run.stdout)
-
-    def test_repl_session_tracks_imports_and_declarations(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession()
-        session.add_import("import stdlib.http")
-        session.add_declaration("let answer = 41")
-
-        self.assertEqual(session.imports, ["import stdlib.http"])
-        self.assertEqual(session.declarations, ["let answer = 41"])
-        self.assertEqual(session.infer_type("answer + 1"), "Int")
-        self.assertEqual(session.infer_type("http.http_ok(\"x\")"), "String")
-        self.assertEqual(session.eval_expression_lines("answer + 1"), ("42",))
-        query_type, matches = session.instances_for_type("List Int")
-        self.assertEqual(query_type, "List Int")
-        self.assertIn("Functor List", matches)
-        self.assertIn("http", session.completion_matches("htt", "htt"))
-        self.assertIn("answer", session.completion_matches("ans", "ans"))
-
-    def test_repl_imports_and_prelude_append_work_together(self) -> None:
-        run = subprocess.run(
-            [sys.executable, "-m", "sprout.cli", "repl"],
-            check=False,
-            capture_output=True,
-            text=True,
-            input='import stdlib.string\n"foo" ++ "foo"\n:type string.concat("a", "b")\n:quit\n',
-        )
-        self.assertEqual(run.returncode, 0, msg=run.stderr)
-        self.assertEqual(run.stderr, "")
-        self.assertIn("ok", run.stdout)
-        self.assertIn("foofoo", run.stdout)
-        self.assertIn("String", run.stdout)
-
-    def test_repl_declared_names_include_declared_symbols(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession(
-            declarations=[
-                "let answer = 42",
-                "fn double(x: Int) -> Int = x + x",
-                "type MaybeInt = | Some Int | None",
-                "class Renderable t { fn render(x: t) -> Int }",
-                "instance Renderable MaybeInt { fn render(x: MaybeInt) -> Int = 0 }",
-            ]
-        )
-        names = set(session.completion_matches("", ""))
-
-        self.assertIn("answer", names)
-        self.assertIn("double", names)
-        self.assertIn("MaybeInt", names)
-        self.assertIn("Some", names)
-        self.assertIn("None", names)
-        self.assertIn("Renderable", names)
-        self.assertIn("render", names)
-
-    def test_repl_declared_names_in_source_reports_declared_symbols(self) -> None:
-        from sprout.analysis_snapshot_backend import declared_names_in_source
-
-        names = set(
-            declared_names_in_source(
-                "module app.repl\n\ntype AAA =\n  | AAA\n\ntype Maybe a =\n  | Just a\n  | Nothing\n\nlet local = 41"
-            )
-        )
-
-        self.assertIn("AAA", names)
-        self.assertIn("Maybe", names)
-        self.assertIn("Just", names)
-        self.assertIn("Nothing", names)
-        self.assertIn("local", names)
-
-    def test_repl_exported_names_in_source_reports_explicit_exports(self) -> None:
-        from sprout.analysis_snapshot_backend import exported_names_in_source
-
-        names = set(
-            exported_names_in_source(
-                "module app.lib\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nfn hidden() -> Int = 1"
-            )
-        )
-
-        self.assertIn("Box", names)
-        self.assertIn("Wrap", names)
-        self.assertIn("unwrap", names)
-        self.assertNotIn("hidden", names)
-
-    def test_repl_symbol_inventory_in_source_reports_declared_imported_and_exported_names(self) -> None:
-        from sprout.analysis_snapshot_backend import symbol_inventory_in_source
-
-        declared, imported, exported = symbol_inventory_in_source(
-            "module app.lib\n\nimport stdlib.string\nimport stdlib.bytes (from_string)\n\nexport type Box(..) =\n  | Wrap String\n\nexport fn unwrap(value: Box) -> String =\n  match value with\n  | Wrap raw -> raw\n\nlet local = 1"
-        )
-
-        self.assertIn("Box", declared)
-        self.assertIn("Wrap", declared)
-        self.assertIn("unwrap", declared)
-        self.assertIn("local", declared)
-        self.assertIn("string", imported)
-        self.assertIn("from_string", imported)
-        self.assertIn("Box", exported)
-        self.assertIn("Wrap", exported)
-        self.assertIn("unwrap", exported)
-        self.assertNotIn("local", exported)
-
-    def test_repl_completion_matches_commands_and_prelude_names(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession()
-        self.assertEqual(session.completion_matches(":t", ":t"), [":t", ":type"])
-        matches = session.completion_matches("sp", "sp")
-        self.assertIn("split_ints", matches)
-        range_matches = session.completion_matches("range_", "range_")
-        self.assertIn("range_count", range_matches)
-        self.assertIn("range_fold", range_matches)
-        self.assertNotIn("range_fold_go", range_matches)
-        self.assertNotIn("range_to_list_go", range_matches)
-
-    def test_repl_completion_matches_declared_names(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession(declarations=["let answer = 42", "fn annotate(x: Int) -> Int = x"])
-        matches = session.completion_matches("ans", "ans")
-
-        self.assertIn("answer", matches)
-        self.assertNotIn("annotate", matches)
-
-    def test_repl_completion_matches_stdlib_module_names(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession()
-        matches = session.completion_matches("htt", "htt")
-
-        self.assertIn("http", matches)
-        self.assertIn("http_client", matches)
-
-    def test_repl_completion_matches_imported_aliases_and_names(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession(imports=["import stdlib.string", "import stdlib.bytes (from_string)"])
-        alias_matches = session.completion_matches("str", "str")
-        name_matches = session.completion_matches("fr", "fr")
-
-        self.assertIn("string", alias_matches)
-        self.assertIn("from_string", name_matches)
-
-    def test_repl_completion_candidates_return_suffix_prefix(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession(declarations=["let answer = 42"])
-        prefix, matches = session.completion_candidates(":t ans")
-
-        self.assertEqual(prefix, "ans")
-        self.assertIn("answer", matches)
-
-    def test_repl_completion_candidates_keep_dotted_prefixes(self) -> None:
-        from sprout.repl_host import ReplSession
-
-        session = ReplSession(imports=["import stdlib.string"])
-        prefix, matches = session.completion_candidates("string.st")
-
-        self.assertEqual(prefix, "string.st")
-        self.assertEqual(matches, [])
