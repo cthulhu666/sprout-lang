@@ -10,8 +10,9 @@ diagnostic quality.
 
 ## Status
 
-Prototype implementation stage. The repository includes a working tokenizer/parser/typechecker,
-interpreter runtime, early native backend, module loader, and stdlib examples.
+Self-hosting milestone reached. The compiler pipeline (parser, typechecker, codegen) is
+implemented in Sprout and compiles itself. The native backend produces executable binaries
+via LLVM IR and clang. Python is no longer part of the compiler or tooling pipeline.
 
 ## Docs
 
@@ -98,26 +99,24 @@ Normative status:
   narrow mixed `IO` plus inner `Maybe`/`Result` `do` model, rather than richer
   effect rows. A focused audit of the current examples and stdlib code did not
   find concrete pressure yet for multi-entry rows or additional effect labels.
-- Native REPL work is the current tooling priority, and the first backend-replacement slice is the execution-oriented backend bundle behind the current bridge contract.
+- The Python-backed REPL and analysis service have been replaced by the self-hosted native compiler pipeline. A native REPL launcher is the next planned tooling milestone; until then `just repl` is unavailable.
 - `docs/repl-self-hosting-v1-draft.md` and the language-server/compiler
-  milestones are currently deferred as product work, but the native REPL bridge
-  is being shaped as reusable language-service infrastructure for those later
-  directions rather than as REPL-only glue.
-- `docs/compiler-self-hosting-roadmap.md` now captures the broader staged path
-  from the current host implementation toward a compiler implemented
-  substantially in Sprout, but that roadmap is explicitly downstream of the
-  current native-REPL-first pause point.
+  milestones remain relevant future directions.
+- `docs/compiler-self-hosting-roadmap.md` captures the staged path toward a
+  compiler implemented substantially in Sprout; the self-hosting milestone has
+  been reached through Phase 10 (see `docs/self-hosting-eliminate-python-backlog.md`).
 
 ## Repository Layout
 
 - `docs/` design and process documents
 - `examples/` sample source files
-- `sprout/` implementation (`tokenizer`, `parser`, `typechecker`, `cli`)
-- `tests/` parser and typechecker tests
+- `stdlib/` language-level standard library source (`prelude.sprout`) plus protocol helpers
+- `stdlib/compiler/` self-hosted compiler source (`parser`, `typechecker`, `codegen`, `compile_driver`)
+- `runtime/` C runtime and GC (`sprout_runtime.c`)
+- `tests/` test suites (native Sprout test files under `tests/stdlib/`)
 - `tests/conformance/` executable language behavior fixtures (`run`, `parse_error`, `type_error`, `runtime_error`)
-- `stdlib/` language-level standard library source (`prelude.sprout`)
-  plus protocol helpers such as `http.sprout`
-- `mise.toml` pinned local toolchain (`python`, `just`)
+- `bootstrap/` platform seed binaries for bootstrapping without a pre-built compiler
+- `mise.toml` pinned local toolchain (`just`)
 - `justfile` common project commands
 
 v0 execution note:
@@ -127,24 +126,26 @@ v0 execution note:
 
 ## Tooling (mise + just)
 
-This repo uses [`mise`](https://mise.jdx.dev/) to pin the Python/`just` toolchain and [`just`](https://github.com/casey/just) as task runner.
+This repo uses [`mise`](https://mise.jdx.dev/) to pin the `just` toolchain and [`just`](https://github.com/casey/just) as task runner.
 
 Prerequisites:
 
-- `mise`, for repository-managed Python and `just`.
-- `clang` on `PATH`, for native builds and stage-1 example compilation.
+- `mise`, for repository-managed `just`.
+- `clang` on `PATH`, for native builds and linking.
 - C standard library headers for the active platform. On macOS, install Xcode Command Line Tools or Xcode so `xcrun --show-sdk-path` works; on Linux, install the distro C development package such as `build-essential` or equivalent.
+- A pre-built `compile_driver_bin_stage1` binary (bootstrap from the committed seed with `just bootstrap-from-seed`, or build from a pre-existing stage-0 binary with `just build-stage1`).
 
 Setup:
 
 1. Install repository-managed tools from `mise.toml`:
    `mise install`
-2. Run commands through mise:
+2. Bootstrap the stage-1 compiler binary from the committed platform seed:
+   `mise exec -- just bootstrap-from-seed`
+3. Run the test suite:
    `mise exec -- just test`
 
 Common tasks:
 
-- Parse file: `mise exec -- just parse examples/fizzbuzz.sprout`
 - Format repo: `mise exec -- just fmt`
 - Check repo formatting: `mise exec -- just fmt-check`
 - Lint repo: `mise exec -- just lint`
@@ -153,31 +154,10 @@ Common tasks:
 - Lint file: `mise exec -- just lint-file examples/fizzbuzz.sprout`
 - Typecheck file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run file: `mise exec -- just run examples/fizzbuzz.sprout`
-- Run the default full test gate in parallel: `mise exec -- just test` (`SPROUT_TEST_JOBS` controls concurrency; default is 4)
-- Run selected test modules in parallel: `mise exec -- just test tests.test_parser tests.test_typechecker`
-- Run selected test modules through an env var: `SPROUT_TESTS="tests.test_parser tests.test_typechecker" mise exec -- just test`
-- Run the parallel runner explicitly: `mise exec -- just test-parallel` (also accepts optional test modules)
-- Run the serial fallback suite: `mise exec -- just test-serial`
-- Measure fast native GC threshold workloads: `mise exec -- just measure-gc-thresholds`
-- Measure opt-in real workloads too: `mise exec -- just measure-gc-real`
-- Start REPL: `mise exec -- python -m sprout.cli repl` (default interpreter-launched path) or `mise exec -- python -m sprout.cli repl --native` (experimental native launcher backed by `analysis-service`; both run the Sprout-hosted frontend in [stdlib/repl.sprout](./stdlib/repl.sprout); [examples/repl_hosted.sprout](./examples/repl_hosted.sprout) remains a thin wrapper; the native launcher now reuses a cached compiled REPL binary between launches and the compiled native frontend carries its own default `analysis-service` command based on the Python used at compile time; loads the foundational prelude by default; interactive mode detection, line editing, `Tab` completion, and `Up`/`Down` history now live in Sprout code; `Tab` completion is ASCII case-insensitive and can complete imported namespace members such as `json.string` after `import stdlib.json`; `:{` and `:}` execute explicit multiline REPL blocks sequentially behind a distinct `block| ` continuation prompt, and `:cancel` aborts the current block; ordinary `import ...` lines work inside the session)
-  If native REPL cache build fails, the launcher now reports the native compile error directly and suggests the interpreter-backed `repl` path.
-  Native REPL startup itself no longer requires a live `analysis-service`; the bridge is contacted lazily on the first analysis-backed action such as `import`, declaration acceptance, `:type`, `:instances`, or expression evaluation.
-- Run tests: `mise exec -- just test`
-- Run selected tests: `mise exec -- just test tests.test_parser tests.test_typechecker`
-- Run serial full test suite explicitly: `mise exec -- just test-serial`
-- Run legacy serial alias: `mise exec -- just test-all`
-- Run integration-style IO tests: `mise exec -- just test-integration`
+- Run stdlib test suite: `mise exec -- just test`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
-- Build native binary (clang): `mise exec -- just compile-native /tmp/prog.sprout /tmp/prog`
-
-Integration-style IO test convention:
-
-- Service-backed tests live in [tests/test_integration_io.py](./tests/test_integration_io.py).
-- Shared local-fixture helpers live in [tests/integration_support.py](./tests/integration_support.py).
-- Prefer local mock services on `127.0.0.1` over external hosted dependencies.
-- Keep `just test` as the default authoritative gate when run without filters, use targeted forms such as `mise exec -- just test tests.test_parser tests.test_typechecker` or `SPROUT_TESTS="..." mise exec -- just test` for faster local loops, use `mise exec -- just test-parallel` when you want to invoke the same runner explicitly, use `mise exec -- just test-serial` or `mise exec -- just test-all` only for fallback/debugging, and use `mise exec -- just test-integration` when iterating on service-backed interpreter/native behavior.
-- Use `mise exec -- just measure-gc-thresholds` for the fast GC regression/stress loop and `mise exec -- just measure-gc-real` or targeted runs such as `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 --threshold off --threshold 4096` for the heavier real workloads that now drive default-threshold decisions. The opt-in real set currently includes `vector_build_medium`, `aoc_day3`, `aoc_day4_small`, and `aoc_day5`, and the script summarizes GC cycles, swept nodes, max live heap, max root-slot count, max marked-node count, wall time, and elapsed microseconds across the selected thresholds.
+- Build native binary (clang): `mise exec -- just compile-native examples/factorial.sprout /tmp/factorial`
+- REPL: not yet available (the Python-backed REPL has been removed; a native launcher is planned — track progress in BACKLOG.md)
 
 ### Native runtime GC environment variables
 
@@ -266,12 +246,9 @@ helpers) instead of the raw `term_*` hooks.
 
 Experimental snapshot analysis hooks:
 
-- Active snapshot/state hooks used by the current Sprout REPL frontend.
-  The host implementation now routes in-source execution through
-  `sprout.analysis_execution_backend`, completion through
-  `sprout.analysis_completion_backend`, and snapshot analysis through
-  `sprout.analysis_snapshot_backend`, while `sprout.analysis` remains a
-  compatibility facade:
+- Snapshot analysis hooks — route to the self-hosted `analysis_service_bin` subprocess
+  when `SPROUT_ANALYSIS_SERVICE_CMD` is set; otherwise these hooks are unavailable
+  (no REPL frontend is currently active):
 - `repl_eval_expr_in_source(module_source: String, expr: String) -> Result String (Vec String) !{IO}`
 - `repl_check_source(module_source: String) -> Result String Unit !{IO}`
 - `repl_declared_names_in_source(module_source: String) -> Result String (Vec String) !{IO}`
@@ -283,97 +260,21 @@ Experimental snapshot analysis hooks:
 - `repl_complete_in_state(line_buffer: String, imports: Vec String, declarations: Vec String) -> (String, Vec String) !{IO}`
 - `repl_reset_session() -> Unit !{IO}`
 
-- Neutral compatibility aliases now exist for the shared analysis subset:
+- Neutral aliases for the shared analysis subset:
   `analysis_check_source`, `analysis_declared_names_in_source`,
   `analysis_exported_names_in_source`, `analysis_symbol_inventory_in_source`,
   `analysis_symbol_locations_in_source`, `analysis_diagnostics_in_source`,
   `analysis_type_of_in_source`, `analysis_instances_in_source`.
 - Application code should prefer `stdlib.compiler` for these capabilities.
-  The raw `analysis_*` hooks are no longer part of the implicit builtin
+  The raw `analysis_*`/`repl_*` hooks are not part of the implicit builtin
   prelude for ordinary modules.
-- Experimental compiler-building helpers may also live under
-  `stdlib.compiler.*` submodules as the self-hosting toolchain grows; those
-  modules are compiler/tooling-oriented rather than stable general-purpose
-  stdlib surface.
-- Python-side analysis helpers exposed from `sprout.analysis` are now backed by
-  `sprout.analysis_snapshot_backend` for snapshot-oriented symbol metadata and
-  structured diagnostics, and by `sprout.analysis_execution_backend` for
-  execution-oriented `check`/`type`/`instances`/`eval` logic. The builtin
-  bridge keeps the older tuple-shaped diagnostics ABI, and `sprout.analysis`
-  remains a compatibility facade over those backend-owned slices.
-
-- Legacy compatibility hooks still present in the host runtime, but no longer used
-  by `stdlib/repl.sprout`:
-- `repl_add_import(source: String) -> Result String Unit !{IO}`
-- `repl_add_declaration(source: String) -> Result String Unit !{IO}`
-- `repl_eval_expr(source: String) -> Result String (Vec String) !{IO}`
-- `repl_type_of(source: String) -> Result String String !{IO}`
-- `repl_instances(source: String) -> Result String (String, Vec String) !{IO}`
-- `repl_complete(line_buffer: String) -> (String, Vec String) !{IO}`
-
-These legacy `repl_*` hooks are compatibility-only runtime surface now. They
-are no longer part of the implicit builtin prelude for ordinary modules;
-prefer `stdlib.compiler` instead.
-
-These are implementation hooks for the Sprout-hosted REPL frontend. They are
-still mostly interpreter-backed. The current near-term priority is making that
-bridge native-capable rather than making it self-hosted. The canonical
-analysis-service subprocess boundary is now
-`python -m sprout.analysis_service_entrypoint` for snapshot `check_source` and
-`declared_names_in_source` / `exported_names_in_source` /
-`symbol_inventory_in_source` / `diagnostics_in_source` /
-`type_of_in_source` / `instances_in_source` / `eval_expr_in_source` queries,
-plus compatibility-only explicit-state `complete_in_state`, as the first explicit host-service
-bridge below the REPL frontend, and native compiled programs now use that bridge for
-`repl_check_source(...)`, `analysis_check_source(...)`,
-`repl_declared_names_in_source(...)`, `analysis_declared_names_in_source(...)`,
-`repl_exported_names_in_source(...)`, `analysis_exported_names_in_source(...)`,
-`repl_symbol_inventory_in_source(...)`,
-`analysis_symbol_inventory_in_source(...)`,
-`repl_diagnostics_in_source(...)`, `analysis_diagnostics_in_source(...)`,
-`repl_type_of_in_source(...)`, `analysis_type_of_in_source(...)`,
-`repl_instances_in_source(...)`, `analysis_instances_in_source(...)`, and
-`repl_eval_expr_in_source(...)`, plus `repl_complete_in_state(...)` and
-`analysis_symbol_locations_in_source(...)`. The active Sprout REPL frontend no
-longer depends on that bridge for `Tab` completion; completion now runs locally
-in `stdlib/repl.sprout` from the current session text state, and startup no
-longer calls `repl_reset_session()` either, so that hook is now
-compatibility-only rather than part of the active frontend path. The rest
-of the REPL/analysis snapshot hooks still report unsupported-backend runtime
-errors in native binaries. End-to-end native execution of the current Sprout
-REPL frontend is now verified by compiling and running
-`examples/repl_hosted.sprout` with that bridge in place, and the user-facing
-`repl --native` launcher now exposes that path experimentally while still using
-the Python `analysis-service` bridge underneath. The canonical service entrypoint is
-[sprout/analysis_service_entrypoint.py](./sprout/analysis_service_entrypoint.py), while
-[sprout/analysis_adapter.py](./sprout/analysis_adapter.py) is now only a
-compatibility wrapper over the reusable dispatcher in
-[sprout/analysis_dispatch.py](./sprout/analysis_dispatch.py) and protocol loop
-in [sprout/analysis_protocol.py](./sprout/analysis_protocol.py), which is the
-intended replacement seam for a future non-Python native service. That bridge
-is now wired by default from explicit snapshot, execution, and completion
-backend bundles rather than only through the monolithic compatibility backend
-object. Service command resolution, startup/error strings, and replay-safe
-retry policy now live in [sprout/analysis_service_config.py](./sprout/analysis_service_config.py),
-while the Python-owned default service command now lives in
-[sprout/analysis_service_python.py](./sprout/analysis_service_python.py),
-and the bridge/runtime layer consumes that narrower service-config seam. It is being treated as reusable language-service infrastructure for later
-self-hosted compiler and language-server work, not as REPL-only plumbing. The launcher
-reuses both a cached
-compiled REPL binary between launches and one long-lived analysis-service
-subprocess per native program run, with one automatic restart for replay-safe
-snapshot queries if that child dies mid-session. The hidden
-`sprout.analysis_adapter`, `sprout.analysis_service`, and
-`sprout.cli analysis-service` remain only as compatibility wrappers.
-The error-text and replay-safe retry helpers now live in
-`sprout.analysis_service_config`, the Python default service-command helper
-lives in `sprout.analysis_service_python`, and `sprout.analysis_bridge`
-remains a compatibility facade.
-Native programs can override the service command via
-`SPROUT_ANALYSIS_SERVICE_CMD`; if that command is invalid, native REPL and
-native snapshot-query failures now point back to that env var explicitly.
-Tests can override the launcher cache
-directory via `SPROUT_NATIVE_REPL_CACHE_DIR`.
+- The self-hosted analysis service binary (`analysis_service_bin`) is built with
+  `just build-analysis-service` and run with `just run-analysis-service`. It
+  implements `declared_names_in_source`, `exported_names_in_source`,
+  `symbol_inventory_in_source`, `symbol_locations_in_source`, `check_source`,
+  `diagnostics_in_source`, `type_of_in_source`, and `eval_expr_in_source` over a
+  JSON-over-stdio protocol. Override the service command via
+  `SPROUT_ANALYSIS_SERVICE_CMD`.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 
@@ -613,9 +514,9 @@ fn main() -> Unit !{IO} =
       | Err err -> print(err)
 ```
 
-Runnable demo:
-- `python3 -m sprout.cli run examples/result_demo.sprout 21`
-- `python3 -m sprout.cli run examples/result_demo.sprout 3`
+Runnable demo (compile to native then pass args directly):
+- `mise exec -- just compile-native examples/result_demo.sprout /tmp/result_demo && /tmp/result_demo 21`
+- `mise exec -- just compile-native examples/result_demo.sprout /tmp/result_demo && /tmp/result_demo 3`
 
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 
@@ -854,8 +755,8 @@ then call helpers like `regex.compile(...)` and `regex.replace_all_literal(...)`
 
 Example classification:
 
-- Runnable examples define `main() -> Unit !{IO}` and can be used with `sprout run`; many also work with `sprout compile`, but backend coverage still varies by feature.
-- Library-style examples expose helpers without `main`; use `sprout check` for them directly, or import them from another runnable module.
+- Runnable examples define `main() -> Unit !{IO}` and can be compiled with `just compile-native` or run with `just run` (no program arguments) or `just compile-native` + direct execution (for programs that read `argv_get`).
+- Library-style examples expose helpers without `main`; use `just check` for them directly, or import them from another runnable module.
 - `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers plus typed issue-summary and issue-detail decoding on top of generic `stdlib.http` + `stdlib.http_client`.
 - `examples/sentry_issue_browser_tui.sprout` is a library-style interactive issue browser module with environment-based config loading, list navigation, refresh, and detail rendering.
 - `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `sprout run` and `sprout compile --native`, including HTTPS-backed Sentry API calls in native mode.
@@ -864,38 +765,29 @@ Example classification:
 - `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
 - `examples/string_templates.sprout` is a runnable experimental string-template demo showing templates in both `String` contexts (`string_concat_many` instead of `++` chains) and `StringTemplate` contexts (structured parts passed to a sink).
 
-Load stdlib prelude explicitly for standalone files:
-
-- `python3 -m sprout.cli check --with-stdlib your_file.sprout`
-- `python3 -m sprout.cli run --with-stdlib your_file.sprout`
-- module-loaded programs get the foundational prelude implicitly
+The stdlib prelude is included automatically when a stdlib root is provided; `just check` and `just run` always include it.
 
 Load HTTP and JSON helpers via imports such as `import stdlib.http (...)`, `import stdlib.http_client (...)`, `import stdlib.json as json`, and `import stdlib.string as string`.
-There is no `--with-http-stdlib` CLI compatibility mode.
 
-- Pass program arguments to `sprout run` after the source path; inside Sprout, read them with `argv_get(index)`.
-- Example HTTP echo server:
-  `SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/http_echo_server.sprout`
-- Example HTTP GET CLI:
-  `python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/`
+For programs that take program arguments (`argv_get`), use `just compile-native` and then run the binary directly. `just run` does not forward arguments.
+
+- Typecheck a file: `mise exec -- just check examples/fizzbuzz.sprout`
+- Run a file (no program arguments): `mise exec -- just run examples/fizzbuzz.sprout`
+- Run with program arguments (compile first):
+  `mise exec -- just compile-native examples/http_get_cli.sprout /tmp/http_get && /tmp/http_get http://127.0.0.1:8080/`
 - Example text demo:
-  `python3 -m sprout.cli run examples/text_demo.sprout "zażółć gęślą jaźń"`
+  `mise exec -- just compile-native examples/text_demo.sprout /tmp/text_demo && /tmp/text_demo "zażółć gęślą jaźń"`
 - Example regex demo:
-  `python3 -m sprout.cli run examples/regex_demo.sprout "ticket=AB-42 owner=ada"`
+  `mise exec -- just compile-native examples/regex_demo.sprout /tmp/regex_demo && /tmp/regex_demo "ticket=AB-42 owner=ada"`
 - Example string templates demo:
-  `python3 -m sprout.cli run examples/string_templates.sprout Ada 3`
-- Sentry issue browser:
-  `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token python3 -m sprout.cli run examples/sentry_issue_browser.sprout`
-  Interactive terminals use arrow keys or `j`/`k` to move, `Enter` to open details, `r` to refresh, and `q` to quit. Non-interactive runs fall back to the plain issue list.
-- Native Sentry issue browser build:
+  `mise exec -- just compile-native examples/string_templates.sprout /tmp/string_templates && /tmp/string_templates Ada 3`
+- Sentry issue browser build and run:
   `mise exec -- just compile-native examples/sentry_issue_browser.sprout /tmp/sentry_issue_browser`
-- Sentry issue browser helper flow:
-  `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token python3 -m sprout.cli repl`
-  then import `examples.sentry_issue_browser_tui` and evaluate `run_entrypoint()`
-- Collections helper demo:
-  `python3 -m sprout.cli run examples/collections_demo.sprout`
+  `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token /tmp/sentry_issue_browser`
+  Interactive terminals use arrow keys or `j`/`k` to move, `Enter` to open details, `r` to refresh, and `q` to quit. Non-interactive runs fall back to the plain issue list.
+- Collections helper demo: `mise exec -- just run examples/collections_demo.sprout`
 - Typeclass collections demo (experimental surface area, not normative v0):
-  `python3 -m sprout.cli run examples/typeclass_functor_foldable_demo.sprout`
+  `mise exec -- just run examples/typeclass_functor_foldable_demo.sprout`
 
 ## Collections
 
@@ -975,18 +867,16 @@ Export behavior:
 
 Commands:
 
-- LLVM IR output: `python3 -m sprout.cli compile input.sprout -o out.ll`
-- Native binary (requires `clang`): `python3 -m sprout.cli compile input.sprout --native -o out_bin`
-- REPL: `python3 -m sprout.cli repl`
-  - commands: `:type EXPR`, `:t EXPR`, `:instances TYPE`, `:i TYPE`, `:help`, `:quit`
-  - the foundational prelude is loaded by default, so list literals, dict literals, `split_ints(...)`, `foldable_to_vec(...)`, and `++` work immediately
-  - `:instances TYPE` lists matching unary typeclass instances for a type, including constructor-head matches such as `List Int` reporting `Functor List`
-  - use ordinary imports inside the session to access stdlib modules, for example `import stdlib.http` or `import stdlib.string`
-  - imported modules use their final path segment (`http.http_ok(...)`, `math.gcd(...)`)
-- Formatter/linter baseline:
-  - format in place: `python3 -m sprout.cli fmt your_file.sprout`
-  - check formatting only: `python3 -m sprout.cli fmt --check your_file.sprout`
-  - lint baseline style issues: `python3 -m sprout.cli lint your_file.sprout`
+- Typecheck: `mise exec -- just check input.sprout`
+- Emit LLVM IR: `mise exec -- just compile input.sprout out.ll`
+- Native binary (requires `clang`): `mise exec -- just compile-native input.sprout out_bin`
+- Run without args: `mise exec -- just run input.sprout`
+- REPL: not yet available (planned; see BACKLOG.md)
+- Formatter/linter:
+  - format in place: `mise exec -- just fmt-file your_file.sprout`
+  - check formatting only: `mise exec -- just fmt-check-file your_file.sprout`
+  - lint: `mise exec -- just lint-file your_file.sprout`
+  - format/lint whole repo: `mise exec -- just fmt` / `mise exec -- just lint`
   - current scope: whitespace-aware formatting, comment preservation, trailing-whitespace/tab/final-newline checks
 
 ## Not Yet Supported (Common Gotchas)

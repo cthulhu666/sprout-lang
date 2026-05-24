@@ -78,9 +78,9 @@ For any non-trivial language change, include:
 
 9. Preferred execution path for local commands:
    `mise exec -- just <task>`
-10. For intermediate verification during development, prefer targeted parallel runs through `mise exec -- just test ...` or `SPROUT_TESTS="..." mise exec -- just test` before falling back to the full parallel gate; use serial `just test-serial` only when the task requires order-sensitive debugging.
-11. Final verification uses the authoritative parallel full-suite run via `mise exec -- just test` with no explicit test filter for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec; use `mise exec -- just test-serial` only as a fallback when diagnosing runner discrepancies or order-sensitive failures.
-12. Docs-only or examples-only changes may use targeted verification instead of the full suite when they do not modify `sprout/`, `stdlib/`, test expectations, or the normative spec; at minimum, verify the commands and examples you changed still work as documented.
+10. For intermediate verification during development, run a single test file directly with `./compile_driver_bin_stage1 --emit-ir stdlib_root tests/stdlib/test_foo.spr | clang - runtime/sprout_runtime.c -o /tmp/t && /tmp/t`; the full gate is `mise exec -- just test`.
+11. Final verification uses `mise exec -- just test` for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
+12. Docs-only or examples-only changes may use targeted verification instead of the full suite when they do not modify `stdlib/`, test expectations, or the normative spec; at minimum, verify the commands and examples you changed still work as documented.
 
 ## Definition of Done
 
@@ -94,9 +94,9 @@ For coding tasks, work is done only when:
 6. Relevant docs/spec updates are complete and in sync with the implementation.
 7. Formatting and linting have been run when applicable.
 8. The entire test suite has been run via `mise exec -- just test` with no explicit test filter for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
-9. During implementation, the faster local loop should usually use targeted parallel runs such as `mise exec -- just test tests.test_parser tests.test_typechecker` or `SPROUT_TESTS="tests.test_parser tests.test_typechecker" mise exec -- just test`; use `mise exec -- just test-serial` only when the task specifically requires serial/full-suite debugging earlier.
-10. Docs-only or examples-only changes may skip the full suite when they do not modify `sprout/`, `stdlib/`, test expectations, or the normative spec, but they must still be verified in a way that matches the change, such as re-running documented commands or executing the updated examples.
-11. After the test suite passes, `mise exec -- just compile-examples-stage1` must also pass (or the failing examples must exactly match the pre-existing known-broken set). Run this after every change that touches `stdlib/`, `sprout/`, the runtime, or any example file.
+9. During implementation, the faster local loop is to run the specific `.spr` test file directly (see item 10 in "How to run tests" above); run `mise exec -- just test` for the full gate.
+10. Docs-only or examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but they must still be verified in a way that matches the change, such as re-running documented commands or executing the updated examples.
+11. After the test suite passes, `mise exec -- just compile-examples-stage1` must also pass (or the failing examples must exactly match the pre-existing known-broken set). Run this after every change that touches `stdlib/`, the runtime, or any example file.
 12. If sandbox or environment restrictions block required full-suite verification, rerun it with escalated permissions rather than accepting partial verification.
 13. Required verification passes.
 14. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
@@ -107,8 +107,12 @@ For coding tasks, work is done only when:
 
 - `docs/` normative and supporting design docs.
 - `examples/` user-facing language examples.
-- `sprout/` implementation source.
 - `stdlib/` language-level standard library source (`prelude.sprout`).
+- `stdlib/compiler/` self-hosted compiler source (`parse`, `infer`, `codegen`, `compile_driver`, etc.).
+- `runtime/` C runtime and GC (`sprout_runtime.c`).
+- `tests/stdlib/` native Sprout test files (`.spr`); run via `just test`.
+- `tests/conformance/` executable language behavior fixtures.
+- `bootstrap/` committed platform seed binaries for Python-free bootstrap.
 - `mise.toml` toolchain definition.
 - `justfile` standard developer tasks.
 
@@ -128,7 +132,7 @@ For coding tasks, work is done only when:
 |---|---|
 | `scan-info <stdlib> <file>` | Calls `bundler.scan_source_info` and prints `module:`, `export:`, `ctor:` lines. Diagnoses module-name extraction bugs without running the full bundler pipeline. |
 | `dump-qualify <stdlib> <file>` | Runs full collection + qualify and prints original→qualified name mapping per module, plus `ctx: EMPTY` or `ctx: populated` for each. A `ctx: EMPTY` line means `build_resolve_ctx` failed to find the module's path in `all_symbols` — all names stay unqualified, triggering the `[assert]` error. |
-| `bundle <stdlib> <file>` | Runs the full bundle phase and prints qualified decl names. Gold standard for detecting qualify-stage regressions; output must be identical between stage-0 and stage-1 (enforced by `tests/test_bootstrap_identity.py`). |
+| `bundle <stdlib> <file>` | Runs the full bundle phase and prints qualified decl names. Gold standard for detecting qualify-stage regressions; output must be identical between stage-0 and stage-1 (verified by `tests/stdlib/test_bundler.spr`). |
 
 **If `bundle_file` returns `BundleErr("[assert] qualify_decl: FnDecl starts with '.'...")`:**
 1. Run `--phase scan-info` to check `scan_source_info` returns a valid non-empty module name.
@@ -151,27 +155,25 @@ In the self-hosted codegen (`stdlib/compiler/codegen.sprout`), String and Char v
 
 If you see `ll_ptr()` for String/Char in codegen, that is a regression. The canonical form is `ll_i64()`.
 
-### GC safety in `sprout/cli.py`
+### GC safety in `runtime/sprout_runtime.c`
 
-`just gc-safety-check` lints the embedded C runtime for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls (callers are expected to root heap values before such calls). Run this after editing any C builtin in `cli.py` that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.
+`just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls (callers are expected to root heap values before such calls). Run this after editing any C builtin in `runtime/sprout_runtime.c` that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.
 
 ### Bootstrap binary rebuild protocol
 
-1. Rebuild stage-0 (wraps Python compiler; OOM-risk — always use memwatch):
+1. Rebuild `compile_driver_bin_stage1` from the committed platform seed (no Python required):
    ```
-   scripts/memwatch.sh 4096 1 -- python3 -m sprout.cli compile \
-     --with-stdlib --native -o compile_driver_bin \
-     stdlib/compiler/compile_driver.sprout
+   just bootstrap-from-seed
    ```
-2. Rebuild stage-1 from stage-0:
+2. Rebuild stage-1 from an existing stage-0 binary (`compile_driver_bin`) if you have one:
    ```
    just build-stage1
    ```
-3. After rebuild, verify identity:
+3. After rebuild, verify the test suite passes:
    ```
-   mise exec -- just test tests.test_bootstrap_identity
+   mise exec -- just test
    ```
-   All corpus files are expected to pass. If a file is newly broken in stage-1, add it to `XFAIL_FILES` in `test_bootstrap_identity.py` with a comment explaining the regression, and remove it once fixed.
+   Bundler parity is covered by `tests/stdlib/test_bundler.spr`.
 
 ## Known Limitations
 

@@ -4,21 +4,23 @@ This file tracks open design, implementation, and tooling follow-up work.
 
 ## Current Priorities
 
-1. Push the current Sprout-hosted REPL toward a native-capable bridge.
-   Design docs: [native-repl-roadmap.md](./native-repl-roadmap.md), [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md), [compiler-self-hosting-roadmap.md](./compiler-self-hosting-roadmap.md).
-   Near-term scope: keep the current Sprout frontend stable, move host-backed session services behind an explicit native-callable bridge, and shape that bridge as reusable language-service infrastructure that serves the REPL first but can later support self-hosted compiler and language-server work.
-   Completed groundwork: canonical `python -m sprout.analysis_service_entrypoint` bridge, plus compatibility wrappers in `sprout.analysis_stdio`, `sprout.analysis_service`, and hidden `sprout.cli analysis-service`, and native-backed `repl_check_source(...)`, `repl_declared_names_in_source(...)`, `repl_exported_names_in_source(...)`, `repl_symbol_inventory_in_source(...)`, `repl_diagnostics_in_source(...)`, `analysis_symbol_locations_in_source(...)`, `repl_type_of_in_source(...)`, `repl_instances_in_source(...)`, `repl_eval_expr_in_source(...)`, and `repl_complete_in_state(...)` through that host-service path, with end-to-end native execution now covered by tests and exposed experimentally via `sprout.cli repl --native`, including launcher-side compiled-binary caching between launches, per-run analysis-service subprocess reuse, and one-shot child restart for replay-safe mid-run bridge failures.
-   Phase 1 target: replace the execution-oriented backend bundle first, while preserving the current bridge contract and de-REPL-shaping the compiler-facing surface around it.
-   Short follow-up: keep shrinking first-class dependence on the Python adapter itself so the native REPL can replace `python -m sprout.analysis_service_entrypoint`, rather than only renaming the module boundary.
-   Pause milestone for switching back to core language work:
-   - native REPL is stable enough for daily interactive use
-   - the remaining Python dependency is isolated behind the adapter/backend seam
-   - no active frontend behavior depends on legacy mutable-session hooks
-   - docs describe the unfinished work as backend replacement, not frontend instability
-   Planned stop-point work:
-   - choose the first post-pause backend-replacement target
-   Deferred scope: the self-hosted session-engine work in `repl-self-hosting-v1-draft.md` and the broader compiler direction in `compiler-self-hosting-roadmap.md` are no longer the active milestone; treat them as post-native-REPL directions.
-   Long-term execution backlog: [self-hosting-eliminate-python-backlog.md](./self-hosting-eliminate-python-backlog.md) tracks the concrete staged work required to remove Python from compiler/tooling ownership entirely.
+1. Implement a native REPL launcher.
+   Context: the Python-backed REPL and analysis service have been removed (2026-05-24).
+   The REPL frontend lives in `stdlib/repl.sprout` and the self-hosted analysis service
+   binary (`analysis_service_bin`) is built via `just build-analysis-service`. What is
+   missing is a native launcher: a small host entry point that compiles `stdlib/repl.sprout`
+   to a binary (or uses a pre-compiled cache) and starts `analysis_service_bin` as a
+   subprocess behind `SPROUT_ANALYSIS_SERVICE_CMD`.
+   Design docs: [native-repl-roadmap.md](./native-repl-roadmap.md), [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
+   Near-term scope:
+   - write a minimal native launcher (shell script or small C shim) that: (a) finds or
+     builds the REPL binary from `stdlib/repl.sprout`; (b) starts `analysis_service_bin`
+     and sets `SPROUT_ANALYSIS_SERVICE_CMD`; (c) exec's the REPL binary.
+   - wire `just repl` to invoke this launcher.
+   - verify `:type`, `:instances`, `import`, and evaluation work end-to-end.
+   Completed groundwork: `analysis_service_bin` implements all snapshot analysis ops over
+   JSON-over-stdio; `stdlib/repl.sprout` implements the full REPL frontend with line
+   editing, history, tab completion, multiline blocks, and session management.
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
    Native-performance follow-up:
    - make tight Sprout string-processing loops competitive with host builtins so moderate stdin/text workloads do not require dedicated host helpers just to be practical
@@ -31,14 +33,11 @@ This file tracks open design, implementation, and tooling follow-up work.
 4. Keep expanding stdlib text/data helpers beyond the current baseline (`trim*`, `contains`, `ends_with`, `string_lines`, `string_digits`, vector utility combinators).
    Remaining follow-up: define the Unicode text model explicitly enough to support a future `Char` type and consistent string indexing/length/slice semantics.
 5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
-6. Keep improving local test throughput beyond the current per-file parallel runner.
-   Completed groundwork: `just test-parallel` now provides a materially faster local loop than serial `just test-serial`.
-   Completed: native Sprout test files for all six compiler stages now live in `tests/stdlib/compiler/` — `test_lexer.spr`, `test_bundler.spr`, `test_parser.spr`, `test_checker.spr`, `test_lowering.spr`, `test_codegen.spr`; run via `just test-stdlib-stage1`.
+6. Keep improving local test throughput.
+   Completed: native Sprout test files for all six compiler stages live in `tests/stdlib/compiler/` — `test_lexer.spr`, `test_bundler.spr`, `test_parser.spr`, `test_checker.spr`, `test_lowering.spr`, `test_codegen.spr`; run via `just test` (`test-stdlib-stage1`).
    Completed: fixed bundler UTF-8 bug in `strip_headers_b` — byte offset was used as codepoint index in `str_slice`, causing parse failures on files (e.g. `stdlib/compiler/types.sprout`) with multi-byte characters in comment headers.
    Remaining follow-up:
-   - migrate the repeated native compile/run scaffolding in `tests/test_codegen.py` onto the shared cached helper path so more native tests benefit from compile caching
-   - measure whether `tests/test_cli.py` native REPL coverage is now dominated by process startup/analysis-service handshake overhead rather than compilation, and only then decide whether more fixture sharing is worth the complexity
-   - keep `just test-serial`/`just test-all` available as fallback full-suite entrypoints when diagnosing runner discrepancies or order-sensitive failures
+   - add compile caching for the stdlib test runner so repeated runs of unchanged test files skip the IR-emit + clang step
 7. Define the long-term `Int` contract and migrate the native backend away from raw `i64` semantics so overflow-sensitive math matches the language model across interpreter and native execution.
 8. Continue native memory-management v1.
    Design doc: [native-memory-management-v1-draft.md](./native-memory-management-v1-draft.md).
@@ -96,8 +95,7 @@ This file tracks open design, implementation, and tooling follow-up work.
    injection) will build on.
    Initial scope: `effect` declarations, `handle`/`with` expressions, implicit perform,
    multi-label effect rows (`!{IO, Test}`), one-shot linear codegen via handler-record
-   passing (no heap continuations or setjmp). Native compiler only — Python reference
-   compiler untouched.
+   passing (no heap continuations or setjmp).
    First milestone constraints: one-shot handlers only (no multi-shot resumption), no
    open effect row polymorphism, no constrained effect operations, backwards-compatible
    (old `TestState` API stays in `stdlib/test.sprout` alongside new `run_tests`).

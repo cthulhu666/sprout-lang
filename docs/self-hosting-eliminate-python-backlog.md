@@ -346,21 +346,23 @@ Definition of done:
 
 ### Phase 12: Remove Python Compatibility Layers
 
-- [~] Delete superseded Python entrypoints once equivalent Sprout paths are the
+- [x] Delete superseded Python entrypoints once equivalent Sprout paths are the
   default and verified.
-  *(2026-05-17: `just run` and `just run-stdlib` no longer invoke Python — they
-  use `compile_driver_bin_stage1 --emit-ir` → clang → execute. `just compile`
-  and `just compile-native` also Python-free since Phase 10. Remaining Python
-  entrypoints: `parse`, `fmt`, `lint`, `check`, `test-stdlib-stage0`,
-  `update-runtime`, `build-stage0`.)*
-- [ ] Remove compatibility wrappers such as hidden CLI fallback surfaces that
+  *(2026-05-24: `sprout/` Python frontend and all Python test/script files
+  deleted. `fmt`, `lint`, `check`, `parse`, `build-stage0`, `test-stdlib-stage0`,
+  `update-runtime` are all gone or replaced by native equivalents. No Python
+  entrypoints remain in the active tooling path.)*
+- [x] Remove compatibility wrappers such as hidden CLI fallback surfaces that
   only exist to preserve Python ownership.
-- [ ] Migrate or delete Python-based build/test/dev scripts that still assume
+  *(2026-05-24: `sprout/` directory removed entirely — no Python wrappers remain.)*
+- [x] Migrate or delete Python-based build/test/dev scripts that still assume
   Python as the project control plane.
+  *(2026-05-24: all Python test files and scripts deleted; CI updated to
+  Python-free pipeline; justfile recipes use native binaries and seed bootstrap.)*
 - [~] Update docs, examples, and contributor workflows so Sprout-first tooling
   is the documented default.
-  *(2026-05-17: `just run` is now Sprout-first; `just compile` and
-  `just compile-native` flipped in Phase 10.)*
+  *(2026-05-24: `README.md` and `AGENTS.md` updated to remove all Python CLI
+  references. `docs/backlog.md` priorities updated. In progress.)*
 - [ ] Add a policy check that blocks new production-path Python ownership from
   re-entering the repository.
 
@@ -388,20 +390,21 @@ These tracks run across multiple phases and should be maintained explicitly.
 - [ ] Preserve stable diagnostics where intended and flag intentional
   differences explicitly.
 - [~] Add bootstrap-stage verification to CI once the first self-hosted stages
-  exist. Stage-1 bootstrap parity: `test_bootstrap_stage1.py` (BootstrapStage2Tests
-  + BootstrapStage3Tests); CI runs `just build-stage1` on every push/PR.
+  exist. CI runs `just build-stage1` on every push/PR; bundler parity is
+  verified by `tests/stdlib/test_bundler.spr` (via `just test`).
   Stage-3 fixed-point (M7) confirmed 2026-05-17: binary sizes identical across
   rounds; IR byte-identical. Remaining gap: CI does not yet cache/produce the
-  stage-2 binary, so `BootstrapStage3Tests` skips in CI unless the artifact
-  is pre-built.
+  stage-2 binary, so stage-3 fixed-point verification is not automated in CI.
 
 ### C. Documentation and Architecture Hygiene
 
 - [ ] Keep `compiler-self-hosting-roadmap.md` as the high-level staged design.
 - [ ] Use this document as the concrete execution backlog for eliminating
   Python.
-- [ ] Update `README.md`, `BACKLOG.md`, and relevant design docs when a phase
+- [~] Update `README.md`, `BACKLOG.md`, and relevant design docs when a phase
   meaningfully advances.
+  *(2026-05-24: README.md, AGENTS.md, docs/backlog.md updated for Python removal.
+  Self-hosting-eliminate-python-backlog.md Phase 12 updated. In progress.)*
 - [ ] Keep experimental vs normative status explicit for every self-hosting
   milestone.
 
