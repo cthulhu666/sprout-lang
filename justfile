@@ -301,9 +301,8 @@ _compile-examples stage xfail="":
 
 # Stage-1: emit IR → clang link for each example.
 # Known xfail: sentry_api (no main fn), sentry_issue_browser{,_tui} (import examples.* unresolved),
-#              repl_hosted (bundler relative-path bug; use `just build-repl` which passes an absolute path).
 [group('examples')]
-compile-examples-stage1: (_compile-examples "compile_driver_bin_stage1" "examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/repl_hosted.sprout")
+compile-examples-stage1: (_compile-examples "compile_driver_bin_stage1" "examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]

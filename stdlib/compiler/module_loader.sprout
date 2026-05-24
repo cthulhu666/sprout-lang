@@ -125,11 +125,15 @@ export fn collect_imports(src: String) -> List ImportSpec =
 # Module path resolution
 # ---------------------------------------------------------------------------
 #
-# Converts a module name like "stdlib.compiler.ast" to a file path.
-# Only handles "stdlib.*" modules — strips the "stdlib." prefix and maps
-# dots to slashes.  Non-stdlib modules return Nothing.
+# Converts a module name to a file path.
+# Handles two forms:
+#   "stdlib.*"  — strips the "stdlib." prefix and maps dots to slashes.
+#   bare name   — no dot: treated as a top-level stdlib module (e.g. "string" → stdlib/string.sprout).
+# Non-stdlib names that contain a dot return Nothing.
 #
-# Example: "stdlib.compiler.ast" + "/proj/stdlib" -> "/proj/stdlib/compiler/ast.sprout"
+# Examples:
+#   "stdlib.compiler.ast" + "/proj/stdlib" -> "/proj/stdlib/compiler/ast.sprout"
+#   "string"              + "/proj/stdlib" -> "/proj/stdlib/string.sprout"
 
 fn replace_dots_with_slash(s: String, i: Int, acc: String) -> String =
   if i >= str_len(s) then acc
@@ -143,6 +147,8 @@ fn replace_dots_with_slash(s: String, i: Int, acc: String) -> String =
 export fn module_name_to_path(name: String, stdlib_root: String) -> Maybe String =
   if str_starts_with(name, "stdlib.") then
     Just(str_concat(stdlib_root, str_concat("/", str_concat(replace_dots_with_slash(str_slice(name, 7, str_len(name)), 0, ""), ".sprout"))))
+  else if str_find(name, ".") == -1 then
+    Just(str_concat(stdlib_root, str_concat("/", str_concat(name, ".sprout"))))
   else Nothing
 
 # ---------------------------------------------------------------------------
