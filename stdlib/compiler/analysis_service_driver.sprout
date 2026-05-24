@@ -361,7 +361,7 @@ fn make_eval_source(src: String, expr: String, type_str: String) -> Maybe String
     else
       Nothing
   else
-    Just(src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr ++ "\nfn main() -> Unit !{IO} = print(" ++ sentinel_name() ++ ")")
+    Just(src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr ++ "\nfn main() -> Unit !{IO} = print(to_string(" ++ sentinel_name() ++ "))")
 
 fn string_to_json(s: String) -> json.Json = json.JsonString(s)
 
