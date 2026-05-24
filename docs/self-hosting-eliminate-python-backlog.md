@@ -363,9 +363,6 @@ Definition of done:
   is the documented default.
   *(2026-05-24: `README.md` and `AGENTS.md` updated to remove all Python CLI
   references. `docs/backlog.md` priorities updated. In progress.)*
-- [ ] Add a policy check that blocks new production-path Python ownership from
-  re-entering the repository.
-
 Definition of done:
 - Python is no longer required for normal compiler/tooling use or maintenance
 
