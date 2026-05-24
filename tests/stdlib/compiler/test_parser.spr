@@ -1,0 +1,104 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+
+fn parse_ok(src: String) -> Bool =
+  match lexer.tokenize(src) with
+  | Err _ -> false
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Ok _ -> true
+      | Err _ -> false
+
+fn parse_fails(src: String) -> Bool =
+  match lexer.tokenize(src) with
+  | Err _ -> true
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> true
+      | Ok _ -> false
+
+fn count_list(lst: List a) -> Int =
+  match lst with
+  | Nil -> 0
+  | Cons _ rest -> 1 + count_list(rest)
+
+fn decl_count(src: String) -> Int =
+  match lexer.tokenize(src) with
+  | Err _ -> -1
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> -1
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ -> count_list(decls)
+
+fn first_fn_name(src: String) -> String =
+  match lexer.tokenize(src) with
+  | Err _ -> ""
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> ""
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | Nil -> ""
+              | Cons d _ ->
+                  match d with
+                  | ast.FnDecl name _ _ _ _ _ _ -> name
+                  | _ -> ""
+
+fn first_is_type_decl(src: String) -> Bool =
+  match lexer.tokenize(src) with
+  | Err _ -> false
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> false
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | Nil -> false
+              | Cons d _ ->
+                  match d with
+                  | ast.TypeDecl _ _ _ _ -> true
+                  | _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Well-formed programs
+    assert_true(state, "simple fn parses", parse_ok("fn val() -> Int = 42"))
+    assert_true(state, "fn with one param", parse_ok("fn id(x: Int) -> Int = x"))
+    assert_true(state, "fn with two params", parse_ok("fn add(a: Int, b: Int) -> Int = a + b"))
+    assert_true(state, "type decl parses", parse_ok("type Color = Red | Green | Blue"))
+    assert_true(state, "let decl parses", parse_ok("let x = 42"))
+    assert_true(state, "match expr parses",
+      parse_ok("fn f(x: Int) -> Int = match x with | 0 -> 1 | _ -> 2"))
+    assert_true(state, "if then else parses",
+      parse_ok("fn f(x: Int) -> Int = if x == 0 then 1 else 2"))
+    assert_true(state, "lambda parses",
+      parse_ok("fn apply(f: Int -> Int, x: Int) -> Int = f(x)"))
+    assert_true(state, "two decls parse",
+      parse_ok("fn a() -> Int = 1\nfn b() -> Int = 2"))
+
+    # Malformed programs
+    assert_true(state, "bare equals fails", parse_fails("="))
+    assert_true(state, "fn without body fails", parse_fails("fn val() -> Int"))
+    assert_true(state, "lex error propagates", parse_fails("@"))
+
+    # Structural assertions
+    assert_eq(state, "fn name extracted", first_fn_name("fn myFunc() -> Int = 1"), "myFunc")
+    assert_eq(state, "fn with params name", first_fn_name("fn add(a: Int, b: Int) -> Int = a + b"), "add")
+
+    assert_eq(state, "single decl count", decl_count("fn val() -> Int = 42"), 1)
+    assert_eq(state, "two decls count", decl_count("fn a() -> Int = 1\nfn b() -> Int = 2"), 2)
+    assert_eq(state, "empty program count", decl_count(""), 0)
+
+    assert_true(state, "type decl identified", first_is_type_decl("type Color = Red | Green"))
+    assert_false(state, "fn decl not type decl", first_is_type_decl("fn val() -> Int = 1"))
+
+    summary(state)

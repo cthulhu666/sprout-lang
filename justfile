@@ -615,7 +615,7 @@ compile-examples-stage1:
   # sentry_api: library module with no main fn; link fails at entry point.
   # sentry_issue_browser{,_tui}: import examples.* which module loader doesn't resolve.
   # ref_tutorial, text_demo: stage-1 parser chokes on these files (non-ASCII / syntax); parser bug.
-  XFAIL_EXAMPLES="examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/ref_tutorial.sprout examples/text_demo.sprout"
+  XFAIL_EXAMPLES="examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout"
   STDLIB_ROOT="$(pwd)/stdlib"
   TMP_LL="/tmp/sprout_ex_$$.ll"
   TMP_BIN="/tmp/sprout_exbin_$$"

@@ -1952,6 +1952,10 @@ def typecheck_program(
                 PURE_EFFECT,
             ),
         ),
+        "panic": Scheme(
+            vars=("panic.a",),
+            type=TFunc(TConst("String"), TVar("panic.a"), IO_EFFECT),
+        ),
         "read_int_lines": Scheme(
             vars=(),
             type=TFunc(TConst("String"), TApp(TConst("Vector"), INT), IO_EFFECT),

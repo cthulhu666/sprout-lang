@@ -1,0 +1,73 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.bundler as bundler
+
+# scan_source_info returns (module_name, exported_names, ctor_export_type_names).
+# ctor_export_type_names: type names that re-export all ctors via (..) — not individual ctor names.
+
+fn module_name_of(src: String) -> String =
+  match bundler.scan_source_info(src) with
+  | (name, _, _) -> name
+
+fn exports_of(src: String) -> List String =
+  match bundler.scan_source_info(src) with
+  | (_, exps, _) -> exps
+
+fn ctors_of(src: String) -> List String =
+  match bundler.scan_source_info(src) with
+  | (_, _, cs) -> cs
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Module name extraction
+    assert_eq(state, "dotted module name",
+      module_name_of("module foo.bar\nfn val() -> Int = 1"),
+      "foo.bar")
+
+    assert_eq(state, "simple module name",
+      module_name_of("module mymod\nfn x() -> Int = 1"),
+      "mymod")
+
+    assert_eq(state, "no module header gives empty",
+      module_name_of("fn val() -> Int = 1"),
+      "")
+
+    assert_eq(state, "empty source gives empty",
+      module_name_of(""),
+      "")
+
+    # Exported function names
+    assert_true(state, "export fn in exports",
+      list_member("baz", exports_of("module foo\nexport fn baz() -> Int = 1")))
+
+    assert_false(state, "unexported fn not in exports",
+      list_member("baz", exports_of("module foo\nfn baz() -> Int = 1")))
+
+    assert_true(state, "multiple exports",
+      list_member("foo", exports_of("module m\nexport fn foo() -> Int = 1\nexport fn bar() -> Int = 2")) &&
+      list_member("bar", exports_of("module m\nexport fn foo() -> Int = 1\nexport fn bar() -> Int = 2")))
+
+    # Exported type names (appear in exports list)
+    assert_true(state, "export type in exports",
+      list_member("Color", exports_of("module foo\nexport type Color (..) = Red | Green")))
+
+    # ctor_export_type_names: type NAME when (..) is present
+    assert_true(state, "export type (..) adds type name to ctor_types",
+      list_member("Color", ctors_of("module foo\nexport type Color (..) = Red | Green")))
+
+    assert_false(state, "export type without (..) not in ctor_types",
+      list_member("Color", ctors_of("module foo\nexport type Color = Red | Green")))
+
+    assert_true(state, "single-ctor type with (..) in ctor_types",
+      list_member("Wrapper", ctors_of("module foo\nexport type Wrapper (..) = Wrapper Int")))
+
+    # Exported class names
+    assert_true(state, "export class in exports",
+      list_member("MyClass", exports_of("module foo\nexport class MyClass a {\n  fn method(x: a) -> Int\n}")))
+
+    # ctor_types empty for fn-only module
+    assert_false(state, "fn-only module has no ctor_types",
+      list_member("baz", ctors_of("module foo\nexport fn baz() -> Int = 1")))
+
+    summary(state)
