@@ -1550,23 +1550,24 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
 
 fn emit_tuple_expr(items: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   do
-    vals_and_lls <- emit_tuple_items(items, ctx, locals, em)
-    let vals = list_map(\p -> match p with | (v, _) -> v, vals_and_lls)
+    (vals_and_lls, rooted) <- emit_tuple_items(items, ctx, locals, em)
     let lls = list_map(\p -> match p with | (_, ll) -> ll, vals_and_lls)
-    rooted <- push_roots_list(vals, em)
     let tuple_ll_ = tuple_ll(lls)
     result <- build_struct(tuple_ll_, vals_and_lls, em, "undef")
     pop_temp_roots(rooted, em)
     val_with_tuple_items(val_make(tuple_ll_, result), Just(lls))
 
-fn emit_tuple_items(items: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> List (Value, String) !{IO} =
+# Each item's root is pushed immediately after evaluation so that a GC cycle
+# triggered inside a later item's builtin call cannot free an earlier result.
+fn emit_tuple_items(items: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> (List (Value, String), Int) !{IO} =
   match items with
-  | Nil -> Nil
+  | Nil -> (Nil, 0)
   | Cons item rest ->
       do
         v <- emit_expr(ctx, locals, em, Nothing, item)
-        rest_vals <- emit_tuple_items(rest, ctx, locals, em)
-        Cons((v, val_ll(v)), rest_vals)
+        n <- push_temp_root(v, em)
+        (rest_vals, ns) <- emit_tuple_items(rest, ctx, locals, em)
+        (Cons((v, val_ll(v)), rest_vals), n + ns)
 
 fn build_struct(tuple_ll_: String, vals_and_lls: List (Value, String), em: Emitter, current: String) -> String !{IO} =
   build_struct_acc(tuple_ll_, vals_and_lls, em, current, 0)

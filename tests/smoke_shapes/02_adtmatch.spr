@@ -1,7 +1,7 @@
 type Color = Red | Green | Blue
 fn color_code(c: Color) -> Int =
   match c with
-  | Red   -> 0
+  | Red -> 0
   | Green -> 1
-  | Blue  -> 2
+  | Blue -> 2
 fn main() -> Unit !{IO} = print(color_code(Red))
