@@ -4,7 +4,7 @@ import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_
 import stdlib.string as string
 
 type SubmissionResult =
-  | Continue (Vec String)(compiler.CompilerSession)
+  | Continue (Vec String)(compiler.StatefulSession)
   | Exit
 
 type ReadResult =
@@ -367,7 +367,7 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
   | Just line -> gather_declaration_names(declarations, index + 1, append_declaration_names(acc, trim(line)))
   | Nothing -> acc
 
-fn completion_candidates_local(line_buffer: String, session: compiler.CompilerSession) -> (String, Vec String) !{IO} =
+fn completion_candidates_local(line_buffer: String, session: compiler.StatefulSession) -> (String, Vec String) !{IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
       if string.find(prefix, ".") == -1 then
@@ -379,10 +379,10 @@ fn completion_candidates_local(line_buffer: String, session: compiler.CompilerSe
                 prefix,
                 lower_ascii(prefix),
                 gather_declaration_names(
-                  compiler.session_declarations(session),
+                  compiler.stateful_session_declarations(session),
                   0,
                   gather_import_names(
-                    compiler.session_imports(session),
+                    compiler.stateful_session_imports(session),
                     0,
                     append_names_from_vec(
                       append_names_from_vec(
@@ -405,7 +405,7 @@ fn completion_candidates_local(line_buffer: String, session: compiler.CompilerSe
           filter_names_by_prefix(
             prefix,
             lower_ascii(prefix),
-            dotted_completion_candidates(prefix, compiler.session_imports(session)),
+            dotted_completion_candidates(prefix, compiler.stateful_session_imports(session)),
             0,
             vec_empty()
           )
@@ -416,7 +416,7 @@ fn apply_completion(current: String, prefix: String, matches: Vec String) -> Str
   else if vec_length(matches) != 1 then current
   else drop_last_count(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
 
-fn complete_current_line(prompt: String, history: Vec String, session: compiler.CompilerSession, current: String, cursor: Int) -> Maybe String !{IO} =
+fn complete_current_line(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int) -> Maybe String !{IO} =
   match completion_candidates_local(current, session) with
   | (prefix, matches) ->
       if prefix == "" then interactive_read_line_loop(prompt, history, session, current, string.length(current), -1, current)
@@ -433,7 +433,7 @@ fn complete_current_line(prompt: String, history: Vec String, session: compiler.
           redraw_input(prompt, current, cursor)
           interactive_read_line_loop(prompt, history, session, current, cursor, -1, current)
 
-fn interactive_read_line_step(prompt: String, history: Vec String, session: compiler.CompilerSession, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
+fn interactive_read_line_step(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
   if key == "" then Nothing
   else if key == "ctrl-d" then
     if current == "" then
@@ -494,17 +494,17 @@ fn interactive_read_line_step(prompt: String, history: Vec String, session: comp
       redraw_input(prompt, next, cursor + string.length(key))
       interactive_read_line_loop(prompt, history, session, next, cursor + string.length(key), -1, next)
 
-fn interactive_read_line_loop(prompt: String, history: Vec String, session: compiler.CompilerSession, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+fn interactive_read_line_loop(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
   do
     key <- term_read_key_once()
     interactive_read_line_step(prompt, history, session, current, cursor, browse_index, draft, key)
 
-fn interactive_read_line(prompt: String, history: Vec String, session: compiler.CompilerSession) -> Maybe String !{IO} =
+fn interactive_read_line(prompt: String, history: Vec String, session: compiler.StatefulSession) -> Maybe String !{IO} =
   do
     redraw_input(prompt, "", 0)
     interactive_read_line_loop(prompt, history, session, "", 0, -1, "")
 
-fn read_input_line(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession) -> Maybe String !{IO} =
+fn read_input_line(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession) -> Maybe String !{IO} =
   match prompt with
   | Just text -> interactive_read_line(text, history, session)
   | Nothing -> term_read_line_once()
@@ -517,7 +517,7 @@ fn block_prompt(prompt: Maybe String) -> Maybe String =
   | Just _ -> Just("block| ")
   | Nothing -> Nothing
 
-fn read_block_submission(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession, acc: String) -> ReadResult !{IO} =
+fn read_block_submission(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, acc: String) -> ReadResult !{IO} =
   match read_input_line(block_prompt(prompt), history, session) with
   | Just line ->
       if trim(line) == ":}" then Submission(acc)
@@ -525,7 +525,7 @@ fn read_block_submission(prompt: Maybe String, history: Vec String, session: com
       else read_block_submission(prompt, history, session, append_submission_line(acc, line))
   | Nothing -> ReadError("unterminated `:{` block; expected `:}` before end of input")
 
-fn read_submission(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession) -> ReadResult !{IO} =
+fn read_submission(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession) -> ReadResult !{IO} =
   match read_input_line(prompt, history, session) with
   | Just line ->
       if trim(line) == ":{" then read_block_submission(prompt, history, session, "")
@@ -589,9 +589,9 @@ fn block_chunks_from_lines(lines: Vec String, index: Int, chunks: Vec String, cu
 fn block_chunks(raw: String) -> Vec String =
   block_chunks_from_lines(string.string_lines(raw), 0, vec_empty(), "")
 
-fn handle_type_command(line: String, prefix: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+fn handle_type_command(line: String, prefix: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":type expects an expression"), session)
-  else Continue(render_type_result(compiler.type_of(session, trim(drop_prefix(line, prefix)))), session)
+  else Continue(render_type_result(compiler.type_of_in_session(session, trim(drop_prefix(line, prefix)))), session)
 
 fn render_compiler_instances_result(result: Result String compiler.InstanceMatches) -> Vec String =
   match result with
@@ -615,23 +615,24 @@ fn report_error_lines(report: compiler.CompilerReport) -> Vec String =
       | Just message -> render_error(message)
       | Nothing -> render_error("analysis failed")
 
-fn handle_instances_command(line: String, prefix: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+fn handle_instances_command(line: String, prefix: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), session)
-  else Continue(render_compiler_instances_result(compiler.instances(session, trim(drop_prefix(line, prefix)))), session)
+  else
+    Continue(render_compiler_instances_result(compiler.instances(
+      compiler.CompilerSession(compiler.stateful_session_imports(session), compiler.stateful_session_declarations(session)),
+      trim(drop_prefix(line, prefix)))), session)
 
-fn handle_import_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
-  match compiler.analyze(compiler.with_import(line, session)) with
-  | report ->
-      if compiler.report_is_ok(report) then Continue(single_line("ok"), compiler.with_import(line, session))
-      else Continue(report_error_lines(report), session)
+fn handle_import_submission(line: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
+  match compiler.session_import(session, line) with
+  | Err msg -> Continue(render_error(msg), session)
+  | Ok new_session -> Continue(single_line("ok"), new_session)
 
-fn handle_declaration_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
-  match compiler.analyze(compiler.with_declaration(line, session)) with
-  | report ->
-      if compiler.report_is_ok(report) then Continue(single_line("ok"), compiler.with_declaration(line, session))
-      else Continue(report_error_lines(report), session)
+fn handle_declaration_submission(line: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
+  match compiler.session_declare(session, line) with
+  | Err msg -> Continue(render_error(msg), session)
+  | Ok new_session -> Continue(single_line("ok"), new_session)
 
-fn handle_trimmed_submission(line: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+fn handle_trimmed_submission(line: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
   if line == "" then Continue(vec_empty(), session)
   else if line == ":help" then Continue(help_lines(), session)
   else if line == ":quit" || line == ":q" || line == ":exit" then Exit
@@ -650,9 +651,9 @@ fn handle_trimmed_submission(line: String, session: compiler.CompilerSession) ->
   else if is_declaration(line) then
     handle_declaration_submission(line, session)
   else
-    Continue(render_expr_result(compiler.eval_lines(session, line)), session)
+    Continue(render_expr_result(compiler.eval_in_session(session, line)), session)
 
-fn handle_submission(raw: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+fn handle_submission(raw: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
   handle_trimmed_submission(trim(raw), session)
 
 fn continue_block_execution(result: SubmissionResult, chunks: Vec String, index: Int, outputs: Vec String) -> SubmissionResult !{IO} =
@@ -661,12 +662,12 @@ fn continue_block_execution(result: SubmissionResult, chunks: Vec String, index:
       execute_block_chunks(chunks, index + 1, outputs ++ lines, next_session)
   | Exit -> Exit
 
-fn execute_block_chunks(chunks: Vec String, index: Int, outputs: Vec String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+fn execute_block_chunks(chunks: Vec String, index: Int, outputs: Vec String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
   match vec_get(index, chunks) with
   | Just chunk -> continue_block_execution(handle_submission(chunk, session), chunks, index, outputs)
   | Nothing -> Continue(outputs, session)
 
-fn handle_block_submission(raw: String, session: compiler.CompilerSession) -> SubmissionResult !{IO} =
+fn handle_block_submission(raw: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
   execute_block_chunks(block_chunks(raw), 0, vec_empty(), session)
 
 fn push_history(history: Vec String, raw: String) -> Vec String =
@@ -682,7 +683,9 @@ fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec St
   | Exit -> finish_loop(prompt)
 
 fn run_repl(prompt: Maybe String) -> Unit !{IO} =
-  repl_loop_session(prompt, vec_empty(), compiler.empty_session())
+  do
+    session <- compiler.create_session()
+    repl_loop_session(prompt, vec_empty(), session)
 
 fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
   if banner == "" then run_repl(prompt)
@@ -691,7 +694,7 @@ fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
       term_write(banner)
       run_repl(prompt)
 
-fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.CompilerSession) -> Unit !{IO} =
+fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession) -> Unit !{IO} =
   match read_submission(prompt, history, session) with
   | Submission line ->
       if string.find(line, "\n") == -1 then
@@ -709,7 +712,9 @@ fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compile
   | EndInput -> finish_loop(prompt)
 
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
-  repl_loop_session(prompt, history, compiler.CompilerSession(imports, declarations))
+  do
+    session <- compiler.create_session()
+    repl_loop_session(prompt, history, session)
 
 export fn main() -> Unit !{IO} =
   if term_is_interactive_once()

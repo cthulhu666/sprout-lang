@@ -1961,6 +1961,15 @@ static char* sprout_json_extract_string(const char* text, const char* key) {
   const char* pos = sprout_json_after_key(text, key);
   return pos == NULL ? NULL : sprout_json_parse_string(&pos);
 }
+static long long sprout_json_extract_int(const char* text, const char* key, int* found_out) {
+  const char* pos = sprout_json_after_key(text, key);
+  if (pos == NULL) { if (found_out) *found_out = 0; return 0; }
+  char* end = NULL;
+  long long value = strtoll(pos, &end, 10);
+  if (end == pos) { if (found_out) *found_out = 0; return 0; }
+  if (found_out) *found_out = 1;
+  return value;
+}
 static long long* sprout_json_extract_int_array(const char* text, const char* key, long long* out_len) {
   const char* pos = sprout_json_after_key(text, key);
   pos = sprout_json_skip_ws(pos);
@@ -2215,7 +2224,10 @@ static int sprout_analysis_service_retry_allowed(const char* op) {
     || strcmp(op, "diagnostics_in_source") == 0
     || strcmp(op, "symbol_locations_in_source") == 0
     || strcmp(op, "instances_in_source") == 0
-    || strcmp(op, "complete_in_state") == 0;
+    || strcmp(op, "complete_in_state") == 0
+    || strcmp(op, "session_create") == 0
+    || strcmp(op, "session_type_of") == 0
+    || strcmp(op, "session_diagnostics") == 0;
 }
 
 static long long sprout_err_string_result(const char* message) {
@@ -2709,6 +2721,141 @@ long long repl_add_declaration(const char* source) {
 long long repl_eval_expr(const char* source) {
   (void)source;
   tcp_fail("repl_eval_expr: not supported in native backend");
+  return 0;
+}
+/* --- Session op request builders --- */
+static char* sprout_analysis_request_no_args(const char* op) {
+  size_t request_len = strlen(op) + 16;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(request, request_len + 1, "{\"op\":\"%s\"}\n", op);
+  return request;
+}
+static char* sprout_analysis_request_session_id_only(const char* op, long long session_id) {
+  size_t request_len = strlen(op) + 48;
+  char* request = alloc_cstr(request_len, "analysis service: out of memory");
+  snprintf(request, request_len + 1, "{\"op\":\"%s\",\"session_id\":%lld}\n", op, session_id);
+  return request;
+}
+static char* sprout_analysis_request_session_update(long long session_id, const char* kind, const char* line) {
+  char* ek = sprout_json_escape(kind);
+  char* el = sprout_json_escape(line);
+  size_t len = strlen(ek) + strlen(el) + 80;
+  char* request = alloc_cstr(len, "analysis service: out of memory");
+  snprintf(request, len + 1,
+    "{\"op\":\"session_update\",\"session_id\":%lld,\"kind\":\"%s\",\"line\":\"%s\"}\n",
+    session_id, ek, el);
+  free(ek); free(el);
+  return request;
+}
+static char* sprout_analysis_request_session_id_expr(const char* op, long long session_id, const char* expr) {
+  char* ee = sprout_json_escape(expr);
+  size_t len = strlen(op) + strlen(ee) + 64;
+  char* request = alloc_cstr(len, "analysis service: out of memory");
+  snprintf(request, len + 1,
+    "{\"op\":\"%s\",\"session_id\":%lld,\"expr\":\"%s\"}\n",
+    op, session_id, ee);
+  free(ee);
+  return request;
+}
+/* --- Session builtins --- */
+long long analysis_session_create(long long dummy) {
+  (void)dummy;
+  char* request = sprout_analysis_request_no_args("session_create");
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+    free(request);
+    if (error != NULL) free(error);
+    sprout_builtin_fail_detail("analysis_session_create", "analysis service: not available");
+  }
+  free(request);
+  int found = 0;
+  long long session_id = sprout_json_extract_int(response, "value", &found);
+  free(response);
+  if (!found) sprout_builtin_fail_detail("analysis_session_create", "analysis service: session_create: missing session_id");
+  return session_id;
+}
+long long analysis_session_update(long long session_id, long long kind_handle, long long line_handle) {
+  const char* kind = (const char*)(uintptr_t)kind_handle;
+  const char* line = (const char*)(uintptr_t)line_handle;
+  char* request = sprout_analysis_request_session_update(session_id, kind, line);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, 0, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: session_update failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    free(response);
+    return sprout_make1(find_ctor_tag_by_name("Ok"), 0LL);
+  }
+  return sprout_analysis_error_from_response(response);
+}
+long long analysis_session_eval(long long session_id, long long expr_handle) {
+  const char* expr = (const char*)(uintptr_t)expr_handle;
+  char* request = sprout_analysis_request_session_id_expr("session_eval", session_id, expr);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, 0, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: session_eval failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_vec_string_result_from_response(response, "value");
+  }
+  return sprout_analysis_error_from_response(response);
+}
+long long analysis_session_type_of(long long session_id, long long expr_handle) {
+  const char* expr = (const char*)(uintptr_t)expr_handle;
+  char* request = sprout_analysis_request_session_id_expr("session_type_of", session_id, expr);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+    free(request);
+    long long out = sprout_err_string_result(error != NULL ? error : "analysis service: session_type_of failed");
+    if (error != NULL) free(error);
+    return out;
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_ok_string_result_from_response(response, "value");
+  }
+  return sprout_analysis_error_from_response(response);
+}
+long long analysis_session_diagnostics(long long session_id) {
+  char* request = sprout_analysis_request_session_id_only("session_diagnostics", session_id);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, 1, &response, &error)) {
+    free(request);
+    sprout_builtin_fail_detail("analysis_session_diagnostics", error != NULL ? error : "analysis service: request failed");
+  }
+  free(request);
+  if (sprout_json_field_is_true(response, "ok")) {
+    return sprout_analysis_diagnostics_vec_or_fail("analysis_session_diagnostics", response, "messages", "lines", "columns");
+  }
+  char* err_msg = sprout_json_extract_string(response, "error");
+  free(response);
+  sprout_builtin_fail_detail("analysis_session_diagnostics", err_msg != NULL ? err_msg : "analysis service: session_diagnostics failed");
+  return 0;
+}
+long long analysis_session_destroy(long long session_id) {
+  char* request = sprout_analysis_request_session_id_only("session_destroy", session_id);
+  char* response = NULL;
+  char* error = NULL;
+  if (!sprout_run_analysis_service(request, 0, &response, &error)) {
+    free(request);
+    if (error != NULL) free(error);
+    return 0;
+  }
+  free(request);
+  free(response);
   return 0;
 }
 long long analysis_eval_expr_in_source(const char* module_source, const char* expr) {

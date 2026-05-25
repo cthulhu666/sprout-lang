@@ -35,6 +35,36 @@ fn count_header_lines(s: String, pos: Int, count: Int) -> Int =
   else count
 
 # ---------------------------------------------------------------------------
+# SessionState — server-side per-session state (M2)
+
+type SessionState = SessionState (Vec String) (Vec String)
+  # imports, declarations
+
+fn session_state_imports(s: SessionState) -> Vec String =
+  match s with | SessionState imports _ -> imports
+
+fn session_state_declarations(s: SessionState) -> Vec String =
+  match s with | SessionState _ declarations -> declarations
+
+fn session_add_line(sess: SessionState, kind: String, line: String) -> SessionState =
+  match sess with
+  | SessionState imports declarations ->
+      if kind == "import" then SessionState(vec_append(line, imports), declarations)
+      else SessionState(imports, vec_append(line, declarations))
+
+fn build_source_parts(header: String, imports: Vec String, declarations: Vec String) -> String =
+  if vec_length(declarations) == 0 then with_imports
+  else with_imports ++ "\n\n" ++ string.join("\n\n", declarations)
+  where with_imports =
+    if vec_length(imports) == 0 then header
+    else header ++ "\n\n" ++ string.join("\n\n", imports)
+
+fn rebuild_session_source(sess: SessionState) -> String =
+  match sess with
+  | SessionState imports declarations ->
+      build_source_parts("module app.session", imports, declarations)
+
+# ---------------------------------------------------------------------------
 # JSON response construction
 
 fn ok_response(value: json.Json) -> json.Json =
@@ -72,6 +102,14 @@ fn require_string_field(req: json.Json, field: String) -> Result String String =
       match json.json_get_string(v) with
       | Nothing -> Err(string.concat("field must be a string: ", field))
       | Just s -> Ok(s)
+
+fn require_int_field(req: json.Json, field: String) -> Result String Int =
+  match json.json_get_field(req, field) with
+  | Nothing -> Err(string.concat("missing field: ", field))
+  | Just v ->
+      match json.json_get_int(v) with
+      | Nothing -> Err(string.concat("field must be an integer: ", field))
+      | Just n -> Ok(n)
 
 # ---------------------------------------------------------------------------
 # AST name extraction
@@ -349,20 +387,28 @@ fn runtime_obj_path() -> String = "/tmp/sprout_runtime_daemon.o"
 # ---------------------------------------------------------------------------
 # StartupState — pre-compiled runtime.o, stdlib_root, and persistent module cache
 
-type StartupState = StartupState String String (Ref(Dict (List (String, types.Scheme))))
-  # stdlib_root, runtime_obj_path, cache
+type StartupState = StartupState String String (Ref(Dict (List (String, types.Scheme)))) (Ref(Dict SessionState)) (Ref Int)
+  # stdlib_root, runtime_obj_path, cache, sessions, next_session_id
 
 fn state_stdlib_root(state: StartupState) -> String =
   match state with
-  | StartupState root _ _ -> root
+  | StartupState root _ _ _ _ -> root
 
 fn state_runtime_obj(state: StartupState) -> String =
   match state with
-  | StartupState _ obj _ -> obj
+  | StartupState _ obj _ _ _ -> obj
 
 fn state_cache(state: StartupState) -> Ref(Dict (List (String, types.Scheme))) =
   match state with
-  | StartupState _ _ cache -> cache
+  | StartupState _ _ cache _ _ -> cache
+
+fn state_sessions(state: StartupState) -> Ref(Dict SessionState) =
+  match state with
+  | StartupState _ _ _ sessions _ -> sessions
+
+fn state_next_id(state: StartupState) -> Ref Int =
+  match state with
+  | StartupState _ _ _ _ next_id -> next_id
 
 # Pre-compile sprout_runtime.c once, create a persistent module cache, and pre-warm it
 # with the prelude so the first user request hits the cache rather than cold-loading.
@@ -376,7 +422,9 @@ fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
     else do
       cache <- module_loader.new_cache()
       prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
-      StartupState(stdlib_root, obj, cache)
+      sessions <- ref_new(dict_empty())
+      next_id <- ref_new(1)
+      StartupState(stdlib_root, obj, cache, sessions, next_id)
 
 fn clang_base_args(runtime_obj: String) -> List String =
   ["clang", eval_ir_path(), runtime_obj, "-O2", "-o", eval_bin_path()]
@@ -471,6 +519,99 @@ fn op_eval_expr_in_source(src: String, expr: String, state: StartupState) -> jso
     eval_with_type_result(src, expr, state, type_result)
 
 # ---------------------------------------------------------------------------
+# Session ops (M2)
+
+fn compile_fail_response(diags: List compiler.Diagnostic) -> json.Json =
+  match diags with
+  | Nil -> error_response("type check failed")
+  | Cons d _ ->
+      match d with
+      | compiler.DiagError msg -> error_response(msg)
+      | compiler.DiagWarning msg -> error_response(msg)
+
+fn op_session_create(state: StartupState) -> json.Json !{IO} =
+  do
+    sessions <- ref_read(state_sessions(state))
+    next_id <- ref_read(state_next_id(state))
+    ref_write(state_sessions(state), dict_set(int_to_string(next_id), SessionState(vec_empty(), vec_empty()), sessions))
+    ref_write(state_next_id(state), next_id + 1)
+    ok_response(json.JsonInt(next_id))
+
+fn op_session_destroy(req: json.Json, state: StartupState) -> json.Json !{IO} =
+  match require_int_field(req, "session_id") with
+  | Err msg -> error_response(msg)
+  | Ok session_id ->
+      do
+        sessions <- ref_read(state_sessions(state))
+        ref_write(state_sessions(state), dict_remove(int_to_string(session_id), sessions))
+        ok_response(json.JsonBool(true))
+
+fn op_session_update(req: json.Json, state: StartupState) -> json.Json !{IO} =
+  match require_int_field(req, "session_id") with
+  | Err msg -> error_response(msg)
+  | Ok session_id ->
+      match require_string_field(req, "kind") with
+      | Err msg -> error_response(msg)
+      | Ok kind ->
+          match require_string_field(req, "line") with
+          | Err msg -> error_response(msg)
+          | Ok line ->
+              do
+                sessions <- ref_read(state_sessions(state))
+                match dict_get(int_to_string(session_id), sessions) with
+                | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
+                | Just sess ->
+                    do
+                      let new_sess = session_add_line(sess, kind, line)
+                      let check_src = rebuild_session_source(new_sess)
+                      check_result <- compiler.compile_source_with_cache(check_src, state_stdlib_root(state), state_cache(state))
+                      match check_result with
+                      | compiler.CompileFail diags -> compile_fail_response(diags)
+                      | compiler.CompileOk _ ->
+                          do
+                            ref_write(state_sessions(state), dict_set(int_to_string(session_id), new_sess, sessions))
+                            ok_response(json.JsonBool(true))
+
+fn op_session_eval(req: json.Json, state: StartupState) -> json.Json !{IO} =
+  match require_int_field(req, "session_id") with
+  | Err msg -> error_response(msg)
+  | Ok session_id ->
+      match require_string_field(req, "expr") with
+      | Err msg -> error_response(msg)
+      | Ok expr ->
+          do
+            sessions <- ref_read(state_sessions(state))
+            match dict_get(int_to_string(session_id), sessions) with
+            | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
+            | Just sess ->
+                op_eval_expr_in_source(rebuild_session_source(sess), expr, state)
+
+fn op_session_type_of(req: json.Json, state: StartupState) -> json.Json !{IO} =
+  match require_int_field(req, "session_id") with
+  | Err msg -> error_response(msg)
+  | Ok session_id ->
+      match require_string_field(req, "expr") with
+      | Err msg -> error_response(msg)
+      | Ok expr ->
+          do
+            sessions <- ref_read(state_sessions(state))
+            match dict_get(int_to_string(session_id), sessions) with
+            | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
+            | Just sess ->
+                op_type_of_in_source(rebuild_session_source(sess), expr, state)
+
+fn op_session_diagnostics(req: json.Json, state: StartupState) -> json.Json !{IO} =
+  match require_int_field(req, "session_id") with
+  | Err msg -> error_response(msg)
+  | Ok session_id ->
+      do
+        sessions <- ref_read(state_sessions(state))
+        match dict_get(int_to_string(session_id), sessions) with
+        | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
+        | Just sess ->
+            op_diagnostics_in_source(rebuild_session_source(sess), state)
+
+# ---------------------------------------------------------------------------
 # Request dispatch
 
 fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{IO} =
@@ -522,6 +663,12 @@ fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{I
             if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
             else op_eval_expr_in_source(src, expr, state)
   else if op == "complete_in_state" then not_implemented(op)
+  else if op == "session_create" then op_session_create(state)
+  else if op == "session_update" then op_session_update(req, state)
+  else if op == "session_eval" then op_session_eval(req, state)
+  else if op == "session_type_of" then op_session_type_of(req, state)
+  else if op == "session_diagnostics" then op_session_diagnostics(req, state)
+  else if op == "session_destroy" then op_session_destroy(req, state)
   else error_response(string.concat("unknown op: ", op))
 
 fn dispatch(req: json.Json, state: StartupState) -> json.Json !{IO} =
@@ -554,7 +701,9 @@ fn service_loop(state: StartupState) -> Unit !{IO} =
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
   if stdlib_root == "" then do
     cache <- module_loader.new_cache()
-    service_loop(StartupState("", "", cache))
+    sessions <- ref_new(dict_empty())
+    next_id <- ref_new(1)
+    service_loop(StartupState("", "", cache, sessions, next_id))
   else do
     state <- build_startup_state(stdlib_root)
     service_loop(state)

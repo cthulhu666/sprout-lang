@@ -194,3 +194,67 @@ fn payload_inventory(payload: ReportPayload) -> SymbolInventory =
 export fn diagnostic_message(value: Diagnostic) -> String =
   match value with
   | Diagnostic message _ _ -> message
+
+# ---------------------------------------------------------------------------
+# StatefulSession — server-side session state (M2)
+#
+# Carries the server-assigned Int session ID plus local mirrors of imports
+# and declarations.  The mirrors are kept in sync by session_import /
+# session_declare (updated only when the server returns Ok) and are used
+# by the REPL's tab-completion system, which needs the raw lists locally
+# without an extra round-trip.
+
+export type StatefulSession (..) = StatefulSession Int (Vec String) (Vec String)
+  # session_id, local_imports_mirror, local_declarations_mirror
+
+export fn stateful_session_imports(session: StatefulSession) -> Vec String =
+  match session with | StatefulSession _ imports _ -> imports
+
+export fn stateful_session_declarations(session: StatefulSession) -> Vec String =
+  match session with | StatefulSession _ _ declarations -> declarations
+
+fn stateful_session_source(session: StatefulSession) -> String =
+  match session with
+  | StatefulSession _ imports declarations -> session_source(CompilerSession(imports, declarations))
+
+extern fn analysis_session_create(dummy: String) -> Int !{IO}
+extern fn analysis_session_update(session_id: Int, kind: String, line: String) -> Result String Unit !{IO}
+extern fn analysis_session_eval(session_id: Int, expr: String) -> Result String (Vec String) !{IO}
+extern fn analysis_session_type_of(session_id: Int, expr: String) -> Result String String !{IO}
+extern fn analysis_session_diagnostics(session_id: Int) -> Vec (String, Int, Int) !{IO}
+extern fn analysis_session_destroy(session_id: Int) -> Unit !{IO}
+
+export fn create_session() -> StatefulSession !{IO} =
+  do
+    id <- analysis_session_create("")
+    StatefulSession(id, vec_empty(), vec_empty())
+
+export fn session_import(session: StatefulSession, line: String) -> Result String StatefulSession !{IO} =
+  match session with
+  | StatefulSession id imports declarations ->
+      match analysis_session_update(id, "import", line) with
+      | Err msg -> Err(msg)
+      | Ok _ -> Ok(StatefulSession(id, vec_append(line, imports), declarations))
+
+export fn session_declare(session: StatefulSession, line: String) -> Result String StatefulSession !{IO} =
+  match session with
+  | StatefulSession id imports declarations ->
+      match analysis_session_update(id, "declaration", line) with
+      | Err msg -> Err(msg)
+      | Ok _ -> Ok(StatefulSession(id, imports, vec_append(line, declarations)))
+
+export fn eval_in_session(session: StatefulSession, expr: String) -> Result String (Vec String) !{IO} =
+  match session with
+  | StatefulSession id _ _ -> analysis_session_eval(id, expr)
+
+export fn type_of_in_session(session: StatefulSession, expr: String) -> Result String String !{IO} =
+  match session with
+  | StatefulSession id _ _ -> analysis_session_type_of(id, expr)
+
+export fn diagnostics_in_session(session: StatefulSession) -> Vec Diagnostic !{IO} =
+  match session with
+  | StatefulSession id _ _ -> map_diagnostics(analysis_session_diagnostics(id), 0, vec_empty())
+
+export fn destroy_session(session: StatefulSession) -> Unit !{IO} =
+  match session with
+  | StatefulSession id _ _ -> analysis_session_destroy(id)
