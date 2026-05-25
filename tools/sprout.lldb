@@ -24,15 +24,33 @@ command alias sprout-adt  expression -l c -- (void)sprout_debug_adt((long long)
 # ── Register shortcuts (arm64) ────────────────────────────────────────────────
 #
 # Sprout passes arguments in x0, x1, x2, … and returns in x0.
-# At a breakpoint inside a function:
-#   x0 = first argument
-#   x1 = second argument (if present)
-#   x0 after return = return value
+#
+# IMPORTANT — DWARF breakpoint offset:
+#   Source-line breakpoints fire at the first call in the function body (+28 on
+#   arm64), not at function entry.  At that instruction x0 holds the address of
+#   the argument's GC root stack slot, NOT the argument value itself.
+#   To read an Int/Bool argument, dereference x0:
+#     (lldb) memory read -s8 -c1 -fu $x0    → shows the integer value
+#   For an ADT argument, x0 is the SproutObj pointer — use sprout-adt directly.
 #
 # Quick display without calling runtime helpers:
-#   (lldb) p/d $x0        — print as decimal integer
-#   (lldb) p/x $x0        — print as hex (pointer or raw int)
-#   (lldb) memory read -s8 -fu $x0    — read SproutObj fields at pointer x0
+#   (lldb) p/d $x0                    — print x0 as decimal integer
+#   (lldb) p/x $x0                    — print x0 as hex
+#   (lldb) memory read -s8 -c1 -fu $x0  — dereference stack slot → Int value
+
+# ── Setting breakpoints ───────────────────────────────────────────────────────
+#
+# LLDB treats '.' in symbol names as an ObjC method separator, so:
+#   (lldb) b main.fact                 ← BROKEN — "no locations (pending)"
+#   (lldb) br set -n "main.fact"       ← BROKEN — same issue
+#
+# Working alternatives:
+#   (lldb) br set -r "main\.fact$"     ← regex breakpoint, escapes the dot ✓
+#   (lldb) b myprog.spr:4              ← source-line breakpoint ✓  (preferred)
+#
+# For stdlib functions that have no debug info, use address-based breakpoints:
+#   (lldb) image lookup -r -s pattern  — find symbol address
+#   (lldb) br set -a <address>         — break at that address
 
 # ── Backtrace note ────────────────────────────────────────────────────────────
 #
@@ -42,10 +60,12 @@ command alias sprout-adt  expression -l c -- (void)sprout_debug_adt((long long)
 
 # ── Example session ───────────────────────────────────────────────────────────
 #
+# $ just build-debug examples/factorial.spr /tmp/factorial_dbg
 # $ lldb /tmp/factorial_dbg
 # (lldb) command source tools/sprout.lldb
-# (lldb) br set -n "main.fact"   # NOTE: 'b main.fact' misfires — dot is parsed as method separator
+# (lldb) b factorial.spr:4             # source-line breakpoint (recommended)
 # (lldb) run
-# (lldb) register read x0         # shows n as raw integer
-# (lldb) bt                       # shows Sprout qualified names
+# (lldb) memory read -s8 -c1 -fu $x0  # read first Int arg (n) from stack slot
+# (lldb) bt                            # shows Sprout qualified names
+# (lldb) sprout-adt $x0               # inspect ADT arg (if applicable)
 # (lldb) continue
