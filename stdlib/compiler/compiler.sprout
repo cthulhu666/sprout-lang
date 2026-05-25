@@ -108,6 +108,22 @@ export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileR
           | checker.CheckErr msg -> CompileFail(Cons (DiagError("check: " ++ msg), Nil))
           | checker.CheckOk env -> CompileOk(env)
 
+# compile_source_with_cache: like compile_source_with_root but uses a caller-provided cache.
+# The cache is NOT recreated — the caller is responsible for its lifecycle.
+# cache param is unannotated: its type is constrained by the module_loader callees.
+export fn compile_source_with_cache(src: String, stdlib_root: String, cache) -> CompileResult !{IO} =
+  do
+    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
+    match lex_parse(strip_headers(src, 0)) with
+    | LexParseFail diags -> CompileFail(diags)
+    | LexParseOk prog ->
+        do
+          result <- checker.check_program_with_env(prog, prelude_pairs ++ import_pairs)
+          match result with
+          | checker.CheckErr msg -> CompileFail(Cons (DiagError("check: " ++ msg), Nil))
+          | checker.CheckOk env -> CompileOk(env)
+
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: String) -> CompileResult !{IO} =
   match read_file(path) with
@@ -253,6 +269,56 @@ export fn compile_full_ir_lines(path: String, stdlib_root: String, debug_mode_: 
           match ir_result with
           | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines -> IrFullLinesOk(header_lines, str_lines, def_lines, dbg_lines)
           | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))
+
+# compile_full_ir_with_cache: like compile_full_ir but uses a caller-provided module cache.
+# Avoids recreating the cache on every eval when called from the analysis service daemon.
+export fn compile_full_ir_with_cache(path: String, stdlib_root: String, cache) -> IrFullResult !{IO} =
+  do
+    recheck_result <- compile_phase_recheck_with_cache(path, stdlib_root, cache)
+    match recheck_result with
+    | typed_ast.TypedErr msg -> IrFullFail(Cons (DiagError(msg), Nil))
+    | typed_ast.TypedOk typed_lowered env ->
+        do
+          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, false, path)
+          match ir_result with
+          | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines -> IrFullOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
+          | codegen.IrLinesErr msg -> IrFullFail(Cons (DiagError("codegen: " ++ msg), Nil))
+
+fn compile_phase_check_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
+  do
+    bundle_result <- bundler.bundle_file(path, stdlib_root)
+    match bundle_result with
+    | bundler.BundleErr msg -> typed_ast.TypedErr("bundle: " ++ msg)
+    | bundler.BundleOk prog ->
+        do
+          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          result <- checker.typecheck_typed(prog, prelude_pairs)
+          match result with
+          | typed_ast.TypedErr msg -> typed_ast.TypedErr("check: " ++ msg)
+          | ok -> ok
+
+fn compile_phase_lower_with_cache(path: String, stdlib_root: String, cache) -> lowering.LowerResult !{IO} =
+  do
+    check_result <- compile_phase_check_with_cache(path, stdlib_root, cache)
+    match check_result with
+    | typed_ast.TypedErr msg -> lowering.LowerErr(msg)
+    | typed_ast.TypedOk typed_prog _ ->
+        match lowering.lower_program(typed_prog) with
+        | lowering.LowerErr msg -> lowering.LowerErr("lower: " ++ msg)
+        | ok -> ok
+
+fn compile_phase_recheck_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
+  do
+    lower_result <- compile_phase_lower_with_cache(path, stdlib_root, cache)
+    match lower_result with
+    | lowering.LowerErr msg -> typed_ast.TypedErr(msg)
+    | lowering.LowerOk lowered ->
+        do
+          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          result <- checker.typecheck_typed(lowered, prelude_pairs)
+          match result with
+          | typed_ast.TypedErr msg -> typed_ast.TypedErr("check2: " ++ msg)
+          | ok -> ok
 
 # compile_one_fn_ir_lines: like compile_full_ir_lines but only emits codegen for
 # the function(s) whose qualified name contains fn_name as a substring.

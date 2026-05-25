@@ -247,9 +247,9 @@ fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
 # ---------------------------------------------------------------------------
 # Op handlers
 
-fn op_check_source(src: String, stdlib_root: String) -> json.Json !{IO} =
+fn op_check_source(src: String, state: StartupState) -> json.Json !{IO} =
   do
-    result <- compiler.compile_source_with_root(src, stdlib_root)
+    result <- compiler.compile_source_with_cache(src, state_stdlib_root(state), state_cache(state))
     match result with
     | compiler.CompileOk _ -> ok_response(json.JsonNull)
     | compiler.CompileFail diags ->
@@ -260,9 +260,9 @@ fn op_check_source(src: String, stdlib_root: String) -> json.Json !{IO} =
             | compiler.DiagError msg -> error_response(msg)
             | compiler.DiagWarning msg -> error_response(msg)
 
-fn op_diagnostics_in_source(src: String, stdlib_root: String) -> json.Json !{IO} =
+fn op_diagnostics_in_source(src: String, state: StartupState) -> json.Json !{IO} =
   do
-    result <- compiler.compile_source_with_root(src, stdlib_root)
+    result <- compiler.compile_source_with_cache(src, state_stdlib_root(state), state_cache(state))
     match result with
     | compiler.CompileOk _ -> empty_diags_response()
     | compiler.CompileFail diags -> diags_to_json(diags)
@@ -302,11 +302,11 @@ fn sentinel_name() -> String = "__repl_source_value"
 fn augment_source(src: String, expr: String) -> String =
   src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr
 
-fn op_type_of_in_source(src: String, expr: String, stdlib_root: String) -> json.Json !{IO} =
+fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.Json !{IO} =
   if str_find(src, "let " ++ sentinel_name()) != -1 then
     error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot infer type")
   else do
-    result <- compiler.compile_source_with_root(augment_source(src, expr), stdlib_root)
+    result <- compiler.compile_source_with_cache(augment_source(src, expr), state_stdlib_root(state), state_cache(state))
     match result with
     | compiler.CompileFail diags ->
         match diags with
@@ -347,19 +347,25 @@ fn runtime_c_path(stdlib_root: String) -> String =
 fn runtime_obj_path() -> String = "/tmp/sprout_runtime_daemon.o"
 
 # ---------------------------------------------------------------------------
-# StartupState — pre-compiled runtime.o and stdlib_root, built once at startup
+# StartupState — pre-compiled runtime.o, stdlib_root, and persistent module cache
 
-type StartupState = StartupState String String  # stdlib_root, runtime_obj_path
+type StartupState = StartupState String String (Ref(Dict (List (String, types.Scheme))))
+  # stdlib_root, runtime_obj_path, cache
 
 fn state_stdlib_root(state: StartupState) -> String =
   match state with
-  | StartupState root _ -> root
+  | StartupState root _ _ -> root
 
 fn state_runtime_obj(state: StartupState) -> String =
   match state with
-  | StartupState _ obj -> obj
+  | StartupState _ obj _ -> obj
 
-# Pre-compile sprout_runtime.c once so every eval link uses the .o instead of .c.
+fn state_cache(state: StartupState) -> Ref(Dict (List (String, types.Scheme))) =
+  match state with
+  | StartupState _ _ cache -> cache
+
+# Pre-compile sprout_runtime.c once, create a persistent module cache, and pre-warm it
+# with the prelude so the first user request hits the cache rather than cold-loading.
 # Darwin frameworks are link-time only; the -c step is platform-independent.
 fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
   do
@@ -367,7 +373,10 @@ fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
     result <- process.proc_run(["clang", "-c", runtime_c_path(stdlib_root), "-O2", "-o", obj])
     if process.proc_ok(result) == false
     then panic("sproutd: failed to pre-compile runtime.c: " ++ process.proc_stderr(result))
-    else StartupState(stdlib_root, obj)
+    else do
+      cache <- module_loader.new_cache()
+      prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+      StartupState(stdlib_root, obj, cache)
 
 fn clang_base_args(runtime_obj: String) -> List String =
   ["clang", eval_ir_path(), runtime_obj, "-O2", "-o", eval_bin_path()]
@@ -431,7 +440,7 @@ fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
   | Err msg -> panic("write_file: eval_source: " ++ msg)
   | Ok _ ->
       do
-        ir_result <- compiler.compile_full_ir(eval_source_path(), state_stdlib_root(state))
+        ir_result <- compiler.compile_full_ir_with_cache(eval_source_path(), state_stdlib_root(state), state_cache(state))
         link_and_run_eval(ir_result, state)
 
 fn eval_with_scheme(src: String, expr: String, state: StartupState, scheme: types.Scheme) -> json.Json !{IO} =
@@ -458,7 +467,7 @@ fn op_eval_expr_in_source(src: String, expr: String, state: StartupState) -> jso
   if str_find(src, "let " ++ sentinel_name()) != -1 then
     error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot eval")
   else do
-    type_result <- compiler.compile_source_with_root(augment_source(src, expr), state_stdlib_root(state))
+    type_result <- compiler.compile_source_with_cache(augment_source(src, expr), state_stdlib_root(state), state_cache(state))
     eval_with_type_result(src, expr, state, type_result)
 
 # ---------------------------------------------------------------------------
@@ -469,14 +478,14 @@ fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{I
     match require_string_field(req, "module_source") with
     | Err msg -> error_response(msg)
     | Ok src ->
-        if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
-        else op_check_source(src, stdlib_root)
+        if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
+        else op_check_source(src, state)
   else if op == "diagnostics_in_source" then
     match require_string_field(req, "module_source") with
     | Err msg -> error_response(msg)
     | Ok src ->
-        if stdlib_root == "" then empty_diags_response()
-        else op_diagnostics_in_source(src, stdlib_root)
+        if state_stdlib_root(state) == "" then empty_diags_response()
+        else op_diagnostics_in_source(src, state)
   else if op == "declared_names_in_source" then
     match require_string_field(req, "module_source") with
     | Err msg -> error_response(msg)
@@ -500,8 +509,8 @@ fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{I
         match require_string_field(req, "expr") with
         | Err msg -> error_response(msg)
         | Ok expr ->
-            if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
-            else op_type_of_in_source(src, expr, stdlib_root)
+            if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
+            else op_type_of_in_source(src, expr, state)
   else if op == "instances_in_source" then not_implemented(op)
   else if op == "eval_expr_in_source" then
     match require_string_field(req, "module_source") with
@@ -510,11 +519,10 @@ fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{I
         match require_string_field(req, "expr") with
         | Err msg -> error_response(msg)
         | Ok expr ->
-            if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
+            if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
             else op_eval_expr_in_source(src, expr, state)
   else if op == "complete_in_state" then not_implemented(op)
   else error_response(string.concat("unknown op: ", op))
-  where stdlib_root = state_stdlib_root(state)
 
 fn dispatch(req: json.Json, state: StartupState) -> json.Json !{IO} =
   match json.json_get_field(req, "op") with
@@ -544,7 +552,9 @@ fn service_loop(state: StartupState) -> Unit !{IO} =
           service_loop(state)
 
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
-  if stdlib_root == "" then service_loop(StartupState("", ""))
+  if stdlib_root == "" then do
+    cache <- module_loader.new_cache()
+    service_loop(StartupState("", "", cache))
   else do
     state <- build_startup_state(stdlib_root)
     service_loop(state)

@@ -271,6 +271,10 @@ fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List S
   if str_starts_with_at_byte(src, i, "module ") then
     match read_dotted_ident_at(src, i + 7) with
     | (name, _) -> (name, exported, ctor_types)
+  else if str_starts_with_at_byte(src, i, "export type alias ") then
+    match read_ident_at(src, i + 18) with
+    | ("", _) -> (mod_name, exported, ctor_types)
+    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
   else if str_starts_with_at_byte(src, i, "export type ") then
     match read_ident_at(src, i + 12) with
     | ("", _) -> (mod_name, exported, ctor_types)
@@ -560,7 +564,8 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   | ast.ClassDecl name _ methods _ _ ->
       add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
   | ast.InstanceDecl _ _ _ _ -> acc
-  | ast.AliasDecl _ _ _ _ -> acc
+  | ast.AliasDecl name _ _ _ ->
+      add_record_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   | ast.ExternFnDecl _ _ _ _ _ -> acc
 
 fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
@@ -1006,7 +1011,7 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
             qualify_instance_methods(ctx, methods),
             pos)
   | ast.AliasDecl name type_params rhs pos ->
-      ast.AliasDecl(name, type_params, qualify_type_expr(ctx, rhs), pos)
+      ast.AliasDecl(dict_get_or(name, ctx_type_locals(ctx), name), type_params, qualify_type_expr(ctx, rhs), pos)
   | ast.ExternFnDecl name params ret_type effects pos ->
       ast.ExternFnDecl(name, qualify_params(ctx, params), qualify_maybe_type(ctx, ret_type), effects, pos)
 

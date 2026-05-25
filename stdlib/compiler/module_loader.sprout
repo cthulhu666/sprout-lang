@@ -265,7 +265,7 @@ fn strip_headers_ml(s: String, pos: Int) -> String =
 # The cache maps module_name → pairs from that module's check result.
 # Modules not in "stdlib.*" are skipped (they're pre-seeded in builtin_env).
 
-type alias ModuleCache = Ref(Dict (List (String, types.Scheme)))
+export type alias ModuleCache = Ref(Dict (List (String, types.Scheme)))
 
 export fn new_cache() -> ModuleCache !{IO} =
   ref_new(dict_empty())
