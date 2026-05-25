@@ -3,6 +3,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 stdlib_root := justfile_directory() / "stdlib"
 driver      := stdlib_root / "compiler" / "compile_driver.sprout"
 clang_extra := if os() == "macos" { "-framework Security -framework CoreFoundation" } else { "" }
+build_dir   := justfile_directory() / "build"
 
 default:
   @just --list
@@ -17,48 +18,48 @@ install-hooks:
 repl:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./repl_bin" ]]; then
+  if [[ ! -x "{{build_dir}}/repl_bin" ]]; then
     echo "ERROR: repl_bin not found; run: just build-repl" >&2; exit 1
   fi
-  if [[ ! -x "./analysis_service_bin" ]]; then
+  if [[ ! -x "{{build_dir}}/analysis_service_bin" ]]; then
     echo "ERROR: analysis_service_bin not found; run: just build-analysis-service" >&2; exit 1
   fi
-  SPROUT_SERVICE_CMD="$(pwd)/analysis_service_bin {{stdlib_root}}"
+  SPROUT_SERVICE_CMD="{{build_dir}}/analysis_service_bin {{stdlib_root}}"
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" SPROUT_DARWIN_FRAMEWORKS=1 ./repl_bin
+    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" SPROUT_DARWIN_FRAMEWORKS=1 "{{build_dir}}/repl_bin"
   else
-    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" ./repl_bin
+    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" "{{build_dir}}/repl_bin"
   fi
 
 # ── Formatting & Linting ──────────────────────────────────────────────────────
 
 [private]
 _require-fmt-bin:
-  @[[ -x "./fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+  @[[ -x "{{build_dir}}/fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
 
 [group('fmt')]
 fmt: _require-fmt-bin
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 ./fmt_bin fmt
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" fmt
 
 [group('fmt')]
 fmt-check: _require-fmt-bin
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 ./fmt_bin fmt --check
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" fmt --check
 
 [group('fmt')]
 fmt-file file: _require-fmt-bin
-  ./fmt_bin fmt {{quote(file)}}
+  "{{build_dir}}/fmt_bin" fmt {{quote(file)}}
 
 [group('fmt')]
 fmt-check-file file: _require-fmt-bin
-  ./fmt_bin fmt --check {{quote(file)}}
+  "{{build_dir}}/fmt_bin" fmt --check {{quote(file)}}
 
 [group('fmt')]
 lint: _require-fmt-bin
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 ./fmt_bin lint
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" lint
 
 [group('fmt')]
 lint-file file: _require-fmt-bin
-  ./fmt_bin lint {{quote(file)}}
+  "{{build_dir}}/fmt_bin" lint {{quote(file)}}
 
 # Build fmt_bin from the committed platform bootstrap seed — no Python required.
 [group('fmt')]
@@ -78,8 +79,9 @@ build-fmt-from-seed:
   echo "==> Emitting LLVM IR for fmt_bin..."
   "$SEED" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/fmt_driver.sprout" > "$TMP_LL"
   echo "==> Linking with clang..."
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o fmt_bin
-  echo "==> Built fmt_bin"
+  mkdir -p "{{build_dir}}"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/fmt_bin"
+  echo "==> Built {{build_dir}}/fmt_bin"
 
 # ── Check / Run ───────────────────────────────────────────────────────────────
 
@@ -87,24 +89,24 @@ build-fmt-from-seed:
 check file:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
   fi
-  ./compile_driver_bin_stage1 --phase check "{{stdlib_root}}" {{quote(file)}}
+  "{{build_dir}}/compile_driver_bin_stage1" --phase check "{{stdlib_root}}" {{quote(file)}}
 
 # Compile {{file}} with stage-1 and run the resulting binary.
 [group('dev')]
 run file:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
     exit 1
   fi
   TMP_LL="/tmp/sprout_run_$$.ll"
   TMP_BIN="/tmp/sprout_run_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  ./compile_driver_bin_stage1 --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_BIN"
   "$TMP_BIN"
 
@@ -113,24 +115,24 @@ run file:
 compile file out:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
     exit 1
   fi
-  ./compile_driver_bin_stage1 --emit-ir "{{stdlib_root}}" {{quote(file)}} > {{quote(out)}}
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > {{quote(out)}}
 
 # Compile {{file}} to a native binary at {{out}} using stage-1.
 [group('dev')]
 compile-native file out:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
     exit 1
   fi
   TMP_LL="/tmp/sprout_compile_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
-  ./compile_driver_bin_stage1 --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o {{quote(out)}}
 
 # ── Testing ───────────────────────────────────────────────────────────────────
@@ -191,15 +193,15 @@ _test-stdlib stage:
 
 # Stage-1: emit IR → clang link → run for each test file.
 [group('test')]
-test-stdlib-stage1: (_test-stdlib "compile_driver_bin_stage1")
+test-stdlib-stage1: (_test-stdlib "build/compile_driver_bin_stage1")
 
 # Stage-2: emit IR → clang link → run for each test file.
 [group('test')]
-test-stdlib-stage2: (_test-stdlib "compile_driver_bin_stage2")
+test-stdlib-stage2: (_test-stdlib "build/compile_driver_bin_stage2")
 
 # Run a single test file with stage-1.
 [group('test')]
-test-file file: (_test-file "compile_driver_bin_stage1" file)
+test-file file: (_test-file "build/compile_driver_bin_stage1" file)
 
 [private]
 _test-file stage file:
@@ -259,32 +261,34 @@ _build-stage in_bin out_bin:
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
   echo "==> Linking with clang..."
+  mkdir -p "{{build_dir}}"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{out_bin}}"
   echo "==> Built {{out_bin}}"
 
 # Build compile_driver_bin_stage2 from stage-1.
 [group('build')]
-build-stage2: (_build-stage "compile_driver_bin_stage1" "compile_driver_bin_stage2")
+build-stage2: (_build-stage "build/compile_driver_bin_stage1" "build/compile_driver_bin_stage2")
 
 # Build compile_driver_bin_stage3 from stage-2.
 [group('build')]
-build-stage3: (_build-stage "compile_driver_bin_stage2" "compile_driver_bin_stage3")
+build-stage3: (_build-stage "build/compile_driver_bin_stage2" "build/compile_driver_bin_stage3")
 
 # Build stage-2 with AddressSanitizer + UBSan (slow; for debugging only).
 [group('build')]
 build-stage2-asan:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
   fi
   TMP_LL="/tmp/sprout_stage2_asan_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR via stage-1..."
-  ./compile_driver_bin_stage1 --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
   echo "==> Linking with clang + ASan/UBSan..."
-  clang "$TMP_LL" runtime/sprout_runtime.c -O1 -fsanitize=address,undefined {{clang_extra}} -o compile_driver_bin_stage2_asan
-  echo "==> Built compile_driver_bin_stage2_asan (asan)"
+  mkdir -p "{{build_dir}}"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O1 -fsanitize=address,undefined {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage2_asan"
+  echo "==> Built {{build_dir}}/compile_driver_bin_stage2_asan (asan)"
 
 # ── Examples ──────────────────────────────────────────────────────────────────
 
@@ -375,15 +379,15 @@ _compile-examples stage xfail="":
 # Stage-1: emit IR → clang link for each example.
 # Known xfail: sentry_api (no main fn), sentry_issue_browser{,_tui} (import examples.* unresolved),
 [group('examples')]
-compile-examples-stage1: (_compile-examples "compile_driver_bin_stage1" "examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
+compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
-compile-examples-stage2: (_compile-examples "compile_driver_bin_stage2")
+compile-examples-stage2: (_compile-examples "build/compile_driver_bin_stage2")
 
 # Stage-3: emit IR → clang link for each example.
 [group('examples')]
-compile-examples-stage3: (_compile-examples "compile_driver_bin_stage3")
+compile-examples-stage3: (_compile-examples "build/compile_driver_bin_stage3")
 
 # ── Bootstrap & Seeds ─────────────────────────────────────────────────────────
 
@@ -405,19 +409,20 @@ bootstrap-from-seed:
   echo "==> Emitting LLVM IR..."
   "$SEED" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
   echo "==> Linking with clang..."
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o compile_driver_bin_stage1
-  echo "==> Built compile_driver_bin_stage1 from seed (Python-free)"
+  mkdir -p "{{build_dir}}"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
+  echo "==> Built {{build_dir}}/compile_driver_bin_stage1 from seed (Python-free)"
 
 # Copy stage-1 as the macOS arm64 bootstrap seed. Output: bootstrap/compile_driver-darwin-arm64
 [group('bootstrap')]
 build-seed-macos:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
   fi
   mkdir -p bootstrap
-  cp compile_driver_bin_stage1 bootstrap/compile_driver-darwin-arm64
+  cp "{{build_dir}}/compile_driver_bin_stage1" bootstrap/compile_driver-darwin-arm64
   echo "==> bootstrap/compile_driver-darwin-arm64:"
   file bootstrap/compile_driver-darwin-arm64
   ls -lh bootstrap/compile_driver-darwin-arm64
@@ -455,11 +460,11 @@ build-seed-linux:
 build-seed-linux-amd64:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
   fi
   mkdir -p bootstrap
-  cp compile_driver_bin_stage1 bootstrap/compile_driver-linux-x86_64
+  cp "{{build_dir}}/compile_driver_bin_stage1" bootstrap/compile_driver-linux-x86_64
   echo "==> bootstrap/compile_driver-linux-x86_64:"
   file bootstrap/compile_driver-linux-x86_64
   ls -lh bootstrap/compile_driver-linux-x86_64
@@ -476,18 +481,19 @@ build-seeds: build-seed-macos build-seed-linux
 build-repl:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
   fi
   TMP_LL="/tmp/sprout_repl_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR for repl_bin..."
-  ./compile_driver_bin_stage1 --emit-ir "{{stdlib_root}}" "{{justfile_directory()}}/examples/repl_hosted.sprout" > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{justfile_directory()}}/examples/repl_hosted.sprout" > "$TMP_LL"
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
   echo "==> Linking with clang..."
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o repl_bin
-  echo "==> Built repl_bin"
+  mkdir -p "{{build_dir}}"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/repl_bin"
+  echo "==> Built {{build_dir}}/repl_bin"
 
 # ── Analysis Service ──────────────────────────────────────────────────────────
 
@@ -496,10 +502,10 @@ build-repl:
 build-analysis-service:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ -x "./compile_driver_bin_stage2" ]]; then
-    STAGE="compile_driver_bin_stage2"
-  elif [[ -x "./compile_driver_bin_stage1" ]]; then
-    STAGE="compile_driver_bin_stage1"
+  if [[ -x "{{build_dir}}/compile_driver_bin_stage2" ]]; then
+    STAGE="{{build_dir}}/compile_driver_bin_stage2"
+  elif [[ -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
+    STAGE="{{build_dir}}/compile_driver_bin_stage1"
   else
     echo "ERROR: neither compile_driver_bin_stage2 nor compile_driver_bin_stage1 found" >&2; exit 1
   fi
@@ -507,12 +513,13 @@ build-analysis-service:
   TMP_LL="/tmp/sprout_analysis_service_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR for analysis service..."
-  "./$STAGE" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/analysis_service_driver.sprout" > "$TMP_LL"
+  "$STAGE" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/analysis_service_driver.sprout" > "$TMP_LL"
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
   echo "==> Linking with clang..."
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o analysis_service_bin
-  echo "==> Built analysis_service_bin"
+  mkdir -p "{{build_dir}}"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/analysis_service_bin"
+  echo "==> Built {{build_dir}}/analysis_service_bin"
 
 # Run the analysis service in foreground (reads JSON from stdin, writes to stdout).
 # Example: echo '{"op":"declared_names_in_source","module_source":"fn foo() -> Int = 1"}' | just run-analysis-service
@@ -520,7 +527,7 @@ build-analysis-service:
 run-analysis-service:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./analysis_service_bin" ]]; then
+  if [[ ! -x "{{build_dir}}/analysis_service_bin" ]]; then
     echo "ERROR: analysis_service_bin not found; run: just build-analysis-service" >&2; exit 1
   fi
-  exec ./analysis_service_bin "{{stdlib_root}}"
+  exec "{{build_dir}}/analysis_service_bin" "{{stdlib_root}}"
