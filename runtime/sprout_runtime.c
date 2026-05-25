@@ -3200,16 +3200,33 @@ long long split_words(const char* s) {
   return sprout_handle_get(h_list);
 }
 
+/* Cached tags for Maybe constructors — looked up once, reused on every
+ * str_char_at_byte call (which is on the hot lexer path).  Eliminates
+ * the O(n_ctors) linear scan in find_ctor_tag_by_name per character. */
+static long long g_tag_just    = -1;
+static long long g_tag_nothing = -1;
+
+static long long cached_tag_just(void) {
+  if (g_tag_just < 0) g_tag_just = find_ctor_tag_by_name("Just");
+  return g_tag_just;
+}
+static long long cached_tag_nothing(void) {
+  if (g_tag_nothing < 0) g_tag_nothing = find_ctor_tag_by_name("Nothing");
+  return g_tag_nothing;
+}
+
 /* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
- * Avoids the O(index) codepoint scan of str_char_at. */
+ * Avoids the O(index) codepoint scan of str_char_at.
+ * Bounds check: null-byte sentinel instead of strlen — O(1) vs O(file_size).
+ * Callers (lexer cursor) only advance by str_char_width_at_byte, so byte_pos
+ * reaches exactly strlen(s) (the '\0') but never further. */
 long long str_char_at_byte(long long s_val, long long byte_pos) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_at_byte: null input");
   if (byte_pos < 0)
-    return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  size_t len = strlen(s);
+    return sprout_make0(cached_tag_nothing());
   size_t pos = (size_t)byte_pos;
-  if (pos >= len) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+  if (s[pos] == '\0') return sprout_make0(cached_tag_nothing());
   size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
   const char* char_str;
   if (width == 1) {
@@ -3222,9 +3239,9 @@ long long str_char_at_byte(long long s_val, long long byte_pos) {
     tmp[width] = '\0';
     register_cstr(tmp);
     SPROUT_HANDLE(h_char, (long long)(uintptr_t)tmp);
-    return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_char));
+    return sprout_make1(cached_tag_just(), sprout_handle_get(h_char));
   }
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
+  return sprout_make1(cached_tag_just(), (long long)(uintptr_t)char_str);
 }
 
 /* str_char_width_at_byte: UTF-8 byte width of the char at byte_pos; 0 at end. O(1). */
@@ -3232,9 +3249,8 @@ long long str_char_width_at_byte(long long s_val, long long byte_pos) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_width_at_byte: null input");
   if (byte_pos < 0) return 0;
-  size_t len = strlen(s);
   size_t pos = (size_t)byte_pos;
-  if (pos >= len) return 0;
+  if (s[pos] == '\0') return 0;
   return (long long)sprout_utf8_char_width((unsigned char)s[pos]);
 }
 
