@@ -44,7 +44,7 @@ command alias sprout-adt  expression -l c -- (void)sprout_debug_adt((long long)
 #
 # $ lldb /tmp/factorial_dbg
 # (lldb) command source tools/sprout.lldb
-# (lldb) b main.fact
+# (lldb) br set -n "main.fact"   # NOTE: 'b main.fact' misfires — dot is parsed as method separator
 # (lldb) run
 # (lldb) register read x0         # shows n as raw integer
 # (lldb) bt                       # shows Sprout qualified names

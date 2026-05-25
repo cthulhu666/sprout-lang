@@ -856,7 +856,7 @@ lldb ./myprog_dbg
 **Starting a debug session**
 
 ```
-(lldb) b myprog.spr:10          # break at line 10 of myprog.spr
+(lldb) b myprog.spr:10              # break at line 10 of myprog.spr
 (lldb) run                      # start the program
 (lldb) bt                       # print Sprout backtrace
 (lldb) n                        # step to next instruction
@@ -878,7 +878,7 @@ Load `tools/sprout.lldb` for convenience aliases:
 
 ```
 (lldb) command source tools/sprout.lldb
-(lldb) b main.fact
+(lldb) br set -n "main.fact"        # dots confuse b's parser; use br set -n
 (lldb) run
 (lldb) register read x0        # first arg as raw i64 (Int = decimal value)
 (lldb) call sprout_debug_adt($x0)   # print ADT constructor name + fields (depth 4)
@@ -897,6 +897,7 @@ True
 **What works**
 
 - Breakpoints by source file and line: `b myprog.spr:N` — line numbers match the original `.spr` file exactly
+- Breakpoints by function name: `br set -n "main.fact"` — the `b` shorthand misparses dots; `br set -n` with quotes is required
 - Sprout-attributed backtraces in `bt`: frame names are qualified Sprout function names (`main.add`, `main.main`)
 - Instruction-level `n` and `s`
 - `call sprout_debug_adt($x0)` / `call sprout_debug_int($x0)` for value inspection
