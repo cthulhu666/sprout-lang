@@ -1,0 +1,154 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+
+# Law-oriented conformance tests for Functor, Semigroup, and Monoid instances.
+#
+# Functor laws:
+#   Identity:    map(\x -> x, xs) == xs
+#   Composition: map(f, map(g, xs)) == map(\x -> f(g(x)), xs)
+#
+# Semigroup law:
+#   Associativity: (a ++ b) ++ c == a ++ (b ++ c)
+#
+# Monoid laws:
+#   Left identity:  Nil ++ xs == xs  /  "" ++ s == s
+#   Right identity: xs ++ Nil == xs  /  s ++ "" == s
+
+fn double(x: Int) -> Int = x * 2
+fn inc(x: Int) -> Int = x + 1
+
+# Typed helpers that anchor concrete element types for Eq resolution.
+fn nil_int() -> List Int = Nil
+fn no_int() -> Maybe Int = Nothing
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # -----------------------------------------------------------------------
+    # Functor List — identity law
+    # nil_int() gives a concrete List Int so Eq (List Int) resolves.
+    # -----------------------------------------------------------------------
+
+    let li_empty  = nil_int()
+    let li_single = Cons(42, Nil)
+    let li_multi  = Cons(1, Cons(2, Cons(3, Nil)))
+
+    assert_eq(state, "functor list identity empty",  map(\x -> x, li_empty),  li_empty)
+    assert_eq(state, "functor list identity single", map(\x -> x, li_single), li_single)
+    assert_eq(state, "functor list identity multi",  map(\x -> x, li_multi),  li_multi)
+
+    # -----------------------------------------------------------------------
+    # Functor List — composition law (f = double, g = inc)
+    # -----------------------------------------------------------------------
+
+    assert_eq(state, "functor list composition empty",
+      map(double, map(inc, li_empty)),
+      map(\x -> double(inc(x)), li_empty))
+
+    assert_eq(state, "functor list composition single",
+      map(double, map(inc, li_single)),
+      map(\x -> double(inc(x)), li_single))
+
+    assert_eq(state, "functor list composition multi",
+      map(double, map(inc, li_multi)),
+      map(\x -> double(inc(x)), li_multi))
+
+    # -----------------------------------------------------------------------
+    # Functor Maybe — identity law
+    # no_int() gives a concrete Maybe Int so Eq (Maybe Int) resolves.
+    # -----------------------------------------------------------------------
+
+    let m_nothing = no_int()
+    let m_just_1  = Just(7)
+    let m_just_2  = Just(100)
+
+    assert_eq(state, "functor maybe identity nothing",  map(\x -> x, m_nothing), m_nothing)
+    assert_eq(state, "functor maybe identity just 7",   map(\x -> x, m_just_1),  m_just_1)
+    assert_eq(state, "functor maybe identity just 100", map(\x -> x, m_just_2),  m_just_2)
+
+    # -----------------------------------------------------------------------
+    # Functor Maybe — composition law (f = double, g = inc)
+    # -----------------------------------------------------------------------
+
+    assert_eq(state, "functor maybe composition nothing",
+      map(double, map(inc, m_nothing)),
+      map(\x -> double(inc(x)), m_nothing))
+
+    assert_eq(state, "functor maybe composition just 7",
+      map(double, map(inc, m_just_1)),
+      map(\x -> double(inc(x)), m_just_1))
+
+    assert_eq(state, "functor maybe composition just 100",
+      map(double, map(inc, m_just_2)),
+      map(\x -> double(inc(x)), m_just_2))
+
+    # -----------------------------------------------------------------------
+    # Semigroup List — associativity
+    # -----------------------------------------------------------------------
+
+    let la = Cons(1, Cons(2, Nil))
+    let lb = Cons(3, Nil)
+    let lc = Cons(4, Cons(5, Nil))
+
+    assert_eq(state, "semigroup list assoc non-empty",
+      (la ++ lb) ++ lc,
+      la ++ (lb ++ lc))
+
+    assert_eq(state, "semigroup list assoc left empty",
+      (nil_int() ++ lb) ++ lc,
+      nil_int() ++ (lb ++ lc))
+
+    assert_eq(state, "semigroup list assoc right empty",
+      (la ++ lb) ++ nil_int(),
+      la ++ (lb ++ nil_int()))
+
+    # -----------------------------------------------------------------------
+    # Semigroup String — associativity
+    # -----------------------------------------------------------------------
+
+    let sa = "foo"
+    let sb = "bar"
+    let sc = "baz"
+
+    assert_eq(state, "semigroup string assoc non-empty",
+      (sa ++ sb) ++ sc,
+      sa ++ (sb ++ sc))
+
+    assert_eq(state, "semigroup string assoc left empty",
+      ("" ++ sb) ++ sc,
+      "" ++ (sb ++ sc))
+
+    assert_eq(state, "semigroup string assoc right empty",
+      (sa ++ sb) ++ "",
+      sa ++ (sb ++ ""))
+
+    # -----------------------------------------------------------------------
+    # Monoid List — left and right identity
+    # nil_int() is used so the empty side has a concrete type for Eq.
+    # -----------------------------------------------------------------------
+
+    assert_eq(state, "monoid list left identity empty",  nil_int() ++ li_empty,  li_empty)
+    assert_eq(state, "monoid list left identity single", nil_int() ++ li_single, li_single)
+    assert_eq(state, "monoid list left identity multi",  nil_int() ++ li_multi,  li_multi)
+
+    assert_eq(state, "monoid list right identity empty",  li_empty  ++ nil_int(), li_empty)
+    assert_eq(state, "monoid list right identity single", li_single ++ nil_int(), li_single)
+    assert_eq(state, "monoid list right identity multi",  li_multi  ++ nil_int(), li_multi)
+
+    # -----------------------------------------------------------------------
+    # Monoid String — left and right identity
+    # -----------------------------------------------------------------------
+
+    let s_empty  = ""
+    let s_single = "x"
+    let s_multi  = "hello"
+
+    assert_eq(state, "monoid string left identity empty",  "" ++ s_empty,  s_empty)
+    assert_eq(state, "monoid string left identity single", "" ++ s_single, s_single)
+    assert_eq(state, "monoid string left identity multi",  "" ++ s_multi,  s_multi)
+
+    assert_eq(state, "monoid string right identity empty",  s_empty  ++ "", s_empty)
+    assert_eq(state, "monoid string right identity single", s_single ++ "", s_single)
+    assert_eq(state, "monoid string right identity multi",  s_multi  ++ "", s_multi)
+
+    summary(state)

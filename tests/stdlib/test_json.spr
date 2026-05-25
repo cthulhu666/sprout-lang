@@ -1,0 +1,111 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.json as json
+
+fn is_ok(r: Result json.JsonError json.Json) -> Bool =
+  match r with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn is_err(r: Result json.JsonError json.Json) -> Bool =
+  match r with
+  | Ok _ -> false
+  | Err _ -> true
+
+fn is_nothing_json(m: Maybe json.Json) -> Bool =
+  match m with
+  | Nothing -> true
+  | Just _ -> false
+
+fn is_nothing_string(m: Maybe String) -> Bool =
+  match m with
+  | Nothing -> true
+  | Just _ -> false
+
+fn is_nothing_int(m: Maybe Int) -> Bool =
+  match m with
+  | Nothing -> true
+  | Just _ -> false
+
+fn is_nothing_array(m: Maybe json.JsonArray) -> Bool =
+  match m with
+  | Nothing -> true
+  | Just _ -> false
+
+fn stringify_round_trip_ok(input: String) -> Bool =
+  match json.parse(input) with
+  | Err _ -> false
+  | Ok v -> is_ok(json.parse(json.stringify(v)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Happy-path sanity checks ---
+
+    assert_true(state, "parse simple object", is_ok(json.parse("{\"key\": \"value\"}")))
+    assert_true(state, "parse integer", is_ok(json.parse("42")))
+    assert_true(state, "parse boolean true", is_ok(json.parse("true")))
+    assert_true(state, "parse null", is_ok(json.parse("null")))
+    assert_true(state, "parse array", is_ok(json.parse("[1, 2, 3]")))
+
+    # --- Malformed input: parse must return Err, not crash ---
+
+    assert_true(state, "malformed: empty string", is_err(json.parse("")))
+    assert_true(state, "malformed: truncated object", is_err(json.parse("{")))
+    assert_true(state, "malformed: trailing garbage", is_err(json.parse("42 garbage")))
+    assert_true(state, "malformed: mismatched brackets", is_err(json.parse("[1, 2")))
+    assert_true(state, "malformed: bare word undefined", is_err(json.parse("undefined")))
+    assert_true(state, "malformed: unclosed string", is_err(json.parse("\"hello")))
+    assert_true(state, "malformed: double comma", is_err(json.parse("[1,,2]")))
+    assert_true(state, "malformed: unquoted key", is_err(json.parse("{key: 1}")))
+
+    # --- Edge cases for json_get_* helpers on valid JSON ---
+
+    let obj_result = json.parse("{\"name\": \"Alice\", \"age\": 30}")
+
+    let missing_key_result =
+      match obj_result with
+      | Ok v -> json.json_get_field(v, "missing")
+      | Err _ -> Nothing
+
+    assert_true(state, "json_get_field missing key returns Nothing", is_nothing_json(missing_key_result))
+
+    let str_field =
+      match obj_result with
+      | Ok v -> json.json_get_field(v, "age")
+      | Err _ -> Nothing
+
+    let str_on_nonstring =
+      match str_field with
+      | Nothing -> Nothing
+      | Just v -> json.json_get_string(v)
+
+    assert_true(state, "json_get_string on non-string returns Nothing", is_nothing_string(str_on_nonstring))
+
+    let int_field =
+      match obj_result with
+      | Ok v -> json.json_get_field(v, "name")
+      | Err _ -> Nothing
+
+    let int_on_nonint =
+      match int_field with
+      | Nothing -> Nothing
+      | Just v -> json.json_get_int(v)
+
+    assert_true(state, "json_get_int on non-int returns Nothing", is_nothing_int(int_on_nonint))
+
+    let arr_on_nonarr =
+      match obj_result with
+      | Ok v ->
+          match json.json_get_field(v, "name") with
+          | Nothing -> Nothing
+          | Just name_val -> json.json_get_array(name_val)
+      | Err _ -> Nothing
+
+    assert_true(state, "json_get_array on non-array returns Nothing", is_nothing_array(arr_on_nonarr))
+
+    # --- json_stringify round-trip ---
+
+    assert_true(state, "stringify round-trip parses back successfully", stringify_round_trip_ok("{\"x\": 1}"))
+
+    summary(state)

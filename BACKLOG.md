@@ -55,7 +55,7 @@ Definition of done:
 - [x] `P0` Add JSON query helpers (`json_get`, `json_get_string`, `json_get_int`, `json_get_array`, etc.).
 - [x] `P1` Add `json_stringify(Json) -> String` for debug and payload building.
 - [ ] `P2` Reimplement `json_stringify` in Sprout once string/escaping primitives make that practical, keeping host builtins reserved for impossible or efficiency-critical operations.
-- [ ] `P1` Add tests for malformed input and edge cases.
+- [x] `P1` Add tests for malformed input and edge cases. `tests/stdlib/test_json.spr`: 5 happy-path, 8 malformed-input (all return `Err _`), 4 accessor edge cases, 1 stringify round-trip; 18/18 PASS.
 
 ### 4) Terminal UI Runtime
 
@@ -140,7 +140,7 @@ Definition of done:
 - [x] `P1` Add `test-stdlib` recipe to `justfile`: pure-shell loop over `tests/stdlib/` and `tests/stdlib/compiler/`, greps for `SUITE FAILED`, exits 1 if any suite fails. No Python.
 - [x] `P2` Add `instance Eq (Vec a) where Eq a`, `instance Eq (Dict v) where Eq v`, `instance ToString (Vec a) where ToString a`, `instance ToString (Dict v) where ToString v` to `stdlib/prelude.sprout` (2026-05-24). `Eq Vec` uses `vec_eq_from` (indexed recursive helper via `vec_get`). `Eq Dict` uses parallel traversal via `dict_entries` — mirrors Haskell's `Data.Map` approach (`toAscList` comparison), correct because the underlying BST is keyed by `strcmp` so entries are always in sorted lexicographic order. `ToString Vec` mirrors `ToString (List a)` style; `ToString Dict` renders as `{key: value, ...}`.
 - [x] `P2` Add `tests/stdlib/test_collections.spr` (13 assertions): replaces element-extraction workarounds with direct `assert_eq` on `Vec Int` and `Dict Int` values including structural equality checks on `vec_reverse`, `vec_slice`, and `dict_remove` results (2026-05-24).
-- [ ] `P2` Add law-oriented conformance tests via `assert_eq` once list/functor/monoid `Eq` instances are stable.
+- [x] `P2` Add law-oriented conformance tests via `assert_eq` once list/functor/monoid `Eq` instances are stable.
 
 ### 7.5) Type Classes (Collections First)
 
@@ -155,7 +155,7 @@ Definition of done:
 - [x] `P1` Add `Eq` class with `==`/`!=` constraint checking; superclass of `Ord`.
 - [ ] `P1` Add `deriving Eq` (and similar) for ADT structural equality — currently ADT `==` uses runtime primitive without typeclass dispatch; tracked as known gap.
 - [x] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `ToString`) for collection-focused workflows.
-- [ ] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity).
+- [x] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity): `tests/stdlib/test_typeclass_laws.spr` (30 assertions); added `instance Functor Maybe` to `stdlib/prelude.sprout`; uses concrete typed helpers `nil_int()`/`no_int()` to anchor `Eq` resolution (2026-05-25).
 - [ ] `P1` Add diagnostics for ambiguous/overlapping instance errors.
 - [ ] `P2` Add deriving/specialization follow-ups once core class system is stable.
 

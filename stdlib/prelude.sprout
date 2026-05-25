@@ -675,6 +675,13 @@ instance Functor List {
     list_map(f, xs)
 }
 
+instance Functor Maybe {
+  fn fmap(f: a -> b, xs: Maybe a) -> Maybe b =
+    match xs with
+    | Nothing -> Nothing
+    | Just x -> Just(f(x))
+}
+
 instance Foldable List {
   fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
     list_fold(step, init, xs)
