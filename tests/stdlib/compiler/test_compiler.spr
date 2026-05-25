@@ -1,0 +1,51 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.module_loader as module_loader
+
+fn is_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn is_fail(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileFail _ -> true
+  | compiler.CompileOk _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # new_cache() creates an independent, empty cache each time
+    cache1 <- module_loader.new_cache()
+    d1 <- ref_read(cache1)
+    assert_eq(state, "new_cache starts empty", vec_length(dict_keys(d1)), 0)
+
+    cache2 <- module_loader.new_cache()
+    d2 <- ref_read(cache2)
+    assert_eq(state, "each new_cache is independent", vec_length(dict_keys(d2)), 0)
+
+    # compile_source_with_cache: pre-seed "stdlib.prelude" so load_prelude_pairs
+    # takes the cache-hit branch and skips file I/O.  This lets us test the
+    # cache-sharing invariant without needing a real stdlib_root on disk.
+    cache3 <- module_loader.new_cache()
+    d3 <- ref_read(cache3)
+    ref_write(cache3, dict_set("stdlib.prelude", Nil, d3))
+
+    r1 <- compiler.compile_source_with_cache("fn x() -> Int = 42", "", cache3)
+    assert_true(state, "compile_source_with_cache: valid source compiles ok", is_ok(r1))
+
+    # Second call on the same cache — prelude entry is still there, no re-read.
+    r2 <- compiler.compile_source_with_cache("fn y() -> Bool = true", "", cache3)
+    assert_true(state, "compile_source_with_cache: cache persists across calls", is_ok(r2))
+
+    # A type error is still caught even through the cache path.
+    r3 <- compiler.compile_source_with_cache("fn z() -> Int = true", "", cache3)
+    assert_true(state, "compile_source_with_cache: type error detected via cache path", is_fail(r3))
+
+    # compile_source (no root needed) is unaffected by M1
+    r4 <- compiler.compile_source("fn w() -> Int = 99")
+    assert_true(state, "compile_source still works", is_ok(r4))
+
+    summary(state)

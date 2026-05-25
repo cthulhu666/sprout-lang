@@ -70,4 +70,17 @@ fn main() -> Unit !{IO} =
     assert_false(state, "fn-only module has no ctor_types",
       list_member("baz", ctors_of("module foo\nexport fn baz() -> Int = 1")))
 
+    # export type alias — M1 bundler fix: scanner must read the alias NAME, not "alias"
+    assert_true(state, "export type alias adds alias name to exports",
+      list_member("Foo", exports_of("module foo\nexport type alias Foo = Int")))
+
+    assert_false(state, "export type alias does not add 'alias' to exports",
+      list_member("alias", exports_of("module foo\nexport type alias Foo = Int")))
+
+    assert_false(state, "export type alias not in ctor_types (aliases have no ctors)",
+      list_member("Foo", ctors_of("module foo\nexport type alias Foo = Int")))
+
+    assert_false(state, "non-exported type alias not in exports",
+      list_member("Foo", exports_of("module foo\ntype alias Foo = Int")))
+
     summary(state)
