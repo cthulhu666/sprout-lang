@@ -125,8 +125,8 @@ type EmitterState =
 # current_sp_id   — !DISubprogram ID for the function currently being emitted;
 #                   used when attaching !dbg to instructions (M1.5+)
 type DbgEmitter =
-  | DbgEmitter Bool String (Ref Int) (Ref (List String)) (Ref Int) (Ref Int)
-  # debug_mode, source_file, meta_id_counter, meta_lines, current_sp_id, current_loc_id
+  | DbgEmitter Bool String (Ref Int) (Ref (List String)) (Ref Int) (Ref Int) Int
+  # debug_mode, source_file, meta_id_counter, meta_lines, current_sp_id, current_loc_id, header_line_offset
 
 # Emitter wraps EmitterState (capped at 9 fields) together with DbgEmitter.
 # All emit_* and es_* call sites use `em: Emitter` unchanged.
@@ -412,22 +412,25 @@ fn em_dbg(em: Emitter) -> DbgEmitter =
 # --- DbgEmitter accessors ---
 
 fn em_dbg_mode(em: Emitter) -> Bool =
-  match em_dbg(em) with | DbgEmitter dm _ _ _ _ _ -> dm
+  match em_dbg(em) with | DbgEmitter dm _ _ _ _ _ _ -> dm
 
 fn em_dbg_src(em: Emitter) -> String =
-  match em_dbg(em) with | DbgEmitter _ sf _ _ _ _ -> sf
+  match em_dbg(em) with | DbgEmitter _ sf _ _ _ _ _ -> sf
 
 fn em_meta_id_ref(em: Emitter) -> Ref Int =
-  match em_dbg(em) with | DbgEmitter _ _ mc _ _ _ -> mc
+  match em_dbg(em) with | DbgEmitter _ _ mc _ _ _ _ -> mc
 
 fn em_meta_lines_ref(em: Emitter) -> Ref (List String) =
-  match em_dbg(em) with | DbgEmitter _ _ _ ml _ _ -> ml
+  match em_dbg(em) with | DbgEmitter _ _ _ ml _ _ _ -> ml
 
 fn em_sp_id_ref(em: Emitter) -> Ref Int =
-  match em_dbg(em) with | DbgEmitter _ _ _ _ sp _ -> sp
+  match em_dbg(em) with | DbgEmitter _ _ _ _ sp _ _ -> sp
 
 fn em_loc_id_ref(em: Emitter) -> Ref Int =
-  match em_dbg(em) with | DbgEmitter _ _ _ _ _ lc -> lc
+  match em_dbg(em) with | DbgEmitter _ _ _ _ _ lc _ -> lc
+
+fn em_header_offset(em: Emitter) -> Int =
+  match em_dbg(em) with | DbgEmitter _ _ _ _ _ _ ho -> ho
 
 # --- field-Ref accessors (pure) — unwrap Emitter → EmitterState ---
 
@@ -558,6 +561,30 @@ fn es_adopt_body(em: Emitter, lines: List String, blk: CurBlk) -> Unit !{IO} =
 # (see assemble_debug_section).  Per-function and per-expression metadata nodes
 # are allocated starting at ID 6 via alloc_meta_id.
 
+# ---------------------------------------------------------------------------
+# Milestone A: header-line offset helpers
+#
+# strip_headers removes module/import/blank lines before parsing; SourcePos
+# line numbers are relative to the stripped source.  We count the stripped
+# lines here so emit_fn_dbg can add the offset back, giving lldb accurate
+# file line numbers.
+
+fn dbg_next_line(s: String, pos: Int) -> Int =
+  if nl == -1 then str_len(s)
+  else pos + nl + 1
+  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+
+fn dbg_is_header_line(s: String, pos: Int) -> Bool =
+  str_starts_with(sl, "module ") ||
+  str_starts_with(sl, "import ") ||
+  str_starts_with(sl, "\n")
+  where sl = str_slice(s, pos, str_len(s))
+
+fn dbg_count_header_lines(src: String, pos: Int, count: Int) -> Int =
+  if pos >= str_len(src) then count
+  else if dbg_is_header_line(src, pos) then dbg_count_header_lines(src, dbg_next_line(src, pos), count + 1)
+  else count
+
 fn alloc_meta_id(em: Emitter) -> Int !{IO} =
   do
     let r = em_meta_id_ref(em)
@@ -632,8 +659,14 @@ fn new_emitter(debug_mode_: Bool, source_file_: String) -> Emitter !{IO} =
     meta_lines_ref <- ref_new(Nil)
     sp_id_ref <- ref_new(0)
     loc_id_ref <- ref_new(0)
+    header_offset <-
+      if debug_mode_ then
+        match read_file(source_file_) with
+        | Err _ -> 0
+        | Ok src -> dbg_count_header_lines(src, 0, 0)
+      else 0
     let es = EmitterState(body_ref, defs_ref, strs_ref, wrap_ref, blk_ref, nt_ref, nb_ref, ns_ref, nl_ref)
-    let dbg = DbgEmitter(debug_mode_, source_file_, meta_id_ref, meta_lines_ref, sp_id_ref, loc_id_ref)
+    let dbg = DbgEmitter(debug_mode_, source_file_, meta_id_ref, meta_lines_ref, sp_id_ref, loc_id_ref, header_offset)
     Emitter(es, dbg)
 
 fn emit_line(em: Emitter, line: String) -> Unit !{IO} =
@@ -2695,7 +2728,8 @@ fn emit_fn_dbg(name: String, body: typed_ast.TypedExpr, em: Emitter) -> String !
       sp_id <- alloc_meta_id(em)
       set_current_sp_id(em, sp_id)
       let pos = typed_ast.typed_expr_pos(body)
-      let line = source.position_line(pos)
+      let stripped_line = source.position_line(pos)
+      let line = stripped_line + em_header_offset(em)
       let sp_line = "!" ++ int_to_string(sp_id) ++ " = distinct !DISubprogram(name: \"" ++ name ++ "\", linkageName: \"" ++ name ++ "\", scope: !3, file: !3, line: " ++ int_to_string(line) ++ ", type: !4, scopeLine: " ++ int_to_string(line) ++ ", flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !0, retainedNodes: !{})"
       add_meta_line(em, sp_line)
       loc_id <- alloc_meta_id(em)
@@ -2704,7 +2738,7 @@ fn emit_fn_dbg(name: String, body: typed_ast.TypedExpr, em: Emitter) -> String !
       add_meta_line(em, loc_line)
       " !dbg !" ++ int_to_string(sp_id)
 
-fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr, sig: FnSig, is_entry: Bool, ctor_reg_meta: Dict (List (String, Int, Int, Int)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
+fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr, sig: FnSig, is_entry: Bool, ctor_reg_meta: Dict (List (String, Int, Int, Int, String)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
   if is_entry == false && has_self_tail_calls(body, name) then
     emit_fn_tco(name, params, body, sig, sctx, em)
   else
@@ -2791,10 +2825,43 @@ fn push_roots_for_pairs(keys: Vec String, locals: Dict Value, em: Emitter, idx: 
               ns <- push_roots_for_pairs(keys, locals, em, idx + 1)
               n + ns
 
-fn emit_ctor_registrations(meta: Dict (List (String, Int, Int, Int)), em: Emitter) -> Unit !{IO} =
+# ---------------------------------------------------------------------------
+# Milestone B: field_kinds descriptor helpers
+#
+# Derives a one-char-per-field descriptor string from a constructor's type
+# expressions so sprout_register_ctor can store it in CtorMeta.field_kinds.
+# The runtime and debugger tools use it to decode raw i64 field values.
+#
+# Encoding: 'i' Int  'b' Bool  's' String/Char  'p' ADT/closure/tuple  '_' type-var
+
+fn char_is_uppercase(ch: Char) -> Bool =
+  str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char_to_string(ch)) >= 0
+
+fn ctor_field_kind(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName name ->
+      if type_name_leaf_is(name, "Int") then "i"
+      else if type_name_leaf_is(name, "Bool") then "b"
+      else if type_name_leaf_is(name, "String") then "s"
+      else if type_name_leaf_is(name, "Char") then "s"
+      else
+        match str_char_at(strip_module_prefix(name), 0) with
+        | Nothing -> "_"
+        | Just ch -> if char_is_uppercase(ch) then "p" else "_"
+  | ast.TypeArrow _ _ _ -> "p"
+  | ast.TypeApply _ _ -> "p"
+  | ast.TypeEffect inner _ -> ctor_field_kind(inner)
+  | ast.TupleType _ -> "p"
+
+fn ctor_field_kinds_string(exprs: List ast.TypeExpr) -> String =
+  match exprs with
+  | Nil -> ""
+  | Cons e rest -> ctor_field_kind(e) ++ ctor_field_kinds_string(rest)
+
+fn emit_ctor_registrations(meta: Dict (List (String, Int, Int, Int, String)), em: Emitter) -> Unit !{IO} =
   emit_ctor_reg_keys(dict_keys(meta), meta, em, 0)
 
-fn emit_ctor_reg_keys(keys: Vec String, meta: Dict (List (String, Int, Int, Int)), em: Emitter, idx: Int) -> Unit !{IO} =
+fn emit_ctor_reg_keys(keys: Vec String, meta: Dict (List (String, Int, Int, Int, String)), em: Emitter, idx: Int) -> Unit !{IO} =
   if idx >= vec_length(keys) then ()
   else
     match vec_get(idx, keys) with
@@ -2807,15 +2874,18 @@ fn emit_ctor_reg_keys(keys: Vec String, meta: Dict (List (String, Int, Int, Int)
               emit_ctor_reg_aliases(aliases, em)
               emit_ctor_reg_keys(keys, meta, em, idx + 1)
 
-fn emit_ctor_reg_aliases(aliases: List (String, Int, Int, Int), em: Emitter) -> Unit !{IO} =
+fn emit_ctor_reg_aliases(aliases: List (String, Int, Int, Int, String), em: Emitter) -> Unit !{IO} =
   match aliases with
   | Nil -> ()
-  | Cons (gname, len, tag, arity) rest ->
+  | Cons (gname, len, tag, arity, fkinds) rest ->
       do
+        (fk_gname, fk_len) <- string_const(em, fkinds)
         ptr <- fresh_tmp(em)
         emit_template(em, `  ${ptr} = getelementptr inbounds [${int_to_string (len)} x i8], ptr ${gname}, i64 0, i64 0`)
+        fkptr <- fresh_tmp(em)
+        emit_template(em, `  ${fkptr} = getelementptr inbounds [${int_to_string (fk_len)} x i8], ptr ${fk_gname}, i64 0, i64 0`)
         reg <- fresh_tmp(em)
-        emit_template(em, `  ${reg} = call i64 @sprout_register_ctor(i64 ${int_to_string (tag)}, ptr ${ptr}, i64 ${int_to_string (arity)})`)
+        emit_template(em, `  ${reg} = call i64 @sprout_register_ctor(i64 ${int_to_string (tag)}, ptr ${ptr}, i64 ${int_to_string (arity)}, ptr ${fkptr})`)
         emit_ctor_reg_aliases(rest, em)
 
 fn emit_fn_tco(name: String, params: List ast.Param, body: typed_ast.TypedExpr, sig: FnSig, ctx: CgCtx, em: Emitter) -> Unit !{IO} =
@@ -2964,7 +3034,7 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("sprout_alloc_closure_env", FnSig("sprout_alloc_closure_env", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_alloc_tuple_blob", FnSig("sprout_alloc_tuple_blob", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   # Runtime startup (uses raw ptr for argv/ctor-name)
-  , ("sprout_register_ctor", FnSig("sprout_register_ctor", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
+  , ("sprout_register_ctor", FnSig("sprout_register_ctor", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Cons(ll_ptr(), Nil)))), ll_i64(), Nothing))
   , ("sprout_set_argv", FnSig("sprout_set_argv", Cons(ll_i32(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
   # String operations — called directly from codegen IR templates, must be declared even without prelude
   , ("str_eq", FnSig("str_eq", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
@@ -3231,7 +3301,7 @@ fn register_fn_wrappers(decls: List typed_ast.TypedDecl, fn_sigs_: Dict FnSig, e
         register_fn_wrappers(rest, fn_sigs_, em)
 
 # Emit all function declarations.
-fn emit_all_fns(decls: List typed_ast.TypedDecl, fn_sigs_: Dict FnSig, ctor_reg_meta: Dict (List (String, Int, Int, Int)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
+fn emit_all_fns(decls: List typed_ast.TypedDecl, fn_sigs_: Dict FnSig, ctor_reg_meta: Dict (List (String, Int, Int, Int, String)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
   match decls with
   | Nil -> ()
   | Cons decl rest ->
@@ -3249,7 +3319,7 @@ fn emit_all_fns(decls: List typed_ast.TypedDecl, fn_sigs_: Dict FnSig, ctor_reg_
         emit_all_fns(rest, fn_sigs_, ctor_reg_meta, runtime_lets, ctx, em)
 
 # Emit only the function declarations whose name contains fn_name as a substring.
-fn emit_matching_fns(decls: List typed_ast.TypedDecl, fn_name: String, fn_sigs_: Dict FnSig, ctor_reg_meta: Dict (List (String, Int, Int, Int)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
+fn emit_matching_fns(decls: List typed_ast.TypedDecl, fn_name: String, fn_sigs_: Dict FnSig, ctor_reg_meta: Dict (List (String, Int, Int, Int, String)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
   match decls with
   | Nil -> ()
   | Cons decl rest ->
@@ -3296,20 +3366,20 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
         | (header_lines, str_lines, def_lines, dbg_lines) -> IrLinesOk(header_lines, str_lines, def_lines, dbg_lines)
 
 # Build ctor registration metadata (for the main function's startup code).
-fn build_ctor_reg_meta(ctor_sigs_: Dict CtorSig, em: Emitter) -> Dict (List (String, Int, Int, Int)) !{IO} =
+fn build_ctor_reg_meta(ctor_sigs_: Dict CtorSig, em: Emitter) -> Dict (List (String, Int, Int, Int, String)) !{IO} =
   build_ctor_reg_meta_keys(dict_keys(ctor_sigs_), ctor_sigs_, em, 0, dict_empty())
 
 # Build the registration alias list: always the qualified name; add the leaf name when it differs.
 # Uses strip_module_prefix to get the leaf (the part after the last dot).
-fn ctor_reg_aliases(k: String, leaf: String, tag: Int, arity: Int, gname: String, gname_len: Int, em: Emitter) -> List (String, Int, Int, Int) !{IO} =
+fn ctor_reg_aliases(k: String, leaf: String, tag: Int, arity: Int, gname: String, gname_len: Int, fkinds: String, em: Emitter) -> List (String, Int, Int, Int, String) !{IO} =
   if leaf == k
-  then Cons((gname, gname_len, tag, arity), Nil)
+  then Cons((gname, gname_len, tag, arity, fkinds), Nil)
   else
     do
       (gname2, len2) <- string_const(em, leaf)
-      Cons((gname, gname_len, tag, arity), Cons((gname2, len2, tag, arity), Nil))
+      Cons((gname, gname_len, tag, arity, fkinds), Cons((gname2, len2, tag, arity, fkinds), Nil))
 
-fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emitter, idx: Int, acc: Dict (List (String, Int, Int, Int))) -> Dict (List (String, Int, Int, Int)) !{IO} =
+fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emitter, idx: Int, acc: Dict (List (String, Int, Int, Int, String))) -> Dict (List (String, Int, Int, Int, String)) !{IO} =
   if idx >= vec_length(keys) then acc
   else
     match vec_get(idx, keys) with
@@ -3320,7 +3390,8 @@ fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emit
         | Just ctor ->
             do
               (gname, gname_len) <- string_const(em, k)
-              aliases <- ctor_reg_aliases(k, strip_module_prefix(k), ctor_tag(ctor), ctor_arity(ctor), gname, gname_len, em)
+              let fkinds = ctor_field_kinds_string(ctor_type_exprs(ctor))
+              aliases <- ctor_reg_aliases(k, strip_module_prefix(k), ctor_tag(ctor), ctor_arity(ctor), gname, gname_len, fkinds, em)
               build_ctor_reg_meta_keys(keys, ctor_sigs_, em, idx + 1, dict_set(k, aliases, acc))
 
 # Assemble the final IR from all sections.

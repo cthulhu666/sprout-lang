@@ -78,6 +78,7 @@ typedef struct {
   long long tag;
   const char* name;
   long long arity;
+  const char* field_kinds; /* one char per field: i=Int b=Bool s=String/Char p=ADT/closure _=type-var */
 } CtorMeta;
 
 typedef struct {
@@ -2818,16 +2819,82 @@ long long read_int_lines(const char* path) {
   fclose(f);
   return sprout_handle_get(h_v);
 }
-long long sprout_register_ctor(long long tag, const char* name, long long arity) {
+long long sprout_register_ctor(long long tag, const char* name, long long arity, const char* field_kinds) {
   if (g_ctor_meta_len >= (long long)(sizeof(g_ctor_meta) / sizeof(g_ctor_meta[0]))) {
     tcp_fail("sprout_register_ctor: constructor metadata table full");
   }
   g_ctor_meta[g_ctor_meta_len].tag = tag;
   g_ctor_meta[g_ctor_meta_len].name = name;
   g_ctor_meta[g_ctor_meta_len].arity = arity;
+  g_ctor_meta[g_ctor_meta_len].field_kinds = field_kinds;
   g_ctor_meta_len++;
   return 0;
 }
+
+/* -------------------------------------------------------------------------
+ * Milestone C: debugger value-inspection helpers
+ *
+ * Call these from lldb at a breakpoint to inspect Sprout values:
+ *
+ *   (lldb) call (void)sprout_debug_int($x0)   -- print an Int/Bool value
+ *   (lldb) call (void)sprout_debug_adt($x0)   -- print an ADT value
+ *
+ * sprout_debug_adt recurses up to depth 4 using field_kinds to decode fields.
+ * -------------------------------------------------------------------------*/
+
+static void sprout_debug_adt_rec(long long val, int depth);
+
+void sprout_debug_int(long long val) {
+  fprintf(stderr, "<Int: %lld>\n", val);
+}
+
+static void sprout_debug_field(long long fval, char kind, int depth) {
+  switch (kind) {
+    case 'i': fprintf(stderr, "%lld", fval); break;
+    case 'b': fprintf(stderr, "%s", fval ? "True" : "False"); break;
+    case 's': {
+      /* Strings are stored as i64 raw pointers to a C string (GC Option C). */
+      const char* s = (const char*)(uintptr_t)fval;
+      if (s == NULL) { fprintf(stderr, "(null)"); break; }
+      fprintf(stderr, "\"%.80s%s\"", s, (strlen(s) > 80 ? "..." : ""));
+      break;
+    }
+    case 'p': case '_':
+      sprout_debug_adt_rec(fval, depth + 1);
+      break;
+    default:
+      fprintf(stderr, "0x%llx", (unsigned long long)fval);
+  }
+}
+
+static void sprout_debug_adt_rec(long long val, int depth) {
+  if (val == 0) { fprintf(stderr, "null"); return; }
+  if (depth > 4) { fprintf(stderr, "..."); return; }
+  SproutObj* obj = (SproutObj*)(uintptr_t)val;
+  CtorMeta* meta = find_ctor(obj->tag);
+  if (meta == NULL) {
+    fprintf(stderr, "<tag:%lld>", obj->tag);
+    return;
+  }
+  fprintf(stderr, "%s", meta->name);
+  if (meta->arity == 0) return;
+  fprintf(stderr, "(");
+  const char* fk = (meta->field_kinds != NULL) ? meta->field_kinds : "";
+  long long fields[9] = { obj->f0, obj->f1, obj->f2, obj->f3, obj->f4,
+                          obj->f5, obj->f6, obj->f7, obj->f8 };
+  for (long long i = 0; i < meta->arity && i < 9; i++) {
+    if (i > 0) fprintf(stderr, ", ");
+    char kind = (fk[i] != '\0') ? fk[i] : '_';
+    sprout_debug_field(fields[i], kind, depth);
+  }
+  fprintf(stderr, ")");
+}
+
+void sprout_debug_adt(long long val) {
+  sprout_debug_adt_rec(val, 0);
+  fprintf(stderr, "\n");
+}
+
 long long sprout_make0(long long tag) {
   CtorMeta* meta = find_ctor(tag);
   if (meta != NULL && strcmp(meta->name, "Nothing") == 0) {

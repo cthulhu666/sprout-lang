@@ -200,11 +200,13 @@ chosen and does not affect M1.
 
 ## Milestones
 
-| # | Scope | Deliverable |
-|---|---|---|
-| **M1** | DWARF in codegen; `--debug` flag; 4th IR section | `lldb ./myprog` supports `b myprog.spr:N`, `n`, `s`, `bt` at Sprout source granularity for user-module functions |
-| **M2** | Extended `SproutCtorMeta` + pretty-printer tool | `p myval` at a breakpoint shows `Cons(42, Nil)` |
-| **M3** | `just build-debug` / `just debug-run` recipes; README §Debugging section | One-command debug workflow documented end-to-end |
+| # | Scope | Deliverable | Status |
+|---|---|---|---|
+| **M1** | DWARF in codegen; `--debug` flag; 4th IR section | `lldb ./myprog` supports `b myprog.spr:N`, `n`, `s`, `bt` at Sprout source granularity for user-module functions | ✅ Done |
+| **M2a** | Line-number offset fix | DWARF line numbers match actual file lines (not stripped-source-relative) | ✅ Done |
+| **M2b** | `field_kinds` in `SproutCtorMeta` | `sprout_register_ctor` stores per-field type descriptor; runtime `CtorMeta.field_kinds` populated | ✅ Done |
+| **M2c** | `sprout_debug_adt` / `sprout_debug_int` + `tools/sprout.lldb` | `call sprout_debug_adt($x0)` prints `Cons(42, Nil)` at a breakpoint; LLDB command aliases in `tools/sprout.lldb` | ✅ Done |
+| **M3** | `just build-debug` / `just debug-run` recipes; README §Debugging section | One-command debug workflow documented end-to-end | ✅ Done |
 
 ---
 

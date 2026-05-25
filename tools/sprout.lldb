@@ -1,0 +1,51 @@
+# sprout.lldb — LLDB helpers for debugging Sprout programs
+#
+# Load at startup: lldb --source tools/sprout.lldb ./my_prog
+# Or interactively: (lldb) command source tools/sprout.lldb
+#
+# Requires a binary built with: just build-debug <file.spr> <out>
+
+# ── Value inspection ──────────────────────────────────────────────────────────
+#
+# Sprout represents values as i64 in registers:
+#   Int/Bool  → raw integer (use sprout-int)
+#   ADT       → pointer to SproutObj (use sprout-adt)
+#
+# Usage:
+#   (lldb) sprout-int $x0          # print Int or Bool value in x0
+#   (lldb) sprout-adt $x0          # print ADT value in x0 (recursive, depth 4)
+#   (lldb) sprout-adt $x1          # inspect second argument
+#
+# The output goes to stderr of the debugged process (visible in the terminal).
+
+command alias sprout-int  expression -l c -- (void)sprout_debug_int((long long)
+command alias sprout-adt  expression -l c -- (void)sprout_debug_adt((long long)
+
+# ── Register shortcuts (arm64) ────────────────────────────────────────────────
+#
+# Sprout passes arguments in x0, x1, x2, … and returns in x0.
+# At a breakpoint inside a function:
+#   x0 = first argument
+#   x1 = second argument (if present)
+#   x0 after return = return value
+#
+# Quick display without calling runtime helpers:
+#   (lldb) p/d $x0        — print as decimal integer
+#   (lldb) p/x $x0        — print as hex (pointer or raw int)
+#   (lldb) memory read -s8 -fu $x0    — read SproutObj fields at pointer x0
+
+# ── Backtrace note ────────────────────────────────────────────────────────────
+#
+# Sprout functions appear with qualified names in backtraces:
+#   main.fact, main.main, stdlib.prelude.list_map, …
+# Stdlib frames show "(no debug info)" — expected; stdlib is not DWARF-annotated.
+
+# ── Example session ───────────────────────────────────────────────────────────
+#
+# $ lldb /tmp/factorial_dbg
+# (lldb) command source tools/sprout.lldb
+# (lldb) b main.fact
+# (lldb) run
+# (lldb) register read x0         # shows n as raw integer
+# (lldb) bt                       # shows Sprout qualified names
+# (lldb) continue

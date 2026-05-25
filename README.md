@@ -872,17 +872,39 @@ mise exec -- just debug-run myprog.spr
 
 This compiles with debug info and opens `lldb` in one step.
 
-**What works in M1**
+**Inspecting values with the LLDB helper script**
 
-- Breakpoints by source file and line: `b myprog.spr:N`
+Load `tools/sprout.lldb` for convenience aliases:
+
+```
+(lldb) command source tools/sprout.lldb
+(lldb) b main.fact
+(lldb) run
+(lldb) register read x0        # first arg as raw i64 (Int = decimal value)
+(lldb) call sprout_debug_adt($x0)   # print ADT constructor name + fields (depth 4)
+(lldb) call sprout_debug_int($x0)   # print an Int/Bool value
+```
+
+`sprout_debug_adt` uses the per-constructor `field_kinds` table (populated at startup)
+to decode each field:
+
+```
+Cons(42, Cons(1, Nil))
+Just("hello")
+True
+```
+
+**What works**
+
+- Breakpoints by source file and line: `b myprog.spr:N` — line numbers match the original `.spr` file exactly
 - Sprout-attributed backtraces in `bt`: frame names are qualified Sprout function names (`main.add`, `main.main`)
 - Instruction-level `n` and `s`
+- `call sprout_debug_adt($x0)` / `call sprout_debug_int($x0)` for value inspection
 
-**Known limitations (M1)**
+**Known limitations**
 
-- **Line number offset**: Sprout source files begin with `module` and `import` header lines that the compiler strips before parsing. DWARF line numbers are relative to the stripped source, so line N in the DWARF corresponds to line N + (number of header lines) in the original file. For example, if your file has two header lines (`module main` + a blank), `b myprog.spr:1` resolves to the first declaration body — functionally correct for breakpoints, but the source display in lldb is offset. This will be addressed in a follow-up.
 - **User-module functions only**: stdlib and prelude functions do not carry debug metadata. `bt` shows "source not available" for any stdlib frame, which is expected — stdlib sources are not distributed with binaries.
-- **ADT value display**: `p myval` at a breakpoint shows the raw `i64` handle, not the constructor name and fields. Human-readable ADT inspection is planned for M2.
+- **ADT function bodies**: `fr v` (frame variables) is not available; inspect via `register read` and `sprout_debug_adt`.
 
 ## Modules (Experimental)
 
