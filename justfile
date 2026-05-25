@@ -197,6 +197,42 @@ test-stdlib-stage1: (_test-stdlib "compile_driver_bin_stage1")
 [group('test')]
 test-stdlib-stage2: (_test-stdlib "compile_driver_bin_stage2")
 
+# Run a single test file with stage-1.
+[group('test')]
+test-file file: (_test-file "compile_driver_bin_stage1" file)
+
+[private]
+_test-file stage file:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE="{{stage}}"
+  if [[ ! -x "./$STAGE" ]]; then
+    echo "ERROR: $STAGE not found" >&2; exit 1
+  fi
+  TMP_LL="/tmp/sprout_test_$$.ll"
+  TMP_BIN="/tmp/sprout_testbin_$$"
+  TMP_ERR="/tmp/sprout_testerr_$$.txt"
+  TMP_RT="/tmp/sprout_runtime_$$.o"
+  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR" "$TMP_RT"' EXIT
+  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_RT" 2>"$TMP_ERR" || { echo "ERROR: runtime compile failed"; cat "$TMP_ERR"; exit 1; }
+  echo "==> {{file}}"
+  if ! "./$STAGE" --emit-ir "{{stdlib_root}}" "{{file}}" > "$TMP_LL" 2>"$TMP_ERR"; then
+    echo "  COMPILE FAILED:"; cat "$TMP_ERR"; exit 1
+  fi
+  if ! clang "$TMP_LL" "$TMP_RT" {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
+    echo "  LINK FAILED:"; cat "$TMP_ERR"; exit 1
+  fi
+  if out=$("$TMP_BIN" 2>&1); then
+    echo "$out"
+  else
+    status=$?
+    echo "$out"
+    echo "  RUN FAILED: exit $status"; exit 1
+  fi
+  if echo "$out" | grep -q "^SUITE FAILED"; then
+    exit 1
+  fi
+
 [group('test')]
 c-runtime-test:
   bash tests/c_runtime/run.sh
