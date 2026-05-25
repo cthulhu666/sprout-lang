@@ -141,13 +141,13 @@ compile-native file out:
 build-debug file out:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
     exit 1
   fi
   TMP_LL="/tmp/sprout_debug_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
-  ./compile_driver_bin_stage1 --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" runtime/sprout_runtime.c -g -O0 {{clang_extra}} -o {{quote(out)}}
 
 # Compile {{file}} with debug info and launch it under lldb.
@@ -155,14 +155,14 @@ build-debug file out:
 debug-run file:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "./compile_driver_bin_stage1" ]]; then
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
     echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
     exit 1
   fi
   TMP_LL="/tmp/sprout_debug_$$.ll"
   TMP_BIN="/tmp/sprout_debug_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  ./compile_driver_bin_stage1 --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" runtime/sprout_runtime.c -g -O0 {{clang_extra}} -o "$TMP_BIN"
   lldb "$TMP_BIN"
 
