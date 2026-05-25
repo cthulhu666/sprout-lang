@@ -157,6 +157,8 @@ Common tasks:
 - Run stdlib test suite: `mise exec -- just test`
 - Emit LLVM IR: `mise exec -- just compile examples/factorial.sprout /tmp/factorial.ll`
 - Build native binary (clang): `mise exec -- just compile-native examples/factorial.sprout /tmp/factorial`
+- Build debug binary (DWARF, no optimisation): `mise exec -- just build-debug examples/factorial.sprout /tmp/factorial_dbg`
+- Debug binary under lldb: `mise exec -- just debug-run examples/factorial.sprout`
 - REPL: not yet available (the Python-backed REPL has been removed; a native launcher is planned — track progress in BACKLOG.md)
 
 ### Native runtime GC environment variables
@@ -832,6 +834,55 @@ Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
 
 - `reactor` (default): event loop / readiness-based echo server
 - `blocking`: simple blocking accept/read/write loop
+
+## Debugging
+
+Compiled Sprout programs support source-level debugging via LLVM DWARF metadata and `lldb` (or `gdb`).
+Debug info is opt-in; release builds are unchanged.
+
+**Building a debug binary**
+
+```
+mise exec -- just build-debug myprog.spr ./myprog_dbg
+```
+
+This compiles `myprog.spr` with DWARF metadata (`--emit-ir --debug`) and links with `-g -O0`.
+The resulting binary can be loaded directly into `lldb`:
+
+```
+lldb ./myprog_dbg
+```
+
+**Starting a debug session**
+
+```
+(lldb) b myprog.spr:10          # break at line 10 of myprog.spr
+(lldb) run                      # start the program
+(lldb) bt                       # print Sprout backtrace
+(lldb) n                        # step to next instruction
+(lldb) s                        # step into a call
+(lldb) continue                 # resume execution
+```
+
+**Launching under lldb directly** (one-liner):
+
+```
+mise exec -- just debug-run myprog.spr
+```
+
+This compiles with debug info and opens `lldb` in one step.
+
+**What works in M1**
+
+- Breakpoints by source file and line: `b myprog.spr:N`
+- Sprout-attributed backtraces in `bt`: frame names are qualified Sprout function names (`main.add`, `main.main`)
+- Instruction-level `n` and `s`
+
+**Known limitations (M1)**
+
+- **Line number offset**: Sprout source files begin with `module` and `import` header lines that the compiler strips before parsing. DWARF line numbers are relative to the stripped source, so line N in the DWARF corresponds to line N + (number of header lines) in the original file. For example, if your file has two header lines (`module main` + a blank), `b myprog.spr:1` resolves to the first declaration body — functionally correct for breakpoints, but the source display in lldb is offset. This will be addressed in a follow-up.
+- **User-module functions only**: stdlib and prelude functions do not carry debug metadata. `bt` shows "source not available" for any stdlib frame, which is expected — stdlib sources are not distributed with binaries.
+- **ADT value display**: `p myval` at a breakpoint shows the raw `i64` handle, not the constructor name and fields. Human-readable ADT inspection is planned for M2.
 
 ## Modules (Experimental)
 

@@ -87,7 +87,7 @@ export type TcoCtx (..) =
   | TcoCtx String String (List (String, String)) String Int String
 
 # ---------------------------------------------------------------------------
-# Emitter state  (9 fields → fits sprout_make9)
+# Emitter state  (9 fields → fits sprout_make9; do NOT add more fields here)
 # ---------------------------------------------------------------------------
 
 # All mutable codegen state lives here, wrapped in a Ref.
@@ -113,7 +113,25 @@ type EmitterState =
       (Ref Int)  # next_str
       (Ref Int)  # next_lam
 
-type alias Emitter = EmitterState
+# ---------------------------------------------------------------------------
+# Debug emitter state — kept separate so EmitterState stays at 9 fields.
+#
+# debug_mode      — false = all DWARF emission is skipped (release build)
+# source_file     — entry source file path, used as the single !DIFile in M1
+# meta_id_counter — next metadata node ID; starts at 6 (IDs 0–5 are the
+#                   static module-level preamble; see assemble_debug_section)
+# meta_lines      — accumulated debug metadata lines (reversed), flushed as
+#                   the 4th IR section after all function defs
+# current_sp_id   — !DISubprogram ID for the function currently being emitted;
+#                   used when attaching !dbg to instructions (M1.5+)
+type DbgEmitter =
+  | DbgEmitter Bool String (Ref Int) (Ref (List String)) (Ref Int) (Ref Int)
+  # debug_mode, source_file, meta_id_counter, meta_lines, current_sp_id, current_loc_id
+
+# Emitter wraps EmitterState (capped at 9 fields) together with DbgEmitter.
+# All emit_* and es_* call sites use `em: Emitter` unchanged.
+type Emitter =
+  | Emitter EmitterState DbgEmitter
 
 # Encodes the current basic block name.  A dedicated ADT avoids the do-bind
 # monadic-unwrap rule that applies to Maybe/Result.
@@ -144,7 +162,8 @@ export type IrResult (..) =
   | IrErr String
 
 export type IrLinesResult (..) =
-  | IrLinesOk (List String) (List String) (List String)
+  | IrLinesOk (List String) (List String) (List String) (List String)
+  # header_lines, str_lines, def_lines, dbg_lines
   | IrLinesErr String
 
 # ===========================================================================
@@ -382,63 +401,91 @@ fn tco_with_outer_roots(t: TcoCtx, n: Int) -> TcoCtx =
 # Section 4 — EmitterState helpers
 # ===========================================================================
 
-# --- field-Ref accessors (pure) ---
+# --- EmitterState unwrap ---
 
-fn es_body_ref(s: EmitterState) -> Ref (List String) =
-  match s with | EmitterState b _ _ _ _ _ _ _ _ -> b
+fn em_es(em: Emitter) -> EmitterState =
+  match em with | Emitter es _ -> es
 
-fn es_all_defs_ref(s: EmitterState) -> Ref (List String) =
-  match s with | EmitterState _ a _ _ _ _ _ _ _ -> a
+fn em_dbg(em: Emitter) -> DbgEmitter =
+  match em with | Emitter _ dbg -> dbg
 
-fn es_str_glbs_ref(s: EmitterState) -> Ref (List String) =
-  match s with | EmitterState _ _ sg _ _ _ _ _ _ -> sg
+# --- DbgEmitter accessors ---
 
-fn es_fn_wrap_ref(s: EmitterState) -> Ref (Dict String) =
-  match s with | EmitterState _ _ _ fw _ _ _ _ _ -> fw
+fn em_dbg_mode(em: Emitter) -> Bool =
+  match em_dbg(em) with | DbgEmitter dm _ _ _ _ _ -> dm
 
-fn es_cur_blk_ref(s: EmitterState) -> Ref CurBlk =
-  match s with | EmitterState _ _ _ _ cb _ _ _ _ -> cb
+fn em_dbg_src(em: Emitter) -> String =
+  match em_dbg(em) with | DbgEmitter _ sf _ _ _ _ -> sf
 
-fn es_next_tmp_ref(s: EmitterState) -> Ref Int =
-  match s with | EmitterState _ _ _ _ _ nt _ _ _ -> nt
+fn em_meta_id_ref(em: Emitter) -> Ref Int =
+  match em_dbg(em) with | DbgEmitter _ _ mc _ _ _ -> mc
 
-fn es_next_blk_ref(s: EmitterState) -> Ref Int =
-  match s with | EmitterState _ _ _ _ _ _ nb _ _ -> nb
+fn em_meta_lines_ref(em: Emitter) -> Ref (List String) =
+  match em_dbg(em) with | DbgEmitter _ _ _ ml _ _ -> ml
 
-fn es_next_str_ref(s: EmitterState) -> Ref Int =
-  match s with | EmitterState _ _ _ _ _ _ _ ns _ -> ns
+fn em_sp_id_ref(em: Emitter) -> Ref Int =
+  match em_dbg(em) with | DbgEmitter _ _ _ _ sp _ -> sp
 
-fn es_next_lam_ref(s: EmitterState) -> Ref Int =
-  match s with | EmitterState _ _ _ _ _ _ _ _ nl -> nl
+fn em_loc_id_ref(em: Emitter) -> Ref Int =
+  match em_dbg(em) with | DbgEmitter _ _ _ _ _ lc -> lc
+
+# --- field-Ref accessors (pure) — unwrap Emitter → EmitterState ---
+
+fn es_body_ref(em: Emitter) -> Ref (List String) =
+  match em_es(em) with | EmitterState b _ _ _ _ _ _ _ _ -> b
+
+fn es_all_defs_ref(em: Emitter) -> Ref (List String) =
+  match em_es(em) with | EmitterState _ a _ _ _ _ _ _ _ -> a
+
+fn es_str_glbs_ref(em: Emitter) -> Ref (List String) =
+  match em_es(em) with | EmitterState _ _ sg _ _ _ _ _ _ -> sg
+
+fn es_fn_wrap_ref(em: Emitter) -> Ref (Dict String) =
+  match em_es(em) with | EmitterState _ _ _ fw _ _ _ _ _ -> fw
+
+fn es_cur_blk_ref(em: Emitter) -> Ref CurBlk =
+  match em_es(em) with | EmitterState _ _ _ _ cb _ _ _ _ -> cb
+
+fn es_next_tmp_ref(em: Emitter) -> Ref Int =
+  match em_es(em) with | EmitterState _ _ _ _ _ nt _ _ _ -> nt
+
+fn es_next_blk_ref(em: Emitter) -> Ref Int =
+  match em_es(em) with | EmitterState _ _ _ _ _ _ nb _ _ -> nb
+
+fn es_next_str_ref(em: Emitter) -> Ref Int =
+  match em_es(em) with | EmitterState _ _ _ _ _ _ _ ns _ -> ns
+
+fn es_next_lam_ref(em: Emitter) -> Ref Int =
+  match em_es(em) with | EmitterState _ _ _ _ _ _ _ _ nl -> nl
 
 # --- field value-getters (IO, reads through the Ref) ---
 
-fn es_body(s: EmitterState) -> List String !{IO} =
-  ref_read(es_body_ref(s))
+fn es_body(em: Emitter) -> List String !{IO} =
+  ref_read(es_body_ref(em))
 
-fn es_all_defs(s: EmitterState) -> List String !{IO} =
-  ref_read(es_all_defs_ref(s))
+fn es_all_defs(em: Emitter) -> List String !{IO} =
+  ref_read(es_all_defs_ref(em))
 
-fn es_str_glbs(s: EmitterState) -> List String !{IO} =
-  ref_read(es_str_glbs_ref(s))
+fn es_str_glbs(em: Emitter) -> List String !{IO} =
+  ref_read(es_str_glbs_ref(em))
 
-fn es_fn_wrap(s: EmitterState) -> Dict String !{IO} =
-  ref_read(es_fn_wrap_ref(s))
+fn es_fn_wrap(em: Emitter) -> Dict String !{IO} =
+  ref_read(es_fn_wrap_ref(em))
 
-fn es_cur_blk(s: EmitterState) -> CurBlk !{IO} =
-  ref_read(es_cur_blk_ref(s))
+fn es_cur_blk(em: Emitter) -> CurBlk !{IO} =
+  ref_read(es_cur_blk_ref(em))
 
-fn es_next_tmp(s: EmitterState) -> Int !{IO} =
-  ref_read(es_next_tmp_ref(s))
+fn es_next_tmp(em: Emitter) -> Int !{IO} =
+  ref_read(es_next_tmp_ref(em))
 
-fn es_next_blk(s: EmitterState) -> Int !{IO} =
-  ref_read(es_next_blk_ref(s))
+fn es_next_blk(em: Emitter) -> Int !{IO} =
+  ref_read(es_next_blk_ref(em))
 
-fn es_next_str(s: EmitterState) -> Int !{IO} =
-  ref_read(es_next_str_ref(s))
+fn es_next_str(em: Emitter) -> Int !{IO} =
+  ref_read(es_next_str_ref(em))
 
-fn es_next_lam(s: EmitterState) -> Int !{IO} =
-  ref_read(es_next_lam_ref(s))
+fn es_next_lam(em: Emitter) -> Int !{IO} =
+  ref_read(es_next_lam_ref(em))
 
 # --- mutation helpers (operate directly on the field Refs) ---
 
@@ -504,10 +551,73 @@ fn es_adopt_body(em: Emitter, lines: List String, blk: CurBlk) -> Unit !{IO} =
     ref_write(es_cur_blk_ref(em), blk)
 
 # ===========================================================================
+# Section 4b — Debug metadata helpers
+# ===========================================================================
+#
+# Metadata IDs 0–5 are statically reserved for the module-level DWARF preamble
+# (see assemble_debug_section).  Per-function and per-expression metadata nodes
+# are allocated starting at ID 6 via alloc_meta_id.
+
+fn alloc_meta_id(em: Emitter) -> Int !{IO} =
+  do
+    let r = em_meta_id_ref(em)
+    n <- ref_read(r)
+    ref_write(r, n + 1)
+    n
+
+fn add_meta_line(em: Emitter, line: String) -> Unit !{IO} =
+  do
+    let r = em_meta_lines_ref(em)
+    cur <- ref_read(r)
+    ref_write(r, Cons(line, cur))
+
+fn set_current_sp_id(em: Emitter, sp_id: Int) -> Unit !{IO} =
+  ref_write(em_sp_id_ref(em), sp_id)
+
+fn set_current_loc_id(em: Emitter, loc_id: Int) -> Unit !{IO} =
+  ref_write(em_loc_id_ref(em), loc_id)
+
+fn reset_debug_fn_state(em: Emitter) -> Unit !{IO} =
+  do
+    set_current_sp_id(em, 0)
+    set_current_loc_id(em, 0)
+
+# Produce the complete 4th IR section: named metadata references followed by
+# all numbered metadata nodes (preamble IDs 0-5 first, then accumulated lines).
+#
+# Static preamble layout (IDs always assigned in this order):
+#   !0  = DICompileUnit
+#   !1  = module flag entry: Dwarf Version
+#   !2  = module flag entry: Debug Info Version
+#   !3  = DIFile
+#   !4  = DISubroutineType (opaque, reused for all functions)
+#   !5  = !{} (empty type-parameter list for DISubroutineType)
+#
+# meta_id_counter starts at 6 so per-function/per-expression nodes start at !6.
+fn assemble_debug_section(em: Emitter) -> List String !{IO} =
+  do
+    meta_lines <- ref_read(em_meta_lines_ref(em))
+    let src = em_dbg_src(em)
+    let per_node_lines = list_reverse(meta_lines)
+    list_append(debug_preamble_lines(src), per_node_lines)
+
+fn debug_preamble_lines(src: String) -> List String =
+  Cons("",
+  Cons("; --- DWARF debug metadata ---",
+  Cons("!llvm.dbg.cu = !{!0}",
+  Cons("!llvm.module.flags = !{!1, !2}",
+  Cons("!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !3, producer: \"sprout\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, splitDebugInlining: false)",
+  Cons("!1 = !{i32 2, !\"Dwarf Version\", i32 5}",
+  Cons("!2 = !{i32 2, !\"Debug Info Version\", i32 3}",
+  Cons("!3 = !DIFile(filename: \"" ++ src ++ "\", directory: \".\")",
+  Cons("!4 = !DISubroutineType(types: !5)",
+  Cons("!5 = !{}", Nil))))))))))
+
+# ===========================================================================
 # Section 5 — High-level Emitter operations
 # ===========================================================================
 
-fn new_emitter() -> Emitter !{IO} =
+fn new_emitter(debug_mode_: Bool, source_file_: String) -> Emitter !{IO} =
   do
     body_ref <- ref_new(Nil)
     defs_ref <- ref_new(Nil)
@@ -518,10 +628,21 @@ fn new_emitter() -> Emitter !{IO} =
     nb_ref <- ref_new(0)
     ns_ref <- ref_new(0)
     nl_ref <- ref_new(0)
-    EmitterState(body_ref, defs_ref, strs_ref, wrap_ref, blk_ref, nt_ref, nb_ref, ns_ref, nl_ref)
+    meta_id_ref <- ref_new(6)
+    meta_lines_ref <- ref_new(Nil)
+    sp_id_ref <- ref_new(0)
+    loc_id_ref <- ref_new(0)
+    let es = EmitterState(body_ref, defs_ref, strs_ref, wrap_ref, blk_ref, nt_ref, nb_ref, ns_ref, nl_ref)
+    let dbg = DbgEmitter(debug_mode_, source_file_, meta_id_ref, meta_lines_ref, sp_id_ref, loc_id_ref)
+    Emitter(es, dbg)
 
 fn emit_line(em: Emitter, line: String) -> Unit !{IO} =
-  es_add_line(em, line)
+  do
+    loc_id <- ref_read(em_loc_id_ref(em))
+    let tagged = if loc_id == 0 then line
+                 else if str_find(line, " call ") >= 0 then line ++ ", !dbg !" ++ int_to_string(loc_id)
+                 else line
+    es_add_line(em, tagged)
 
 # Emit a StringTemplate as a single body line.
 # Assembly joins body entries with "\n", so we must collapse all template
@@ -2556,6 +2677,33 @@ fn emit_nothing_value(nothing_tag: Int, em: Emitter) -> Value !{IO} =
 # Section 18 — Function emission
 # ===========================================================================
 
+# emit_fn_dbg: when debug_mode is on and the function is not stdlib, allocate a
+# !DISubprogram metadata node and return the " !dbg !N" suffix for the define line.
+# User functions: qualified name contains "." AND does not start with "stdlib."
+# or "__tc_".  This excludes unqualified prelude helpers (range, vec_empty, …)
+# and typeclass dictionary functions (__tc_Eq_Int_eq, …) from M1 DWARF coverage.
+fn is_user_fn_name(name: String) -> Bool =
+  str_find(name, ".") >= 0 &&
+  str_starts_with(name, "stdlib.") == false &&
+  str_starts_with(name, "__tc_") == false
+
+fn emit_fn_dbg(name: String, body: typed_ast.TypedExpr, em: Emitter) -> String !{IO} =
+  if em_dbg_mode(em) == false then ""
+  else if is_user_fn_name(name) == false then ""
+  else
+    do
+      sp_id <- alloc_meta_id(em)
+      set_current_sp_id(em, sp_id)
+      let pos = typed_ast.typed_expr_pos(body)
+      let line = source.position_line(pos)
+      let sp_line = "!" ++ int_to_string(sp_id) ++ " = distinct !DISubprogram(name: \"" ++ name ++ "\", linkageName: \"" ++ name ++ "\", scope: !3, file: !3, line: " ++ int_to_string(line) ++ ", type: !4, scopeLine: " ++ int_to_string(line) ++ ", flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !0, retainedNodes: !{})"
+      add_meta_line(em, sp_line)
+      loc_id <- alloc_meta_id(em)
+      set_current_loc_id(em, loc_id)
+      let loc_line = "!" ++ int_to_string(loc_id) ++ " = !DILocation(line: " ++ int_to_string(line) ++ ", column: 0, scope: !" ++ int_to_string(sp_id) ++ ")"
+      add_meta_line(em, loc_line)
+      " !dbg !" ++ int_to_string(sp_id)
+
 fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr, sig: FnSig, is_entry: Bool, ctor_reg_meta: Dict (List (String, Int, Int, Int)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
   if is_entry == false && has_self_tail_calls(body, name) then
     emit_fn_tco(name, params, body, sig, sctx, em)
@@ -2566,7 +2714,8 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
                        else build_fn_params(fn_params(sig), params, 0)
       let emit_name = emitted_fn_name(name)
       let define_ret = if is_entry then "i32" else fn_ret(sig)
-      emit_template(em, `define ${define_ret} @${emit_name}(${params_str}) {`)
+      dbg_suffix <- emit_fn_dbg(name, body, em)
+      emit_line(em, "define " ++ define_ret ++ " @" ++ emit_name ++ "(" ++ params_str ++ ")" ++ dbg_suffix ++ " {")
       emit_label(em, "entry")
       rooted <- if is_entry then
         do
@@ -2600,6 +2749,7 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
       else
         emit_template(em, `  ret ${fn_ret (sig)} ${val_ir (coerced_result)}`)
       emit_line(em, "}")
+      reset_debug_fn_state(em)
   where sctx = ctx_with_scope(ctx, name)
 
 fn build_fn_params(lls: List String, params: List ast.Param, idx: Int) -> String =
@@ -3124,7 +3274,7 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
   match prog with
   | typed_ast.TypedProgram decls ->
       do
-        em <- new_emitter()
+        em <- new_emitter(false, "")
         let fn_sigs_ = build_fn_sigs_from_decls(decls, env)
         let externs = build_extern_sigs_from_decls(decls, env)
         let ctor_adt_pair = build_ctor_sigs_from_decls(decls)
@@ -3143,7 +3293,7 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
         emit_matching_fns(decls, fn_name, fn_sigs_, ctor_reg_meta, runtime_lets, ctx, em)
         sections <- assemble_ir_sections(em)
         match sections with
-        | (header_lines, str_lines, def_lines) -> IrLinesOk(header_lines, str_lines, def_lines)
+        | (header_lines, str_lines, def_lines, dbg_lines) -> IrLinesOk(header_lines, str_lines, def_lines, dbg_lines)
 
 # Build ctor registration metadata (for the main function's startup code).
 fn build_ctor_reg_meta(ctor_sigs_: Dict CtorSig, em: Emitter) -> Dict (List (String, Int, Int, Int)) !{IO} =
@@ -3178,9 +3328,9 @@ fn assemble_ir(em: Emitter) -> String !{IO} =
   do
     sections <- assemble_ir_sections(em)
     match sections with
-    | (header_lines, str_lines, def_lines) -> join_line_sections(header_lines, str_lines, def_lines)
+    | (header_lines, str_lines, def_lines, dbg_lines) -> join_line_sections(header_lines, str_lines, def_lines, dbg_lines)
 
-fn assemble_ir_sections(em: Emitter) -> (List String, List String, List String) !{IO} =
+fn assemble_ir_sections(em: Emitter) -> (List String, List String, List String, List String) !{IO} =
   do
     body <- es_body(em)
     defs <- es_all_defs(em)
@@ -3188,13 +3338,14 @@ fn assemble_ir_sections(em: Emitter) -> (List String, List String, List String) 
     let header_lines = list_reverse(body)
     let def_lines = list_reverse(defs)
     let str_lines = list_reverse(strs)
-    (header_lines, str_lines, def_lines)
+    dbg_lines <- if em_dbg_mode(em) then assemble_debug_section(em) else Nil
+    (header_lines, str_lines, def_lines, dbg_lines)
 
 fn join_lines(lines: List String) -> String =
   string_join_newlines(lines)
 
-fn join_line_sections(header_lines: List String, str_lines: List String, def_lines: List String) -> String =
-  string_join_newlines(header_lines) ++ string_join_newlines(str_lines) ++ string_join_newlines(def_lines)
+fn join_line_sections(header_lines: List String, str_lines: List String, def_lines: List String, dbg_lines: List String) -> String =
+  string_join_newlines(header_lines) ++ string_join_newlines(str_lines) ++ string_join_newlines(def_lines) ++ string_join_newlines(dbg_lines)
 
 # ===========================================================================
 # Section 22 — Main entry point
@@ -3202,16 +3353,16 @@ fn join_line_sections(header_lines: List String, str_lines: List String, def_lin
 
 export fn compile_to_ir(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> IrResult !{IO} =
   do
-    lines_result <- compile_to_ir_lines(prog, env)
+    lines_result <- compile_to_ir_lines(prog, env, false, "")
     match lines_result with
     | IrLinesErr msg -> IrErr(msg)
-    | IrLinesOk header_lines str_lines def_lines -> IrOk(join_line_sections(header_lines, str_lines, def_lines))
+    | IrLinesOk header_lines str_lines def_lines dbg_lines -> IrOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
 
-export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> IrLinesResult !{IO} =
+export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Scheme, debug_mode_: Bool, source_file_: String) -> IrLinesResult !{IO} =
   match prog with
   | typed_ast.TypedProgram decls ->
       do
-        em <- new_emitter()
+        em <- new_emitter(debug_mode_, source_file_)
         let fn_sigs_ = build_fn_sigs_from_decls(decls, env)
         let externs = build_extern_sigs_from_decls(decls, env)
         let ctor_adt_pair = build_ctor_sigs_from_decls(decls)
@@ -3248,7 +3399,7 @@ export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Sche
         # Assemble final IR sections without concatenating the full output.
         sections <- assemble_ir_sections(em)
         match sections with
-        | (header_lines, str_lines, def_lines) -> IrLinesOk(header_lines, str_lines, def_lines)
+        | (header_lines, str_lines, def_lines, dbg_lines) -> IrLinesOk(header_lines, str_lines, def_lines, dbg_lines)
 
 fn global_count(gi: Dict GlobalInfo) -> Int !{IO} =
   vec_length(dict_keys(gi))

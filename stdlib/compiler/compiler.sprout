@@ -166,7 +166,8 @@ export type IrFullResult (..) =
   | IrFullFail (List Diagnostic)
 
 export type IrFullLinesResult (..) =
-  | IrFullLinesOk (List String) (List String) (List String)
+  | IrFullLinesOk (List String) (List String) (List String) (List String)
+  # header_lines, str_lines, def_lines, dbg_lines
   | IrFullLinesFail (List Diagnostic)
 
 # ---------------------------------------------------------------------------
@@ -229,27 +230,28 @@ export fn compile_phase_recheck(path: String, stdlib_root: String) -> typed_ast.
 
 export fn compile_full_ir(path: String, stdlib_root: String) -> IrFullResult !{IO} =
   do
-    lines_result <- compile_full_ir_lines(path, stdlib_root)
+    lines_result <- compile_full_ir_lines(path, stdlib_root, false)
     match lines_result with
     | IrFullLinesFail diags -> IrFullFail(diags)
-    | IrFullLinesOk header_lines str_lines def_lines -> IrFullOk(join_line_sections(header_lines, str_lines, def_lines))
+    | IrFullLinesOk header_lines str_lines def_lines dbg_lines -> IrFullOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
 
-fn join_line_sections(header_lines: List String, str_lines: List String, def_lines: List String) -> String =
-  string_join_newlines(header_lines) ++ string_join_newlines(str_lines) ++ string_join_newlines(def_lines)
+fn join_line_sections(header_lines: List String, str_lines: List String, def_lines: List String, dbg_lines: List String) -> String =
+  string_join_newlines(header_lines) ++ string_join_newlines(str_lines) ++ string_join_newlines(def_lines) ++ string_join_newlines(dbg_lines)
 
 # compile_full_ir_lines uses compile_phase_recheck so that prog, typed_prog,
 # and lowered are freed before codegen runs — only typed_lowered + env survive
 # into the caller's scope.
-export fn compile_full_ir_lines(path: String, stdlib_root: String) -> IrFullLinesResult !{IO} =
+# debug_mode: when true, emits DWARF metadata in the 4th IR section (--debug flag).
+export fn compile_full_ir_lines(path: String, stdlib_root: String, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
   do
     recheck_result <- compile_phase_recheck(path, stdlib_root)
     match recheck_result with
     | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError(msg), Nil))
     | typed_ast.TypedOk typed_lowered env ->
         do
-          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env)
+          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, debug_mode_, path)
           match ir_result with
-          | codegen.IrLinesOk header_lines str_lines def_lines -> IrFullLinesOk(header_lines, str_lines, def_lines)
+          | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines -> IrFullLinesOk(header_lines, str_lines, def_lines, dbg_lines)
           | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))
 
 # compile_one_fn_ir_lines: like compile_full_ir_lines but only emits codegen for
@@ -263,5 +265,5 @@ export fn compile_one_fn_ir_lines(fn_name: String, path: String, stdlib_root: St
         do
           ir_result <- codegen.compile_to_ir_lines_one_fn(fn_name, typed_lowered, env)
           match ir_result with
-          | codegen.IrLinesOk header_lines str_lines def_lines -> IrFullLinesOk(header_lines, str_lines, def_lines)
+          | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines -> IrFullLinesOk(header_lines, str_lines, def_lines, dbg_lines)
           | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))

@@ -140,27 +140,29 @@ fn run_file_recheck(path: String, stdlib_root: String) -> Unit !{IO} =
 # ---------------------------------------------------------------------------
 # Phase: ir — emit LLVM IR text
 
-fn run_file_ir(path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file_ir(path: String, stdlib_root: String, debug_mode_: Bool) -> Unit !{IO} =
   do
-    result <- compiler.compile_full_ir_lines(path, stdlib_root)
+    result <- compiler.compile_full_ir_lines(path, stdlib_root, debug_mode_)
     match result with
     | compiler.IrFullLinesFail diags -> print_diags(diags)
-    | compiler.IrFullLinesOk header_lines str_lines def_lines ->
+    | compiler.IrFullLinesOk header_lines str_lines def_lines dbg_lines ->
         do
           print_lines(header_lines)
           print_lines(str_lines)
           print_lines(def_lines)
+          print_lines(dbg_lines)
 
 fn run_file_ir_one(fn_name: String, path: String, stdlib_root: String) -> Unit !{IO} =
   do
     result <- compiler.compile_one_fn_ir_lines(fn_name, path, stdlib_root)
     match result with
     | compiler.IrFullLinesFail diags -> print_diags(diags)
-    | compiler.IrFullLinesOk header_lines str_lines def_lines ->
+    | compiler.IrFullLinesOk header_lines str_lines def_lines dbg_lines ->
         do
           print_lines(header_lines)
           print_lines(str_lines)
           print_lines(def_lines)
+          print_lines(dbg_lines)
 
 fn print_lines(lines: List String) -> Unit !{IO} =
   match lines with
@@ -209,7 +211,7 @@ fn run_file_dump_qualify(path: String, stdlib_root: String) -> Unit !{IO} =
 # phase: "" = default source check,
 #        "bundle"|"check"|"lower"|"recheck"|"ir"|"scan-info"|"dump-qualify"
 
-fn run_batch(stdlib_root: String, idx: Int, phase: String) -> Unit !{IO} =
+fn run_batch(stdlib_root: String, idx: Int, phase: String, debug_mode_: Bool) -> Unit !{IO} =
   match argv_get(idx) with
   | Nothing -> ()
   | Just path ->
@@ -220,20 +222,26 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String) -> Unit !{IO} =
         else if phase == "check" then run_file_check(path, stdlib_root)
         else if phase == "lower" then run_file_lower(path, stdlib_root)
         else if phase == "recheck" then run_file_recheck(path, stdlib_root)
-        else if phase == "ir" then run_file_ir(path, stdlib_root)
+        else if phase == "ir" then run_file_ir(path, stdlib_root, debug_mode_)
         else if phase == "scan-info" then run_file_scan_info(path, stdlib_root)
         else if phase == "dump-qualify" then run_file_dump_qualify(path, stdlib_root)
         else run_file(path, stdlib_root)
-        run_batch(stdlib_root, idx + 1, phase)
+        run_batch(stdlib_root, idx + 1, phase, debug_mode_)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing -> print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir | --emit-ir-one <fn_name>] <stdlib-root> <file>...")
+  | Nothing -> print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name>] <stdlib-root> <file>...")
   | Just first_arg ->
       if first_arg == "--emit-ir" then
         match argv_get(1) with
-        | Nothing -> print("ERROR: usage: compile-driver --emit-ir <stdlib-root> <file>...")
-        | Just stdlib_root -> run_batch(stdlib_root, 2, "ir")
+        | Nothing -> print("ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> <file>...")
+        | Just second_arg ->
+            if second_arg == "--debug" then
+              match argv_get(2) with
+              | Nothing -> print("ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
+              | Just stdlib_root -> run_batch(stdlib_root, 3, "ir", true)
+            else
+              run_batch(second_arg, 2, "ir", false)
       else if first_arg == "--emit-ir-one" then
         match argv_get(1) with
         | Nothing -> print("ERROR: --emit-ir-one requires a function name argument")
@@ -250,6 +258,6 @@ fn main() -> Unit !{IO} =
         | Just phase ->
             match argv_get(2) with
             | Nothing -> print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> <file>...")
-            | Just stdlib_root -> run_batch(stdlib_root, 3, phase)
+            | Just stdlib_root -> run_batch(stdlib_root, 3, phase, false)
       else
-        run_batch(first_arg, 1, "")
+        run_batch(first_arg, 1, "", false)
