@@ -344,15 +344,40 @@ fn eval_bin_path() -> String = "/tmp/sprout_eval_repl_bin"
 fn runtime_c_path(stdlib_root: String) -> String =
   stdlib_root ++ "/../runtime/sprout_runtime.c"
 
-fn clang_base_args(stdlib_root: String) -> List String =
-  ["clang", eval_ir_path(), runtime_c_path(stdlib_root), "-O2", "-o", eval_bin_path()]
+fn runtime_obj_path() -> String = "/tmp/sprout_runtime_daemon.o"
+
+# ---------------------------------------------------------------------------
+# StartupState — pre-compiled runtime.o and stdlib_root, built once at startup
+
+type StartupState = StartupState String String  # stdlib_root, runtime_obj_path
+
+fn state_stdlib_root(state: StartupState) -> String =
+  match state with
+  | StartupState root _ -> root
+
+fn state_runtime_obj(state: StartupState) -> String =
+  match state with
+  | StartupState _ obj -> obj
+
+# Pre-compile sprout_runtime.c once so every eval link uses the .o instead of .c.
+# Darwin frameworks are link-time only; the -c step is platform-independent.
+fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
+  do
+    let obj = runtime_obj_path()
+    result <- process.proc_run(["clang", "-c", runtime_c_path(stdlib_root), "-O2", "-o", obj])
+    if process.proc_ok(result) == false
+    then panic("sproutd: failed to pre-compile runtime.c: " ++ process.proc_stderr(result))
+    else StartupState(stdlib_root, obj)
+
+fn clang_base_args(runtime_obj: String) -> List String =
+  ["clang", eval_ir_path(), runtime_obj, "-O2", "-o", eval_bin_path()]
 
 fn clang_darwin_extra() -> List String =
   ["-framework", "Security", "-framework", "CoreFoundation"]
 
-fn clang_argv(stdlib_root: String, use_darwin: Bool) -> List String =
-  if use_darwin then list_append(clang_base_args(stdlib_root), clang_darwin_extra())
-  else clang_base_args(stdlib_root)
+fn clang_argv(runtime_obj: String, use_darwin: Bool) -> List String =
+  if use_darwin then list_append(clang_base_args(runtime_obj), clang_darwin_extra())
+  else clang_base_args(runtime_obj)
 
 fn make_eval_source(src: String, expr: String, type_str: String) -> Maybe String =
   if string.ends_with(type_str, " !{IO}") then
@@ -389,7 +414,7 @@ fn darwin_frameworks_set() -> Bool !{IO} =
   | Just _ -> true
   | Nothing -> false
 
-fn link_and_run_eval(ir_result: compiler.IrFullResult, stdlib_root: String) -> json.Json !{IO} =
+fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> json.Json !{IO} =
   match ir_result with
   | compiler.IrFullFail _ -> error_response("eval_expr_in_source: codegen failed")
   | compiler.IrFullOk ir_text ->
@@ -398,24 +423,24 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, stdlib_root: String) -> j
       | Ok _ ->
           do
             use_darwin <- darwin_frameworks_set()
-            link_result <- process.proc_run(clang_argv(stdlib_root, use_darwin))
+            link_result <- process.proc_run(clang_argv(state_runtime_obj(state), use_darwin))
             run_eval_binary(link_result)
 
-fn compile_and_run_eval(src: String, stdlib_root: String) -> json.Json !{IO} =
+fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
   match write_file(eval_source_path(), src) with
   | Err msg -> panic("write_file: eval_source: " ++ msg)
   | Ok _ ->
       do
-        ir_result <- compiler.compile_full_ir(eval_source_path(), stdlib_root)
-        link_and_run_eval(ir_result, stdlib_root)
+        ir_result <- compiler.compile_full_ir(eval_source_path(), state_stdlib_root(state))
+        link_and_run_eval(ir_result, state)
 
-fn eval_with_scheme(src: String, expr: String, stdlib_root: String, scheme: types.Scheme) -> json.Json !{IO} =
+fn eval_with_scheme(src: String, expr: String, state: StartupState, scheme: types.Scheme) -> json.Json !{IO} =
   match make_eval_source(src, expr, type_str) with
   | Nothing -> error_response("eval_expr_in_source: cannot auto-print effectful non-Unit expression of type: " ++ type_str)
-  | Just full_src -> compile_and_run_eval(full_src, stdlib_root)
+  | Just full_src -> compile_and_run_eval(full_src, state)
   where type_str = types.scheme_to_string(scheme)
 
-fn eval_with_type_result(src: String, expr: String, stdlib_root: String, result: compiler.CompileResult) -> json.Json !{IO} =
+fn eval_with_type_result(src: String, expr: String, state: StartupState, result: compiler.CompileResult) -> json.Json !{IO} =
   match result with
   | compiler.CompileFail diags ->
       match diags with
@@ -427,19 +452,19 @@ fn eval_with_type_result(src: String, expr: String, stdlib_root: String, result:
   | compiler.CompileOk env ->
       match dict_get(sentinel_name(), env) with
       | Nothing -> error_response("eval_expr_in_source: could not infer type of expression")
-      | Just scheme -> eval_with_scheme(src, expr, stdlib_root, scheme)
+      | Just scheme -> eval_with_scheme(src, expr, state, scheme)
 
-fn op_eval_expr_in_source(src: String, expr: String, stdlib_root: String) -> json.Json !{IO} =
+fn op_eval_expr_in_source(src: String, expr: String, state: StartupState) -> json.Json !{IO} =
   if str_find(src, "let " ++ sentinel_name()) != -1 then
     error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot eval")
   else do
-    type_result <- compiler.compile_source_with_root(augment_source(src, expr), stdlib_root)
-    eval_with_type_result(src, expr, stdlib_root, type_result)
+    type_result <- compiler.compile_source_with_root(augment_source(src, expr), state_stdlib_root(state))
+    eval_with_type_result(src, expr, state, type_result)
 
 # ---------------------------------------------------------------------------
 # Request dispatch
 
-fn dispatch_op(op: String, req: json.Json, stdlib_root: String) -> json.Json !{IO} =
+fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{IO} =
   if op == "check_source" then
     match require_string_field(req, "module_source") with
     | Err msg -> error_response(msg)
@@ -486,38 +511,45 @@ fn dispatch_op(op: String, req: json.Json, stdlib_root: String) -> json.Json !{I
         | Err msg -> error_response(msg)
         | Ok expr ->
             if stdlib_root == "" then error_response("stdlib-root not configured for semantic ops")
-            else op_eval_expr_in_source(src, expr, stdlib_root)
+            else op_eval_expr_in_source(src, expr, state)
   else if op == "complete_in_state" then not_implemented(op)
   else error_response(string.concat("unknown op: ", op))
+  where stdlib_root = state_stdlib_root(state)
 
-fn dispatch(req: json.Json, stdlib_root: String) -> json.Json !{IO} =
+fn dispatch(req: json.Json, state: StartupState) -> json.Json !{IO} =
   match json.json_get_field(req, "op") with
   | Nothing -> error_response("missing 'op' field")
   | Just op_val ->
       match json.json_get_string(op_val) with
       | Nothing -> error_response("'op' must be a string")
-      | Just op -> dispatch_op(op, req, stdlib_root)
+      | Just op -> dispatch_op(op, req, state)
 
-fn dispatch_line(line: String, stdlib_root: String) -> json.Json !{IO} =
+fn dispatch_line(line: String, state: StartupState) -> json.Json !{IO} =
   match json.parse(line) with
   | Err (json.JsonDecode msg) -> error_response(string.concat("invalid JSON: ", msg))
-  | Ok req -> dispatch(req, stdlib_root)
+  | Ok req -> dispatch(req, state)
 
 # ---------------------------------------------------------------------------
 # Service loop
 
-fn service_loop(stdlib_root: String) -> Unit !{IO} =
+fn service_loop(state: StartupState) -> Unit !{IO} =
   match term_read_line() with
   | Nothing -> ()
   | Just line ->
-      if string.is_empty(line) then service_loop(stdlib_root)
+      if string.is_empty(line) then service_loop(state)
       else
         do
-          response <- dispatch_line(line, stdlib_root)
+          response <- dispatch_line(line, state)
           term_write(json.stringify(response) ++ "\n")
-          service_loop(stdlib_root)
+          service_loop(state)
+
+export fn run_service(stdlib_root: String) -> Unit !{IO} =
+  if stdlib_root == "" then service_loop(StartupState("", ""))
+  else do
+    state <- build_startup_state(stdlib_root)
+    service_loop(state)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
-  | Nothing -> service_loop("")
-  | Just stdlib_root -> service_loop(stdlib_root)
+  | Nothing -> run_service("")
+  | Just stdlib_root -> run_service(stdlib_root)
