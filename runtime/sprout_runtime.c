@@ -476,9 +476,29 @@ static void sprout_managed_index_remove(ManagedNode* node) {
   }
 }
 
-static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slots) {
+/* Freelist for ManagedNode structs — avoids malloc/free on the hot allocation
+ * path where thousands of short-lived objects are tracked per source file.
+ * Single-threaded; no locking required. */
+static ManagedNode* g_managed_node_freelist = NULL;
+
+/* SproutObj freelist: recycle GC-swept SproutObj allocations.
+ * f0 is used as the next-pointer while the object is on the freelist;
+ * sprout_init_obj always overwrites f0 before any code reads it. */
+static SproutObj* g_sprout_obj_freelist = NULL;
+
+static ManagedNode* alloc_managed_node(void) {
+  if (g_managed_node_freelist != NULL) {
+    ManagedNode* n = g_managed_node_freelist;
+    g_managed_node_freelist = n->next;
+    return n;
+  }
   ManagedNode* n = (ManagedNode*)malloc(sizeof(ManagedNode));
   if (n == NULL) tcp_fail("register_managed_ptr: out of memory");
+  return n;
+}
+
+static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slots) {
+  ManagedNode* n = alloc_managed_node();
   n->ptr = ptr;
   n->kind = kind;
   n->aux_slots = aux_slots;
@@ -515,6 +535,12 @@ static void register_obj(SproutObj* p) {
 
 static SproutObj* sprout_alloc_obj_raw(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
+  if (g_sprout_obj_freelist != NULL) {
+    SproutObj* obj = g_sprout_obj_freelist;
+    g_sprout_obj_freelist = (SproutObj*)(uintptr_t)obj->f0;
+    g_debug_alloc_sprout_obj++;
+    return obj;
+  }
   return (SproutObj*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(SproutObj), ctx);
 }
 
@@ -968,9 +994,12 @@ static void sprout_gc_mark_roots(void) {
 
 static void sprout_gc_free_payload(ManagedNode* node) {
   switch (node->kind) {
-    case SPROUT_HEAP_OBJ:
-      free(node->ptr);
+    case SPROUT_HEAP_OBJ: {
+      SproutObj* obj = (SproutObj*)node->ptr;
+      obj->f0 = (long long)(uintptr_t)g_sprout_obj_freelist;
+      g_sprout_obj_freelist = obj;
       return;
+    }
     case SPROUT_HEAP_CLOSURE:
       free(node->ptr);
       return;
@@ -1029,7 +1058,8 @@ static void sprout_gc_sweep(void) {
       } else {
         prev->next = next;
       }
-      free(node);
+      node->next = g_managed_node_freelist;
+      g_managed_node_freelist = node;
       g_debug_gc_swept++;
       g_managed_heap_count--;
     } else {
