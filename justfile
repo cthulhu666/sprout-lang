@@ -305,30 +305,64 @@ _compile-examples stage xfail="":
   if [[ ! -x "./$STAGE" ]]; then
     echo "ERROR: $STAGE not found" >&2; exit 1
   fi
-  TMP_LL="/tmp/sprout_ex_$$.ll"
-  TMP_BIN="/tmp/sprout_exbin_$$"
-  TMP_ERR="/tmp/sprout_exerr_$$.txt"
-  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR"' EXIT
-  total_failed=0
-  total_xfail=0
+  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  TMPD="/tmp/sprout_ex_$$"
+  mkdir -p "$TMPD"
+  trap 'rm -rf "$TMPD"' EXIT
+  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
+    || { echo "ERROR: runtime compile failed"; cat "$TMPD/rt.err"; exit 1; }
+  declare -a pids=()
+  declare -a outs=()
+  declare -a stats=()
+  idx=0
+  active=0
   for f in examples/*.sprout; do
     [ -f "$f" ] || continue
-    echo "==> $f"
-    is_xfail=0
-    for xf in $XFAIL_EXAMPLES; do [[ "$f" == "$xf" ]] && is_xfail=1 && break; done
-    ok=1
-    if ! "./$STAGE" --emit-ir "{{stdlib_root}}" "$f" > "$TMP_LL" 2>"$TMP_ERR"; then
-      echo "  COMPILE FAILED:"; cat "$TMP_ERR"; ok=0
-    elif ! clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
-      echo "  LINK FAILED:"; cat "$TMP_ERR"; ok=0
+    outs+=("$TMPD/$idx.out")
+    stats+=("$TMPD/$idx.st")
+    (
+      set +e
+      is_xfail=0
+      for xf in $XFAIL_EXAMPLES; do [[ "$f" == "$xf" ]] && is_xfail=1 && break; done
+      printf '==> %s\n' "$f" > "$TMPD/$idx.out"
+      ok=1
+      "./$STAGE" --emit-ir "{{stdlib_root}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
+      if [[ $? -ne 0 ]]; then
+        { printf '  COMPILE FAILED:\n'; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
+      else
+        clang "$TMPD/$idx.ll" "$TMPD/rt.o" {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
+        if [[ $? -ne 0 ]]; then
+          { printf '  LINK FAILED:\n'; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
+        fi
+      fi
+      if [[ $ok -eq 1 ]]; then
+        if [[ $is_xfail -eq 1 ]]; then printf '  UNEXPECTED OK (remove from xfail)\n' >> "$TMPD/$idx.out"; echo 2 > "$TMPD/$idx.st"
+        else printf '  OK\n' >> "$TMPD/$idx.out"; echo 0 > "$TMPD/$idx.st"; fi
+      else
+        if [[ $is_xfail -eq 1 ]]; then printf '  xfail (expected)\n' >> "$TMPD/$idx.out"; echo 3 > "$TMPD/$idx.st"
+        else echo 1 > "$TMPD/$idx.st"; fi
+      fi
+    ) &
+    pids+=($!)
+    idx=$((idx + 1))
+    active=$((active + 1))
+    if (( active >= JOBS )); then
+      wait -n 2>/dev/null || wait "${pids[idx - active]}" || true
+      active=$((active - 1))
     fi
-    if [[ $ok -eq 1 ]]; then
-      if [[ $is_xfail -eq 1 ]]; then echo "  UNEXPECTED OK (remove from xfail)"; total_failed=$((total_failed + 1))
-      else echo "  OK"; fi
-    else
-      if [[ $is_xfail -eq 1 ]]; then echo "  xfail (expected)"; total_xfail=$((total_xfail + 1))
-      else total_failed=$((total_failed + 1)); fi
-    fi
+  done
+  for pid in "${pids[@]}"; do wait "$pid" || true; done
+  total_failed=0
+  total_xfail=0
+  for i in "${!outs[@]}"; do
+    cat "${outs[$i]}" 2>/dev/null || true
+    case "$(cat "${stats[$i]}" 2>/dev/null || echo 1)" in
+      0) ;;
+      1) total_failed=$((total_failed + 1)) ;;
+      2) total_failed=$((total_failed + 1)) ;;
+      3) total_xfail=$((total_xfail + 1)) ;;
+    esac
   done
   echo ""
   [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail example(s) xfail (expected)"
