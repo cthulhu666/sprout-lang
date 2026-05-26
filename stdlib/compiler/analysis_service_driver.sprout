@@ -37,7 +37,7 @@ fn count_header_lines(s: String, pos: Int, count: Int) -> Int =
 # ---------------------------------------------------------------------------
 # SessionState — server-side per-session state (M2)
 
-type SessionState = SessionState (Vec String) (Vec String)
+export type SessionState (..) = SessionState (Vec String) (Vec String)
   # imports, declarations
 
 fn session_state_imports(s: SessionState) -> Vec String =
@@ -46,7 +46,7 @@ fn session_state_imports(s: SessionState) -> Vec String =
 fn session_state_declarations(s: SessionState) -> Vec String =
   match s with | SessionState _ declarations -> declarations
 
-fn session_add_line(sess: SessionState, kind: String, line: String) -> SessionState =
+export fn session_add_line(sess: SessionState, kind: String, line: String) -> SessionState =
   match sess with
   | SessionState imports declarations ->
       if kind == "import" then SessionState(vec_append(line, imports), declarations)
@@ -59,7 +59,7 @@ fn build_source_parts(header: String, imports: Vec String, declarations: Vec Str
     if vec_length(imports) == 0 then header
     else header ++ "\n\n" ++ string.join("\n\n", imports)
 
-fn rebuild_session_source(sess: SessionState) -> String =
+export fn rebuild_session_source(sess: SessionState) -> String =
   match sess with
   | SessionState imports declarations ->
       build_source_parts("module app.session", imports, declarations)

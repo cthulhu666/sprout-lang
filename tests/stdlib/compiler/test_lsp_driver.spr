@@ -1,0 +1,51 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lsp_driver as lsp
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # parse_content_length
+    assert_eq(state, "parse_content_length: valid header",
+      lsp.parse_content_length("Content-Length: 42"), Just(42))
+    assert_eq(state, "parse_content_length: zero",
+      lsp.parse_content_length("Content-Length: 0"), Just(0))
+    assert_eq(state, "parse_content_length: unrelated header",
+      lsp.parse_content_length("Content-Type: application/vscode-jsonrpc"), Nothing)
+    assert_eq(state, "parse_content_length: empty string",
+      lsp.parse_content_length(""), Nothing)
+    assert_eq(state, "parse_content_length: partial prefix",
+      lsp.parse_content_length("Content-Length:42"), Nothing)
+
+    # extract_word — basic identifiers
+    assert_eq(state, "extract_word: middle of word",
+      lsp.extract_word("hello world", 2), "hello")
+    assert_eq(state, "extract_word: second word",
+      lsp.extract_word("hello world", 8), "world")
+    assert_eq(state, "extract_word: start of string",
+      lsp.extract_word("hello", 0), "hello")
+    assert_eq(state, "extract_word: end of word (col at last char)",
+      lsp.extract_word("hello", 4), "hello")
+
+    # extract_word — at a non-ident character gives empty string
+    assert_eq(state, "extract_word: space gives empty",
+      lsp.extract_word("hello world", 5), "")
+    assert_eq(state, "extract_word: open paren gives empty",
+      lsp.extract_word("foo(bar)", 3), "")
+
+    # extract_word — qualified names (dot included)
+    assert_eq(state, "extract_word: dotted name from middle",
+      lsp.extract_word("string.join(\"|\")", 8), "string.join")
+    assert_eq(state, "extract_word: dotted name from start",
+      lsp.extract_word("string.join(\"|\")", 0), "string.join")
+
+    # extract_word — empty string input
+    assert_eq(state, "extract_word: empty line",
+      lsp.extract_word("", 0), "")
+
+    # extract_word — col past end of line
+    assert_eq(state, "extract_word: col past end",
+      lsp.extract_word("hi", 10), "")
+
+    summary(state)

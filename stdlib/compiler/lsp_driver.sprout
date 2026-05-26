@@ -36,7 +36,7 @@ fn build_lsp_state(stdlib_root: String) -> LspState !{IO} =
 fn lsp_send(body: String) -> Unit !{IO} =
   term_write("Content-Length: " ++ int_to_string(string.length(body)) ++ "\r\n\r\n" ++ body)
 
-fn parse_content_length(line: String) -> Maybe Int =
+export fn parse_content_length(line: String) -> Maybe Int =
   match string.strip_prefix(line, "Content-Length: ") with
   | Nothing -> Nothing
   | Just value -> Just(parse_int(value))
@@ -175,9 +175,19 @@ fn word_end_loop(line: String, col: Int, total: Int) -> Int =
         if is_hover_ident_ch(ch) then word_end_loop(line, col + 1, total)
         else col
 
-fn extract_word(line: String, col: Int) -> String =
-  string.slice(line, wstart, word_end_loop(line, col, string.length(line)) - wstart)
+fn extract_word_impl(line: String, col: Int, len: Int) -> String =
+  string.slice(line, wstart, word_end_loop(line, col, len) - wstart)
   where wstart = word_start(line, col)
+
+export fn extract_word(line: String, col: Int) -> String =
+  if col >= len then ""
+  else
+    match string.char_at(line, col) with
+    | Nothing -> ""
+    | Just ch ->
+        if is_hover_ident_ch(ch) then extract_word_impl(line, col, len)
+        else ""
+  where len = string.length(line)
 
 fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
   make_result(id,
