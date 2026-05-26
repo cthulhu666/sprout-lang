@@ -4,6 +4,8 @@ import stdlib.json as json
 import stdlib.compiler as compiler
 import stdlib.string as string
 
+extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
+
 # ---------------------------------------------------------------------------
 # LspState
 
@@ -34,7 +36,7 @@ fn build_lsp_state(stdlib_root: String) -> LspState !{IO} =
 # JetBrains) send compact single-line JSON bodies.
 
 fn lsp_send(body: String) -> Unit !{IO} =
-  term_write("Content-Length: " ++ int_to_string(string.length(body)) ++ "\r\n\r\n" ++ body)
+  term_write("Content-Length: " ++ int_to_string(string.byte_length(body)) ++ "\r\n\r\n" ++ body)
 
 export fn parse_content_length(line: String) -> Maybe Int =
   match string.strip_prefix(line, "Content-Length: ") with
@@ -54,7 +56,7 @@ fn read_headers_loop(cl: Maybe Int) -> Maybe Int !{IO} =
 fn read_lsp_message() -> Maybe String !{IO} =
   match read_headers_loop(Nothing) with
   | Nothing -> Nothing
-  | Just _ -> term_read_line()
+  | Just n -> stdin_read_bytes(n)
 
 # ---------------------------------------------------------------------------
 # JSON-RPC 2.0 helpers

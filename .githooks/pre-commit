@@ -203,13 +203,16 @@ if not new_fns:
     sys.exit(0)
 
 try:
-    with open('runtime/APPROVED_BUILTINS') as f:
-        approved = {
-            line.split('#')[0].strip()
-            for line in f
-            if line.strip() and not line.startswith('#')
-        }
-except FileNotFoundError:
+    content = subprocess.check_output(
+        ['git', 'show', ':runtime/APPROVED_BUILTINS'],
+        stderr=subprocess.DEVNULL
+    ).decode(errors='replace')
+    approved = {
+        line.split('#')[0].strip()
+        for line in content.splitlines()
+        if line.strip() and not line.startswith('#')
+    }
+except subprocess.CalledProcessError:
     approved = set()
 
 missing = [fn for fn in new_fns if fn not in approved]

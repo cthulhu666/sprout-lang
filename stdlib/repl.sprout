@@ -711,10 +711,32 @@ fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compile
         repl_loop_session(prompt, history, session)
   | EndInput -> finish_loop(prompt)
 
+fn replay_imports(session: compiler.StatefulSession, imports: Vec String, i: Int) -> compiler.StatefulSession !{IO} =
+  if i >= vec_length(imports) then session
+  else
+    match vec_get(i, imports) with
+    | Nothing -> replay_imports(session, imports, i + 1)
+    | Just line ->
+        match compiler.session_import(session, line) with
+        | Err _ -> replay_imports(session, imports, i + 1)
+        | Ok next -> replay_imports(next, imports, i + 1)
+
+fn replay_declarations(session: compiler.StatefulSession, declarations: Vec String, i: Int) -> compiler.StatefulSession !{IO} =
+  if i >= vec_length(declarations) then session
+  else
+    match vec_get(i, declarations) with
+    | Nothing -> replay_declarations(session, declarations, i + 1)
+    | Just line ->
+        match compiler.session_declare(session, line) with
+        | Err _ -> replay_declarations(session, declarations, i + 1)
+        | Ok next -> replay_declarations(next, declarations, i + 1)
+
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
   do
-    session <- compiler.create_session()
-    repl_loop_session(prompt, history, session)
+    empty_session <- compiler.create_session()
+    with_imports <- replay_imports(empty_session, imports, 0)
+    full_session <- replay_declarations(with_imports, declarations, 0)
+    repl_loop_session(prompt, history, full_session)
 
 export fn run() -> Unit !{IO} =
   if term_is_interactive_once()

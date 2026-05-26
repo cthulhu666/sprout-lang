@@ -1618,6 +1618,28 @@ long long term_read_line(void) {
   SPROUT_HANDLE(h_line, (long long)(uintptr_t)line);
   return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_line));
 }
+/* stdin_read_bytes: read exactly n bytes from stdin; returns Nothing on EOF.
+ * Required because fread has no Sprout equivalent — getline reads to newline,
+ * not to a fixed byte count as LSP/DAP Content-Length framing requires. */
+long long stdin_read_bytes(long long n_val) {
+  if (n_val < 0) tcp_fail("stdin_read_bytes: negative byte count");
+  char* buf = (char*)malloc((size_t)n_val + 1);
+  if (!buf) tcp_fail("stdin_read_bytes: out of memory");
+  size_t total = 0;
+  while (total < (size_t)n_val) {
+    size_t got = fread(buf + total, 1, (size_t)n_val - total, stdin);
+    if (got == 0) {
+      free(buf);
+      if (feof(stdin)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
+      tcp_fail("stdin_read_bytes: read error");
+    }
+    total += got;
+  }
+  buf[n_val] = '\0';
+  register_cstr(buf);
+  SPROUT_HANDLE(h_buf, (long long)(uintptr_t)buf);
+  return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_buf));
+}
 _Bool term_is_interactive(void) {
   return isatty(fileno(stdin)) && isatty(fileno(stdout));
 }
@@ -2888,8 +2910,8 @@ long long sproutd_self_init(void) {
     snprintf(inferred, sizeof(inferred), "%s/../stdlib", dir);
     stdlib_root = inferred;
   }
-  char cmd[PATH_MAX * 2 + 32];
-  snprintf(cmd, sizeof(cmd), "%s --analysis-service %s", own_exe, stdlib_root);
+  char cmd[PATH_MAX * 2 + 36];
+  snprintf(cmd, sizeof(cmd), "'%s' --analysis-service '%s'", own_exe, stdlib_root);
   setenv("SPROUT_ANALYSIS_SERVICE_CMD", cmd, 0);
 #ifdef __APPLE__
   setenv("SPROUT_DARWIN_FRAMEWORKS", "1", 0);

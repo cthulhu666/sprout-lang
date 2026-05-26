@@ -142,6 +142,7 @@ str_byte_len
 str_char_at
 str_char_at_byte
 str_char_width_at_byte
+stdin_read_bytes  # fread(n) — no Sprout way to read exactly N bytes; needed for Content-Length framing (LSP, DAP)
 str_compare
 str_concat
 str_find

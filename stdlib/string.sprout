@@ -12,6 +12,10 @@ export fn concat(left: String, right: String) -> String =
 export fn length(raw: String) -> Int =
   str_len(raw)
 
+# O(bytes): UTF-8 byte count (strlen); use this for protocol byte-length headers.
+export fn byte_length(raw: String) -> Int =
+  str_byte_len(raw)
+
 # O(codepoints in `raw` + `count`): the builtin finds UTF-8 boundaries, then copies the slice.
 export fn slice(raw: String, start: Int, count: Int) -> String =
   str_slice(raw, start, count)

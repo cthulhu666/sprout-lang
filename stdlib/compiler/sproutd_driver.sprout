@@ -13,7 +13,10 @@ fn main() -> Unit !{IO} =
       | Nothing -> panic("sproutd: --analysis-service requires stdlib_root argument")
   | Just "--lsp" ->
       match argv_get(1) with
-      | Just stdlib_root -> lsp.run_lsp(stdlib_root)
+      | Just stdlib_root ->
+          do
+            sproutd_self_init()
+            lsp.run_lsp(stdlib_root)
       | Nothing -> panic("sproutd: --lsp requires stdlib_root argument")
   | _ ->
       do
