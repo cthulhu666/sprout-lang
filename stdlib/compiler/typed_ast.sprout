@@ -119,7 +119,7 @@ export type TypedResult (..) =
 # Result of inferring a single function/method body.
 # BodyLenient: an unknown-variable error was silently accepted (builtin gap).
 export type BodyResult (..) =
-  | BodyOk TypedExpr
+  | BodyOk TypedExpr types.Type
   | BodyLenient
   | BodyErr String
 

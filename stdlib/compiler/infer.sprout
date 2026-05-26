@@ -1956,10 +1956,13 @@ fn typecheck_decl(
             # BodyLenient is no longer produced (fn_body_err always returns BodyErr).
             # Retained as a constructor only to avoid breaking the typed_ast public API.
             TypedDeclErr("internal: unexpected BodyLenient in " ++ name)
-        | typed_ast.BodyOk typed_body ->
+        | typed_ast.BodyOk typed_body inferred_fn_type ->
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
-              register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env))
+              dict_set(name,
+                unifier.generalize(unifier.ftv_env(env), dict_empty(), dict_empty(),
+                  inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
+                env))
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
       match dict_get(name, env) with
       | Just _ ->
@@ -2195,8 +2198,8 @@ fn check_fn_body(
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
             | Err e -> typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e)
-            | Ok _ -> typed_ast.BodyOk(apply_subst_typed_expr(s1, typed_body))
-  | _ -> typed_ast.BodyOk(dummy_unit())
+            | Ok s2 -> typed_ast.BodyOk(apply_subst_typed_expr(s1, typed_body), unifier.apply_subst(s2, inst_type))
+  | _ -> typed_ast.BodyOk(dummy_unit(), types.TConst("Unit"))
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(
