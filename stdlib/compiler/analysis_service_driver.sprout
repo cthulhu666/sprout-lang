@@ -517,6 +517,11 @@ export fn is_function_scheme(s: types.Scheme) -> Bool =
   | types.TFunc _ _ _ -> true
   | _ -> false
 
+export fn is_polymorphic_scheme(s: types.Scheme) -> Bool =
+  match types.scheme_vars(s) with
+  | Nil -> false
+  | _ -> true
+
 export fn fn_display_type_str(type_str: String) -> String =
   if str_starts_with(type_str, "forall ") && dot != -1
   then str_slice(type_str, dot + 2, str_len(type_str))
@@ -526,6 +531,8 @@ export fn fn_display_type_str(type_str: String) -> String =
 fn eval_with_scheme(src: String, expr: String, state: StartupState, scheme: types.Scheme) -> json.Json !{IO} =
   if is_function_scheme(scheme) then
     ok_response(vec_strings_to_json_array(vec_singleton("<fn: " ++ fn_display_type_str(type_str) ++ ">")))
+  else if is_polymorphic_scheme(scheme) then
+    ok_response(vec_strings_to_json_array(vec_singleton("<value: " ++ fn_display_type_str(type_str) ++ ">")))
   else
     match make_eval_source(src, expr, type_str) with
     | Nothing -> error_response("eval_expr_in_source: cannot auto-print effectful non-Unit expression of type: " ++ type_str)
