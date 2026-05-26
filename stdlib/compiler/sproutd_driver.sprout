@@ -1,0 +1,16 @@
+module main
+import stdlib.repl as repl
+import stdlib.compiler.analysis_service_driver as service
+
+extern fn sproutd_self_init() -> Unit !{IO}
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Just "--analysis-service" ->
+      match argv_get(1) with
+      | Just stdlib_root -> service.run_service(stdlib_root)
+      | Nothing -> panic("sproutd: --analysis-service requires stdlib_root argument")
+  | _ ->
+      do
+        sproutd_self_init()
+        repl.run()

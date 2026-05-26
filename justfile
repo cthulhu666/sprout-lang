@@ -13,23 +13,15 @@ install-hooks:
   git config core.hooksPath .githooks
   @echo "Hooks installed — .githooks/pre-commit is now active."
 
-# Launch the interactive Sprout REPL.
-# Prerequisites: just build-repl && just build-analysis-service
+# Launch the interactive Sprout REPL via sproutd (self-configuring).
+# Prerequisites: just build-sproutd
 repl:
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/repl_bin" ]]; then
-    echo "ERROR: repl_bin not found; run: just build-repl" >&2; exit 1
+  if [[ ! -x "{{build_dir}}/sproutd" ]]; then
+    echo "ERROR: sproutd not found; run: just build-sproutd" >&2; exit 1
   fi
-  if [[ ! -x "{{build_dir}}/analysis_service_bin" ]]; then
-    echo "ERROR: analysis_service_bin not found; run: just build-analysis-service" >&2; exit 1
-  fi
-  SPROUT_SERVICE_CMD="{{build_dir}}/analysis_service_bin {{stdlib_root}}"
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" SPROUT_DARWIN_FRAMEWORKS=1 "{{build_dir}}/repl_bin"
-  else
-    exec env SPROUT_ANALYSIS_SERVICE_CMD="$SPROUT_SERVICE_CMD" "{{build_dir}}/repl_bin"
-  fi
+  exec "{{build_dir}}/sproutd"
 
 # ── Formatting & Linting ──────────────────────────────────────────────────────
 
@@ -526,6 +518,25 @@ build-repl:
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/repl_bin"
   echo "==> Built {{build_dir}}/repl_bin"
 
+# Build sproutd — combined REPL + analysis service binary (self-configuring).
+[group('build')]
+build-sproutd:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
+  fi
+  TMP_LL="/tmp/sprout_sproutd_$$.ll"
+  trap 'rm -f "$TMP_LL"' EXIT
+  echo "==> Emitting LLVM IR for sproutd..."
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/sproutd_driver.sprout" > "$TMP_LL"
+  echo "==> Validating IR..."
+  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
+  echo "==> Linking with clang..."
+  mkdir -p "{{build_dir}}"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/sproutd"
+  echo "==> Built {{build_dir}}/sproutd"
+
 # ── Analysis Service ──────────────────────────────────────────────────────────
 
 # Build the analysis service binary. Prefers stage-2; falls back to stage-1.
@@ -544,7 +555,7 @@ build-analysis-service:
   TMP_LL="/tmp/sprout_analysis_service_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR for analysis service..."
-  "$STAGE" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/analysis_service_driver.sprout" > "$TMP_LL"
+  "$STAGE" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/analysis_service_main.sprout" > "$TMP_LL"
   echo "==> Validating IR..."
   if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
   echo "==> Linking with clang..."

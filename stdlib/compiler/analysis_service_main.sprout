@@ -1,0 +1,7 @@
+module main
+import stdlib.compiler.analysis_service_driver as service
+
+fn main() -> Unit !{IO} =
+  match argv_get(0) with
+  | Nothing -> service.run_service("")
+  | Just stdlib_root -> service.run_service(stdlib_root)

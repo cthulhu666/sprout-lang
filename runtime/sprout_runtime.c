@@ -24,6 +24,7 @@
 #include <Security/SecureTransport.h>
 #include <Security/SecTrust.h>
 #include <Security/SecCertificate.h>
+#include <mach-o/dyld.h>
 #endif
 
 typedef struct {
@@ -2858,6 +2859,44 @@ long long analysis_session_destroy(long long session_id) {
   free(response);
   return 0;
 }
+/* --- sproutd self-init: auto-set SPROUT_ANALYSIS_SERVICE_CMD if unset --- */
+long long sproutd_self_init(void) {
+  const char* existing = getenv("SPROUT_ANALYSIS_SERVICE_CMD");
+  if (existing != NULL && existing[0] != '\0') return 0;
+  char own_exe[PATH_MAX];
+#ifdef __APPLE__
+  uint32_t sz = (uint32_t)PATH_MAX;
+  if (_NSGetExecutablePath(own_exe, &sz) != 0) return 0;
+  { char* resolved = realpath(own_exe, NULL);
+    if (resolved == NULL) return 0;
+    strncpy(own_exe, resolved, PATH_MAX - 1);
+    own_exe[PATH_MAX - 1] = '\0';
+    free(resolved); }
+#else
+  ssize_t len = readlink("/proc/self/exe", own_exe, PATH_MAX - 1);
+  if (len < 0) return 0;
+  own_exe[len] = '\0';
+#endif
+  const char* stdlib_root = getenv("SPROUT_STDLIB_ROOT");
+  char inferred[PATH_MAX];
+  if (stdlib_root == NULL || stdlib_root[0] == '\0') {
+    char dir[PATH_MAX];
+    strncpy(dir, own_exe, PATH_MAX - 1);
+    dir[PATH_MAX - 1] = '\0';
+    char* slash = strrchr(dir, '/');
+    if (slash) *slash = '\0';
+    snprintf(inferred, sizeof(inferred), "%s/../stdlib", dir);
+    stdlib_root = inferred;
+  }
+  char cmd[PATH_MAX * 2 + 32];
+  snprintf(cmd, sizeof(cmd), "%s --analysis-service %s", own_exe, stdlib_root);
+  setenv("SPROUT_ANALYSIS_SERVICE_CMD", cmd, 0);
+#ifdef __APPLE__
+  setenv("SPROUT_DARWIN_FRAMEWORKS", "1", 0);
+#endif
+  return 0;
+}
+
 long long analysis_eval_expr_in_source(const char* module_source, const char* expr) {
   return sprout_analysis_vec_string_result("eval_expr_in_source", module_source, expr);
 }

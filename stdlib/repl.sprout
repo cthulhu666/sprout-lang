@@ -716,7 +716,7 @@ export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec Stri
     session <- compiler.create_session()
     repl_loop_session(prompt, history, session)
 
-export fn main() -> Unit !{IO} =
+export fn run() -> Unit !{IO} =
   if term_is_interactive_once()
   then start_repl(Just("sprout> "), "Sprout REPL. Use :help for commands.\r\n")
   else start_repl(Nothing, "")

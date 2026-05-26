@@ -1,4 +1,4 @@
-module main
+module stdlib.compiler.analysis_service_driver
 import stdlib.json as json
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.bundler as bundler
@@ -708,7 +708,3 @@ export fn run_service(stdlib_root: String) -> Unit !{IO} =
     state <- build_startup_state(stdlib_root)
     service_loop(state)
 
-fn main() -> Unit !{IO} =
-  match argv_get(0) with
-  | Nothing -> run_service("")
-  | Just stdlib_root -> run_service(stdlib_root)
