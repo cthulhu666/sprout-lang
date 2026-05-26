@@ -21,6 +21,11 @@ fn is_check_err(r: checker.CheckResult) -> Bool =
   | checker.CheckErr _ -> true
   | checker.CheckOk _ -> false
 
+fn check_err_msg(r: checker.CheckResult) -> String =
+  match r with
+  | checker.CheckErr msg -> msg
+  | checker.CheckOk _ -> ""
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -59,5 +64,9 @@ fn main() -> Unit !{IO} =
 
     r11 <- run_check("fn val() -> String = 42")
     assert_true(state, "int body with string annotation fails", is_check_err(r11))
+
+    r12 <- run_check("fn f(x: Int) -> Int = x\nfn g() -> Int = f()")
+    assert_true(state, "zero-arg call on function fails", is_check_err(r12))
+    assert_true(state, "zero-arg error names the callee", str_find(check_err_msg(r12), "'f'") != -1)
 
     summary(state)

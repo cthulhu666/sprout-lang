@@ -504,11 +504,17 @@ fn infer_call_inner(
             typed_ast.typed_expr_type(typed_callee),
             list_map(\e -> typed_ast.typed_expr_type(e), typed_args),
             types.TVar(v),
-            merge_effects(callee_eff, args_eff))
+            merge_effects(callee_eff, args_eff),
+            callee_display_name(callee))
           match r with
           | CallErr e -> InferErr(e)
           | CallOk ret_t s3 es3 call_eff ->
               check_call_constraint(callee, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos, prog_to_fresh)
+
+fn callee_display_name(callee: ast.Expr) -> String =
+  match callee with
+  | ast.VarExpr name _ -> "'" ++ name ++ "'"
+  | _ -> "expression"
 
 fn infer_call_resolve(
   subst: Dict types.Type,
@@ -516,12 +522,13 @@ fn infer_call_resolve(
   callee_type: types.Type,
   arg_types: List types.Type,
   ret_type: types.Type,
-  eff: types.Effect
+  eff: types.Effect,
+  callee_display: String
 ) -> CallResult !{IO} =
   match arg_types with
   | Nil ->
       match unifier.apply_subst(subst, callee_type) with
-      | types.TFunc _ _ _ -> CallErr("Call type mismatch: function requires arguments but was called with none")
+      | types.TFunc _ _ _ -> CallErr(callee_display ++ " requires arguments but was called with none")
       | resolved ->
           match unifier.unify_types(subst, resolved, ret_type) with
           | Err e -> CallErr("Call type mismatch: " ++ e)
