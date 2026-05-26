@@ -183,5 +183,51 @@ if echo "$CHANGED" | grep -qE 'stdlib/compiler/|tests/stdlib/compiler/'; then
   fi
 fi
 
+# ── 6. New C builtin guard (blocking) ────────────────────────────────────────
+# Any non-static `long long <name>(` function added to sprout_runtime.c must
+# have its name in runtime/APPROVED_BUILTINS.  Forcing an update to that file
+# makes the addition explicit and reviewable.  Per AGENTS.md rules 4–6.
+if echo "$CHANGED" | grep -qE 'runtime/sprout_runtime\.c'; then
+  python3 - <<'PYEOF'
+import subprocess, sys, re
+
+diff = subprocess.check_output(
+    ['git', 'diff', '--cached', '--', 'runtime/sprout_runtime.c']
+).decode(errors='replace')
+
+new_fns = re.findall(
+    r'^\+long long ([a-z_][a-zA-Z0-9_]*)\(',
+    diff, re.MULTILINE
+)
+if not new_fns:
+    sys.exit(0)
+
+try:
+    with open('runtime/APPROVED_BUILTINS') as f:
+        approved = {
+            line.split('#')[0].strip()
+            for line in f
+            if line.strip() and not line.startswith('#')
+        }
+except FileNotFoundError:
+    approved = set()
+
+missing = [fn for fn in new_fns if fn not in approved]
+if not missing:
+    sys.exit(0)
+
+print('[pre-commit] NEW C BUILTINS not in runtime/APPROVED_BUILTINS:')
+for fn in missing:
+    print(f'  long long {fn}(')
+print()
+print('[pre-commit] Per AGENTS.md "Builtin vs Stdlib" rules 4-6:')
+print('[pre-commit]   - Exhaust Sprout/stdlib alternatives first.')
+print('[pre-commit]   - If a builtin is truly necessary, add its name to')
+print('[pre-commit]     runtime/APPROVED_BUILTINS with an inline comment')
+print('[pre-commit]     explaining why it cannot be done in Sprout.')
+sys.exit(1)
+PYEOF
+fi
+
 # (GC safety check removed — scripts/gc_safety_check.py is Python.
 #  CI still enforces it via: just gc-safety-check --strict)
