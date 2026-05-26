@@ -92,7 +92,7 @@ For coding tasks, work is done only when:
 4. **For any edit to a file with coverage gaps:** at least one new test was added that closes a gap in that file.
 5. The implementation is complete.
 6. Relevant docs/spec updates are complete and in sync with the implementation.
-7. Formatting and linting have been run when applicable.
+7. `mise exec -- just fmt` has been run and any reformatted files staged, for any change that touches `.sprout` or `.spr` files.
 8. The entire test suite has been run via `mise exec -- just test` with no explicit test filter for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
 9. During implementation, the faster local loop is to run the specific `.spr` test file directly (see item 10 in "How to run tests" above); run `mise exec -- just test` for the full gate.
 10. Docs-only or examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but they must still be verified in a way that matches the change, such as re-running documented commands or executing the updated examples.

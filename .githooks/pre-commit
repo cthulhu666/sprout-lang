@@ -8,6 +8,33 @@ CHANGED=$(git diff --cached --name-only 2>/dev/null || true)
 HOOK_TMP=$(mktemp -d /tmp/sprout_hook_XXXXXX)
 trap "rm -rf $HOOK_TMP" EXIT
 
+# ── 0. Format check (staged .sprout/.spr files only) ─────────────────────────
+# Runs when any .sprout or .spr file is staged.
+# Checks only the staged files — fast gate before slower compilation checks.
+# Skipped automatically if build/fmt_bin is absent.
+sprout_staged=$(echo "$CHANGED" | grep -E '\.(sprout|spr)$' || true)
+if [ -n "$sprout_staged" ]; then
+  if [ -x "./build/fmt_bin" ]; then
+    echo "[pre-commit] .sprout/.spr files staged — running fmt-check..."
+    fmt_failed=0
+    while IFS= read -r f; do
+      [ -f "$f" ] || continue
+      fmt_err="$HOOK_TMP/fmt_err.txt"
+      if ! ./build/fmt_bin fmt --check "$f" > "$fmt_err" 2>&1; then
+        echo "[pre-commit] formatting drift: $f"
+        fmt_failed=$((fmt_failed + 1))
+      fi
+    done <<< "$sprout_staged"
+    if [ "$fmt_failed" -gt 0 ]; then
+      echo "[pre-commit] $fmt_failed file(s) have formatting drift — run: mise exec -- just fmt && git add <files>"
+      exit 1
+    fi
+    echo "[pre-commit] fmt-check passed."
+  else
+    echo "[pre-commit] build/fmt_bin absent — skipping fmt-check (run: just build-fmt-from-seed)."
+  fi
+fi
+
 # ── 1. Emit-IR smoke tests ───────────────────────────────────────────────────
 # Runs when any compiler Sprout source changes.
 # Tests compile_driver_bin_stage1 --emit-ir on code-shape snippets in
