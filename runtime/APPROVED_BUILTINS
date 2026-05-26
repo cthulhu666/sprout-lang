@@ -138,6 +138,7 @@ sprout_set_argv
 sprout_set_current_fn
 sprout_tag
 sproutd_self_init
+sproutd_init_with_root  # like sproutd_self_init but takes explicit stdlib_root — setenv/exe-path resolution impossible in Sprout
 str_byte_len
 str_char_at
 str_char_at_byte

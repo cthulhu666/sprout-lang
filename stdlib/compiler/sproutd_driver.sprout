@@ -4,6 +4,7 @@ import stdlib.compiler.analysis_service_driver as service
 import stdlib.compiler.lsp_driver as lsp
 
 extern fn sproutd_self_init() -> Unit !{IO}
+extern fn sproutd_init_with_root(root: String) -> Unit !{IO}
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with
@@ -15,7 +16,7 @@ fn main() -> Unit !{IO} =
       match argv_get(1) with
       | Just stdlib_root ->
           do
-            sproutd_self_init()
+            sproutd_init_with_root(stdlib_root)
             lsp.run_lsp(stdlib_root)
       | Nothing -> panic("sproutd: --lsp requires stdlib_root argument")
   | _ ->

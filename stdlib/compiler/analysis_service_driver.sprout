@@ -387,16 +387,16 @@ fn runtime_obj_path() -> String = "/tmp/sprout_runtime_daemon.o"
 # ---------------------------------------------------------------------------
 # StartupState — pre-compiled runtime.o, stdlib_root, and persistent module cache
 
-type StartupState = StartupState String String (Ref(Dict (List (String, types.Scheme)))) (Ref(Dict SessionState)) (Ref Int)
-  # stdlib_root, runtime_obj_path, cache, sessions, next_session_id
+type StartupState = StartupState String (Ref String) (Ref(Dict (List (String, types.Scheme)))) (Ref(Dict SessionState)) (Ref Int)
+  # stdlib_root, runtime_obj_ref ("" = not yet compiled), cache, sessions, next_session_id
 
 fn state_stdlib_root(state: StartupState) -> String =
   match state with
   | StartupState root _ _ _ _ -> root
 
-fn state_runtime_obj(state: StartupState) -> String =
+fn state_runtime_obj_ref(state: StartupState) -> Ref String =
   match state with
-  | StartupState _ obj _ _ _ -> obj
+  | StartupState _ ref _ _ _ -> ref
 
 fn state_cache(state: StartupState) -> Ref(Dict (List (String, types.Scheme))) =
   match state with
@@ -410,21 +410,39 @@ fn state_next_id(state: StartupState) -> Ref Int =
   match state with
   | StartupState _ _ _ _ next_id -> next_id
 
-# Pre-compile sprout_runtime.c once, create a persistent module cache, and pre-warm it
-# with the prelude so the first user request hits the cache rather than cold-loading.
-# Darwin frameworks are link-time only; the -c step is platform-independent.
+# Create the persistent service state and pre-warm the module cache with the
+# prelude.  Runtime object compilation is deferred to first eval so the service
+# starts (and answers diagnostics/type-of/hover) even when clang is not on PATH.
 fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
+  do
+    runtime_obj_ref <- ref_new("")
+    cache <- module_loader.new_cache()
+    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+    sessions <- ref_new(dict_empty())
+    next_id <- ref_new(1)
+    StartupState(stdlib_root, runtime_obj_ref, cache, sessions, next_id)
+
+# Cache the compiled runtime object path on first successful compile so
+# subsequent evals skip the clang -c step.
+fn write_obj_and_ok(obj: String, obj_ref: Ref String) -> Result String String !{IO} =
+  do
+    ref_write(obj_ref, obj)
+    Ok(obj)
+
+fn try_compile_runtime_obj(stdlib_root: String, obj_ref: Ref String) -> Result String String !{IO} =
   do
     let obj = runtime_obj_path()
     result <- process.proc_run(["clang", "-c", runtime_c_path(stdlib_root), "-O2", "-o", obj])
-    if process.proc_ok(result) == false
-    then panic("sproutd: failed to pre-compile runtime.c: " ++ process.proc_stderr(result))
-    else do
-      cache <- module_loader.new_cache()
-      prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
-      sessions <- ref_new(dict_empty())
-      next_id <- ref_new(1)
-      StartupState(stdlib_root, obj, cache, sessions, next_id)
+    if process.proc_ok(result)
+    then write_obj_and_ok(obj, obj_ref)
+    else Err("eval: clang not available: " ++ process.proc_stderr(result))
+
+fn ensure_runtime_obj(state: StartupState) -> Result String String !{IO} =
+  do
+    let obj_ref = state_runtime_obj_ref(state)
+    current <- ref_read(obj_ref)
+    if current == "" then try_compile_runtime_obj(state_stdlib_root(state), obj_ref)
+    else Ok(current)
 
 fn clang_base_args(runtime_obj: String) -> List String =
   ["clang", eval_ir_path(), runtime_obj, "-O2", "-o", eval_bin_path()]
@@ -478,10 +496,13 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
       match write_file(eval_ir_path(), ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
       | Ok _ ->
-          do
-            use_darwin <- darwin_frameworks_set()
-            link_result <- process.proc_run(clang_argv(state_runtime_obj(state), use_darwin))
-            run_eval_binary(link_result)
+          match ensure_runtime_obj(state) with
+          | Err msg -> error_response(msg)
+          | Ok runtime_obj ->
+              do
+                use_darwin <- darwin_frameworks_set()
+                link_result <- process.proc_run(clang_argv(runtime_obj, use_darwin))
+                run_eval_binary(link_result)
 
 fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
   match write_file(eval_source_path(), src) with
@@ -700,10 +721,11 @@ fn service_loop(state: StartupState) -> Unit !{IO} =
 
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
   if stdlib_root == "" then do
+    runtime_obj_ref <- ref_new("")
     cache <- module_loader.new_cache()
     sessions <- ref_new(dict_empty())
     next_id <- ref_new(1)
-    service_loop(StartupState("", "", cache, sessions, next_id))
+    service_loop(StartupState("", runtime_obj_ref, cache, sessions, next_id))
   else do
     state <- build_startup_state(stdlib_root)
     service_loop(state)
