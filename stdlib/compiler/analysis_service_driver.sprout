@@ -512,10 +512,24 @@ fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
         ir_result <- compiler.compile_full_ir_with_cache(eval_source_path(), state_stdlib_root(state), state_cache(state))
         link_and_run_eval(ir_result, state)
 
+export fn is_function_scheme(s: types.Scheme) -> Bool =
+  match types.scheme_type(s) with
+  | types.TFunc _ _ _ -> true
+  | _ -> false
+
+export fn fn_display_type_str(type_str: String) -> String =
+  if str_starts_with(type_str, "forall ") && dot != -1
+  then str_slice(type_str, dot + 2, str_len(type_str))
+  else type_str
+  where dot = str_find(type_str, ". ")
+
 fn eval_with_scheme(src: String, expr: String, state: StartupState, scheme: types.Scheme) -> json.Json !{IO} =
-  match make_eval_source(src, expr, type_str) with
-  | Nothing -> error_response("eval_expr_in_source: cannot auto-print effectful non-Unit expression of type: " ++ type_str)
-  | Just full_src -> compile_and_run_eval(full_src, state)
+  if is_function_scheme(scheme) then
+    ok_response(vec_strings_to_json_array(vec_singleton("<fn: " ++ fn_display_type_str(type_str) ++ ">")))
+  else
+    match make_eval_source(src, expr, type_str) with
+    | Nothing -> error_response("eval_expr_in_source: cannot auto-print effectful non-Unit expression of type: " ++ type_str)
+    | Just full_src -> compile_and_run_eval(full_src, state)
   where type_str = types.scheme_to_string(scheme)
 
 fn eval_with_type_result(src: String, expr: String, state: StartupState, result: compiler.CompileResult) -> json.Json !{IO} =

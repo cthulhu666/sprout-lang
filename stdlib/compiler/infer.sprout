@@ -518,9 +518,18 @@ fn infer_call_resolve(
   ret_type: types.Type,
   eff: types.Effect
 ) -> CallResult !{IO} =
-  match unifier.unify_types(subst, callee_type, build_fn_type(arg_types, ret_type)) with
-  | Err e -> CallErr("Call type mismatch: " ++ e)
-  | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
+  match arg_types with
+  | Nil ->
+      match unifier.apply_subst(subst, callee_type) with
+      | types.TFunc _ _ _ -> CallErr("Call type mismatch: function requires arguments but was called with none")
+      | resolved ->
+          match unifier.unify_types(subst, resolved, ret_type) with
+          | Err e -> CallErr("Call type mismatch: " ++ e)
+          | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
+  | _ ->
+      match unifier.unify_types(subst, callee_type, build_fn_type(arg_types, ret_type)) with
+      | Err e -> CallErr("Call type mismatch: " ++ e)
+      | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
 
 # --- Constraint checking ---
 #
