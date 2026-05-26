@@ -17,19 +17,19 @@ fn run_lower(src: String) -> lowering.LowerResult !{IO} =
             tc <- checker.typecheck_typed(prog, Nil)
             match tc with
             | typed_ast.TypedErr msg -> lowering.LowerErr("typecheck: " ++ msg)
-            | typed_ast.TypedOk typed_prog _ -> lowering.lower_program(typed_prog)
+            | typed_ast.TypedOk typed_prog env -> lowering.lower_program(typed_prog, env)
 
 fn is_lower_ok(r: lowering.LowerResult) -> Bool =
   match r with
   | lowering.LowerOk _ -> true
   | lowering.LowerErr _ -> false
 
-fn has_tc_name_in(decls: List ast.Decl) -> Bool =
+fn has_tc_name_in(decls: List typed_ast.TypedDecl) -> Bool =
   match decls with
   | Nil -> false
   | Cons d rest ->
       match d with
-      | ast.FnDecl name _ _ _ _ _ _ ->
+      | typed_ast.TFnDecl name _ _ _ _ _ ->
           if str_starts_with(name, "__tc_") then true
           else has_tc_name_in(rest)
       | _ -> has_tc_name_in(rest)
@@ -39,7 +39,7 @@ fn lower_has_tc_decl(r: lowering.LowerResult) -> Bool =
   | lowering.LowerErr _ -> false
   | lowering.LowerOk prog ->
       match prog with
-      | ast.Program decls _ -> has_tc_name_in(decls)
+      | typed_ast.TypedProgram decls -> has_tc_name_in(decls)
 
 fn main() -> Unit !{IO} =
   do

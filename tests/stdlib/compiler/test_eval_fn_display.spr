@@ -45,7 +45,7 @@ fn main() -> Unit !{IO} =
       svc.fn_display_type_str("Int"), "Int")
 
     # is_polymorphic_scheme: forall-quantified types → true
-    let poly_vec = types.Scheme(Cons("a" Nil), Nil, types.type_list(types.TVar("a")), types.effect_pure())
+    let poly_vec = types.Scheme(Cons("a", Nil), Nil, types.type_list(types.TVar("a")), types.effect_pure())
     assert_true(state, "forall a. List a is polymorphic",
       svc.is_polymorphic_scheme(poly_vec))
 

@@ -6,9 +6,8 @@ import stdlib.compiler.lowering as lowering
 import stdlib.compiler.codegen as codegen
 import stdlib.compiler.typed_ast as typed_ast
 
-# Full pipeline: lex → parse → typecheck → lower → re-typecheck → emit IR.
-# Two typecheck passes are needed: the second re-types the lowered AST so every
-# TypedExpr node carries a fully-resolved Type before codegen sees it.
+# Full pipeline: lex → parse → typecheck → lower → emit IR.
+# lower_program preserves types, so no second typecheck pass is needed.
 fn run_codegen(src: String) -> codegen.IrResult !{IO} =
   match lexer.tokenize(src) with
   | Err _ -> codegen.IrErr("lex error")
@@ -17,19 +16,14 @@ fn run_codegen(src: String) -> codegen.IrResult !{IO} =
       | Err _ -> codegen.IrErr("parse error")
       | Ok prog ->
           do
-            tc1 <- checker.typecheck_typed(prog, Nil)
-            match tc1 with
-            | typed_ast.TypedErr msg -> codegen.IrErr("check1: " ++ msg)
-            | typed_ast.TypedOk typed_prog _ ->
-                match lowering.lower_program(typed_prog) with
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr msg -> codegen.IrErr("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
                 | lowering.LowerErr msg -> codegen.IrErr("lower: " ++ msg)
-                | lowering.LowerOk lowered ->
-                    do
-                      tc2 <- checker.typecheck_typed(lowered, Nil)
-                      match tc2 with
-                      | typed_ast.TypedErr msg -> codegen.IrErr("check2: " ++ msg)
-                      | typed_ast.TypedOk typed_lowered env ->
-                          codegen.compile_to_ir(typed_lowered, env)
+                | lowering.LowerOk typed_lowered ->
+                    codegen.compile_to_ir(typed_lowered, env)
 
 fn ir_contains(ir: String, sub: String) -> Bool =
   str_find(ir, sub) != -1

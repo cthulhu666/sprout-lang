@@ -145,7 +145,7 @@ export fn compile_file(path: String) -> CompileResult !{IO} =
 # diagnostic list on the first failing stage.
 
 export type FullResult (..) =
-  | FullOk ast.Program (Dict types.Scheme)
+  | FullOk typed_ast.TypedProgram (Dict types.Scheme)
   | FullFail (List Diagnostic)
 
 export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
@@ -161,21 +161,19 @@ export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
           match tc_result with
           | typed_ast.TypedErr msg -> FullFail(Cons (DiagError("check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog env ->
-              match lowering.lower_program(typed_prog) with
+              match lowering.lower_program(typed_prog, env) with
               | lowering.LowerErr msg -> FullFail(Cons (DiagError("lower: " ++ msg), Nil))
               | lowering.LowerOk lowered -> FullOk(lowered, env)
 
 # ---------------------------------------------------------------------------
-# Full IR pipeline: bundle → typecheck → lower → typecheck(lowered) → codegen
+# Full IR pipeline: bundle → typecheck → lower → codegen
 # ---------------------------------------------------------------------------
 #
 # compile_full_ir is the M6 entry point.  It extends compile_full by:
-#   4. checker.typecheck_typed(lowered) — re-typecheck the lowered AST so that
-#      every TypedExpr node carries a fully-resolved types.Type
-#   5. codegen.compile_to_ir           — emit LLVM IR text (M6)
+#   4. codegen.compile_to_ir — emit LLVM IR text (M6)
 #
-# The second typecheck is necessary because lowering rewrites the AST and the
-# typed nodes in the lowered tree do not carry the re-inferred types yet.
+# Lowering now preserves types (lower_program returns TypedProgram), so a
+# second typecheck is no longer needed.
 
 export type IrFullResult (..) =
   | IrFullOk String
@@ -197,11 +195,11 @@ export type IrFullLinesResult (..) =
 #
 #   compile_phase_bundle  → bundler output only
 #   compile_phase_check   → bundle + typecheck     (frees bundle on return)
-#   compile_phase_lower   → + lower                (frees typed_prog on return)
-#   compile_phase_recheck → + retypecheck          (frees lowered on return)
+#   compile_phase_lower   → + lower (typed)        (frees typed_prog on return)
+#   compile_phase_recheck → alias for compile_phase_lower (no second typecheck)
 #
-# The chain compile_phase_recheck → compile_phase_lower → compile_phase_check
-# means codegen only ever sees typed_lowered + env, not the four earlier ASTs.
+# Lowering now preserves types (lower_program threads the scheme env and returns
+# TypedProgram), so compile_phase_recheck is a plain alias.
 
 export fn compile_phase_bundle(path: String, stdlib_root: String) -> bundler.BundleResult !{IO} =
   bundler.bundle_file(path, stdlib_root)
@@ -220,29 +218,18 @@ export fn compile_phase_check(path: String, stdlib_root: String) -> typed_ast.Ty
           | typed_ast.TypedErr msg -> typed_ast.TypedErr("check: " ++ msg)
           | ok -> ok
 
-export fn compile_phase_lower(path: String, stdlib_root: String) -> lowering.LowerResult !{IO} =
+export fn compile_phase_lower(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
   do
     check_result <- compile_phase_check(path, stdlib_root)
     match check_result with
-    | typed_ast.TypedErr msg -> lowering.LowerErr(msg)
-    | typed_ast.TypedOk typed_prog _ ->
-        match lowering.lower_program(typed_prog) with
-        | lowering.LowerErr msg -> lowering.LowerErr("lower: " ++ msg)
-        | ok -> ok
+    | typed_ast.TypedErr msg -> typed_ast.TypedErr(msg)
+    | typed_ast.TypedOk typed_prog env ->
+        match lowering.lower_program(typed_prog, env) with
+        | lowering.LowerErr msg -> typed_ast.TypedErr("lower: " ++ msg)
+        | lowering.LowerOk lowered -> typed_ast.TypedOk(lowered, env)
 
 export fn compile_phase_recheck(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
-  do
-    lower_result <- compile_phase_lower(path, stdlib_root)
-    match lower_result with
-    | lowering.LowerErr msg -> typed_ast.TypedErr(msg)
-    | lowering.LowerOk lowered ->
-        do
-          cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
-          result <- checker.typecheck_typed(lowered, prelude_pairs)
-          match result with
-          | typed_ast.TypedErr msg -> typed_ast.TypedErr("check2: " ++ msg)
-          | ok -> ok
+  compile_phase_lower(path, stdlib_root)
 
 export fn compile_full_ir(path: String, stdlib_root: String) -> IrFullResult !{IO} =
   do
@@ -297,28 +284,18 @@ fn compile_phase_check_with_cache(path: String, stdlib_root: String, cache) -> t
           | typed_ast.TypedErr msg -> typed_ast.TypedErr("check: " ++ msg)
           | ok -> ok
 
-fn compile_phase_lower_with_cache(path: String, stdlib_root: String, cache) -> lowering.LowerResult !{IO} =
+fn compile_phase_lower_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
   do
     check_result <- compile_phase_check_with_cache(path, stdlib_root, cache)
     match check_result with
-    | typed_ast.TypedErr msg -> lowering.LowerErr(msg)
-    | typed_ast.TypedOk typed_prog _ ->
-        match lowering.lower_program(typed_prog) with
-        | lowering.LowerErr msg -> lowering.LowerErr("lower: " ++ msg)
-        | ok -> ok
+    | typed_ast.TypedErr msg -> typed_ast.TypedErr(msg)
+    | typed_ast.TypedOk typed_prog env ->
+        match lowering.lower_program(typed_prog, env) with
+        | lowering.LowerErr msg -> typed_ast.TypedErr("lower: " ++ msg)
+        | lowering.LowerOk lowered -> typed_ast.TypedOk(lowered, env)
 
 fn compile_phase_recheck_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
-  do
-    lower_result <- compile_phase_lower_with_cache(path, stdlib_root, cache)
-    match lower_result with
-    | lowering.LowerErr msg -> typed_ast.TypedErr(msg)
-    | lowering.LowerOk lowered ->
-        do
-          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
-          result <- checker.typecheck_typed(lowered, prelude_pairs)
-          match result with
-          | typed_ast.TypedErr msg -> typed_ast.TypedErr("check2: " ++ msg)
-          | ok -> ok
+  compile_phase_lower_with_cache(path, stdlib_root, cache)
 
 # compile_one_fn_ir_lines: like compile_full_ir_lines but only emits codegen for
 # the function(s) whose qualified name contains fn_name as a substring.

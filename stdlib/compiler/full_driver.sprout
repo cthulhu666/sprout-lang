@@ -1,6 +1,6 @@
 module main
 import stdlib.compiler.compiler as compiler
-import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
 
 # ---------------------------------------------------------------------------
 # Diagnostic printing
@@ -18,10 +18,10 @@ fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
 # ---------------------------------------------------------------------------
 # Decl counting for the summary line
 
-fn count_decls(decls: List ast.Decl) -> Int =
+fn count_typed_decls(decls: List typed_ast.TypedDecl) -> Int =
   match decls with
   | Nil -> 0
-  | Cons _ rest -> 1 + count_decls(rest)
+  | Cons _ rest -> 1 + count_typed_decls(rest)
 
 # ---------------------------------------------------------------------------
 # Per-file pipeline: bundle → typecheck → lower
@@ -35,8 +35,8 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
         do
           print("OK")
           match lowered with
-          | ast.Program decls _ ->
-              print("decls: " ++ int_to_string(count_decls(decls)))
+          | typed_ast.TypedProgram decls ->
+              print("decls: " ++ int_to_string(count_typed_decls(decls)))
 
 # ---------------------------------------------------------------------------
 # Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]

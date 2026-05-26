@@ -2,42 +2,45 @@ module stdlib.compiler.lowering
 import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
+import stdlib.compiler.types as types
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 export type LowerResult (..) =
-  | LowerOk ast.Program
+  | LowerOk typed_ast.TypedProgram
   | LowerErr String
 
 # lower_program: transform a TypedProgram (with TDict evidence nodes) into a
-# plain ast.Program using the dictionary-passing lowering:
+# typed TypedProgram using the dictionary-passing lowering:
 #
 #   1. ClassDecl → generate class-method dispatch wrappers (dropped from output).
-#   2. InstanceDecl → generate __tc_{Class}_{mangled}_{method} FnDecls.
+#   2. InstanceDecl → generate __tc_{Class}_{mangled}_{method} TFnDecls.
 #   3. FnDecl with constraints → add hidden params + rewrite body.
 #   4. TDict evidence nodes in TCall args → expand to concrete instance fn refs
 #      or forwarded hidden params.
 #
+# Types are preserved through lowering: lower_expr returns TypedExpr, and
+# generated declarations carry types derived from the scheme environment.
 # This is the Sprout-native equivalent of Python's lower_typeclasses pass.
-export fn lower_program(prog: typed_ast.TypedProgram) -> LowerResult =
+export fn lower_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> LowerResult =
   match prog with
-  | typed_ast.TypedProgram decls -> lower_program_decls(decls)
+  | typed_ast.TypedProgram decls -> lower_program_decls(decls, env)
 
-fn lower_program_decls(decls: List typed_ast.TypedDecl) -> LowerResult =
+fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.Scheme) -> LowerResult =
   match lower_decls(decls,
                     LowerEnv(collect_class_order(decls, dict_empty()),
                              collect_instance_table(decls, dict_empty()),
                              collect_super_map(decls, dict_empty()),
-                             collect_inst_meta(decls, dict_empty())),
+                             collect_inst_meta(decls, dict_empty()),
+                             scheme_env),
                     Nil, Nil, Nil) with
   | (user_rev, wrapper_rev, inst_rev) ->
-      LowerOk(ast.Program(
+      LowerOk(typed_ast.TypedProgram(
         list_append(
           list_append(list_reverse(user_rev), list_reverse(wrapper_rev)),
-          list_reverse(inst_rev)),
-        dummy_pos()))
+          list_reverse(inst_rev))))
 
 # ---------------------------------------------------------------------------
 # Internal types
@@ -50,46 +53,98 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl) -> LowerResult =
 #   inst_meta    – constraint_key → (instance_type_args, instance_constraints, method_arities)
 #                  Populated only for constrained instances (e.g. instance Eq (Maybe a) where Eq a).
 #                  Used to build lambda wrappers that capture inner dicts at call sites.
+#   scheme_env   – the full type scheme environment from the typechecker; used to
+#                  assign types to generated nodes so types survive lowering.
 type LowerEnv =
-  | LowerEnv (Dict (List String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int))
+  | LowerEnv (Dict (List String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int)) (Dict types.Scheme)
 
 # LowerCtx: per-function context passed during expression lowering.
-#   class_order – inherited from LowerEnv
-#   fwd_methods – constraint_key → { method_name → hidden_param_name }  (forwarded)
-#   inst_table  – constraint_key → { method_name → instance_fn_name }   (concrete)
-#   super_map   – class_name → [direct superclass names]
-#   inst_meta   – same as LowerEnv.inst_meta, threaded through for resolve_tdict
+#   class_order  – inherited from LowerEnv
+#   fwd_methods  – constraint_key → { method_name → hidden_param_name }  (forwarded)
+#   inst_table   – constraint_key → { method_name → instance_fn_name }   (concrete)
+#   super_map    – class_name → [direct superclass names]
+#   inst_meta    – same as LowerEnv.inst_meta, threaded through for resolve_tdict
+#   scheme_env   – inherited from LowerEnv; used in resolve_tdict to type generated VarExprs
 type LowerCtx =
-  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int))
+  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int)) (Dict types.Scheme)
 
 fn env_class_order(env: LowerEnv) -> Dict (List String) =
-  match env with | LowerEnv co _ _ _ -> co
+  match env with | LowerEnv co _ _ _ _ -> co
 
 fn env_inst_table(env: LowerEnv) -> Dict (Dict String) =
-  match env with | LowerEnv _ it _ _ -> it
+  match env with | LowerEnv _ it _ _ _ -> it
 
 fn env_super_map(env: LowerEnv) -> Dict (List String) =
-  match env with | LowerEnv _ _ sm _ -> sm
+  match env with | LowerEnv _ _ sm _ _ -> sm
 
 fn env_inst_meta(env: LowerEnv) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int) =
-  match env with | LowerEnv _ _ _ im -> im
+  match env with | LowerEnv _ _ _ im _ -> im
+
+fn env_scheme_env(env: LowerEnv) -> Dict types.Scheme =
+  match env with | LowerEnv _ _ _ _ se -> se
 
 fn ctx_class_order(ctx: LowerCtx) -> Dict (List String) =
-  match ctx with | LowerCtx co _ _ _ _ -> co
+  match ctx with | LowerCtx co _ _ _ _ _ -> co
 
 fn ctx_fwd(ctx: LowerCtx) -> Dict (Dict String) =
-  match ctx with | LowerCtx _ fwd _ _ _ -> fwd
+  match ctx with | LowerCtx _ fwd _ _ _ _ -> fwd
 
 fn ctx_inst(ctx: LowerCtx) -> Dict (Dict String) =
-  match ctx with | LowerCtx _ _ inst _ _ -> inst
+  match ctx with | LowerCtx _ _ inst _ _ _ -> inst
 
 fn ctx_super_map(ctx: LowerCtx) -> Dict (List String) =
-  match ctx with | LowerCtx _ _ _ sm _ -> sm
+  match ctx with | LowerCtx _ _ _ sm _ _ -> sm
 
 fn ctx_inst_meta(ctx: LowerCtx) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int) =
-  match ctx with | LowerCtx _ _ _ _ im -> im
+  match ctx with | LowerCtx _ _ _ _ im _ -> im
+
+fn ctx_scheme_env(ctx: LowerCtx) -> Dict types.Scheme =
+  match ctx with | LowerCtx _ _ _ _ _ se -> se
 
 fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+
+# ---------------------------------------------------------------------------
+# Type helpers for generated nodes
+# ---------------------------------------------------------------------------
+#
+# lookup_scheme_type: get the body type of a named scheme from the env, or a
+# sentinel TVar if the name is not found (generated names not yet in env).
+fn lookup_scheme_type(name: String, env: Dict types.Scheme) -> types.Type =
+  match dict_get(name, env) with
+  | Nothing -> types.TVar("?gen")
+  | Just s -> types.scheme_type(s)
+
+# tfunc_result_type: strip all leading TFunc layers to find the result type.
+# e.g. TFunc a (TFunc a Bool) -> Bool
+fn tfunc_result_type(t: types.Type) -> types.Type =
+  match t with
+  | types.TFunc _ ret _ -> tfunc_result_type(ret)
+  | _ -> t
+
+# tfunc_nth_arg: return the type of the nth argument in a curried function type.
+fn tfunc_nth_arg(t: types.Type, n: Int) -> types.Type =
+  if n == 0 then
+    match t with
+    | types.TFunc arg _ _ -> arg
+    | _ -> t
+  else
+    match t with
+    | types.TFunc _ ret _ -> tfunc_nth_arg(ret, n - 1)
+    | _ -> t
+
+# generate_typed_param_vars: build TVar nodes for each user param, assigning
+# types by peeling the curried method type one layer per parameter.
+fn generate_typed_param_vars(params: List ast.Param, method_type: types.Type, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  match params with
+  | Nil -> Nil
+  | Cons (ast.Param pname _) rest ->
+      match method_type with
+      | types.TFunc arg_t ret_t _ ->
+          Cons(typed_ast.TVar(pname, arg_t, pos),
+               generate_typed_param_vars(rest, ret_t, pos))
+      | _ ->
+          Cons(typed_ast.TVar(pname, method_type, pos),
+               generate_typed_param_vars(rest, method_type, pos))
 
 # ---------------------------------------------------------------------------
 # Pass 1 – collect class_order
@@ -254,10 +309,10 @@ fn collect_method_arities(
 fn lower_decls(
   decls: List typed_ast.TypedDecl,
   env: LowerEnv,
-  user_rev: List ast.Decl,
-  wrapper_rev: List ast.Decl,
-  inst_rev: List ast.Decl
-) -> (List ast.Decl, List ast.Decl, List ast.Decl) =
+  user_rev: List typed_ast.TypedDecl,
+  wrapper_rev: List typed_ast.TypedDecl,
+  inst_rev: List typed_ast.TypedDecl
+) -> (List typed_ast.TypedDecl, List typed_ast.TypedDecl, List typed_ast.TypedDecl) =
   match decls with
   | Nil -> (user_rev, wrapper_rev, inst_rev)
   | Cons d rest ->
@@ -267,39 +322,38 @@ fn lower_decls(
 fn lower_one_decl(
   d: typed_ast.TypedDecl,
   env: LowerEnv,
-  user_rev: List ast.Decl,
-  wrapper_rev: List ast.Decl,
-  inst_rev: List ast.Decl
-) -> (List ast.Decl, List ast.Decl, List ast.Decl) =
+  user_rev: List typed_ast.TypedDecl,
+  wrapper_rev: List typed_ast.TypedDecl,
+  inst_rev: List typed_ast.TypedDecl
+) -> (List typed_ast.TypedDecl, List typed_ast.TypedDecl, List typed_ast.TypedDecl) =
   match d with
   | typed_ast.TPassThrough inner ->
       match inner with
       # Generate class method dispatch wrappers; drop ClassDecl from output.
       | ast.ClassDecl class_name _ methods _ _ ->
           (user_rev,
-           prepend_decls(generate_class_wrappers(class_name, methods, env_class_order(env), env_super_map(env)), wrapper_rev),
+           prepend_decls(generate_class_wrappers(class_name, methods, env_class_order(env), env_super_map(env), env_scheme_env(env)), wrapper_rev),
            inst_rev)
       # Drop InstanceDecl — replaced by generated instance fns.
       | ast.InstanceDecl _ _ _ _ ->
           (user_rev, wrapper_rev, inst_rev)
       | _ ->
-          (Cons(inner, user_rev), wrapper_rev, inst_rev)
+          (Cons(typed_ast.TPassThrough(inner), user_rev), wrapper_rev, inst_rev)
   | typed_ast.TFnDecl name params ret_ty effects constraints body ->
       (Cons(lower_fn_decl(name, params, ret_ty, effects, constraints, body, env), user_rev),
        wrapper_rev, inst_rev)
   | typed_ast.TLetDecl name body ->
-      (Cons(ast.LetDecl(name,
-                        lower_expr(body, LowerCtx(env_class_order(env), dict_empty(), env_inst_table(env), env_super_map(env), env_inst_meta(env))),
-                        dummy_pos()),
+      (Cons(typed_ast.TLetDecl(name,
+                               lower_expr(body, LowerCtx(env_class_order(env), dict_empty(), env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env)))),
             user_rev),
        wrapper_rev, inst_rev)
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       (user_rev, wrapper_rev,
        prepend_decls(generate_instance_fns(constraint, inst_constraints, methods, env), inst_rev))
   | typed_ast.TExternFnDecl name params ret_ty effects ->
-      (Cons(ast.ExternFnDecl(name, params, ret_ty, effects, dummy_pos()), user_rev), wrapper_rev, inst_rev)
+      (Cons(typed_ast.TExternFnDecl(name, params, ret_ty, effects), user_rev), wrapper_rev, inst_rev)
 
-fn prepend_decls(new_decls: List ast.Decl, acc: List ast.Decl) -> List ast.Decl =
+fn prepend_decls(new_decls: List typed_ast.TypedDecl, acc: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
   match new_decls with
   | Nil -> acc
   | Cons d rest -> prepend_decls(rest, Cons(d, acc))
@@ -319,23 +373,25 @@ fn generate_class_wrappers(
   class_name: String,
   methods: List ast.ClassMethodSig,
   class_order: Dict (List String),
-  super_map: Dict (List String)
-) -> List ast.Decl =
+  super_map: Dict (List String),
+  scheme_env: Dict types.Scheme
+) -> List typed_ast.TypedDecl =
   generate_class_wrappers_acc(class_name, methods, hidden_params_for_classes(
                                                      class_with_transitive_supers(class_name, super_map),
-                                                     0, class_order, Nil), Nil)
+                                                     0, class_order, Nil), scheme_env, Nil)
 
 fn generate_class_wrappers_acc(
   class_name: String,
   methods: List ast.ClassMethodSig,
   hidden_params: List ast.Param,
-  acc: List ast.Decl
-) -> List ast.Decl =
+  scheme_env: Dict types.Scheme,
+  acc: List typed_ast.TypedDecl
+) -> List typed_ast.TypedDecl =
   match methods with
   | Nil -> list_reverse(acc)
   | Cons sig rest ->
-      generate_class_wrappers_acc(class_name, rest, hidden_params,
-        Cons(generate_one_class_wrapper(class_name, sig, hidden_params), acc))
+      generate_class_wrappers_acc(class_name, rest, hidden_params, scheme_env,
+        Cons(generate_one_class_wrapper(class_name, sig, hidden_params, scheme_env), acc))
 
 # Build a list of hidden params __tc_<C>_<idx>_<method> for the ordered list of
 # class names (typically [Class, super1, super2, ...]) at the given index.
@@ -366,22 +422,28 @@ fn prepend_class_hidden_params(
 fn generate_one_class_wrapper(
   class_name: String,
   sig: ast.ClassMethodSig,
-  hidden_params: List ast.Param
-) -> ast.Decl =
+  hidden_params: List ast.Param,
+  scheme_env: Dict types.Scheme
+) -> typed_ast.TypedDecl =
   match sig with
   | ast.ClassMethodSig method_name params ret_ty effects_maybe ->
-      ast.FnDecl(
+      typed_ast.TFnDecl(
         method_name,
         list_append(params, hidden_params),
         Just(ret_ty),
         effects_maybe,
         [],
-        ast.CallExpr(
-          ast.VarExpr(tc_slot_name(class_name, 0, method_name), dummy_pos()),
-          list_map(\p -> match p with | ast.Param pn _ -> ast.VarExpr(pn, dummy_pos()),
-                   params),
-          dummy_pos()),
-        dummy_pos())
+        typed_ast.TCall(
+          typed_ast.TVar(
+            tc_slot_name(class_name, 0, method_name),
+            lookup_scheme_type(method_name, scheme_env),
+            dummy_pos()),
+          generate_typed_param_vars(
+            params,
+            lookup_scheme_type(method_name, scheme_env),
+            dummy_pos()),
+          tfunc_result_type(lookup_scheme_type(method_name, scheme_env)),
+          dummy_pos()))
 
 # ---------------------------------------------------------------------------
 # Instance function generation
@@ -396,7 +458,7 @@ fn generate_instance_fns(
   inst_constraints: List ast.TypeConstraint,
   methods: List typed_ast.TypedInstanceMethod,
   env: LowerEnv
-) -> List ast.Decl =
+) -> List typed_ast.TypedDecl =
   generate_instance_fns_acc(constraint, inst_constraints, methods, env, Nil)
 
 fn generate_instance_fns_acc(
@@ -404,8 +466,8 @@ fn generate_instance_fns_acc(
   inst_constraints: List ast.TypeConstraint,
   methods: List typed_ast.TypedInstanceMethod,
   env: LowerEnv,
-  acc: List ast.Decl
-) -> List ast.Decl =
+  acc: List typed_ast.TypedDecl
+) -> List typed_ast.TypedDecl =
   match methods with
   | Nil -> list_reverse(acc)
   | Cons m rest ->
@@ -417,19 +479,18 @@ fn generate_one_instance_fn(
   inst_constraints: List ast.TypeConstraint,
   method: typed_ast.TypedInstanceMethod,
   env: LowerEnv
-) -> ast.Decl =
+) -> typed_ast.TypedDecl =
   match method with
   | typed_ast.TypedInstanceMethod method_name params ret_maybe effects_maybe body ->
       match build_hidden_for_constraints(inst_constraints, env_class_order(env), env_super_map(env)) with
       | (hidden_params, fwd_map) ->
-          ast.FnDecl(
+          typed_ast.TFnDecl(
             instance_fn_name(constraint, method_name),
             list_append(params, hidden_params),
             ret_maybe,
             effects_maybe,
             [],
-            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env))),
-            dummy_pos())
+            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env))))
 
 # ---------------------------------------------------------------------------
 # FnDecl lowering
@@ -443,17 +504,16 @@ fn lower_fn_decl(
   constraints: List ast.TypeConstraint,
   body: typed_ast.TypedExpr,
   env: LowerEnv
-) -> ast.Decl =
+) -> typed_ast.TypedDecl =
   match build_hidden_for_constraints(constraints, env_class_order(env), env_super_map(env)) with
   | (hidden_params, fwd_map) ->
-      ast.FnDecl(
+      typed_ast.TFnDecl(
         name,
         list_append(params, hidden_params),
         ret_ty,
         effects,
         [],
-        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env))),
-        dummy_pos())
+        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env))))
 
 # ---------------------------------------------------------------------------
 # Build hidden params for a list of constraints
@@ -641,40 +701,40 @@ fn strip_module_prefix(name: String) -> String =
 # Expression lowering
 # ---------------------------------------------------------------------------
 
-fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> ast.Expr =
+fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   match te with
-  | typed_ast.TVar name _ pos -> ast.VarExpr(name, pos)
-  | typed_ast.TInt n _ pos -> ast.IntExpr(n, pos)
-  | typed_ast.TBool b _ pos -> ast.BoolExpr(b, pos)
-  | typed_ast.TString s _ pos -> ast.StringExpr(s, pos)
-  | typed_ast.TChar c _ pos -> ast.CharExpr(c, pos)
-  | typed_ast.TUnit _ pos -> ast.UnitExpr(pos)
-  | typed_ast.TTuple items _ pos ->
-      ast.TupleExpr(lower_expr_list(items, ctx), pos)
-  | typed_ast.TIf cond then_ else_ _ pos ->
-      ast.IfExpr(lower_expr(cond, ctx), lower_expr(then_, ctx), lower_expr(else_, ctx), pos)
-  | typed_ast.TMatch scrut branches _ pos ->
-      ast.MatchExpr(lower_expr(scrut, ctx), lower_branches(branches, ctx), pos)
-  | typed_ast.TCall callee args _ pos ->
-      ast.CallExpr(lower_expr(callee, ctx), expand_call_args(args, ctx), pos)
-  | typed_ast.TDict _ _ pos ->
+  | typed_ast.TVar name t pos -> typed_ast.TVar(name, t, pos)
+  | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
+  | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
+  | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)
+  | typed_ast.TChar c t pos -> typed_ast.TChar(c, t, pos)
+  | typed_ast.TUnit t pos -> typed_ast.TUnit(t, pos)
+  | typed_ast.TTuple items t pos ->
+      typed_ast.TTuple(lower_expr_list(items, ctx), t, pos)
+  | typed_ast.TIf cond then_ else_ t pos ->
+      typed_ast.TIf(lower_expr(cond, ctx), lower_expr(then_, ctx), lower_expr(else_, ctx), t, pos)
+  | typed_ast.TMatch scrut branches t pos ->
+      typed_ast.TMatch(lower_expr(scrut, ctx), lower_branches(branches, ctx), t, pos)
+  | typed_ast.TCall callee args t pos ->
+      typed_ast.TCall(lower_expr(callee, ctx), expand_call_args(args, ctx), t, pos)
+  | typed_ast.TDict _ t pos ->
       # TDict should only appear as a prefix arg inside TCall — never standalone.
-      # If seen standalone, emit a no-op unit expression.
-      ast.UnitExpr(pos)
-  | typed_ast.TLambda params body _ pos ->
-      ast.LambdaExpr(params, lower_expr(body, ctx), pos)
-  | typed_ast.TBinary op l r _ pos ->
-      ast.BinaryExpr(op, lower_expr(l, ctx), lower_expr(r, ctx), pos)
-  | typed_ast.TUnary op e _ pos ->
-      ast.UnaryExpr(op, lower_expr(e, ctx), pos)
-  | typed_ast.TRange lo hi _ pos ->
-      ast.IntRangeExpr(lower_expr(lo, ctx), lower_expr(hi, ctx), pos)
-  | typed_ast.TDo steps _ pos ->
-      ast.DoExpr(lower_do_steps(steps, ctx), pos)
-  | typed_ast.TRecord name fields _ pos ->
-      ast.RecordExpr(name, lower_record_fields(fields, ctx), pos)
-  | typed_ast.TGetField e fname _ pos ->
-      ast.GetFieldExpr(lower_expr(e, ctx), fname, pos)
+      # If seen standalone, preserve type and emit as unit.
+      typed_ast.TUnit(t, pos)
+  | typed_ast.TLambda params body t pos ->
+      typed_ast.TLambda(params, lower_expr(body, ctx), t, pos)
+  | typed_ast.TBinary op l r t pos ->
+      typed_ast.TBinary(op, lower_expr(l, ctx), lower_expr(r, ctx), t, pos)
+  | typed_ast.TUnary op e t pos ->
+      typed_ast.TUnary(op, lower_expr(e, ctx), t, pos)
+  | typed_ast.TRange lo hi t pos ->
+      typed_ast.TRange(lower_expr(lo, ctx), lower_expr(hi, ctx), t, pos)
+  | typed_ast.TDo steps t pos ->
+      typed_ast.TDo(lower_do_steps(steps, ctx), t, pos)
+  | typed_ast.TRecord name fields t pos ->
+      typed_ast.TRecord(name, lower_record_fields(fields, ctx), t, pos)
+  | typed_ast.TGetField e fname t pos ->
+      typed_ast.TGetField(lower_expr(e, ctx), fname, t, pos)
 
 # expand_call_args: lower user args first (in order), then append expanded TDict
 # witness args at the end.  This matches Python typeclass_lowering.py which also
@@ -682,33 +742,32 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> ast.Expr =
 # TypedExpr arg list are evidence prepended by infer.sprout at call sites; they
 # must land AFTER the user args to match the hidden params that lower_fn_decl
 # appends to the parameter list.
-fn expand_call_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List ast.Expr =
+fn expand_call_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   list_append(expand_user_args(args, ctx), expand_dict_witness_args(args, ctx))
 
-fn expand_user_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List ast.Expr =
+fn expand_user_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
   | Cons (typed_ast.TDict _ _ _) rest -> expand_user_args(rest, ctx)
   | Cons e rest -> Cons(lower_expr(e, ctx), expand_user_args(rest, ctx))
 
-fn expand_dict_witness_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List ast.Expr =
+fn expand_dict_witness_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
   | Cons (typed_ast.TDict c _ pos) rest ->
       list_append(resolve_tdict(c, pos, ctx), expand_dict_witness_args(rest, ctx))
   | Cons _ rest -> expand_dict_witness_args(rest, ctx)
 
-# resolve_tdict: expand one TDict witness into a list of VarExprs, one per
+# resolve_tdict: expand one TDict witness into a list of TypedExprs, one per
 # class method.  Resolution order:
 #   1. Forwarded hidden param (fwd_methods in ctx — polymorphic call site)
 #   2. Concrete instance fn  (inst_table in ctx — concrete call site)
-#   3. Fallback: bare VarExpr with the constraint's key (should not happen in
-#      well-typed programs; produces incorrect but non-crashing output)
+#   3. Fallback: TVar with unresolved name (should not happen in well-typed programs)
 fn resolve_tdict(
   c: ast.TypeConstraint,
   pos: source.SourcePos,
   ctx: LowerCtx
-) -> List ast.Expr =
+) -> List typed_ast.TypedExpr =
   match c with
   | ast.TypeConstraint class_name type_args ->
       resolve_tdict_for_classes(
@@ -724,7 +783,7 @@ fn resolve_tdict_for_classes(
   type_args: List ast.TypeExpr,
   pos: source.SourcePos,
   ctx: LowerCtx
-) -> List ast.Expr =
+) -> List typed_ast.TypedExpr =
   match classes with
   | Nil -> Nil
   | Cons eff_class rest ->
@@ -740,10 +799,10 @@ fn resolve_tdict_with_key(
   type_args: List ast.TypeExpr,
   pos: source.SourcePos,
   ctx: LowerCtx
-) -> List ast.Expr =
+) -> List typed_ast.TypedExpr =
   match dict_get(key, ctx_fwd(ctx)) with
   | Just method_map ->
-      list_map(\m -> resolve_method_var(m, method_map, key, pos),
+      list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)),
                class_methods_for(class_name, ctx_class_order(ctx)))
   | Nothing ->
       match dict_get(key, ctx_inst(ctx)) with
@@ -751,7 +810,7 @@ fn resolve_tdict_with_key(
           resolve_tdict_for_inst(key, type_args, pos, ctx, method_map,
                                  class_methods_for(class_name, ctx_class_order(ctx)))
       | Nothing ->
-          list_map(\_ -> ast.VarExpr("__unresolved_" ++ key, pos),
+          list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar("?gen"), pos),
                    class_methods_for(class_name, ctx_class_order(ctx)))
 
 # Resolve a concrete instance's dict, checking inst_meta for lambda-wrapping of
@@ -763,16 +822,17 @@ fn resolve_tdict_for_inst(
   ctx: LowerCtx,
   method_map: Dict String,
   methods: List String
-) -> List ast.Expr =
+) -> List typed_ast.TypedExpr =
   match dict_get(key, ctx_inst_meta(ctx)) with
   | Nothing ->
-      list_map(\m -> resolve_method_var(m, method_map, key, pos), methods)
+      list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)), methods)
   | Just (inst_type_args, inst_constraints, method_arities) ->
       resolve_tdict_apply_inner_dicts(key, pos, method_map, methods, method_arities,
         resolve_inner_constraint_dicts(
           inst_constraints,
           unify_type_args_list(inst_type_args, type_args, dict_empty()),
-          pos, ctx))
+          pos, ctx),
+        ctx_scheme_env(ctx))
 
 # Apply resolved inner dicts to instance methods: bare refs if Nil, lambda-wrapped otherwise.
 fn resolve_tdict_apply_inner_dicts(
@@ -781,10 +841,11 @@ fn resolve_tdict_apply_inner_dicts(
   method_map: Dict String,
   methods: List String,
   method_arities: Dict Int,
-  inner_dicts: List ast.Expr
-) -> List ast.Expr =
+  inner_dicts: List typed_ast.TypedExpr,
+  scheme_env: Dict types.Scheme
+) -> List typed_ast.TypedExpr =
   match inner_dicts with
-  | Nil -> list_map(\m -> resolve_method_var(m, method_map, key, pos), methods)
+  | Nil -> list_map(\m -> resolve_method_var(m, method_map, key, pos, scheme_env), methods)
   | _ -> list_map(\m -> resolve_method_with_lambda(m, key, method_map, method_arities, inner_dicts, pos), methods)
 
 fn resolve_method_with_lambda(
@@ -792,11 +853,11 @@ fn resolve_method_with_lambda(
   key: String,
   method_map: Dict String,
   method_arities: Dict Int,
-  inner_dicts: List ast.Expr,
+  inner_dicts: List typed_ast.TypedExpr,
   pos: source.SourcePos
-) -> ast.Expr =
+) -> typed_ast.TypedExpr =
   match dict_get(method_name, method_map) with
-  | Nothing -> ast.VarExpr("__unresolved_" ++ key ++ "_" ++ method_name, pos)
+  | Nothing -> typed_ast.TVar("__unresolved_" ++ key ++ "_" ++ method_name, types.TVar("?gen"), pos)
   | Just fn_name ->
       build_lambda_with_inner_dicts(fn_name, get_method_arity(method_name, method_arities), inner_dicts, pos)
 
@@ -809,11 +870,12 @@ fn resolve_method_var(
   method_name: String,
   method_map: Dict String,
   fallback_key: String,
-  pos: source.SourcePos
-) -> ast.Expr =
+  pos: source.SourcePos,
+  scheme_env: Dict types.Scheme
+) -> typed_ast.TypedExpr =
   match dict_get(method_name, method_map) with
-  | Just fn_name -> ast.VarExpr(fn_name, pos)
-  | Nothing -> ast.VarExpr("__unresolved_" ++ fallback_key ++ "_" ++ method_name, pos)
+  | Just fn_name -> typed_ast.TVar(fn_name, lookup_scheme_type(fn_name, scheme_env), pos)
+  | Nothing -> typed_ast.TVar("__unresolved_" ++ fallback_key ++ "_" ++ method_name, types.TVar("?gen"), pos)
 
 # ---------------------------------------------------------------------------
 # Inner-dict helpers: type unification, substitution, lambda wrapping
@@ -884,13 +946,13 @@ fn substitute_constraint(tc: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> ast
       ast.TypeConstraint(class_name, list_map(\te -> substitute_type_expr(te, subs), type_args))
 
 # resolve_inner_constraint_dicts: resolve each inner constraint (after substitution)
-# into a list of dict expressions (one per class method).
+# into a list of typed dict expressions (one per class method).
 fn resolve_inner_constraint_dicts(
   inst_constraints: List ast.TypeConstraint,
   subs: Dict ast.TypeExpr,
   pos: source.SourcePos,
   ctx: LowerCtx
-) -> List ast.Expr =
+) -> List typed_ast.TypedExpr =
   match inst_constraints with
   | Nil -> Nil
   | Cons c rest ->
@@ -902,26 +964,30 @@ fn resolve_inner_constraint_dicts(
 # For an instance method fn_name with n_params explicit params and inner_dicts as
 # the resolved inner dicts, produces:
 #   \__lp_0 ... __lp_{n-1} -> fn_name(__lp_0, ..., __lp_{n-1}, inner_dict_0, ...)
+# Lambda and inner call types use TVar "?lambda" — these are dict witnesses whose
+# LLVM representation is always a closure pointer regardless of their Sprout type.
 fn build_lambda_with_inner_dicts(
   fn_name: String,
   n_params: Int,
-  inner_dicts: List ast.Expr,
+  inner_dicts: List typed_ast.TypedExpr,
   pos: source.SourcePos
-) -> ast.Expr =
+) -> typed_ast.TypedExpr =
   build_lambda_helper(fn_name, make_lp_names(n_params, 0), inner_dicts, pos)
 
 fn build_lambda_helper(
   fn_name: String,
   lp_names: List String,
-  inner_dicts: List ast.Expr,
+  inner_dicts: List typed_ast.TypedExpr,
   pos: source.SourcePos
-) -> ast.Expr =
-  ast.LambdaExpr(
+) -> typed_ast.TypedExpr =
+  typed_ast.TLambda(
     list_map(\nm -> ast.Param(nm, Nothing), lp_names),
-    ast.CallExpr(
-      ast.VarExpr(fn_name, pos),
-      list_append(list_map(\nm -> ast.VarExpr(nm, pos), lp_names), inner_dicts),
+    typed_ast.TCall(
+      typed_ast.TVar(fn_name, types.TVar("?lambda"), pos),
+      list_append(list_map(\nm -> typed_ast.TVar(nm, types.TVar("?lambda"), pos), lp_names), inner_dicts),
+      types.TVar("?lambda"),
       pos),
+    types.TVar("?lambda"),
     pos)
 
 fn make_lp_names(n: Int, i: Int) -> List String =
@@ -932,34 +998,34 @@ fn make_lp_names(n: Int, i: Int) -> List String =
 # Recursive lowering helpers
 # ---------------------------------------------------------------------------
 
-fn lower_expr_list(exprs: List typed_ast.TypedExpr, ctx: LowerCtx) -> List ast.Expr =
+fn lower_expr_list(exprs: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match exprs with
   | Nil -> Nil
   | Cons e rest -> Cons(lower_expr(e, ctx), lower_expr_list(rest, ctx))
 
-fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> List ast.MatchBranch =
+fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> List typed_ast.TypedMatchBranch =
   match branches with
   | Nil -> Nil
   | Cons b rest ->
       match b with
       | typed_ast.TypedMatchBranch pat body ->
-          Cons(ast.MatchBranch(pat, lower_expr(body, ctx)), lower_branches(rest, ctx))
+          Cons(typed_ast.TypedMatchBranch(pat, lower_expr(body, ctx)), lower_branches(rest, ctx))
 
-fn lower_do_steps(steps: List typed_ast.TypedDoStep, ctx: LowerCtx) -> List ast.DoStep =
+fn lower_do_steps(steps: List typed_ast.TypedDoStep, ctx: LowerCtx) -> List typed_ast.TypedDoStep =
   match steps with
   | Nil -> Nil
   | Cons s rest -> Cons(lower_do_step(s, ctx), lower_do_steps(rest, ctx))
 
-fn lower_do_step(step: typed_ast.TypedDoStep, ctx: LowerCtx) -> ast.DoStep =
+fn lower_do_step(step: typed_ast.TypedDoStep, ctx: LowerCtx) -> typed_ast.TypedDoStep =
   match step with
-  | typed_ast.TDoBindStep pat e -> ast.DoBindStep(pat, lower_expr(e, ctx))
-  | typed_ast.TDoLetStep name e -> ast.DoLetStep(name, lower_expr(e, ctx))
-  | typed_ast.TDoExprStep e -> ast.DoExprStep(lower_expr(e, ctx))
+  | typed_ast.TDoBindStep pat e -> typed_ast.TDoBindStep(pat, lower_expr(e, ctx))
+  | typed_ast.TDoLetStep name e -> typed_ast.TDoLetStep(name, lower_expr(e, ctx))
+  | typed_ast.TDoExprStep e -> typed_ast.TDoExprStep(lower_expr(e, ctx))
 
-fn lower_record_fields(fields: List typed_ast.TypedRecordField, ctx: LowerCtx) -> List ast.RecordField =
+fn lower_record_fields(fields: List typed_ast.TypedRecordField, ctx: LowerCtx) -> List typed_ast.TypedRecordField =
   match fields with
   | Nil -> Nil
   | Cons f rest ->
       match f with
       | typed_ast.TypedRecordField fname e ->
-          Cons(ast.RecordField(fname, lower_expr(e, ctx)), lower_record_fields(rest, ctx))
+          Cons(typed_ast.TypedRecordField(fname, lower_expr(e, ctx)), lower_record_fields(rest, ctx))
