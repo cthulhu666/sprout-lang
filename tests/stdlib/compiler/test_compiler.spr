@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.types as types
 
 fn is_ok(r: compiler.CompileResult) -> Bool =
   match r with
@@ -12,6 +13,14 @@ fn is_fail(r: compiler.CompileResult) -> Bool =
   match r with
   | compiler.CompileFail _ -> true
   | compiler.CompileOk _ -> false
+
+fn scheme_str(name: String, r: compiler.CompileResult) -> String =
+  match r with
+  | compiler.CompileFail _ -> "<compile failed>"
+  | compiler.CompileOk env ->
+      match dict_get(name, env) with
+      | Nothing -> "<not found>"
+      | Just s -> types.scheme_to_string(s)
 
 fn main() -> Unit !{IO} =
   do
@@ -47,6 +56,22 @@ fn main() -> Unit !{IO} =
     # compile_source (no root needed) is unaffected by M1
     r4 <- compiler.compile_source("fn w() -> Int = 99")
     assert_true(state, "compile_source still works", is_ok(r4))
+
+    # ---------------------------------------------------------------------------
+    # Unannotated fn param — inferred scheme correctness
+    #
+    # These tests guard against register_fn_decl_scheme rebuilding from AST and
+    # discarding the substitution that resolves _unann vars to concrete types.
+    # The bugs they catch: double(4) → garbage, :t double → "forall a b. a -> b",
+    # fmap(double, xs) → codegen failure.
+    # ---------------------------------------------------------------------------
+    r_double_scheme <- compiler.compile_source("fn double(x) = x * 2")
+    assert_eq(state, "unannotated fn: scheme is Int -> Int (not forall a b. a -> b)",
+      scheme_str("double", r_double_scheme), "Int -> Int")
+
+    r_id_scheme <- compiler.compile_source("fn id(x) = x")
+    assert_eq(state, "unannotated identity fn: scheme is forall a. a -> a",
+      scheme_str("id", r_id_scheme), "forall a. a -> a")
 
     # ---------------------------------------------------------------------------
     # Module loader: qualified import access (requires real stdlib on disk)
