@@ -29,13 +29,13 @@ fn main() -> Unit !{IO} =
     # nil_int() gives a concrete List Int so Eq (List Int) resolves.
     # -----------------------------------------------------------------------
 
-    let li_empty  = nil_int()
+    let li_empty = nil_int()
     let li_single = Cons(42, Nil)
-    let li_multi  = Cons(1, Cons(2, Cons(3, Nil)))
+    let li_multi = Cons(1, Cons(2, Cons(3, Nil)))
 
-    assert_eq(state, "functor list identity empty",  map(\x -> x, li_empty),  li_empty)
+    assert_eq(state, "functor list identity empty", map(\x -> x, li_empty), li_empty)
     assert_eq(state, "functor list identity single", map(\x -> x, li_single), li_single)
-    assert_eq(state, "functor list identity multi",  map(\x -> x, li_multi),  li_multi)
+    assert_eq(state, "functor list identity multi", map(\x -> x, li_multi), li_multi)
 
     # -----------------------------------------------------------------------
     # Functor List — composition law (f = double, g = inc)
@@ -59,12 +59,12 @@ fn main() -> Unit !{IO} =
     # -----------------------------------------------------------------------
 
     let m_nothing = no_int()
-    let m_just_1  = Just(7)
-    let m_just_2  = Just(100)
+    let m_just_1 = Just(7)
+    let m_just_2 = Just(100)
 
-    assert_eq(state, "functor maybe identity nothing",  map(\x -> x, m_nothing), m_nothing)
-    assert_eq(state, "functor maybe identity just 7",   map(\x -> x, m_just_1),  m_just_1)
-    assert_eq(state, "functor maybe identity just 100", map(\x -> x, m_just_2),  m_just_2)
+    assert_eq(state, "functor maybe identity nothing", map(\x -> x, m_nothing), m_nothing)
+    assert_eq(state, "functor maybe identity just 7", map(\x -> x, m_just_1), m_just_1)
+    assert_eq(state, "functor maybe identity just 100", map(\x -> x, m_just_2), m_just_2)
 
     # -----------------------------------------------------------------------
     # Functor Maybe — composition law (f = double, g = inc)
@@ -127,28 +127,28 @@ fn main() -> Unit !{IO} =
     # nil_int() is used so the empty side has a concrete type for Eq.
     # -----------------------------------------------------------------------
 
-    assert_eq(state, "monoid list left identity empty",  nil_int() ++ li_empty,  li_empty)
+    assert_eq(state, "monoid list left identity empty", nil_int() ++ li_empty, li_empty)
     assert_eq(state, "monoid list left identity single", nil_int() ++ li_single, li_single)
-    assert_eq(state, "monoid list left identity multi",  nil_int() ++ li_multi,  li_multi)
+    assert_eq(state, "monoid list left identity multi", nil_int() ++ li_multi, li_multi)
 
-    assert_eq(state, "monoid list right identity empty",  li_empty  ++ nil_int(), li_empty)
+    assert_eq(state, "monoid list right identity empty", li_empty ++ nil_int(), li_empty)
     assert_eq(state, "monoid list right identity single", li_single ++ nil_int(), li_single)
-    assert_eq(state, "monoid list right identity multi",  li_multi  ++ nil_int(), li_multi)
+    assert_eq(state, "monoid list right identity multi", li_multi ++ nil_int(), li_multi)
 
     # -----------------------------------------------------------------------
     # Monoid String — left and right identity
     # -----------------------------------------------------------------------
 
-    let s_empty  = ""
+    let s_empty = ""
     let s_single = "x"
-    let s_multi  = "hello"
+    let s_multi = "hello"
 
-    assert_eq(state, "monoid string left identity empty",  "" ++ s_empty,  s_empty)
+    assert_eq(state, "monoid string left identity empty", "" ++ s_empty, s_empty)
     assert_eq(state, "monoid string left identity single", "" ++ s_single, s_single)
-    assert_eq(state, "monoid string left identity multi",  "" ++ s_multi,  s_multi)
+    assert_eq(state, "monoid string left identity multi", "" ++ s_multi, s_multi)
 
-    assert_eq(state, "monoid string right identity empty",  s_empty  ++ "", s_empty)
+    assert_eq(state, "monoid string right identity empty", s_empty ++ "", s_empty)
     assert_eq(state, "monoid string right identity single", s_single ++ "", s_single)
-    assert_eq(state, "monoid string right identity multi",  s_multi  ++ "", s_multi)
+    assert_eq(state, "monoid string right identity multi", s_multi ++ "", s_multi)
 
     summary(state)

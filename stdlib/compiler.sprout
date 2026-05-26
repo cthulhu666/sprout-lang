@@ -221,7 +221,7 @@ extern fn analysis_session_create(dummy: String) -> Int !{IO}
 extern fn analysis_session_update(session_id: Int, kind: String, line: String) -> Result String Unit !{IO}
 extern fn analysis_session_eval(session_id: Int, expr: String) -> Result String (Vec String) !{IO}
 extern fn analysis_session_type_of(session_id: Int, expr: String) -> Result String String !{IO}
-extern fn analysis_session_diagnostics(session_id: Int) -> Vec (String, Int, Int) !{IO}
+extern fn analysis_session_diagnostics(session_id: Int) -> Vec(String, Int, Int) !{IO}
 extern fn analysis_session_destroy(session_id: Int) -> Unit !{IO}
 
 export fn create_session() -> StatefulSession !{IO} =

@@ -37,7 +37,7 @@ fn count_header_lines(s: String, pos: Int, count: Int) -> Int =
 # ---------------------------------------------------------------------------
 # SessionState — server-side per-session state (M2)
 
-export type SessionState (..) = SessionState (Vec String) (Vec String)
+export type SessionState (..) = SessionState(Vec String) (Vec String)
   # imports, declarations
 
 fn session_state_imports(s: SessionState) -> Vec String =
@@ -387,7 +387,7 @@ fn runtime_obj_path() -> String = "/tmp/sprout_runtime_daemon.o"
 # ---------------------------------------------------------------------------
 # StartupState — pre-compiled runtime.o, stdlib_root, and persistent module cache
 
-type StartupState = StartupState String (Ref String) (Ref(Dict (List (String, types.Scheme)))) (Ref(Dict SessionState)) (Ref Int)
+type StartupState = StartupState String (Ref String) (Ref (Dict (List (String, types.Scheme)))) (Ref (Dict SessionState)) (Ref Int)
   # stdlib_root, runtime_obj_ref ("" = not yet compiled), cache, sessions, next_session_id
 
 fn state_stdlib_root(state: StartupState) -> String =
@@ -398,11 +398,11 @@ fn state_runtime_obj_ref(state: StartupState) -> Ref String =
   match state with
   | StartupState _ ref _ _ _ -> ref
 
-fn state_cache(state: StartupState) -> Ref(Dict (List (String, types.Scheme))) =
+fn state_cache(state: StartupState) -> Ref (Dict (List (String, types.Scheme))) =
   match state with
   | StartupState _ _ cache _ _ -> cache
 
-fn state_sessions(state: StartupState) -> Ref(Dict SessionState) =
+fn state_sessions(state: StartupState) -> Ref (Dict SessionState) =
   match state with
   | StartupState _ _ _ sessions _ -> sessions
 
