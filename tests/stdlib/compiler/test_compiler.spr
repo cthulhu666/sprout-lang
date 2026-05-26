@@ -90,4 +90,35 @@ fn main() -> Unit !{IO} =
             "unknown qualified name still fails type check",
             is_fail(r_bad))
 
+          # Regression: unannotated function with parameter was rejected with
+          # "Return type mismatch: Int vs Unit" in REPL session context.
+          # Test matrix: with/without module header, with/without spaces around *.
+
+          # No module header, no param annotation — baseline
+          cache_d <- module_loader.new_cache()
+          r_bare <- compiler.compile_source_with_cache(
+            "fn double(x) = x * 2",
+            stdlib_root, cache_d)
+          assert_true(state,
+            "unannotated fn with param, no module header, compiles ok",
+            is_ok(r_bare))
+
+          # module app.session header, spaces around operator
+          cache_d2 <- module_loader.new_cache()
+          r_session_space <- compiler.compile_source_with_cache(
+            "module app.session\n\nfn double(x) = x * 2",
+            stdlib_root, cache_d2)
+          assert_true(state,
+            "unannotated fn with param, session header, spaces, compiles ok",
+            is_ok(r_session_space))
+
+          # module app.session header, no spaces around operator
+          cache_d3 <- module_loader.new_cache()
+          r_session_nospace <- compiler.compile_source_with_cache(
+            "module app.session\n\nfn double(x) = x*2",
+            stdlib_root, cache_d3)
+          assert_true(state,
+            "unannotated fn with param, session header, no spaces, compiles ok",
+            is_ok(r_session_nospace))
+
     summary(state)
