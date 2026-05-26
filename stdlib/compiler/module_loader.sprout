@@ -222,22 +222,39 @@ fn find_pair(pairs: List (String, types.Scheme), name: String) -> Maybe types.Sc
 # Own-entry extraction
 # ---------------------------------------------------------------------------
 #
-# After check_program_with_env returns an env that includes builtins + imports
-# + the module's own declarations, we strip the pre-existing entries so the
-# cache only stores what this module itself defined.  This keeps the cached
-# pairs small and avoids inflating every consumer's typing environment with
-# duplicated builtin schemes.
+# We extract own_pairs by selecting only the names that the module source
+# explicitly declares, plus all @-prefixed marker pairs (typeclass instances,
+# record fields).  Using declared names is more precise than a key-exclusion
+# filter: the exclusion approach breaks when a module re-declares a name that
+# also exists in the prelude (e.g. collections.sprout re-declares vec_singleton).
 
-fn filter_own_pairs(
-  all_pairs: List (String, types.Scheme),
-  exclude: Dict types.Scheme
-) -> List (String, types.Scheme) =
-  match all_pairs with
-  | Nil -> Nil
-  | Cons (k, v) rest ->
-      match dict_get(k, exclude) with
-      | Just _ -> filter_own_pairs(rest, exclude)
-      | Nothing -> Cons((k, v), filter_own_pairs(rest, exclude))
+fn ctor_value_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
+  match ctors with
+  | Nil -> acc
+  | Cons (ast.TypeConstructor name _) rest -> ctor_value_names(rest, Cons(name, acc))
+
+fn class_method_names_acc(methods: List ast.ClassMethodSig, acc: List String) -> List String =
+  match methods with
+  | Nil -> acc
+  | Cons (ast.ClassMethodSig name _ _ _) rest -> class_method_names_acc(rest, Cons(name, acc))
+
+fn decl_value_names(decl: ast.Decl, acc: List String) -> List String =
+  match decl with
+  | ast.FnDecl name _ _ _ _ _ _ -> Cons(name, acc)
+  | ast.ExternFnDecl name _ _ _ _ -> Cons(name, acc)
+  | ast.TypeDecl _ _ ctors _ -> ctor_value_names(ctors, acc)
+  | ast.LetDecl name _ _ -> Cons(name, acc)
+  | ast.ClassDecl _ _ methods _ _ -> class_method_names_acc(methods, acc)
+  | _ -> acc
+
+fn program_declared_names(prog: ast.Program) -> List String =
+  match prog with
+  | ast.Program decls _ -> program_decls_loop(decls, Nil)
+
+fn program_decls_loop(decls: List ast.Decl, acc: List String) -> List String =
+  match decls with
+  | Nil -> acc
+  | Cons d rest -> program_decls_loop(rest, decl_value_names(d, acc))
 
 # ---------------------------------------------------------------------------
 # Header stripping (bootstrap parser can't parse module/import declarations)
@@ -311,8 +328,8 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
                               | checker.CheckErr _ -> Nil
                               | checker.CheckOk env ->
                                   do
-                                    let exclude = dict_from_list(checker.builtin_entries() ++ base_pairs)
-                                    let own_pairs = filter_own_pairs(dict_to_pairs(env), exclude)
+                                    let declared = program_declared_names(prog)
+                                    let own_pairs = select_named_pairs(dict_to_pairs(env), declared) ++ collect_marker_pairs(dict_to_pairs(env))
                                     cache_put(cache, name, own_pairs)
                                     own_pairs
 
