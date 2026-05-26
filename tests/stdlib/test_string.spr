@@ -1,5 +1,10 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
-import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right)
+import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right, join)
+
+# Regression: global lets that call string_concat_many (via join) must work.
+# The codegen bug emitted __sprout_init_globals before register_ctor in the
+# entry fn, so these initialisers crashed with "constructor metadata not registered".
+let global_join_result = join("|", ["foo", "bar", "baz"])
 
 fn main() -> Unit !{IO} =
   do
@@ -48,5 +53,10 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "strip_suffix found", strip_suffix("hello", "llo"), Just("he"))
     assert_eq(state, "strip_suffix missing", strip_suffix("hello", "xyz"), Nothing)
+
+    assert_eq(state, "join basic", join("|", ["a", "b", "c"]), "a|b|c")
+    assert_eq(state, "join single", join(",", ["x"]), "x")
+    assert_eq(state, "join empty sep", join("", ["hi", "there"]), "hithere")
+    assert_eq(state, "join global let", global_join_result, "foo|bar|baz")
 
     summary(state)
