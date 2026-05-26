@@ -155,7 +155,7 @@ fn is_lowercase_name(name: String) -> Bool =
 
 fn collect_ret_type_vars(ret_type_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
   match ret_type_maybe with
-  | Nothing -> acc
+  | Nothing -> list_add_unique("_unann", acc)
   | Just te -> collect_te_vars(te, acc)
 
 fn build_type_var_dict(vars: List String, acc: Dict types.Type) -> Dict types.Type =
@@ -190,7 +190,7 @@ fn param_types_from_decl(params: List ast.Param, local_vars: Dict types.Type) ->
 
 fn ret_from_maybe_with_vars(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with
-  | Nothing -> types.TConst("Unit")
+  | Nothing -> types.TVar("_unann")
   | Just te -> type_from_ast(te, local_vars)
 
 fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
