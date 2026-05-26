@@ -48,4 +48,46 @@ fn main() -> Unit !{IO} =
     r4 <- compiler.compile_source("fn w() -> Int = 99")
     assert_true(state, "compile_source still works", is_ok(r4))
 
+    # ---------------------------------------------------------------------------
+    # Module loader: qualified import access (requires real stdlib on disk)
+    #
+    # These tests use SPROUT_STDLIB_ROOT (set by `just test`) to load real stdlib
+    # modules and verify that qualified names survive import resolution correctly.
+    # Skipped gracefully when running outside the just test harness.
+    # ---------------------------------------------------------------------------
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          # Regression: collections.vec_singleton was silently dropped from
+          # own_pairs by filter_own_pairs because its name collides with the
+          # prelude's vec_singleton.  After the fix, load_module uses
+          # program_declared_names so the collision no longer matters.
+          cache_c <- module_loader.new_cache()
+          r_collections <- compiler.compile_source_with_cache(
+            "import collections\nfn foo() -> Vec Int = collections.vec_singleton(42)",
+            stdlib_root, cache_c)
+          assert_true(state,
+            "collections.vec_singleton accessible after 'import collections'",
+            is_ok(r_collections))
+
+          # Regression guard: a module that only re-declares a prelude name
+          # (with no other names) must not produce an empty qualified namespace.
+          cache_c2 <- module_loader.new_cache()
+          r_qualified_alias <- compiler.compile_source_with_cache(
+            "import stdlib.collections as col\nfn bar() -> Vec Bool = col.vec_singleton(true)",
+            stdlib_root, cache_c2)
+          assert_true(state,
+            "collections.vec_singleton accessible via explicit stdlib alias",
+            is_ok(r_qualified_alias))
+
+          # Sanity: an unknown qualified name still fails (guard against false OK).
+          cache_c3 <- module_loader.new_cache()
+          r_bad <- compiler.compile_source_with_cache(
+            "import collections\nfn baz() -> Int = collections.no_such_fn()",
+            stdlib_root, cache_c3)
+          assert_true(state,
+            "unknown qualified name still fails type check",
+            is_fail(r_bad))
+
     summary(state)

@@ -193,7 +193,7 @@ _test-stdlib stage:
         echo "  LINK FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
-      if out=$("$TMP_BIN" 2>&1); then
+      if out=$(SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMP_BIN" 2>&1); then
         echo "$out"
       else
         status=$?
