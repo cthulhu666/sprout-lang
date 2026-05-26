@@ -499,25 +499,6 @@ build-seeds: build-seed-macos build-seed-linux
 
 # ── REPL ──────────────────────────────────────────────────────────────────────
 
-# Build the REPL binary from examples/repl_hosted.sprout using stage-1.
-[group('build')]
-build-repl:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
-  fi
-  TMP_LL="/tmp/sprout_repl_$$.ll"
-  trap 'rm -f "$TMP_LL"' EXIT
-  echo "==> Emitting LLVM IR for repl_bin..."
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{justfile_directory()}}/examples/repl_hosted.sprout" > "$TMP_LL"
-  echo "==> Validating IR..."
-  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
-  echo "==> Linking with clang..."
-  mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/repl_bin"
-  echo "==> Built {{build_dir}}/repl_bin"
-
 # Build sproutd — combined REPL + analysis service binary (self-configuring).
 [group('build')]
 build-sproutd:
