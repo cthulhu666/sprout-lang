@@ -2755,10 +2755,10 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
         do
           init_argv <- fresh_tmp(em)
           emit_template(em, `  ${init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)`)
+          emit_ctor_registrations(ctor_reg_meta, em)
           match runtime_lets with
           | Nil -> ()
           | _ -> emit_line(em, "  call void @__sprout_init_globals()")
-          emit_ctor_registrations(ctor_reg_meta, em)
           0
       else
         do
