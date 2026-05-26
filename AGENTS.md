@@ -121,8 +121,9 @@ For coding tasks, work is done only when:
 1. Keep host-side builtins minimal and effect-oriented.
 2. Prefer implementing pure helpers in `stdlib/prelude.sprout`.
 3. When moving functionality from builtin to stdlib, add/adjust conformance tests.
-4. Add a builtin only when the feature is impossible to implement in Sprout or cannot be implemented efficiently enough in Sprout with the current language/runtime surface.
+4. Add a builtin only when the feature is impossible to implement in Sprout or cannot be implemented efficiently enough in Sprout with the current language/runtime surface. **Before proposing a new builtin, exhaust alternatives:** can existing `term_write`/`term_read_line`/`process.proc_run` compose the behaviour? Can a workaround (e.g. single-line-body assumption for LSP) eliminate the need? If the answer is yes, use the workaround and add a comment explaining the constraint.
 5. If a feature could plausibly live in Sprout stdlib, discuss that tradeoff with the user before implementing it as a builtin.
+6. Performance is **not** sufficient justification for a builtin unless there is a concrete, measured bottleneck. Correctness requirements (e.g. raw byte I/O that `term_read_line` cannot express) are sufficient.
 
 ## Bootstrap and Debugging Tools
 

@@ -1,0 +1,375 @@
+module stdlib.compiler.lsp_driver
+
+import stdlib.json as json
+import stdlib.compiler as compiler
+import stdlib.string as string
+
+# ---------------------------------------------------------------------------
+# LspState
+
+type LspState = LspState String (Ref(Dict String)) (Ref Bool)
+  # stdlib_root, open_documents (uri -> source), shutdown_requested
+
+fn lsp_stdlib_root(state: LspState) -> String =
+  match state with | LspState r _ _ -> r
+
+fn lsp_documents(state: LspState) -> Ref(Dict String) =
+  match state with | LspState _ d _ -> d
+
+fn lsp_shutdown_flag(state: LspState) -> Ref Bool =
+  match state with | LspState _ _ s -> s
+
+fn build_lsp_state(stdlib_root: String) -> LspState !{IO} =
+  do
+    docs <- ref_new(dict_empty())
+    shutdown <- ref_new(false)
+    LspState(stdlib_root, docs, shutdown)
+
+# ---------------------------------------------------------------------------
+# LSP framing
+#
+# Write: compose "Content-Length: N\r\n\r\n<body>" via term_write (fflushes).
+# Read headers: use term_read_line (strips \r\n).
+# Read body: use term_read_line — valid because all major LSP clients (VS Code,
+# JetBrains) send compact single-line JSON bodies.
+
+fn lsp_send(body: String) -> Unit !{IO} =
+  term_write("Content-Length: " ++ int_to_string(string.length(body)) ++ "\r\n\r\n" ++ body)
+
+fn parse_content_length(line: String) -> Maybe Int =
+  match string.strip_prefix(line, "Content-Length: ") with
+  | Nothing -> Nothing
+  | Just value -> Just(parse_int(value))
+
+fn read_headers_loop(cl: Maybe Int) -> Maybe Int !{IO} =
+  match term_read_line() with
+  | Nothing -> Nothing
+  | Just line ->
+      if string.is_empty(line) then cl
+      else
+        match parse_content_length(line) with
+        | Just n -> read_headers_loop(Just(n))
+        | Nothing -> read_headers_loop(cl)
+
+fn read_lsp_message() -> Maybe String !{IO} =
+  match read_headers_loop(Nothing) with
+  | Nothing -> Nothing
+  | Just _ -> term_read_line()
+
+# ---------------------------------------------------------------------------
+# JSON-RPC 2.0 helpers
+
+fn make_result(id: json.Json, result: json.Json) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
+    json.JsonObjectCons("id", id,
+    json.JsonObjectCons("result", result,
+    json.JsonObjectNil))))
+
+fn make_error(id: json.Json, code: Int, msg: String) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
+    json.JsonObjectCons("id", id,
+    json.JsonObjectCons("error",
+      json.JsonObject(
+        json.JsonObjectCons("code", json.JsonInt(code),
+        json.JsonObjectCons("message", json.JsonString(msg),
+        json.JsonObjectNil))),
+    json.JsonObjectNil))))
+
+fn make_notification(method: String, params: json.Json) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
+    json.JsonObjectCons("method", json.JsonString(method),
+    json.JsonObjectCons("params", params,
+    json.JsonObjectNil))))
+
+fn get_id(req: json.Json) -> json.Json =
+  match json.json_get_field(req, "id") with
+  | Just id -> id
+  | Nothing -> json.JsonNull
+
+fn get_method(req: json.Json) -> Maybe String =
+  match json.json_get_field(req, "method") with
+  | Nothing -> Nothing
+  | Just v -> json.json_get_string(v)
+
+fn get_params(req: json.Json) -> json.Json =
+  match json.json_get_field(req, "params") with
+  | Just p -> p
+  | Nothing -> json.JsonNull
+
+fn json_get_str(obj: json.Json, key: String) -> Maybe String =
+  match json.json_get_field(obj, key) with
+  | Nothing -> Nothing
+  | Just v -> json.json_get_string(v)
+
+fn json_get_int_fld(obj: json.Json, key: String) -> Maybe Int =
+  match json.json_get_field(obj, key) with
+  | Nothing -> Nothing
+  | Just v -> json.json_get_int(v)
+
+fn send_message(msg: json.Json) -> Unit !{IO} =
+  lsp_send(json.stringify(msg))
+
+# ---------------------------------------------------------------------------
+# Diagnostics — public compiler.Diagnostic has (message, line, col)
+
+fn diag_range(line: Int, col: Int) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("start",
+      json.JsonObject(
+        json.JsonObjectCons("line", json.JsonInt(line),
+        json.JsonObjectCons("character", json.JsonInt(col),
+        json.JsonObjectNil))),
+    json.JsonObjectCons("end",
+      json.JsonObject(
+        json.JsonObjectCons("line", json.JsonInt(line),
+        json.JsonObjectCons("character", json.JsonInt(col),
+        json.JsonObjectNil))),
+    json.JsonObjectNil)))
+
+fn diag_to_lsp(d: compiler.Diagnostic) -> json.Json =
+  match d with
+  | compiler.Diagnostic msg line col ->
+      json.JsonObject(
+        json.JsonObjectCons("range", diag_range(line, col),
+        json.JsonObjectCons("severity", json.JsonInt(1),
+        json.JsonObjectCons("message", json.JsonString(msg),
+        json.JsonObjectNil))))
+
+fn push_diagnostics(uri: String, diags: Vec compiler.Diagnostic, state: LspState) -> Unit !{IO} =
+  send_message(make_notification("textDocument/publishDiagnostics",
+    json.JsonObject(
+      json.JsonObjectCons("uri", json.JsonString(uri),
+      json.JsonObjectCons("diagnostics",
+        json.array_from_list(vec_to_list(vec_map(diag_to_lsp, diags))),
+      json.JsonObjectNil)))))
+
+fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit !{IO} =
+  do
+    diags <- compiler.diagnostics_in_source(src)
+    push_diagnostics(uri, diags, state)
+
+# ---------------------------------------------------------------------------
+# Hover — word extraction + type_of_in_source
+
+fn is_hover_ident_ch(ch: Char) -> Bool =
+  string.is_ident_continue(ch) || ch == '.'
+
+fn word_start(line: String, col: Int) -> Int =
+  if col <= 0 then 0
+  else
+    match string.char_at(line, col - 1) with
+    | Nothing -> col
+    | Just ch ->
+        if is_hover_ident_ch(ch) then word_start(line, col - 1)
+        else col
+
+fn word_end_loop(line: String, col: Int, total: Int) -> Int =
+  if col >= total then total
+  else
+    match string.char_at(line, col) with
+    | Nothing -> col
+    | Just ch ->
+        if is_hover_ident_ch(ch) then word_end_loop(line, col + 1, total)
+        else col
+
+fn extract_word(line: String, col: Int) -> String =
+  string.slice(line, wstart, word_end_loop(line, col, string.length(line)) - wstart)
+  where wstart = word_start(line, col)
+
+fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
+  make_result(id,
+    json.JsonObject(
+      json.JsonObjectCons("contents",
+        json.JsonObject(
+          json.JsonObjectCons("kind", json.JsonString("plaintext"),
+          json.JsonObjectCons("value", json.JsonString(type_str),
+          json.JsonObjectNil))),
+      json.JsonObjectNil)))
+
+fn do_hover(id: json.Json, src: String, word: String, state: LspState) -> Unit !{IO} =
+  match compiler.type_of_in_source(src, word) with
+  | Err _ -> send_message(make_result(id, json.JsonNull))
+  | Ok type_str -> send_message(make_hover_result(id, type_str))
+
+type HoverParams = HoverParams String Int Int
+
+fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
+  match json.json_get_field(params, "textDocument") with
+  | Nothing -> Nothing
+  | Just td ->
+      match json_get_str(td, "uri") with
+      | Nothing -> Nothing
+      | Just uri ->
+          match json.json_get_field(params, "position") with
+          | Nothing -> Nothing
+          | Just pos ->
+              match json_get_int_fld(pos, "line") with
+              | Nothing -> Nothing
+              | Just line_num ->
+                  match json_get_int_fld(pos, "character") with
+                  | Nothing -> Nothing
+                  | Just char_num -> Just(HoverParams(uri, line_num, char_num))
+
+# ---------------------------------------------------------------------------
+# Initialize capabilities
+
+fn server_capabilities() -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("textDocumentSync", json.JsonInt(1),
+    json.JsonObjectCons("hoverProvider", json.JsonBool(true),
+    json.JsonObjectCons("completionProvider",
+      json.JsonObject(
+        json.JsonObjectCons("triggerCharacters",
+          json.array_from_list(Cons(json.JsonString("."), Nil)),
+        json.JsonObjectNil)),
+    json.JsonObjectNil))))
+
+fn initialize_result() -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("capabilities", server_capabilities(),
+    json.JsonObjectCons("serverInfo",
+      json.JsonObject(
+        json.JsonObjectCons("name", json.JsonString("sproutd"),
+        json.JsonObjectCons("version", json.JsonString("0.1.0"),
+        json.JsonObjectNil))),
+    json.JsonObjectNil)))
+
+# ---------------------------------------------------------------------------
+# Request / notification handlers
+
+fn handle_initialize(id: json.Json, state: LspState) -> Unit !{IO} =
+  send_message(make_result(id, initialize_result()))
+
+fn handle_shutdown(id: json.Json, state: LspState) -> Unit !{IO} =
+  do
+    ref_write(lsp_shutdown_flag(state), true)
+    send_message(make_result(id, json.JsonNull))
+
+fn handle_did_open(params: json.Json, state: LspState) -> Unit !{IO} =
+  match json.json_get_field(params, "textDocument") with
+  | Nothing -> ()
+  | Just td ->
+      match json_get_str(td, "uri") with
+      | Nothing -> ()
+      | Just uri ->
+          match json_get_str(td, "text") with
+          | Nothing -> ()
+          | Just src ->
+              do
+                docs <- ref_read(lsp_documents(state))
+                ref_write(lsp_documents(state), dict_set(uri, src, docs))
+                check_and_push_diagnostics(uri, src, state)
+
+fn handle_did_change(params: json.Json, state: LspState) -> Unit !{IO} =
+  match json.json_get_field(params, "textDocument") with
+  | Nothing -> ()
+  | Just td ->
+      match json_get_str(td, "uri") with
+      | Nothing -> ()
+      | Just uri ->
+          match json.json_get_field(params, "contentChanges") with
+          | Nothing -> ()
+          | Just changes_val ->
+              match json.json_get_array(changes_val) with
+              | Nothing -> ()
+              | Just arr ->
+                  match json.json_array_next(arr) with
+                  | Nothing -> ()
+                  | Just step ->
+                      match step with
+                      | json.JsonArrayStep head _ ->
+                          match json_get_str(head, "text") with
+                          | Nothing -> ()
+                          | Just src ->
+                              do
+                                docs <- ref_read(lsp_documents(state))
+                                ref_write(lsp_documents(state), dict_set(uri, src, docs))
+                                check_and_push_diagnostics(uri, src, state)
+
+fn handle_did_close(params: json.Json, state: LspState) -> Unit !{IO} =
+  match json.json_get_field(params, "textDocument") with
+  | Nothing -> ()
+  | Just td ->
+      match json_get_str(td, "uri") with
+      | Nothing -> ()
+      | Just uri ->
+          do
+            docs <- ref_read(lsp_documents(state))
+            ref_write(lsp_documents(state), dict_remove(uri, docs))
+            push_diagnostics(uri, vec_empty(), state)
+
+fn hover_for_line(id: json.Json, src: String, line_str: String, char_num: Int, state: LspState) -> Unit !{IO} =
+  if string.is_empty(word) then send_message(make_result(id, json.JsonNull))
+  else do_hover(id, src, word, state)
+  where word = extract_word(line_str, char_num)
+
+fn handle_hover_with_source(id: json.Json, src: String, line_num: Int, char_num: Int, state: LspState) -> Unit !{IO} =
+  match vec_get(line_num, string.string_lines(src)) with
+  | Nothing -> send_message(make_result(id, json.JsonNull))
+  | Just line_str -> hover_for_line(id, src, line_str, char_num, state)
+
+fn handle_hover(id: json.Json, params: json.Json, state: LspState) -> Unit !{IO} =
+  match extract_hover_params(params) with
+  | Nothing -> send_message(make_result(id, json.JsonNull))
+  | Just hp ->
+      match hp with
+      | HoverParams uri line_num char_num ->
+          do
+            docs <- ref_read(lsp_documents(state))
+            match dict_get(uri, docs) with
+            | Nothing -> send_message(make_result(id, json.JsonNull))
+            | Just src -> handle_hover_with_source(id, src, line_num, char_num, state)
+
+# ---------------------------------------------------------------------------
+# Dispatch
+
+fn dispatch_lsp(method: String, req: json.Json, state: LspState) -> Unit !{IO} =
+  if method == "initialize" then handle_initialize(get_id(req), state)
+  else if method == "initialized" then ()
+  else if method == "shutdown" then handle_shutdown(get_id(req), state)
+  else if method == "textDocument/didOpen" then handle_did_open(get_params(req), state)
+  else if method == "textDocument/didChange" then handle_did_change(get_params(req), state)
+  else if method == "textDocument/didClose" then handle_did_close(get_params(req), state)
+  else if method == "textDocument/hover" then handle_hover(get_id(req), get_params(req), state)
+  else if method == "textDocument/completion" then
+    send_message(make_result(get_id(req), json.array_from_list(Nil)))
+  else ()
+
+fn handle_after_shutdown_check(method: String, req: json.Json, shutdown: Bool, state: LspState) -> Unit !{IO} =
+  if method == "exit" then ()
+  else if shutdown then
+    match json.json_get_field(req, "id") with
+    | Nothing -> lsp_loop(state)
+    | Just id ->
+        do
+          send_message(make_error(id, -32600, "server is shutting down"))
+          lsp_loop(state)
+  else
+    do
+      dispatch_lsp(method, req, state)
+      lsp_loop(state)
+
+# ---------------------------------------------------------------------------
+# Main loop
+
+fn lsp_loop(state: LspState) -> Unit !{IO} =
+  match read_lsp_message() with
+  | Nothing -> ()
+  | Just body ->
+      match json.parse(body) with
+      | Err _ -> lsp_loop(state)
+      | Ok req ->
+          match get_method(req) with
+          | Nothing -> lsp_loop(state)
+          | Just method ->
+              do
+                shutdown <- ref_read(lsp_shutdown_flag(state))
+                handle_after_shutdown_check(method, req, shutdown, state)
+
+export fn run_lsp(stdlib_root: String) -> Unit !{IO} =
+  do
+    state <- build_lsp_state(stdlib_root)
+    lsp_loop(state)
