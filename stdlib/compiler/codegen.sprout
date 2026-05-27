@@ -151,7 +151,9 @@ export type CgCtx (..) =
       (Set)
       (Dict FnSig)
       (String)
-  # fn_sigs, ctor_sigs, globals, adt_names, extern_sigs, scope
+      (Dict Int)
+      (Dict FnSig)
+  # fn_sigs, ctor_sigs, globals, adt_names, extern_sigs, scope, cpr_fns, cpr_extern_sigs
 
 # ---------------------------------------------------------------------------
 # Public result type
@@ -1558,28 +1560,34 @@ fn emit_defs_list(lines: List String, em: Emitter) -> Unit !{IO} =
 # ===========================================================================
 
 fn ctx_fn_sigs(ctx: CgCtx) -> Dict FnSig =
-  match ctx with | CgCtx fs _ _ _ _ _ -> fs
+  match ctx with | CgCtx fs _ _ _ _ _ _ _ -> fs
 
 fn ctx_ctor_sigs(ctx: CgCtx) -> Dict CtorSig =
-  match ctx with | CgCtx _ cs _ _ _ _ -> cs
+  match ctx with | CgCtx _ cs _ _ _ _ _ _ -> cs
 
 fn ctx_globals(ctx: CgCtx) -> Dict GlobalInfo =
-  match ctx with | CgCtx _ _ g _ _ _ -> g
+  match ctx with | CgCtx _ _ g _ _ _ _ _ -> g
 
 fn ctx_adt_names(ctx: CgCtx) -> Set =
-  match ctx with | CgCtx _ _ _ an _ _ -> an
+  match ctx with | CgCtx _ _ _ an _ _ _ _ -> an
 
 fn ctx_extern_sigs(ctx: CgCtx) -> Dict FnSig =
-  match ctx with | CgCtx _ _ _ _ es _ -> es
+  match ctx with | CgCtx _ _ _ _ es _ _ _ -> es
 
 fn ctx_scope(ctx: CgCtx) -> String =
-  match ctx with | CgCtx _ _ _ _ _ sc -> sc
+  match ctx with | CgCtx _ _ _ _ _ sc _ _ -> sc
+
+fn ctx_cpr_fns(ctx: CgCtx) -> Dict Int =
+  match ctx with | CgCtx _ _ _ _ _ _ cf _ -> cf
+
+fn ctx_cpr_extern_sigs(ctx: CgCtx) -> Dict FnSig =
+  match ctx with | CgCtx _ _ _ _ _ _ _ ces -> ces
 
 fn ctx_with_globals(ctx: CgCtx, g: Dict GlobalInfo) -> CgCtx =
-  match ctx with | CgCtx fs cs _ an es sc -> CgCtx(fs, cs, g, an, es, sc)
+  match ctx with | CgCtx fs cs _ an es sc cf ces -> CgCtx(fs, cs, g, an, es, sc, cf, ces)
 
 fn ctx_with_scope(ctx: CgCtx, name: String) -> CgCtx =
-  match ctx with | CgCtx fs cs g an es _ -> CgCtx(fs, cs, g, an, es, name)
+  match ctx with | CgCtx fs cs g an es _ cf ces -> CgCtx(fs, cs, g, an, es, name, cf, ces)
 
 # ===========================================================================
 # Section 16 — TCO helpers
@@ -2077,6 +2085,19 @@ fn emit_if(cond: typed_ast.TypedExpr, thn: typed_ast.TypedExpr, els: typed_ast.T
         val_for_ll(out_ll, phi)
 
 fn emit_match(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
+  match scrut with
+  | typed_ast.TCall (typed_ast.TVar name _ _) call_args _ _ ->
+      match dict_get(name, ctx_cpr_fns(ctx)) with
+      | Just width ->
+          if all_branches_simple(branches)
+          then emit_match_unboxed_adt(name, call_args, scrut, branches, ty, width, ctx, locals, em, tco_ctx)
+          else emit_match_heap(scrut, branches, ty, ctx, locals, em, tco_ctx)
+      | Nothing ->
+          emit_match_heap(scrut, branches, ty, ctx, locals, em, tco_ctx)
+  | _ ->
+      emit_match_heap(scrut, branches, ty, ctx, locals, em, tco_ctx)
+
+fn emit_match_heap(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   do
     sv <- emit_expr(ctx, locals, em, Nothing, scrut)
     done_lbl <- fresh_block(em, "match_done")
@@ -2151,6 +2172,145 @@ fn is_wildcard_or_var(pat: ast.Pattern) -> Bool =
   | ast.WildcardPattern _ -> true
   | ast.VarPattern _ _ -> true
   | _ -> false
+
+fn all_var_pats(args: List ast.Pattern) -> Bool =
+  match args with
+  | Nil -> true
+  | Cons (ast.VarPattern _ _) rest -> all_var_pats(rest)
+  | Cons (ast.WildcardPattern _) rest -> all_var_pats(rest)
+  | _ -> false
+
+# Top-level VarPattern excluded: it binds the whole scrutinee as i64, but in
+# the unboxed path the scrutinee is a { i64, ... } struct value — types don't align.
+fn is_simple_pat(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.WildcardPattern _ -> true
+  | ast.ConstructorPattern _ args _ -> all_var_pats(args)
+  | _ -> false
+
+fn all_branches_simple(branches: List typed_ast.TypedMatchBranch) -> Bool =
+  match branches with
+  | Nil -> true
+  | Cons (typed_ast.TypedMatchBranch pat _) rest ->
+      if is_simple_pat(pat) then all_branches_simple(rest) else false
+
+fn emit_unboxed_pattern_test(pat: ast.Pattern, tag_tmp: String, ctx: CgCtx, em: Emitter) -> Value !{IO} =
+  match pat with
+  | ast.ConstructorPattern name _ _ ->
+      match dict_get(name, ctx_ctor_sigs(ctx)) with
+      | Nothing -> val_make(ll_i1(), "0")
+      | Just ctor ->
+          do
+            eq_t <- fresh_tmp(em)
+            emit_template(em, `  ${eq_t} = icmp eq i64 ${tag_tmp}, ${int_to_string (ctor_tag(ctor))}`)
+            val_make(ll_i1(), eq_t)
+  | _ -> val_make(ll_i1(), "1")
+
+fn emit_unboxed_pattern_bind(pat: ast.Pattern, r: String, ll_struct: String, em: Emitter) -> (List (String, Value), Int) !{IO} =
+  match pat with
+  | ast.WildcardPattern _ -> (Nil, 0)
+  | ast.ConstructorPattern _ args _ ->
+      emit_unboxed_ctor_args_bind(args, r, ll_struct, em, 1, Nil, 0)
+  | _ -> (Nil, 0)
+
+fn emit_unboxed_ctor_args_bind(args: List ast.Pattern, r: String, ll_struct: String, em: Emitter, field_idx: Int, acc: List (String, Value), rooted: Int) -> (List (String, Value), Int) !{IO} =
+  match args with
+  | Nil -> (list_reverse(acc), rooted)
+  | Cons arg rest_args ->
+      match arg with
+      | ast.VarPattern vname _ ->
+          do
+            f <- fresh_tmp(em)
+            emit_template(em, `  ${f} = extractvalue ${ll_struct} ${r}, ${int_to_string (field_idx)}`)
+            let fv = val_make(ll_i64(), f)
+            rooted_field <- push_temp_root(fv, em)
+            emit_unboxed_ctor_args_bind(rest_args, r, ll_struct, em, field_idx + 1, Cons((vname, fv), acc), rooted + rooted_field)
+      | _ ->
+          emit_unboxed_ctor_args_bind(rest_args, r, ll_struct, em, field_idx + 1, acc, rooted)
+
+fn emit_unboxed_branches(branches: List typed_ast.TypedMatchBranch, r: String, tag_tmp: String, ll_struct: String, out_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
+  match branches with
+  | Nil ->
+      do
+        emit_match_abort(em)
+        list_reverse(acc)
+  | Cons (typed_ast.TypedMatchBranch pat body) rest ->
+      do
+        branch_lbl <- fresh_block(em, "match_br")
+        next_lbl <- fresh_block(em, "match_next")
+        let is_always = is_wildcard_or_var(pat)
+        if is_always then
+          emit_template(em, `  br label %${branch_lbl}`)
+        else
+          do
+            test_v <- emit_unboxed_pattern_test(pat, tag_tmp, ctx, em)
+            emit_template(em, `  br i1 ${val_ir (test_v)}, label %${branch_lbl}, label %${next_lbl}`)
+        emit_label(em, branch_lbl)
+        (new_binds, rooted) <- emit_unboxed_pattern_bind(pat, r, ll_struct, em)
+        let branch_locals = extend_locals(locals, new_binds)
+        let branch_tco = match tco_ctx with
+                         | Nothing -> Nothing
+                         | Just tc -> Just(tco_with_outer_roots(tc, tco_outer_roots(tc) + rooted))
+        body_val <- emit_expr(ctx, branch_locals, em, branch_tco, body)
+        _ <- emit_pending_tco(branch_tco, body_val, em)
+        branch_term <- is_terminated(em)
+        if branch_term then
+          do
+            if list_is_nil_branches(rest) then
+              do
+                emit_label(em, next_lbl)
+                emit_match_abort(em)
+                list_reverse(acc)
+            else
+              do
+                emit_label(em, next_lbl)
+                emit_unboxed_branches(rest, r, tag_tmp, ll_struct, out_ll, ctx, locals, em, tco_ctx, done_lbl, acc)
+        else
+          do
+            coerced_body <- coerce_value(body_val, out_ll, em)
+            end_blk <- read_cur_blk_or(em, branch_lbl)
+            pop_temp_roots(rooted, em)
+            emit_template(em, `  br label %${done_lbl}`)
+            emit_label(em, next_lbl)
+            emit_unboxed_branches(rest, r, tag_tmp, ll_struct, out_ll, ctx, locals, em, tco_ctx, done_lbl, Cons((coerced_body, end_blk), acc))
+
+fn emit_match_unboxed_adt(name: String, call_args: List typed_ast.TypedExpr, scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ty: types.Type, width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
+  match dict_get(name ++ "_unboxed", ctx_cpr_extern_sigs(ctx)) with
+  | Just sig ->
+      emit_match_unboxed_call(name ++ "_unboxed", sig, call_args, branches, ty, width, ctx, locals, em, tco_ctx)
+  | Nothing ->
+      match dict_get(name, ctx_fn_sigs(ctx)) with
+      | Just sig ->
+          emit_match_unboxed_call(emitted_fn_name(name) ++ "_worker", sig, call_args, branches, ty, width, ctx, locals, em, tco_ctx)
+      | Nothing ->
+          emit_match_heap(scrut, branches, ty, ctx, locals, em, tco_ctx)
+
+fn emit_match_unboxed_call(call_fn: String, sig: FnSig, call_args: List typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ty: types.Type, width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
+  do
+    (arg_vals, rooted_args) <- emit_args_with_roots(call_args, ctx, locals, em)
+    coerced <- coerce_args(fn_params(sig), arg_vals, em)
+    let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
+    r <- fresh_tmp(em)
+    let ll_struct = ll_for_unboxed_width(width)
+    let call_str = if args_ir == ""
+                   then "  " ++ r ++ " = call " ++ ll_struct ++ " @" ++ call_fn ++ "()"
+                   else "  " ++ r ++ " = call " ++ ll_struct ++ " @" ++ call_fn ++ "(" ++ args_ir ++ ")"
+    emit_line(em, call_str)
+    pop_temp_roots(rooted_args, em)
+    tag_tmp <- fresh_tmp(em)
+    emit_template(em, `  ${tag_tmp} = extractvalue ${ll_struct} ${r}, 0`)
+    done_lbl <- fresh_block(em, "match_done")
+    let out_ll = match tco_ctx with | Nothing -> type_to_ll(ty) | Just tc -> tco_ret_ll(tc)
+    branch_vals <- emit_unboxed_branches(branches, r, tag_tmp, ll_struct, out_ll, ctx, locals, em, tco_ctx, done_lbl, Nil)
+    if list_is_nil_branch_vals(branch_vals) then
+      val_for_ll(out_ll, "undef")
+    else
+      do
+        emit_label(em, done_lbl)
+        phi <- fresh_tmp(em)
+        let parts = join_comma(list_map(\p -> match p with | (v, blk) -> "[ " ++ val_ir(v) ++ ", %" ++ blk ++ " ]", branch_vals))
+        emit_template(em, `  ${phi} = phi ${out_ll} ${parts}`)
+        val_for_ll(out_ll, phi)
 
 fn list_is_nil_branch_vals(xs: List (Value, String)) -> Bool =
   match xs with | Nil -> true | _ -> false
@@ -2742,48 +2902,55 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
   if is_entry == false && has_self_tail_calls(body, name) then
     emit_fn_tco(name, params, body, sig, sctx, em)
   else
-    do
-      let params_str = if is_entry
-                       then "i32 %argc, ptr %argv"
-                       else build_fn_params(fn_params(sig), params, 0)
-      let emit_name = emitted_fn_name(name)
-      let define_ret = if is_entry then "i32" else fn_ret(sig)
-      dbg_suffix <- emit_fn_dbg(name, body, em)
-      emit_line(em, "define " ++ define_ret ++ " @" ++ emit_name ++ "(" ++ params_str ++ ")" ++ dbg_suffix ++ " {")
-      emit_label(em, "entry")
-      rooted <- if is_entry then
+    match (if is_entry then Nothing else dict_get(name, ctx_cpr_fns(ctx))) with
+    | Just width ->
         do
-          init_argv <- fresh_tmp(em)
-          emit_template(em, `  ${init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)`)
-          emit_ctor_registrations(ctor_reg_meta, em)
-          match runtime_lets with
-          | Nil -> ()
-          | _ -> emit_line(em, "  call void @__sprout_init_globals()")
-          0
-      else
+          emit_fn_worker(name, params, body, sig, width, sctx, em)
+          emit_line(em, "")
+          emit_fn_wrapper(name, params, sig, width, em)
+    | Nothing ->
         do
-          param_locals_pair <- build_param_locals(params, fn_params(sig), 0)
-          rooted_params <- push_roots_for_params(param_locals_pair, em)
-          rooted_params
-      param_locals <- if is_entry then dict_empty() else
-        do
-          pair <- build_param_locals(params, fn_params(sig), 0)
-          pair
-      result <- emit_expr(sctx, param_locals, em, Nothing, body)
-      coerced_result <- if is_entry then result else coerce_value(result, fn_ret(sig), em)
-      pop_temp_roots(rooted, em)
-      if is_entry then
-        match typed_ast.typed_expr_type(body) with
-        | types.TConst "Int" ->
+          let params_str = if is_entry
+                           then "i32 %argc, ptr %argv"
+                           else build_fn_params(fn_params(sig), params, 0)
+          let emit_name = emitted_fn_name(name)
+          let define_ret = if is_entry then "i32" else fn_ret(sig)
+          dbg_suffix <- emit_fn_dbg(name, body, em)
+          emit_line(em, "define " ++ define_ret ++ " @" ++ emit_name ++ "(" ++ params_str ++ ")" ++ dbg_suffix ++ " {")
+          emit_label(em, "entry")
+          rooted <- if is_entry then
             do
-              exit_reg <- fresh_tmp(em)
-              emit_template(em, `  ${exit_reg} = trunc i64 ${val_ir (result)} to i32`)
-              emit_template(em, `  ret i32 ${exit_reg}`)
-        | _ -> emit_line(em, "  ret i32 0")
-      else
-        emit_template(em, `  ret ${fn_ret (sig)} ${val_ir (coerced_result)}`)
-      emit_line(em, "}")
-      reset_debug_fn_state(em)
+              init_argv <- fresh_tmp(em)
+              emit_template(em, `  ${init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)`)
+              emit_ctor_registrations(ctor_reg_meta, em)
+              match runtime_lets with
+              | Nil -> ()
+              | _ -> emit_line(em, "  call void @__sprout_init_globals()")
+              0
+          else
+            do
+              param_locals_pair <- build_param_locals(params, fn_params(sig), 0)
+              rooted_params <- push_roots_for_params(param_locals_pair, em)
+              rooted_params
+          param_locals <- if is_entry then dict_empty() else
+            do
+              pair <- build_param_locals(params, fn_params(sig), 0)
+              pair
+          result <- emit_expr(sctx, param_locals, em, Nothing, body)
+          coerced_result <- if is_entry then result else coerce_value(result, fn_ret(sig), em)
+          pop_temp_roots(rooted, em)
+          if is_entry then
+            match typed_ast.typed_expr_type(body) with
+            | types.TConst "Int" ->
+                do
+                  exit_reg <- fresh_tmp(em)
+                  emit_template(em, `  ${exit_reg} = trunc i64 ${val_ir (result)} to i32`)
+                  emit_template(em, `  ret i32 ${exit_reg}`)
+            | _ -> emit_line(em, "  ret i32 0")
+          else
+            emit_template(em, `  ret ${fn_ret (sig)} ${val_ir (coerced_result)}`)
+          emit_line(em, "}")
+          reset_debug_fn_state(em)
   where sctx = ctx_with_scope(ctx, name)
 
 fn build_fn_params(lls: List String, params: List ast.Param, idx: Int) -> String =
@@ -3030,6 +3197,8 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("sprout_tag", FnSig("sprout_tag", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_field", FnSig("sprout_field", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_abort_match", FnSig("sprout_abort_match", Nil, ll_i64(), Nothing))
+  , ("sprout_rebox2", FnSig("sprout_rebox2", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
+  , ("sprout_rebox3", FnSig("sprout_rebox3", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
   # Closure / tuple allocation
   , ("sprout_alloc_closure_env", FnSig("sprout_alloc_closure_env", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_alloc_tuple_blob", FnSig("sprout_alloc_tuple_blob", Cons(ll_i64(), Nil), ll_i64(), Nothing))
@@ -3106,6 +3275,333 @@ fn build_extern_sigs_acc(decls: List typed_ast.TypedDecl, env: Dict types.Scheme
                 dict_set(name, FnSig(name, list_map(ast_param_to_ll, params), ret_ll_, Nothing), acc))
       | _ ->
           build_extern_sigs_acc(rest, env, acc)
+
+# ===========================================================================
+# Section 20.5 — CPR (Constructed Product Result) analysis helpers
+# ===========================================================================
+
+# Returns the outermost type constructor name of a TypeExpr, e.g.
+# TypeApply (TypeName "Maybe") _ -> Just "Maybe"
+fn type_expr_ctor_name(t: ast.TypeExpr) -> Maybe String =
+  match t with
+  | ast.TypeName name -> Just(name)
+  | ast.TypeApply f _ -> type_expr_apply_ctor(f)
+  | ast.TypeEffect inner _ -> type_expr_ctor_name(inner)
+  | _ -> Nothing
+
+fn type_expr_apply_ctor(f: ast.TypeExpr) -> Maybe String =
+  match f with
+  | ast.TypeName name -> Just(name)
+  | _ -> type_expr_ctor_name(f)
+
+# Build a map from ADT type name to its maximum constructor arity.
+fn build_adt_arities(decls: List typed_ast.TypedDecl) -> Dict Int =
+  build_adt_arities_acc(decls, dict_empty())
+
+fn build_adt_arities_acc(decls: List typed_ast.TypedDecl, acc: Dict Int) -> Dict Int =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | typed_ast.TPassThrough (ast.TypeDecl type_name _ ctors _) ->
+          build_adt_arities_acc(rest, dict_set(type_name, compute_max_arity(ctors, 0), acc))
+      | _ -> build_adt_arities_acc(rest, acc)
+
+fn ctor_field_count(tc: ast.TypeConstructor) -> Int =
+  match tc with
+  | ast.TypeConstructor _ ctor_args -> list_length(type_expr_lls(ctor_args))
+
+fn compute_max_arity(ctors: List ast.TypeConstructor, max_ar: Int) -> Int =
+  match ctors with
+  | Nil -> max_ar
+  | Cons tc rest ->
+      match ctor_field_count(tc) with
+      | ar -> compute_max_arity(rest, if ar > max_ar then ar else max_ar)
+
+# Given a max constructor arity, return the total i64 count for the unboxed struct
+# (tag + max_arity payload fields), or Nothing if too large for CPR.
+# max_arity=1 → width=2 (SproutUnboxed2), max_arity=2 → width=3 (SproutUnboxed3).
+fn unboxed_width_for_arity(max_arity: Int) -> Maybe Int =
+  if max_arity == 1 then Just(2)
+  else if max_arity == 2 then Just(3)
+  else Nothing
+
+# Classify an extern return type: returns Just width if it's a small CPR-eligible ADT.
+fn cpr_width_for_type_expr(ret_ty: Maybe ast.TypeExpr, arities: Dict Int) -> Maybe Int =
+  match ret_ty with
+  | Nothing -> Nothing
+  | Just te ->
+      match type_expr_ctor_name(te) with
+      | Nothing -> Nothing
+      | Just ctor_name ->
+          match dict_get(ctor_name, arities) with
+          | Nothing -> Nothing
+          | Just max_ar -> unboxed_width_for_arity(max_ar)
+
+# Build the cpr_fns dict: function name → unboxed struct width (2 or 3).
+# Covers externs (always eligible) and user-defined functions whose return type
+# is a small ADT and that do not self-tail-call (TCO functions are excluded).
+fn build_cpr_fns(decls: List typed_ast.TypedDecl, arities: Dict Int) -> Dict Int =
+  build_cpr_fns_acc(decls, arities, dict_empty())
+
+fn build_cpr_fns_acc(decls: List typed_ast.TypedDecl, arities: Dict Int, acc: Dict Int) -> Dict Int =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | typed_ast.TExternFnDecl name _ ret_ty _ ->
+          match cpr_width_for_type_expr(ret_ty, arities) with
+          | Nothing -> build_cpr_fns_acc(rest, arities, acc)
+          | Just width -> build_cpr_fns_acc(rest, arities, dict_set(name, width, acc))
+      | typed_ast.TFnDecl name _ ret_ty _ _ body ->
+          if has_self_tail_calls(body, name) then
+            build_cpr_fns_acc(rest, arities, acc)
+          else
+            match cpr_width_for_type_expr(ret_ty, arities) with
+            | Nothing -> build_cpr_fns_acc(rest, arities, acc)
+            | Just width -> build_cpr_fns_acc(rest, arities, dict_set(name, width, acc))
+      | _ -> build_cpr_fns_acc(rest, arities, acc)
+
+# Build FnSig entries for the _unboxed extern variants so that emit_extern_decls
+# emits the required `declare { i64, i64 } @name_unboxed(...)` lines.
+# Only externs with a matching C implementation are included; this prevents
+# declare-without-define linker errors for externs that haven't been ported yet.
+fn build_cpr_extern_sigs(decls: List typed_ast.TypedDecl, arities: Dict Int, externs: Dict FnSig) -> Dict FnSig =
+  build_cpr_extern_sigs_acc(decls, arities, externs, dict_empty())
+
+fn is_cpr_extern_allowlisted(name: String) -> Bool =
+  name == "env_get"
+  || name == "argv_get"
+  || name == "term_read_line"
+  || name == "str_char_at"
+  || name == "str_char_at_byte"
+  || name == "regex_find_range"
+  || name == "vector_get"
+  || name == "map_get"
+  || name == "map_nth_key"
+  || name == "map_nth_value"
+  || name == "bytes_get"
+  || name == "native_set_to_list"
+
+fn build_cpr_extern_sigs_acc(decls: List typed_ast.TypedDecl, arities: Dict Int, externs: Dict FnSig, acc: Dict FnSig) -> Dict FnSig =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | typed_ast.TExternFnDecl name _ ret_ty _ ->
+          if is_cpr_extern_allowlisted(name)
+          then
+            match cpr_width_for_type_expr(ret_ty, arities) with
+            | Nothing -> build_cpr_extern_sigs_acc(rest, arities, externs, acc)
+            | Just width ->
+                match dict_get(name, externs) with
+                | Nothing -> build_cpr_extern_sigs_acc(rest, arities, externs, acc)
+                | Just orig_sig ->
+                    build_cpr_extern_sigs_acc(rest, arities, externs,
+                      dict_set(name ++ "_unboxed",
+                               FnSig(name ++ "_unboxed", fn_params(orig_sig), ll_for_unboxed_width(width), Nothing),
+                               acc))
+          else build_cpr_extern_sigs_acc(rest, arities, externs, acc)
+      | _ -> build_cpr_extern_sigs_acc(rest, arities, externs, acc)
+
+# LLVM struct type string for an unboxed ADT of the given total width (tag + fields).
+fn ll_for_unboxed_width(width: Int) -> String =
+  if width == 2 then "{ i64, i64 }"
+  else if width == 3 then "{ i64, i64, i64 }"
+  else "{ i64, i64, i64, i64 }"
+
+# ===========================================================================
+# Section 20.5 — CPR worker/wrapper emission
+# ===========================================================================
+
+# Emit `define { i64, ... } @name_worker(params) { body }`.
+# The body is compiled in "worker mode" via emit_worker_expr which routes
+# CPR-eligible tail calls to their _unboxed/_worker variants, returning
+# the result as a struct register rather than a heap pointer.
+fn emit_fn_worker(name: String, params: List ast.Param, body: typed_ast.TypedExpr, sig: FnSig, width: Int, ctx: CgCtx, em: Emitter) -> Unit !{IO} =
+  do
+    let params_str = build_fn_params(fn_params(sig), params, 0)
+    let ll_struct = ll_for_unboxed_width(width)
+    let worker_name = emitted_fn_name(name) ++ "_worker"
+    emit_line(em, "define " ++ ll_struct ++ " @" ++ worker_name ++ "(" ++ params_str ++ ") {")
+    emit_label(em, "entry")
+    param_locals <- build_param_locals(params, fn_params(sig), 0)
+    rooted <- push_roots_for_params(param_locals, em)
+    result_reg <- emit_worker_expr(width, ctx, param_locals, em, body)
+    pop_temp_roots(rooted, em)
+    emit_line(em, "  ret " ++ ll_struct ++ " " ++ result_reg)
+    emit_line(em, "}")
+
+# Emit `define i64 @name(params) { call @name_worker; rebox; ret i64 }`.
+# This is the public symbol: all existing call sites call @name and get a
+# boxed i64.  The optimization fires only when emit_match routes to @name_worker
+# directly (in match-on-call position).
+fn emit_fn_wrapper(name: String, params: List ast.Param, sig: FnSig, width: Int, em: Emitter) -> Unit !{IO} =
+  do
+    let params_str = build_fn_params(fn_params(sig), params, 0)
+    let emit_name = emitted_fn_name(name)
+    let worker_name = emit_name ++ "_worker"
+    let ll_struct = ll_for_unboxed_width(width)
+    emit_line(em, "define i64 @" ++ emit_name ++ "(" ++ params_str ++ ") {")
+    emit_label(em, "entry")
+    r <- fresh_tmp(em)
+    let call_str = if params_str == ""
+                   then "  " ++ r ++ " = call " ++ ll_struct ++ " @" ++ worker_name ++ "()"
+                   else "  " ++ r ++ " = call " ++ ll_struct ++ " @" ++ worker_name ++ "(" ++ params_str ++ ")"
+    emit_line(em, call_str)
+    tag_t <- fresh_tmp(em)
+    emit_template(em, `  ${tag_t} = extractvalue ${ll_struct} ${r}, 0`)
+    f0_t <- fresh_tmp(em)
+    emit_template(em, `  ${f0_t} = extractvalue ${ll_struct} ${r}, 1`)
+    rooted_f0 <- push_temp_root(val_make(ll_i64(), f0_t), em)
+    if width == 2 then
+      do
+        boxed <- fresh_tmp(em)
+        emit_template(em, `  ${boxed} = call i64 @sprout_rebox2(i64 ${tag_t}, i64 ${f0_t})`)
+        pop_temp_roots(rooted_f0, em)
+        emit_template(em, `  ret i64 ${boxed}`)
+    else
+      do
+        f1_t <- fresh_tmp(em)
+        emit_template(em, `  ${f1_t} = extractvalue ${ll_struct} ${r}, 2`)
+        rooted_f1 <- push_temp_root(val_make(ll_i64(), f1_t), em)
+        boxed <- fresh_tmp(em)
+        emit_template(em, `  ${boxed} = call i64 @sprout_rebox3(i64 ${tag_t}, i64 ${f0_t}, i64 ${f1_t})`)
+        pop_temp_roots(rooted_f0 + rooted_f1, em)
+        emit_template(em, `  ret i64 ${boxed}`)
+    emit_line(em, "}")
+
+# Worker-mode expression emitter.  Only called at tail position within a worker
+# function body (direct return site, match arm body, if branch).
+# Sub-expressions (scrutinees, conditions, call arguments) always use emit_expr.
+fn emit_worker_expr(width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter, e: typed_ast.TypedExpr) -> String !{IO} =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar name _ _) call_args _ _ ->
+      match dict_get(name, ctx_cpr_fns(ctx)) with
+      | Just _ -> emit_worker_cpr_call(name, call_args, width, ctx, locals, em)
+      | Nothing -> emit_worker_box_unbox(width, ctx, locals, em, e)
+  | typed_ast.TMatch scrut branches _ _ ->
+      emit_worker_match(width, scrut, branches, ctx, locals, em)
+  | typed_ast.TIf cond thn els _ _ ->
+      emit_worker_if(width, cond, thn, els, ctx, locals, em)
+  | _ ->
+      emit_worker_box_unbox(width, ctx, locals, em, e)
+
+# Dispatch to _unboxed (extern) or _worker (user-defined) variant.
+fn emit_worker_cpr_call(name: String, call_args: List typed_ast.TypedExpr, width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter) -> String !{IO} =
+  match dict_get(name ++ "_unboxed", ctx_cpr_extern_sigs(ctx)) with
+  | Just sig -> emit_worker_cpr_do(name ++ "_unboxed", sig, call_args, width, em, ctx, locals)
+  | Nothing ->
+      match dict_get(name, ctx_fn_sigs(ctx)) with
+      | Just sig -> emit_worker_cpr_do(emitted_fn_name(name) ++ "_worker", sig, call_args, width, em, ctx, locals)
+      | Nothing -> "undef"
+
+fn emit_worker_cpr_do(call_fn: String, sig: FnSig, call_args: List typed_ast.TypedExpr, width: Int, em: Emitter, ctx: CgCtx, locals: Dict Value) -> String !{IO} =
+  do
+    (arg_vals, rooted_args) <- emit_args_with_roots(call_args, ctx, locals, em)
+    coerced <- coerce_args(fn_params(sig), arg_vals, em)
+    let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
+    r <- fresh_tmp(em)
+    let ll_struct = ll_for_unboxed_width(width)
+    let call_str = if args_ir == ""
+                   then "  " ++ r ++ " = call " ++ ll_struct ++ " @" ++ call_fn ++ "()"
+                   else "  " ++ r ++ " = call " ++ ll_struct ++ " @" ++ call_fn ++ "(" ++ args_ir ++ ")"
+    emit_line(em, call_str)
+    pop_temp_roots(rooted_args, em)
+    r
+
+# Fallback: emit the expression via normal heap path, then unbox tag + fields
+# into a struct using insertvalue.  Correct but doesn't eliminate allocation.
+fn emit_worker_box_unbox(width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter, e: typed_ast.TypedExpr) -> String !{IO} =
+  do
+    v <- emit_expr(ctx, locals, em, Nothing, e)
+    let ll_struct = ll_for_unboxed_width(width)
+    tag_t <- fresh_tmp(em)
+    emit_template(em, `  ${tag_t} = call i64 @sprout_tag(i64 ${val_ir (v)})`)
+    f0_t <- fresh_tmp(em)
+    emit_template(em, `  ${f0_t} = call i64 @sprout_field(i64 ${val_ir (v)}, i64 0)`)
+    r0 <- fresh_tmp(em)
+    emit_line(em, "  " ++ r0 ++ " = insertvalue " ++ ll_struct ++ " undef, i64 " ++ tag_t ++ ", 0")
+    r1 <- fresh_tmp(em)
+    emit_line(em, "  " ++ r1 ++ " = insertvalue " ++ ll_struct ++ " " ++ r0 ++ ", i64 " ++ f0_t ++ ", 1")
+    if width == 2 then
+      r1
+    else
+      do
+        f1_t <- fresh_tmp(em)
+        emit_template(em, `  ${f1_t} = call i64 @sprout_field(i64 ${val_ir (v)}, i64 1)`)
+        r2 <- fresh_tmp(em)
+        emit_line(em, "  " ++ r2 ++ " = insertvalue " ++ ll_struct ++ " " ++ r1 ++ ", i64 " ++ f1_t ++ ", 2")
+        r2
+
+# Worker-mode match: scrutinee emitted via normal emit_expr → i64,
+# arm bodies via emit_worker_expr → struct reg, phi with struct type.
+fn emit_worker_match(width: Int, scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, ctx: CgCtx, locals: Dict Value, em: Emitter) -> String !{IO} =
+  do
+    sv <- emit_expr(ctx, locals, em, Nothing, scrut)
+    done_lbl <- fresh_block(em, "match_done")
+    let ll_struct = ll_for_unboxed_width(width)
+    let scrut_type = typed_ast.typed_expr_type(scrut)
+    branch_pairs <- emit_worker_branches(branches, sv, scrut_type, ll_struct, width, ctx, locals, em, done_lbl, Nil)
+    match branch_pairs with
+    | Nil -> "undef"
+    | _ ->
+        do
+          emit_label(em, done_lbl)
+          phi <- fresh_tmp(em)
+          let parts = join_comma(list_map(\p -> match p with | (sr, blk) -> "[ " ++ sr ++ ", %" ++ blk ++ " ]", branch_pairs))
+          emit_template(em, `  ${phi} = phi ${ll_struct} ${parts}`)
+          phi
+
+fn emit_worker_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_type: types.Type, ll_struct: String, width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter, done_lbl: String, acc: List (String, String)) -> List (String, String) !{IO} =
+  match branches with
+  | Nil ->
+      do
+        emit_match_abort(em)
+        list_reverse(acc)
+  | Cons (typed_ast.TypedMatchBranch pat body) rest ->
+      do
+        branch_lbl <- fresh_block(em, "match_br")
+        next_lbl <- fresh_block(em, "match_next")
+        let is_always = is_wildcard_or_var(pat)
+        if is_always then
+          emit_template(em, `  br label %${branch_lbl}`)
+        else
+          do
+            test_v <- emit_pattern_test(pat, scrut, ctx, em)
+            emit_template(em, `  br i1 ${val_ir (test_v)}, label %${branch_lbl}, label %${next_lbl}`)
+        emit_label(em, branch_lbl)
+        (new_binds, rooted) <- emit_pattern_bind(pat, scrut, Just(scrut_type), ctx, em)
+        let branch_locals = extend_locals(locals, new_binds)
+        struct_reg <- emit_worker_expr(width, ctx, branch_locals, em, body)
+        end_blk <- read_cur_blk_or(em, branch_lbl)
+        pop_temp_roots(rooted, em)
+        emit_template(em, `  br label %${done_lbl}`)
+        emit_label(em, next_lbl)
+        emit_worker_branches(rest, scrut, scrut_type, ll_struct, width, ctx, locals, em, done_lbl, Cons((struct_reg, end_blk), acc))
+
+# Worker-mode if: condition emitted normally, branches via emit_worker_expr.
+fn emit_worker_if(width: Int, cond: typed_ast.TypedExpr, thn: typed_ast.TypedExpr, els: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> String !{IO} =
+  do
+    let ll_struct = ll_for_unboxed_width(width)
+    raw_cv <- emit_expr(ctx, locals, em, Nothing, cond)
+    cv <- coerce_value(raw_cv, ll_i1(), em)
+    then_lbl <- fresh_block(em, "if_then")
+    else_lbl <- fresh_block(em, "if_else")
+    done_lbl <- fresh_block(em, "if_done")
+    emit_template(em, `  br i1 ${val_ir (cv)}, label %${then_lbl}, label %${else_lbl}`)
+    emit_label(em, then_lbl)
+    then_reg <- emit_worker_expr(width, ctx, locals, em, thn)
+    then_blk <- read_cur_blk_or(em, then_lbl)
+    emit_template(em, `  br label %${done_lbl}`)
+    emit_label(em, else_lbl)
+    else_reg <- emit_worker_expr(width, ctx, locals, em, els)
+    else_blk <- read_cur_blk_or(em, else_lbl)
+    emit_template(em, `  br label %${done_lbl}`)
+    emit_label(em, done_lbl)
+    phi <- fresh_tmp(em)
+    emit_line(em, "  " ++ phi ++ " = phi " ++ ll_struct ++ " [ " ++ then_reg ++ ", %" ++ then_blk ++ " ], [ " ++ else_reg ++ ", %" ++ else_blk ++ " ]")
+    phi
 
 # ===========================================================================
 # Section 21 — Program analysis
@@ -3353,11 +3849,15 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
         let gi_rt_pair = classify_let_decls(decls, env)
         let gi = match gi_rt_pair with | (g, _) -> g
         let runtime_lets = match gi_rt_pair with | (_, r) -> r
-        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "")
+        let adt_arities = build_adt_arities(decls)
+        let cpr_fns_ = build_cpr_fns(decls, adt_arities)
+        let cpr_extern_decls = build_cpr_extern_sigs(decls, adt_arities, externs)
+        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "", cpr_fns_, cpr_extern_decls)
         emit_line(em, "; Generated by sprout codegen.sprout (M6) -- single-function mode")
         emit_line(em, "target triple = \"unknown-unknown-unknown\"")
         emit_line(em, "")
         emit_extern_decls(externs, em)
+        emit_extern_decls(cpr_extern_decls, em)
         emit_line(em, "")
         ctor_reg_meta <- build_ctor_reg_meta(ctor_sigs_, em)
         emit_matching_fns(decls, fn_name, fn_sigs_, ctor_reg_meta, runtime_lets, ctx, em)
@@ -3442,13 +3942,17 @@ export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Sche
         let gi_rt_pair = classify_let_decls(decls, env)
         let gi = match gi_rt_pair with | (g, _) -> g
         let runtime_lets = match gi_rt_pair with | (_, r) -> r
-        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "")
+        let adt_arities = build_adt_arities(decls)
+        let cpr_fns_ = build_cpr_fns(decls, adt_arities)
+        let cpr_extern_decls = build_cpr_extern_sigs(decls, adt_arities, externs)
+        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "", cpr_fns_, cpr_extern_decls)
         # Header
         emit_line(em, "; Generated by sprout codegen.sprout (M6)")
         emit_line(em, "target triple = \"unknown-unknown-unknown\"")
         emit_line(em, "")
         # Extern declarations
         emit_extern_decls(externs, em)
+        emit_extern_decls(cpr_extern_decls, em)
         emit_line(em, "")
         # Global variable declarations
         emit_global_decls(gi, em)

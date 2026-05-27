@@ -87,4 +87,15 @@ fn main() -> Unit !{IO} =
     err2 <- codegen_ok("fn val() -> Bool = 42")
     assert_false(state, "type error fails codegen", err2)
 
+    # CPR (Constructed Product Result) unboxing — Chunk 1: declare lines for _unboxed variants
+    # A Maybe-returning extern should produce a `declare { i64, i64 } @name_unboxed(...)` line
+    # in the emitted IR header so the unboxed fast path can be called without a forward-ref error.
+    let cpr_src = "type Maybe a = Nothing | Just a\nextern fn vector_get(v: Vec Int, idx: Int) -> Maybe Int\nfn get_or_default(v: Vec Int, i: Int) -> Int = match vector_get(v, i) with | Just x -> x | Nothing -> -1"
+    cpr_ir <- get_ir(cpr_src)
+    assert_true(state, "CPR: Maybe-returning extern emits declare for _unboxed variant", ir_contains(cpr_ir, "declare { i64, i64 } @vector_get_unboxed"))
+
+    # CPR — Chunk 2: extractvalue replaces sprout_field in match-on-call pattern
+    assert_true(state, "CPR: match-on-call uses extractvalue for field access", ir_contains(cpr_ir, "extractvalue { i64, i64 }"))
+    assert_true(state, "CPR: match-on-call uses extractvalue for tag access", ir_contains(cpr_ir, "extractvalue { i64, i64 }"))
+
     summary(state)

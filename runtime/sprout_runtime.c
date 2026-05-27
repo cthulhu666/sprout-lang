@@ -222,6 +222,8 @@ long long sprout_make6(long long tag, long long a0, long long a1, long long a2, 
 long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6);
 long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7);
 long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8);
+long long sprout_rebox2(long long tag, long long f0);
+long long sprout_rebox3(long long tag, long long f0, long long f1);
 long long sprout_tag(long long h);
 long long sprout_field(long long h, long long idx);
 static CtorMeta* find_ctor(long long tag);
@@ -659,6 +661,12 @@ long long sprout_gc_pop_roots(long long count) {
  * The shadow root stack (sprout_gc_push_i64_root / sprout_gc_pop_roots)
  * remains in use for generated Sprout IR code; handles are for C builtins.
  */
+/* CPR unboxed return types: returned in registers by _unboxed extern variants.
+ * The caller (codegen) extracts tag + fields via LLVM extractvalue and never
+ * heap-allocates the ADT wrapper when the result is immediately pattern-matched. */
+typedef struct { int64_t tag; int64_t f0; }             SproutUnboxed2;
+typedef struct { int64_t tag; int64_t f0; int64_t f1; } SproutUnboxed3;
+
 #define SPROUT_HANDLE_TABLE_SIZE 1024
 typedef int32_t SproutHandle;
 #define SPROUT_INVALID_HANDLE ((SproutHandle)-1)
@@ -3151,6 +3159,17 @@ long long sprout_make1(long long tag, long long a0) {
 long long sprout_make2(long long tag, long long a0, long long a1) {
   return sprout_make_registered_obj(tag, a0, a1, 0, "sprout_make2: out of memory");
 }
+long long sprout_rebox2(long long tag, long long f0) {
+  CtorMeta* m = find_ctor(tag);
+  if (m != NULL && m->arity == 0) return sprout_make0(tag);
+  return sprout_make1(tag, f0);
+}
+long long sprout_rebox3(long long tag, long long f0, long long f1) {
+  CtorMeta* m = find_ctor(tag);
+  if (m != NULL && m->arity == 0) return sprout_make0(tag);
+  if (m != NULL && m->arity == 1) return sprout_make1(tag, f0);
+  return sprout_make2(tag, f0, f1);
+}
 long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
   return sprout_make_registered_obj(tag, a0, a1, a2, "sprout_make3: out of memory");
 }
@@ -3550,6 +3569,150 @@ static long long cached_tag_nothing(void) {
   if (g_tag_nothing < 0) g_tag_nothing = find_ctor_tag_by_name("Nothing");
   return g_tag_nothing;
 }
+
+static long long bst_get(long long h, const char* key);
+static BSTNode*  bst_nth_node(long long h, long long n);
+
+/* ── CPR unboxed extern variants ─────────────────────────────────────────────
+ * Each _unboxed variant mirrors its boxed counterpart but returns SproutUnboxed2
+ * instead of a heap-allocated Just/Nothing.  The codegen emits calls to these
+ * when a match immediately scrutinises the return value (direct-match CPR path).
+ * GC safety: none of these call sprout_makeN, so no GC can trigger after the
+ * last allocation returns.  The caller pushes extracted field0 as a temp root
+ * in the Just arm before any further GC-triggering call (see emit_match_unboxed_adt).
+ * NOTE: if a future moving GC is added, the returned i64 pointers must be
+ * re-rooted via handles before any allocation; the non-moving invariant makes
+ * this safe today. */
+
+SproutUnboxed2 env_get_unboxed(const char* name) {
+  if (name == NULL) tcp_fail("env_get_unboxed: null name");
+  const char* value = getenv(name);
+  if (value == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)value };
+}
+
+SproutUnboxed2 argv_get_unboxed(long long index) {
+  if (index < 0 || g_sprout_argv == NULL || index >= (long long)(g_sprout_argc - 1))
+    return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)g_sprout_argv[index + 1] };
+}
+
+SproutUnboxed2 term_read_line_unboxed(void) {
+  char* line = NULL;
+  size_t cap = 0;
+  ssize_t len = getline(&line, &cap, stdin);
+  if (len < 0) {
+    free(line);
+    if (feof(stdin)) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+    tcp_fail("term_read_line_unboxed: read error");
+  }
+  while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+    len -= 1;
+    line[len] = '\0';
+  }
+  register_cstr(line);
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)line };
+}
+
+SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
+  const char* s = (const char*)s_val;
+  if (s == NULL) tcp_fail("str_char_at_unboxed: null input");
+  if (index < 0) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  size_t byte_pos = 0;
+  long long cp_idx = 0;
+  while (s[byte_pos] != '\0') {
+    if (cp_idx == index) {
+      size_t width = sprout_utf8_char_width((unsigned char)s[byte_pos]);
+      if (width == 1) {
+        if (!g_ascii_char_strs_init) init_ascii_char_strs();
+        return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)g_ascii_char_strs[(unsigned char)s[byte_pos]] };
+      }
+      char* tmp = (char*)malloc(width + 1);
+      if (!tmp) tcp_fail("str_char_at_unboxed: out of memory");
+      memcpy(tmp, s + byte_pos, width);
+      tmp[width] = '\0';
+      register_cstr(tmp);
+      return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)tmp };
+    }
+    byte_pos += sprout_utf8_char_width((unsigned char)s[byte_pos]);
+    cp_idx++;
+  }
+  return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+}
+
+SproutUnboxed2 str_char_at_byte_unboxed(long long s_val, long long byte_pos) {
+  const char* s = (const char*)s_val;
+  if (s == NULL) tcp_fail("str_char_at_byte_unboxed: null input");
+  if (byte_pos < 0) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  size_t pos = (size_t)byte_pos;
+  if (s[pos] == '\0') return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
+  if (width == 1) {
+    if (!g_ascii_char_strs_init) init_ascii_char_strs();
+    return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)g_ascii_char_strs[(unsigned char)s[pos]] };
+  }
+  char* tmp = (char*)malloc(width + 1);
+  if (!tmp) tcp_fail("str_char_at_byte_unboxed: out of memory");
+  memcpy(tmp, s + pos, width);
+  tmp[width] = '\0';
+  register_cstr(tmp);
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)tmp };
+}
+
+SproutUnboxed2 regex_find_range_unboxed(const char* pattern, const char* text) {
+  if (pattern == NULL || text == NULL) tcp_fail("regex_find_range_unboxed: null input");
+  regex_t compiled;
+  char* error = NULL;
+  if (!regex_compile_ere(pattern, &compiled, &error)) {
+    regex_builtin_fail("regex_find_range_unboxed", error);
+  }
+  regmatch_t match;
+  int status = regexec(&compiled, text, 1, &match, 0);
+  regfree(&compiled);
+  if (status == REG_NOMATCH) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  if (status != 0 || match.rm_so < 0 || match.rm_eo < 0)
+    tcp_fail("regex_find_range_unboxed: regexec failed");
+  IntRangeVal* range = sprout_alloc_range_val("regex_find_range_unboxed: out of memory");
+  range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
+  range->end   = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)range };
+}
+
+SproutUnboxed2 vector_get_unboxed(long long vec, long long index) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_get_unboxed: null vector");
+  if (index < 0 || index >= v->len) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return (SproutUnboxed2){ cached_tag_just(), v->data[index] };
+}
+
+SproutUnboxed2 map_get_unboxed(long long map_h, long long key_val) {
+  const char* key = (const char*)key_val;
+  if (key == NULL) tcp_fail("map_get_unboxed: null key");
+  long long found = bst_get(map_h, key);
+  if (found == LLONG_MIN) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return (SproutUnboxed2){ cached_tag_just(), found };
+}
+
+SproutUnboxed2 map_nth_key_unboxed(long long map_h, long long index) {
+  BSTNode* node = bst_nth_node(map_h, index);
+  if (node == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)node->key };
+}
+
+SproutUnboxed2 map_nth_value_unboxed(long long map_h, long long index) {
+  BSTNode* node = bst_nth_node(map_h, index);
+  if (node == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return (SproutUnboxed2){ cached_tag_just(), node->value };
+}
+
+SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
+  BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
+  if (value == NULL) tcp_fail("bytes_get_unboxed: null bytes");
+  if (index < 0 || (size_t)index >= value->len) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)value->data[index] };
+}
+
+/* ── end CPR unboxed extern variants ────────────────────────────────────────*/
 
 /* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
  * Avoids the O(index) codepoint scan of str_char_at.
@@ -5739,6 +5902,15 @@ long long native_set_to_list(long long set_h) {
   long long result = bst_to_list_acc(rs, list_nil);
   SPROUT_GC_POP_LOCALS(1);
   return result;
+}
+
+SproutUnboxed3 native_set_to_list_unboxed(long long set_h) {
+  long long list = native_set_to_list(set_h);
+  long long tag = sprout_tag(list);
+  long long nil_tag = find_ctor_tag_by_name("Nil");
+  if (tag == nil_tag)
+    return (SproutUnboxed3){ tag, 0, 0 };
+  return (SproutUnboxed3){ tag, sprout_field(list, 0), sprout_field(list, 1) };
 }
 
 long long native_set_size(long long set_h) {
