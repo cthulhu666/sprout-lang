@@ -121,17 +121,6 @@ fn tfunc_result_type(t: types.Type) -> types.Type =
   | types.TFunc _ ret _ -> tfunc_result_type(ret)
   | _ -> t
 
-# tfunc_nth_arg: return the type of the nth argument in a curried function type.
-fn tfunc_nth_arg(t: types.Type, n: Int) -> types.Type =
-  if n == 0 then
-    match t with
-    | types.TFunc arg _ _ -> arg
-    | _ -> t
-  else
-    match t with
-    | types.TFunc _ ret _ -> tfunc_nth_arg(ret, n - 1)
-    | _ -> t
-
 # generate_typed_param_vars: build TVar nodes for each user param, assigning
 # types by peeling the curried method type one layer per parameter.
 fn generate_typed_param_vars(params: List ast.Param, method_type: types.Type, pos: source.SourcePos) -> List typed_ast.TypedExpr =
@@ -434,6 +423,10 @@ fn generate_one_class_wrapper(
         effects_maybe,
         [],
         typed_ast.TCall(
+          # NOTE: slot_name is a hidden param (concrete instance fn pointer), but
+          # lookup_scheme_type returns the polymorphic class method scheme body (e.g.
+          # ∀a. a→a→Bool for "eq").  The types are imprecise — codegen resolves the
+          # slot from locals by name and never dispatches on the type field here.
           typed_ast.TVar(
             tc_slot_name(class_name, 0, method_name),
             lookup_scheme_type(method_name, scheme_env),
@@ -719,7 +712,9 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       typed_ast.TCall(lower_expr(callee, ctx), expand_call_args(args, ctx), t, pos)
   | typed_ast.TDict _ t pos ->
       # TDict should only appear as a prefix arg inside TCall — never standalone.
-      # If seen standalone, preserve type and emit as unit.
+      # If seen standalone, emit as unit.  Note: `t` here is the constraint evidence
+      # type (not TConst "Unit"), but this path is unreachable in valid programs so
+      # the type mismatch on the TUnit node is harmless.
       typed_ast.TUnit(t, pos)
   | typed_ast.TLambda params body t pos ->
       typed_ast.TLambda(params, lower_expr(body, ctx), t, pos)
@@ -965,7 +960,9 @@ fn resolve_inner_constraint_dicts(
 # the resolved inner dicts, produces:
 #   \__lp_0 ... __lp_{n-1} -> fn_name(__lp_0, ..., __lp_{n-1}, inner_dict_0, ...)
 # Lambda and inner call types use TVar "?lambda" — these are dict witnesses whose
-# LLVM representation is always a closure pointer regardless of their Sprout type.
+# LLVM representation is always a closure pointer (i64) regardless of Sprout type.
+# type_to_ll(TVar _) = "i64", so codegen emits correct i64 params/returns for these
+# nodes even though no precise Sprout type is available at lowering time.
 fn build_lambda_with_inner_dicts(
   fn_name: String,
   n_params: Int,

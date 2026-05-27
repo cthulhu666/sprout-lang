@@ -5,6 +5,7 @@ import stdlib.compiler.checker as checker
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
 
 fn run_lower(src: String) -> lowering.LowerResult !{IO} =
   match lexer.tokenize(src) with
@@ -41,6 +42,29 @@ fn lower_has_tc_decl(r: lowering.LowerResult) -> Bool =
       match prog with
       | typed_ast.TypedProgram decls -> has_tc_name_in(decls)
 
+fn first_fn_body_in(decls: List typed_ast.TypedDecl) -> Maybe typed_ast.TypedExpr =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl _ _ _ _ _ body -> Just(body)
+      | _ -> first_fn_body_in(rest)
+
+fn is_sentinel_type(t: types.Type) -> Bool =
+  match t with
+  | types.TVar name -> name == "?gen" || name == "?lambda"
+  | _ -> false
+
+fn body_type_is_sentinel(r: lowering.LowerResult) -> Bool =
+  match r with
+  | lowering.LowerErr _ -> false
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_in(decls) with
+          | Nothing -> false
+          | Just body -> is_sentinel_type(typed_ast.typed_expr_type(body))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -63,6 +87,10 @@ fn main() -> Unit !{IO} =
     r4 <- run_lower("class Greet a {\n  fn greet(x: a) -> String\n}\ninstance Greet Int {\n  fn greet(x: Int) -> String = \"hi\"\n}")
     assert_true(state, "class and instance lower ok", is_lower_ok(r4))
     assert_true(state, "instance produces __tc_ decl", lower_has_tc_decl(r4))
+
+    # Type preservation: lower_expr must pass types through, not erase to ?gen/?lambda
+    assert_false(state, "simple fn body type is non-sentinel", body_type_is_sentinel(r1))
+    assert_false(state, "class wrapper body type is non-sentinel", body_type_is_sentinel(r4))
 
     # Error propagation — lex errors become LowerErr
     r5 <- run_lower("@invalid syntax")
