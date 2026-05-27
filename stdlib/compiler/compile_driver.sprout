@@ -9,7 +9,6 @@ import stdlib.compiler.types as types
 import stdlib.compiler.codegen as codegen
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
-import stdlib.compiler.lowering as lowering
 
 # ---------------------------------------------------------------------------
 # Header stripping (mirrors compiler.sprout / type_driver.sprout)
@@ -117,12 +116,11 @@ fn run_file_lower(path: String, stdlib_root: String) -> Unit !{IO} =
   do
     result <- compiler.compile_phase_lower(path, stdlib_root)
     match result with
-    | lowering.LowerErr msg -> print("ERROR: lower: " ++ msg)
-    | lowering.LowerOk prog ->
+    | typed_ast.TypedErr msg -> print("ERROR: " ++ msg)
+    | typed_ast.TypedOk typed_prog env ->
         do
           print("OK")
-          match prog with
-          | ast.Program decls _ -> dump_ast_decl_names(decls)
+          checker.dump_typed_program_names(typed_prog, env)
 
 # ---------------------------------------------------------------------------
 # Phase: recheck — re-typecheck the lowered AST so typed nodes carry resolved types

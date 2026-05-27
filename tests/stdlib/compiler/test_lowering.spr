@@ -3,7 +3,6 @@ import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.checker as checker
 import stdlib.compiler.lowering as lowering
-import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 
