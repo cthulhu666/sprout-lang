@@ -288,26 +288,20 @@ fn needs_space(prev_prev: Maybe token.Token, prev: Maybe token.Token, curr: toke
 # render_token
 
 fn render_char_escape(raw: String) -> String =
-  string.replace_all(
-    string.replace_all(
-      string.replace_all(
-        string.replace_all(
-          string.replace_all(raw, "\\", "\\\\"),
-        "'", "\\'"),
-      "\n", "\\n"),
-    "\r", "\\r"),
-  "\t", "\\t")
+  raw
+    |> string.replace_all("\\", "\\\\")
+    |> string.replace_all("'", "\\'")
+    |> string.replace_all("\n", "\\n")
+    |> string.replace_all("\r", "\\r")
+    |> string.replace_all("\t", "\\t")
 
 fn render_string_escape(raw: String) -> String =
-  string.replace_all(
-    string.replace_all(
-      string.replace_all(
-        string.replace_all(
-          string.replace_all(raw, "\\", "\\\\"),
-        "\"", "\\\""),
-      "\n", "\\n"),
-    "\r", "\\r"),
-  "\t", "\\t")
+  raw
+    |> string.replace_all("\\", "\\\\")
+    |> string.replace_all("\"", "\\\"")
+    |> string.replace_all("\n", "\\n")
+    |> string.replace_all("\r", "\\r")
+    |> string.replace_all("\t", "\\t")
 
 fn render_token(tok: token.Token) -> String =
   match token.token_kind(tok) with
@@ -484,12 +478,12 @@ fn last_line_no(lines: List String) -> Int =
 fn last_line_text(lines: List String) -> String =
   list_fold(\ (_, x) -> x, "", lines)
 
-fn add_missing_newline_issue(issues: List LintIssue, src: String, lines: List String) -> List LintIssue =
+fn add_missing_newline_issue(src: String, lines: List String, issues: List LintIssue) -> List LintIssue =
   if src == "" then issues
   else if string.ends_with(src, "\n") then issues
   else Cons(LintIssue(last_line_no(lines), str_len(last_line_text(lines)) + 1, "missing trailing newline"), issues)
 
-fn add_format_issue(issues: List LintIssue, src: String) -> List LintIssue =
+fn add_format_issue(src: String, issues: List LintIssue) -> List LintIssue =
   if format_source(src) != (if string.ends_with(src, "\n") then src else src ++ "\n") then
     Cons(LintIssue(1, 1, "file is not formatted"), issues)
   else issues
@@ -498,6 +492,10 @@ fn run_lint_fold(lines: List String) -> LintState =
   list_fold(lint_line, LintState (Nil, 1), lines)
 
 export fn lint_source(src: String) -> List LintIssue =
-  list_reverse(add_format_issue(add_missing_newline_issue(lint_state_issues(run_lint_fold(lines)), src, lines), src))
+  run_lint_fold(lines)
+    |> lint_state_issues
+    |> add_missing_newline_issue(src, lines)
+    |> add_format_issue(src)
+    |> list_reverse
   where
     lines = str_split_lines(src)

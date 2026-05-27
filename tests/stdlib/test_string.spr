@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
-import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right, join)
+import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right, join, replace_all)
 
 # Regression: global lets that call string_concat_many (via join) must work.
 # The codegen bug emitted __sprout_init_globals before register_ctor in the
@@ -58,5 +58,13 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "join single", join(",", ["x"]), "x")
     assert_eq(state, "join empty sep", join("", ["hi", "there"]), "hithere")
     assert_eq(state, "join global let", global_join_result, "foo|bar|baz")
+
+    assert_eq(state, "replace_all single", replace_all("o", "0", "foo"), "f00")
+    assert_eq(state, "replace_all no match", replace_all("xyz", "_", "hello"), "hello")
+    assert_eq(state, "replace_all multi-char", replace_all("\\n", "\\\\n", "a\\nb\\nc"), "a\\\\nb\\\\nc")
+    assert_eq(state, "replace_all empty from", replace_all("", "x", "abc"), "abc")
+    assert_eq(state, "replace_all chained via pipe",
+      "abc" |> replace_all("a", "X") |> replace_all("c", "Y"),
+      "XbY")
 
     summary(state)

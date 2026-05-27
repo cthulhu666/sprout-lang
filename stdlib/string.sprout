@@ -135,12 +135,12 @@ export fn join(sep: String, xs: f String) -> String where Foldable f =
 export fn repeat(s: String, n: Int) -> String =
   if n <= 0 then "" else s ++ repeat(s, n - 1)
 
-export fn replace_all(s: String, from: String, to: String) -> String =
+export fn replace_all(from: String, to: String, s: String) -> String =
   if str_len(from) == 0 then s
   else
     match split_once(s, from) with
     | Nothing -> s
-    | Just (before, after) -> before ++ to ++ replace_all(after, from, to)
+    | Just (before, after) -> before ++ to ++ replace_all(from, to, after)
 
 fn append_line(acc: Vec String, current: String) -> Vec String =
   vec_append(current, acc)
