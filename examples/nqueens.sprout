@@ -1,0 +1,55 @@
+module examples.nqueens
+
+# N-Queens: count all solutions for an N×N board using backtracking.
+#
+# Constraint arrays give O(1) conflict checks:
+#   cols[c]        — column c is occupied
+#   pos_diag[r+c]  — positive diagonal (r+c constant) is occupied
+#   neg_diag[r-c+n-1] — negative diagonal (r-c constant, shifted) is occupied
+#
+# Each `vec_set` returns a fresh Vec, so backtracking is free: the caller
+# still holds the unmodified arrays after the recursive call returns.
+#
+# Run:
+#   python3 -m sprout.cli run examples/nqueens.sprout
+# Expected output:
+#   1 4 2 92 724 14200
+
+fn make_bool_vec(size: Int, i: Int, acc: Vec Bool) -> Vec Bool =
+  if i >= size then acc
+  else make_bool_vec(size, i + 1, vec_append(false, acc))
+
+fn is_free(col: Int, pd: Int, nd: Int, cols: Vec Bool, pos_diag: Vec Bool, neg_diag: Vec Bool) -> Bool =
+  vec_get_or(col, false, cols) == false &&
+  vec_get_or(pd, false, pos_diag) == false &&
+  vec_get_or(nd, false, neg_diag) == false
+
+# Returns the number of complete solutions reachable from state (row, col).
+# Two branches at each step:
+#   1. skip column col in this row — try col+1
+#   2. place a queen at (row, col) if safe — advance to next row
+fn queens(n: Int, row: Int, col: Int, cols: Vec Bool, pos_diag: Vec Bool, neg_diag: Vec Bool) -> Int =
+  if row == n then 1
+  else if col >= n then 0
+  else
+    queens(n, row, col + 1, cols, pos_diag, neg_diag) +
+    (if is_free(col, row + col, row - col + n - 1, cols, pos_diag, neg_diag) then
+      queens(n, row + 1, 0,
+        vec_set(col, true, cols),
+        vec_set(row + col, true, pos_diag),
+        vec_set(row - col + n - 1, true, neg_diag))
+    else 0)
+
+fn count_solutions(n: Int) -> Int =
+  queens(n, 0, 0,
+    make_bool_vec(n, 0, vec_empty()),
+    make_bool_vec(2 * n - 1, 0, vec_empty()),
+    make_bool_vec(2 * n - 1, 0, vec_empty()))
+
+fn main() -> Unit !{IO} =
+  do
+    print(count_solutions(1))   # 1
+    print(count_solutions(4))   # 2
+    print(count_solutions(8))   # 92
+    print(count_solutions(10))  # 724
+    print(count_solutions(12))  # 14200
