@@ -3292,9 +3292,7 @@ long long string_concat_many(long long list_handle) {
   while (sprout_tag(cur) != nil_tag) {
     if (sprout_tag(cur) != cons_tag) tcp_fail("string_concat_many: malformed list");
     const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    if (s == NULL) {
-      tcp_fail("string_concat_many: null string element");
-    }
+    if (s == NULL) tcp_fail("string_concat_many: null string element");
     total += strlen(s);
     cur = sprout_field(cur, 1);
   }

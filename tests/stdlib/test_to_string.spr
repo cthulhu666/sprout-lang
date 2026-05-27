@@ -1,0 +1,23 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# Regression test: class method wrappers must receive their hidden typeclass-dict
+# parameter.  The bug in build_fn_sigs_acc used extract_param_lls_from_type
+# (which only counts function arrows in the scheme type) instead of
+# list_map(\_ -> ll_i64(), params).  For to_string the scheme is `∀a. a→String`
+# (1 arrow) but the wrapper TFnDecl has 2 params (user value + hidden dict),
+# so the LLVM stub was emitted with arity 1 and always returned 0 (null),
+# causing string_concat_many to crash whenever a template literal was used.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "to_string Int 0", to_string(0), "0")
+    assert_eq(state, "to_string Int 42", to_string(42), "42")
+    assert_eq(state, "to_string Int neg", to_string(-7), "-7")
+    assert_eq(state, "to_string Bool true", to_string(true), "true")
+    assert_eq(state, "to_string Bool false", to_string(false), "false")
+    assert_eq(state, "to_string String id", to_string("hello"), "hello")
+    assert_eq(state, "to_string String empty", to_string(""), "")
+
+    summary(state)
