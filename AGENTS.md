@@ -11,6 +11,7 @@ Primary design references:
 - `docs/style-guide-v0.md`
 - `docs/language-design-v0.md`
 - `docs/language-design-best-practices.md`
+- `docs/guidelines.md` (code authoring guidelines for stdlib and compiler)
 
 ## Collaboration Rules
 
@@ -24,6 +25,7 @@ Primary design references:
 8. Explicitly call out any proposal to add a new builtin or to keep functionality in the host runtime instead of implementing it in Sprout; builtin/runtime additions require user approval up front.
 9. Prefer fixing root-cause issues over introducing workarounds when the root cause is reasonably tractable.
 10. When editing Sprout source examples, stdlib code, or user-facing snippets, follow `docs/style-guide-v0.md` unless a stronger file-local convention already exists.
+11. Adhere to `docs/guidelines.md` when authoring stdlib or compiler code; deviations require justification in the PR description.
 
 ## Docs and TODO Hygiene
 
