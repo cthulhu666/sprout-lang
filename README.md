@@ -132,6 +132,7 @@ Prerequisites:
 
 - `mise`, for repository-managed `just`.
 - `clang` on `PATH`, for native builds and linking.
+- `opt` on `PATH` (LLVM IR verifier), required for all build and test recipes. Install via `brew install llvm && brew link llvm` (macOS) or `sudo apt-get install llvm-16` + add `/usr/lib/llvm-16/bin` to `PATH` (Linux/Debian). The `opt --passes=verify` step runs between IR emission and clang in every build; a missing `opt` fails loudly.
 - C standard library headers for the active platform. On macOS, install Xcode Command Line Tools or Xcode so `xcrun --show-sdk-path` works; on Linux, install the distro C development package such as `build-essential` or equivalent.
 - A pre-built `compile_driver_bin_stage1` binary (bootstrap from the committed seed with `just bootstrap-from-seed`, or build from a pre-existing stage-0 binary with `just build-stage1`).
 
