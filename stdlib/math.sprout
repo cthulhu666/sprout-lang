@@ -9,8 +9,9 @@ fn trunc_remainder(value: Int, divisor: Int) -> Int =
   value - (value / divisor) * divisor
 
 fn euclidean_remainder(value: Int, modulus: Int) -> Int =
-  if trunc_remainder(value, modulus) < 0 then trunc_remainder(value, modulus) + modulus
-  else trunc_remainder(value, modulus)
+  if r < 0 then r + modulus
+  else r
+  where r = trunc_remainder(value, modulus)
 
 export fn abs(value: Int) -> Int =
   int_abs(value)
