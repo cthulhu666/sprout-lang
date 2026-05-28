@@ -59,6 +59,10 @@ if echo "$CHANGED" | grep -qE 'stdlib/compiler/'; then
       fi
       if grep -qE 'str_concat\(ptr null,|, ptr null\)' "$smk_ir"; then
         echo "[pre-commit] shape $(basename "$f"): IR contains str_concat(ptr null,...) — null-ptr codegen bug"
+        smk_failed=$((smk_failed + 1)); continue
+      fi
+      if ! opt --passes=verify "$smk_ir" -o /dev/null > "$smk_err" 2>&1; then
+        echo "[pre-commit] shape $(basename "$f"): opt IR verification failed:"; cat "$smk_err"
         smk_failed=$((smk_failed + 1))
       fi
     done

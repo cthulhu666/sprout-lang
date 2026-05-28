@@ -189,6 +189,10 @@ _test-stdlib stage:
         echo "  COMPILE FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
       fi
+      if ! opt --passes=verify "$TMP_LL" -o /dev/null 2>"$TMP_ERR"; then
+        echo "  IR INVALID (opt --passes=verify):"; cat "$TMP_ERR"
+        total_failed=$((total_failed + 1)); continue
+      fi
       if ! clang "$TMP_LL" "$TMP_RT" {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
         echo "  LINK FAILED:"; cat "$TMP_ERR"
         total_failed=$((total_failed + 1)); continue
@@ -282,7 +286,7 @@ _build-stage in_bin out_bin:
   echo "==> Emitting LLVM IR via {{in_bin}}..."
   ./{{in_bin}} --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
   echo "==> Validating IR..."
-  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
+  opt --passes=verify "$TMP_LL" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{out_bin}}"
@@ -357,6 +361,8 @@ _compile-examples stage xfail="":
       "./$STAGE" --emit-ir "{{stdlib_root}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
       if [[ $? -ne 0 ]]; then
         { printf '  COMPILE FAILED:\n'; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
+      elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
+        { printf '  IR INVALID (opt --passes=verify):\n'; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
       else
         clang "$TMPD/$idx.ll" "$TMPD/rt.o" {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
         if [[ $? -ne 0 ]]; then
@@ -431,6 +437,8 @@ bootstrap-from-seed:
   echo "==> Using seed: $SEED ($(file -b "$SEED"))"
   echo "==> Emitting LLVM IR..."
   "$SEED" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
+  echo "==> Validating IR..."
+  opt --passes=verify "$TMP_LL" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
@@ -512,7 +520,7 @@ build-sproutd:
   echo "==> Emitting LLVM IR for sproutd..."
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/sproutd_driver.sprout" > "$TMP_LL"
   echo "==> Validating IR..."
-  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
+  opt --passes=verify "$TMP_LL" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/sproutd"
@@ -538,7 +546,7 @@ build-analysis-service:
   echo "==> Emitting LLVM IR for analysis service..."
   "$STAGE" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/analysis_service_main.sprout" > "$TMP_LL"
   echo "==> Validating IR..."
-  if command -v opt &>/dev/null; then opt --passes=verify "$TMP_LL" -o /dev/null; else echo "    (opt not found, skipping IR validation)"; fi
+  opt --passes=verify "$TMP_LL" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/analysis_service_bin"

@@ -18,6 +18,8 @@ jobs:
       - name: Install Clang / LLVM
         # clang-16+ required: Sprout IR uses opaque ptr type (LLVM 16 default).
         # clang-14 (Debian 12 default) cannot parse ptr in IR text.
+        # llvm-16 required: provides opt (IR verifier); all build recipes call
+        # `opt --passes=verify` as a hard step — not a soft skip.
         run: |
           sudo apt-get install -y clang-16 llvm-16 ripgrep
           echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
