@@ -630,7 +630,7 @@ instance ToString Int {
 
 instance ToString Bool {
   fn to_string(value: Bool) -> String =
-    if value then "True" else "False"
+    if value then "true" else "false"
 }
 
 instance ToString String {

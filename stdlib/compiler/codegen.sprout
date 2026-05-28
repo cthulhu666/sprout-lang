@@ -3417,9 +3417,12 @@ fn build_cpr_fns_acc(decls: List typed_ast.TypedDecl, arities: Dict Int, acc: Di
   | Cons decl rest ->
       match decl with
       | typed_ast.TExternFnDecl name _ ret_ty _ ->
-          match cpr_width_for_type_expr(ret_ty, arities) with
-          | Nothing -> build_cpr_fns_acc(rest, arities, acc)
-          | Just width -> build_cpr_fns_acc(rest, arities, dict_set(name, width, acc))
+          if is_cpr_extern_allowlisted(name) then
+            match cpr_width_for_type_expr(ret_ty, arities) with
+            | Nothing -> build_cpr_fns_acc(rest, arities, acc)
+            | Just width -> build_cpr_fns_acc(rest, arities, dict_set(name, width, acc))
+          else
+            build_cpr_fns_acc(rest, arities, acc)
       | typed_ast.TFnDecl name _ ret_ty _ _ body ->
           if has_self_tail_calls(body, name) then
             build_cpr_fns_acc(rest, arities, acc)

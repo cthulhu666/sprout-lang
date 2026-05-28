@@ -108,4 +108,12 @@ fn main() -> Unit !{IO} =
 
     assert_true(state, "stringify round-trip parses back successfully", stringify_round_trip_ok("{\"x\": 1}"))
 
+    # Regression: CPR worker for non-allowlisted externs (json_parse) previously
+    # generated `ret { i64, i64 } undef`, causing non-exhaustive match at runtime.
+    let cpr_regression_ok =
+      match json.parse("99") with
+      | Ok _ -> true
+      | Err _ -> false
+    assert_true(state, "CPR regression: inline do-block match on parse result", cpr_regression_ok)
+
     summary(state)

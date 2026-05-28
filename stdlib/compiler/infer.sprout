@@ -663,6 +663,30 @@ fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dic
       | Nothing -> first_concrete_typed_arg_str(rest, subst)
       | Just s -> Just(s)
 
+# Like first_concrete_typed_arg_str but skips heads in the excluded list.
+# Used when multiple constraints share a class: subsequent constraints skip
+# heads already committed to earlier TDict injections.
+fn first_concrete_typed_arg_str_excluding(
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  excluded: List String
+) -> Maybe String =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg rest ->
+      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Nothing -> first_concrete_typed_arg_str_excluding(rest, subst, excluded)
+      | Just s ->
+          if str_list_contains(excluded, s) then
+            first_concrete_typed_arg_str_excluding(rest, subst, excluded)
+          else
+            Just(s)
+
+fn str_list_contains(xs: List String, target: String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons h rest -> if h == target then true else str_list_contains(rest, target)
+
 # Convert a concrete types.Type to an ast.TypeExpr.
 # Only TConst and TApp are meaningful here; anything else falls back to "_".
 fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
@@ -702,6 +726,35 @@ fn first_concrete_arg_typeexpr_or_name(
   match first_concrete_typed_arg_typeexpr(typed_args, subst) with
   | Just te -> te
   | Nothing -> ast.TypeName(head_str)
+
+# Like first_concrete_arg_typeexpr_or_name but skips args whose head is in excluded.
+# Needed so that the TypeConstraint in a TDict records the correct instance type
+# when multiple constraints share the same class.
+fn first_concrete_arg_typeexpr_or_name_excluding(
+  head_str: String,
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  excluded: List String
+) -> ast.TypeExpr =
+  match first_concrete_typed_arg_typeexpr_excluding(typed_args, subst, excluded) with
+  | Just te -> te
+  | Nothing -> ast.TypeName(head_str)
+
+fn first_concrete_typed_arg_typeexpr_excluding(
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  excluded: List String
+) -> Maybe ast.TypeExpr =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg rest ->
+      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Nothing -> first_concrete_typed_arg_typeexpr_excluding(rest, subst, excluded)
+      | Just te ->
+          if str_list_contains(excluded, te_outermost_name(te)) then
+            first_concrete_typed_arg_typeexpr_excluding(rest, subst, excluded)
+          else
+            Just(te)
 
 # Like first_concrete_arg_typeexpr_or_name, but substitutes programmer type-variable
 # names recovered from @fwd markers when the type contains TVars.  This is needed when
@@ -805,23 +858,93 @@ fn user_typed_args(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
       else Cons(typed_ast.TVar(name, t, p), user_typed_args(rest))
   | Cons e rest -> Cons(e, user_typed_args(rest))
 
+# Collect the head-type strings of already-injected TDict nodes for a given class.
+# Used to exclude already-committed heads when resolving subsequent constraints of
+# the same class (e.g., both Eq a and Eq b must inject distinct dicts).
+fn collect_injected_heads_for_class(class_name: String, typed_args: List typed_ast.TypedExpr) -> List String =
+  collect_injected_heads_acc(class_name, typed_args, Nil)
+
+fn collect_injected_heads_acc(class_name: String, typed_args: List typed_ast.TypedExpr, acc: List String) -> List String =
+  match typed_args with
+  | Nil -> acc
+  | Cons arg rest ->
+      match arg with
+      | typed_ast.TDict (ast.TypeConstraint cn type_args) _ _ ->
+          if cn == class_name then
+            collect_injected_heads_acc(class_name, rest, list_append(acc, Cons(te_head_str(type_args), Nil)))
+          else
+            collect_injected_heads_acc(class_name, rest, acc)
+      | _ -> collect_injected_heads_acc(class_name, rest, acc)
+
+fn te_head_str(type_args: List ast.TypeExpr) -> String =
+  match type_args with
+  | Nil -> ""
+  | Cons te _ -> te_outermost_name(te)
+
+fn te_outermost_name(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName n -> n
+  | ast.TypeApply base _ -> te_outermost_name(base)
+  | _ -> ""
+
+# Iterate over prog_to_fresh VALUES (fresh TVars from instantiation), apply s3 to
+# each to get the caller's concrete type, then check for @inst:class:head.
+# This finds the right instance for constrained regular functions (e.g., Foldable t
+# in join(sep, xs) where xs resolves to Vec) without scanning user_args in order —
+# which would pick the wrong dict when non-constrained args have matching instances.
+fn scan_prog_to_fresh_for_instance(
+  class_name: String,
+  prog_to_fresh: Dict types.Type,
+  s3: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos,
+  excluded: List String
+) -> Maybe typed_ast.TypedExpr =
+  scan_ptf_entries(class_name, vec_to_list(dict_entries(prog_to_fresh)), s3, env, pos, excluded)
+
+fn scan_ptf_entries(
+  class_name: String,
+  entries: List (String, types.Type),
+  s3: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos,
+  excluded: List String
+) -> Maybe typed_ast.TypedExpr =
+  match entries with
+  | Nil -> Nothing
+  | Cons entry rest ->
+      match entry with
+      | (_, fresh_t) ->
+          match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
+          | Nothing -> scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
+          | Just head_str ->
+              if str_list_contains(excluded, head_str) then
+                scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
+              else
+                match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+                | Just _ ->
+                    Just(typed_ast.TDict(
+                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr(unifier.apply_subst(s3, fresh_t)), Nil)),
+                      types.TConst(class_name), pos))
+                | Nothing ->
+                    scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
+
 fn resolve_one_constraint_tdict(
   class_name: String,
   user_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme,
-  pos: source.SourcePos
+  pos: source.SourcePos,
+  excluded: List String
 ) -> Maybe typed_ast.TypedExpr =
-  match first_concrete_typed_arg_str(user_args, subst) with
+  match first_concrete_typed_arg_str_excluding(user_args, subst, excluded) with
   | Just head_str ->
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
           Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst), Nil)),
+            ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, excluded), Nil)),
             types.TConst(class_name), pos))
       | Nothing ->
-          # Concrete type found but no instance for it (e.g., arg is List (k, Int, a)
-          # and Ord List doesn't exist). Fall through to @fwd / env scan.
           resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
   | Nothing ->
       resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
@@ -940,23 +1063,30 @@ fn resolve_obligation(
   s3: Dict types.Type,
   user_args: List typed_ast.TypedExpr,
   env: Dict types.Scheme,
-  pos: source.SourcePos
+  pos: source.SourcePos,
+  excluded: List String
 ) -> Maybe typed_ast.TypedExpr =
   match dict_get(prog_var, prog_to_fresh) with
   | Nothing ->
       match resolve_via_fwd_for_prog_var(class_name, prog_var, env, pos) with
-      | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos)
+      | Nothing ->
+          match resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded) with
+          | Just tdict -> Just(tdict)
+          | Nothing -> scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded)
       | fwd -> fwd
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
       | Just head_str ->
-          match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-          | Just _ ->
-              Just(typed_ast.TDict(
-                ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                types.TConst(class_name), pos))
-          | Nothing ->
-              resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
+          if str_list_contains(excluded, head_str) then
+            resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
+          else
+            match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+            | Just _ ->
+                Just(typed_ast.TDict(
+                  ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
+                  types.TConst(class_name), pos))
+            | Nothing ->
+                resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
 
@@ -980,13 +1110,13 @@ fn inject_constrained_fn_dicts(
   | Just class_marker ->
       match class_marker with
       | types.Scheme _ _ (types.TApp(types.TConst class_name)(types.TConst prog_var)) _ ->
-          match resolve_obligation(class_name, prog_var, prog_to_fresh, s3, user_typed_args(typed_args), env, pos) with
+          match resolve_obligation(class_name, prog_var, prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
           | Nothing ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
           | Just tdict ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
       | types.Scheme _ _ (types.TConst class_name) _ ->
-          match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos) with
+          match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
           | Nothing ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
           | Just tdict ->
