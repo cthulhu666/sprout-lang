@@ -103,22 +103,24 @@ To time only the pre-built Sprout binary (excluding compilation):
 
 ## Results
 
-Measured on Apple M1 (arm64-darwin), 2026-05-27.
+Measured on Apple M1 (arm64-darwin). Sprout numbers updated 2026-05-28 post type-aware-rooting fix.
 
 ### N=12 (14,200 solutions) — primary benchmark point
 
-| Implementation | Time (ms) | vs Sprout |
+| Implementation | Time (ms) | vs Sprout (post-P0) |
 |---|---:|---:|
-| Go bitmask | 4.6 | 353× |
-| Go mutable | 71 | 23× |
-| Go pure | 74 | 22× |
-| Haskell `UArray` (unboxed) | 108 | 15× |
-| Haskell `Array` (boxed) | 174 | 9× |
-| Ruby mutable | 984 | 1.6× |
-| Ruby pure | 1,192 | 1.3× |
-| Python mutable | 1,266 | 1.2× |
-| Python pure | 1,572 | 1.0× |
-| **Sprout** (clang -O2, exec only) | **~1,620** | **1×** |
+| Go bitmask | 4.6 | 202× |
+| Go mutable | 71 | 13× |
+| Go pure | 74 | 13× |
+| Haskell `UArray` (unboxed) | 108 | 8.6× |
+| Haskell `Array` (boxed) | 174 | 5.3× |
+| Ruby mutable | 984 | 1.06× |
+| Ruby pure | 1,192 | 1.28× |
+| Python mutable | 1,266 | 1.36× |
+| Python pure | 1,572 | 1.69× |
+| **Sprout** (clang -O2, exec only) — post-P0 type-aware rooting (2026-05-28) | **928** | **1×** |
+| Sprout — pre-P0 baseline (CPR-only, 2026-05-27) | ~1,500–2,600 | 1.6–2.8× slower than current |
+| Sprout — pre-CPR baseline (2026-05-26) | ~1,620 | 1.7× slower than current |
 
 ### Full progression across N
 
@@ -140,29 +142,56 @@ N=12 (14,200 solutions):
   Haskell UArray 108  ms   Haskell Box 174  ms
   Ruby mutable   984  ms   Ruby pure   1192 ms
   Python mutable 1266 ms   Python pure 1572 ms
-  Sprout         ~1620 ms  (exec only; full pipeline including clang -O2 is ~7 s)
+  Sprout (post-P0)  928 ms  (exec only; clang -O2)
 
 N=13 (73,712 solutions):
   Go bitmask     25   ms   Go mutable  416  ms   Go pure      416  ms
   Haskell UArray 559  ms   Haskell Box 913  ms
-  (Python/Ruby/Sprout not measured at N=13 — too slow)
+  Sprout (post-P0) 5,700 ms  (Python/Ruby not measured at N=13 — too slow)
 ```
+
+Optimization trajectory and next steps: see [`docs/nqueens-optim-iteration-2026-05-28.md`](../../docs/nqueens-optim-iteration-2026-05-28.md).
+Target: match Haskell UArray (~108 ms N=12). Remaining gap ~8.6× after P0; next iteration is P1 (inline GC root push/pop or enable LTO).
 
 ---
 
 ## Analysis
 
-### Why Sprout compiles to native code but runs at Python speed
+### Why Sprout still trails Haskell despite compiling to native code
 
-Sprout's `vec_set` copies the underlying `Vector` and allocates a new heap
-object tracked by Sprout's GC. With millions of backtracking nodes at N=12,
-this generates enormous GC pressure. The binary retired **29 billion
-instructions** in 1.6 s — most of that is the conservative GC tracing and
-sweeping short-lived `Vec` objects.
+**Updated 2026-05-28** — the prior framing (GC tracing dominates) turned out
+to be wrong; the actual bottleneck was the GC root push/pop function-call
+overhead. See [`docs/nqueens-optim-iteration-2026-05-28.md`](../../docs/nqueens-optim-iteration-2026-05-28.md) for the full profile-driven analysis.
+
+Before any optimization (2026-05-26), the Sprout N=12 binary retired ~29
+billion instructions in 1.6 s. The first hypothesis blamed `vec_set` copying
+and GC sweep cost; that was partly correct but wasn't the dominant term.
+
+After CPR unboxing (2026-05-27) the per-N=12 cost dropped ~10% and the
+instruction count fell modestly. The next assumption — that
+`register_managed_ptr` (per-allocation GC bookkeeping) was the residual
+bottleneck — was overturned by an actual CPU sample profile.
+
+The real residual cost was **GC root push/pop** (`sprout_gc_push_i64_root`,
+`sprout_gc_pop_roots`) at **67% of CPU time** — every heap-valued temporary
+in codegen emitted an external call into the C runtime to register a root.
+Reading the emitted IR for `queens` showed that ~50% of those calls were
+pure waste: the codegen pushed roots for `Int` arguments because Sprout's
+`Int` is `i64` at the LLVM level, the same as boxed ADT handles, and the
+push helper used the LLVM type rather than the source-level Sprout type.
+
+The N-queens P0 fix (2026-05-28) added type-aware rooting that skips push
+for `Int`/`Bool`/`Char` arguments. N=12 dropped from ~1,500 ms to **928 ms**;
+total instructions retired across the full run dropped from 159 B to 114 B
+(−28%). Post-P0 the push/pop CPU share is **~44%** — still dominant; the
+remaining pushes are for genuine heap pointers (Vec args) that type
+filtering can't eliminate. The next attack target is the function-call
+boundary itself (P1: inline push/pop as IR, or enable `-flto`).
 
 GHC's generational GC collects short-lived heap objects in its nursery at
-near-zero marginal cost, which is why boxed Haskell (same copy-per-step
-algorithm) is 9× faster despite also allocating per step.
+near-zero marginal cost; once Sprout's per-push overhead is gone, the
+remaining gap will need attacking allocation cost too (P3 True/False/Nil
+singletons, P4 bump-allocated nursery — see backlog).
 
 ### Why unboxed (UArray) beats boxed (Array) by only 1.6× instead of ~58×
 

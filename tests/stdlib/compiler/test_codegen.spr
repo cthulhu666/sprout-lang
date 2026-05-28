@@ -112,4 +112,22 @@ fn main() -> Unit !{IO} =
     swap_ir <- get_ir(swap_src)
     assert_true(state, "tuple param (Int,Bool) emits struct type { i64, i1 } not i64 blob", ir_contains(swap_ir, "{ i64, i1 }"))
 
+    # GC root skipping for scalar types (Int, Bool, Char).
+    # Int args to function calls must NOT emit sprout_gc_push_i64_root.
+    # Only heap-allocated args (Vec, ADT handles, etc.) should be rooted.
+    # This pins the optimization that avoids ~50% wasted push/pop pairs.
+    let int_call_src = "extern fn uses_ints(a: Int, b: Int) -> Int\nfn call_with_ints(x: Int, y: Int) -> Int = uses_ints(x, y)"
+    int_call_ir <- get_ir(int_call_src)
+    assert_false(state, "Int args to call must NOT emit gc_push_i64_root", ir_contains(int_call_ir, "call i64 @sprout_gc_push_i64_root"))
+
+    # A Vec (heap) arg MUST still be rooted
+    let vec_call_src = "extern fn uses_vec(v: Vec Int) -> Int\nextern fn make_v() -> Vec Int\nfn call_with_vec() -> Int = uses_vec(make_v())"
+    vec_call_ir <- get_ir(vec_call_src)
+    assert_true(state, "Vec arg to call MUST emit gc_push_i64_root", ir_contains(vec_call_ir, "call i64 @sprout_gc_push_i64_root"))
+
+    # Mixed: only the Vec arg should be rooted, not the Int
+    let mixed_call_src = "extern fn mixed(n: Int, v: Vec Int) -> Int\nextern fn make_v2() -> Vec Int\nfn call_mixed(x: Int) -> Int = mixed(x, make_v2())"
+    mixed_call_ir <- get_ir(mixed_call_src)
+    assert_true(state, "mixed call: Vec arg rooted", ir_contains(mixed_call_ir, "call i64 @sprout_gc_push_i64_root"))
+
     summary(state)

@@ -158,6 +158,32 @@ In the self-hosted codegen (`stdlib/compiler/codegen.sprout`), String and Char v
 
 If you see `ll_ptr()` for String/Char in codegen, that is a regression. The canonical form is `ll_i64()`.
 
+### Type-aware GC rooting — `push_temp_root_typed` (codegen)
+
+**This is an intentional design choice, not an oversight.** Do not "simplify" call sites of `push_temp_root_typed` back to the older `push_temp_root`.
+
+In `stdlib/compiler/codegen.sprout`, two rooting helpers coexist:
+
+- `push_temp_root(v, em)` — looks only at the LLVM-level type (`val_is_i64`, `val_is_ptr`, `val_is_tuple`). Pushes a root for any i64-typed value because in LLVM, both `Int` and boxed ADT handles are `i64`.
+- `push_temp_root_typed(v, ty, em)` — additionally consults the **source-level Sprout type**. Skips the push entirely when `ty` is a known non-heap scalar (`Int`, `Bool`, `Char` — see `type_is_non_heap_scalar`). For all other types (including `TVar`, `TApp`, ADT names, polymorphic vars), falls back to `push_temp_root` (conservative).
+
+**Why:** before this distinction, every call site of an `Int`-returning expression emitted `alloca i64; store; call sprout_gc_push_i64_root; … call sprout_gc_pop_roots(1)` for nothing — Int cannot ever be a heap pointer. Profiling N-queens showed **67% of CPU time** was in `sprout_gc_push_i64_root`/`sprout_gc_pop_roots`, of which ~50% was pure waste from Int args. Type-aware rooting eliminated that waste and delivered a measured **1.5–2.7× speedup on N-queens** (N=12 from ~1.5 s to 928 ms).
+
+**Hot-path call sites that must use `push_temp_root_typed`:**
+
+- `emit_args_with_roots` and `emit_args_with_roots_lls` (function call argument rooting)
+- `emit_tco_args` (tail-call argument rooting)
+- `emit_tuple_items` (tuple-construction item rooting)
+- `emit_do` `TDoLetStep` (do-block let binding rooting)
+- `build_param_locals_and_push_roots` (function-entry parameter rooting; consults `ast.Param` annotation via `type_expr_is_non_heap_scalar`)
+- `emit_pattern_bind` `VarPattern` (match binder rooting; consults `scrut_type`)
+- `load_lambda_params` (lambda parameter rooting; consults `ast.Param` annotation)
+- `allocate_tco_slots_acc` (TCO slot rooting; consults `ast.Param` annotation)
+
+**Invariant:** when in doubt — when no source-level type is available — fall back to `push_temp_root`. A spurious extra root is harmless; a missing root corrupts the heap. Polymorphic `TVar`s could resolve to heap types at runtime in monomorphized code; do **not** treat them as non-heap.
+
+Tests pinning the invariant: `tests/stdlib/compiler/test_codegen.spr` includes regression tests "Int args to call must NOT emit gc_push_i64_root", "Vec arg to call MUST emit gc_push_i64_root", and "mixed call: Vec arg rooted".
+
 ### GC safety in `runtime/sprout_runtime.c`
 
 `just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls (callers are expected to root heap values before such calls). Run this after editing any C builtin in `runtime/sprout_runtime.c` that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.

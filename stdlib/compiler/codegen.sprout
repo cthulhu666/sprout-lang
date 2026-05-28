@@ -868,6 +868,29 @@ fn sizeof_struct(struct_type: String, em: Emitter) -> String !{IO} =
 # Section 8 — GC root management
 # ===========================================================================
 
+# Returns true for Sprout source-level types that are guaranteed to be pure
+# scalars and can never be GC-managed heap pointers.  Only whitelisted
+# TConst names — everything else (TVars, TApp, ADT names, Unit, …) may
+# resolve to a heap object and must be rooted conservatively.
+fn type_is_non_heap_scalar(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name ->
+      type_name_leaf_is(name, "Int") ||
+      type_name_leaf_is(name, "Bool") ||
+      type_name_leaf_is(name, "Char")
+  | _ -> false
+
+# Returns true when an ast.TypeExpr annotation declares a non-heap scalar.
+# Used only when we have the annotation from ast.Param; returns false when
+# uncertain (Nothing annotation or non-scalar type).
+fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName name ->
+      type_name_leaf_is(name, "Int") ||
+      type_name_leaf_is(name, "Bool") ||
+      type_name_leaf_is(name, "Char")
+  | _ -> false
+
 # Push a temporary GC root for `v`.  Returns the number of roots pushed (0 or 1).
 # We skip pushing for Bool (i1) — it is never a heap pointer.
 fn push_temp_root(v: Value, em: Emitter) -> Int !{IO} =
@@ -899,6 +922,14 @@ fn push_temp_root(v: Value, em: Emitter) -> Int !{IO} =
       1
   else
     0  # i1 (Bool) — never a GC-managed heap pointer
+
+# Typed variant: skip rooting entirely when the source-level Sprout type is a
+# known non-heap scalar (Int, Bool, Char).  Falls back to push_temp_root for
+# all other types, including TVars and polymorphic types, which may resolve to
+# heap objects at runtime.
+fn push_temp_root_typed(v: Value, ty: types.Type, em: Emitter) -> Int !{IO} =
+  if type_is_non_heap_scalar(ty) then 0
+  else push_temp_root(v, em)
 
 fn pop_temp_roots(count: Int, em: Emitter) -> Unit !{IO} =
   if count <= 0 then ()
@@ -1189,7 +1220,10 @@ fn emit_pattern_bind(pat: ast.Pattern, scrut: Value, scrut_type: Maybe types.Typ
   | ast.UnitPattern _ -> (Nil, 0)
   | ast.VarPattern name _ ->
       do
-        rooted <- push_temp_root(scrut, em)
+        let skip = match scrut_type with
+                   | Just t -> type_is_non_heap_scalar(t)
+                   | Nothing -> false
+        rooted <- if skip then 0 else push_temp_root(scrut, em)
         (Cons((name, scrut), Nil), rooted)
   | ast.TuplePattern items _ ->
       emit_tuple_pattern_bind(items, scrut, ctx, em, 0, Nil, 0)
@@ -1532,7 +1566,7 @@ fn load_captures(names: List String, lls: List String, em: Emitter, idx: Int) ->
 fn load_lambda_params(params: List ast.Param, wire_lls: List String, logical_lls: List String, em: Emitter, idx: Int) -> (List (String, Value), Int) !{IO} =
   match params with
   | Nil -> (Nil, 0)
-  | Cons (ast.Param name _) rest_params ->
+  | Cons (ast.Param name ann) rest_params ->
       match wire_lls with
       | Nil -> (Nil, 0)
       | Cons wire rest_wires ->
@@ -1543,7 +1577,10 @@ fn load_lambda_params(params: List ast.Param, wire_lls: List String, logical_lls
                 let ir = "%a" ++ int_to_string(idx)
                 let raw_v = val_for_ll(wire, ir)
                 v <- coerce_value(raw_v, logical, em)
-                rooted <- push_temp_root(v, em)
+                let skip = match ann with
+                           | Just te -> type_expr_is_non_heap_scalar(te)
+                           | Nothing -> false
+                rooted <- if skip then 0 else push_temp_root(v, em)
                 (rest_binds, rest_rooted) <- load_lambda_params(rest_params, rest_wires, rest_logicals, em, idx + 1)
                 (Cons((name, v), rest_binds), rooted + rest_rooted)
 
@@ -1727,7 +1764,7 @@ fn emit_tuple_items(items: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Va
   | Cons item rest ->
       do
         v <- emit_expr(ctx, locals, em, Nothing, item)
-        n <- push_temp_root(v, em)
+        n <- push_temp_root_typed(v, typed_ast.typed_expr_type(item), em)
         (rest_vals, ns) <- emit_tuple_items(rest, ctx, locals, em)
         (Cons((v, val_ll(v)), rest_vals), n + ns)
 
@@ -2637,7 +2674,7 @@ fn emit_args_with_roots(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict
   | Cons arg rest ->
       do
         v <- emit_expr(ctx, locals, em, Nothing, arg)
-        rooted <- push_temp_root(v, em)
+        rooted <- push_temp_root_typed(v, typed_ast.typed_expr_type(arg), em)
         (rest_vals, rest_rooted) <- emit_args_with_roots(rest, ctx, locals, em)
         (Cons(v, rest_vals), rooted + rest_rooted)
 
@@ -2647,7 +2684,7 @@ fn emit_args_with_roots_lls(args: List typed_ast.TypedExpr, lls: List String, ct
   | Cons arg rest ->
       do
         v <- emit_expr(ctx, locals, em, Nothing, arg)
-        rooted <- push_temp_root(v, em)
+        rooted <- push_temp_root_typed(v, typed_ast.typed_expr_type(arg), em)
         (rest_vals, rest_rooted) <- emit_args_with_roots_lls(rest, list_drop(lls, 1), ctx, locals, em)
         (Cons(v, rest_vals), rooted + rest_rooted)
 
@@ -2658,7 +2695,7 @@ fn emit_tco_args(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value,
       do
         v <- emit_expr(ctx, locals, em, Nothing, arg)
         let has_more = list_is_nil_exprs(rest) == false
-        rooted <- if has_more then push_temp_root(v, em) else 0
+        rooted <- if has_more then push_temp_root_typed(v, typed_ast.typed_expr_type(arg), em) else 0
         (rest_vals, rest_rooted) <- emit_tco_args(rest, ctx, locals, em)
         (Cons(v, rest_vals), rooted + rest_rooted)
 
@@ -2724,7 +2761,7 @@ fn emit_do(steps: List typed_ast.TypedDoStep, result_ty: types.Type, ctx: CgCtx,
       | typed_ast.TDoLetStep name e ->
           do
             v <- emit_expr(ctx, locals, em, Nothing, e)
-            rooted <- push_temp_root(v, em)
+            rooted <- push_temp_root_typed(v, typed_ast.typed_expr_type(e), em)
             let step_tco = tco_with_extra_roots(tco_ctx, rooted)
             result <- emit_do(rest, result_ty, ctx, dict_set(name, v, locals), em, step_tco)
             _ <- emit_pending_tco(step_tco, result, em)
@@ -2927,7 +2964,7 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
           dbg_suffix <- emit_fn_dbg(name, body, em)
           emit_line(em, "define " ++ define_ret ++ " @" ++ emit_name ++ "(" ++ params_str ++ ")" ++ dbg_suffix ++ " {")
           emit_label(em, "entry")
-          rooted <- if is_entry then
+          (param_locals, rooted) <- if is_entry then
             do
               init_argv <- fresh_tmp(em)
               emit_template(em, `  ${init_argv} = call i64 @sprout_set_argv(i32 %argc, ptr %argv)`)
@@ -2935,16 +2972,9 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
               match runtime_lets with
               | Nil -> ()
               | _ -> emit_line(em, "  call void @__sprout_init_globals()")
-              0
+              (dict_empty(), 0)
           else
-            do
-              param_locals_pair <- build_param_locals(params, fn_params(sig), 0)
-              rooted_params <- push_roots_for_params(param_locals_pair, em)
-              rooted_params
-          param_locals <- if is_entry then dict_empty() else
-            do
-              pair <- build_param_locals(params, fn_params(sig), 0)
-              pair
+            build_param_locals_and_push_roots(params, fn_params(sig), em)
           result <- emit_expr(sctx, param_locals, em, Nothing, body)
           coerced_result <- if is_entry then result else coerce_value(result, fn_ret(sig), em)
           pop_temp_roots(rooted, em)
@@ -3000,6 +3030,29 @@ fn push_roots_for_pairs(keys: Vec String, locals: Dict Value, em: Emitter, idx: 
               n <- push_temp_root(v, em)
               ns <- push_roots_for_pairs(keys, locals, em, idx + 1)
               n + ns
+
+# Build param locals dict and push GC roots in one pass, using the type
+# annotation from ast.Param (if present) to skip rooting for known scalar
+# types (Int, Bool, Char).  Returns (locals_dict, n_roots_pushed).
+# Falls back to push_temp_root (conservative) when annotation is absent or
+# names a non-scalar type.
+fn build_param_locals_and_push_roots(params: List ast.Param, lls: List String, em: Emitter) -> (Dict Value, Int) !{IO} =
+  build_param_locals_and_push_roots_acc(params, lls, em, dict_empty(), 0)
+
+fn build_param_locals_and_push_roots_acc(params: List ast.Param, lls: List String, em: Emitter, acc: Dict Value, rooted: Int) -> (Dict Value, Int) !{IO} =
+  match params with
+  | Nil -> (acc, rooted)
+  | Cons (ast.Param name ann) rest_params ->
+      match lls with
+      | Nil -> (acc, rooted)
+      | Cons ll rest_lls ->
+          do
+            let v = val_for_ll(ll, "%" ++ name)
+            let skip = match ann with
+                       | Just te -> type_expr_is_non_heap_scalar(te)
+                       | Nothing -> false
+            n <- if skip then 0 else push_temp_root(v, em)
+            build_param_locals_and_push_roots_acc(rest_params, rest_lls, em, dict_set(name, v, acc), rooted + n)
 
 # ---------------------------------------------------------------------------
 # Milestone B: field_kinds descriptor helpers
@@ -3102,7 +3155,7 @@ fn allocate_tco_slots(params: List ast.Param, lls: List String, loop_lbl: String
 fn allocate_tco_slots_acc(params: List ast.Param, lls: List String, em: Emitter, acc: List (String, String), rooted: Int) -> (List (String, String), Int) !{IO} =
   match params with
   | Nil -> (list_reverse(acc), rooted)
-  | Cons (ast.Param name _) rest_params ->
+  | Cons (ast.Param name ann) rest_params ->
       match lls with
       | Nil -> (list_reverse(acc), rooted)
       | Cons ll rest_lls ->
@@ -3110,7 +3163,11 @@ fn allocate_tco_slots_acc(params: List ast.Param, lls: List String, em: Emitter,
             slot <- fresh_tmp(em)
             emit_template(em, `  ${slot} = alloca ${ll}`)
             emit_template(em, `  store ${ll} %${name}, ptr ${slot}`)
-            r <- if ll == ll_i64() then
+            let scalar_ann = match ann with
+                             | Just te -> type_expr_is_non_heap_scalar(te)
+                             | Nothing -> false
+            r <- if scalar_ann then 0
+                 else if ll == ll_i64() then
                    do
                      reg <- fresh_tmp(em)
                      emit_template(em, `  ${reg} = call i64 @sprout_gc_push_i64_root(ptr ${slot})`)
@@ -3435,8 +3492,7 @@ fn emit_fn_worker(name: String, params: List ast.Param, body: typed_ast.TypedExp
     let worker_name = emitted_fn_name(name) ++ "_worker"
     emit_line(em, "define " ++ ll_struct ++ " @" ++ worker_name ++ "(" ++ params_str ++ ") {")
     emit_label(em, "entry")
-    param_locals <- build_param_locals(params, fn_params(sig), 0)
-    rooted <- push_roots_for_params(param_locals, em)
+    (param_locals, rooted) <- build_param_locals_and_push_roots(params, fn_params(sig), em)
     result_reg <- emit_worker_expr(width, ctx, param_locals, em, body)
     pop_temp_roots(rooted, em)
     emit_line(em, "  ret " ++ ll_struct ++ " " ++ result_reg)
