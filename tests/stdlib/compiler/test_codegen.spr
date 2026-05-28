@@ -98,4 +98,11 @@ fn main() -> Unit !{IO} =
     assert_true(state, "CPR: match-on-call uses extractvalue for field access", ir_contains(cpr_ir, "extractvalue { i64, i64 }"))
     assert_true(state, "CPR: match-on-call uses extractvalue for tag access", ir_contains(cpr_ir, "extractvalue { i64, i64 }"))
 
+    # build_fn_sigs_acc invariant: tuple-typed params must preserve their struct IR type.
+    # If the count-mismatch guard fires unconditionally, (Int, Bool) collapses to i64
+    # and LLVM rejects the IR at link time (phi type mismatch). This pins that invariant.
+    let swap_src = "fn swap(pair: (Int, Bool)) -> (Bool, Int) = match pair with | (x, b) -> (b, x)"
+    swap_ir <- get_ir(swap_src)
+    assert_true(state, "tuple param (Int,Bool) emits struct type { i64, i1 } not i64 blob", ir_contains(swap_ir, "{ i64, i1 }"))
+
     summary(state)

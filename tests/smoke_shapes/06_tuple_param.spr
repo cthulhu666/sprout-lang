@@ -1,0 +1,5 @@
+module main
+fn swap(pair: (Int, Bool)) -> (Bool, Int) =
+  match pair with
+  | (x, b) -> (b, x)
+fn main() -> Unit !{IO} = print(swap((7, true)))
