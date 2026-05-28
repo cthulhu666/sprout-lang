@@ -98,6 +98,13 @@ fn main() -> Unit !{IO} =
     assert_true(state, "CPR: match-on-call uses extractvalue for field access", ir_contains(cpr_ir, "extractvalue { i64, i64 }"))
     assert_true(state, "CPR: match-on-call uses extractvalue for tag access", ir_contains(cpr_ir, "extractvalue { i64, i64 }"))
 
+    # FnSig arity invariant: constrained functions have hidden dict args not in their scheme type.
+    # build_fn_sigs_acc must fall back to all-i64 when extracted param count < actual param count.
+    # This verifies the function compiles to IR without a codegen arity mismatch crash.
+    let constrained_src = "class Eq a { fn eq(x: a, y: a) -> Bool }\ninstance Eq Int { fn eq(x: Int, y: Int) -> Bool = x == y }\nfn same(x: a, y: a) -> Bool where Eq a = eq(x, y)"
+    constrained_ir <- get_ir(constrained_src)
+    assert_true(state, "constrained fn compiles to IR (FnSig arity invariant)", ir_contains(constrained_ir, "define"))
+
     # build_fn_sigs_acc invariant: tuple-typed params must preserve their struct IR type.
     # If the count-mismatch guard fires unconditionally, (Int, Bool) collapses to i64
     # and LLVM rejects the IR at link time (phi type mismatch). This pins that invariant.

@@ -2902,10 +2902,16 @@ fn emit_fn_dbg(name: String, body: typed_ast.TypedExpr, em: Emitter) -> String !
       " !dbg !" ++ int_to_string(sp_id)
 
 fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr, sig: FnSig, is_entry: Bool, ctor_reg_meta: Dict (List (String, Int, Int, Int, String)), runtime_lets: List (String, typed_ast.TypedExpr), ctx: CgCtx, em: Emitter) -> Unit !{IO} =
-  if is_entry == false && has_self_tail_calls(body, name) then
-    emit_fn_tco(name, params, body, sig, sctx, em)
-  else
-    match (if is_entry then Nothing else dict_get(name, ctx_cpr_fns(ctx))) with
+  do
+    # FnSig invariant: param_lls must have the same length as AST params.
+    # A mismatch silently truncates IR call args or emits wrong param types.
+    if is_entry == false && fn_arity(sig) != list_length_params(params) then
+      panic("codegen: FnSig arity mismatch for " ++ name ++ ": sig=" ++ int_to_string(fn_arity(sig)) ++ " ast=" ++ int_to_string(list_length_params(params)))
+    else ()
+    if is_entry == false && has_self_tail_calls(body, name) then
+      emit_fn_tco(name, params, body, sig, sctx, em)
+    else
+      match (if is_entry then Nothing else dict_get(name, ctx_cpr_fns(ctx))) with
     | Just width ->
         do
           emit_fn_worker(name, params, body, sig, width, sctx, em)
@@ -3989,3 +3995,4 @@ export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Sche
 
 fn global_count(gi: Dict GlobalInfo) -> Int !{IO} =
   vec_length(dict_keys(gi))
+
