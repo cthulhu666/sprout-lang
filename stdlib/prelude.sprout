@@ -855,6 +855,7 @@ extern fn read_lines(path: String) -> List String !{IO}
 extern fn read_int_lines(path: String) -> Vector Int !{IO}
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
 extern fn env_get(name: String) -> Maybe String !{IO}
+extern fn time_now_micros() -> Int !{IO}
 
 # Numeric / string conversions
 extern fn parse_int(s: String) -> Int

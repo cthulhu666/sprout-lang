@@ -1,0 +1,13 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    t0 <- time_now_micros()
+    assert_true(state, "time_now_micros > 0", t0 > 0)
+
+    t1 <- time_now_micros()
+    assert_true(state, "time is monotonic (t1 >= t0)", t1 >= t0)
+
+    summary(state)

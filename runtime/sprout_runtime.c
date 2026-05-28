@@ -382,6 +382,8 @@ static long long sprout_now_micros(void) {
   return ((long long)tv.tv_sec * 1000000LL) + (long long)tv.tv_usec;
 }
 
+long long time_now_micros(void) { return sprout_now_micros(); }
+
 static void sprout_gc_log_cycle(
   const char* reason,
   long long heap_before,

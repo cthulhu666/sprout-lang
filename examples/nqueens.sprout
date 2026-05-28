@@ -12,8 +12,10 @@ module examples.nqueens
 #
 # Run:
 #   python3 -m sprout.cli run examples/nqueens.sprout
-# Expected output:
-#   1 4 2 92 724 14200
+# Expected output (N= label, count, wall-clock time):
+#   N=1: 1  (0.0 ms)
+#   ...
+#   N=13: 73712  (...)
 
 fn make_bool_vec(size: Int, i: Int, acc: Vec Bool) -> Vec Bool =
   if i >= size then acc
@@ -46,11 +48,27 @@ fn count_solutions(n: Int) -> Int =
     make_bool_vec(2 * n - 1, 0, vec_empty()),
     make_bool_vec(2 * n - 1, 0, vec_empty()))
 
+fn format_ms_parts(ms: Int, micros: Int) -> String =
+  string_concat_many(["(", int_to_string(ms), ".", int_to_string((micros - ms * 1000) / 100), " ms)"])
+
+fn format_ms(micros: Int) -> String =
+  format_ms_parts(micros / 1000, micros)
+
+fn print_result(n: Int, c: Int, t0: Int) -> Unit !{IO} =
+  do
+    t1 <- time_now_micros()
+    print(string_concat_many(["N=", int_to_string(n), ": ", int_to_string(c), "  ", format_ms(t1 - t0)]))
+
+fn bench_n(n: Int) -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    print_result(n, count_solutions(n), t0)
+
 fn main() -> Unit !{IO} =
   do
-    print(count_solutions(1))  # 1
-    print(count_solutions(4))  # 2
-    print(count_solutions(8))  # 92
-    print(count_solutions(10))  # 724
-    print(count_solutions(12))  # 14200
-    print(count_solutions(13))  # 73712
+    bench_n(1)
+    bench_n(4)
+    bench_n(8)
+    bench_n(10)
+    bench_n(12)
+    bench_n(13)

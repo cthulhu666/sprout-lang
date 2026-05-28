@@ -171,6 +171,7 @@ term_read_key
 term_read_line
 term_show_cursor
 term_write
+time_now_micros  # syscall wrapper — gettimeofday cannot be called from Sprout stdlib; needed for wall-clock benchmarking
 vector_append
 vector_empty
 vector_from_list
