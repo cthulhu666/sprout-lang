@@ -70,12 +70,14 @@ if echo "$CHANGED" | grep -qE 'stdlib/compiler/'; then
 fi
 
 # ── 1.5. Example canary (compile + run) ──────────────────────────────────────
-# Runs when any compiler Sprout source or runtime changes.
-# Compiles and runs a curated subset of examples covering codegen paths not
-# exercised by the IR smoke tests: tuple-typed params/returns, CPR worker
-# paths, constrained functions, global closures.
-# Skipped if build/compile_driver_bin_stage1 is absent.
-if echo "$CHANGED" | grep -qE 'stdlib/compiler/|runtime/sprout_runtime\.c'; then
+# Runs when the seed binary or runtime is staged — i.e. after a bootstrap round
+# has been completed and the promoted binary reflects the staged source changes.
+# Triggering on stdlib/compiler/ alone would test the *old* binary against the
+# old examples (always passes, no signal); the canary is only meaningful once
+# the binary has been rebuilt from the new codegen.
+# Also runs on runtime/sprout_runtime.c changes: runtime is linked directly so
+# those changes take effect without a bootstrap round.
+if echo "$CHANGED" | grep -qE 'bootstrap/compile_driver|runtime/sprout_runtime\.c'; then
   if [ -x "./build/compile_driver_bin_stage1" ]; then
     echo "[pre-commit] compiler/runtime changed — running example canary..."
     EX_STDLIB="$(pwd)/stdlib"
