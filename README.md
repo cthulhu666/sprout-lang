@@ -130,8 +130,10 @@ This repo uses [`mise`](https://mise.jdx.dev/) to pin the `just` toolchain and [
 
 Prerequisites:
 
-- `mise`, for repository-managed tools (`just`, `clang`, `opt`, `python`).
-- `clang` and `opt` are both provided by `clang = "16"` in `mise.toml` and installed by `mise install`. `opt --passes=verify` runs between IR emission and clang in every build recipe; a missing `opt` fails loudly.
+- `mise`, for repository-managed `just` and `python`.
+- `clang` and `opt` on `PATH` (system-installed, not managed by mise). `opt --passes=verify` runs between IR emission and clang in every build recipe; a missing `opt` fails loudly.
+  - macOS: `brew install llvm` then add `$(brew --prefix llvm)/bin` to `PATH` (brew LLVM is keg-only).
+  - Linux/Debian: `sudo apt-get install clang-16 llvm-16` then add `/usr/lib/llvm-16/bin` to `PATH`.
 - C standard library headers for the active platform. On macOS, install Xcode Command Line Tools or Xcode so `xcrun --show-sdk-path` works; on Linux, install the distro C development package such as `build-essential` or equivalent.
 - A pre-built `compile_driver_bin_stage1` binary (bootstrap from the committed seed with `just bootstrap-from-seed`, or build from a pre-existing stage-0 binary with `just build-stage1`).
 
