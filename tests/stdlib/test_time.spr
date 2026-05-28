@@ -1,3 +1,5 @@
+# Tests for time_now_micros: monotonic microsecond counter (CLOCK_MONOTONIC).
+# Only elapsed differences are meaningful; the epoch is unspecified.
 import stdlib.test (TestState, new_state, assert_true, summary)
 
 fn main() -> Unit !{IO} =
@@ -8,6 +10,9 @@ fn main() -> Unit !{IO} =
     assert_true(state, "time_now_micros > 0", t0 > 0)
 
     t1 <- time_now_micros()
-    assert_true(state, "time is monotonic (t1 >= t0)", t1 >= t0)
+    assert_true(state, "monotonic: t1 >= t0", t1 >= t0)
+
+    t2 <- time_now_micros()
+    assert_true(state, "monotonic: t2 >= t1", t2 >= t1)
 
     summary(state)

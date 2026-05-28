@@ -12,6 +12,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <time.h>
 #include <sys/wait.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -382,7 +383,15 @@ static long long sprout_now_micros(void) {
   return ((long long)tv.tv_sec * 1000000LL) + (long long)tv.tv_usec;
 }
 
-long long time_now_micros(void) { return sprout_now_micros(); }
+/* Monotonic microsecond counter (CLOCK_MONOTONIC).
+ * Intended use: elapsed-time measurement (benchmarks, timeouts).
+ * The epoch is unspecified — only differences between two calls are meaningful.
+ * DO NOT use for wall-clock timestamps; use gettimeofday / CLOCK_REALTIME for those. */
+long long time_now_micros(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  return (long long)ts.tv_sec * 1000000LL + (long long)ts.tv_nsec / 1000LL;
+}
 
 static void sprout_gc_log_cycle(
   const char* reason,

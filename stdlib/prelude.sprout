@@ -855,6 +855,9 @@ extern fn read_lines(path: String) -> List String !{IO}
 extern fn read_int_lines(path: String) -> Vector Int !{IO}
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
 extern fn env_get(name: String) -> Maybe String !{IO}
+# Returns microseconds from a monotonic clock (CLOCK_MONOTONIC).
+# Only differences between two calls are meaningful — the epoch is unspecified.
+# Use for elapsed-time measurement (benchmarks, timeouts); not for wall-clock timestamps.
 extern fn time_now_micros() -> Int !{IO}
 
 # Numeric / string conversions
