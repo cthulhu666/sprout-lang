@@ -947,7 +947,21 @@ fn resolve_one_constraint_tdict(
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
   | Nothing ->
-      resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+      # No non-excluded concrete arg found. This happens when all concrete args have the
+      # same type as a prior constraint of the same class (e.g. `where Eq a, Eq b` called
+      # with a = b = AlwaysEqual). Fall back without exclusion: the second constraint
+      # legitimately needs the same dict as the first.
+      match first_concrete_typed_arg_str(user_args, subst) with
+      | Just head_str ->
+          match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+          | Just _ ->
+              Just(typed_ast.TDict(
+                ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst), Nil)),
+                types.TConst(class_name), pos))
+          | Nothing ->
+              resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+      | Nothing ->
+          resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
 
 # Try @fwd marker lookup first (direct TVar arg), then fall back to env scan.
 # Used when the first concrete-type lookup finds no instance (or no concrete type).
@@ -1077,16 +1091,16 @@ fn resolve_obligation(
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
       | Just head_str ->
-          if str_list_contains(excluded, head_str) then
-            resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
-          else
-            match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-            | Just _ ->
-                Just(typed_ast.TDict(
-                  ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                  types.TConst(class_name), pos))
-            | Nothing ->
-                resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
+          # prog_to_fresh maps this prog_var precisely — trust it even if head_str is
+          # in excluded (that means two distinct prog_vars legitimately map to the same
+          # concrete type; they need the same dict, not a different one).
+          match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+          | Just _ ->
+              Just(typed_ast.TDict(
+                ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
+                types.TConst(class_name), pos))
+          | Nothing ->
+              resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
 

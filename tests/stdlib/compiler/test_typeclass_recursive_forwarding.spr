@@ -20,6 +20,12 @@ fn recursive_both_eq(left: a, right: b, depth: Int) -> Bool where Eq a, Eq b =
     else false
   else recursive_both_eq(left, right, depth - 1)
 
+# Non-recursive variant: exercises the external call-site injection path directly,
+# without any recursive forwarding involved.
+fn both_eq_direct(left: a, right: b) -> Bool where Eq a, Eq b =
+  if eq(left, left) then eq(right, right)
+  else false
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -27,5 +33,19 @@ fn main() -> Unit !{IO} =
       state,
       "recursive call forwards distinct Eq a and Eq b dictionaries",
       recursive_both_eq(AlwaysEqual(1), NeverEqual(2), 1)
+    )
+    # Same concrete type for both constraints: second injection must not be skipped.
+    # both AlwaysEqual.eq → true → both_eq_direct returns true.
+    assert_true(
+      state,
+      "same concrete type for both constraints: second dict not skipped",
+      both_eq_direct(AlwaysEqual(1), AlwaysEqual(2))
+    )
+    # Distinct types, non-recursive: AlwaysEqual.eq=true, NeverEqual.eq=false → returns false.
+    # If both dicts were resolved to AlwaysEqual (bug), returns true instead.
+    assert_true(
+      state,
+      "distinct types non-recursive: NeverEqual dict used (result is false)",
+      both_eq_direct(AlwaysEqual(1), NeverEqual(2)) == false
     )
     summary(state)
