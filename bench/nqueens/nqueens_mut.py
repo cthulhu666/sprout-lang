@@ -20,7 +20,7 @@ def queens(n, row, col, cols, pd, nd):
 def count_solutions(n):
     return queens(n, 0, 0, [False]*n, [False]*(2*n-1), [False]*(2*n-1))
 
-for n in [1, 4, 8, 10, 12]:
+for n in [1, 4, 8, 10, 12, 13]:
     t = time.perf_counter()
     c = count_solutions(n)
     ms = (time.perf_counter() - t) * 1000

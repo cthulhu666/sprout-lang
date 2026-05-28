@@ -48,8 +48,9 @@ fn count_solutions(n: Int) -> Int =
 
 fn main() -> Unit !{IO} =
   do
-    print(count_solutions(1))   # 1
-    print(count_solutions(4))   # 2
-    print(count_solutions(8))   # 92
+    print(count_solutions(1))  # 1
+    print(count_solutions(4))  # 2
+    print(count_solutions(8))  # 92
     print(count_solutions(10))  # 724
     print(count_solutions(12))  # 14200
+    print(count_solutions(13))  # 73712

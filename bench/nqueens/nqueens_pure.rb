@@ -29,7 +29,7 @@ def count_solutions(n)
     Array.new(2*n - 1, false))
 end
 
-[1, 4, 8, 10, 12].each do |n|
+[1, 4, 8, 10, 12, 13].each do |n|
   t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   c = count_solutions(n)
   ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t) * 1000
