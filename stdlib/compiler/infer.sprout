@@ -1213,6 +1213,10 @@ fn inject_constrained_fn_dicts(
 # for each constraint, enabling polymorphic dispatch in check_instance_for_marker.
 # prog_to_fresh maps programmer type-var names (e.g., "a") to their fresh
 # instantiation TVars (e.g., TVar("a42")).
+# These per-function @fwd: entries are NOT folded into the global env directly.
+# Instead, extract_fwd_from_entries rewrites them to "@eta_fwd:" keys so lowering
+# can locate the correct forwarded dict slot for value-position eta-expansion
+# without colliding with resolve_via_fwd_for_prog_var's @fwd: scans.
 
 fn seed_forward_markers(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match constraints with
