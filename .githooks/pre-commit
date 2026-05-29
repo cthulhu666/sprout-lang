@@ -21,7 +21,7 @@ if [ -n "$sprout_staged" ]; then
       [ -f "$f" ] || continue
       fmt_err="$HOOK_TMP/fmt_err.txt"
       if ! ./build/fmt_bin fmt --check "$f" > "$fmt_err" 2>&1; then
-        echo "[pre-commit] formatting drift: $f"
+        echo "[pre-commit] formatting drift: $f"; cat "$fmt_err"
         fmt_failed=$((fmt_failed + 1))
       fi
     done <<< "$sprout_staged"
@@ -61,9 +61,11 @@ if echo "$CHANGED" | grep -qE 'stdlib/compiler/'; then
         echo "[pre-commit] shape $(basename "$f"): IR contains str_concat(ptr null,...) — null-ptr codegen bug"
         smk_failed=$((smk_failed + 1)); continue
       fi
-      if ! opt --passes=verify "$smk_ir" -o /dev/null > "$smk_err" 2>&1; then
-        echo "[pre-commit] shape $(basename "$f"): opt IR verification failed:"; cat "$smk_err"
-        smk_failed=$((smk_failed + 1))
+      if command -v opt > /dev/null 2>&1; then
+        if ! opt --passes=verify "$smk_ir" -o /dev/null > "$smk_err" 2>&1; then
+          echo "[pre-commit] shape $(basename "$f"): opt IR verification failed:"; cat "$smk_err"
+          smk_failed=$((smk_failed + 1))
+        fi
       fi
     done
     [ "$smk_failed" -gt 0 ] && { echo "[pre-commit] $smk_failed emit-IR smoke test(s) FAILED — commit blocked."; exit 1; }
@@ -170,7 +172,7 @@ fi
 # or the test files themselves change.
 # Compiles each test file via compile_driver_bin_stage1 --emit-ir, links with
 # clang, and runs.  tests/stdlib/compiler/ is covered by section 5.
-if echo "$CHANGED" | grep -qE 'stdlib/(prelude|test|math|string)\.sprout|stdlib/compiler/types\.sprout|tests/stdlib/'; then
+if echo "$CHANGED" | grep -qE 'stdlib/.*\.sprout|tests/stdlib/'; then
   if [ -x "./build/compile_driver_bin_stage1" ]; then
     echo "[pre-commit] stdlib sources changed — running in-language test suites..."
     CS4_STDLIB="$(pwd)/stdlib"
