@@ -924,10 +924,76 @@ fn scan_ptf_entries(
                 match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
                 | Just _ ->
                     Just(typed_ast.TDict(
-                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr(unifier.apply_subst(s3, fresh_t)), Nil)),
+                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
                       types.TConst(class_name), pos))
                 | Nothing ->
                     scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
+
+# Check if a TVar node in `t` has an @fwd marker whose stored prog_var equals `prog_var`.
+fn tvar_for_prog_var_in_type(t: types.Type, class_name: String, prog_var: String, env: Dict types.Scheme) -> Bool =
+  match t with
+  | types.TVar name ->
+      match dict_get("@fwd:" ++ name ++ ":" ++ class_name, env) with
+      | Just scheme ->
+          match scheme with
+          | types.Scheme _ _ (types.TConst pv) _ -> pv == prog_var
+          | _ -> false
+      | Nothing -> false
+  | types.TApp base arg ->
+      tvar_for_prog_var_in_type(base, class_name, prog_var, env) ||
+      tvar_for_prog_var_in_type(arg, class_name, prog_var, env)
+  | _ -> false
+
+# Returns true if `t` has at least one inner TVar (i.e., not at the head) that
+# anchors to prog_var via a @fwd marker. Used to distinguish "Maybe a" (include)
+# from "List String" (skip) when scanning prog_to_fresh for instance lookup.
+fn has_inner_tvar_for_prog_var(t: types.Type, class_name: String, prog_var: String, env: Dict types.Scheme) -> Bool =
+  match t with
+  | types.TApp base arg ->
+      tvar_for_prog_var_in_type(arg, class_name, prog_var, env) ||
+      has_inner_tvar_for_prog_var(base, class_name, prog_var, env)
+  | _ -> false
+
+fn scan_ptf_for_prog_var(
+  class_name: String,
+  prog_var: String,
+  prog_to_fresh: Dict types.Type,
+  s3: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos,
+  excluded: List String
+) -> Maybe typed_ast.TypedExpr =
+  scan_ptf_prog_var_entries(class_name, prog_var, vec_to_list(dict_entries(prog_to_fresh)), s3, env, pos, excluded)
+
+fn scan_ptf_prog_var_entries(
+  class_name: String,
+  prog_var: String,
+  entries: List (String, types.Type),
+  s3: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos,
+  excluded: List String
+) -> Maybe typed_ast.TypedExpr =
+  match entries with
+  | Nil -> Nothing
+  | Cons entry rest ->
+      match entry with
+      | (_, fresh_t) ->
+          match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
+          | Nothing -> scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
+          | Just head_str ->
+              if str_list_contains(excluded, head_str) then
+                scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
+              else if has_inner_tvar_for_prog_var(unifier.apply_subst(s3, fresh_t), class_name, prog_var, env) then
+                match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+                | Just _ ->
+                    Just(typed_ast.TDict(
+                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
+                      types.TConst(class_name), pos))
+                | Nothing ->
+                    scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
+              else
+                scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
 
 fn resolve_one_constraint_tdict(
   class_name: String,
@@ -1082,12 +1148,15 @@ fn resolve_obligation(
 ) -> Maybe typed_ast.TypedExpr =
   match dict_get(prog_var, prog_to_fresh) with
   | Nothing ->
-      match resolve_via_fwd_for_prog_var(class_name, prog_var, env, pos) with
+      match scan_ptf_for_prog_var(class_name, prog_var, prog_to_fresh, s3, env, pos, excluded) with
+      | Just tdict -> Just(tdict)
       | Nothing ->
-          match scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded) with
-          | Just tdict -> Just(tdict)
-          | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded)
-      | fwd -> fwd
+          match resolve_via_fwd_for_prog_var(class_name, prog_var, env, pos) with
+          | Nothing ->
+              match scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded) with
+              | Just tdict2 -> Just(tdict2)
+              | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded)
+          | fwd -> fwd
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
       | Just head_str ->

@@ -721,7 +721,10 @@ fn first_concrete_head_str(t: types.Type) -> Maybe String =
   | _ -> Nothing
 
 fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
-  match dict_get(class_name ++ "_" ++ head, ctx_inst(ctx)) with
+  # strip_module_prefix: class_order stores bundler-qualified names (e.g. "prelude.ToString")
+  # but inst_table keys are always stripped (built via constraint_key_from_tc which calls
+  # strip_module_prefix).  Strip here so both sides of the lookup use the same key form.
+  match dict_get(strip_module_prefix(class_name) ++ "_" ++ head, ctx_inst(ctx)) with
   | Nothing -> Nothing
   | Just method_map -> dict_get(method_name, method_map)
 
@@ -732,7 +735,8 @@ fn find_fwd_in_co_entries(class_name: String, method_name: String, entries: List
   match entries with
   | Nil -> Nothing
   | Cons (key, method_map) rest ->
-      if str_starts_with(key, class_name ++ "_") then
+      # fwd_map keys are always stripped; strip class_name here to match.
+      if str_starts_with(key, strip_module_prefix(class_name) ++ "_") then
         match dict_get(method_name, method_map) with
         | Just impl_name -> Just(impl_name)
         | Nothing -> find_fwd_in_co_entries(class_name, method_name, rest)
