@@ -778,6 +778,11 @@ fn make_eta_lambda_n(impl_name: String, method_type: types.Type, n: Int, pos: so
       tfunc_result_type(method_type), pos),
     method_type, pos)
 
+fn tvar_head_name(t: types.Type) -> Maybe String =
+  match t with
+  | types.TVar name -> Just(name)
+  | _ -> Nothing
+
 fn try_eta_expand_class_method(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_class_of_method(name, ctx_class_order(ctx)) with
   | Nothing -> Nothing
@@ -792,8 +797,24 @@ fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerC
           | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
           | Nothing -> Nothing
       | Nothing ->
-          match find_fwd_method_impl(class_name, name, ctx) with
-          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+          # @eta_fwd markers (distinct from per-function @fwd:) are threaded into
+          # scheme_env during typecheck_decl. Key: "@eta_fwd:{fresh_tvar}:{class_name}".
+          # Maps fresh TVar names back to programmer constraint var names (e.g., "b"),
+          # enabling exact slot selection when multiple same-class constraints exist.
+          match tvar_head_name(param) with
+          | Just tvar_name ->
+              match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ class_name, ctx_scheme_env(ctx)) with
+              | Just fwd_scheme ->
+                  match types.scheme_type(fwd_scheme) with
+                  | types.TConst prog_var ->
+                      match dict_get(strip_module_prefix(class_name) ++ "_" ++ prog_var, ctx_fwd(ctx)) with
+                      | Just method_map ->
+                          match dict_get(name, method_map) with
+                          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+                          | Nothing -> Nothing
+                      | Nothing -> Nothing
+                  | _ -> Nothing
+              | Nothing -> Nothing
           | Nothing -> Nothing
   | _ -> Nothing
 

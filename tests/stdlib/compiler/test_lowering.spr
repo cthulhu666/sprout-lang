@@ -102,6 +102,29 @@ fn lowered_fn_body_has_lambda_first_arg(result: lowering.LowerResult, fname: Str
           | Nothing -> false
           | Just body -> body_first_arg_is_lambda(body)
 
+# Extract the callee name from the first lambda arg's body call.
+# For f(myshow) after eta-expansion: TCall(f, [TLambda(_, TCall(TVar(callee), _), _)], _)
+fn lambda_arg_inner_callee(body: typed_ast.TypedExpr) -> String =
+  match body with
+  | typed_ast.TCall _ args _ _ ->
+      match args with
+      | Cons (typed_ast.TLambda _ lambda_body _ _) _ ->
+          match lambda_body with
+          | typed_ast.TCall (typed_ast.TVar callee _ _) _ _ _ -> callee
+          | _ -> "__lambda_body_not_call"
+      | _ -> "__first_arg_not_lambda"
+  | _ -> "__body_not_call"
+
+fn lowered_fn_lambda_inner_callee(result: lowering.LowerResult, fname: String) -> String =
+  match result with
+  | lowering.LowerErr _ -> "__lower_err"
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> "__no_fn"
+          | Just body -> lambda_arg_inner_callee(body)
+
 # After lowering, TDict args become TVar nodes named __tc_ClassName_Type_method.
 # Scan a call's arg list for the first such var and return its name.
 fn tc_var_name_if_any(arg: typed_ast.TypedExpr) -> Maybe String =
@@ -202,6 +225,15 @@ fn main() -> Unit !{IO} =
     r_eta_poly <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\nfn test(f: (b -> String) -> String, n: b) -> String where MyShow b = f(myshow)")
     assert_true(state, "class method value-pos (poly) lowers ok", is_lower_ok(r_eta_poly))
     assert_true(state, "class method value-pos (poly) eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_eta_poly, "test"))
+
+    # P2 regression: two same-class constraints (where MyShow a, MyShow b).
+    # Prefix scan always picks the alphabetically-first slot ("MyShow_a", idx 0) regardless
+    # of which type the method value is inferred for.  When myshow appears in value position
+    # typed as (b -> String), the correct slot is __tc_MyShow_1_myshow (idx 1 = b).
+    r_eta_two_same_class <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\nfn test_b(fb: (b -> String) -> String) -> String where MyShow a, MyShow b = fb(myshow)")
+    assert_true(state, "same-class two-vars fwd: lowers ok", is_lower_ok(r_eta_two_same_class))
+    assert_true(state, "same-class two-vars fwd: picks b-slot (__tc_MyShow_1) not a-slot",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_eta_two_same_class, "test_b"), "__tc_MyShow_1_"))
 
     # Regression: constrained fn call must inject the element dict (Int), not the
     # container dict (Box Int) when the constraint variable appears inside a container

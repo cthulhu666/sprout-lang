@@ -2178,7 +2178,7 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl), register_record_fields(rec_name, type_params, fields, env))
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
       do
-        r <- check_fn_body(state, decl, env, subst, eff_subst, alias_env)
+        (r, fwd_markers) <- check_fn_body(state, decl, env, subst, eff_subst, alias_env)
         match r with
         | typed_ast.BodyErr e -> TypedDeclErr(e)
         | typed_ast.BodyLenient ->
@@ -2188,10 +2188,16 @@ fn typecheck_decl(
         | typed_ast.BodyOk typed_body inferred_fn_type ->
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
-              dict_set(name,
-                unifier.generalize(unifier.ftv_env(env), dict_empty(), dict_empty(),
-                  inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
-                env))
+              # WHY: fold @eta_fwd markers into the global env so lowering can map fresh
+              # TVar names back to programmer constraint var names when eta-expanding
+              # class methods in value position. Keys use @eta_fwd: prefix (not @fwd:)
+              # to avoid polluting the per-function @fwd: namespace scanned by
+              # resolve_via_fwd_for_prog_var. Keys are globally unique (one InferState).
+              fold_fwd_markers(fwd_markers,
+                dict_set(name,
+                  unifier.generalize(unifier.ftv_env(env), dict_empty(), dict_empty(),
+                    inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
+                  env)))
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
       match dict_get(name, env) with
       | Just _ ->
@@ -2404,6 +2410,32 @@ fn assert_resolved_typed_record_fields(fn_name: String, fields: List typed_ast.T
 # FnDecl body inference
 # ---------------------------------------------------------------------------
 
+# Extract @fwd:* entries from a typechecker env. Used to thread fresh-name →
+# prog-var mappings through to lowering for value-position class method
+# eta-expansion (see try_eta_in_class in lowering.sprout).
+fn extract_fwd_markers(fwd_env: Dict types.Scheme) -> Dict types.Scheme =
+  extract_fwd_from_entries(vec_to_list(dict_entries(fwd_env)), dict_empty())
+
+fn extract_fwd_from_entries(entries: List (String, types.Scheme), acc: Dict types.Scheme) -> Dict types.Scheme =
+  match entries with
+  | Nil -> acc
+  | Cons (key, scheme) rest ->
+      if str_starts_with(key, "@fwd:") then
+        # Rewrite "@fwd:X" → "@eta_fwd:X" so these global markers don't collide with
+        # the per-function @fwd: entries that resolve_via_fwd_for_prog_var scans.
+        extract_fwd_from_entries(rest, dict_set("@eta_fwd:" ++ str_slice(key, 5, str_len(key)), scheme, acc))
+      else
+        extract_fwd_from_entries(rest, acc)
+
+fn fold_fwd_markers(markers: Dict types.Scheme, env: Dict types.Scheme) -> Dict types.Scheme =
+  fold_fwd_entries(vec_to_list(dict_entries(markers)), env)
+
+fn fold_fwd_entries(entries: List (String, types.Scheme), env: Dict types.Scheme) -> Dict types.Scheme =
+  match entries with
+  | Nil -> env
+  | Cons (key, scheme) rest ->
+      fold_fwd_entries(rest, dict_set(key, scheme, env))
+
 fn check_fn_body(
   state: unifier.InferState,
   decl: ast.Decl,
@@ -2411,7 +2443,7 @@ fn check_fn_body(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type
-) -> typed_ast.BodyResult !{IO} =
+) -> (typed_ast.BodyResult, Dict types.Scheme) !{IO} =
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints body _ ->
       do
@@ -2423,12 +2455,12 @@ fn check_fn_body(
         let self_env = register_constrained_fn_markers(name, constraints, fwd_env)
         br <- infer_expr(state, fn_body_env(name, params, inst_type, self_env), subst, eff_subst, body)
         match br with
-        | InferErr msg -> fn_body_err(name, msg)
+        | InferErr msg -> (fn_body_err(name, msg), dict_empty())
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
-            | Err e -> typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e)
-            | Ok s2 -> typed_ast.BodyOk(apply_subst_typed_expr(s1, typed_body), unifier.apply_subst(s2, inst_type))
-  | _ -> typed_ast.BodyOk(dummy_unit(), types.TConst("Unit"))
+            | Err e -> (typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e), dict_empty())
+            | Ok s2 -> (typed_ast.BodyOk(apply_subst_typed_expr(s1, typed_body), unifier.apply_subst(s2, inst_type)), extract_fwd_markers(fwd_env))
+  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst("Unit")), dict_empty())
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(
