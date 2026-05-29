@@ -213,6 +213,58 @@ fn lowered_fn_body_dict_var_for_prefix(result: lowering.LowerResult, fname: Stri
           | Nothing -> "__no_fn"
           | Just body -> call_body_tc_var_for_prefix(body, prefix)
 
+# Dig into the first branch body of a TMatch expression.
+fn first_match_branch_body(body: typed_ast.TypedExpr) -> Maybe typed_ast.TypedExpr =
+  match body with
+  | typed_ast.TMatch _ branches _ _ ->
+      match branches with
+      | Nil -> Nothing
+      | Cons b _ ->
+          match b with
+          | typed_ast.TypedMatchBranch _ branch_body -> Just(branch_body)
+  | _ -> Nothing
+
+fn lowered_fn_match_branch_has_lambda_first_arg(result: lowering.LowerResult, fname: String) -> Bool =
+  match result with
+  | lowering.LowerErr _ -> false
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> false
+          | Just body ->
+              match first_match_branch_body(body) with
+              | Nothing -> false
+              | Just branch_body -> body_first_arg_is_lambda(branch_body)
+
+# Dig into the last TDoExprStep of a TDo expression.
+fn last_do_expr_step_body(steps: List typed_ast.TypedDoStep) -> Maybe typed_ast.TypedExpr =
+  match steps with
+  | Nil -> Nothing
+  | Cons s rest ->
+      match rest with
+      | Nil ->
+          match s with
+          | typed_ast.TDoExprStep e -> Just(e)
+          | _ -> Nothing
+      | _ -> last_do_expr_step_body(rest)
+
+fn lowered_fn_do_last_step_has_lambda_first_arg(result: lowering.LowerResult, fname: String) -> Bool =
+  match result with
+  | lowering.LowerErr _ -> false
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> false
+          | Just body ->
+              match body with
+              | typed_ast.TDo steps _ _ ->
+                  match last_do_expr_step_body(steps) with
+                  | Nothing -> false
+                  | Just expr -> body_first_arg_is_lambda(expr)
+              | _ -> false
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -309,5 +361,39 @@ fn main() -> Unit !{IO} =
     assert_true(state, "p1-constrained: lowers ok", is_lower_ok(r_p1c))
     assert_true(state, "p1-constrained: my_eq is eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_p1c, "test"))
     assert_eq(state, "p1-constrained: inner call has 3 args (1 dict + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1c, "test"), 3)
+
+    # P1-match-binder: a variable bound by a match pattern that shares a class method name
+    # must NOT be eta-expanded in the branch body.
+    # Bug: lower_branches lowered branch bodies with ctx unchanged (pattern binders absent
+    # from ctx_bound_vars), so a name like 'myshow' would be eta-expanded to a TLambda.
+    # h takes (Int -> String) directly; myshow is passed as the first arg.
+    r_match_bind <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\ntype Val = Val (Int -> String)\nfn test(v: Val, h: (Int -> String) -> String) -> String =\n  match v with\n  | Val myshow -> h(myshow)")
+    assert_true(state, "match-binder shadow: lowers ok", is_lower_ok(r_match_bind))
+    assert_false(state, "match-binder shadow: myshow NOT eta-expanded in branch body", lowered_fn_match_branch_has_lambda_first_arg(r_match_bind, "test"))
+
+    # P1-do-let-binder: a name introduced by a do-let step must be in scope (as a
+    # local) for all subsequent steps, preventing eta-expansion.
+    # Uses a pure do-block (no IO) to keep the inline source self-contained.
+    r_do_let <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nfn test(h: (Int -> String) -> String) -> String =\n  do\n    let myshow = \\x -> \"local\"\n    h(myshow)")
+    assert_true(state, "do-let-binder shadow: lowers ok", is_lower_ok(r_do_let))
+    assert_false(state, "do-let-binder shadow: myshow NOT eta-expanded in later step", lowered_fn_do_last_step_has_lambda_first_arg(r_do_let, "test"))
+
+    # P1-do-bind-binder: same as do-let but using monadic bind (<-).
+    # Uses extern to supply an IO-wrapped value; last step is io_of(h(myshow)).
+    r_do_bind <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nextern fn io_of(x: a) -> a !{IO}\nfn test(h: (Int -> String) -> String) -> String !{IO} =\n  do\n    myshow <- io_of(\\x -> \"local\")\n    io_of(h(myshow))")
+    assert_true(state, "do-bind-binder shadow: lowers ok", is_lower_ok(r_do_bind))
+
+    # P1b-concrete-inner: eta-expansion for an instance (MyEq (Box a) where MyEq a) at a
+    # CONCRETE instantiation (Box Int) must still thread the inner MyEq Int dict.
+    # Bug: inner_tvar_of_tapp returns Nothing for TConst inner, falling back to no-dict lambda.
+    r_p1b_conc <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Box a = Box a\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq (Box a) where MyEq a {\n  fn my_eq(x: Box a, y: Box a) -> Bool = true\n}\nfn test(f: (Box Int -> Box Int -> Bool) -> Bool) -> Bool = f(my_eq)")
+    assert_true(state, "p1b-concrete-inner: lowers ok", is_lower_ok(r_p1b_conc))
+    assert_eq(state, "p1b-concrete-inner: inner call has 3 args (1 dict + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_conc, "test"), 3)
+
+    # P1b-multi-var: eta-expansion for an instance (MyEq (Pair a b) where MyEq a, MyEq b)
+    # must thread BOTH inner dicts, not just the last TVar (b).
+    r_p1b_multi <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Pair a b = Pair a b\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq Bool {\n  fn my_eq(x: Bool, y: Bool) -> Bool = true\n}\ninstance MyEq (Pair a b) where MyEq a, MyEq b {\n  fn my_eq(x: Pair a b, y: Pair a b) -> Bool = true\n}\nfn test(f: (Pair a b -> Pair a b -> Bool) -> Bool) -> Bool where MyEq (Pair a b), MyEq a, MyEq b = f(my_eq)")
+    assert_true(state, "p1b-multi-var: lowers ok", is_lower_ok(r_p1b_multi))
+    assert_eq(state, "p1b-multi-var: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_multi, "test"), 4)
 
     summary(state)

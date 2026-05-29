@@ -804,6 +804,25 @@ fn inner_tvar_of_tapp(t: types.Type) -> Maybe String =
       | _ -> Nothing
   | _ -> Nothing
 
+# For TApp _ (TConst name) returns Just name (stripped); Nothing otherwise.
+fn inner_concrete_of_tapp(t: types.Type) -> Maybe String =
+  match t with
+  | types.TApp _ arg ->
+      match arg with
+      | types.TConst name -> Just(strip_module_prefix(name))
+      | _ -> Nothing
+  | _ -> Nothing
+
+# Collect ALL inner TVar names from a TApp chain, innermost (leftmost) first.
+# TApp(TApp(Pair, fresh_a), fresh_b) → ["fresh_a", "fresh_b"].
+fn tapp_inner_tvars_ordered(t: types.Type) -> List String =
+  match t with
+  | types.TApp base arg ->
+      match arg with
+      | types.TVar name -> list_append(tapp_inner_tvars_ordered(base), Cons(name, Nil))
+      | _ -> tapp_inner_tvars_ordered(base)
+  | _ -> Nil
+
 fn make_eta_lambda_with_dicts(impl_name: String, method_type: types.Type, dict_args: List typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
   make_eta_lambda_with_dicts_n(impl_name, method_type, count_method_params(method_type), dict_args, pos)
 
@@ -861,6 +880,102 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
           Cons(typed_ast.TVar(slot, types.TVar("?lambda"), pos),
                collect_slots_from_method_map(rest, method_map, pos))
 
+# Resolve inner dicts for the concrete-inner-type case (e.g. Box Int).
+# For each inst_constraint (e.g. MyEq a), looks up the concrete instance for
+# {class}_{concrete_inner} in ctx_inst and collects its slot references.
+fn lookup_eta_inner_dicts_concrete(class_name: String, head: String, concrete_inner: String, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
+  match dict_get(class_name ++ "_" ++ head, ctx_inst_meta(ctx)) with
+  | Nothing -> Nothing
+  | Just (_, inst_constraints, _) ->
+      match inst_constraints with
+      | Nil -> Nothing
+      | _ ->
+          match resolve_concrete_inst_dicts(inst_constraints, concrete_inner, ctx, dummy_pos()) with
+          | Nil -> Nothing
+          | dicts -> Just(dicts)
+
+fn resolve_concrete_inst_dicts(inst_constraints: List ast.TypeConstraint, concrete_inner: String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  match inst_constraints with
+  | Nil -> Nil
+  | Cons c rest ->
+      list_append(
+        resolve_one_concrete_inst_dict(c, concrete_inner, ctx, pos),
+        resolve_concrete_inst_dicts(rest, concrete_inner, ctx, pos))
+
+fn resolve_one_concrete_inst_dict(c: ast.TypeConstraint, concrete_inner: String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  match c with
+  | ast.TypeConstraint class_name _ ->
+      match dict_get(strip_module_prefix(class_name) ++ "_" ++ concrete_inner, ctx_inst(ctx)) with
+      | Nothing -> Nil
+      | Just method_map ->
+          collect_slots_from_method_map(
+            class_methods_for(strip_module_prefix(class_name), ctx_class_order(ctx)),
+            method_map, pos)
+
+# Extract inst type variable names from the instance type_args in TApp left-to-right order.
+# For [TypeApply(TypeApply(TypeName "Pair", TypeName "a"), TypeName "b")] → ["a", "b"].
+fn extract_inst_type_var_names(type_args: List ast.TypeExpr) -> List String =
+  match type_args with
+  | Nil -> Nil
+  | Cons head_arg _ -> type_apply_arg_var_names(head_arg)
+
+fn type_apply_arg_var_names(te: ast.TypeExpr) -> List String =
+  match te with
+  | ast.TypeApply base arg ->
+      match arg with
+      | ast.TypeName name -> list_append(type_apply_arg_var_names(base), Cons(name, Nil))
+      | _ -> type_apply_arg_var_names(base)
+  | _ -> Nil
+
+fn build_var_to_tvar_dict(inst_vars: List String, fresh_tvars: List String) -> Dict String =
+  match inst_vars with
+  | Nil -> dict_empty()
+  | Cons var rest_vars ->
+      match fresh_tvars with
+      | Nil -> dict_empty()
+      | Cons tv rest_tvars ->
+          dict_set(var, tv, build_var_to_tvar_dict(rest_vars, rest_tvars))
+
+fn resolve_eta_inner_dicts_with_var_map(inst_constraints: List ast.TypeConstraint, var_to_tvar: Dict String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  match inst_constraints with
+  | Nil -> Nil
+  | Cons c rest ->
+      list_append(
+        resolve_eta_one_constraint_with_map(c, var_to_tvar, ctx, pos),
+        resolve_eta_inner_dicts_with_var_map(rest, var_to_tvar, ctx, pos))
+
+fn resolve_eta_one_constraint_with_map(c: ast.TypeConstraint, var_to_tvar: Dict String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  match c with
+  | ast.TypeConstraint _ type_args ->
+      match type_args with
+      | Cons (ast.TypeName var_name) _ ->
+          match dict_get(var_name, var_to_tvar) with
+          | Nothing -> Nil
+          | Just inner_tvar -> resolve_eta_one_inner_dict(c, inner_tvar, ctx, pos)
+      | _ -> Nil
+
+fn lookup_eta_inner_dicts_multi(class_name: String, head: String, inner_tvars: List String, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
+  match dict_get(class_name ++ "_" ++ head, ctx_inst_meta(ctx)) with
+  | Nothing -> Nothing
+  | Just (type_args, inst_constraints, _) ->
+      match inst_constraints with
+      | Nil -> Nothing
+      | _ ->
+          lookup_eta_inner_dicts_multi_with_inst(
+            extract_inst_type_var_names(type_args),
+            inner_tvars,
+            inst_constraints,
+            ctx,
+            dummy_pos())
+
+fn lookup_eta_inner_dicts_multi_with_inst(inst_var_names: List String, inner_tvars: List String, inst_constraints: List ast.TypeConstraint, ctx: LowerCtx, pos: source.SourcePos) -> Maybe (List typed_ast.TypedExpr) =
+  if list_length(inst_var_names) == list_length(inner_tvars) then
+    match resolve_eta_inner_dicts_with_var_map(inst_constraints, build_var_to_tvar_dict(inst_var_names, inner_tvars), ctx, pos) with
+    | Nil -> Nothing
+    | inner_dicts -> Just(inner_dicts)
+  else
+    Nothing
+
 fn try_eta_expand_class_method(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_class_of_method(name, ctx_class_order(ctx)) with
   | Nothing -> Nothing
@@ -873,12 +988,17 @@ fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerC
       | Just head ->
           match find_concrete_method_impl(class_name, name, head, ctx) with
           | Just impl_name ->
-              match inner_tvar_of_tapp(param) with
-              | Nothing ->
-                  # TODO: concrete inner type (e.g. Box Int) or non-TApp — dict threading not yet implemented.
-                  Just(make_eta_lambda(impl_name, t, dummy_pos()))
-              | Just inner_tvar ->
-                  match lookup_eta_inner_dicts(strip_module_prefix(class_name), head, inner_tvar, ctx) with
+              match tapp_inner_tvars_ordered(param) with
+              | Nil ->
+                  match inner_concrete_of_tapp(param) with
+                  | Just concrete_inner ->
+                      match lookup_eta_inner_dicts_concrete(strip_module_prefix(class_name), head, concrete_inner, ctx) with
+                      | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+                      | Just inner_dicts -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
+                  | Nothing ->
+                      Just(make_eta_lambda(impl_name, t, dummy_pos()))
+              | inner_tvars ->
+                  match lookup_eta_inner_dicts_multi(strip_module_prefix(class_name), head, inner_tvars, ctx) with
                   | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
                   | Just inner_dicts -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
           | Nothing -> Nothing
@@ -1228,18 +1348,41 @@ fn lower_expr_list(exprs: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed
   | Nil -> Nil
   | Cons e rest -> Cons(lower_expr(e, ctx), lower_expr_list(rest, ctx))
 
+fn pat_bound_names(pat: ast.Pattern) -> List String =
+  match pat with
+  | ast.WildcardPattern _ -> Nil
+  | ast.VarPattern name _ -> Cons(name, Nil)
+  | ast.IntPattern _ _ -> Nil
+  | ast.BoolPattern _ _ -> Nil
+  | ast.StringPattern _ _ -> Nil
+  | ast.CharPattern _ _ -> Nil
+  | ast.UnitPattern _ -> Nil
+  | ast.TuplePattern pats _ -> pat_list_bound_names(pats)
+  | ast.ConstructorPattern _ pats _ -> pat_list_bound_names(pats)
+
+fn pat_list_bound_names(pats: List ast.Pattern) -> List String =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest -> list_append(pat_bound_names(p), pat_list_bound_names(rest))
+
+fn do_step_bound_names(step: typed_ast.TypedDoStep) -> List String =
+  match step with
+  | typed_ast.TDoBindStep pat _ -> pat_bound_names(pat)
+  | typed_ast.TDoLetStep name _ -> Cons(name, Nil)
+  | typed_ast.TDoExprStep _ -> Nil
+
 fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> List typed_ast.TypedMatchBranch =
   match branches with
   | Nil -> Nil
   | Cons b rest ->
       match b with
       | typed_ast.TypedMatchBranch pat body ->
-          Cons(typed_ast.TypedMatchBranch(pat, lower_expr(body, ctx)), lower_branches(rest, ctx))
+          Cons(typed_ast.TypedMatchBranch(pat, lower_expr(body, ctx_with_bound(pat_bound_names(pat), ctx))), lower_branches(rest, ctx))
 
 fn lower_do_steps(steps: List typed_ast.TypedDoStep, ctx: LowerCtx) -> List typed_ast.TypedDoStep =
   match steps with
   | Nil -> Nil
-  | Cons s rest -> Cons(lower_do_step(s, ctx), lower_do_steps(rest, ctx))
+  | Cons s rest -> Cons(lower_do_step(s, ctx), lower_do_steps(rest, ctx_with_bound(do_step_bound_names(s), ctx)))
 
 fn lower_do_step(step: typed_ast.TypedDoStep, ctx: LowerCtx) -> typed_ast.TypedDoStep =
   match step with
