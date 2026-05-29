@@ -416,4 +416,17 @@ fn main() -> Unit !{IO} =
     assert_true(state, "p1b-super-inner: lowers ok", is_lower_ok(r_p1b_super))
     assert_eq(state, "p1b-super-inner: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_super, "test"), 4)
 
+    # P1c-class-type-not-first-param: Decode's class parameter is the return
+    # type, not the String input. Eta expansion must pick Decode Int for
+    # (String -> Int), even when Decode String also exists.
+    r_p1c_decode <- run_lower("class Decode a {\n  fn decode(s: String) -> a\n}\ninstance Decode Int {\n  fn decode(s: String) -> Int = 1\n}\ninstance Decode String {\n  fn decode(s: String) -> String = s\n}\nfn test(f: (String -> Int) -> Int) -> Int = f(decode)")
+    assert_true(state, "p1c-decode: lowers ok", is_lower_ok(r_p1c_decode))
+    assert_true(state, "p1c-decode: picks Decode Int not Decode String",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_p1c_decode, "test"), "__tc_Decode_Int_"))
+
+    r_p1c_make <- run_lower("class Make a {\n  fn make() -> a\n}\ninstance Make Int {\n  fn make() -> Int = 1\n}\ninstance Make String {\n  fn make() -> String = \"s\"\n}\nfn test(f: (Unit -> Int) -> Int) -> Int = f(make)")
+    assert_true(state, "p1c-zero-arg: lowers ok", is_lower_ok(r_p1c_make))
+    assert_true(state, "p1c-zero-arg: picks Make Int not Make Unit",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_p1c_make, "test"), "__tc_Make_Int_"))
+
     summary(state)
