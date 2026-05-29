@@ -125,6 +125,35 @@ fn lowered_fn_lambda_inner_callee(result: lowering.LowerResult, fname: String) -
           | Nothing -> "__no_fn"
           | Just body -> lambda_arg_inner_callee(body)
 
+# Count args in the inner call inside the first lambda arg.
+# For f(eta_lambda) where eta_lambda = TLambda(ps, TCall(impl, args, ...), ...):
+# returns list_length(args) — used to verify dict args are included.
+fn count_typed_exprs(xs: List typed_ast.TypedExpr) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons _ rest -> 1 + count_typed_exprs(rest)
+
+fn lambda_arg_inner_call_arg_count(body: typed_ast.TypedExpr) -> Int =
+  match body with
+  | typed_ast.TCall _ args _ _ ->
+      match args with
+      | Cons (typed_ast.TLambda _ lambda_body _ _) _ ->
+          match lambda_body with
+          | typed_ast.TCall _ inner_args _ _ -> count_typed_exprs(inner_args)
+          | _ -> -1
+      | _ -> -2
+  | _ -> -3
+
+fn lowered_fn_lambda_inner_arg_count(result: lowering.LowerResult, fname: String) -> Int =
+  match result with
+  | lowering.LowerErr _ -> -4
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> -5
+          | Just body -> lambda_arg_inner_call_arg_count(body)
+
 # After lowering, TDict args become TVar nodes named __tc_ClassName_Type_method.
 # Scan a call's arg list for the first such var and return its name.
 fn tc_var_name_if_any(arg: typed_ast.TypedExpr) -> Maybe String =
@@ -271,5 +300,14 @@ fn main() -> Unit !{IO} =
     r_shadowed <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nfn test(f: (Int -> String) -> String, myshow: Int -> String) -> String = f(myshow)")
     assert_true(state, "shadowed param: lowers ok", is_lower_ok(r_shadowed))
     assert_false(state, "shadowed param: NOT eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_shadowed, "test"))
+
+    # P1-constrained: class method in value position where the instance is parameterized
+    # (instance MyEq (Box a) where MyEq a). The concrete-head branch fires with head "Box",
+    # finding __tc_MyEq_Box_my_eq — but the eta wrapper must also thread the inner
+    # MyEq a dict so the inner call has 3 args (dict + 2 value), not 2.
+    r_p1c <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Box a = Box a\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq (Box a) where MyEq a {\n  fn my_eq(x: Box a, y: Box a) -> Bool = true\n}\nfn test(f: (Box a -> Box a -> Bool) -> Bool) -> Bool where MyEq (Box a), MyEq a = f(my_eq)")
+    assert_true(state, "p1-constrained: lowers ok", is_lower_ok(r_p1c))
+    assert_true(state, "p1-constrained: my_eq is eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_p1c, "test"))
+    assert_eq(state, "p1-constrained: inner call has 3 args (1 dict + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1c, "test"), 3)
 
     summary(state)
