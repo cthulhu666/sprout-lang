@@ -865,12 +865,10 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
   | Just prog_scheme ->
       match types.scheme_type(prog_scheme) with
       | types.TConst prog_var ->
-          match dict_get(strip_module_prefix(class_name) ++ "_" ++ prog_var, ctx_fwd(ctx)) with
-          | Nothing -> Nothing
-          | Just method_map ->
-              Just(collect_slots_from_method_map(
-                class_methods_for(strip_module_prefix(class_name), ctx_class_order(ctx)),
-                method_map, pos))
+          Just(resolve_tdict(
+            ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
+            pos,
+            ctx))
       | _ -> Nothing
 
 fn try_eta_expand_class_method(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =

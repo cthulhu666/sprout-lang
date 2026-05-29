@@ -409,4 +409,11 @@ fn main() -> Unit !{IO} =
     assert_true(state, "p1b-mixed-inner: lowers ok", is_lower_ok(r_p1b_mixed))
     assert_eq(state, "p1b-mixed-inner: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_mixed, "test"), 4)
 
+    # P1b-super-inner: if the forwarded inner constraint has superclasses, eta
+    # expansion must include the direct class slots plus transitive superclass
+    # slots. MyOrd a contributes my_less and superclass MyEq a contributes my_eq.
+    r_p1b_super <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\nclass MyOrd a where MyEq a {\n  fn my_less(x: a, y: a) -> Bool\n}\ntype Box a = Box a\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd Int {\n  fn my_less(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd (Box a) where MyOrd a {\n  fn my_less(x: Box a, y: Box a) -> Bool = true\n}\nfn test(f: (Box a -> Box a -> Bool) -> Bool) -> Bool where MyOrd (Box a), MyOrd a = f(my_less)")
+    assert_true(state, "p1b-super-inner: lowers ok", is_lower_ok(r_p1b_super))
+    assert_eq(state, "p1b-super-inner: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_super, "test"), 4)
+
     summary(state)
