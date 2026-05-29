@@ -33,6 +33,10 @@ This file tracks open design, implementation, and tooling follow-up work.
 4. Keep expanding stdlib text/data helpers beyond the current baseline (`trim*`, `contains`, `ends_with`, `string_lines`, `string_digits`, vector utility combinators).
    Remaining follow-up: define the Unicode text model explicitly enough to support a future `Char` type and consistent string indexing/length/slice semantics.
 5. Improve the formatter/linter beyond the current baseline (deeper structural formatting and broader lint rules).
+   Immediate tooling bug: `fmt_bin fmt` currently collapses some `.sprout`/`.spr`
+   files to a single line, including `stdlib/compiler/lowering.sprout` and
+   `tests/stdlib/compiler/test_lowering.spr`. Fix formatter newline preservation
+   and add regression coverage before relying on the pre-commit formatting hook.
 6. Keep improving local test throughput.
    Completed: native Sprout test files for all six compiler stages live in `tests/stdlib/compiler/` — `test_lexer.spr`, `test_bundler.spr`, `test_parser.spr`, `test_checker.spr`, `test_lowering.spr`, `test_codegen.spr`; run via `just test` (`test-stdlib-stage1`).
    Completed: fixed bundler UTF-8 bug in `strip_headers_b` — byte offset was used as codepoint index in `str_slice`, causing parse failures on files (e.g. `stdlib/compiler/types.sprout`) with multi-byte characters in comment headers.

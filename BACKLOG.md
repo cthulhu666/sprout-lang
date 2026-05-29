@@ -101,6 +101,12 @@ Definition of done:
 - [x] `P1` Add better diagnostics for module/import/export errors with source context.
 - [x] `P2` Add formatter/linter baseline.
 - [ ] `P2` Improve formatter/linter beyond the baseline (structural formatting and broader lint rules).
+- [ ] `P1` Fix native formatter newline preservation bug: `fmt_bin fmt` can collapse
+  `.sprout`/`.spr` files to a single line. Reproduced on
+  `stdlib/compiler/lowering.sprout`, `tests/stdlib/compiler/test_lowering.spr`,
+  and `tests/stdlib/test_constrained_container_dispatch.spr`; this also makes the
+  pre-commit `fmt-check` hook unusable for affected files. Add regression coverage
+  for multiline modules before re-enabling formatter-enforced commits for these paths.
 - [ ] `P2` Move `lower_typeclasses` into `run_program` so callers never need to apply it manually: every production call site (cli.py, repl.py, analysis_execution_backend.py) already lowers before calling `run_program`, but tests that call `run_program` directly on an unlowered program silently break whenever new code uses a Foldable/typeclass-constrained function. Verify no caller double-lowers (lowering should be idempotent, but confirm first), then absorb the step inside `run_program` and remove the redundant `lower_typeclasses` calls at each call site.
 - [x] `P1` Add `opt --passes=verify` IR validation to `bootstrap-from-seed`, `_test-stdlib`, and `_compile-examples` justfile recipes (2026-05-28). `_build-stage` already had the check. All three emit LLVM IR and then hand off to clang; the verify step runs between IR emission and clang so malformed IR (phi type mismatches, wrong insertvalue types, etc.) is caught with a precise LLVM error rather than a cryptic clang message. `opt` is a hard requirement — the build fails loudly if it is not on PATH. Install via `brew install llvm` (macOS) or `apt-get install llvm-16` (Linux). CI already satisfies this via `llvm-16` in PATH. Pre-commit hook emit-IR smoke tests (section 1) also wired to run `opt --passes=verify` per shape when available. This would have caught the CPR tuple param regression (LLVM phi type mismatch) and the missing-ptrtoint global closure bug.
 
