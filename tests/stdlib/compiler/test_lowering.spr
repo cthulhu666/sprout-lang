@@ -24,6 +24,11 @@ fn is_lower_ok(r: lowering.LowerResult) -> Bool =
   | lowering.LowerOk _ -> true
   | lowering.LowerErr _ -> false
 
+fn lower_err_msg(r: lowering.LowerResult) -> String =
+  match r with
+  | lowering.LowerOk _ -> "__ok"
+  | lowering.LowerErr msg -> msg
+
 fn has_tc_name_in(decls: List typed_ast.TypedDecl) -> Bool =
   match decls with
   | Nil -> false
@@ -64,6 +69,71 @@ fn body_type_is_sentinel(r: lowering.LowerResult) -> Bool =
           | Nothing -> false
           | Just body -> is_sentinel_type(typed_ast.typed_expr_type(body))
 
+fn first_fn_body_named(decls: List typed_ast.TypedDecl, fname: String) -> Maybe typed_ast.TypedExpr =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ body ->
+          if name == fname then Just(body)
+          else first_fn_body_named(rest, fname)
+      | _ -> first_fn_body_named(rest, fname)
+
+fn first_arg_is_lambda(args: List typed_ast.TypedExpr) -> Bool =
+  match args with
+  | Nil -> false
+  | Cons first _ ->
+      match first with
+      | typed_ast.TLambda _ _ _ _ -> true
+      | _ -> false
+
+fn body_first_arg_is_lambda(body: typed_ast.TypedExpr) -> Bool =
+  match body with
+  | typed_ast.TCall _ args _ _ -> first_arg_is_lambda(args)
+  | _ -> false
+
+fn lowered_fn_body_has_lambda_first_arg(result: lowering.LowerResult, fname: String) -> Bool =
+  match result with
+  | lowering.LowerErr _ -> false
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> false
+          | Just body -> body_first_arg_is_lambda(body)
+
+# After lowering, TDict args become TVar nodes named __tc_ClassName_Type_method.
+# Scan a call's arg list for the first such var and return its name.
+fn tc_var_name_if_any(arg: typed_ast.TypedExpr) -> Maybe String =
+  match arg with
+  | typed_ast.TVar name _ _ ->
+      if str_starts_with(name, "__tc_") then Just(name) else Nothing
+  | _ -> Nothing
+
+fn find_tc_var_in_args(args: List typed_ast.TypedExpr) -> String =
+  match args with
+  | Nil -> "__none"
+  | Cons first rest ->
+      match tc_var_name_if_any(first) with
+      | Just name -> name
+      | Nothing -> find_tc_var_in_args(rest)
+
+fn call_body_first_tc_var(body: typed_ast.TypedExpr) -> String =
+  match body with
+  | typed_ast.TCall _ args _ _ -> find_tc_var_in_args(args)
+  | _ -> "__not_call"
+
+# Return the name of the first __tc_* TVar found in fname's lowered body call args.
+fn lowered_fn_body_dict_var_name(result: lowering.LowerResult, fname: String) -> String =
+  match result with
+  | lowering.LowerErr _ -> "__lower_err"
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> "__no_fn"
+          | Just body -> call_body_first_tc_var(body)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -94,5 +164,29 @@ fn main() -> Unit !{IO} =
     # Error propagation — lex errors become LowerErr
     r5 <- run_lower("@invalid syntax")
     assert_false(state, "lex error propagates to LowerErr", is_lower_ok(r5))
+
+    # Regression: class method in value position must be eta-expanded to a TLambda,
+    # not left as a bare TVar (which generates a generic closure including dict slots
+    # as extra args — callers without the dict arity SIGBUS on AArch64).
+    r_eta_conc <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nfn test(f: (Int -> String) -> String, n: Int) -> String = f(myshow)")
+    assert_true(state, "class method value-pos (concrete) lowers ok", is_lower_ok(r_eta_conc))
+    assert_true(state, "class method value-pos (concrete) eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_eta_conc, "test"))
+
+    r_eta_poly <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\nfn test(f: (b -> String) -> String, n: b) -> String where MyShow b = f(myshow)")
+    assert_true(state, "class method value-pos (poly) lowers ok", is_lower_ok(r_eta_poly))
+    assert_true(state, "class method value-pos (poly) eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_eta_poly, "test"))
+
+    # Regression: constrained fn call must inject the element dict (Int), not the
+    # container dict (Box Int) when the constraint variable appears inside a container
+    # param type and an instance for the container also exists.
+    # Bug: resolve_obligation fell through to first-concrete-arg heuristic which
+    # found Box Int's head "Box" and picked @inst:MyC:Box instead of @inst:MyC:Int.
+    # Use a user-defined Box type (avoids Cons/Nil not being in scope in the isolated
+    # typecheck env) with a concrete Box Int instance so the first-arg heuristic
+    # resolves to Box (wrong) vs the prog_to_fresh scan which resolves to Int (correct).
+    r_dict_conc <- run_lower("class MyC a {\n  fn myop(x: a) -> String\n}\ninstance MyC Int {\n  fn myop(x: Int) -> String = \"int\"\n}\ntype Box a = Box a\ninstance MyC (Box Int) {\n  fn myop(xs: Box Int) -> String = \"boxint\"\n}\nfn wrap(xs: Box a) -> String where MyC a = \"ok\"\nfn main() -> String = wrap(Box(42))")
+    assert_true(state, "constrained dict injection (container arg) lowers ok", is_lower_ok(r_dict_conc))
+    assert_true(state, "constrained dict injection uses Int dict not Box dict",
+      str_starts_with(lowered_fn_body_dict_var_name(r_dict_conc, "main"), "__tc_MyC_Int_"))
 
     summary(state)

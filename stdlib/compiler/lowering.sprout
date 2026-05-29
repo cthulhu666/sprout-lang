@@ -691,12 +691,126 @@ fn strip_module_prefix(name: String) -> String =
   where dot_pos = str_find(name, ".")
 
 # ---------------------------------------------------------------------------
+# Eta-expansion of class methods in value position
+# ---------------------------------------------------------------------------
+#
+# When a class method (e.g. `to_string`) is used as a value — passed to a
+# higher-order function like `fmap` — the generic closure wrapping it includes
+# dict slots as extra arguments.  Callers that don't know the dict arity crash
+# (SIGBUS on AArch64).  Fix: rewrite the TVar to a TLambda that calls the
+# resolved concrete or forwarded implementation directly, bypassing the generic
+# wrapper and its hidden dict parameter.
+#
+# lower_expr_callee (used for TCall callees) skips eta-expansion so that
+# infer-injected TDict nodes in direct calls expand correctly.
+
+fn find_class_of_method(method_name: String, class_order: Dict (List String)) -> Maybe String =
+  find_class_in_co_entries(method_name, vec_to_list(dict_entries(class_order)))
+
+fn find_class_in_co_entries(method_name: String, entries: List (String, List String)) -> Maybe String =
+  match entries with
+  | Nil -> Nothing
+  | Cons (class_name, methods) rest ->
+      if list_str_member(method_name, methods) then Just(class_name)
+      else find_class_in_co_entries(method_name, rest)
+
+fn first_concrete_head_str(t: types.Type) -> Maybe String =
+  match t with
+  | types.TConst name -> Just(strip_module_prefix(name))
+  | types.TApp base _ -> first_concrete_head_str(base)
+  | _ -> Nothing
+
+fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
+  match dict_get(class_name ++ "_" ++ head, ctx_inst(ctx)) with
+  | Nothing -> Nothing
+  | Just method_map -> dict_get(method_name, method_map)
+
+fn find_fwd_method_impl(class_name: String, method_name: String, ctx: LowerCtx) -> Maybe String =
+  find_fwd_in_co_entries(class_name, method_name, vec_to_list(dict_entries(ctx_fwd(ctx))))
+
+fn find_fwd_in_co_entries(class_name: String, method_name: String, entries: List (String, Dict String)) -> Maybe String =
+  match entries with
+  | Nil -> Nothing
+  | Cons (key, method_map) rest ->
+      if str_starts_with(key, class_name ++ "_") then
+        match dict_get(method_name, method_map) with
+        | Just impl_name -> Just(impl_name)
+        | Nothing -> find_fwd_in_co_entries(class_name, method_name, rest)
+      else
+        find_fwd_in_co_entries(class_name, method_name, rest)
+
+fn eta_param_name(i: Int) -> String =
+  "__eta_x" ++ int_to_string(i)
+
+fn count_method_params(t: types.Type) -> Int =
+  match t with
+  | types.TFunc _ ret _ -> 1 + count_method_params(ret)
+  | _ -> 0
+
+fn make_eta_params_list(n: Int, i: Int) -> List ast.Param =
+  if i >= n then Nil
+  else Cons(ast.Param(eta_param_name(i), Nothing), make_eta_params_list(n, i + 1))
+
+fn make_eta_arg_tvars(t: types.Type, i: Int, n: Int, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  if i >= n then Nil
+  else
+    match t with
+    | types.TFunc param ret _ ->
+        Cons(typed_ast.TVar(eta_param_name(i), param, pos),
+             make_eta_arg_tvars(ret, i + 1, n, pos))
+    | _ ->
+        Cons(typed_ast.TVar(eta_param_name(i), t, pos),
+             make_eta_arg_tvars(t, i + 1, n, pos))
+
+fn make_eta_lambda(impl_name: String, method_type: types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  make_eta_lambda_n(impl_name, method_type, count_method_params(method_type), pos)
+
+fn make_eta_lambda_n(impl_name: String, method_type: types.Type, n: Int, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TLambda(
+    make_eta_params_list(n, 0),
+    typed_ast.TCall(
+      typed_ast.TVar(impl_name, method_type, pos),
+      make_eta_arg_tvars(method_type, 0, n, pos),
+      tfunc_result_type(method_type), pos),
+    method_type, pos)
+
+fn try_eta_expand_class_method(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match find_class_of_method(name, ctx_class_order(ctx)) with
+  | Nothing -> Nothing
+  | Just class_name -> try_eta_in_class(class_name, name, t, ctx)
+
+fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match t with
+  | types.TFunc param _ _ ->
+      match first_concrete_head_str(param) with
+      | Just head ->
+          match find_concrete_method_impl(class_name, name, head, ctx) with
+          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+          | Nothing -> Nothing
+      | Nothing ->
+          match find_fwd_method_impl(class_name, name, ctx) with
+          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+          | Nothing -> Nothing
+  | _ -> Nothing
+
+# lower_expr_callee: lower the callee of a TCall without eta-expanding TVar class methods.
+# Direct class method calls already have TDict nodes injected by infer; rewriting the
+# callee would corrupt those dict args.
+fn lower_expr_callee(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
+  match te with
+  | typed_ast.TVar name t pos -> typed_ast.TVar(name, t, pos)
+  | _ -> lower_expr(te, ctx)
+
+# ---------------------------------------------------------------------------
 # Expression lowering
 # ---------------------------------------------------------------------------
 
 fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   match te with
-  | typed_ast.TVar name t pos -> typed_ast.TVar(name, t, pos)
+  | typed_ast.TVar name t pos ->
+      match try_eta_expand_class_method(name, t, ctx) with
+      | Just expanded -> lower_expr(expanded, ctx)
+      | Nothing -> typed_ast.TVar(name, t, pos)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)
@@ -709,7 +823,7 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   | typed_ast.TMatch scrut branches t pos ->
       typed_ast.TMatch(lower_expr(scrut, ctx), lower_branches(branches, ctx), t, pos)
   | typed_ast.TCall callee args t pos ->
-      typed_ast.TCall(lower_expr(callee, ctx), expand_call_args(args, ctx), t, pos)
+      typed_ast.TCall(lower_expr_callee(callee, ctx), expand_call_args(args, ctx), t, pos)
   | typed_ast.TDict _ t pos ->
       # TDict should only appear as a prefix arg inside TCall — never standalone.
       # If seen standalone, emit as unit.  Note: `t` here is the constraint evidence

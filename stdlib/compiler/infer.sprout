@@ -1084,9 +1084,9 @@ fn resolve_obligation(
   | Nothing ->
       match resolve_via_fwd_for_prog_var(class_name, prog_var, env, pos) with
       | Nothing ->
-          match resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded) with
+          match scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded) with
           | Just tdict -> Just(tdict)
-          | Nothing -> scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded)
+          | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded)
       | fwd -> fwd
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
