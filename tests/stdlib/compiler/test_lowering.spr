@@ -265,4 +265,11 @@ fn main() -> Unit !{IO} =
     assert_true(state, "direct constrained call injects correct dict",
       str_starts_with(lowered_fn_body_dict_var_name(r_direct, "main"), "__tc_Greet_Int_"))
 
+    # P1-shadowed: a function parameter named after a class method must NOT be eta-expanded.
+    # The name 'myshow' here refers to the local param (Int -> String), not the class method.
+    # Bug: lower_expr's TVar case would see the name in the class env and wrap it in a lambda.
+    r_shadowed <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nfn test(f: (Int -> String) -> String, myshow: Int -> String) -> String = f(myshow)")
+    assert_true(state, "shadowed param: lowers ok", is_lower_ok(r_shadowed))
+    assert_false(state, "shadowed param: NOT eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_shadowed, "test"))
+
     summary(state)

@@ -65,8 +65,9 @@ type LowerEnv =
 #   super_map    – class_name → [direct superclass names]
 #   inst_meta    – same as LowerEnv.inst_meta, threaded through for resolve_tdict
 #   scheme_env   – inherited from LowerEnv; used in resolve_tdict to type generated VarExprs
+#   bound_vars   – locally bound names (fn params, lambda params) that must NOT be eta-expanded
 type LowerCtx =
-  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int)) (Dict types.Scheme)
+  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int)) (Dict types.Scheme) (List String)
 
 fn env_class_order(env: LowerEnv) -> Dict (List String) =
   match env with | LowerEnv co _ _ _ _ -> co
@@ -84,24 +85,35 @@ fn env_scheme_env(env: LowerEnv) -> Dict types.Scheme =
   match env with | LowerEnv _ _ _ _ se -> se
 
 fn ctx_class_order(ctx: LowerCtx) -> Dict (List String) =
-  match ctx with | LowerCtx co _ _ _ _ _ -> co
+  match ctx with | LowerCtx co _ _ _ _ _ _ -> co
 
 fn ctx_fwd(ctx: LowerCtx) -> Dict (Dict String) =
-  match ctx with | LowerCtx _ fwd _ _ _ _ -> fwd
+  match ctx with | LowerCtx _ fwd _ _ _ _ _ -> fwd
 
 fn ctx_inst(ctx: LowerCtx) -> Dict (Dict String) =
-  match ctx with | LowerCtx _ _ inst _ _ _ -> inst
+  match ctx with | LowerCtx _ _ inst _ _ _ _ -> inst
 
 fn ctx_super_map(ctx: LowerCtx) -> Dict (List String) =
-  match ctx with | LowerCtx _ _ _ sm _ _ -> sm
+  match ctx with | LowerCtx _ _ _ sm _ _ _ -> sm
 
 fn ctx_inst_meta(ctx: LowerCtx) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int) =
-  match ctx with | LowerCtx _ _ _ _ im _ -> im
+  match ctx with | LowerCtx _ _ _ _ im _ _ -> im
 
 fn ctx_scheme_env(ctx: LowerCtx) -> Dict types.Scheme =
-  match ctx with | LowerCtx _ _ _ _ _ se -> se
+  match ctx with | LowerCtx _ _ _ _ _ se _ -> se
+
+fn ctx_bound_vars(ctx: LowerCtx) -> List String =
+  match ctx with | LowerCtx _ _ _ _ _ _ bv -> bv
+
+fn ctx_with_bound(vars: List String, ctx: LowerCtx) -> LowerCtx =
+  LowerCtx(ctx_class_order(ctx), ctx_fwd(ctx), ctx_inst(ctx), ctx_super_map(ctx), ctx_inst_meta(ctx), ctx_scheme_env(ctx), list_append(ctx_bound_vars(ctx), vars))
 
 fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+
+fn param_names_from_list(ps: List ast.Param) -> List String =
+  match ps with
+  | Nil -> Nil
+  | Cons (ast.Param name _) rest -> Cons(name, param_names_from_list(rest))
 
 # ---------------------------------------------------------------------------
 # Type helpers for generated nodes
@@ -333,7 +345,7 @@ fn lower_one_decl(
        wrapper_rev, inst_rev)
   | typed_ast.TLetDecl name body ->
       (Cons(typed_ast.TLetDecl(name,
-                               lower_expr(body, LowerCtx(env_class_order(env), dict_empty(), env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env)))),
+                               lower_expr(body, LowerCtx(env_class_order(env), dict_empty(), env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env), Nil))),
             user_rev),
        wrapper_rev, inst_rev)
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
@@ -483,7 +495,7 @@ fn generate_one_instance_fn(
             ret_maybe,
             effects_maybe,
             [],
-            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env))))
+            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env), param_names_from_list(list_append(params, hidden_params)))))
 
 # ---------------------------------------------------------------------------
 # FnDecl lowering
@@ -506,7 +518,7 @@ fn lower_fn_decl(
         ret_ty,
         effects,
         [],
-        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env))))
+        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env), param_names_from_list(list_append(params, hidden_params)))))
 
 # ---------------------------------------------------------------------------
 # Build hidden params for a list of constraints
@@ -833,9 +845,12 @@ fn lower_expr_callee(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedE
 fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   match te with
   | typed_ast.TVar name t pos ->
-      match try_eta_expand_class_method(name, t, ctx) with
-      | Just expanded -> lower_expr(expanded, ctx)
-      | Nothing -> typed_ast.TVar(name, t, pos)
+      if list_member(name, ctx_bound_vars(ctx)) then
+        typed_ast.TVar(name, t, pos)
+      else
+        match try_eta_expand_class_method(name, t, ctx) with
+        | Just expanded -> lower_expr(expanded, ctx)
+        | Nothing -> typed_ast.TVar(name, t, pos)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)
@@ -856,7 +871,7 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       # the type mismatch on the TUnit node is harmless.
       typed_ast.TUnit(t, pos)
   | typed_ast.TLambda params body t pos ->
-      typed_ast.TLambda(params, lower_expr(body, ctx), t, pos)
+      typed_ast.TLambda(params, lower_expr(body, ctx_with_bound(param_names_from_list(params), ctx)), t, pos)
   | typed_ast.TBinary op l r t pos ->
       typed_ast.TBinary(op, lower_expr(l, ctx), lower_expr(r, ctx), t, pos)
   | typed_ast.TUnary op e t pos ->
