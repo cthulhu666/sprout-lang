@@ -396,4 +396,17 @@ fn main() -> Unit !{IO} =
     assert_true(state, "p1b-multi-var: lowers ok", is_lower_ok(r_p1b_multi))
     assert_eq(state, "p1b-multi-var: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_multi, "test"), 4)
 
+    # P1b-multi-concrete: the same Pair instance at Pair Int Bool must resolve
+    # both concrete inner dictionaries. The old eta path only looked at the final
+    # concrete type arg (Bool), so it built an under-applied wrapper.
+    r_p1b_multi_concrete <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Pair a b = Pair a b\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq Bool {\n  fn my_eq(x: Bool, y: Bool) -> Bool = true\n}\ninstance MyEq (Pair a b) where MyEq a, MyEq b {\n  fn my_eq(x: Pair a b, y: Pair a b) -> Bool = true\n}\nfn test(f: (Pair Int Bool -> Pair Int Bool -> Bool) -> Bool) -> Bool = f(my_eq)")
+    assert_true(state, "p1b-multi-concrete: lowers ok", is_lower_ok(r_p1b_multi_concrete))
+    assert_eq(state, "p1b-multi-concrete: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_multi_concrete, "test"), 4)
+
+    # P1b-mixed-inner: Pair a Bool must resolve one forwarded dict and one
+    # concrete dict through the same general substitution path.
+    r_p1b_mixed <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Pair a b = Pair a b\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq Bool {\n  fn my_eq(x: Bool, y: Bool) -> Bool = true\n}\ninstance MyEq (Pair a b) where MyEq a, MyEq b {\n  fn my_eq(x: Pair a b, y: Pair a b) -> Bool = true\n}\nfn test(f: (Pair a Bool -> Pair a Bool -> Bool) -> Bool) -> Bool where MyEq (Pair a Bool), MyEq a = f(my_eq)")
+    assert_true(state, "p1b-mixed-inner: lowers ok", is_lower_ok(r_p1b_mixed))
+    assert_eq(state, "p1b-mixed-inner: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_mixed, "test"), 4)
+
     summary(state)

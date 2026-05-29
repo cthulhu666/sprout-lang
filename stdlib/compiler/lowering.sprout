@@ -795,34 +795,6 @@ fn tvar_head_name(t: types.Type) -> Maybe String =
   | types.TVar name -> Just(name)
   | _ -> Nothing
 
-# For TApp _ (TVar name) returns Just name; Nothing for concrete inner types or non-TApp.
-fn inner_tvar_of_tapp(t: types.Type) -> Maybe String =
-  match t with
-  | types.TApp _ arg ->
-      match arg with
-      | types.TVar name -> Just(name)
-      | _ -> Nothing
-  | _ -> Nothing
-
-# For TApp _ (TConst name) returns Just name (stripped); Nothing otherwise.
-fn inner_concrete_of_tapp(t: types.Type) -> Maybe String =
-  match t with
-  | types.TApp _ arg ->
-      match arg with
-      | types.TConst name -> Just(strip_module_prefix(name))
-      | _ -> Nothing
-  | _ -> Nothing
-
-# Collect ALL inner TVar names from a TApp chain, innermost (leftmost) first.
-# TApp(TApp(Pair, fresh_a), fresh_b) → ["fresh_a", "fresh_b"].
-fn tapp_inner_tvars_ordered(t: types.Type) -> List String =
-  match t with
-  | types.TApp base arg ->
-      match arg with
-      | types.TVar name -> list_append(tapp_inner_tvars_ordered(base), Cons(name, Nil))
-      | _ -> tapp_inner_tvars_ordered(base)
-  | _ -> Nil
-
 fn make_eta_lambda_with_dicts(impl_name: String, method_type: types.Type, dict_args: List typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
   make_eta_lambda_with_dicts_n(impl_name, method_type, count_method_params(method_type), dict_args, pos)
 
@@ -835,41 +807,6 @@ fn make_eta_lambda_with_dicts_n(impl_name: String, method_type: types.Type, n: I
       tfunc_result_type(method_type), pos),
     method_type, pos)
 
-fn lookup_eta_inner_dicts(class_name: String, head: String, inner_tvar: String, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
-  match dict_get(class_name ++ "_" ++ head, ctx_inst_meta(ctx)) with
-  | Nothing -> Nothing
-  | Just (_, inst_constraints, _) ->
-      match inst_constraints with
-      | Nil -> Nothing
-      | _ ->
-          match resolve_eta_inner_dicts_for_constraints(inst_constraints, inner_tvar, ctx, dummy_pos()) with
-          | Nil -> Nothing
-          | inner_dicts -> Just(inner_dicts)
-
-fn resolve_eta_inner_dicts_for_constraints(inst_constraints: List ast.TypeConstraint, inner_tvar: String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
-  match inst_constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      list_append(
-        resolve_eta_one_inner_dict(c, inner_tvar, ctx, pos),
-        resolve_eta_inner_dicts_for_constraints(rest, inner_tvar, ctx, pos))
-
-fn resolve_eta_one_inner_dict(c: ast.TypeConstraint, inner_tvar: String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
-  match c with
-  | ast.TypeConstraint class_name _ ->
-      match dict_get("@eta_fwd:" ++ inner_tvar ++ ":" ++ strip_module_prefix(class_name), ctx_scheme_env(ctx)) with
-      | Nothing -> Nil
-      | Just prog_scheme ->
-          match types.scheme_type(prog_scheme) with
-          | types.TConst prog_var ->
-              match dict_get(strip_module_prefix(class_name) ++ "_" ++ prog_var, ctx_fwd(ctx)) with
-              | Nothing -> Nil
-              | Just method_map ->
-                  collect_slots_from_method_map(
-                    class_methods_for(strip_module_prefix(class_name), ctx_class_order(ctx)),
-                    method_map, pos)
-          | _ -> Nil
-
 fn collect_slots_from_method_map(methods: List String, method_map: Dict String, pos: source.SourcePos) -> List typed_ast.TypedExpr =
   match methods with
   | Nil -> Nil
@@ -880,101 +817,61 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
           Cons(typed_ast.TVar(slot, types.TVar("?lambda"), pos),
                collect_slots_from_method_map(rest, method_map, pos))
 
-# Resolve inner dicts for the concrete-inner-type case (e.g. Box Int).
-# For each inst_constraint (e.g. MyEq a), looks up the concrete instance for
-# {class}_{concrete_inner} in ctx_inst and collects its slot references.
-fn lookup_eta_inner_dicts_concrete(class_name: String, head: String, concrete_inner: String, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
+fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
+  match t with
+  | types.TConst name -> ast.TypeName(strip_module_prefix(name))
+  | types.TVar name -> ast.TypeName(name)
+  | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
+  | types.TFunc param ret _ ->
+      ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing)
+  | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_eta_typeexpr(item), items))
+
+fn lookup_eta_inner_dicts_general(class_name: String, head: String, actual_param: types.Type, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
   match dict_get(class_name ++ "_" ++ head, ctx_inst_meta(ctx)) with
   | Nothing -> Nothing
-  | Just (_, inst_constraints, _) ->
+  | Just (inst_type_args, inst_constraints, _) ->
       match inst_constraints with
       | Nil -> Nothing
       | _ ->
-          match resolve_concrete_inst_dicts(inst_constraints, concrete_inner, ctx, dummy_pos()) with
-          | Nil -> Nothing
-          | dicts -> Just(dicts)
-
-fn resolve_concrete_inst_dicts(inst_constraints: List ast.TypeConstraint, concrete_inner: String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
-  match inst_constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      list_append(
-        resolve_one_concrete_inst_dict(c, concrete_inner, ctx, pos),
-        resolve_concrete_inst_dicts(rest, concrete_inner, ctx, pos))
-
-fn resolve_one_concrete_inst_dict(c: ast.TypeConstraint, concrete_inner: String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
-  match c with
-  | ast.TypeConstraint class_name _ ->
-      match dict_get(strip_module_prefix(class_name) ++ "_" ++ concrete_inner, ctx_inst(ctx)) with
-      | Nothing -> Nil
-      | Just method_map ->
-          collect_slots_from_method_map(
-            class_methods_for(strip_module_prefix(class_name), ctx_class_order(ctx)),
-            method_map, pos)
-
-# Extract inst type variable names from the instance type_args in TApp left-to-right order.
-# For [TypeApply(TypeApply(TypeName "Pair", TypeName "a"), TypeName "b")] → ["a", "b"].
-fn extract_inst_type_var_names(type_args: List ast.TypeExpr) -> List String =
-  match type_args with
-  | Nil -> Nil
-  | Cons head_arg _ -> type_apply_arg_var_names(head_arg)
-
-fn type_apply_arg_var_names(te: ast.TypeExpr) -> List String =
-  match te with
-  | ast.TypeApply base arg ->
-      match arg with
-      | ast.TypeName name -> list_append(type_apply_arg_var_names(base), Cons(name, Nil))
-      | _ -> type_apply_arg_var_names(base)
-  | _ -> Nil
-
-fn build_var_to_tvar_dict(inst_vars: List String, fresh_tvars: List String) -> Dict String =
-  match inst_vars with
-  | Nil -> dict_empty()
-  | Cons var rest_vars ->
-      match fresh_tvars with
-      | Nil -> dict_empty()
-      | Cons tv rest_tvars ->
-          dict_set(var, tv, build_var_to_tvar_dict(rest_vars, rest_tvars))
-
-fn resolve_eta_inner_dicts_with_var_map(inst_constraints: List ast.TypeConstraint, var_to_tvar: Dict String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
-  match inst_constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      list_append(
-        resolve_eta_one_constraint_with_map(c, var_to_tvar, ctx, pos),
-        resolve_eta_inner_dicts_with_var_map(rest, var_to_tvar, ctx, pos))
-
-fn resolve_eta_one_constraint_with_map(c: ast.TypeConstraint, var_to_tvar: Dict String, ctx: LowerCtx, pos: source.SourcePos) -> List typed_ast.TypedExpr =
-  match c with
-  | ast.TypeConstraint _ type_args ->
-      match type_args with
-      | Cons (ast.TypeName var_name) _ ->
-          match dict_get(var_name, var_to_tvar) with
-          | Nothing -> Nil
-          | Just inner_tvar -> resolve_eta_one_inner_dict(c, inner_tvar, ctx, pos)
-      | _ -> Nil
-
-fn lookup_eta_inner_dicts_multi(class_name: String, head: String, inner_tvars: List String, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
-  match dict_get(class_name ++ "_" ++ head, ctx_inst_meta(ctx)) with
-  | Nothing -> Nothing
-  | Just (type_args, inst_constraints, _) ->
-      match inst_constraints with
-      | Nil -> Nothing
-      | _ ->
-          lookup_eta_inner_dicts_multi_with_inst(
-            extract_inst_type_var_names(type_args),
-            inner_tvars,
+          match resolve_eta_substituted_inner_dicts(
             inst_constraints,
-            ctx,
-            dummy_pos())
+            unify_type_args_list(inst_type_args, Cons(type_to_eta_typeexpr(actual_param), Nil), dict_empty()),
+            dummy_pos(),
+            ctx) with
+          | Nil -> Nothing
+          | inner_dicts -> Just(inner_dicts)
 
-fn lookup_eta_inner_dicts_multi_with_inst(inst_var_names: List String, inner_tvars: List String, inst_constraints: List ast.TypeConstraint, ctx: LowerCtx, pos: source.SourcePos) -> Maybe (List typed_ast.TypedExpr) =
-  if list_length(inst_var_names) == list_length(inner_tvars) then
-    match resolve_eta_inner_dicts_with_var_map(inst_constraints, build_var_to_tvar_dict(inst_var_names, inner_tvars), ctx, pos) with
-    | Nil -> Nothing
-    | inner_dicts -> Just(inner_dicts)
-  else
-    Nothing
+fn resolve_eta_substituted_inner_dicts(inst_constraints: List ast.TypeConstraint, subs: Dict ast.TypeExpr, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
+  match inst_constraints with
+  | Nil -> Nil
+  | Cons c rest ->
+      list_append(
+        resolve_eta_substituted_inner_dict(substitute_constraint(c, subs), pos, ctx),
+        resolve_eta_substituted_inner_dicts(rest, subs, pos, ctx))
+
+fn resolve_eta_substituted_inner_dict(c: ast.TypeConstraint, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Cons (ast.TypeName name) Nil ->
+          match resolve_eta_fwd_type_name_dict(class_name, name, pos, ctx) with
+          | Just dicts -> dicts
+          | Nothing -> resolve_tdict(c, pos, ctx)
+      | _ -> resolve_tdict(c, pos, ctx)
+
+fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: source.SourcePos, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
+  match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ strip_module_prefix(class_name), ctx_scheme_env(ctx)) with
+  | Nothing -> Nothing
+  | Just prog_scheme ->
+      match types.scheme_type(prog_scheme) with
+      | types.TConst prog_var ->
+          match dict_get(strip_module_prefix(class_name) ++ "_" ++ prog_var, ctx_fwd(ctx)) with
+          | Nothing -> Nothing
+          | Just method_map ->
+              Just(collect_slots_from_method_map(
+                class_methods_for(strip_module_prefix(class_name), ctx_class_order(ctx)),
+                method_map, pos))
+      | _ -> Nothing
 
 fn try_eta_expand_class_method(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_class_of_method(name, ctx_class_order(ctx)) with
@@ -988,19 +885,9 @@ fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerC
       | Just head ->
           match find_concrete_method_impl(class_name, name, head, ctx) with
           | Just impl_name ->
-              match tapp_inner_tvars_ordered(param) with
-              | Nil ->
-                  match inner_concrete_of_tapp(param) with
-                  | Just concrete_inner ->
-                      match lookup_eta_inner_dicts_concrete(strip_module_prefix(class_name), head, concrete_inner, ctx) with
-                      | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-                      | Just inner_dicts -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
-                  | Nothing ->
-                      Just(make_eta_lambda(impl_name, t, dummy_pos()))
-              | inner_tvars ->
-                  match lookup_eta_inner_dicts_multi(strip_module_prefix(class_name), head, inner_tvars, ctx) with
-                  | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-                  | Just inner_dicts -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
+              match lookup_eta_inner_dicts_general(strip_module_prefix(class_name), head, param, ctx) with
+              | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+              | Just inner_dicts -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
           | Nothing -> Nothing
       | Nothing ->
           # @eta_fwd markers (distinct from per-function @fwd:) are threaded into

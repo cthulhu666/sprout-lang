@@ -1,0 +1,52 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+
+class Valid a {
+  fn valid(x: a) -> Bool
+}
+
+type Pair a b =
+  | MkPair a b
+
+instance Valid Int {
+  fn valid(x: Int) -> Bool = x == 1
+}
+
+instance Valid Bool {
+  fn valid(x: Bool) -> Bool = x
+}
+
+instance Valid (Pair a b) where Valid a, Valid b {
+  fn valid(x: Pair a b) -> Bool =
+    match x with
+    | MkPair xa xb -> valid(xa) && valid(xb)
+}
+
+fn valid_mixed(x: Pair a Bool) -> Bool where Valid (Pair a Bool), Valid a =
+  valid(x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(
+      state,
+      "direct dispatch threads both concrete inner dicts",
+      valid(MkPair(1, true))
+    )
+    assert_false(
+      state,
+      "concrete inner dicts preserve element result",
+      valid(MkPair(2, true))
+    )
+    assert_true(
+      state,
+      "direct dispatch threads mixed forwarded/concrete dicts",
+      valid_mixed(MkPair(1, true))
+    )
+    assert_false(
+      state,
+      "mixed forwarded/concrete dicts preserve element result",
+      valid_mixed(MkPair(2, true))
+    )
+
+    summary(state)
