@@ -853,6 +853,29 @@ fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String
 fn find_fwd_method_impl(class_name: String, method_name: String, ctx: LowerCtx) -> Maybe String =
   find_fwd_in_co_entries(class_name, method_name, vec_to_list(dict_entries(ctx_fwd(ctx))))
 
+# Exact-head lookup: returns the forwarded slot for ClassName_head if the current
+# function received that constraint as a hidden dict parameter.  Used to prefer the
+# forwarded slot over the concrete instance when both share the same key (e.g.
+# "MyEq_Box"), avoiding an unresolvable inner-dict reference at eta-expansion time.
+fn find_fwd_method_for_head(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
+  match dict_get(strip_module_prefix(class_name) ++ "_" ++ head, ctx_fwd(ctx)) with
+  | Nothing -> Nothing
+  | Just method_map -> dict_get_method(method_name, method_map)
+
+# Returns true if any dict in the list is the __unresolved_* sentinel emitted by
+# resolve_tdict_with_key when a key is absent from both ctx_fwd and ctx_inst.
+# Used to detect the P2 case: concrete instance found but inner constraint is not
+# in scope — fall back to the forwarded slot instead of emitting a bad IR node.
+fn has_unresolved_dict(dicts: List typed_ast.TypedExpr) -> Bool =
+  match dicts with
+  | Nil -> false
+  | Cons d rest ->
+      match d with
+      | typed_ast.TVar name _ _ ->
+          if str_starts_with(name, "__unresolved_") then true
+          else has_unresolved_dict(rest)
+      | _ -> has_unresolved_dict(rest)
+
 fn find_fwd_in_co_entries(class_name: String, method_name: String, entries: List (String, Dict String)) -> Maybe String =
   match entries with
   | Nil -> Nothing
@@ -1072,8 +1095,21 @@ fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerC
               | Just impl_name ->
                   match lookup_eta_inner_dicts_general(strip_module_prefix(class_name), head, class_type, ctx) with
                   | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-                  | Just inner_dicts -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
-              | Nothing -> Nothing
+                  | Just inner_dicts ->
+                      # If any inner dict is the __unresolved_* sentinel it means the
+                      # inner constraint (e.g. MyEq a) is not in scope — the caller only
+                      # forwarded the outer one (MyEq (Box a)).  Prefer the forwarded slot
+                      # so we emit a well-formed 2-arg lambda instead of a dangling ref.
+                      if has_unresolved_dict(inner_dicts) then
+                        match find_fwd_method_for_head(class_name, name, head, ctx) with
+                        | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
+                        | Nothing -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
+                      else
+                        Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
+              | Nothing ->
+                  match find_fwd_method_for_head(class_name, name, head, ctx) with
+                  | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
+                  | Nothing -> Nothing
           | Nothing ->
               # @eta_fwd markers (distinct from per-function @fwd:) are threaded into
               # scheme_env during typecheck_decl. Key: "@eta_fwd:{fresh_tvar}:{class_name}".

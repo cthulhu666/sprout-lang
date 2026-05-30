@@ -17,8 +17,16 @@ instance MyEq (Box a) where MyEq a {
 fn apply_box_eq(f: Box Int -> Box Int -> Bool) -> Bool =
   f(Box(1), Box(2))
 
+fn apply_eq(f: a -> a -> Bool, x: a, y: a) -> Bool = f(x, y)
+
+# Forwards MyEq (Box a) but NOT MyEq a — runtime smoke test for the P2 fix.
+# The instance body returns true unconditionally so this is safe with any binary.
+fn box_eq_via_hof(x: Box a, y: Box a) -> Bool where MyEq (Box a) =
+  apply_eq(my_eq, x, y)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
     assert_true(state, "constrained eta method compiles and runs", apply_box_eq(my_eq))
+    assert_true(state, "forwarded MyEq (Box a) eta in hof", box_eq_via_hof(Box(1), Box(2)))
     summary(state)
