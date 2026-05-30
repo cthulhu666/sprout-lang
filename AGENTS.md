@@ -104,6 +104,10 @@ For coding tasks, work is done only when:
 14. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
 15. The changes are committed.
 16. A self-review has been performed before handoff.
+17. **Compiler-source changes** (any edit under `stdlib/compiler/`): each shape in `tests/smoke_shapes/*.spr` emits IR cleanly via `compile_driver_bin_stage1 --emit-ir`, the IR contains at least one `define` block, and the IR contains no `str_concat(ptr null,…)` occurrence (null-ptr codegen regression guard).
+18. **Compiler-source changes** (any edit under `stdlib/compiler/`): `compile_driver_bin_stage1 --phase bundle` on `stdlib/compiler/token.sprout`, `stdlib/compiler/ast.sprout`, and `stdlib/prelude.sprout` produces non-empty output containing no dot-prefix qualified names (lines beginning with `.`).
+19. **Runtime changes** (any edit to `runtime/sprout_runtime.c`): every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
+20. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`): the example canary set — `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` — compiles *and runs* to completion without crash. Note: `just compile-examples-stage1` (item 11) only covers compile; runtime execution of these canaries is currently a manual gate until CI covers it.
 
 ## Directory Conventions
 
@@ -214,3 +218,17 @@ Use commit messages that explain intent, for example:
 - `spec: define match exhaustiveness rules`
 - `parser: add infix precedence for comparison operators`
 - `types: improve error for mismatched function arguments`
+
+### Agent commit workflow (DoD acknowledgement)
+
+A Claude Code PreToolUse hook (`scripts/dod_check_on_commit.sh`, wired via `.claude/settings.json`) intercepts any Bash call running `git commit` and blocks it unless an acknowledgement file at `.git/dod-ack` matches the currently staged tree's `git write-tree` hash. The hook exists to force a deliberate Definition-of-Done check before committing.
+
+Workflow:
+1. Stage everything intended for the commit (`git add …`). Staged tree must be final before acking.
+2. Mentally verify the DoD criteria above for the staged changes.
+3. Run `just dod-ack` — writes the current `git write-tree` hash to `.git/dod-ack`.
+4. Run `git commit …`. The hook re-computes `git write-tree` and compares; matching hash → commit proceeds.
+
+Re-acking is required whenever the staged tree changes (re-`git add` after the ack invalidates it). `git commit --amend` for message-only changes does *not* require re-acking — the tree is unchanged.
+
+The hook substring-matches `git commit` in the Bash tool's command text; this means a Bash invocation that *contains* the literal string `git commit` (e.g., inside an echo or a for-loop iteration list) will also trigger. Recovery is the same `just dod-ack && retry` ceremony; the false-positive cost is intentional and accepted.

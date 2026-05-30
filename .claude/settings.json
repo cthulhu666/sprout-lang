@@ -9,6 +9,15 @@
             "command": "bash scripts/guidelines_reminder.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/dod_check_on_commit.sh"
+          }
+        ]
       }
     ]
   }

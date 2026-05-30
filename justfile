@@ -13,6 +13,15 @@ install-hooks:
   git config core.hooksPath .githooks
   @echo "Hooks installed — .githooks/pre-commit is now active."
 
+# Acknowledge that DoD criteria are met for the currently staged tree.
+# Required by .claude/settings.json PreToolUse Bash hook on `git commit`.
+# Writes `git write-tree` hash to .git/dod-ack; hook compares the hash on the
+# pending commit's staged tree.  Same tree → ack reused (e.g. amend message).
+# Different tree → re-run `just dod-ack` to re-attest.
+dod-ack:
+  @git write-tree > .git/dod-ack
+  @echo "DoD acked for staged tree: $(cat .git/dod-ack)"
+
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
 repl:
