@@ -1,0 +1,45 @@
+module examples.list_pattern_demo
+
+# Demonstrates [a, b | rest] list pattern syntax.
+# The primary motivation: multi-argument command dispatch without pyramid nesting.
+
+type Command (..) =
+  | Build String
+  | Test String String
+  | Publish String String Bool
+  | Help
+  | Unknown (List String)
+
+fn parse_args(args: List String) -> Command =
+  match args with
+  | [] -> Help
+  | ["build", target | _] -> Build(target)
+  | ["test", suite, filter | _] -> Test(suite, filter)
+  | ["publish", pkg, version, "--dry-run" | _] -> Publish(pkg, version, true)
+  | ["publish", pkg, version | _] -> Publish(pkg, version, false)
+  | _ -> Unknown(args)
+
+fn describe_command(cmd: Command) -> String =
+  match cmd with
+  | Help -> "usage: tool [build|test|publish] ..."
+  | Build target -> "building: " ++ target
+  | Test suite filter -> "testing " ++ suite ++ " (filter: " ++ filter ++ ")"
+  | Publish pkg ver true -> "dry-run publish: " ++ pkg ++ " v" ++ ver
+  | Publish pkg ver false -> "publishing: " ++ pkg ++ " v" ++ ver
+  | Unknown _ -> "unknown command"
+
+fn sum_ints(xs: List Int) -> Int =
+  match xs with
+  | [] -> 0
+  | [x] -> x
+  | [x, y] -> x + y
+  | [x | rest] -> x + sum_ints(rest)
+
+fn main() -> Unit !{IO} =
+  do
+    print(describe_command(parse_args(Nil)))
+    print(describe_command(parse_args(Cons("build", Cons("myapp", Nil)))))
+    print(describe_command(parse_args(Cons("test", Cons("unit", Cons("auth", Nil))))))
+    print(describe_command(parse_args(Cons("publish", Cons("mylib", Cons("1.2.0", Cons("--dry-run", Nil)))))))
+    print(describe_command(parse_args(Cons("publish", Cons("mylib", Cons("1.2.0", Nil))))))
+    print(int_to_string(sum_ints(Cons(1, Cons(2, Cons(3, Cons(4, Nil)))))))
