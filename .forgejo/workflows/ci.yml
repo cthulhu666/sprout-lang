@@ -24,10 +24,17 @@ jobs:
           sudo apt-get install -y clang-16 llvm-16 ripgrep
           echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
 
-      - name: Bootstrap stage-1 from committed seed (Python-free)
+      - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
-      - name: Build fmt_bin from seed (Python-free)
+      - name: Verify bootstrap seed is a fixed point
+        # stage-1 (built from bootstrap/compile_driver.ll) must re-emit
+        # byte-identical IR for the current driver source.  If this fails,
+        # someone changed compiler source without refreshing the seed via
+        # `just refresh-seed`.
+        run: just verify-bootstrap-fixed-point
+
+      - name: Build fmt_bin via stage-1
         run: just build-fmt-from-seed
 
       - name: Check formatting

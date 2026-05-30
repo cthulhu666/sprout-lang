@@ -62,23 +62,16 @@ lint: _require-fmt-bin
 lint-file file: _require-fmt-bin
   "{{build_dir}}/fmt_bin" lint {{quote(file)}}
 
-# Build fmt_bin from the committed platform bootstrap seed — no Python required.
+# Build fmt_bin via stage-1 (which is built from the IR seed).  fmt_bin chains
+# off compile_driver_bin_stage1 — no platform-specific binary required.
 [group('fmt')]
-build-fmt-from-seed:
+build-fmt-from-seed: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-  SEED="bootstrap/compile_driver-$PLATFORM"
-  if [[ ! -x "$SEED" ]]; then
-    echo "ERROR: No seed binary for platform $PLATFORM at $SEED" >&2
-    echo "       Run: just build-seeds  (or build-seed-macos / build-seed-linux)" >&2
-    exit 1
-  fi
   TMP_LL="/tmp/sprout_fmt_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
-  echo "==> Using seed: $SEED ($(file -b "$SEED"))"
-  echo "==> Emitting LLVM IR for fmt_bin..."
-  "$SEED" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/fmt_driver.sprout" > "$TMP_LL"
+  echo "==> Emitting LLVM IR for fmt_bin via stage-1..."
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/fmt_driver.sprout" > "$TMP_LL"
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/fmt_bin"
@@ -428,91 +421,83 @@ compile-examples-stage2: (_compile-examples "build/compile_driver_bin_stage2")
 compile-examples-stage3: (_compile-examples "build/compile_driver_bin_stage3")
 
 # ── Bootstrap & Seeds ─────────────────────────────────────────────────────────
+#
+# The committed seed is platform-agnostic LLVM IR text at bootstrap/compile_driver.ll.
+# Bootstrap = link the IR with the runtime via clang.  No per-platform binaries.
+# Master invariant: stage-1 built from the seed re-emits IR byte-identical to the
+# seed for the current compile_driver.sprout — i.e. the seed is a fixed point of
+# the compiler.  CI enforces this; refresh the seed with `just refresh-seed`
+# whenever a compiler-source change perturbs the IR.
 
-# Bootstrap compile_driver_bin_stage1 from the committed platform seed — no Python required.
+# Bootstrap compile_driver_bin_stage1 from the committed IR seed.
 [group('bootstrap')]
 bootstrap-from-seed:
   #!/usr/bin/env bash
   set -euo pipefail
-  PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-  SEED="bootstrap/compile_driver-$PLATFORM"
-  if [[ ! -x "$SEED" ]]; then
-    echo "ERROR: No seed binary for platform $PLATFORM at $SEED" >&2
-    echo "       Run: just build-seeds  (or build-seed-linux / build-seed-macos)" >&2
+  SEED="bootstrap/compile_driver.ll"
+  if [[ ! -f "$SEED" ]]; then
+    echo "ERROR: $SEED not found." >&2
     exit 1
   fi
-  TMP_LL="/tmp/sprout_bootstrap_$$.ll"
-  trap 'rm -f "$TMP_LL"' EXIT
-  echo "==> Using seed: $SEED ($(file -b "$SEED"))"
-  echo "==> Emitting LLVM IR..."
-  "$SEED" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
-  echo "==> Validating IR..."
-  opt --passes=verify "$TMP_LL" -o /dev/null
+  echo "==> Validating IR seed..."
+  opt --passes=verify "$SEED" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
-  echo "==> Built {{build_dir}}/compile_driver_bin_stage1 from seed (Python-free)"
+  clang "$SEED" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
+  echo "==> Built {{build_dir}}/compile_driver_bin_stage1 from IR seed."
 
-# Copy stage-1 as the macOS arm64 bootstrap seed. Output: bootstrap/compile_driver-darwin-arm64
+# Refresh bootstrap/compile_driver.ll from the current compile_driver.sprout source.
+# Use this after any compiler-source change that perturbs the IR.  Reaches the
+# new fixed point by iterating until two consecutive stages produce identical IR
+# (typically one iteration after a codegen change).
 [group('bootstrap')]
-build-seed-macos:
+refresh-seed: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
+  TMPD=$(mktemp -d /tmp/sprout_refresh_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  ITER=0
+  PREV="bootstrap/compile_driver.ll"
+  while :; do
+    ITER=$((ITER + 1))
+    if (( ITER > 5 )); then
+      echo "ERROR: did not converge to a fixed point after 5 iterations." >&2
+      echo "       Likely cause: non-deterministic codegen." >&2
+      exit 1
+    fi
+    NEXT="$TMPD/stage${ITER}.ll"
+    echo "==> Iteration $ITER: emitting IR via stage-$ITER..."
+    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$NEXT"
+    opt --passes=verify "$NEXT" -o /dev/null
+    if cmp -s "$PREV" "$NEXT"; then
+      echo "==> Fixed point reached at iteration $ITER."
+      cp "$NEXT" bootstrap/compile_driver.ll
+      echo "==> bootstrap/compile_driver.ll updated."
+      break
+    fi
+    echo "    Diverges from previous; rebuilding stage from new IR..."
+    clang "$NEXT" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
+    PREV="$NEXT"
+  done
+
+# Verify the committed seed is a fixed point: stage-1 built from the seed
+# re-emits identical IR for the current driver source.  CI runs this on every PR.
+[group('bootstrap')]
+verify-bootstrap-fixed-point: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMP_LL="/tmp/sprout_fp_$$.ll"
+  trap 'rm -f "$TMP_LL"' EXIT
+  echo "==> Re-emitting IR via stage-1..."
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
+  if cmp -s bootstrap/compile_driver.ll "$TMP_LL"; then
+    echo "==> Fixed point ✓ — bootstrap/compile_driver.ll matches stage-1 output."
+  else
+    echo "==> FIXED POINT BROKEN ✗" >&2
+    echo "    bootstrap/compile_driver.ll diverges from current stage-1 output." >&2
+    echo "    Run: just refresh-seed   (then stage the updated bootstrap/compile_driver.ll)" >&2
+    exit 1
   fi
-  mkdir -p bootstrap
-  cp "{{build_dir}}/compile_driver_bin_stage1" bootstrap/compile_driver-darwin-arm64
-  echo "==> bootstrap/compile_driver-darwin-arm64:"
-  file bootstrap/compile_driver-darwin-arm64
-  ls -lh bootstrap/compile_driver-darwin-arm64
-
-# Build the Linux arm64 bootstrap seed via Docker (ubuntu:24.04, native arm64).
-[group('bootstrap')]
-build-seed-linux:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  mkdir -p bootstrap
-  docker run --rm \
-    --platform linux/arm64 \
-    --workdir /repo \
-    -v "$(pwd):/repo:ro" \
-    -v "$(pwd)/bootstrap:/out" \
-    ubuntu:24.04 \
-    bash -euo pipefail -c '
-      apt-get update -qq && apt-get install -y -q clang-16 >&2
-      SEED="/repo/bootstrap/compile_driver-linux-aarch64"
-      TMP_LL="/tmp/sprout_aarch64_$$.ll"
-      echo "==> Using seed: $SEED" >&2
-      echo "==> Emitting LLVM IR..." >&2
-      "$SEED" --emit-ir /repo/stdlib /repo/stdlib/compiler/compile_driver.sprout > "$TMP_LL"
-      echo "==> Linking with clang-16..." >&2
-      clang-16 "$TMP_LL" /repo/runtime/sprout_runtime.c -O2 -o /out/compile_driver-linux-aarch64
-      chmod +x /out/compile_driver-linux-aarch64
-      echo "==> Done" >&2
-    '
-  echo "==> bootstrap/compile_driver-linux-aarch64:"
-  file bootstrap/compile_driver-linux-aarch64
-  ls -lh bootstrap/compile_driver-linux-aarch64
-
-# Copy stage-1 as the Linux x86_64 bootstrap seed (run on a Linux x86_64 host).
-[group('bootstrap')]
-build-seed-linux-amd64:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
-  fi
-  mkdir -p bootstrap
-  cp "{{build_dir}}/compile_driver_bin_stage1" bootstrap/compile_driver-linux-x86_64
-  echo "==> bootstrap/compile_driver-linux-x86_64:"
-  file bootstrap/compile_driver-linux-x86_64
-  ls -lh bootstrap/compile_driver-linux-x86_64
-
-# Build seed binaries for darwin-arm64 + linux-aarch64 (via Docker).
-# For linux-x86_64, run just build-seed-linux-amd64 on a Linux x86_64 host.
-[group('bootstrap')]
-build-seeds: build-seed-macos build-seed-linux
 
 # ── REPL ──────────────────────────────────────────────────────────────────────
 

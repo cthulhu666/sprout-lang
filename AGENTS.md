@@ -128,7 +128,7 @@ These rules govern *how* the verification gates in Definition of Done are run, i
 - `runtime/` C runtime and GC (`sprout_runtime.c`).
 - `tests/stdlib/` native Sprout test files (`.spr`); run via `just test`.
 - `tests/conformance/` executable language behavior fixtures.
-- `bootstrap/` committed platform seed binaries for Python-free bootstrap.
+- `bootstrap/` committed LLVM IR seed (`compile_driver.ll`) for stage-1 bootstrap.
 - `mise.toml` toolchain definition.
 - `justfile` standard developer tasks.
 
@@ -204,10 +204,11 @@ Tests pinning the invariant: `tests/stdlib/compiler/test_codegen.spr` includes r
 
 ### Bootstrap binary rebuild protocol
 
-1. Rebuild `compile_driver_bin_stage1` from the committed platform seed (no Python required):
+1. Rebuild `compile_driver_bin_stage1` from the committed IR seed (`bootstrap/compile_driver.ll`):
    ```
    just bootstrap-from-seed
    ```
+   The seed is platform-agnostic LLVM IR text; `clang` materializes the host target at link time. Refresh the seed with `just refresh-seed` after any compiler-source change that perturbs the IR (CI's `just verify-bootstrap-fixed-point` will flag this).
 2. Rebuild stage-1 from an existing stage-0 binary (`compile_driver_bin`) if you have one:
    ```
    just build-stage1

@@ -19,7 +19,7 @@ jobs:
           sudo apt-get install -y clang-16 llvm-16
           echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
 
-      - name: Bootstrap stage-1 from committed seed (Python-free)
+      - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
       - name: Verify examples (stage-1)
@@ -44,10 +44,7 @@ jobs:
       - name: Install Clang / LLVM
         run: sudo apt-get install -y clang llvm
 
-      - name: Bootstrap stage-1 from committed aarch64 seed (Python-free)
-        # Uses bootstrap/compile_driver-linux-aarch64 to emit IR from current source,
-        # then links with clang. Equivalent to the Python path (enforced by
-        # test_bootstrap_identity.py) but skips the OOM-risky Python compilation.
+      - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
       - name: Verify examples (stage-1)
@@ -75,19 +72,13 @@ jobs:
         with:
           name: sprout-linux-aarch64
 
-      - name: Stage darwin-arm64 seed as release binary
-        # Uses the committed bootstrap seed. WARNING: run `just build-seed-macos &&
-        # git commit bootstrap/compile_driver-darwin-arm64` before tagging to keep
-        # this current. There is no macOS CI runner available on GCE.
-        run: cp bootstrap/compile_driver-darwin-arm64 sprout-darwin-arm64
-
       - name: Create Forgejo release
         # softprops/action-gh-release reads GITHUB_API_URL, which Forgejo Actions
         # injects as https://codeberg.org/api/v1 — works with Forgejo transparently.
+        # macOS users build from source via `just bootstrap-from-seed`.
         uses: softprops/action-gh-release@v2
         with:
           files: |
             sprout-linux-x86_64
             sprout-linux-aarch64
-            sprout-darwin-arm64
           generate_release_notes: true
