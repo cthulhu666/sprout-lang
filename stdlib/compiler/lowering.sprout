@@ -891,10 +891,28 @@ fn make_eta_lambda_with_dicts_n(impl_name: String, method_type: types.Type, n: I
   typed_ast.TLambda(
     make_eta_params_list(n, 0),
     typed_ast.TCall(
-      typed_ast.TVar(impl_name, method_type, pos),
+      typed_ast.TVar(impl_name, method_type_with_hidden_dicts(method_type, dict_args), pos),
       list_append(make_eta_arg_tvars(method_type, 0, n, pos), dict_args),
       tfunc_result_type(method_type), pos),
     method_type, pos)
+
+fn method_type_with_hidden_dicts(method_type: types.Type, dict_args: List typed_ast.TypedExpr) -> types.Type =
+  append_hidden_param_types(method_type, typed_expr_types(dict_args))
+
+fn typed_expr_types(args: List typed_ast.TypedExpr) -> List types.Type =
+  match args with
+  | Nil -> Nil
+  | Cons arg rest -> Cons(typed_ast.typed_expr_type(arg), typed_expr_types(rest))
+
+fn append_hidden_param_types(t: types.Type, hidden_params: List types.Type) -> types.Type =
+  match t with
+  | types.TFunc param ret eff -> types.TFunc(param, append_hidden_param_types(ret, hidden_params), eff)
+  | _ -> prepend_func_params(hidden_params, t)
+
+fn prepend_func_params(params: List types.Type, ret: types.Type) -> types.Type =
+  match params with
+  | Nil -> ret
+  | Cons param rest -> types.TFunc(param, prepend_func_params(rest, ret), types.EffectPure)
 
 fn collect_slots_from_method_map(methods: List String, method_map: Dict String, pos: source.SourcePos) -> List typed_ast.TypedExpr =
   match methods with
