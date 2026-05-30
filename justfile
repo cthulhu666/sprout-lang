@@ -499,6 +499,140 @@ verify-bootstrap-fixed-point: bootstrap-from-seed
     exit 1
   fi
 
+# ── DoD CI Gates ──────────────────────────────────────────────────────────────
+#
+# These recipes enforce DoD items #7–#10 — the checks that previously lived in
+# pre-commit but were trimmed to keep that hook lightweight.  Run by CI on every
+# PR; locally available for self-verification before commit.
+
+# DoD #7 — smoke shapes.  Each tests/smoke_shapes/*.spr must emit IR cleanly,
+# contain at least one `define` block, and contain no `str_concat(ptr null,…)`
+# (null-pointer codegen regression guard).
+[group('ci-checks')]
+smoke-shapes: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_smk_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  failed=0
+  for f in tests/smoke_shapes/*.spr; do
+    [ -f "$f" ] || continue
+    ir="$TMPD/$(basename "$f").ll"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$f" > "$ir" 2>"$TMPD/err"; then
+      echo "smoke-shapes: emit-IR failed for $f" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1)); continue
+    fi
+    if ! grep -q '^define ' "$ir"; then
+      echo "smoke-shapes: $f produced IR with no 'define' block" >&2
+      failed=$((failed + 1)); continue
+    fi
+    if grep -qE 'str_concat\(ptr null,|, ptr null\)' "$ir"; then
+      echo "smoke-shapes: $f contains str_concat(ptr null,…) — null-ptr codegen regression" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  if (( failed > 0 )); then
+    echo "smoke-shapes: $failed shape(s) failed" >&2; exit 1
+  fi
+  echo "==> smoke-shapes ✓"
+
+# DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
+# prelude.sprout must produce non-empty output with no dot-prefix qualified names.
+[group('ci-checks')]
+bundle-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_bsm_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  failed=0
+  for f in stdlib/compiler/token.sprout stdlib/compiler/ast.sprout stdlib/prelude.sprout; do
+    [ -f "$f" ] || { echo "bundle-smoke: missing corpus file $f" >&2; failed=$((failed + 1)); continue; }
+    out="$TMPD/$(basename "$f").out"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --phase bundle "{{stdlib_root}}" "$f" > "$out" 2>"$TMPD/err"; then
+      echo "bundle-smoke: --phase bundle failed for $f" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1)); continue
+    fi
+    # Extract qualified-name lines (skip "=== file ===" headers and "OK" lines).
+    names=$(awk '/^=== .+ ===$/{past=1;next} past && /^OK$/{next} past && NF{print}' "$out")
+    if [[ -z "$names" ]]; then
+      echo "bundle-smoke: no qualified names emitted for $f" >&2
+      failed=$((failed + 1)); continue
+    fi
+    dot_names=$(printf '%s\n' "$names" | grep '^\.' || true)
+    if [[ -n "$dot_names" ]]; then
+      echo "bundle-smoke: $f has dot-prefix qualified names:" >&2
+      printf '%s\n' "$dot_names" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  if (( failed > 0 )); then
+    echo "bundle-smoke: $failed corpus file(s) failed" >&2; exit 1
+  fi
+  echo "==> bundle-smoke ✓"
+
+# DoD #9 — APPROVED_BUILTINS guard.  Every non-static `long long <name>(` in
+# runtime/sprout_runtime.c must be listed in runtime/APPROVED_BUILTINS.
+# Per AGENTS.md "Builtin vs Stdlib" rules 4–6.
+[group('ci-checks')]
+check-approved-builtins:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  APPROVED=runtime/APPROVED_BUILTINS
+  SOURCE=runtime/sprout_runtime.c
+  if [[ ! -f "$APPROVED" ]] || [[ ! -f "$SOURCE" ]]; then
+    echo "check-approved-builtins: missing $APPROVED or $SOURCE" >&2; exit 1
+  fi
+  # Names declared in runtime.c (excluding `static long long`).
+  declared=$(grep -E '^long long [a-z_][a-zA-Z0-9_]*\(' "$SOURCE" | sed -E 's/^long long ([a-z_][a-zA-Z0-9_]*)\(.*/\1/' | sort -u)
+  # Names listed in APPROVED_BUILTINS (strip comments and whitespace).
+  approved=$(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' "$APPROVED" | grep -v '^$' | sort -u)
+  missing=$(comm -23 <(echo "$declared") <(echo "$approved") || true)
+  if [[ -n "$missing" ]]; then
+    echo "check-approved-builtins: builtins in $SOURCE missing from $APPROVED:" >&2
+    printf '  %s\n' $missing >&2
+    echo >&2
+    echo "  Per AGENTS.md 'Builtin vs Stdlib' rules 4-6: add each name to" >&2
+    echo "  $APPROVED with an inline comment explaining why it cannot be" >&2
+    echo "  done in Sprout." >&2
+    exit 1
+  fi
+  echo "==> check-approved-builtins ✓"
+
+# DoD #10 — example canary RUN.  The canary set must compile AND run to
+# completion without crashing.  `just compile-examples-stage1` only covers
+# compile; this recipe adds the runtime check.
+[group('ci-checks')]
+run-example-canary: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_canary_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
+    || { echo "run-example-canary: runtime compile failed" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  failed=0
+  for f in examples/tuples.sprout examples/factorial.sprout examples/maybe_map.sprout examples/typeclass_collections_demo.sprout examples/fizzbuzz.sprout; do
+    [ -f "$f" ] || { echo "run-example-canary: missing $f" >&2; failed=$((failed + 1)); continue; }
+    name=$(basename "$f" .sprout)
+    ll="$TMPD/$name.ll"
+    bin="$TMPD/$name.bin"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$f" > "$ll" 2>"$TMPD/err"; then
+      echo "run-example-canary: emit-IR failed for $f" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1)); continue
+    fi
+    if ! clang "$ll" "$TMPD/rt.o" {{clang_extra}} -o "$bin" 2>"$TMPD/err"; then
+      echo "run-example-canary: link failed for $f" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1)); continue
+    fi
+    if ! "$bin" > /dev/null 2>"$TMPD/err"; then
+      echo "run-example-canary: $f crashed at runtime (exit $?)" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  if (( failed > 0 )); then
+    echo "run-example-canary: $failed canary(s) failed" >&2; exit 1
+  fi
+  echo "==> run-example-canary ✓"
+
 # ── REPL ──────────────────────────────────────────────────────────────────────
 
 # Build sproutd — combined REPL + analysis service binary (self-configuring).

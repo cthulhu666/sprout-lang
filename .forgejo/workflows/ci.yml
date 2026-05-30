@@ -34,6 +34,21 @@ jobs:
         # `just refresh-seed`.
         run: just verify-bootstrap-fixed-point
 
+      - name: APPROVED_BUILTINS guard (DoD #9)
+        # Every `long long <name>(` in runtime/sprout_runtime.c must be in
+        # runtime/APPROVED_BUILTINS.  Independent of stage-1; runs early.
+        run: just check-approved-builtins
+
+      - name: Smoke shapes (DoD #7)
+        # tests/smoke_shapes/*.spr each emit-IR cleanly; contain a `define`
+        # block; no `str_concat(ptr null,…)` (null-ptr codegen regression).
+        run: just smoke-shapes
+
+      - name: Bundle smoke (DoD #8)
+        # `--phase bundle` on token/ast/prelude produces non-empty output
+        # with no dot-prefix qualified names.
+        run: just bundle-smoke
+
       - name: Build fmt_bin via stage-1
         run: just build-fmt-from-seed
 
@@ -43,8 +58,13 @@ jobs:
       - name: Run stdlib tests (stage-1)
         run: just test-stdlib-stage1
 
-      - name: Verify examples (stage-1)
+      - name: Verify examples compile (stage-1)
         run: just compile-examples-stage1
+
+      - name: Example canary RUNS (DoD #10)
+        # Canary set (tuples, factorial, maybe_map, typeclass_collections_demo,
+        # fizzbuzz) compiles AND runs to completion without crash.
+        run: just run-example-canary
 
       - name: GC safety check
         run: just gc-safety-check --strict
