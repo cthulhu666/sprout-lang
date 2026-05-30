@@ -11,6 +11,14 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 fn apply_any(x: a, f: a -> String) -> String =
   f(x)
 
+fn apply_stringer(f: Int -> String, xs: List Int) -> List String =
+  list_map(f, xs)
+
+# Regression: class method passed as value to a user-defined higher-order function in a
+# let-decl. If lowering's eta-expansion fails, the sentinel (__eta_unresolved_*) causes
+# a linker error rather than SIGBUS — ensuring compile-time detection.
+let applied_via_ho = apply_stringer(to_string, [10, 20, 30])
+
 fn show_via_value_method(x: a) -> String where ToString a =
   apply_any(x, to_string)
 
@@ -31,5 +39,6 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "to_string String empty", to_string(""), "")
     assert_eq(state, "polymorphic imported to_string eta", show_via_value_method(42), "42")
     assert_eq(state, "to_string via let-decl list_map", to_string_int_list, ["1", "2", "3"])
+    assert_eq(state, "to_string via user-defined higher-order let-decl", applied_via_ho, ["10", "20", "30"])
 
     summary(state)

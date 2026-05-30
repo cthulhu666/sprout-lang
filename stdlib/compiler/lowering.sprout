@@ -1163,7 +1163,10 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       else
         match try_eta_expand_class_method(name, t, ctx) with
         | Just expanded -> lower_expr(expanded, ctx)
-        | Nothing -> typed_ast.TVar(name, t, pos)
+        | Nothing ->
+            match find_eta_class_of_method(name, ctx) with
+            | Just class_name -> typed_ast.TVar("__eta_unresolved_" ++ strip_module_prefix(class_name) ++ "_" ++ strip_module_prefix(name), t, pos)
+            | Nothing -> typed_ast.TVar(name, t, pos)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)
