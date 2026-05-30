@@ -288,6 +288,8 @@ fn parse_pattern_non_paren(tokens: Vec token.Token, i: Int) -> Result ParseError
     Ok((ast.StringPattern(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
   else if tok_is_ident(tok_at(tokens, i)) then
     parse_ident_pattern(tokens, i, token.token_text(tok_at(tokens, i)), cur_pos(tokens, i))
+  else if tok_is_symbol(tok_at(tokens, i), "[") then
+    parse_list_pattern(tokens, i + 1, cur_pos(tokens, i))
   else
     Err(ParseError(string.concat("Expected pattern at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
 
@@ -310,6 +312,7 @@ fn collect_pattern_items(tokens: Vec token.Token, i: Int, acc: List ast.Pattern)
 fn starts_pattern_atom(tokens: Vec token.Token, i: Int) -> Bool =
   tok_is_int(tok_at(tokens, i)) || tok_is_string(tok_at(tokens, i)) || tok_is_char(tok_at(tokens, i)) ||
   tok_is_ident(tok_at(tokens, i)) || tok_is_symbol(tok_at(tokens, i), "(") ||
+  tok_is_symbol(tok_at(tokens, i), "[") ||
   tok_is_keyword(tok_at(tokens, i), "true") || tok_is_keyword(tok_at(tokens, i), "false")
 
 fn collect_pattern_atoms(tokens: Vec token.Token, i: Int, acc: List ast.Pattern) -> Result ParseError (List ast.Pattern, Int) =
@@ -333,6 +336,8 @@ fn parse_pattern_atom(tokens: Vec token.Token, i: Int) -> Result ParseError (ast
     parse_ident_pattern_atom(tokens, i, token.token_text(tok_at(tokens, i)), cur_pos(tokens, i))
   else if tok_is_symbol(tok_at(tokens, i), "(") then
     parse_pattern_after_lparen(tokens, i + 1, cur_pos(tokens, i))
+  else if tok_is_symbol(tok_at(tokens, i), "[") then
+    parse_list_pattern(tokens, i + 1, cur_pos(tokens, i))
   else
     Err(ParseError(string.concat("Expected pattern atom at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
 
@@ -340,6 +345,34 @@ fn parse_ident_pattern_atom(tokens: Vec token.Token, i: Int, name: String, pos: 
   if name == "_" then Ok((ast.WildcardPattern(pos), i + 1))
   else if is_constructor_name(name) then Ok((ast.ConstructorPattern(name, Nil, pos), i + 1))
   else Ok((ast.VarPattern(name, pos), i + 1))
+
+fn parse_list_pattern(tokens: Vec token.Token, i: Int, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
+  match match_symbol(tokens, i, "]") with
+  | Just (_, i2) -> Ok((ast.ConstructorPattern("Nil", Nil, pos), i2))
+  | Nothing -> parse_list_pattern_items(tokens, i, Nil, pos)
+
+fn parse_list_pattern_items(tokens: Vec token.Token, i: Int, acc: List ast.Pattern, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
+  do
+    (p, i2) <- parse_pattern(tokens, i)
+    match match_symbol(tokens, i2, "|") with
+    | Just (_, i3) ->
+        do
+          (tail, i4) <- parse_pattern(tokens, i3)
+          (_, i5) <- expected_symbol("]", tokens, i4)
+          Ok((build_cons_pattern(list_reverse(Cons(p, acc)), tail, pos), i5))
+    | Nothing ->
+        match match_symbol(tokens, i2, "]") with
+        | Just (_, i3) ->
+            Ok((build_cons_pattern(list_reverse(Cons(p, acc)), ast.ConstructorPattern("Nil", Nil, pos), pos), i3))
+        | Nothing ->
+            do
+              (_, i3) <- expected_symbol(",", tokens, i2)
+              parse_list_pattern_items(tokens, i3, Cons(p, acc), pos)
+
+fn build_cons_pattern(items: List ast.Pattern, tail: ast.Pattern, pos: source.SourcePos) -> ast.Pattern =
+  match items with
+  | Nil -> tail
+  | Cons h rest -> ast.ConstructorPattern("Cons", Cons(h, Cons(build_cons_pattern(rest, tail, pos), Nil)), pos)
 
 # ---------------------------------------------------------------------------
 # Do expression helpers

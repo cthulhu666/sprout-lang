@@ -101,4 +101,26 @@ fn main() -> Unit !{IO} =
     assert_true(state, "type decl identified", first_is_type_decl("type Color = Red | Green"))
     assert_false(state, "fn decl not type decl", first_is_type_decl("fn val() -> Int = 1"))
 
+    # List pattern syntax
+    assert_true(state, "empty list pattern",
+      parse_ok("fn f(xs: List Int) -> Int = match xs with | [] -> 0 | _ -> 1"))
+    assert_true(state, "single-element list pattern",
+      parse_ok("fn f(xs: List Int) -> Int = match xs with | [x] -> x | _ -> 0"))
+    assert_true(state, "two-element list pattern",
+      parse_ok("fn f(xs: List Int) -> Int = match xs with | [a, b] -> a | _ -> 0"))
+    assert_true(state, "list pattern with tail",
+      parse_ok("fn f(xs: List Int) -> Int = match xs with | [h | _] -> h | _ -> 0"))
+    assert_true(state, "list pattern with heads and tail",
+      parse_ok("fn f(xs: List Int) -> Int = match xs with | [a, b | _] -> a | _ -> 0"))
+    assert_true(state, "list pattern string literals",
+      parse_ok("fn f(xs: List String) -> String = match xs with | [\"foo\", x] -> x | _ -> \"\""))
+    assert_true(state, "list pattern string head with wildcard tail",
+      parse_ok("fn f(xs: List String) -> String = match xs with | [\"a\" | _] -> \"yes\" | _ -> \"no\""))
+    assert_true(state, "nested list pattern",
+      parse_ok("fn f(xs: List (List Int)) -> Int = match xs with | [[a, b], _] -> a | _ -> 0"))
+    assert_true(state, "list pattern as constructor arg atom",
+      parse_ok("fn f(xs: List Int) -> Int = match xs with | [a, b | rest] -> a | _ -> 0"))
+    assert_true(state, "multiple list pattern arms",
+      parse_ok("fn f(xs: List Int) -> Int = match xs with | [] -> 0 | [x] -> x | [a, b | _] -> a"))
+
     summary(state)
