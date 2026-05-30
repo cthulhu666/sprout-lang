@@ -866,6 +866,9 @@ fn find_fwd_method_for_head(class_name: String, method_name: String, head: Strin
 # resolve_tdict_with_key when a key is absent from both ctx_fwd and ctx_inst.
 # Used to detect the P2 case: concrete instance found but inner constraint is not
 # in scope — fall back to the forwarded slot instead of emitting a bad IR node.
+# Note: checks __unresolved_* (dict-resolution sentinel) only; __eta_unresolved_*
+# (eta-expansion sentinel emitted in lower_expr) is a distinct family and is NOT
+# covered here by design — the two failure modes have separate handling.
 fn has_unresolved_dict(dicts: List typed_ast.TypedExpr) -> Bool =
   match dicts with
   | Nil -> false
@@ -1022,14 +1025,6 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
             ctx))
       | _ -> Nothing
 
-fn try_eta_expand_class_method(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match find_eta_class_of_method(name, ctx) with
-  | Nothing -> try_eta_forwarded_without_class(name, t, ctx)
-  | Just class_name ->
-      match try_eta_in_class(class_name, name, t, ctx) with
-      | Just expanded -> Just(expanded)
-      | Nothing -> try_eta_forwarded_without_class(name, t, ctx)
-
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match t with
   | types.TFunc param _ _ ->
@@ -1161,12 +1156,18 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       if list_member(name, ctx_bound_vars(ctx)) then
         typed_ast.TVar(name, t, pos)
       else
-        match try_eta_expand_class_method(name, t, ctx) with
-        | Just expanded -> lower_expr(expanded, ctx)
+        match find_eta_class_of_method(name, ctx) with
         | Nothing ->
-            match find_eta_class_of_method(name, ctx) with
-            | Just class_name -> typed_ast.TVar("__eta_unresolved_" ++ strip_module_prefix(class_name) ++ "_" ++ strip_module_prefix(name), t, pos)
+            match try_eta_forwarded_without_class(name, t, ctx) with
+            | Just expanded -> lower_expr(expanded, ctx)
             | Nothing -> typed_ast.TVar(name, t, pos)
+        | Just class_name ->
+            match try_eta_in_class(class_name, name, t, ctx) with
+            | Just expanded -> lower_expr(expanded, ctx)
+            | Nothing ->
+                match try_eta_forwarded_without_class(name, t, ctx) with
+                | Just expanded -> lower_expr(expanded, ctx)
+                | Nothing -> typed_ast.TVar("__eta_unresolved_" ++ strip_module_prefix(class_name) ++ "_" ++ strip_module_prefix(name), t, pos)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)

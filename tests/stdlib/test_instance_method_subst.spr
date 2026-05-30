@@ -13,10 +13,16 @@ class Showcase a {
 }
 
 fn apply_str(f: Int -> String, x: Int) -> String = f(x)
+fn apply_bool(f: Bool -> String, x: Bool) -> String = f(x)
 
 instance Showcase Int {
   fn showcase(x: Int) -> String =
     apply_str(to_string, x)
+}
+
+instance Showcase Bool {
+  fn showcase(x: Bool) -> String =
+    apply_bool(to_string, x)
 }
 
 fn run_showcase(x: a) -> String where Showcase a =
@@ -26,4 +32,5 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
     assert_eq(state, "instance method body with class method as value", run_showcase(42), "42")
+    assert_eq(state, "instance method body — second concrete type", run_showcase(true), "true")
     summary(state)

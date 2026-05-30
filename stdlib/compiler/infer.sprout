@@ -369,7 +369,7 @@ fn infer_expr(
       InferErr("Internal error: StringTemplateExpr reached inference; desugar pass should have eliminated it")
 
 # Declaration-boundary wrapper: applies s1 to the result so fresh TVars
-# never escape into lowering.  All declaration-level callers use this;
+# never escape into lowering.  Declaration-level callers should use this;
 # sub-expression recursion stays on infer_expr.
 export fn typecheck_expr(
   state: unifier.InferState,
