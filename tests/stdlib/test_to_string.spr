@@ -8,6 +8,12 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 # so the LLVM stub was emitted with arity 1 and always returned 0 (null),
 # causing string_concat_many to crash whenever a template literal was used.
 
+fn apply_any(x: a, f: a -> String) -> String =
+  f(x)
+
+fn show_via_value_method(x: a) -> String where ToString a =
+  apply_any(x, to_string)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -19,5 +25,6 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "to_string Bool false", to_string(false), "false")
     assert_eq(state, "to_string String id", to_string("hello"), "hello")
     assert_eq(state, "to_string String empty", to_string(""), "")
+    assert_eq(state, "polymorphic imported to_string eta", show_via_value_method(42), "42")
 
     summary(state)

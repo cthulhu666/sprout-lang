@@ -732,6 +732,10 @@ fn strip_module_prefix(name: String) -> String =
   else strip_module_prefix(str_slice(name, dot_pos + 1, str_len(name)))
   where dot_pos = str_find(name, ".")
 
+fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
+  if str_len(s) < str_len(suffix) then false
+  else str_slice(s, str_len(s) - str_len(suffix), str_len(s)) == suffix
+
 # ---------------------------------------------------------------------------
 # Eta-expansion of class methods in value position
 # ---------------------------------------------------------------------------
@@ -747,14 +751,21 @@ fn strip_module_prefix(name: String) -> String =
 # infer-injected TDict nodes in direct calls expand correctly.
 
 fn find_class_of_method(method_name: String, class_order: Dict (List String)) -> Maybe String =
-  find_class_in_co_entries(method_name, vec_to_list(dict_entries(class_order)))
+  find_class_in_co_entries(strip_module_prefix(method_name), vec_to_list(dict_entries(class_order)))
 
 fn find_class_in_co_entries(method_name: String, entries: List (String, List String)) -> Maybe String =
   match entries with
   | Nil -> Nothing
   | Cons (class_name, methods) rest ->
-      if list_str_member(method_name, methods) then Just(class_name)
+      if list_str_member_stripped(method_name, methods) then Just(class_name)
       else find_class_in_co_entries(method_name, rest)
+
+fn list_str_member_stripped(needle: String, xs: List String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons x rest ->
+      if strip_module_prefix(x) == needle then true
+      else list_str_member_stripped(needle, rest)
 
 fn first_concrete_head_str(t: types.Type) -> Maybe String =
   match t with
@@ -771,9 +782,14 @@ fn eta_class_type(class_name: String, method_name: String, actual_type: types.Ty
   match class_param_for(class_name, ctx) with
   | Nothing -> fallback
   | Just class_param ->
-      match dict_get(method_name, ctx_scheme_env(ctx)) with
+      match lookup_method_scheme(method_name, ctx_scheme_env(ctx)) with
       | Nothing -> fallback
       | Just scheme -> eta_class_type_from_scheme(class_param, types.scheme_type(scheme), actual_type, fallback)
+
+fn lookup_method_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
+  match dict_get(method_name, scheme_env) with
+  | Just scheme -> Just(scheme)
+  | Nothing -> dict_get(strip_module_prefix(method_name), scheme_env)
 
 fn eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actual_type: types.Type, fallback: types.Type) -> types.Type =
   match dict_get(class_param, match_type_vars(scheme_type, eta_actual_type_for_scheme_match(scheme_type, actual_type), dict_empty())) with
@@ -827,7 +843,12 @@ fn find_concrete_method_impl(class_name: String, method_name: String, head: Stri
   # strip_module_prefix).  Strip here so both sides of the lookup use the same key form.
   match dict_get(strip_module_prefix(class_name) ++ "_" ++ head, ctx_inst(ctx)) with
   | Nothing -> Nothing
-  | Just method_map -> dict_get(method_name, method_map)
+  | Just method_map -> dict_get_method(method_name, method_map)
+
+fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String =
+  match dict_get(method_name, method_map) with
+  | Just value -> Just(value)
+  | Nothing -> dict_get(strip_module_prefix(method_name), method_map)
 
 fn find_fwd_method_impl(class_name: String, method_name: String, ctx: LowerCtx) -> Maybe String =
   find_fwd_in_co_entries(class_name, method_name, vec_to_list(dict_entries(ctx_fwd(ctx))))
@@ -838,7 +859,7 @@ fn find_fwd_in_co_entries(class_name: String, method_name: String, entries: List
   | Cons (key, method_map) rest ->
       # fwd_map keys are always stripped; strip class_name here to match.
       if str_starts_with(key, strip_module_prefix(class_name) ++ "_") then
-        match dict_get(method_name, method_map) with
+        match dict_get_method(method_name, method_map) with
         | Just impl_name -> Just(impl_name)
         | Nothing -> find_fwd_in_co_entries(class_name, method_name, rest)
       else
@@ -979,9 +1000,66 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
       | _ -> Nothing
 
 fn try_eta_expand_class_method(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match find_class_of_method(name, ctx_class_order(ctx)) with
+  match find_eta_class_of_method(name, ctx) with
+  | Nothing -> try_eta_forwarded_without_class(name, t, ctx)
+  | Just class_name ->
+      match try_eta_in_class(class_name, name, t, ctx) with
+      | Just expanded -> Just(expanded)
+      | Nothing -> try_eta_forwarded_without_class(name, t, ctx)
+
+fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match t with
+  | types.TFunc param _ _ ->
+      match tvar_head_name(param) with
+      | Just tvar_name ->
+          match find_forwarded_method_for_tvar(name, tvar_name, vec_to_list(dict_entries(ctx_fwd(ctx)))) with
+          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+          | Nothing ->
+              match find_forwarded_method_any(name, vec_to_list(dict_entries(ctx_fwd(ctx)))) with
+              | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+              | Nothing -> Nothing
+      | Nothing ->
+          match find_forwarded_method_any(name, vec_to_list(dict_entries(ctx_fwd(ctx)))) with
+          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+          | Nothing -> Nothing
+  | _ -> Nothing
+
+fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entries: List (String, Dict String)) -> Maybe String =
+  match entries with
+  | Nil -> Nothing
+  | Cons (key, method_map) rest ->
+      if str_ends_with_suffix(key, "_" ++ tvar_name) then
+        match dict_get_method(method_name, method_map) with
+        | Just impl_name -> Just(impl_name)
+        | Nothing -> find_forwarded_method_for_tvar(method_name, tvar_name, rest)
+      else
+        find_forwarded_method_for_tvar(method_name, tvar_name, rest)
+
+fn find_forwarded_method_any(method_name: String, entries: List (String, Dict String)) -> Maybe String =
+  match entries with
+  | Nil -> Nothing
+  | Cons (_, method_map) rest ->
+      match dict_get_method(method_name, method_map) with
+      | Just impl_name -> Just(impl_name)
+      | Nothing -> find_forwarded_method_any(method_name, rest)
+
+fn find_eta_class_of_method(method_name: String, ctx: LowerCtx) -> Maybe String =
+  match find_class_of_method(method_name, ctx_class_order(ctx)) with
+  | Just class_name -> Just(class_name)
+  | Nothing -> lookup_class_marker(method_name, ctx)
+
+fn lookup_class_marker(method_name: String, ctx: LowerCtx) -> Maybe String =
+  match lookup_class_marker_scheme(method_name, ctx_scheme_env(ctx)) with
   | Nothing -> Nothing
-  | Just class_name -> try_eta_in_class(class_name, name, t, ctx)
+  | Just scheme ->
+      match types.scheme_type(scheme) with
+      | types.TConst class_name -> Just(class_name)
+      | _ -> Nothing
+
+fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
+  match dict_get("@class:" ++ method_name, scheme_env) with
+  | Just scheme -> Just(scheme)
+  | Nothing -> dict_get("@class:" ++ strip_module_prefix(method_name), scheme_env)
 
 fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match t with
@@ -1003,20 +1081,34 @@ fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerC
               # enabling exact slot selection when multiple same-class constraints exist.
               match tvar_head_name(class_type) with
               | Just tvar_name ->
-                  match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ class_name, ctx_scheme_env(ctx)) with
-                  | Just fwd_scheme ->
-                      match types.scheme_type(fwd_scheme) with
-                      | types.TConst prog_var ->
-                          match dict_get(strip_module_prefix(class_name) ++ "_" ++ prog_var, ctx_fwd(ctx)) with
-                          | Just method_map ->
-                              match dict_get(name, method_map) with
-                              | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-                              | Nothing -> Nothing
-                          | Nothing -> Nothing
-                      | _ -> Nothing
-                  | Nothing -> Nothing
+                  eta_forwarded_method(name, class_name, tvar_name, t, ctx)
               | Nothing -> Nothing
   | _ -> Nothing
+
+fn eta_forwarded_method(method_name: String, class_name: String, tvar_name: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match eta_forwarded_method_for_prog_var(method_name, class_name, tvar_name, method_type, ctx) with
+  | Just expanded -> Just(expanded)
+  | Nothing ->
+      match lookup_eta_fwd_scheme(tvar_name, class_name, ctx) with
+      | Just fwd_scheme ->
+          match types.scheme_type(fwd_scheme) with
+          | types.TConst prog_var ->
+              eta_forwarded_method_for_prog_var(method_name, class_name, prog_var, method_type, ctx)
+          | _ -> Nothing
+      | Nothing -> Nothing
+
+fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, prog_var: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match dict_get(strip_module_prefix(class_name) ++ "_" ++ prog_var, ctx_fwd(ctx)) with
+  | Just method_map ->
+      match dict_get_method(method_name, method_map) with
+      | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, dummy_pos()))
+      | Nothing -> Nothing
+  | Nothing -> Nothing
+
+fn lookup_eta_fwd_scheme(tvar_name: String, class_name: String, ctx: LowerCtx) -> Maybe types.Scheme =
+  match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ class_name, ctx_scheme_env(ctx)) with
+  | Just scheme -> Just(scheme)
+  | Nothing -> dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ strip_module_prefix(class_name), ctx_scheme_env(ctx))
 
 # lower_expr_callee: lower the callee of a TCall without eta-expanding TVar class methods.
 # Direct class method calls already have TDict nodes injected by infer; rewriting the
