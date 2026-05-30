@@ -440,4 +440,13 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "p2-fwd-only: 2 args in inner call (fwd slot, no unresolved inner dict)",
       lowered_fn_lambda_inner_arg_count(r_p2, "test"), 2)
 
+    # TVar-headed forwarded constraint: eta_forwarded_method_for_prog_var path.
+    # `where MyEq a` — no concrete head; must use ctx_fwd["MyEq_a"] slot directly.
+    r_tvar_fwd <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\nfn test(f: (a -> a -> Bool) -> Bool) -> Bool where MyEq a = f(my_eq)")
+    assert_true(state, "tvar-fwd: lowers ok", is_lower_ok(r_tvar_fwd))
+    assert_true(state, "tvar-fwd: uses forwarded slot (__tc_MyEq_0_)",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_tvar_fwd, "test"), "__tc_MyEq_0_"))
+    assert_eq(state, "tvar-fwd: 2 args in inner call (value args only, no dict in lambda body)",
+      lowered_fn_lambda_inner_arg_count(r_tvar_fwd, "test"), 2)
+
     summary(state)

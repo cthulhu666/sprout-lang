@@ -1103,7 +1103,7 @@ fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerC
                       if has_unresolved_dict(inner_dicts) then
                         match find_fwd_method_for_head(class_name, name, head, ctx) with
                         | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
-                        | Nothing -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
+                        | Nothing -> Nothing
                       else
                         Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
               | Nothing ->
@@ -1134,11 +1134,8 @@ fn eta_forwarded_method(method_name: String, class_name: String, tvar_name: Stri
       | Nothing -> Nothing
 
 fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, prog_var: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match dict_get(strip_module_prefix(class_name) ++ "_" ++ prog_var, ctx_fwd(ctx)) with
-  | Just method_map ->
-      match dict_get_method(method_name, method_map) with
-      | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, dummy_pos()))
-      | Nothing -> Nothing
+  match find_fwd_method_for_head(class_name, method_name, prog_var, ctx) with
+  | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, dummy_pos()))
   | Nothing -> Nothing
 
 fn lookup_eta_fwd_scheme(tvar_name: String, class_name: String, ctx: LowerCtx) -> Maybe types.Scheme =
