@@ -1,316 +1,53 @@
 #!/usr/bin/env bash
-# Pre-commit hook: fast compiler-health checks gated on what actually changed.
+# Sprout pre-commit hook — minimal: fmt --check + lint on staged files.
+# Install with: just install-hooks
+#
+# Check-only: never modifies files or staging. Heavier validation
+# (smoke tests, bundler parity, stdlib units, native compiler-stage tests,
+# C-builtin guards) lives in CI, not here.
+
 set -euo pipefail
 
-CHANGED=$(git diff --cached --name-only 2>/dev/null || true)
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
 
-# Shared temp workspace — all sections write here; cleaned on exit.
-HOOK_TMP=$(mktemp -d /tmp/sprout_hook_XXXXXX)
-trap "rm -rf $HOOK_TMP" EXIT
+files=$(git diff --cached --name-only --diff-filter=ACMR -z \
+        | tr '\0' '\n' | grep -E '\.(sprout|spr)$' || true)
+[[ -z "$files" ]] && exit 0
 
-# ── 0. Format check (staged .sprout/.spr files only) ─────────────────────────
-# Runs when any .sprout or .spr file is staged.
-# Checks only the staged files — fast gate before slower compilation checks.
-# Skipped automatically if build/fmt_bin is absent.
-sprout_staged=$(echo "$CHANGED" | grep -E '\.(sprout|spr)$' || true)
-if [ -n "$sprout_staged" ]; then
-  if [ -x "./build/fmt_bin" ]; then
-    echo "[pre-commit] .sprout/.spr files staged — running fmt-check..."
-    fmt_failed=0
-    while IFS= read -r f; do
-      [ -f "$f" ] || continue
-      fmt_err="$HOOK_TMP/fmt_err.txt"
-      if ! ./build/fmt_bin fmt --check "$f" > "$fmt_err" 2>&1; then
-        echo "[pre-commit] formatting drift: $f"; cat "$fmt_err"
-        fmt_failed=$((fmt_failed + 1))
-      fi
-    done <<< "$sprout_staged"
-    if [ "$fmt_failed" -gt 0 ]; then
-      echo "[pre-commit] $fmt_failed file(s) have formatting drift — run: mise exec -- just fmt && git add <files>"
-      exit 1
-    fi
-    echo "[pre-commit] fmt-check passed."
-  else
-    echo "[pre-commit] build/fmt_bin absent — skipping fmt-check (run: just build-fmt-from-seed)."
+FMT="./build/fmt_bin"
+if [[ ! -x "$FMT" ]]; then
+  echo "[pre-commit] $FMT absent — run: just build-fmt-from-seed" >&2
+  exit 1
+fi
+
+needs_fmt=()
+lint_failures=()
+tmp=$(mktemp -d /tmp/sprout_hook_XXXXXX)
+trap "rm -rf '$tmp'" EXIT
+
+while IFS= read -r f; do
+  [[ -z "$f" || ! -f "$f" ]] && continue
+  if ! "$FMT" fmt --check "$f" > "$tmp/fmt.err" 2>&1; then
+    needs_fmt+=("$f")
   fi
-fi
-
-# ── 1. Emit-IR smoke tests ───────────────────────────────────────────────────
-# Runs when any compiler Sprout source changes.
-# Tests compile_driver_bin_stage1 --emit-ir on code-shape snippets in
-# tests/smoke_shapes/.  Checks: non-zero exit, has 'define' block, no
-# str_concat(ptr null,...) (null-ptr codegen regression guard).
-if echo "$CHANGED" | grep -qE 'stdlib/compiler/'; then
-  if [ -x "./build/compile_driver_bin_stage1" ]; then
-    echo "[pre-commit] compiler source changed — running emit-IR smoke tests..."
-    SMK_STDLIB="$(pwd)/stdlib"
-    smk_failed=0
-    for f in tests/smoke_shapes/*.spr; do
-      [ -f "$f" ] || continue
-      smk_ir="$HOOK_TMP/smk_ir.ll"
-      smk_err="$HOOK_TMP/smk_err.txt"
-      if ! ./build/compile_driver_bin_stage1 --emit-ir "$SMK_STDLIB" "$f" > "$smk_ir" 2>"$smk_err"; then
-        echo "[pre-commit] emit-IR failed for shape $(basename "$f"):"; cat "$smk_err"
-        smk_failed=$((smk_failed + 1)); continue
-      fi
-      if ! grep -q "^define " "$smk_ir"; then
-        echo "[pre-commit] shape $(basename "$f"): IR has no 'define' block"
-        smk_failed=$((smk_failed + 1)); continue
-      fi
-      if grep -qE 'str_concat\(ptr null,|, ptr null\)' "$smk_ir"; then
-        echo "[pre-commit] shape $(basename "$f"): IR contains str_concat(ptr null,...) — null-ptr codegen bug"
-        smk_failed=$((smk_failed + 1)); continue
-      fi
-      if command -v opt > /dev/null 2>&1; then
-        if ! opt --passes=verify "$smk_ir" -o /dev/null > "$smk_err" 2>&1; then
-          echo "[pre-commit] shape $(basename "$f"): opt IR verification failed:"; cat "$smk_err"
-          smk_failed=$((smk_failed + 1))
-        fi
-      fi
-    done
-    [ "$smk_failed" -gt 0 ] && { echo "[pre-commit] $smk_failed emit-IR smoke test(s) FAILED — commit blocked."; exit 1; }
-    echo "[pre-commit] emit-IR smoke tests passed."
-  else
-    echo "[pre-commit] build/compile_driver_bin_stage1 absent — skipping emit-IR smoke tests."
+  if ! "$FMT" lint "$f" > "$tmp/lint.err" 2>&1; then
+    lint_failures+=("$f: $(tr '\n' ' ' < "$tmp/lint.err" | head -c 200)")
   fi
+done <<< "$files"
+
+fail=0
+if (( ${#needs_fmt[@]} > 0 )); then
+  echo "[pre-commit] formatting drift:" >&2
+  printf '  %s\n' "${needs_fmt[@]}" >&2
+  echo "  fix: mise exec -- just fmt && git add <files>" >&2
+  fail=1
+fi
+if (( ${#lint_failures[@]} > 0 )); then
+  echo "[pre-commit] lint failures:" >&2
+  printf '  %s\n' "${lint_failures[@]}" >&2
+  echo "  inspect: just lint-file <path>" >&2
+  fail=1
 fi
 
-# ── 1.5. Example canary (compile + run) ──────────────────────────────────────
-# Runs when the seed binary or runtime is staged — i.e. after a bootstrap round
-# has been completed and the promoted binary reflects the staged source changes.
-# Triggering on stdlib/compiler/ alone would test the *old* binary against the
-# old examples (always passes, no signal); the canary is only meaningful once
-# the binary has been rebuilt from the new codegen.
-# Also runs on runtime/sprout_runtime.c changes: runtime is linked directly so
-# those changes take effect without a bootstrap round.
-if echo "$CHANGED" | grep -qE 'bootstrap/compile_driver|runtime/sprout_runtime\.c'; then
-  if [ -x "./build/compile_driver_bin_stage1" ]; then
-    echo "[pre-commit] compiler/runtime changed — running example canary..."
-    EX_STDLIB="$(pwd)/stdlib"
-    EX_CLANG_EXTRA=""
-    [[ "$(uname)" == "Darwin" ]] && EX_CLANG_EXTRA="-framework Security -framework CoreFoundation"
-    ex_failed=0
-    for f in \
-      examples/tuples.sprout \
-      examples/factorial.sprout \
-      examples/maybe_map.sprout \
-      examples/typeclass_collections_demo.sprout \
-      examples/fizzbuzz.sprout; do
-      [ -f "$f" ] || continue
-      ex_ll="$HOOK_TMP/ex.ll"
-      ex_bin="$HOOK_TMP/ex_bin"
-      ex_err="$HOOK_TMP/ex_err.txt"
-      if ! ./build/compile_driver_bin_stage1 --emit-ir "$EX_STDLIB" "$f" > "$ex_ll" 2>"$ex_err"; then
-        echo "[pre-commit] example compile failed: $f"; cat "$ex_err"
-        ex_failed=$((ex_failed + 1)); continue
-      fi
-      # shellcheck disable=SC2086
-      if ! clang "$ex_ll" runtime/sprout_runtime.c -O2 $EX_CLANG_EXTRA -o "$ex_bin" 2>"$ex_err"; then
-        echo "[pre-commit] example link failed: $f"; cat "$ex_err"
-        ex_failed=$((ex_failed + 1)); continue
-      fi
-      if ! "$ex_bin" > /dev/null 2>"$ex_err"; then
-        echo "[pre-commit] example crashed: $f"
-        cat "$ex_err"
-        ex_failed=$((ex_failed + 1))
-      fi
-    done
-    [ "$ex_failed" -gt 0 ] && { echo "[pre-commit] $ex_failed example canary test(s) FAILED — commit blocked."; exit 1; }
-    echo "[pre-commit] example canary passed."
-  else
-    echo "[pre-commit] build/compile_driver_bin_stage1 absent — skipping example canary."
-  fi
-fi
-
-# ── 2. Bundler parity tests ──────────────────────────────────────────────────
-# (test_bundler_parity.py was removed in e2a96ec with the Python cleanup;
-#  bundler correctness is now covered by tests/stdlib/compiler/test_bundler.spr)
-
-# ── 3. Bundle smoke tests on stage-1 binary ──────────────────────────────────
-# Runs when compiler Sprout source changes.
-# Checks that compile_driver_bin_stage1 --phase bundle produces valid qualified
-# names (non-empty output, no dot-prefix names) for the bootstrap corpus.
-# Skipped automatically if compile_driver_bin_stage1 is absent.
-if echo "$CHANGED" | grep -qE 'stdlib/compiler/'; then
-  if [ -x "./build/compile_driver_bin_stage1" ]; then
-    echo "[pre-commit] running bundle smoke tests on stage-1 binary..."
-    BSM_STDLIB="$(pwd)/stdlib"
-    bsm_failed=0
-    for corpus_file in \
-      stdlib/compiler/token.sprout \
-      stdlib/compiler/ast.sprout \
-      stdlib/prelude.sprout; do
-      [ -f "$corpus_file" ] || continue
-      bsm_out="$HOOK_TMP/bsm_out.txt"
-      bsm_err="$HOOK_TMP/bsm_err.txt"
-      if ! ./build/compile_driver_bin_stage1 --phase bundle "$BSM_STDLIB" "$corpus_file" > "$bsm_out" 2>"$bsm_err"; then
-        echo "[pre-commit] bundle failed: $corpus_file"; cat "$bsm_err"
-        bsm_failed=$((bsm_failed + 1)); continue
-      fi
-      # Extract qualified-name lines: skip "=== ... ===" header and "OK" lines.
-      bsm_names=$(awk '/^=== .+ ===$/{past=1;next} past && /^OK$/{next} past && NF{print}' "$bsm_out")
-      if [ -z "$bsm_names" ]; then
-        echo "[pre-commit] bundle produced no qualified names for $corpus_file"
-        bsm_failed=$((bsm_failed + 1)); continue
-      fi
-      dot_names=$(echo "$bsm_names" | grep '^\.' || true)
-      if [ -n "$dot_names" ]; then
-        echo "[pre-commit] bundle: dot-prefix names in $corpus_file:"
-        echo "$dot_names"
-        bsm_failed=$((bsm_failed + 1))
-      fi
-    done
-    [ "$bsm_failed" -gt 0 ] && { echo "[pre-commit] $bsm_failed bundle smoke test(s) FAILED — commit blocked."; exit 1; }
-    echo "[pre-commit] bundle smoke tests passed."
-  else
-    echo "[pre-commit] compile_driver_bin_stage1 absent — skipping bundle smoke tests."
-  fi
-fi
-
-# ── 4. In-language stdlib unit tests ─────────────────────────────────────────
-# Runs when the test framework, prelude Eq instances, tested stdlib modules,
-# or the test files themselves change.
-# Compiles each test file via compile_driver_bin_stage1 --emit-ir, links with
-# clang, and runs.  tests/stdlib/compiler/ is covered by section 5.
-if echo "$CHANGED" | grep -qE 'stdlib/.*\.sprout|tests/stdlib/'; then
-  if [ -x "./build/compile_driver_bin_stage1" ]; then
-    echo "[pre-commit] stdlib sources changed — running in-language test suites..."
-    CS4_STDLIB="$(pwd)/stdlib"
-    CS4_CLANG_EXTRA=""
-    [[ "$(uname)" == "Darwin" ]] && CS4_CLANG_EXTRA="-framework Security -framework CoreFoundation"
-    # Files with known compile errors — skipped until the underlying bug is fixed.
-    CS4_SKIP="test_process.spr test_regex.spr"
-    stdlib_failed=0
-    for f in tests/stdlib/*.spr tests/stdlib/*.sprout; do
-      [ -f "$f" ] || continue
-      fname=$(basename "$f")
-      if echo "$CS4_SKIP" | grep -qw "$fname"; then
-        echo "[pre-commit] skipping known-broken: $f"
-        continue
-      fi
-      cs4_ll="$HOOK_TMP/s4.ll"
-      cs4_bin="$HOOK_TMP/s4_bin"
-      cs4_err="$HOOK_TMP/s4_err.txt"
-      if ! ./build/compile_driver_bin_stage1 --emit-ir "$CS4_STDLIB" "$f" > "$cs4_ll" 2>"$cs4_err"; then
-        echo "[pre-commit] compile error: $f"; cat "$cs4_err"
-        stdlib_failed=$((stdlib_failed + 1)); continue
-      fi
-      # shellcheck disable=SC2086
-      if ! clang "$cs4_ll" runtime/sprout_runtime.c -O2 $CS4_CLANG_EXTRA -o "$cs4_bin" 2>"$cs4_err"; then
-        echo "[pre-commit] link error: $f"; cat "$cs4_err"
-        stdlib_failed=$((stdlib_failed + 1)); continue
-      fi
-      out=$("$cs4_bin" 2>&1) || true
-      if echo "$out" | grep -q "^SUITE FAILED"; then
-        echo "[pre-commit] SUITE FAILED: $f"
-        echo "$out"
-        stdlib_failed=$((stdlib_failed + 1))
-      fi
-    done
-    if [ "$stdlib_failed" -gt 0 ]; then
-      echo "[pre-commit] $stdlib_failed stdlib test suite(s) FAILED — commit blocked."
-      exit 1
-    fi
-    echo "[pre-commit] stdlib tests passed."
-  else
-    echo "[pre-commit] build/compile_driver_bin_stage1 absent — skipping stdlib tests."
-  fi
-fi
-
-# ── 5. Native compiler-stage tests (stage-1) ─────────────────────────────────
-# Runs when any stdlib/compiler source or compiler test file changes.
-# Verifies all compiler-stage tests (lexer→codegen + type system) against the
-# native binary.  Requires compile_driver_bin_stage1 — skipped if absent.
-if echo "$CHANGED" | grep -qE 'stdlib/compiler/|tests/stdlib/compiler/'; then
-  if [ -x "./build/compile_driver_bin_stage1" ]; then
-    echo "[pre-commit] compiler sources changed — running native compiler-stage tests..."
-    CS1_STDLIB="$(pwd)/stdlib"
-    CS1_CLANG_EXTRA=""
-    [[ "$(uname)" == "Darwin" ]] && CS1_CLANG_EXTRA="-framework Security -framework CoreFoundation"
-    cs1_ll="$HOOK_TMP/cs1.ll"
-    cs1_bin="$HOOK_TMP/cs1_bin"
-    cs1_err="$HOOK_TMP/cs1_err.txt"
-    cs1_failed=0
-    # test_typeclass_recursive_forwarding.spr excluded: P2 pre-existing bug in BACKLOG
-    for f in tests/stdlib/compiler/test_lexer.spr \
-              tests/stdlib/compiler/test_bundler.spr \
-              tests/stdlib/compiler/test_parser.spr \
-              tests/stdlib/compiler/test_checker.spr \
-              tests/stdlib/compiler/test_lowering.spr \
-              tests/stdlib/compiler/test_codegen.spr \
-              tests/stdlib/compiler/test_types.spr; do
-      [ -f "$f" ] || continue
-      if ! ./build/compile_driver_bin_stage1 --emit-ir "$CS1_STDLIB" "$f" > "$cs1_ll" 2>"$cs1_err"; then
-        echo "[pre-commit] compile error: $f"; cat "$cs1_err"
-        cs1_failed=$((cs1_failed + 1)); continue
-      fi
-      # shellcheck disable=SC2086
-      if ! clang "$cs1_ll" runtime/sprout_runtime.c -O2 $CS1_CLANG_EXTRA -o "$cs1_bin" 2>"$cs1_err"; then
-        echo "[pre-commit] link error: $f"; cat "$cs1_err"
-        cs1_failed=$((cs1_failed + 1)); continue
-      fi
-      out=$("$cs1_bin" 2>&1) || true
-      if echo "$out" | grep -q "^SUITE FAILED"; then
-        echo "[pre-commit] SUITE FAILED: $f"
-        echo "$out"
-        cs1_failed=$((cs1_failed + 1))
-      fi
-    done
-    [ "$cs1_failed" -gt 0 ] && { echo "[pre-commit] $cs1_failed compiler-stage test(s) FAILED — commit blocked."; exit 1; }
-    echo "[pre-commit] native compiler-stage tests passed."
-  else
-    echo "[pre-commit] compile_driver_bin_stage1 absent — skipping native compiler-stage tests."
-  fi
-fi
-
-# ── 6. New C builtin guard (blocking) ────────────────────────────────────────
-# Any non-static `long long <name>(` function added to sprout_runtime.c must
-# have its name in runtime/APPROVED_BUILTINS.  Forcing an update to that file
-# makes the addition explicit and reviewable.  Per AGENTS.md rules 4–6.
-if echo "$CHANGED" | grep -qE 'runtime/sprout_runtime\.c'; then
-  python3 - <<'PYEOF'
-import subprocess, sys, re
-
-diff = subprocess.check_output(
-    ['git', 'diff', '--cached', '--', 'runtime/sprout_runtime.c']
-).decode(errors='replace')
-
-new_fns = re.findall(
-    r'^\+long long ([a-z_][a-zA-Z0-9_]*)\(',
-    diff, re.MULTILINE
-)
-if not new_fns:
-    sys.exit(0)
-
-try:
-    content = subprocess.check_output(
-        ['git', 'show', ':runtime/APPROVED_BUILTINS'],
-        stderr=subprocess.DEVNULL
-    ).decode(errors='replace')
-    approved = {
-        line.split('#')[0].strip()
-        for line in content.splitlines()
-        if line.strip() and not line.startswith('#')
-    }
-except subprocess.CalledProcessError:
-    approved = set()
-
-missing = [fn for fn in new_fns if fn not in approved]
-if not missing:
-    sys.exit(0)
-
-print('[pre-commit] NEW C BUILTINS not in runtime/APPROVED_BUILTINS:')
-for fn in missing:
-    print(f'  long long {fn}(')
-print()
-print('[pre-commit] Per AGENTS.md "Builtin vs Stdlib" rules 4-6:')
-print('[pre-commit]   - Exhaust Sprout/stdlib alternatives first.')
-print('[pre-commit]   - If a builtin is truly necessary, add its name to')
-print('[pre-commit]     runtime/APPROVED_BUILTINS with an inline comment')
-print('[pre-commit]     explaining why it cannot be done in Sprout.')
-sys.exit(1)
-PYEOF
-fi
-
-# (GC safety check removed — scripts/gc_safety_check.py is Python.
-#  CI still enforces it via: just gc-safety-check --strict)
+exit $fail
