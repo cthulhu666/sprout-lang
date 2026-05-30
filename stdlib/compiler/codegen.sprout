@@ -183,7 +183,7 @@ fn tuple_ll(items: List String) -> String =
 fn join_comma(xs: List String) -> String =
   match xs with
   | Nil -> ""
-  | Cons h Nil -> h
+  | [h] -> h
   | Cons h t -> h ++ ", " ++ join_comma(t)
 
 fn join_args_str(a: String, b: String) -> String =
@@ -1652,7 +1652,7 @@ fn any_branch_has_tail(branches: List typed_ast.TypedMatchBranch, fn_name_: Stri
 fn do_last_has_tail(steps: List typed_ast.TypedDoStep, fn_name_: String) -> Bool =
   match steps with
   | Nil -> false
-  | Cons step Nil ->
+  | [step] ->
       match step with
       | typed_ast.TDoExprStep e -> has_self_tail_calls(e, fn_name_)
       | _ -> false

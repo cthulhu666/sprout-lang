@@ -47,52 +47,46 @@ fn run_fmt_write(path: String) -> Int !{IO} =
                 print("formatted " ++ path)
                 0
 
-fn run_fmt() -> Int !{IO} =
-  match argv_get(1) with
-  | Nothing ->
+fn run_lint_file(path: String) -> Int !{IO} =
+  match read_file(path) with
+  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Ok src ->
       do
-        print("fmt: missing path")
-        1
-  | Just "--check" ->
-      match argv_get(2) with
-      | Nothing ->
-          do
-            print("fmt --check: missing path")
-            1
-      | Just path -> run_fmt_check(path)
-  | Just path -> run_fmt_write(path)
-
-fn run_lint() -> Int !{IO} =
-  match argv_get(1) with
-  | Nothing ->
-      do
-        print("lint: missing path")
-        1
-  | Just path ->
-      match read_file(path) with
-      | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
-      | Ok src ->
-          do
-            let issues = formatter.lint_source(src)
-            match issues with
-            | Nil ->
-                do
-                  print("ok")
-                  0
-            | _ ->
-                do
-                  print_issues(path, issues)
-                  1
+        let issues = formatter.lint_source(src)
+        match issues with
+        | Nil ->
+            do
+              print("ok")
+              0
+        | _ ->
+            do
+              print_issues(path, issues)
+              1
 
 fn main() -> Int !{IO} =
-  match argv_get(0) with
-  | Nothing ->
-      do
-        print("usage: fmt_bin [fmt|lint] <path>")
-        1
-  | Just "lint" -> run_lint()
-  | Just "fmt" -> run_fmt()
-  | Just cmd ->
-      do
-        print("unknown subcommand: " ++ cmd)
-        1
+  do
+    args <- argv_all()
+    match args with
+    | ["fmt", "--check", path | _] -> run_fmt_check(path)
+    | ["fmt", "--check" | _] ->
+        do
+          print("fmt --check: missing path")
+          1
+    | ["fmt", path | _] -> run_fmt_write(path)
+    | ["fmt" | _] ->
+        do
+          print("fmt: missing path")
+          1
+    | ["lint", path | _] -> run_lint_file(path)
+    | ["lint" | _] ->
+        do
+          print("lint: missing path")
+          1
+    | [cmd | _] ->
+        do
+          print("unknown subcommand: " ++ cmd)
+          1
+    | _ ->
+        do
+          print("usage: fmt_bin [fmt|lint] <path>")
+          1

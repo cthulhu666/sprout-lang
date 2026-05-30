@@ -130,6 +130,10 @@ fn main() -> Unit !{IO} =
     mixed_call_ir <- get_ir(mixed_call_src)
     assert_true(state, "mixed call: Vec arg rooted", ir_contains(mixed_call_ir, "call i64 @sprout_gc_push_i64_root"))
 
+    # join_comma single-element arm: one-param fn emits no comma in param list
+    one_param_ir <- get_ir("fn id(x: Int) -> Int = x")
+    assert_true(state, "one-param define has no trailing comma", ir_contains(one_param_ir, "define i64 @id(i64"))
+
     # String ++ (append) — exercises the [left, right | _] arm of emit_append_call.
     # extern fn append brings the name into scope without requiring Semigroup infrastructure.
     let concat_src = "extern fn append(x: String, y: String) -> String\nfn greet(name: String) -> String = \"Hello, \" ++ name"

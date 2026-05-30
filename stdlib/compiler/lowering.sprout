@@ -695,7 +695,7 @@ fn mangle_type_args(args: List ast.TypeExpr) -> String =
 fn mangle_type_args_rev(args: List ast.TypeExpr, acc: List String) -> List String =
   match args with
   | Nil -> acc
-  | Cons h Nil -> Cons(mangle_type_expr(h), acc)
+  | [h] -> Cons(mangle_type_expr(h), acc)
   | Cons h rest -> mangle_type_args_rev(rest, Cons("_", Cons(mangle_type_expr(h), acc)))
 
 fn mangle_type_expr(te: ast.TypeExpr) -> String =
@@ -719,7 +719,7 @@ fn join_strings(ss: List String, sep: String) -> String =
 fn join_strings_rev(ss: List String, sep: String, acc: List String) -> List String =
   match ss with
   | Nil -> acc
-  | Cons s Nil -> Cons(s, acc)
+  | [s] -> Cons(s, acc)
   | Cons s rest -> join_strings_rev(rest, sep, Cons(sep, Cons(s, acc)))
 
 # ---------------------------------------------------------------------------
@@ -1007,7 +1007,7 @@ fn resolve_eta_substituted_inner_dict(c: ast.TypeConstraint, pos: source.SourceP
   match c with
   | ast.TypeConstraint class_name type_args ->
       match type_args with
-      | Cons (ast.TypeName name) Nil ->
+      | [ast.TypeName name] ->
           match resolve_eta_fwd_type_name_dict(class_name, name, pos, ctx) with
           | Just dicts -> dicts
           | Nothing -> resolve_tdict(c, pos, ctx)

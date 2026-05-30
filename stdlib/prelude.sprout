@@ -408,7 +408,7 @@ fn decorated_sort_split(xs: List (k, Int, a), mid: Int) -> List(k, Int, a) where
 fn decorated_sort(xs: List (k, Int, a)) -> List(k, Int, a) where Ord k =
   match xs with
   | Nil -> Nil
-  | Cons _ Nil -> xs
+  | [_] -> xs
   | _ -> decorated_sort_split(xs, list_length(xs) / 2)
 
 # O(n): one pass over the list plus one native allocation/copy into the vector.
