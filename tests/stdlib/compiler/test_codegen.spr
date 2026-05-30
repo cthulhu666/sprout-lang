@@ -130,11 +130,9 @@ fn main() -> Unit !{IO} =
     mixed_call_ir <- get_ir(mixed_call_src)
     assert_true(state, "mixed call: Vec arg rooted", ir_contains(mixed_call_ir, "call i64 @sprout_gc_push_i64_root"))
 
-    # join_comma single-element arm: one-param fn emits no comma in param list
     one_param_ir <- get_ir("fn id(x: Int) -> Int = x")
     assert_true(state, "one-param define has no trailing comma", ir_contains(one_param_ir, "define i64 @id(i64"))
 
-    # String ++ (append) — exercises the [left, right | _] arm of emit_append_call.
     # extern fn append brings the name into scope without requiring Semigroup infrastructure.
     let concat_src = "extern fn append(x: String, y: String) -> String\nfn greet(name: String) -> String = \"Hello, \" ++ name"
     ok_concat <- codegen_ok(concat_src)
@@ -142,12 +140,10 @@ fn main() -> Unit !{IO} =
     concat_ir <- get_ir(concat_src)
     assert_true(state, "string ++ emits str_concat call", ir_contains(concat_ir, "str_concat"))
 
-    # emit_ctor_args_bind: 2-field ADT exercises the parallel (args, lls) walk.
     let pair_src = "type Pair = Pair Int Int\nfn fst(p: Pair) -> Int = match p with | Pair x _ -> x"
     pair_ir <- get_ir(pair_src)
     assert_true(state, "2-field ctor pattern emits sprout_field", ir_contains(pair_ir, "sprout_field"))
 
-    # load_captures: lambda that captures n from outer scope exercises the (names, lls) parallel walk.
     # extern fn apply makes f: Int -> Int usable without Semigroup/typeclass infrastructure.
     let closure_src = "extern fn apply(f: Int -> Int, x: Int) -> Int\nfn test_capture(n: Int) -> Int = apply(\\x -> n + x, 5)"
     ok_closure <- codegen_ok(closure_src)

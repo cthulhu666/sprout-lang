@@ -34,8 +34,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "argv words", proc_stdout(r_argv), "one two three\n")
 
     # argv_all collects all argv as a List String without crashing
-    let all_args = argv_all()
-    assert_true(state, "argv_all returns a list", list_length(all_args) >= 0)
+    let _ = argv_all()
 
     # empty stdin string must not deadlock — child sees EOF immediately
     r_empty_stdin <- proc_run_stdin(["cat"], "")

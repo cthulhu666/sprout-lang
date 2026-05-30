@@ -37,9 +37,9 @@ fn sum_ints(xs: List Int) -> Int =
 
 fn main() -> Unit !{IO} =
   do
-    print(describe_command(parse_args(Nil)))
-    print(describe_command(parse_args(Cons("build", Cons("myapp", Nil)))))
-    print(describe_command(parse_args(Cons("test", Cons("unit", Cons("auth", Nil))))))
-    print(describe_command(parse_args(Cons("publish", Cons("mylib", Cons("1.2.0", Cons("--dry-run", Nil)))))))
-    print(describe_command(parse_args(Cons("publish", Cons("mylib", Cons("1.2.0", Nil))))))
-    print(int_to_string(sum_ints(Cons(1, Cons(2, Cons(3, Cons(4, Nil)))))))
+    print(describe_command(parse_args([])))
+    print(describe_command(parse_args(["build", "myapp"])))
+    print(describe_command(parse_args(["test", "unit", "auth"])))
+    print(describe_command(parse_args(["publish", "mylib", "1.2.0", "--dry-run"])))
+    print(describe_command(parse_args(["publish", "mylib", "1.2.0"])))
+    print(int_to_string(sum_ints([1, 2, 3, 4])))
