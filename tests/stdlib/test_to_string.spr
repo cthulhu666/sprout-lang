@@ -14,6 +14,10 @@ fn apply_any(x: a, f: a -> String) -> String =
 fn show_via_value_method(x: a) -> String where ToString a =
   apply_any(x, to_string)
 
+# Regression: let-decl path must apply substitution so that typeclass method
+# eta-expansion resolves the concrete instance (REPL wraps all exprs as let-decls).
+let to_string_int_list = list_map(to_string, [1, 2, 3])
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -26,5 +30,6 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "to_string String id", to_string("hello"), "hello")
     assert_eq(state, "to_string String empty", to_string(""), "")
     assert_eq(state, "polymorphic imported to_string eta", show_via_value_method(42), "42")
+    assert_eq(state, "to_string via let-decl list_map", to_string_int_list, ["1", "2", "3"])
 
     summary(state)

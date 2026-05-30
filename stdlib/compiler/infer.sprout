@@ -2217,7 +2217,7 @@ fn typecheck_decl(
         | InferErr e -> TypedDeclErr(e)
         | InferOk typed_expr s1 _ _ ->
             TypedDeclOk(
-              typed_ast.TLetDecl(name, typed_expr),
+              typed_ast.TLetDecl(name, apply_subst_typed_expr(s1, typed_expr)),
               dict_set(name,
                 unifier.generalize(unifier.ftv_env(env), s1, eff_subst,
                   typed_ast.typed_expr_type(typed_expr), types.EffectPure),
