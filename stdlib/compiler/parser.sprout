@@ -346,9 +346,12 @@ fn parse_ident_pattern_atom(tokens: Vec token.Token, i: Int, name: String, pos: 
   else if is_constructor_name(name) then Ok((ast.ConstructorPattern(name, Nil, pos), i + 1))
   else Ok((ast.VarPattern(name, pos), i + 1))
 
+fn nil_pattern(pos: source.SourcePos) -> ast.Pattern =
+  ast.ConstructorPattern("Nil", Nil, pos)
+
 fn parse_list_pattern(tokens: Vec token.Token, i: Int, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
   match match_symbol(tokens, i, "]") with
-  | Just (_, i2) -> Ok((ast.ConstructorPattern("Nil", Nil, pos), i2))
+  | Just (_, i2) -> Ok((nil_pattern(pos), i2))
   | Nothing -> parse_list_pattern_items(tokens, i, Nil, pos)
 
 fn parse_list_pattern_items(tokens: Vec token.Token, i: Int, acc: List ast.Pattern, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
@@ -363,7 +366,7 @@ fn parse_list_pattern_items(tokens: Vec token.Token, i: Int, acc: List ast.Patte
     | Nothing ->
         match match_symbol(tokens, i2, "]") with
         | Just (_, i3) ->
-            Ok((build_cons_pattern(list_reverse(Cons(p, acc)), ast.ConstructorPattern("Nil", Nil, pos), pos), i3))
+            Ok((build_cons_pattern(list_reverse(Cons(p, acc)), nil_pattern(pos), pos), i3))
         | Nothing ->
             do
               (_, i3) <- expected_symbol(",", tokens, i2)
