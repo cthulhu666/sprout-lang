@@ -2509,9 +2509,9 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
 
 fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   match args with
-  | Cons (typed_ast.TDict _ _ _) (Cons left (Cons right _)) ->
+  | [typed_ast.TDict _ _ _, left, right | _] ->
       emit_append_operands(left, right, ty, ctx, locals, em)
-  | Cons left (Cons right _) ->
+  | [left, right | _] ->
       emit_append_operands(left, right, ty, ctx, locals, em)
   | _ -> zero_val(type_to_ll(ty))
 

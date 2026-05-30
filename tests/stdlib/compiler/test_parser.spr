@@ -122,5 +122,9 @@ fn main() -> Unit !{IO} =
       parse_ok("fn f(xs: List Int) -> Int = match xs with | [a, b | rest] -> a | _ -> 0"))
     assert_true(state, "multiple list pattern arms",
       parse_ok("fn f(xs: List Int) -> Int = match xs with | [] -> 0 | [x] -> x | [a, b | _] -> a"))
+    assert_true(state, "list pattern with qualified constructor head",
+      parse_ok("fn f(xs: List a) -> Bool = match xs with | [Foo.Bar _ _, x | _] -> true | _ -> false"))
+    assert_true(state, "list pattern two qualified constructors",
+      parse_ok("fn f(xs: List a) -> Bool = match xs with | [Foo.A _ _, Foo.B _ | _] -> true | _ -> false"))
 
     summary(state)
