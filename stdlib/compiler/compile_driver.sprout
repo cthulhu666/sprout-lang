@@ -227,35 +227,30 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, debug_mode_: Bool) ->
         run_batch(stdlib_root, idx + 1, phase, debug_mode_)
 
 fn main() -> Unit !{IO} =
-  match argv_get(0) with
-  | Nothing -> print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name>] <stdlib-root> <file>...")
-  | Just first_arg ->
-      if first_arg == "--emit-ir" then
-        match argv_get(1) with
-        | Nothing -> print("ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> <file>...")
-        | Just second_arg ->
-            if second_arg == "--debug" then
-              match argv_get(2) with
-              | Nothing -> print("ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
-              | Just stdlib_root -> run_batch(stdlib_root, 3, "ir", true)
-            else
-              run_batch(second_arg, 2, "ir", false)
-      else if first_arg == "--emit-ir-one" then
-        match argv_get(1) with
-        | Nothing -> print("ERROR: --emit-ir-one requires a function name argument")
-        | Just fn_name ->
-            match argv_get(2) with
-            | Nothing -> print("ERROR: usage: compile-driver --emit-ir-one <fn_name> <stdlib-root> <file>")
-            | Just stdlib_root ->
-                match argv_get(3) with
-                | Nothing -> print("ERROR: usage: compile-driver --emit-ir-one <fn_name> <stdlib-root> <file>")
-                | Just file -> run_file_ir_one(fn_name, file, stdlib_root)
-      else if first_arg == "--phase" then
-        match argv_get(1) with
-        | Nothing -> print("ERROR: --phase requires an argument: bundle|check|lower|recheck|ir|scan-info|dump-qualify")
-        | Just phase ->
-            match argv_get(2) with
-            | Nothing -> print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> <file>...")
-            | Just stdlib_root -> run_batch(stdlib_root, 3, phase, false)
-      else
-        run_batch(first_arg, 1, "", false)
+  do
+    args <- argv_all()
+    match args with
+    | ["--emit-ir", "--debug", stdlib_root | _] ->
+        run_batch(stdlib_root, 3, "ir", true)
+    | ["--emit-ir", "--debug" | _] ->
+        print("ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
+    | ["--emit-ir", stdlib_root | _] ->
+        run_batch(stdlib_root, 2, "ir", false)
+    | ["--emit-ir" | _] ->
+        print("ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> <file>...")
+    | ["--emit-ir-one", fn_name, stdlib_root, path | _] ->
+        run_file_ir_one(fn_name, path, stdlib_root)
+    | ["--emit-ir-one", _ | _] ->
+        print("ERROR: usage: compile-driver --emit-ir-one <fn_name> <stdlib-root> <file>")
+    | ["--emit-ir-one"] ->
+        print("ERROR: --emit-ir-one requires a function name argument")
+    | ["--phase", phase, stdlib_root | _] ->
+        run_batch(stdlib_root, 3, phase, false)
+    | ["--phase", _ | _] ->
+        print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> <file>...")
+    | ["--phase" | _] ->
+        print("ERROR: --phase requires an argument: bundle|check|lower|recheck|ir|scan-info|dump-qualify")
+    | [stdlib_root | _] ->
+        run_batch(stdlib_root, 1, "", false)
+    | _ ->
+        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name>] <stdlib-root> <file>...")

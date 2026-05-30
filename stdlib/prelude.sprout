@@ -854,6 +854,17 @@ extern fn panic(msg: String) -> a !{IO}
 extern fn read_lines(path: String) -> List String !{IO}
 extern fn read_int_lines(path: String) -> Vector Int !{IO}
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
+
+export fn argv_all() -> List String !{IO} =
+  argv_collect(0)
+
+fn argv_collect(i: Int) -> List String !{IO} =
+  match argv_get(i) with
+  | Nothing -> Nil
+  | Just s -> do
+      rest <- argv_collect(i + 1)
+      Cons(s, rest)
+
 extern fn env_get(name: String) -> Maybe String !{IO}
 # Returns microseconds from a monotonic clock (CLOCK_MONOTONIC).
 # Only differences between two calls are meaningful — the epoch is unspecified.
