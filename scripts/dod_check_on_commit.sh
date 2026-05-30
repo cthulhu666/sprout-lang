@@ -46,18 +46,24 @@ fi
 cat >&2 <<'MSG'
 BLOCKED: DoD acknowledgement required before `git commit`.
 
-Before committing, confirm the relevant DoD criteria from AGENTS.md are met:
-  - High-level design approved by user when required (#1)
-  - Failing tests written first for new features (#2) / regression test for fixes (#3)
-  - Coverage gaps closed for edited files (#4)
-  - Docs & spec in sync (#6)
-  - `mise exec -- just fmt` run on changed .sprout/.spr files (#7)
-  - `mise exec -- just test` passes (#8) — required for code/semantics changes
-  - `mise exec -- just compile-examples-stage1` passes (#11)
-  - Compiler-source changes: smoke shapes pass + bundle smoke passes (#17, #18)
-  - Runtime changes: new long-long fns listed in runtime/APPROVED_BUILTINS (#19)
-  - Bootstrap/runtime changes: example canary RUNS without crash (#20)
-  - Skipped tests treated as gaps unless user accepted (#14)
+Confirm the relevant criteria from AGENTS.md are met for the staged changes.
+
+Definition of Ready (entry conditions — should already be true):
+  - Design approved by user when required
+  - Failing test exists for new features (TDD)
+  - Regression test exists & reproduces the defect for bug fixes
+  - Coverage-gap tests drafted for edits to files with gaps
+
+Definition of Done (exit conditions — verify now):
+  - Implementation complete; DoR tests now pass
+  - Docs & spec in sync with the implementation
+  - `mise exec -- just fmt` run on changed .sprout/.spr files
+  - `mise exec -- just test` passes (required for code/semantics changes)
+  - `mise exec -- just compile-examples-stage1` passes
+  - Compiler-source changes: smoke shapes pass + bundle smoke passes
+  - Runtime changes: new C builtins listed in runtime/APPROVED_BUILTINS
+  - Bootstrap/runtime changes: example canary RUNS without crash
+  - Skipped tests treated as gaps unless user explicitly accepted them
 
 To proceed, after verifying:
   just dod-ack && <retry the original `git commit ...`>

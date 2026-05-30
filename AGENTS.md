@@ -67,9 +67,9 @@ For any non-trivial language change, include:
 
 ### What tests to write
 
-1. **TDD for new features and language changes.** Write the failing test(s) *before* touching implementation code. Confirm the test fails for the right reason (e.g. wrong output, not a crash or import error), then implement until it passes. Do not mark a feature task in-progress without at least one failing test already committed or staged.
-2. **Regression test for every bug fix.** Before patching the root cause, add a test that reproduces the defect and fails on the unfixed code. The test must pass after the fix. This is non-negotiable — a bug fix without a regression test is considered incomplete.
-3. **Coverage improvement when touching a file with gaps.** Whenever you edit a file that has untested branches, untested error paths, or untested edge cases, add at least one new test that closes a coverage gap in that file. You are not required to achieve full coverage in a single pass, but you must leave coverage better than you found it.
+1. **TDD for new features and language changes** *(produces the artifact required by Definition of Ready #2)*. Write the failing test(s) *before* touching implementation code. Confirm the test fails for the right reason (e.g. wrong output, not a crash or import error), then implement until it passes. Do not mark a feature task in-progress without at least one failing test already committed or staged.
+2. **Regression test for every bug fix** *(produces the artifact required by Definition of Ready #3)*. Before patching the root cause, add a test that reproduces the defect and fails on the unfixed code. The test must pass after the fix. This is non-negotiable — a bug fix without a regression test is considered incomplete.
+3. **Coverage improvement when touching a file with gaps** *(produces the artifact required by Definition of Ready #4)*. Whenever you edit a file that has untested branches, untested error paths, or untested edge cases, add at least one new test that closes a coverage gap in that file. You are not required to achieve full coverage in a single pass, but you must leave coverage better than you found it.
 4. Parser changes need parser tests.
 5. Typechecker changes need both success and failure tests.
 6. Runtime/semantic changes need executable behavior tests.
@@ -78,36 +78,46 @@ For any non-trivial language change, include:
 
 ### How to run tests
 
+These are *how* to execute tests during development. The *rules* about when a particular execution counts as verification live in Definition of Done and Verification Policy below.
+
 9. Preferred execution path for local commands:
    `mise exec -- just <task>`
-10. For intermediate verification during development, run a single test file directly with `./compile_driver_bin_stage1 --emit-ir stdlib_root tests/stdlib/test_foo.spr | clang - runtime/sprout_runtime.c -o /tmp/t && /tmp/t`; the full gate is `mise exec -- just test`.
-11. Final verification uses `mise exec -- just test` for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
-12. Docs-only or examples-only changes may use targeted verification instead of the full suite when they do not modify `stdlib/`, test expectations, or the normative spec; at minimum, verify the commands and examples you changed still work as documented.
+10. For intermediate verification during development, run a single test file directly with `./compile_driver_bin_stage1 --emit-ir stdlib_root tests/stdlib/test_foo.spr | clang - runtime/sprout_runtime.c -o /tmp/t && /tmp/t`. The full gate is `mise exec -- just test` (required by Definition of Done #5 for code/semantics changes; exceptions in Verification Policy).
+
+## Definition of Ready
+
+Before starting to write code, ensure the following are true. These are entry conditions for implementation, not exit conditions.
+
+1. **Design alignment**: the change has been designed at a high level and approved by the user when required (see "Design Change Process").
+2. **New features**: a failing test exists and has been confirmed to fail (TDD). *Practice: see "Code and Testing Expectations §What tests to write" #1.*
+3. **Bug fixes**: a regression test exists that reproduces the defect (it will fail until the fix lands). *Practice: see "Code and Testing Expectations §What tests to write" #2.*
+4. **Edits to files with coverage gaps**: at least one new test has been drafted that closes a gap in that file. *Practice: see "Code and Testing Expectations §What tests to write" #3.*
 
 ## Definition of Done
 
-For coding tasks, work is done only when:
+For coding tasks, work is done only when **all applicable** items below are true.
 
-1. The change has been designed at a high level and approved by the user when required.
-2. **For new features:** failing test(s) were written and confirmed to fail before implementation began (TDD).
-3. **For bug fixes:** a regression test that reproduced the defect exists and now passes.
-4. **For any edit to a file with coverage gaps:** at least one new test was added that closes a gap in that file.
-5. The implementation is complete.
-6. Relevant docs/spec updates are complete and in sync with the implementation.
-7. `mise exec -- just fmt` has been run and any reformatted files staged, for any change that touches `.sprout` or `.spr` files.
-8. The entire test suite has been run via `mise exec -- just test` with no explicit test filter for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
-9. During implementation, the faster local loop is to run the specific `.spr` test file directly (see item 10 in "How to run tests" above); run `mise exec -- just test` for the full gate.
-10. Docs-only or examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but they must still be verified in a way that matches the change, such as re-running documented commands or executing the updated examples.
-11. After the test suite passes, `mise exec -- just compile-examples-stage1` must also pass (or the failing examples must exactly match the pre-existing known-broken set). Run this after every change that touches `stdlib/`, the runtime, or any example file.
-12. If sandbox or environment restrictions block required full-suite verification, rerun it with escalated permissions rather than accepting partial verification.
-13. Required verification passes.
-14. Skipped tests are treated as a verification gap unless the user explicitly accepts that gap.
-15. The changes are committed.
-16. A self-review has been performed before handoff.
-17. **Compiler-source changes** (any edit under `stdlib/compiler/`): each shape in `tests/smoke_shapes/*.spr` emits IR cleanly via `compile_driver_bin_stage1 --emit-ir`, the IR contains at least one `define` block, and the IR contains no `str_concat(ptr null,…)` occurrence (null-ptr codegen regression guard).
-18. **Compiler-source changes** (any edit under `stdlib/compiler/`): `compile_driver_bin_stage1 --phase bundle` on `stdlib/compiler/token.sprout`, `stdlib/compiler/ast.sprout`, and `stdlib/prelude.sprout` produces non-empty output containing no dot-prefix qualified names (lines beginning with `.`).
-19. **Runtime changes** (any edit to `runtime/sprout_runtime.c`): every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
-20. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`): the example canary set — `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` — compiles *and runs* to completion without crash. Note: `just compile-examples-stage1` (item 11) only covers compile; runtime execution of these canaries is currently a manual gate until CI covers it.
+1. The implementation is complete.
+2. The tests drafted under Definition of Ready (failing tests, regression tests, coverage-gap tests) now pass.
+3. Relevant docs/spec updates are complete and in sync with the implementation.
+4. `mise exec -- just fmt` has been run and any reformatted files staged, for any change that touches `.sprout` or `.spr` files.
+5. The entire test suite has been run via `mise exec -- just test` with no explicit test filter, for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
+6. `mise exec -- just compile-examples-stage1` passes (or the failing examples exactly match the pre-existing known-broken set). Run after every change that touches `stdlib/`, the runtime, or any example file.
+7. **Compiler-source changes** (any edit under `stdlib/compiler/`) — smoke shapes: each shape in `tests/smoke_shapes/*.spr` emits IR cleanly via `compile_driver_bin_stage1 --emit-ir`, the IR contains at least one `define` block, and contains no `str_concat(ptr null,…)` occurrence (null-ptr codegen regression guard).
+8. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bundle smoke: `compile_driver_bin_stage1 --phase bundle` on `stdlib/compiler/token.sprout`, `stdlib/compiler/ast.sprout`, and `stdlib/prelude.sprout` produces non-empty output containing no dot-prefix qualified names (lines beginning with `.`).
+9. **Runtime changes** (any edit to `runtime/sprout_runtime.c`) — APPROVED_BUILTINS: every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
+10. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` each compile *and run* to completion without crash. (`just compile-examples-stage1` only covers compile; running these is currently a manual gate until CI covers it.)
+11. The changes are committed (via the DoD-ack workflow — see "Commit Guidance").
+12. A self-review has been performed before handoff.
+
+## Verification Policy
+
+These rules govern *how* the verification gates in Definition of Done are run, including allowed exceptions and required contingencies.
+
+- **Fast local loop, full gate at end**: during implementation, run the specific `.spr` test file directly for fast iteration (concrete command in "Code and Testing Expectations §How to run tests" #10); `mise exec -- just test` is the full gate that must pass before considering DoD #5 met.
+- **Docs/examples-only exception**: docs-only or examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but they must still be verified in a way that matches the change — re-running documented commands, executing updated examples, etc.
+- **Sandbox contingency**: if sandbox or environment restrictions block required full-suite verification, rerun it with escalated permissions rather than accepting partial verification.
+- **Skipped tests**: any test skipped during verification is treated as a verification gap unless the user explicitly accepts that gap.
 
 ## Directory Conventions
 
