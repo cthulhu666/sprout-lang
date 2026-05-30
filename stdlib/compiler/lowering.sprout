@@ -830,12 +830,10 @@ fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type
       | _ -> acc
 
 fn match_type_var_lists(patterns: List types.Type, actuals: List types.Type, acc: Dict types.Type) -> Dict types.Type =
-  match patterns with
-  | Nil -> acc
-  | Cons p prest ->
-      match actuals with
-      | Nil -> acc
-      | Cons a arest -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
+  match (patterns, actuals) with
+  | (Nil, _) -> acc
+  | (_, Nil) -> acc
+  | (Cons p prest, Cons a arest) -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
 
 fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
   # strip_module_prefix: class_order stores bundler-qualified names (e.g. "prelude.ToString")
@@ -1384,13 +1382,11 @@ fn unify_type_args_list(
   concretes: List ast.TypeExpr,
   acc: Dict ast.TypeExpr
 ) -> Dict ast.TypeExpr =
-  match patterns with
-  | Nil -> acc
-  | Cons p rest_p ->
-      match concretes with
-      | Nil -> acc
-      | Cons c rest_c ->
-          unify_type_args_list(rest_p, rest_c, unify_type_expr(p, c, acc))
+  match (patterns, concretes) with
+  | (Nil, _) -> acc
+  | (_, Nil) -> acc
+  | (Cons p rest_p, Cons c rest_c) ->
+      unify_type_args_list(rest_p, rest_c, unify_type_expr(p, c, acc))
 
 # substitute_type_expr: apply type-variable substitution to a TypeExpr.
 fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeExpr =

@@ -1145,25 +1145,23 @@ fn emit_ctor_args_test(eq_tag: String, handle: Value, ctor: CtorSig, args: List 
     val_make(ll_i1(), phi)
 
 fn emit_ctor_field_tests(args: List ast.Pattern, arg_lls: List String, handle: Value, ctx: CgCtx, em: Emitter, idx: Int, miss_lbl: String) -> String !{IO} =
-  match args with
-  | Nil ->
+  match (args, arg_lls) with
+  | (Nil, _) ->
       do
         cb <- es_cur_blk(em)
         match cb with | NoBlk -> miss_lbl | SomeBlk name -> name
-  | Cons arg rest_args ->
-      match arg_lls with
-      | Nil ->
-          do
-            cb <- es_cur_blk(em)
-            match cb with | NoBlk -> miss_lbl | SomeBlk name -> name
-      | Cons arg_ll rest_lls ->
-          do
-            field <- emit_ctor_field(val_ir(handle), idx, arg_ll, em)
-            test <- emit_pattern_test(arg, field, ctx, em)
-            next_lbl <- fresh_block(em, "ctor_next")
-            emit_template(em, `  br i1 ${val_ir (test)}, label %${next_lbl}, label %${miss_lbl}`)
-            emit_label(em, next_lbl)
-            emit_ctor_field_tests(rest_args, rest_lls, handle, ctx, em, idx + 1, miss_lbl)
+  | (_, Nil) ->
+      do
+        cb <- es_cur_blk(em)
+        match cb with | NoBlk -> miss_lbl | SomeBlk name -> name
+  | (Cons arg rest_args, Cons arg_ll rest_lls) ->
+      do
+        field <- emit_ctor_field(val_ir(handle), idx, arg_ll, em)
+        test <- emit_pattern_test(arg, field, ctx, em)
+        next_lbl <- fresh_block(em, "ctor_next")
+        emit_template(em, `  br i1 ${val_ir (test)}, label %${next_lbl}, label %${miss_lbl}`)
+        emit_label(em, next_lbl)
+        emit_ctor_field_tests(rest_args, rest_lls, handle, ctx, em, idx + 1, miss_lbl)
 
 # Extract field idx from a ctor handle, coercing from i64 to the target type.
 fn emit_ctor_field(handle_ir: String, idx: Int, ll: String, em: Emitter) -> Value !{IO} =
@@ -1250,16 +1248,14 @@ fn emit_ctor_pattern_bind(name: String, args: List ast.Pattern, scrut: Value, sc
         emit_ctor_args_bind(args, lls, scrut, ctx, em, 0, Nil, 0)
 
 fn emit_ctor_args_bind(args: List ast.Pattern, lls: List String, scrut: Value, ctx: CgCtx, em: Emitter, idx: Int, acc: List (String, Value), rooted: Int) -> (List (String, Value), Int) !{IO} =
-  match args with
-  | Nil -> (list_reverse(acc), rooted)
-  | Cons arg rest_args ->
-      match lls with
-      | Nil -> (list_reverse(acc), rooted)
-      | Cons ll rest_lls ->
-          do
-            field <- emit_ctor_field(val_ir(scrut), idx, ll, em)
-            (binds, r) <- emit_pattern_bind(arg, field, Nothing, ctx, em)
-            emit_ctor_args_bind(rest_args, rest_lls, scrut, ctx, em, idx + 1, list_reverse(binds) ++ acc, rooted + r)
+  match (args, lls) with
+  | (Nil, _) -> (list_reverse(acc), rooted)
+  | (_, Nil) -> (list_reverse(acc), rooted)
+  | (Cons arg rest_args, Cons ll rest_lls) ->
+      do
+        field <- emit_ctor_field(val_ir(scrut), idx, ll, em)
+        (binds, r) <- emit_pattern_bind(arg, field, Nothing, ctx, em)
+        emit_ctor_args_bind(rest_args, rest_lls, scrut, ctx, em, idx + 1, list_reverse(binds) ++ acc, rooted + r)
 
 fn extend_locals(base: Dict Value, pairs: List (String, Value)) -> Dict Value =
   match pairs with
@@ -1399,16 +1395,14 @@ fn build_closure_args_ir(callee: Value, param_lls: List String, args: List Value
     "ptr " ++ val_ir(callee) ++ (if list_is_nil(arg_parts) then "" else ", " ++ join_comma(arg_parts))
 
 fn coerce_args(param_lls: List String, args: List Value, em: Emitter) -> List (String, String) !{IO} =
-  match param_lls with
-  | Nil -> Nil
-  | Cons ll rest_lls ->
-      match args with
-      | Nil -> Nil
-      | Cons arg rest_args ->
-          do
-            cv <- coerce_value(arg, ll, em)
-            rest <- coerce_args(rest_lls, rest_args, em)
-            Cons((ll, val_ir(cv)), rest)
+  match (param_lls, args) with
+  | (Nil, _) -> Nil
+  | (_, Nil) -> Nil
+  | (Cons ll rest_lls, Cons arg rest_args) ->
+      do
+        cv <- coerce_value(arg, ll, em)
+        rest <- coerce_args(rest_lls, rest_args, em)
+        Cons((ll, val_ir(cv)), rest)
 
 fn list_is_nil(xs: List String) -> Bool =
   match xs with
@@ -1547,42 +1541,36 @@ fn emit_lambda_helper(lam_name: String, params: List ast.Param, wire_lls: List S
     restore_body(em, saved)
 
 fn load_captures(names: List String, lls: List String, em: Emitter, idx: Int) -> (List (String, Value), Int) !{IO} =
-  match names with
-  | Nil -> (Nil, 0)
-  | Cons name rest_names ->
-      match lls with
-      | Nil -> (Nil, 0)
-      | Cons ll rest_lls ->
-          do
-            slot <- fresh_tmp(em)
-            emit_template(em, `  ${slot} = getelementptr i64, ptr %env, i64 ${int_to_string (idx)}`)
-            raw <- fresh_tmp(em)
-            emit_template(em, `  ${raw} = load i64, ptr ${slot}`)
-            v <- coerce_value(val_make(ll_i64(), raw), ll, em)
-            rooted <- push_temp_root(v, em)
-            (rest_binds, rest_rooted) <- load_captures(rest_names, rest_lls, em, idx + 1)
-            (Cons((name, v), rest_binds), rooted + rest_rooted)
+  match (names, lls) with
+  | (Nil, _) -> (Nil, 0)
+  | (_, Nil) -> (Nil, 0)
+  | (Cons name rest_names, Cons ll rest_lls) ->
+      do
+        slot <- fresh_tmp(em)
+        emit_template(em, `  ${slot} = getelementptr i64, ptr %env, i64 ${int_to_string (idx)}`)
+        raw <- fresh_tmp(em)
+        emit_template(em, `  ${raw} = load i64, ptr ${slot}`)
+        v <- coerce_value(val_make(ll_i64(), raw), ll, em)
+        rooted <- push_temp_root(v, em)
+        (rest_binds, rest_rooted) <- load_captures(rest_names, rest_lls, em, idx + 1)
+        (Cons((name, v), rest_binds), rooted + rest_rooted)
 
 fn load_lambda_params(params: List ast.Param, wire_lls: List String, logical_lls: List String, em: Emitter, idx: Int) -> (List (String, Value), Int) !{IO} =
-  match params with
-  | Nil -> (Nil, 0)
-  | Cons (ast.Param name ann) rest_params ->
-      match wire_lls with
-      | Nil -> (Nil, 0)
-      | Cons wire rest_wires ->
-          match logical_lls with
-          | Nil -> (Nil, 0)
-          | Cons logical rest_logicals ->
-              do
-                let ir = "%a" ++ int_to_string(idx)
-                let raw_v = val_for_ll(wire, ir)
-                v <- coerce_value(raw_v, logical, em)
-                let skip = match ann with
-                           | Just te -> type_expr_is_non_heap_scalar(te)
-                           | Nothing -> false
-                rooted <- if skip then 0 else push_temp_root(v, em)
-                (rest_binds, rest_rooted) <- load_lambda_params(rest_params, rest_wires, rest_logicals, em, idx + 1)
-                (Cons((name, v), rest_binds), rooted + rest_rooted)
+  match (params, wire_lls, logical_lls) with
+  | (Nil, _, _) -> (Nil, 0)
+  | (_, Nil, _) -> (Nil, 0)
+  | (_, _, Nil) -> (Nil, 0)
+  | (Cons(ast.Param name ann) rest_params, Cons wire rest_wires, Cons logical rest_logicals) ->
+      do
+        let ir = "%a" ++ int_to_string(idx)
+        let raw_v = val_for_ll(wire, ir)
+        v <- coerce_value(raw_v, logical, em)
+        let skip = match ann with
+                   | Just te -> type_expr_is_non_heap_scalar(te)
+                   | Nothing -> false
+        rooted <- if skip then 0 else push_temp_root(v, em)
+        (rest_binds, rest_rooted) <- load_lambda_params(rest_params, rest_wires, rest_logicals, em, idx + 1)
+        (Cons((name, v), rest_binds), rooted + rest_rooted)
 
 fn emit_defs_list(lines: List String, em: Emitter) -> Unit !{IO} =
   match lines with
@@ -1685,16 +1673,14 @@ fn tco_with_extra_roots(tco_ctx: Maybe TcoCtx, extra_roots: Int) -> Maybe TcoCtx
   | Just tc -> Just(tco_with_outer_roots(tc, tco_outer_roots(tc) + extra_roots))
 
 fn store_tco_args(slots: List (String, String), vals: List Value, em: Emitter) -> Unit !{IO} =
-  match slots with
-  | Nil -> ()
-  | Cons (slot_ir, ll) rest_slots ->
-      match vals with
-      | Nil -> ()
-      | Cons v rest_vals ->
-          do
-            cv <- coerce_value(v, ll, em)
-            emit_template(em, `  store ${ll} ${val_ir (cv)}, ptr ${slot_ir}`)
-            store_tco_args(rest_slots, rest_vals, em)
+  match (slots, vals) with
+  | (Nil, _) -> ()
+  | (_, Nil) -> ()
+  | (Cons(slot_ir, ll) rest_slots, Cons v rest_vals) ->
+      do
+        cv <- coerce_value(v, ll, em)
+        emit_template(em, `  store ${ll} ${val_ir (cv)}, ptr ${slot_ir}`)
+        store_tco_args(rest_slots, rest_vals, em)
 
 # ===========================================================================
 # Section 17 — Expression emission

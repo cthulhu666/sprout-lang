@@ -142,4 +142,17 @@ fn main() -> Unit !{IO} =
     concat_ir <- get_ir(concat_src)
     assert_true(state, "string ++ emits str_concat call", ir_contains(concat_ir, "str_concat"))
 
+    # emit_ctor_args_bind: 2-field ADT exercises the parallel (args, lls) walk.
+    let pair_src = "type Pair = Pair Int Int\nfn fst(p: Pair) -> Int = match p with | Pair x _ -> x"
+    pair_ir <- get_ir(pair_src)
+    assert_true(state, "2-field ctor pattern emits sprout_field", ir_contains(pair_ir, "sprout_field"))
+
+    # load_captures: lambda that captures n from outer scope exercises the (names, lls) parallel walk.
+    # extern fn apply makes f: Int -> Int usable without Semigroup/typeclass infrastructure.
+    let closure_src = "extern fn apply(f: Int -> Int, x: Int) -> Int\nfn test_capture(n: Int) -> Int = apply(\\x -> n + x, 5)"
+    ok_closure <- codegen_ok(closure_src)
+    assert_true(state, "closure with capture compiles to IR", ok_closure)
+    closure_ir <- get_ir(closure_src)
+    assert_true(state, "capture closure emits getelementptr env slot", ir_contains(closure_ir, "getelementptr i64, ptr %env"))
+
     summary(state)
