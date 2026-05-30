@@ -1,0 +1,29 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression: check_instance_method_body must apply s1 to typed_body so that
+# class-method references used as values inside instance method bodies have
+# concrete types for eta-expansion.
+#
+# Without the fix, to_string inside showcase_int has type ?K->String (fresh TVar)
+# when it reaches lowering; eta-expansion fails; the sentinel emits
+# __eta_unresolved_ToString_to_string, producing a linker error at compile time.
+
+class Showcase a {
+  fn showcase(x: a) -> String
+}
+
+fn apply_str(f: Int -> String, x: Int) -> String = f(x)
+
+instance Showcase Int {
+  fn showcase(x: Int) -> String =
+    apply_str(to_string, x)
+}
+
+fn run_showcase(x: a) -> String where Showcase a =
+  showcase(x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "instance method body with class method as value", run_showcase(42), "42")
+    summary(state)

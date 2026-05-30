@@ -338,7 +338,7 @@ fn dummy_unit() -> typed_ast.TypedExpr =
 # Expression inference
 # ---------------------------------------------------------------------------
 
-export fn infer_expr(
+fn infer_expr(
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -367,6 +367,23 @@ export fn infer_expr(
   | ast.IntRangeExpr lo hi pos -> infer_range(state, env, subst, eff_subst, lo, hi, pos)
   | ast.StringTemplateExpr _ pos ->
       InferErr("Internal error: StringTemplateExpr reached inference; desugar pass should have eliminated it")
+
+# Declaration-boundary wrapper: applies s1 to the result so fresh TVars
+# never escape into lowering.  All declaration-level callers use this;
+# sub-expression recursion stays on infer_expr.
+export fn typecheck_expr(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  expr: ast.Expr
+) -> InferResult !{IO} =
+  do
+    r <- infer_expr(state, env, subst, eff_subst, expr)
+    match r with
+    | InferErr _ -> r
+    | InferOk typed_expr s1 eff_subst2 eff ->
+        InferOk(apply_subst_typed_expr(s1, typed_expr), s1, eff_subst2, eff)
 
 # --- Variable ---
 
@@ -2212,12 +2229,12 @@ fn typecheck_decl(
             dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
   | ast.LetDecl name expr _ ->
       do
-        r <- infer_expr(state, env, subst, eff_subst, expr)
+        r <- typecheck_expr(state, env, subst, eff_subst, expr)
         match r with
         | InferErr e -> TypedDeclErr(e)
         | InferOk typed_expr s1 _ _ ->
             TypedDeclOk(
-              typed_ast.TLetDecl(name, apply_subst_typed_expr(s1, typed_expr)),
+              typed_ast.TLetDecl(name, typed_expr),
               dict_set(name,
                 unifier.generalize(unifier.ftv_env(env), s1, eff_subst,
                   typed_ast.typed_expr_type(typed_expr), types.EffectPure),
@@ -2457,13 +2474,13 @@ fn check_fn_body(
         # constrained calls (e.g., decorated_merge_sorted calling itself) can
         # find the markers and have dict args injected by inject_constrained_fn_dicts.
         let self_env = register_constrained_fn_markers(name, constraints, fwd_env)
-        br <- infer_expr(state, fn_body_env(name, params, inst_type, self_env), subst, eff_subst, body)
+        br <- typecheck_expr(state, fn_body_env(name, params, inst_type, self_env), subst, eff_subst, body)
         match br with
         | InferErr msg -> (fn_body_err(name, msg), dict_empty())
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
             | Err e -> (typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e), dict_empty())
-            | Ok s2 -> (typed_ast.BodyOk(apply_subst_typed_expr(s1, typed_body), unifier.apply_subst(s2, inst_type)), extract_fwd_markers(fwd_env))
+            | Ok s2 -> (typed_ast.BodyOk(typed_body, unifier.apply_subst(s2, inst_type)), extract_fwd_markers(fwd_env))
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst("Unit")), dict_empty())
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
@@ -2646,7 +2663,7 @@ fn check_instance_method(
       do
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty()))
         let fwd_env = seed_forward_markers(inst_constraints, prog_to_fresh, env)
-        br <- infer_expr(state, extend_env_with_params(params, ctor_param_types(inst_type), fwd_env), subst, eff_subst, body)
+        br <- typecheck_expr(state, extend_env_with_params(params, ctor_param_types(inst_type), fwd_env), subst, eff_subst, body)
         match br with
         | InferErr msg -> instance_method_err(name, msg)
         | InferOk typed_body s1 _ _ ->
