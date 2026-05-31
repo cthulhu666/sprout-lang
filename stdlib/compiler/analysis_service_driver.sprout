@@ -489,9 +489,17 @@ fn darwin_frameworks_set() -> Bool !{IO} =
   | Just _ -> true
   | Nothing -> false
 
+fn diag_msg(d: compiler.Diagnostic) -> String =
+  match d with
+  | compiler.DiagError msg -> msg
+  | compiler.DiagWarning msg -> msg
+
 fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> json.Json !{IO} =
   match ir_result with
-  | compiler.IrFullFail _ -> error_response("eval_expr_in_source: codegen failed")
+  | compiler.IrFullFail diags ->
+      match diags with
+      | Nil -> error_response("eval_expr_in_source: codegen failed")
+      | Cons d _ -> error_response(diag_msg(d))
   | compiler.IrFullOk ir_text ->
       match write_file(eval_ir_path(), ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
