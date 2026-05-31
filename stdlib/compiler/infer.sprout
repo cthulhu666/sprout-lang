@@ -23,7 +23,7 @@ type CallResult =
 
 # Internal per-decl result (not exported; callers see TypedResult).
 type TypedDeclResult =
-  | TypedDeclOk typed_ast.TypedDecl (Dict types.Scheme)
+  | TypedDeclOk typed_ast.TypedDecl (Dict types.Scheme) (List String)
   | TypedDeclErr String
 
 # Internal single-method result.
@@ -2102,11 +2102,13 @@ export fn typecheck_decls(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
-  # Pre-scan: register all FnDecl signatures and their @constrained_N markers
-  # in env before processing bodies.  This enables forward references and
-  # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
-  # is defined later in the same file).
-  typecheck_decls_inner(state, decls, pre_scan_fn_decls(decls, env, dict_empty()), subst, eff_subst, dict_empty(), Nil)
+  do
+    # Pre-scan: register all FnDecl signatures and their @constrained_N markers
+    # in env before processing bodies.  This enables forward references and
+    # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
+    # is defined later in the same file).
+    let scanned_env = pre_scan_fn_decls(decls, env, dict_empty())
+    typecheck_decls_inner(state, decls, scanned_env, subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
 
 # Pre-scan pass: register FnDecl signatures, @constrained_N markers, and
 # TypeDecl constructors for all declarations without typechecking bodies.
@@ -2158,7 +2160,8 @@ fn typecheck_decls_inner(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
-  acc: List typed_ast.TypedDecl
+  acc: List typed_ast.TypedDecl,
+  env_ftv: List String
 ) -> typed_ast.TypedResult !{IO} =
   match decls with
   | Nil ->
@@ -2170,19 +2173,19 @@ fn typecheck_decls_inner(
       | ast.AliasDecl name Nil rhs_te _ ->
           typecheck_decls_inner(state, rest, env, subst, eff_subst,
             dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env),
-            Cons(typed_ast.TPassThrough(decl), acc))
+            Cons(typed_ast.TPassThrough(decl), acc), env_ftv)
       | ast.AliasDecl name (Cons param Nil) rhs_te _ ->
           typecheck_decls_inner(state, rest, env, subst, eff_subst,
             register_single_param_alias(name, param, rhs_te, alias_env),
-            Cons(typed_ast.TPassThrough(decl), acc))
+            Cons(typed_ast.TPassThrough(decl), acc), env_ftv)
       | _ ->
           do
-            r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env)
+            r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env, env_ftv)
             match r with
             | TypedDeclErr e -> typed_ast.TypedErr(e)
-            | TypedDeclOk typed_decl new_env ->
+            | TypedDeclOk typed_decl new_env new_env_ftv ->
                 typecheck_decls_inner(state, rest, new_env, subst, eff_subst, alias_env,
-                  Cons(typed_decl, acc))
+                  Cons(typed_decl, acc), new_env_ftv)
 
 fn typecheck_decl(
   state: unifier.InferState,
@@ -2190,16 +2193,21 @@ fn typecheck_decl(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  alias_env: Dict types.Type
+  alias_env: Dict types.Type,
+  env_ftv: List String
 ) -> TypedDeclResult !{IO} =
   match decl with
   | ast.TypeDecl _ _ _ _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env))
+      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
   | ast.RecordDecl rec_name type_params fields _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl), register_record_fields(rec_name, type_params, fields, env))
+      TypedDeclOk(typed_ast.TPassThrough(decl), register_record_fields(rec_name, type_params, fields, env), env_ftv)
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
       do
         (r, fwd_markers) <- check_fn_body(state, decl, env, subst, eff_subst, alias_env)
+        # WHY: @eta_fwd markers added here have free type variables that must be
+        # included in env_ftv so subsequent declarations don't incorrectly generalize
+        # over them.  Computed once per declaration (not per env entry) → stays O(n).
+        let new_env_ftv = types.list_union(unifier.ftv_env(fwd_markers), env_ftv)
         match r with
         | typed_ast.BodyErr e -> TypedDeclErr(e)
         | typed_ast.BodyLenient ->
@@ -2216,17 +2224,19 @@ fn typecheck_decl(
               # resolve_via_fwd_for_prog_var. Keys are globally unique (one InferState).
               fold_fwd_markers(fwd_markers,
                 dict_set(name,
-                  unifier.generalize(unifier.ftv_env(env), dict_empty(), dict_empty(),
+                  unifier.generalize(env_ftv, dict_empty(), dict_empty(),
                     inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
-                  env)))
+                  env)),
+              new_env_ftv)
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
       match dict_get(name, env) with
       | Just _ ->
-          TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env)
+          TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv)
       | Nothing ->
           TypedDeclOk(
             typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
-            dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
+            dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env),
+            env_ftv)
   | ast.LetDecl name expr _ ->
       do
         r <- typecheck_expr(state, env, subst, eff_subst, expr)
@@ -2236,16 +2246,18 @@ fn typecheck_decl(
             TypedDeclOk(
               typed_ast.TLetDecl(name, typed_expr),
               dict_set(name,
-                unifier.generalize(unifier.ftv_env(env), s1, eff_subst,
+                unifier.generalize(env_ftv, s1, eff_subst,
                   typed_ast.typed_expr_type(typed_expr), types.EffectPure),
-                env))
+                env),
+              env_ftv)
   | ast.AliasDecl _ _ _ _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl), env)
+      TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         register_class_methods(type_params, methods,
           register_class_method_markers(class_name, methods,
-            register_superclass_markers(class_name, superclasses, env))))
+            register_superclass_markers(class_name, superclasses, env))),
+        env_ftv)
   | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
         r <- check_instance_methods(state, inst_constraints, methods, env, subst, eff_subst)
@@ -2254,7 +2266,8 @@ fn typecheck_decl(
         | typed_ast.InstanceMethodsOk typed_methods ->
             TypedDeclOk(
               typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods),
-              register_instance_marker(constraint, env))
+              register_instance_marker(constraint, env),
+              env_ftv)
 
 # ---------------------------------------------------------------------------
 # apply_subst_typed_expr — walk a typed AST applying a type substitution

@@ -74,6 +74,22 @@ fn main() -> Unit !{IO} =
       scheme_str("id", r_id_scheme), "forall a. a -> a")
 
     # ---------------------------------------------------------------------------
+    # Generalization correctness with multiple preceding declarations
+    #
+    # Guards the ftv_env hoisting optimization: env_ftv is computed once from
+    # the pre-scanned env rather than calling ftv_env(env) per declaration.
+    # If env_ftv is stale or wrong, polymorphic functions at any position in
+    # the file will get incorrect (over-monomorphised or wrong-variable) schemes.
+    # ---------------------------------------------------------------------------
+    r_id_many_decls <- compiler.compile_source("fn f1() -> Int = 1\nfn f2() -> Int = 2\nfn f3() -> Int = 3\nfn f4() -> Int = 4\nfn f5() -> Int = 5\nfn id(x) = x")
+    assert_eq(state, "generalize: id still forall a. a -> a after many preceding decls",
+      scheme_str("id", r_id_many_decls), "forall a. a -> a")
+
+    r_double_many_decls <- compiler.compile_source("fn f1(x) = x\nfn f2(x) = x\nfn f3(x) = x\nfn double(x) = x * 2")
+    assert_eq(state, "generalize: double still Int -> Int after polymorphic preceding decls",
+      scheme_str("double", r_double_many_decls), "Int -> Int")
+
+    # ---------------------------------------------------------------------------
     # Module loader: qualified import access (requires real stdlib on disk)
     #
     # These tests use SPROUT_STDLIB_ROOT (set by `just test`) to load real stdlib
