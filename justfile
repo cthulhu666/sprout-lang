@@ -19,14 +19,22 @@ install-hooks:
 # pending commit's staged tree.  Same tree → ack reused (e.g. amend message).
 # Different tree → re-run `just dod-ack` to re-attest.
 dod-ack:
-  @git write-tree > .git/dod-ack
-  @echo "DoD acked for staged tree: $(cat .git/dod-ack)"
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{invocation_directory()}}"
+  ACK="$(git rev-parse --git-dir)/dod-ack"
+  git write-tree > "$ACK"
+  echo "DoD acked for staged tree: $(cat "$ACK")"
 
 # Bypass the bootstrap seed gate for one commit when a compiler change does not
 # affect IR output.  Run `just verify-bootstrap-fixed-point` first to confirm.
 seed-fp-ack:
-  @git write-tree > .git/seed-fp-ack
-  @echo "Seed fixed-point acked for staged tree: $(cat .git/seed-fp-ack)"
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{invocation_directory()}}"
+  ACK="$(git rev-parse --git-dir)/seed-fp-ack"
+  git write-tree > "$ACK"
+  echo "Seed fixed-point acked for staged tree: $(cat "$ACK")"
 
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd

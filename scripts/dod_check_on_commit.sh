@@ -4,7 +4,7 @@
 #
 # Acknowledgement mechanism (γ.2, tree-hash-bound):
 #   1. Agent verifies DoD criteria for the staged changes.
-#   2. Agent runs:  just dod-ack   (writes `git write-tree` hash to .git/dod-ack)
+#   2. Agent runs:  just dod-ack   (writes `git write-tree` hash to <git-dir>/dod-ack)
 #   3. Agent retries the commit.
 # The hook re-computes git write-tree on the staged index and compares.
 # Same tree as the ack → commit proceeds.  Different tree → DENY with checklist.
@@ -13,6 +13,10 @@
 # verified THIS staged content."  Tree hash is the only identifier that
 # captures that exactly.  Amend-message-only commits don't change the tree,
 # so they reuse the ack for free.
+#
+# Worktree safety: ack files live under $(git rev-parse --git-dir), which is
+# per-worktree (.git/worktrees/<name>/ for linked worktrees).  Parallel agents
+# in separate worktrees each get their own ack namespace with no shared state.
 
 set -euo pipefail
 
@@ -30,10 +34,13 @@ if ! printf '%s' "$CMD" | grep -qE '(^|[ \t&|;`(])git[ \t]+([^ \t]+[ \t]+)*commi
   exit 0
 fi
 
-# We're handling a `git commit`. Locate the repo root and check the ack.
+# We're handling a `git commit`. Locate the repo root and git dir.
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [[ -z "$REPO_ROOT" ]]; then exit 0; fi
 cd "$REPO_ROOT"
+# git-dir is per-worktree (.git/worktrees/<name>/ for linked worktrees, .git/ for main).
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || true)
+if [[ -z "$GIT_DIR" ]]; then exit 0; fi
 
 TREE_HASH=$(git write-tree 2>/dev/null || true)
 
@@ -41,7 +48,7 @@ TREE_HASH=$(git write-tree 2>/dev/null || true)
 COMPILER_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -E '^stdlib/compiler/[^/]+\.sprout$|^stdlib/[^/]+\.sprout$' || true)
 if [[ -n "$COMPILER_STAGED" ]]; then
   SEED_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -F 'bootstrap/compile_driver.ll' || true)
-  FP_ACK_FILE=".git/seed-fp-ack"
+  FP_ACK_FILE="$GIT_DIR/seed-fp-ack"
   SEED_OK=false
   if [[ -n "$SEED_STAGED" ]]; then
     SEED_OK=true
@@ -67,7 +74,7 @@ SEED_MSG
   fi
 fi
 
-ACK_FILE=".git/dod-ack"
+ACK_FILE="$GIT_DIR/dod-ack"
 
 if [[ -n "$TREE_HASH" && -f "$ACK_FILE" && "$(cat "$ACK_FILE" 2>/dev/null)" == "$TREE_HASH" ]]; then
   exit 0
