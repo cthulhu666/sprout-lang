@@ -36,6 +36,37 @@ if [[ -z "$REPO_ROOT" ]]; then exit 0; fi
 cd "$REPO_ROOT"
 
 TREE_HASH=$(git write-tree 2>/dev/null || true)
+
+# --- Seed gate (DoD #9): compiler source staged → seed must be refreshed or verified ---
+COMPILER_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -E '^stdlib/compiler/[^/]+\.sprout$|^stdlib/[^/]+\.sprout$' || true)
+if [[ -n "$COMPILER_STAGED" ]]; then
+  SEED_STAGED=$(git diff --cached --name-only 2>/dev/null | grep -F 'bootstrap/compile_driver.ll' || true)
+  FP_ACK_FILE=".git/seed-fp-ack"
+  SEED_OK=false
+  if [[ -n "$SEED_STAGED" ]]; then
+    SEED_OK=true
+  elif [[ -n "$TREE_HASH" && -f "$FP_ACK_FILE" && "$(cat "$FP_ACK_FILE" 2>/dev/null)" == "$TREE_HASH" ]]; then
+    SEED_OK=true
+  fi
+  if [[ "$SEED_OK" != "true" ]]; then
+    cat >&2 <<'SEED_MSG'
+BLOCKED: Compiler-source files are staged but bootstrap/compile_driver.ll has not been refreshed (DoD #9).
+
+If the compiler change affects IR output:
+  scripts/memwatch.sh 4096 1 -- just refresh-seed
+  git add bootstrap/compile_driver.ll
+  <retry the commit>
+
+If the IR output is unchanged (verify first, then ack):
+  scripts/memwatch.sh 4096 1 -- just verify-bootstrap-fixed-point
+  just seed-fp-ack
+  <retry the commit>
+
+SEED_MSG
+    exit 2
+  fi
+fi
+
 ACK_FILE=".git/dod-ack"
 
 if [[ -n "$TREE_HASH" && -f "$ACK_FILE" && "$(cat "$ACK_FILE" 2>/dev/null)" == "$TREE_HASH" ]]; then
@@ -46,26 +77,9 @@ fi
 cat >&2 <<'MSG'
 BLOCKED: DoD acknowledgement required before `git commit`.
 
-Confirm the relevant criteria from AGENTS.md are met for the staged changes.
+Verify ALL applicable criteria in AGENTS.md §"Definition of Done" for the staged changes,
+then acknowledge:
 
-Definition of Ready (entry conditions — should already be true):
-  - Design approved by user when required
-  - Failing test exists for new features (TDD)
-  - Regression test exists & reproduces the defect for bug fixes
-  - Coverage-gap tests drafted for edits to files with gaps
-
-Definition of Done (exit conditions — verify now):
-  - Implementation complete; DoR tests now pass
-  - Docs & spec in sync with the implementation
-  - `mise exec -- just fmt` run on changed .sprout/.spr files
-  - `mise exec -- just test` passes (required for code/semantics changes)
-  - `mise exec -- just compile-examples-stage1` passes
-  - Compiler-source changes: smoke shapes pass + bundle smoke passes
-  - Runtime changes: new C builtins listed in runtime/APPROVED_BUILTINS
-  - Bootstrap/runtime changes: example canary RUNS without crash
-  - Skipped tests treated as gaps unless user explicitly accepted them
-
-To proceed, after verifying:
   just dod-ack && <retry the original `git commit ...`>
 
 MSG

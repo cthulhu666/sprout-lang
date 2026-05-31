@@ -22,6 +22,12 @@ dod-ack:
   @git write-tree > .git/dod-ack
   @echo "DoD acked for staged tree: $(cat .git/dod-ack)"
 
+# Bypass the bootstrap seed gate for one commit when a compiler change does not
+# affect IR output.  Run `just verify-bootstrap-fixed-point` first to confirm.
+seed-fp-ack:
+  @git write-tree > .git/seed-fp-ack
+  @echo "Seed fixed-point acked for staged tree: $(cat .git/seed-fp-ack)"
+
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
 repl:
