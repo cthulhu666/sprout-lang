@@ -1,4 +1,5 @@
 module examples.astar
+import stdlib.math (abs)
 
 # A* shortest-path on a 100×100 grid.
 #
@@ -17,9 +18,6 @@ module examples.astar
 # Run:
 #   just compile-native examples/astar.sprout /tmp/astar && /tmp/astar
 
-fn abs_val(n: Int) -> Int =
-  if n < 0 then -n else n
-
 fn int_mod(a: Int, b: Int) -> Int =
   a - (a / b) * b
 
@@ -37,7 +35,7 @@ fn cell_idx(x: Int, y: Int) -> Int =
   y * 100 + x
 
 fn heuristic(x: Int, y: Int) -> Int =
-  abs_val(99 - x) + abs_val(99 - y)
+  abs(99 - x) + abs(99 - y)
 
 fn open_insert(f: Int, g: Int, x: Int, y: Int, open: List (Int, Int, Int, Int)) -> List (Int, Int, Int, Int) =
   match open with
