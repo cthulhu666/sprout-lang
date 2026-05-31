@@ -112,6 +112,11 @@ fn main() -> Unit !{IO} =
     swap_ir <- get_ir(swap_src)
     assert_true(state, "tuple param (Int,Bool) emits struct type { i64, i1 } not i64 blob", ir_contains(swap_ir, "{ i64, i1 }"))
 
+    # 3-field tuple exercises the multi-element join path: { i64, i1, i64 } requires two separating commas.
+    let triple_src = "fn fst3(t: (Int, Bool, Int)) -> Int = match t with | (x, _, _) -> x"
+    triple_ir <- get_ir(triple_src)
+    assert_true(state, "3-field tuple emits { i64, i1, i64 } struct type", ir_contains(triple_ir, "{ i64, i1, i64 }"))
+
     # GC root skipping for scalar types (Int, Bool, Char).
     # Int args to function calls must NOT emit sprout_gc_push_i64_root.
     # Only heap-allocated args (Vec, ADT handles, etc.) should be rooted.

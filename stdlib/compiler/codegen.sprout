@@ -3,6 +3,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # M6 — LLVM IR emission pass
@@ -178,13 +179,7 @@ fn ll_i1() -> String = "i1"
 fn ll_ptr() -> String = "ptr"
 
 fn tuple_ll(items: List String) -> String =
-  "{ " ++ join_comma(items) ++ " }"
-
-fn join_comma(xs: List String) -> String =
-  match xs with
-  | Nil -> ""
-  | [h] -> h
-  | Cons h t -> h ++ ", " ++ join_comma(t)
+  "{ " ++ string.join(", ", items) ++ " }"
 
 fn join_args_str(a: String, b: String) -> String =
   if a == "" && b == "" then ""
@@ -1392,7 +1387,7 @@ fn build_closure_args_ir(callee: Value, param_lls: List String, args: List Value
   do
     coerced <- coerce_args(param_lls, args, em)
     let arg_parts = list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced)
-    "ptr " ++ val_ir(callee) ++ (if list_is_nil(arg_parts) then "" else ", " ++ join_comma(arg_parts))
+    "ptr " ++ val_ir(callee) ++ (if list_is_nil(arg_parts) then "" else ", " ++ string.join(", ", arg_parts))
 
 fn coerce_args(param_lls: List String, args: List Value, em: Emitter) -> List (String, String) !{IO} =
   match (param_lls, args) with
@@ -1857,7 +1852,7 @@ fn emit_ctor_closure_wrapper(wrap_name: String, ctor: CtorSig, em: Emitter) -> U
 fn pack_and_call_ctor_wrapper(lls: List String, n: Int, tag_str: String, em: Emitter) -> Unit !{IO} =
   do
     pack_strs <- pack_args_from_env(lls, 0, em)
-    let args_ir = join_comma(list_map(\p -> "i64 " ++ p, pack_strs))
+    let args_ir = string.join(", ", list_map(\p -> "i64 " ++ p, pack_strs))
     ret <- fresh_tmp(em)
     let sep = if args_ir == "" then "" else ", "
     emit_template(em, `  ${ret} = call i64 @sprout_make${int_to_string (n)}(i64 ${tag_str}${sep}${args_ir})`)
@@ -2137,7 +2132,7 @@ fn emit_match_heap(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMat
       do
         emit_label(em, done_lbl)
         phi <- fresh_tmp(em)
-        let parts = join_comma(list_map(\p -> match p with | (v, blk) -> "[ " ++ val_ir(v) ++ ", %" ++ blk ++ " ]", branch_vals))
+        let parts = string.join(", ", list_map(\p -> match p with | (v, blk) -> "[ " ++ val_ir(v) ++ ", %" ++ blk ++ " ]", branch_vals))
         emit_template(em, `  ${phi} = phi ${out_ll} ${parts}`)
         val_for_ll(out_ll, phi)
 
@@ -2315,7 +2310,7 @@ fn emit_match_unboxed_call(call_fn: String, sig: FnSig, call_args: List typed_as
   do
     (arg_vals, rooted_args) <- emit_args_with_roots(call_args, ctx, locals, em)
     coerced <- coerce_args(fn_params(sig), arg_vals, em)
-    let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
+    let args_ir = string.join(", ", list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
     r <- fresh_tmp(em)
     let ll_struct = ll_for_unboxed_width(width)
     let call_str = if args_ir == ""
@@ -2334,7 +2329,7 @@ fn emit_match_unboxed_call(call_fn: String, sig: FnSig, call_args: List typed_as
       do
         emit_label(em, done_lbl)
         phi <- fresh_tmp(em)
-        let parts = join_comma(list_map(\p -> match p with | (v, blk) -> "[ " ++ val_ir(v) ++ ", %" ++ blk ++ " ]", branch_vals))
+        let parts = string.join(", ", list_map(\p -> match p with | (v, blk) -> "[ " ++ val_ir(v) ++ ", %" ++ blk ++ " ]", branch_vals))
         emit_template(em, `  ${phi} = phi ${out_ll} ${parts}`)
         val_for_ll(out_ll, phi)
 
@@ -2543,7 +2538,7 @@ fn emit_ctor_call_expr(ctor: CtorSig, args: List typed_ast.TypedExpr, ctx: CgCtx
       rooted_packed <- push_packed_roots(coerced, em)
       packed <- pack_coerced(coerced, em)
       let n = list_length(packed)
-      let args_ir = join_comma(list_map(\p -> "i64 " ++ p, packed))
+      let args_ir = string.join(", ", list_map(\p -> "i64 " ++ p, packed))
       tmp <- fresh_tmp(em)
       let sep = if args_ir == "" then "" else ", "
       emit_template(em, `  ${tmp} = call i64 @sprout_make${int_to_string (n)}(i64 ${int_to_string (ctor_tag(ctor))}${sep}${args_ir})`)
@@ -2583,7 +2578,7 @@ fn emit_ctor_partial_wrapper(wrap_name: String, ctor: CtorSig, applied: Int, em:
     remain_packed <- pack_args_from_env(rem_lls, 0, em)
     let all_packed = applied_packed ++ remain_packed
     let n = list_length(all_packed)
-    let args_ir = join_comma(list_map(\p -> "i64 " ++ p, all_packed))
+    let args_ir = string.join(", ", list_map(\p -> "i64 " ++ p, all_packed))
     ret <- fresh_tmp(em)
     let sep = if args_ir == "" then "" else ", "
     emit_template(em, `  ${ret} = call i64 @sprout_make${int_to_string (n)}(i64 ${int_to_string (ctor_tag(ctor))}${sep}${args_ir})`)
@@ -2643,7 +2638,7 @@ fn emit_regular_direct_call(name: String, sig: FnSig, args: List typed_ast.Typed
   do
     (arg_vals, rooted_args) <- emit_args_with_roots(args, ctx, locals, em)
     coerced <- coerce_args(fn_params(sig), arg_vals, em)
-    let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
+    let args_ir = string.join(", ", list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
     tmp <- fresh_tmp(em)
     let call_name = emitted_fn_name(name)
     let call_str = if args_ir == ""
@@ -3555,7 +3550,7 @@ fn emit_worker_cpr_do(call_fn: String, sig: FnSig, call_args: List typed_ast.Typ
   do
     (arg_vals, rooted_args) <- emit_args_with_roots(call_args, ctx, locals, em)
     coerced <- coerce_args(fn_params(sig), arg_vals, em)
-    let args_ir = join_comma(list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
+    let args_ir = string.join(", ", list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
     r <- fresh_tmp(em)
     let ll_struct = ll_for_unboxed_width(width)
     let call_str = if args_ir == ""
@@ -3604,7 +3599,7 @@ fn emit_worker_match(width: Int, scrut: typed_ast.TypedExpr, branches: List type
         do
           emit_label(em, done_lbl)
           phi <- fresh_tmp(em)
-          let parts = join_comma(list_map(\p -> match p with | (sr, blk) -> "[ " ++ sr ++ ", %" ++ blk ++ " ]", branch_pairs))
+          let parts = string.join(", ", list_map(\p -> match p with | (sr, blk) -> "[ " ++ sr ++ ", %" ++ blk ++ " ]", branch_pairs))
           emit_template(em, `  ${phi} = phi ${ll_struct} ${parts}`)
           phi
 
@@ -3809,7 +3804,7 @@ fn emit_extern_decl_keys(keys: Vec String, externs: Dict FnSig, em: Emitter, idx
         | Nothing -> emit_extern_decl_keys(keys, externs, em, idx + 1)
         | Just sig ->
             do
-              let params_str = join_comma(fn_params(sig))
+              let params_str = string.join(", ", fn_params(sig))
               emit_template(em, `declare ${fn_ret (sig)} @${fn_name (sig)}(${params_str})`)
               emit_extern_decl_keys(keys, externs, em, idx + 1)
 

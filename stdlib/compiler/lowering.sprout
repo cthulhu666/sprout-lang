@@ -3,6 +3,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.types as types
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -711,16 +712,7 @@ fn mangle_type_expr(te: ast.TypeExpr) -> String =
 fn mangle_effects_suffix(effects_maybe: Maybe (List String)) -> String =
   match effects_maybe with
   | Nothing -> ""
-  | Just effs -> "_eff_" ++ join_strings(effs, "_")
-
-fn join_strings(ss: List String, sep: String) -> String =
-  string_concat_many(list_reverse(join_strings_rev(ss, sep, Nil)))
-
-fn join_strings_rev(ss: List String, sep: String, acc: List String) -> List String =
-  match ss with
-  | Nil -> acc
-  | [s] -> Cons(s, acc)
-  | Cons s rest -> join_strings_rev(rest, sep, Cons(sep, Cons(s, acc)))
+  | Just effs -> "_eff_" ++ string.join("_", effs)
 
 # ---------------------------------------------------------------------------
 # Module prefix stripping
