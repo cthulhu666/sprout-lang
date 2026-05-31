@@ -638,6 +638,11 @@ instance ToString String {
     value
 }
 
+instance ToString IntRange {
+  fn to_string(value: IntRange) -> String =
+    "IntRange(" ++ int_to_string(range_start(value)) ++ ", " ++ int_to_string(range_end(value)) ++ ")"
+}
+
 instance Ord Int {
   fn compare(left: Int, right: Int) -> Int =
     if left < right then -1

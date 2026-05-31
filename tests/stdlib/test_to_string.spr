@@ -40,5 +40,8 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "polymorphic imported to_string eta", show_via_value_method(42), "42")
     assert_eq(state, "to_string via let-decl list_map", to_string_int_list, ["1", "2", "3"])
     assert_eq(state, "to_string via user-defined higher-order let-decl", applied_via_ho, ["10", "20", "30"])
+    assert_eq(state, "to_string IntRange ascending", to_string(range(0, 10)), "IntRange(0, 10)")
+    assert_eq(state, "to_string IntRange descending", to_string(range(5, 1)), "IntRange(5, 1)")
+    assert_eq(state, "to_string IntRange single", to_string(range(3, 3)), "IntRange(3, 3)")
 
     summary(state)
