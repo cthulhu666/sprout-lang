@@ -5426,6 +5426,33 @@ long long vector_append(long long vec, long long value) {
   return (long long)(uintptr_t)out;
 }
 
+long long vec_make_filled(long long n, long long val) {
+  long long rooted_val = val;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_val);
+  VectorVal* out = sprout_alloc_vector_val("vec_make_filled: out of memory");
+  out->len = n;
+  out->cap = n;
+  out->data = sprout_alloc_vector_data((size_t)n, "vec_make_filled: out of memory");
+  for (long long i = 0; i < n; i++) out->data[i] = rooted_val;
+  SPROUT_GC_POP_LOCALS(1);
+  return (long long)(uintptr_t)out;
+}
+
+long long vector_mutset(long long vec, long long index, long long value) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_mutset: null vector");
+  if (index < 0 || index >= v->len) tcp_fail("vector_mutset: index out of bounds");
+  v->data[index] = value;
+  return 0;
+}
+
+long long vector_get_direct(long long vec, long long index) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_get_direct: null vector");
+  if (index < 0 || index >= v->len) tcp_fail("vector_get_direct: index out of bounds");
+  return v->data[index];
+}
+
 long long vector_from_list(long long list_handle) {
   /* Build a Vec<a> from a forward-ordered List<a> in O(n) time and space. */
   long long nil_tag = find_ctor_tag_by_name("Nil");

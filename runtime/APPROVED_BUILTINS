@@ -172,11 +172,14 @@ term_read_line
 term_show_cursor
 term_write
 time_now_micros  # syscall wrapper — gettimeofday cannot be called from Sprout stdlib; needed for wall-clock benchmarking
+vec_make_filled  # O(n) fill-init of a raw VectorVal; avoids O(n²) repeated vec_append from Sprout; needed for MutVec allocation
 vector_append
 vector_empty
 vector_from_list
 vector_get
+vector_get_direct  # O(1) read directly from VectorVal pointer; bypasses Vec ADT for MutVec; bounds-checked in C
 vector_length
+vector_mutset  # O(1) in-place write to VectorVal slot; required for MutVec mutation; not expressible as a pure Sprout fn
 vector_set
 vector_sort_by_int
 write_file

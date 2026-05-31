@@ -1,0 +1,123 @@
+module examples.astar
+
+# A* shortest-path on a 100×100 grid.
+#
+# Wall rule (interior cells only; border always clear):
+#   is_wall(x, y) = x>0 && y>0 && x<99 && y<99 && int_mod(x*5+y*3, 13) < 4
+#   ~31% interior walls; a path via the border always exists.
+#
+# Start: (0,0)   Goal: (99,99)   W=H=100
+# Heuristic: Manhattan distance (admissible, consistent).
+#
+# Data structures (mutable O(1) updates via MutVec):
+#   open set — sorted List (f, g, x, y), ascending by f; lazy-deletion
+#   g_score  — MutVec Int, len=10000, index=y*100+x, sentinel=9999999
+#   closed   — MutVec Int, len=10000, index=y*100+x (0=open, 1=closed)
+#
+# Run:
+#   just compile-native examples/astar.sprout /tmp/astar && /tmp/astar
+
+fn abs_val(n: Int) -> Int =
+  if n < 0 then -n else n
+
+fn int_mod(a: Int, b: Int) -> Int =
+  a - (a / b) * b
+
+fn in_bounds(x: Int, y: Int) -> Bool =
+  x >= 0 && x < 100 && y >= 0 && y < 100
+
+fn is_wall(x: Int, y: Int) -> Bool =
+  if x <= 0 then false
+  else if y <= 0 then false
+  else if x >= 99 then false
+  else if y >= 99 then false
+  else int_mod(x * 5 + y * 3, 13) < 4
+
+fn cell_idx(x: Int, y: Int) -> Int =
+  y * 100 + x
+
+fn heuristic(x: Int, y: Int) -> Int =
+  abs_val(99 - x) + abs_val(99 - y)
+
+fn open_insert(f: Int, g: Int, x: Int, y: Int, open: List (Int, Int, Int, Int)) -> List (Int, Int, Int, Int) =
+  match open with
+  | Nil -> Cons((f, g, x, y), Nil)
+  | Cons head rest ->
+      match head with
+      | (hf, _, _, _) ->
+          if f <= hf then Cons((f, g, x, y), open)
+          else Cons(head, open_insert(f, g, x, y, rest))
+
+# Write ng into g_score[nidx] and push (nx,ny) onto the open list.
+fn relax_and_insert(nx: Int, ny: Int, ng: Int, g_score: MutVec Int, open: List (Int, Int, Int, Int)) -> List (Int, Int, Int, Int) !{IO} =
+  do
+    mutvec_set(g_score, cell_idx(nx, ny), ng)
+    open_insert(ng + heuristic(nx, ny), ng, nx, ny, open)
+
+# Check g_score[nidx] and relax if ng is cheaper.
+fn try_relax_open(nx: Int, ny: Int, ng: Int, g_score: MutVec Int, open: List (Int, Int, Int, Int)) -> List (Int, Int, Int, Int) !{IO} =
+  do
+    cur_g <- mutvec_get(g_score, cell_idx(nx, ny))
+    if ng < cur_g then relax_and_insert(nx, ny, ng, g_score, open)
+    else open
+
+# Skip (nx,ny) if out of bounds, a wall, or already closed; otherwise try to relax.
+fn try_relax(nx: Int, ny: Int, ng: Int, closed: MutVec Int, g_score: MutVec Int, open: List (Int, Int, Int, Int)) -> List (Int, Int, Int, Int) !{IO} =
+  if in_bounds(nx, ny) == false then open
+  else if is_wall(nx, ny) then open
+  else do
+    cl <- mutvec_get(closed, cell_idx(nx, ny))
+    if cl == 1 then open
+    else try_relax_open(nx, ny, ng, g_score, open)
+
+fn expand_neighbors(x: Int, y: Int, ng: Int, closed: MutVec Int, g_score: MutVec Int, open: List (Int, Int, Int, Int)) -> List (Int, Int, Int, Int) !{IO} =
+  do
+    o1 <- try_relax(x, y - 1, ng, closed, g_score, open)
+    o2 <- try_relax(x, y + 1, ng, closed, g_score, o1)
+    o3 <- try_relax(x - 1, y, ng, closed, g_score, o2)
+    try_relax(x + 1, y, ng, closed, g_score, o3)
+
+fn astar_expand(x: Int, y: Int, g: Int, rest: List (Int, Int, Int, Int), g_score: MutVec Int, closed: MutVec Int) -> Maybe Int !{IO} =
+  do
+    mutvec_set(closed, cell_idx(x, y), 1)
+    new_open <- expand_neighbors(x, y, g + 1, closed, g_score, rest)
+    astar_loop(new_open, g_score, closed)
+
+fn astar_loop(open: List (Int, Int, Int, Int), g_score: MutVec Int, closed: MutVec Int) -> Maybe Int !{IO} =
+  match open with
+  | Nil -> Nothing
+  | Cons head rest ->
+      match head with
+      | (_, g, x, y) ->
+          if x == 99 && y == 99 then Just(g)
+          else do
+            cl <- mutvec_get(closed, cell_idx(x, y))
+            if cl == 1 then astar_loop(rest, g_score, closed)
+            else astar_expand(x, y, g, rest, g_score, closed)
+
+fn astar() -> Maybe Int !{IO} =
+  do
+    g_score <- mutvec_new(10000, 9999999)
+    closed <- mutvec_new(10000, 0)
+    mutvec_set(g_score, 0, 0)
+    astar_loop(Cons((heuristic(0, 0), 0, 0, 0), Nil), g_score, closed)
+
+fn run_iters(n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then acc
+  else match astar() with
+    | Nothing -> run_iters(n - 1, acc)
+    | Just path -> run_iters(n - 1, acc + path)
+
+fn format_ms(micros: Int) -> String =
+  string_concat_many([int_to_string(micros / 1000), ".", int_to_string((micros / 100) - (micros / 1000) * 10), " ms"])
+
+fn print_result(n: Int, total: Int, t0: Int) -> Unit !{IO} =
+  do
+    t1 <- time_now_micros()
+    print(string_concat_many(["A* 100x100, ", int_to_string(n), " runs: ", format_ms(t1 - t0), "  (", int_to_string((t1 - t0) / n), " us/run, path=", int_to_string(total / n), " steps)"]))
+
+fn main() -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    total <- run_iters(100, 0)
+    print_result(100, total, t0)

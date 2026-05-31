@@ -40,6 +40,8 @@ export type Result e a =
 export type Vec a =
   | Vec (Vector a)
 
+type MutVec a = MutVec(Vector a)
+
 export type Dict v =
   | Dict (Map v)
 
@@ -911,6 +913,9 @@ extern fn vector_get(v: Vector a, i: Int) -> Maybe a
 extern fn vector_set(v: Vector a, i: Int, val: a) -> Vector a
 extern fn vector_append(v: Vector a, val: a) -> Vector a
 extern fn vector_from_list(xs: List a) -> Vector a
+extern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
 
 # Raw map (string-keyed hash map)
 extern fn map_empty() -> Map v
@@ -941,6 +946,21 @@ extern fn bytes_from_utf8(s: String) -> Bytes
 extern fn ref_new(val: a) -> Ref a !{IO}
 extern fn ref_read(r: Ref a) -> a !{IO}
 extern fn ref_write(r: Ref a, val: a) -> Unit !{IO}
+
+# Mutable vectors (opaque; use mutvec_* functions only)
+fn mutvec_raw(v: MutVec a) -> Vector a =
+  match v with | MutVec raw -> raw
+
+export fn mutvec_new(n: Int, val: a) -> MutVec a !{IO} =
+  do
+    raw <- vec_make_filled(n, val)
+    MutVec(raw)
+
+export fn mutvec_get(v: MutVec a, i: Int) -> a !{IO} =
+  vector_get_direct(mutvec_raw(v), i)
+
+export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
+  vector_mutset(mutvec_raw(v), i, val)
 
 # Regex
 extern fn regex_validate(pattern: String) -> Result String Unit

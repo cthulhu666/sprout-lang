@@ -1,0 +1,47 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # mutvec_new: all slots initialised to fill value
+    v <- mutvec_new(5, 42)
+    v0 <- mutvec_get(v, 0)
+    v4 <- mutvec_get(v, 4)
+    assert_eq(state, "mutvec_new fill slot 0", v0, 42)
+    assert_eq(state, "mutvec_new fill slot 4", v4, 42)
+
+    # mutvec_set: targeted write does not disturb other slots
+    mutvec_set(v, 2, 99)
+    a0 <- mutvec_get(v, 0)
+    a2 <- mutvec_get(v, 2)
+    a4 <- mutvec_get(v, 4)
+    assert_eq(state, "mutvec_set target slot", a2, 99)
+    assert_eq(state, "mutvec_set untouched slot 0", a0, 42)
+    assert_eq(state, "mutvec_set untouched slot 4", a4, 42)
+
+    # mutvec_set: overwrite same slot again
+    mutvec_set(v, 2, 7)
+    b2 <- mutvec_get(v, 2)
+    assert_eq(state, "mutvec_set overwrite", b2, 7)
+
+    # two independent MutVecs do not alias each other
+    p <- mutvec_new(3, 0)
+    q <- mutvec_new(3, 0)
+    mutvec_set(p, 1, 100)
+    q1 <- mutvec_get(q, 1)
+    assert_eq(state, "mutvec no alias between vecs", q1, 0)
+
+    # large allocation (10000 elements — same size as astar arrays)
+    big <- mutvec_new(10000, 9999999)
+    big0 <- mutvec_get(big, 0)
+    big9999 <- mutvec_get(big, 9999)
+    assert_eq(state, "mutvec_new large fill slot 0", big0, 9999999)
+    assert_eq(state, "mutvec_new large fill slot 9999", big9999, 9999999)
+    mutvec_set(big, 5000, 1)
+    bigmid <- mutvec_get(big, 5000)
+    bigadj <- mutvec_get(big, 4999)
+    assert_eq(state, "mutvec_set large mid slot", bigmid, 1)
+    assert_eq(state, "mutvec_set large adjacent untouched", bigadj, 9999999)
+
+    summary(state)
