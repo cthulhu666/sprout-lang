@@ -156,8 +156,9 @@ fn contains_name(names: Vec String, value: String, index: Int) -> Bool =
   | Nothing -> false
 
 fn lower_char(value: Char) -> Char =
-  if string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)) == -1 then value
-  else string.char_at_or("abcdefghijklmnopqrstuvwxyz", string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)), '?')
+  match string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(value)) with
+  | Nothing -> value
+  | Just pos -> string.char_at_or("abcdefghijklmnopqrstuvwxyz", pos, '?')
 
 fn lower_ascii_from(raw: String, index: Int, acc: String) -> String =
   if index >= string.length(raw) then acc
@@ -260,22 +261,26 @@ fn append_csv_names(acc: Vec String, raw: String) -> Vec String =
   | Just pair -> append_csv_name_pair(acc, pair)
 
 fn append_import_names(names: Vec String, line: String) -> Vec String =
-  if string.find(line, " as ") == -1 then
-    if string.find(line, "(") == -1 then append_unique_name(names, module_leaf_name(trim(line)))
-    else append_csv_names(append_unique_name(names, module_leaf_name(trim(take_before(line, "(")))), take_between(line, "(", ")"))
-  else if string.find(line, "(") == -1 then
-    append_unique_name(
-      append_unique_name(names, trim(take_after(line, " as "))),
-      module_leaf_name(trim(string.slice(line, 0, string.find(line, " as "))))
-    )
-  else
-    append_csv_names(
-      append_unique_name(
-        append_unique_name(names, trim(take_after(line, " as "))),
-        module_leaf_name(trim(take_before(string.slice(line, 0, string.find(line, " as ")), "(")))
-      ),
-      take_between(line, "(", ")")
-    )
+  match string.find(line, " as ") with
+  | Nothing ->
+      match string.find(line, "(") with
+      | Nothing -> append_unique_name(names, module_leaf_name(trim(line)))
+      | Just _ -> append_csv_names(append_unique_name(names, module_leaf_name(trim(take_before(line, "(")))), take_between(line, "(", ")"))
+  | Just as_pos ->
+      match string.find(line, "(") with
+      | Nothing ->
+          append_unique_name(
+            append_unique_name(names, trim(take_after(line, " as "))),
+            module_leaf_name(trim(string.slice(line, 0, as_pos)))
+          )
+      | Just _ ->
+          append_csv_names(
+            append_unique_name(
+              append_unique_name(names, trim(take_after(line, " as "))),
+              module_leaf_name(trim(take_before(string.slice(line, 0, as_pos), "(")))
+            ),
+            take_between(line, "(", ")")
+          )
 
 fn gather_import_names(imports: Vec String, index: Int, acc: Vec String) -> Vec String =
   match vec_get(index, imports) with
@@ -290,10 +295,9 @@ fn replace_char(raw: String, from: Char, to: Char, index: Int, acc: String) -> S
   else replace_char(raw, from, to, index + 1, acc ++ string.string_from_char(char_at(raw, index)))
 
 fn module_path(module_name: String) -> String =
-  if string.find(module_name, ".") == -1 then
-    "stdlib/" ++ module_name ++ ".sprout"
-  else
-    replace_char(module_name, '.', '/', 0, "") ++ ".sprout"
+  match string.find(module_name, ".") with
+  | Nothing -> "stdlib/" ++ module_name ++ ".sprout"
+  | Just _ -> replace_char(module_name, '.', '/', 0, "") ++ ".sprout"
 
 fn append_exported_names(names: Vec String, line: String) -> Vec String =
   append_declaration_names(names, trim(line))
@@ -316,12 +320,15 @@ fn qualify_names(namespace: String, names: Vec String, index: Int, acc: Vec Stri
   | Nothing -> acc
 
 fn import_target_module(line: String) -> String =
-  if string.find(line, " as ") == -1 then
-    if string.find(line, "(") == -1 then trim(line)
-    else trim(take_before(line, "("))
-  else
-    if string.find(trim(take_before(line, " as ")), "(") == -1 then trim(take_before(line, " as "))
-    else trim(take_before(trim(take_before(line, " as ")), "("))
+  match string.find(line, " as ") with
+  | Nothing ->
+      match string.find(line, "(") with
+      | Nothing -> trim(line)
+      | Just _ -> trim(take_before(line, "("))
+  | Just _ ->
+      match string.find(trim(take_before(line, " as ")), "(") with
+      | Nothing -> trim(take_before(line, " as "))
+      | Just _ -> trim(take_before(trim(take_before(line, " as ")), "("))
 
 fn imported_namespace_ref_for_namespace(namespace: String, line: String) -> Maybe String =
   if trim(take_after(line, " as ")) != "" && lower_ascii(trim(take_after(line, " as "))) == lower_ascii(namespace) then
@@ -370,7 +377,8 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
 fn completion_candidates_local(line_buffer: String, session: compiler.StatefulSession) -> (String, Vec String) !{IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
-      if string.find(prefix, ".") == -1 then
+      match string.find(prefix, ".") with
+      | Nothing ->
         match prelude_completion_names() with
         | prelude_names ->
             (
@@ -399,7 +407,7 @@ fn completion_candidates_local(line_buffer: String, session: compiler.StatefulSe
                 vec_empty()
               )
             )
-      else
+      | Just _ ->
         (
           prefix,
           filter_names_by_prefix(
@@ -697,10 +705,9 @@ fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
 fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession) -> Unit !{IO} =
   match read_submission(prompt, history, session) with
   | Submission line ->
-      if string.find(line, "\n") == -1 then
-        continue_loop(handle_submission(line, session), prompt, push_history(history, line))
-      else
-        continue_loop(handle_block_submission(line, session), prompt, push_history(history, line))
+      match string.find(line, "\n") with
+      | Nothing -> continue_loop(handle_submission(line, session), prompt, push_history(history, line))
+      | Just _ -> continue_loop(handle_block_submission(line, session), prompt, push_history(history, line))
   | ReadNotice message ->
       do
         render_lines(prompt, single_line(message), 0)

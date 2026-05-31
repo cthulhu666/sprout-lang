@@ -31,15 +31,16 @@ export fn drop(raw: String, count: Int) -> String =
   else slice(raw, count, length(raw) - count)
 
 # O(|raw| * |needle|) in the worst case: delegates to the native substring search.
-export fn find(raw: String, needle: String) -> Int =
-  str_find(raw, needle)
+export fn find(raw: String, needle: String) -> Maybe Int =
+  if r < 0 then Nothing else Just(r)
+  where r = str_find(raw, needle)
 
 # O(|prefix|): compares only the prefix region.
 export fn starts_with(raw: String, prefix: String) -> Bool =
   str_starts_with(raw, prefix)
 
 export fn contains(raw: String, needle: String) -> Bool =
-  find(raw, needle) >= 0
+  match find(raw, needle) with | Just _ -> true | Nothing -> false
 
 # O(|raw| + |suffix|): pays for repeated length checks plus the copied suffix slice.
 export fn ends_with(raw: String, suffix: String) -> Bool =
@@ -74,10 +75,12 @@ export fn is_ascii_whitespace(ch: Char) -> Bool =
   is_space(ch) || is_tab(ch) || is_newline(ch) || is_carriage_return(ch)
 
 fn is_ascii_digit_char(ch: Char) -> Bool =
-  digit_value(ch) >= 0
+  match digit_value(ch) with | Just _ -> true | Nothing -> false
 
 fn is_ascii_alpha_char(ch: Char) -> Bool =
-  find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", string_from_char(ch)) >= 0
+  match find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", string_from_char(ch)) with
+  | Just _ -> true
+  | Nothing -> false
 
 export fn is_ascii_digit(ch: Char) -> Bool =
   is_ascii_digit_char(ch)
@@ -120,8 +123,10 @@ export fn strip_suffix(raw: String, suffix: String) -> Maybe String =
 
 export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
   if is_empty(sep) then Nothing
-  else if find(raw, sep) < 0 then Nothing
-  else Just((take(raw, find(raw, sep)), drop(raw, find(raw, sep) + length(sep))))
+  else
+    match find(raw, sep) with
+    | Nothing -> Nothing
+    | Just pos -> Just((take(raw, pos), drop(raw, pos + length(sep))))
 
 fn join_step(sep: String, acc: List String, s: String) -> List String =
   match acc with
@@ -173,16 +178,15 @@ fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec Str
 export fn string_lines(raw: String) -> Vec String =
   lines_loop(raw, 0, 0, length(raw), vec_empty())
 
-fn digit_value(ch: Char) -> Int =
+fn digit_value(ch: Char) -> Maybe Int =
   find("0123456789", string_from_char(ch))
 
 fn digits_loop(raw: String, index: Int, total: Int, acc: Vec Int) -> Vec Int =
   if index >= total then acc
   else
-    if digit_value(char_at_or(raw, index, '?')) >= 0 then
-      digits_loop(raw, index + 1, total, vec_append(digit_value(char_at_or(raw, index, '?')), acc))
-    else
-      digits_loop(raw, index + 1, total, acc)
+    match digit_value(char_at_or(raw, index, '?')) with
+    | Nothing -> digits_loop(raw, index + 1, total, acc)
+    | Just v -> digits_loop(raw, index + 1, total, vec_append(v, acc))
 
 # O(n^2) in the number of codepoints: each step re-reads one character and may copy the output vector.
 export fn string_digits(raw: String) -> Vec Int =
