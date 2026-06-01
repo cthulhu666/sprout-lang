@@ -42,6 +42,30 @@ fn get_ir(src: String) -> String !{IO} =
     | codegen.IrOk ir -> ir
     | codegen.IrErr msg -> "ERROR: " ++ msg
 
+fn run_codegen_lines(src: String) -> codegen.IrLinesResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> codegen.IrLinesErr("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> codegen.IrLinesErr("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr msg -> codegen.IrLinesErr("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> codegen.IrLinesErr("lower: " ++ msg)
+                | lowering.LowerOk typed_lowered ->
+                    codegen.compile_to_ir_lines(typed_lowered, env, false, "")
+
+fn get_warns(src: String) -> List String !{IO} =
+  do
+    r <- run_codegen_lines(src)
+    match r with
+    | codegen.IrLinesErr _ -> Nil
+    | codegen.IrLinesOk _ _ _ _ warns -> warns
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -155,5 +179,17 @@ fn main() -> Unit !{IO} =
     assert_true(state, "closure with capture compiles to IR", ok_closure)
     closure_ir <- get_ir(closure_src)
     assert_true(state, "capture closure emits getelementptr env slot", ir_contains(closure_ir, "getelementptr i64, ptr %env"))
+
+    # Missed-TCO warning: a TCO function (self-tail-call) that also makes a cross-function tail
+    # call should emit a warning.  `count` has a self-tail-call (→ TCO active) and a tail call to
+    # `helper` in the base case (→ cross-fn tail call in TCO context → warning).
+    let tco_cross_src = "fn helper(n: Int) -> Int = n\nfn count(n: Int) -> Int = if n == 0 then helper(n) else count(n - 1)"
+    warns1 <- get_warns(tco_cross_src)
+    assert_true(state, "cross-fn tail call in TCO fn emits warning", list_length(warns1) > 0)
+
+    # A pure self-recursive TCO function with no cross-fn calls must produce NO warning.
+    let pure_tco_src = "fn count_down(n: Int) -> Int = if n == 0 then 0 else count_down(n - 1)"
+    warns2 <- get_warns(pure_tco_src)
+    assert_true(state, "pure TCO fn (no cross-fn calls) emits no warning", list_length(warns2) == 0)
 
     summary(state)

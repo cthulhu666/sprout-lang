@@ -129,10 +129,11 @@ type DbgEmitter =
   | DbgEmitter Bool String (Ref Int) (Ref (List String)) (Ref Int) (Ref Int) Int
   # debug_mode, source_file, meta_id_counter, meta_lines, current_sp_id, current_loc_id, header_line_offset
 
-# Emitter wraps EmitterState (capped at 9 fields) together with DbgEmitter.
-# All emit_* and es_* call sites use `em: Emitter` unchanged.
+# Emitter wraps EmitterState (capped at 9 fields) together with DbgEmitter and a
+# warns accumulator collecting missed-TCO advisory messages (cross-fn tail calls in a
+# TCO context).  All emit_* and es_* call sites use `em: Emitter` unchanged.
 type Emitter =
-  | Emitter EmitterState DbgEmitter
+  | Emitter EmitterState DbgEmitter (Ref (List String))
 
 # Encodes the current basic block name.  A dedicated ADT avoids the do-bind
 # monadic-unwrap rule that applies to Maybe/Result.
@@ -165,8 +166,8 @@ export type IrResult (..) =
   | IrErr String
 
 export type IrLinesResult (..) =
-  | IrLinesOk (List String) (List String) (List String) (List String)
-  # header_lines, str_lines, def_lines, dbg_lines
+  | IrLinesOk (List String) (List String) (List String) (List String) (List String)
+  # header_lines, str_lines, def_lines, dbg_lines, warn_msgs
   | IrLinesErr String
 
 # ===========================================================================
@@ -401,10 +402,13 @@ fn tco_with_outer_roots(t: TcoCtx, n: Int) -> TcoCtx =
 # --- EmitterState unwrap ---
 
 fn em_es(em: Emitter) -> EmitterState =
-  match em with | Emitter es _ -> es
+  match em with | Emitter es _ _ -> es
 
 fn em_dbg(em: Emitter) -> DbgEmitter =
-  match em with | Emitter _ dbg -> dbg
+  match em with | Emitter _ dbg _ -> dbg
+
+fn em_warns_ref(em: Emitter) -> Ref (List String) =
+  match em with | Emitter _ _ wr -> wr
 
 # --- DbgEmitter accessors ---
 
@@ -664,7 +668,8 @@ fn new_emitter(debug_mode_: Bool, source_file_: String) -> Emitter !{IO} =
       else 0
     let es = EmitterState(body_ref, defs_ref, strs_ref, wrap_ref, blk_ref, nt_ref, nb_ref, ns_ref, nl_ref)
     let dbg = DbgEmitter(debug_mode_, source_file_, meta_id_ref, meta_lines_ref, sp_id_ref, loc_id_ref, header_offset)
-    Emitter(es, dbg)
+    warns_ref <- ref_new(Nil)
+    Emitter(es, dbg, warns_ref)
 
 fn emit_line(em: Emitter, line: String) -> Unit !{IO} =
   do
@@ -1963,7 +1968,10 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
   else
     do
       lv <- emit_expr(ctx, locals, em, Nothing, left)
+      let left_ty = typed_ast.typed_expr_type(left)
+      rooted <- push_temp_root_typed(lv, left_ty, em)
       rv <- emit_expr(ctx, locals, em, Nothing, right)
+      pop_temp_roots(rooted, em)
       if op == "+" || op == "-" || op == "*" || op == "/" then
         do
           tmp <- fresh_tmp(em)
@@ -1977,7 +1985,6 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
           val_make(ll_i64(), tmp)
       else
         do
-          let left_ty = typed_ast.typed_expr_type(left)
           let right_ty = typed_ast.typed_expr_type(right)
           if compare_needs_ptr_dispatch(left_ty, right_ty) then
             do
@@ -2346,6 +2353,8 @@ fn emit_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ty: ty
   match callee with
   | typed_ast.TVar "print" _ _ ->
       emit_print_call(args, ctx, locals, em)
+  | typed_ast.TVar "eprint" _ _ ->
+      emit_eprint_call(args, ctx, locals, em)
   | typed_ast.TVar name callee_ty _ ->
       emit_named_call(name, callee_ty, args, ty, ctx, locals, em, tco_ctx)
   | _ ->
@@ -2414,6 +2423,17 @@ fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Valu
             val_make(ll_i64(), tmp)
         else
           val_make(ll_i64(), "0")
+
+fn emit_eprint_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
+  match args with
+  | Nil -> val_make(ll_i64(), "0")
+  | Cons arg _ ->
+      do
+        v <- emit_expr(ctx, locals, em, Nothing, arg)
+        vp <- coerce_value(v, ll_ptr(), em)
+        tmp <- fresh_tmp(em)
+        emit_template(em, `  ${tmp} = call i64 @eprint_str(ptr ${val_ir (vp)})`)
+        val_make(ll_i64(), tmp)
 
 fn strip_module_prefix(name: String) -> String =
   if dot_pos < 0
@@ -2603,6 +2623,12 @@ fn load_applied_from_env(lls: List String, n: Int, em: Emitter, slot_idx: Int) -
           rest_packed <- load_applied_from_env(rest, n - 1, em, slot_idx + 1)
           Cons(raw, rest_packed)
 
+fn emit_warn_and_regular_call(caller: String, callee: String, sig: FnSig, args: List typed_ast.TypedExpr, target_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
+  do
+    old <- ref_read(em_warns_ref(em))
+    ref_write(em_warns_ref(em), Cons("tail call from `" ++ caller ++ "` to `" ++ callee ++ "` will allocate a stack frame (cross-function tail call in a TCO function)", old))
+    emit_regular_direct_call(callee, sig, args, target_ll, ctx, locals, em)
+
 fn emit_direct_fn_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
   if n_args < n_params then
     do
@@ -2628,7 +2654,7 @@ fn emit_direct_fn_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr,
             pop_temp_roots(rooted_args, em)
             val_with_tco_args(val_make(tco_ret_ll(tc), "undef"), Just(coerced_args))
         else
-          emit_regular_direct_call(name, sig, args, type_to_ll(ty), ctx, locals, em)
+          emit_warn_and_regular_call(tco_fn_name(tc), name, sig, args, type_to_ll(ty), ctx, locals, em)
     | Nothing ->
         emit_regular_direct_call(name, sig, args, type_to_ll(ty), ctx, locals, em)
   where n_args = list_length_exprs(args)
@@ -3259,6 +3285,7 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("str_compare", FnSig("str_compare", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
   # Print helpers — called with ptr/i64 operands from print codegen templates
   , ("print_str", FnSig("print_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  , ("eprint_str", FnSig("eprint_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("print_value", FnSig("print_value", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   # GC root management — use raw ptr (stack slot addresses, not Sprout values)
   , ("sprout_gc_push_i64_root", FnSig("sprout_gc_push_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
@@ -3919,8 +3946,9 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
         ctor_reg_meta <- build_ctor_reg_meta(ctor_sigs_, em)
         emit_matching_fns(decls, fn_name, fn_sigs_, ctor_reg_meta, runtime_lets, ctx, em)
         sections <- assemble_ir_sections(em)
+        warns <- ref_read(em_warns_ref(em))
         match sections with
-        | (header_lines, str_lines, def_lines, dbg_lines) -> IrLinesOk(header_lines, str_lines, def_lines, dbg_lines)
+        | (header_lines, str_lines, def_lines, dbg_lines) -> IrLinesOk(header_lines, str_lines, def_lines, dbg_lines, warns)
 
 # Build ctor registration metadata (for the main function's startup code).
 fn build_ctor_reg_meta(ctor_sigs_: Dict CtorSig, em: Emitter) -> Dict (List (String, Int, Int, Int, String)) !{IO} =
@@ -3984,7 +4012,7 @@ export fn compile_to_ir(prog: typed_ast.TypedProgram, env: Dict types.Scheme) ->
     lines_result <- compile_to_ir_lines(prog, env, false, "")
     match lines_result with
     | IrLinesErr msg -> IrErr(msg)
-    | IrLinesOk header_lines str_lines def_lines dbg_lines -> IrOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
+    | IrLinesOk header_lines str_lines def_lines dbg_lines _ -> IrOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
 
 export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Scheme, debug_mode_: Bool, source_file_: String) -> IrLinesResult !{IO} =
   match prog with
@@ -4030,8 +4058,9 @@ export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Sche
         emit_all_fns(decls, fn_sigs_, ctor_reg_meta, runtime_lets, ctx, em)
         # Assemble final IR sections without concatenating the full output.
         sections <- assemble_ir_sections(em)
+        warns <- ref_read(em_warns_ref(em))
         match sections with
-        | (header_lines, str_lines, def_lines, dbg_lines) -> IrLinesOk(header_lines, str_lines, def_lines, dbg_lines)
+        | (header_lines, str_lines, def_lines, dbg_lines) -> IrLinesOk(header_lines, str_lines, def_lines, dbg_lines, warns)
 
 fn global_count(gi: Dict GlobalInfo) -> Int !{IO} =
   vec_length(dict_keys(gi))

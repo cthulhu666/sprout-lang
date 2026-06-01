@@ -1236,6 +1236,16 @@ long long print_str(const char* s) {
   printf("%s\n", s);
   return 0;
 }
+long long eprint_str(const char* s) {
+  fprintf(stderr, "%s\n", s);
+  return 0;
+}
+/* Bridge for old stage-1 codegen that emits @eprint(i64) — Sprout strings are
+   heap pointers passed as i64 before emit_eprint_call was added. */
+long long eprint(long long s) {
+  fprintf(stderr, "%s\n", (const char*)s);
+  return 0;
+}
 long long print_text(const char* s) {
   printf("%s", s);
   return 0;

@@ -854,6 +854,7 @@ instance ToString (Dict v) where ToString v {
 
 # I/O
 extern fn print(val: a) -> Unit !{IO}
+extern fn eprint(val: String) -> Unit !{IO}
 extern fn print_int(n: Int) -> Int !{IO}
 extern fn read_file(path: String) -> Result String String !{IO}
 extern fn write_file(path: String, content: String) -> Result String Unit !{IO}
