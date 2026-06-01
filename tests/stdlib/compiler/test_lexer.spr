@@ -99,4 +99,17 @@ fn main() -> Unit !{IO} =
     # Error case
     assert_false(state, "at-sign is lex error", lex_ok("@"))
 
+    # Template literal: tokens and content ordering
+    # Token layout for `hello`: [template_start, template_lit, template_end, eof]
+    assert_eq(state, "template start kind", tok_kind_at("`hello`", 0), "template_start")
+    assert_eq(state, "template lit kind", tok_kind_at("`hello`", 1), "template_lit")
+    assert_eq(state, "template lit text correct order", tok_text_at("`hello`", 1), "hello")
+    assert_eq(state, "template end kind", tok_kind_at("`hello`", 2), "template_end")
+
+    # Template with escape sequence — ensures escape decoding preserves order
+    assert_eq(state, "template escape text", tok_text_at("`a\\nb`", 1), "a\nb")
+
+    # String escape sequence — ensures escape decoding preserves order
+    assert_eq(state, "string escape text", tok_text_at("\"a\\nb\"", 0), "a\nb")
+
     summary(state)

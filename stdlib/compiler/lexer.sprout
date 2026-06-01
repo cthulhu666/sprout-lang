@@ -118,13 +118,13 @@ fn scan_char_content(cursor: source.SourceCursor, start_pos: source.SourcePos) -
           else Err(token.TokenizeError("Char literal must contain exactly one character", start_pos))
 
 # Scans a string body (cursor is past the opening ").
-# acc accumulates the decoded characters.
+# acc accumulates decoded characters in reverse order (Cons at head).
 # Returns the decoded string content and the cursor past the closing ".
-fn scan_string_content(cursor: source.SourceCursor, start_pos: source.SourcePos, acc: String) -> Result token.TokenizeError (String, source.SourceCursor) =
+fn scan_string_content(cursor: source.SourceCursor, start_pos: source.SourcePos, acc: List String) -> Result token.TokenizeError (String, source.SourceCursor) =
   match source.peek_char(cursor) with
   | Nothing -> Err(token.TokenizeError("Unterminated string literal", start_pos))
   | Just ch ->
-      if ch == '"' then Ok((acc, source.advance_char(cursor)))
+      if ch == '"' then Ok((string_concat_many(list_reverse(acc)), source.advance_char(cursor)))
       else if ch == '\\' then
         match source.peek_char(source.advance_char(cursor)) with
         | Nothing -> Err(token.TokenizeError("Unterminated string literal", start_pos))
@@ -135,13 +135,13 @@ fn scan_string_content(cursor: source.SourceCursor, start_pos: source.SourcePos,
                 scan_string_content(
                   source.advance_char(source.advance_char(cursor)),
                   start_pos,
-                  string.concat(acc, string.string_from_char(decoded))
+                  Cons(string.string_from_char(decoded), acc)
                 )
       else
         scan_string_content(
           source.advance_char(cursor),
           start_pos,
-          string.concat(acc, string.string_from_char(ch))
+          Cons(string.string_from_char(ch), acc)
         )
 
 # Decodes a template escape (the char after \).
@@ -156,10 +156,11 @@ fn decode_template_escape(ch: Char, cursor_after_ch: source.SourceCursor) -> (St
   else (string.string_from_char(ch), cursor_after_ch)
 
 # Emits a TEMPLATE_LIT token if acc is non-empty, otherwise nothing.
-# Returns the token list with the new token prepended (reversed accumulator style).
-fn flush_template_lit(acc: String, start_pos: source.SourcePos, toks: List token.Token) -> List token.Token =
-  if str_len(acc) == 0 then toks
-  else Cons(token.Token(token.TokenTemplateLit, acc, start_pos), toks)
+# acc is in reverse order (built via Cons); reversed and joined here.
+fn flush_template_lit(acc: List String, start_pos: source.SourcePos, toks: List token.Token) -> List token.Token =
+  match acc with
+  | Nil -> toks
+  | _ -> Cons(token.Token(token.TokenTemplateLit, string_concat_many(list_reverse(acc)), start_pos), toks)
 
 # Scans inside ${ ... } (the interpolation body) at the given brace depth.
 # cursor is positioned right after ${.
@@ -218,18 +219,18 @@ fn scan_nested_template(raw: String, cursor: source.SourceCursor, outer_start_po
   scan_nested_template_with_start(raw, cursor, cursor_position(cursor), outer_start_pos, depth, toks_acc)
 
 fn scan_nested_template_with_start(raw: String, cursor: source.SourceCursor, templ_start_pos: source.SourcePos, outer_start_pos: source.SourcePos, depth: Int, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
-  match scan_template_content(raw, source.advance_char(cursor), templ_start_pos, "", templ_start_pos,
+  match scan_template_content(raw, source.advance_char(cursor), templ_start_pos, Nil, templ_start_pos,
       Cons(token.Token(token.TokenTemplateStart, "`", templ_start_pos), toks_acc)) with
   | Err e -> Err(e)
   | Ok (toks2, cursor2) ->
       scan_interp_body(raw, cursor2, outer_start_pos, depth, toks2)
 
 # Scans the body of a template literal (cursor is past the opening `).
-# lit_acc accumulates raw decoded literal characters.
+# lit_acc accumulates decoded literal segments in reverse order (built via Cons).
 # lit_start is the position where the current literal segment started.
 # toks_acc is the reversed token accumulator (TEMPLATE_START already prepended).
 # Returns Ok((full_reversed_tok_list, cursor_past_closing_`))
-fn scan_template_content(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
+fn scan_template_content(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: List String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
   match source.peek_char(cursor) with
   | Nothing -> Err(token.TokenizeError("Unterminated template literal", start_pos))
   | Just ch ->
@@ -244,23 +245,23 @@ fn scan_template_content(raw: String, cursor: source.SourceCursor, start_pos: so
         scan_template_escape(raw, cursor, start_pos, lit_acc, lit_start, toks_acc)
       else
         scan_template_content(raw, source.advance_char(cursor), start_pos,
-          string.concat(lit_acc, string.string_from_char(ch)), lit_start, toks_acc)
+          Cons(string.string_from_char(ch), lit_acc), lit_start, toks_acc)
 
 # Handle $ in template: either ${ (interp start) or bare $ (literal).
-fn scan_template_dollar(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
+fn scan_template_dollar(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: List String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
   match source.peek_char(source.advance_char(cursor)) with
   | Nothing ->
       scan_template_content(raw, source.advance_char(cursor), start_pos,
-        string.concat(lit_acc, "$"), lit_start, toks_acc)
+        Cons("$", lit_acc), lit_start, toks_acc)
   | Just c ->
       if c == '{' then
         scan_template_interp_start(raw, cursor, start_pos, lit_acc, lit_start, toks_acc)
       else
         scan_template_content(raw, source.advance_char(cursor), start_pos,
-          string.concat(lit_acc, "$"), lit_start, toks_acc)
+          Cons("$", lit_acc), lit_start, toks_acc)
 
 # cursor is at '$', next char is '{'. Flush lit, emit INTERP_START, enter body.
-fn scan_template_interp_start(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
+fn scan_template_interp_start(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: List String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
   scan_template_interp_body(
     raw,
     source.advance_char(source.advance_char(cursor)),
@@ -274,17 +275,17 @@ fn scan_template_interp_body(raw: String, cursor_after_brace: source.SourceCurso
   match scan_interp_body(raw, cursor_after_brace, interp_start, 0, toks2) with
   | Err e -> Err(e)
   | Ok (toks3, cursor2) ->
-      scan_template_content(raw, cursor2, start_pos, "", cursor_position(cursor2), toks3)
+      scan_template_content(raw, cursor2, start_pos, Nil, cursor_position(cursor2), toks3)
 
 # Handle \ in template: decode escape and continue.
-fn scan_template_escape(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
+fn scan_template_escape(raw: String, cursor: source.SourceCursor, start_pos: source.SourcePos, lit_acc: List String, lit_start: source.SourcePos, toks_acc: List token.Token) -> Result token.TokenizeError (List token.Token, source.SourceCursor) =
   match source.peek_char(source.advance_char(cursor)) with
   | Nothing -> Err(token.TokenizeError("Unterminated template literal", start_pos))
   | Just esc ->
       match decode_template_escape(esc, source.advance_char(source.advance_char(cursor))) with
       | (decoded_str, next_cursor) ->
           scan_template_content(raw, next_cursor, start_pos,
-            string.concat(lit_acc, decoded_str), lit_start, toks_acc)
+            Cons(decoded_str, lit_acc), lit_start, toks_acc)
 
 # Tries each operator string in order, returning the cursor past the first match.
 fn try_ops(cursor: source.SourceCursor, ops: List String) -> Maybe source.SourceCursor =
@@ -310,7 +311,7 @@ where
   end_cursor = scan_int_end(raw, cursor)
 
 fn scan_string_next(cursor: source.SourceCursor, start_pos: source.SourcePos) -> Result token.TokenizeError (source.SourceCursor, token.Token) =
-  match scan_string_content(source.advance_char(cursor), start_pos, "") with
+  match scan_string_content(source.advance_char(cursor), start_pos, Nil) with
   | Err e -> Err(e)
   | Ok (text, next) -> Ok((next, token.Token(token.TokenStringKind, text, start_pos)))
 
@@ -323,7 +324,7 @@ fn scan_template_from(raw: String, cursor: source.SourceCursor, acc: List token.
   scan_template_from_with_pos(raw, cursor, cursor_position(cursor), acc)
 
 fn scan_template_from_with_pos(raw: String, cursor: source.SourceCursor, templ_start_pos: source.SourcePos, acc: List token.Token) -> Result token.TokenizeError (List token.Token) =
-  match scan_template_content(raw, source.advance_char(cursor), templ_start_pos, "", templ_start_pos,
+  match scan_template_content(raw, source.advance_char(cursor), templ_start_pos, Nil, templ_start_pos,
       Cons(token.Token(token.TokenTemplateStart, "`", templ_start_pos), acc)) with
   | Err e -> Err(e)
   | Ok (toks, next) -> tokenize_from(raw, next, toks)
