@@ -147,8 +147,8 @@ fn read_until_headers(conn: Int, acc: String) -> ServerResult String !{IO} =
   | Nothing ->
       do
         chunk <- tcp_read(conn)
-      if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-      else read_until_headers(conn, string.concat(acc, chunk))
+        if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+        else read_until_headers(conn, string.concat(acc, chunk))
 
 fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> ServerResult String !{IO} =
   if remaining <= 0 then Ok(acc)
@@ -176,7 +176,8 @@ fn continue_read_request(conn: Int, raw: String, prefix: (RequestLine, Dict Stri
       parse(full)
 where
   (_req, _headers, content_length) = prefix
-  body = string.drop(raw, request_body_start(raw))
+  body_start = match request_body_start(raw) with | Nothing -> 0 | Just pos -> pos
+  body = string.drop(raw, body_start)
 
 fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc

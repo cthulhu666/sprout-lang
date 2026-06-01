@@ -1032,7 +1032,7 @@ entry:
   %t506 = add i64 8, 0
   %t507 = call i64 @sprout_alloc_closure_env(i64 %t506)
   %t508 = inttoptr i64 %t507 to ptr
-  store ptr @__sprout_fn_closure_1499, ptr %t508
+  store ptr @__sprout_fn_closure_1500, ptr %t508
   %t509 = alloca ptr
   store ptr %t508, ptr %t509
   %t510 = call i64 @sprout_gc_push_ptr_root(ptr %t509)
@@ -3236,7 +3236,7 @@ entry:
   %t1710 = add i64 16, 0
   %t1711 = call i64 @sprout_alloc_closure_env(i64 %t1710)
   %t1712 = inttoptr i64 %t1711 to ptr
-  store ptr @__sprout_lambda_1500_vec_sum_by, ptr %t1712
+  store ptr @__sprout_lambda_1501_vec_sum_by, ptr %t1712
   %t1713 = ptrtoint ptr %f to i64
   %t1714 = getelementptr i64, ptr %t1712, i64 1
   store i64 %t1713, ptr %t1714
@@ -5212,7 +5212,7 @@ entry:
   %t2855 = add i64 8, 0
   %t2856 = call i64 @sprout_alloc_closure_env(i64 %t2855)
   %t2857 = inttoptr i64 %t2856 to ptr
-  store ptr @__sprout_lambda_1501_vec_sort, ptr %t2857
+  store ptr @__sprout_lambda_1502_vec_sort, ptr %t2857
   %t2858 = alloca ptr
   store ptr %t2857, ptr %t2858
   %t2859 = call i64 @sprout_gc_push_ptr_root(ptr %t2858)
@@ -6319,7 +6319,7 @@ entry:
   %t3510 = add i64 16, 0
   %t3511 = call i64 @sprout_alloc_closure_env(i64 %t3510)
   %t3512 = inttoptr i64 %t3511 to ptr
-  store ptr @__sprout_lambda_1502_fold_indexed, ptr %t3512
+  store ptr @__sprout_lambda_1503_fold_indexed, ptr %t3512
   %t3513 = getelementptr i64, ptr %t3512, i64 1
   store i64 %f, ptr %t3513
   %t3514 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -6401,7 +6401,7 @@ entry:
   %t3577 = add i64 16, 0
   %t3578 = call i64 @sprout_alloc_closure_env(i64 %t3577)
   %t3579 = inttoptr i64 %t3578 to ptr
-  store ptr @__sprout_lambda_1503_mconcat, ptr %t3579
+  store ptr @__sprout_lambda_1504_mconcat, ptr %t3579
   %t3580 = getelementptr i64, ptr %t3579, i64 1
   store i64 %__tc_Semigroup_1_append, ptr %t3580
   %t3581 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -7088,7 +7088,7 @@ entry:
   %t3952 = add i64 8, 0
   %t3953 = call i64 @sprout_alloc_closure_env(i64 %t3952)
   %t3954 = inttoptr i64 %t3953 to ptr
-  store ptr @__sprout_lambda_1504_foldable_to_vec, ptr %t3954
+  store ptr @__sprout_lambda_1505_foldable_to_vec, ptr %t3954
   %t3955 = alloca ptr
   store ptr %t3954, ptr %t3955
   %t3956 = call i64 @sprout_gc_push_ptr_root(ptr %t3955)
@@ -8708,7 +8708,7 @@ entry:
   %t4863 = add i64 8, 0
   %t4864 = call i64 @sprout_alloc_closure_env(i64 %t4863)
   %t4865 = inttoptr i64 %t4864 to ptr
-  store ptr @__sprout_lambda_1505_stdlib.string.find, ptr %t4865
+  store ptr @__sprout_lambda_1506_stdlib.string.find, ptr %t4865
   %t4866 = alloca ptr
   store ptr %t4865, ptr %t4866
   %t4867 = call i64 @sprout_gc_push_ptr_root(ptr %t4866)
@@ -9636,7 +9636,7 @@ entry:
   %t5396 = add i64 16, 0
   %t5397 = call i64 @sprout_alloc_closure_env(i64 %t5396)
   %t5398 = inttoptr i64 %t5397 to ptr
-  store ptr @__sprout_lambda_1506_stdlib.string.join, ptr %t5398
+  store ptr @__sprout_lambda_1507_stdlib.string.join, ptr %t5398
   %t5399 = getelementptr i64, ptr %t5398, i64 1
   store i64 %sep, ptr %t5399
   %t5400 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -15791,7 +15791,7 @@ entry:
   %t9151 = add i64 24, 0
   %t9152 = call i64 @sprout_alloc_closure_env(i64 %t9151)
   %t9153 = inttoptr i64 %t9152 to ptr
-  store ptr @__sprout_lambda_1507_stdlib.compiler.lexer.scan_ident_next, ptr %t9153
+  store ptr @__sprout_lambda_1508_stdlib.compiler.lexer.scan_ident_next, ptr %t9153
   %t9154 = getelementptr i64, ptr %t9153, i64 1
   store i64 %cursor, ptr %t9154
   %t9155 = getelementptr i64, ptr %t9153, i64 2
@@ -15838,7 +15838,7 @@ entry:
   %t9222 = add i64 24, 0
   %t9223 = call i64 @sprout_alloc_closure_env(i64 %t9222)
   %t9224 = inttoptr i64 %t9223 to ptr
-  store ptr @__sprout_lambda_1508_stdlib.compiler.lexer.scan_int_next, ptr %t9224
+  store ptr @__sprout_lambda_1509_stdlib.compiler.lexer.scan_int_next, ptr %t9224
   %t9225 = getelementptr i64, ptr %t9224, i64 1
   store i64 %cursor, ptr %t9225
   %t9226 = getelementptr i64, ptr %t9224, i64 2
@@ -24217,7 +24217,7 @@ entry:
   %t14919 = add i64 56, 0
   %t14920 = call i64 @sprout_alloc_closure_env(i64 %t14919)
   %t14921 = inttoptr i64 %t14920 to ptr
-  store ptr @__sprout_lambda_1509_stdlib.compiler.parser.scan_do_step_end, ptr %t14921
+  store ptr @__sprout_lambda_1510_stdlib.compiler.parser.scan_do_step_end, ptr %t14921
   %t14922 = getelementptr i64, ptr %t14921, i64 1
   store i64 %tokens, ptr %t14922
   %t14923 = getelementptr i64, ptr %t14921, i64 2
@@ -38642,7 +38642,7 @@ entry:
   %t24289 = add i64 32, 0
   %t24290 = call i64 @sprout_alloc_closure_env(i64 %t24289)
   %t24291 = inttoptr i64 %t24290 to ptr
-  store ptr @__sprout_lambda_1512_stdlib.compiler.parser.fresh_where_tmp_name_from_exprs, ptr %t24291
+  store ptr @__sprout_lambda_1513_stdlib.compiler.parser.fresh_where_tmp_name_from_exprs, ptr %t24291
   %t24292 = getelementptr i64, ptr %t24291, i64 1
   store i64 %index, ptr %t24292
   %t24293 = getelementptr i64, ptr %t24291, i64 2
@@ -38686,7 +38686,7 @@ entry:
   %t24349 = add i64 24, 0
   %t24350 = call i64 @sprout_alloc_closure_env(i64 %t24349)
   %t24351 = inttoptr i64 %t24350 to ptr
-  store ptr @__sprout_lambda_1513_stdlib.compiler.parser.fresh_where_tmp_name_from, ptr %t24351
+  store ptr @__sprout_lambda_1514_stdlib.compiler.parser.fresh_where_tmp_name_from, ptr %t24351
   %t24352 = getelementptr i64, ptr %t24351, i64 1
   store i64 %index, ptr %t24352
   %t24353 = getelementptr i64, ptr %t24351, i64 2
@@ -45637,7 +45637,7 @@ entry:
   %t29135 = add i64 16, 0
   %t29136 = call i64 @sprout_alloc_closure_env(i64 %t29135)
   %t29137 = inttoptr i64 %t29136 to ptr
-  store ptr @__sprout_lambda_1514_stdlib.compiler.parser.parse_program, ptr %t29137
+  store ptr @__sprout_lambda_1515_stdlib.compiler.parser.parse_program, ptr %t29137
   %t29138 = getelementptr i64, ptr %t29137, i64 1
   store i64 %tokens, ptr %t29138
   %t29139 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -48587,7 +48587,7 @@ entry:
   %t30812 = add i64 32, 0
   %t30813 = call i64 @sprout_alloc_closure_env(i64 %t30812)
   %t30814 = inttoptr i64 %t30813 to ptr
-  store ptr @__sprout_lambda_1515_stdlib.compiler.types.scheme_to_string_renamed, ptr %t30814
+  store ptr @__sprout_lambda_1516_stdlib.compiler.types.scheme_to_string_renamed, ptr %t30814
   %t30815 = getelementptr i64, ptr %t30814, i64 1
   store i64 %eff, ptr %t30815
   %t30816 = getelementptr i64, ptr %t30814, i64 2
@@ -49520,7 +49520,7 @@ entry:
   %t31249 = add i64 16, 0
   %t31250 = call i64 @sprout_alloc_closure_env(i64 %t31249)
   %t31251 = inttoptr i64 %t31250 to ptr
-  store ptr @__sprout_lambda_1516_stdlib.compiler.unifier.strip_module_prefix, ptr %t31251
+  store ptr @__sprout_lambda_1517_stdlib.compiler.unifier.strip_module_prefix, ptr %t31251
   %t31252 = getelementptr i64, ptr %t31251, i64 1
   store i64 %name, ptr %t31252
   %t31253 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -53321,7 +53321,7 @@ entry:
   %t33516 = add i64 8, 0
   %t33517 = call i64 @sprout_alloc_closure_env(i64 %t33516)
   %t33518 = inttoptr i64 %t33517 to ptr
-  store ptr @__sprout_lambda_1517_stdlib.compiler.unifier.ftv_env, ptr %t33518
+  store ptr @__sprout_lambda_1518_stdlib.compiler.unifier.ftv_env, ptr %t33518
   %t33519 = alloca ptr
   store ptr %t33518, ptr %t33519
   %t33520 = call i64 @sprout_gc_push_ptr_root(ptr %t33519)
@@ -54723,7 +54723,7 @@ match_br5108:
   %t34152 = add i64 8, 0
   %t34153 = call i64 @sprout_alloc_closure_env(i64 %t34152)
   %t34154 = inttoptr i64 %t34153 to ptr
-  store ptr @__sprout_lambda_1518_stdlib.compiler.typed_ast.type_to_type_expr, ptr %t34154
+  store ptr @__sprout_lambda_1519_stdlib.compiler.typed_ast.type_to_type_expr, ptr %t34154
   %t34155 = alloca ptr
   store ptr %t34154, ptr %t34155
   %t34156 = call i64 @sprout_gc_push_ptr_root(ptr %t34155)
@@ -55012,7 +55012,7 @@ entry:
   %t34336 = add i64 16, 0
   %t34337 = call i64 @sprout_alloc_closure_env(i64 %t34336)
   %t34338 = inttoptr i64 %t34337 to ptr
-  store ptr @__sprout_lambda_1519_stdlib.compiler.infer.strip_module_prefix, ptr %t34338
+  store ptr @__sprout_lambda_1520_stdlib.compiler.infer.strip_module_prefix, ptr %t34338
   %t34339 = getelementptr i64, ptr %t34338, i64 1
   store i64 %name, ptr %t34339
   %t34340 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -56223,7 +56223,7 @@ entry:
   %t35157 = add i64 16, 0
   %t35158 = call i64 @sprout_alloc_closure_env(i64 %t35157)
   %t35159 = inttoptr i64 %t35158 to ptr
-  store ptr @__sprout_lambda_1520_stdlib.compiler.infer.is_lowercase_name, ptr %t35159
+  store ptr @__sprout_lambda_1521_stdlib.compiler.infer.is_lowercase_name, ptr %t35159
   %t35160 = getelementptr i64, ptr %t35159, i64 1
   store i64 %name, ptr %t35160
   %t35161 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -56444,7 +56444,7 @@ entry:
   %t35345 = add i64 40, 0
   %t35346 = call i64 @sprout_alloc_closure_env(i64 %t35345)
   %t35347 = inttoptr i64 %t35346 to ptr
-  store ptr @__sprout_lambda_1521_stdlib.compiler.infer.scheme_from_fn_parts_inner, ptr %t35347
+  store ptr @__sprout_lambda_1522_stdlib.compiler.infer.scheme_from_fn_parts_inner, ptr %t35347
   %t35348 = getelementptr i64, ptr %t35347, i64 1
   store i64 %effects_maybe, ptr %t35348
   %t35349 = getelementptr i64, ptr %t35347, i64 2
@@ -60963,7 +60963,7 @@ match_br5840:
   %t37960 = add i64 8, 0
   %t37961 = call i64 @sprout_alloc_closure_env(i64 %t37960)
   %t37962 = inttoptr i64 %t37961 to ptr
-  store ptr @__sprout_lambda_1522_stdlib.compiler.infer.infer_call_inner, ptr %t37962
+  store ptr @__sprout_lambda_1523_stdlib.compiler.infer.infer_call_inner, ptr %t37962
   %t37963 = alloca ptr
   store ptr %t37962, ptr %t37963
   %t37964 = call i64 @sprout_gc_push_ptr_root(ptr %t37963)
@@ -69971,7 +69971,7 @@ match_br6831:
   %t43094 = add i64 8, 0
   %t43095 = call i64 @sprout_alloc_closure_env(i64 %t43094)
   %t43096 = inttoptr i64 %t43095 to ptr
-  store ptr @__sprout_lambda_1523_stdlib.compiler.infer.infer_tuple, ptr %t43096
+  store ptr @__sprout_lambda_1524_stdlib.compiler.infer.infer_tuple, ptr %t43096
   %t43097 = alloca ptr
   store ptr %t43096, ptr %t43097
   %t43098 = call i64 @sprout_gc_push_ptr_root(ptr %t43097)
@@ -76699,7 +76699,7 @@ entry:
   %t47107 = add i64 16, 0
   %t47108 = call i64 @sprout_alloc_closure_env(i64 %t47107)
   %t47109 = inttoptr i64 %t47108 to ptr
-  store ptr @__sprout_lambda_1524_stdlib.compiler.infer.make_record_field_scheme, ptr %t47109
+  store ptr @__sprout_lambda_1525_stdlib.compiler.infer.make_record_field_scheme, ptr %t47109
   %t47110 = getelementptr i64, ptr %t47109, i64 1
   store i64 %rec_name, ptr %t47110
   %t47111 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -78878,7 +78878,7 @@ entry:
   %t48502 = add i64 40, 0
   %t48503 = call i64 @sprout_alloc_closure_env(i64 %t48502)
   %t48504 = inttoptr i64 %t48503 to ptr
-  store ptr @__sprout_lambda_1525_stdlib.compiler.infer.register_single_param_alias, ptr %t48504
+  store ptr @__sprout_lambda_1526_stdlib.compiler.infer.register_single_param_alias, ptr %t48504
   %t48505 = getelementptr i64, ptr %t48504, i64 1
   store i64 %alias_env, ptr %t48505
   %t48506 = getelementptr i64, ptr %t48504, i64 2
@@ -86292,7 +86292,7 @@ entry:
   %t52751 = add i64 32, 0
   %t52752 = call i64 @sprout_alloc_closure_env(i64 %t52751)
   %t52753 = inttoptr i64 %t52752 to ptr
-  store ptr @__sprout_lambda_1526_stdlib.compiler.infer.remove_constrained_fn_markers, ptr %t52753
+  store ptr @__sprout_lambda_1527_stdlib.compiler.infer.remove_constrained_fn_markers, ptr %t52753
   %t52754 = getelementptr i64, ptr %t52753, i64 1
   store i64 %idx, ptr %t52754
   %t52755 = getelementptr i64, ptr %t52753, i64 2
@@ -87885,7 +87885,7 @@ entry:
   %t53728 = add i64 16, 0
   %t53729 = call i64 @sprout_alloc_closure_env(i64 %t53728)
   %t53730 = inttoptr i64 %t53729 to ptr
-  store ptr @__sprout_lambda_1527_stdlib.compiler.checker.strip_module_prefix, ptr %t53730
+  store ptr @__sprout_lambda_1528_stdlib.compiler.checker.strip_module_prefix, ptr %t53730
   %t53731 = getelementptr i64, ptr %t53730, i64 1
   store i64 %name, ptr %t53731
   %t53732 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -100341,7 +100341,7 @@ entry:
   %t61248 = add i64 24, 0
   %t61249 = call i64 @sprout_alloc_closure_env(i64 %t61248)
   %t61250 = inttoptr i64 %t61249 to ptr
-  store ptr @__sprout_lambda_1528_stdlib.compiler.module_loader.prefix_constrained_key, ptr %t61250
+  store ptr @__sprout_lambda_1529_stdlib.compiler.module_loader.prefix_constrained_key, ptr %t61250
   %t61251 = getelementptr i64, ptr %t61250, i64 1
   store i64 %pfx, ptr %t61251
   %t61252 = getelementptr i64, ptr %t61250, i64 2
@@ -101714,7 +101714,7 @@ entry:
   %t62076 = add i64 24, 0
   %t62077 = call i64 @sprout_alloc_closure_env(i64 %t62076)
   %t62078 = inttoptr i64 %t62077 to ptr
-  store ptr @__sprout_lambda_1529_stdlib.compiler.module_loader.next_line_ml, ptr %t62078
+  store ptr @__sprout_lambda_1530_stdlib.compiler.module_loader.next_line_ml, ptr %t62078
   %t62079 = getelementptr i64, ptr %t62078, i64 1
   store i64 %pos, ptr %t62079
   %t62080 = getelementptr i64, ptr %t62078, i64 2
@@ -105260,7 +105260,7 @@ entry:
   %t64060 = add i64 16, 0
   %t64061 = call i64 @sprout_alloc_closure_env(i64 %t64060)
   %t64062 = inttoptr i64 %t64061 to ptr
-  store ptr @__sprout_lambda_1530_stdlib.compiler.bundler.split_at_dot, ptr %t64062
+  store ptr @__sprout_lambda_1531_stdlib.compiler.bundler.split_at_dot, ptr %t64062
   %t64063 = getelementptr i64, ptr %t64062, i64 1
   store i64 %name, ptr %t64063
   %t64064 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -106361,7 +106361,7 @@ entry:
   %t64789 = add i64 48, 0
   %t64790 = call i64 @sprout_alloc_closure_env(i64 %t64789)
   %t64791 = inttoptr i64 %t64790 to ptr
-  store ptr @__sprout_lambda_1531_stdlib.compiler.bundler.scan_lines, ptr %t64791
+  store ptr @__sprout_lambda_1532_stdlib.compiler.bundler.scan_lines, ptr %t64791
   %t64792 = getelementptr i64, ptr %t64791, i64 1
   store i64 %ctor_types, ptr %t64792
   %t64793 = getelementptr i64, ptr %t64791, i64 2
@@ -107101,7 +107101,7 @@ entry:
   %t65323 = add i64 24, 0
   %t65324 = call i64 @sprout_alloc_closure_env(i64 %t65323)
   %t65325 = inttoptr i64 %t65324 to ptr
-  store ptr @__sprout_lambda_1532_stdlib.compiler.bundler.strip_headers_b, ptr %t65325
+  store ptr @__sprout_lambda_1533_stdlib.compiler.bundler.strip_headers_b, ptr %t65325
   %t65326 = getelementptr i64, ptr %t65325, i64 1
   store i64 %s, ptr %t65326
   %t65327 = getelementptr i64, ptr %t65325, i64 2
@@ -110270,7 +110270,7 @@ entry:
   %t67266 = add i64 32, 0
   %t67267 = call i64 @sprout_alloc_closure_env(i64 %t67266)
   %t67268 = inttoptr i64 %t67267 to ptr
-  store ptr @__sprout_lambda_1533_stdlib.compiler.bundler.add_value_to_symbols, ptr %t67268
+  store ptr @__sprout_lambda_1534_stdlib.compiler.bundler.add_value_to_symbols, ptr %t67268
   %t67269 = zext i1 %is_exported to i64
   %t67270 = getelementptr i64, ptr %t67268, i64 1
   store i64 %t67269, ptr %t67270
@@ -110321,7 +110321,7 @@ entry:
   %t67405 = add i64 32, 0
   %t67406 = call i64 @sprout_alloc_closure_env(i64 %t67405)
   %t67407 = inttoptr i64 %t67406 to ptr
-  store ptr @__sprout_lambda_1534_stdlib.compiler.bundler.add_record_to_symbols, ptr %t67407
+  store ptr @__sprout_lambda_1535_stdlib.compiler.bundler.add_record_to_symbols, ptr %t67407
   %t67408 = zext i1 %is_exported to i64
   %t67409 = getelementptr i64, ptr %t67407, i64 1
   store i64 %t67408, ptr %t67409
@@ -110378,7 +110378,7 @@ entry:
   %t67562 = add i64 40, 0
   %t67563 = call i64 @sprout_alloc_closure_env(i64 %t67562)
   %t67564 = inttoptr i64 %t67563 to ptr
-  store ptr @__sprout_lambda_1535_stdlib.compiler.bundler.add_class_to_symbols, ptr %t67564
+  store ptr @__sprout_lambda_1536_stdlib.compiler.bundler.add_class_to_symbols, ptr %t67564
   %t67565 = getelementptr i64, ptr %t67564, i64 1
   store i64 %methods, ptr %t67565
   %t67566 = zext i1 %is_exported to i64
@@ -110586,7 +110586,7 @@ entry:
   %t67960 = add i64 56, 0
   %t67961 = call i64 @sprout_alloc_closure_env(i64 %t67960)
   %t67962 = inttoptr i64 %t67961 to ptr
-  store ptr @__sprout_lambda_1536_stdlib.compiler.bundler.add_type_to_symbols, ptr %t67962
+  store ptr @__sprout_lambda_1537_stdlib.compiler.bundler.add_type_to_symbols, ptr %t67962
   %t67963 = getelementptr i64, ptr %t67962, i64 1
   store i64 %exported, ptr %t67963
   %t67964 = getelementptr i64, ptr %t67962, i64 2
@@ -118465,7 +118465,7 @@ entry:
   %t72606 = add i64 8, 0
   %t72607 = call i64 @sprout_alloc_closure_env(i64 %t72606)
   %t72608 = inttoptr i64 %t72607 to ptr
-  store ptr @__sprout_lambda_1539_stdlib.compiler.bundler.make_bundle_or_err, ptr %t72608
+  store ptr @__sprout_lambda_1540_stdlib.compiler.bundler.make_bundle_or_err, ptr %t72608
   %t72609 = alloca ptr
   store ptr %t72608, ptr %t72609
   %t72610 = call i64 @sprout_gc_push_ptr_root(ptr %t72609)
@@ -127369,7 +127369,7 @@ match_br13169:
   %t77556 = add i64 8, 0
   %t77557 = call i64 @sprout_alloc_closure_env(i64 %t77556)
   %t77558 = inttoptr i64 %t77557 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t77558
+  store ptr @__sprout_fn_closure_1486, ptr %t77558
   %t77559 = alloca ptr
   store ptr %t77558, ptr %t77559
   %t77560 = call i64 @sprout_gc_push_ptr_root(ptr %t77559)
@@ -127400,7 +127400,7 @@ entry:
   %t77598 = add i64 16, 0
   %t77599 = call i64 @sprout_alloc_closure_env(i64 %t77598)
   %t77600 = inttoptr i64 %t77599 to ptr
-  store ptr @__sprout_lambda_1540_stdlib.compiler.lowering.strip_module_prefix, ptr %t77600
+  store ptr @__sprout_lambda_1541_stdlib.compiler.lowering.strip_module_prefix, ptr %t77600
   %t77601 = getelementptr i64, ptr %t77600, i64 1
   store i64 %name, ptr %t77601
   %t77602 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -130744,7 +130744,7 @@ match_br13559:
   %t79477 = add i64 8, 0
   %t79478 = call i64 @sprout_alloc_closure_env(i64 %t79477)
   %t79479 = inttoptr i64 %t79478 to ptr
-  store ptr @__sprout_lambda_1541_stdlib.compiler.lowering.type_to_eta_typeexpr, ptr %t79479
+  store ptr @__sprout_lambda_1542_stdlib.compiler.lowering.type_to_eta_typeexpr, ptr %t79479
   %t79480 = alloca ptr
   store ptr %t79479, ptr %t79480
   %t79481 = call i64 @sprout_gc_push_ptr_root(ptr %t79480)
@@ -135643,7 +135643,7 @@ match_br14134:
   %t82359 = add i64 40, 0
   %t82360 = call i64 @sprout_alloc_closure_env(i64 %t82359)
   %t82361 = inttoptr i64 %t82360 to ptr
-  store ptr @__sprout_lambda_1542_stdlib.compiler.lowering.resolve_tdict_with_key, ptr %t82361
+  store ptr @__sprout_lambda_1543_stdlib.compiler.lowering.resolve_tdict_with_key, ptr %t82361
   %t82362 = getelementptr i64, ptr %t82361, i64 1
   store i64 %ctx, ptr %t82362
   %t82363 = getelementptr i64, ptr %t82361, i64 2
@@ -135761,7 +135761,7 @@ match_br14149:
   %t82477 = add i64 24, 0
   %t82478 = call i64 @sprout_alloc_closure_env(i64 %t82477)
   %t82479 = inttoptr i64 %t82478 to ptr
-  store ptr @__sprout_lambda_1543_stdlib.compiler.lowering.resolve_tdict_with_key, ptr %t82479
+  store ptr @__sprout_lambda_1544_stdlib.compiler.lowering.resolve_tdict_with_key, ptr %t82479
   %t82480 = getelementptr i64, ptr %t82479, i64 1
   store i64 %pos, ptr %t82480
   %t82481 = getelementptr i64, ptr %t82479, i64 2
@@ -135873,7 +135873,7 @@ match_br14152:
   %t82583 = add i64 40, 0
   %t82584 = call i64 @sprout_alloc_closure_env(i64 %t82583)
   %t82585 = inttoptr i64 %t82584 to ptr
-  store ptr @__sprout_lambda_1544_stdlib.compiler.lowering.resolve_tdict_for_inst, ptr %t82585
+  store ptr @__sprout_lambda_1545_stdlib.compiler.lowering.resolve_tdict_for_inst, ptr %t82585
   %t82586 = getelementptr i64, ptr %t82585, i64 1
   store i64 %ctx, ptr %t82586
   %t82587 = getelementptr i64, ptr %t82585, i64 2
@@ -136062,7 +136062,7 @@ match_br14161:
   %t82739 = add i64 40, 0
   %t82740 = call i64 @sprout_alloc_closure_env(i64 %t82739)
   %t82741 = inttoptr i64 %t82740 to ptr
-  store ptr @__sprout_lambda_1545_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts, ptr %t82741
+  store ptr @__sprout_lambda_1546_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts, ptr %t82741
   %t82742 = getelementptr i64, ptr %t82741, i64 1
   store i64 %scheme_env, ptr %t82742
   %t82743 = getelementptr i64, ptr %t82741, i64 2
@@ -136102,7 +136102,7 @@ match_br14163:
   %t82802 = add i64 48, 0
   %t82803 = call i64 @sprout_alloc_closure_env(i64 %t82802)
   %t82804 = inttoptr i64 %t82803 to ptr
-  store ptr @__sprout_lambda_1546_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts, ptr %t82804
+  store ptr @__sprout_lambda_1547_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts, ptr %t82804
   %t82805 = getelementptr i64, ptr %t82804, i64 1
   store i64 %pos, ptr %t82805
   %t82806 = getelementptr i64, ptr %t82804, i64 2
@@ -137267,7 +137267,7 @@ match_br14313:
   %t83483 = add i64 16, 0
   %t83484 = call i64 @sprout_alloc_closure_env(i64 %t83483)
   %t83485 = inttoptr i64 %t83484 to ptr
-  store ptr @__sprout_lambda_1547_stdlib.compiler.lowering.substitute_constraint, ptr %t83485
+  store ptr @__sprout_lambda_1548_stdlib.compiler.lowering.substitute_constraint, ptr %t83485
   %t83486 = getelementptr i64, ptr %t83485, i64 1
   store i64 %subs, ptr %t83486
   %t83487 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -137493,7 +137493,7 @@ entry:
   %t83638 = add i64 8, 0
   %t83639 = call i64 @sprout_alloc_closure_env(i64 %t83638)
   %t83640 = inttoptr i64 %t83639 to ptr
-  store ptr @__sprout_lambda_1548_stdlib.compiler.lowering.build_lambda_helper, ptr %t83640
+  store ptr @__sprout_lambda_1549_stdlib.compiler.lowering.build_lambda_helper, ptr %t83640
   %t83641 = alloca ptr
   store ptr %t83640, ptr %t83641
   %t83642 = call i64 @sprout_gc_push_ptr_root(ptr %t83641)
@@ -137546,7 +137546,7 @@ entry:
   %t83710 = add i64 16, 0
   %t83711 = call i64 @sprout_alloc_closure_env(i64 %t83710)
   %t83712 = inttoptr i64 %t83711 to ptr
-  store ptr @__sprout_lambda_1549_stdlib.compiler.lowering.build_lambda_helper, ptr %t83712
+  store ptr @__sprout_lambda_1550_stdlib.compiler.lowering.build_lambda_helper, ptr %t83712
   %t83713 = getelementptr i64, ptr %t83712, i64 1
   store i64 %pos, ptr %t83713
   %t83714 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -139035,7 +139035,7 @@ entry:
   %t84571 = add i64 8, 0
   %t84572 = call i64 @sprout_alloc_closure_env(i64 %t84571)
   %t84573 = inttoptr i64 %t84572 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t84573
+  store ptr @__sprout_fn_closure_1486, ptr %t84573
   %t84574 = alloca ptr
   store ptr %t84573, ptr %t84574
   %t84575 = call i64 @sprout_gc_push_ptr_root(ptr %t84574)
@@ -139269,7 +139269,7 @@ match_br14543:
   %t84698 = add i64 8, 0
   %t84699 = call i64 @sprout_alloc_closure_env(i64 %t84698)
   %t84700 = inttoptr i64 %t84699 to ptr
-  store ptr @__sprout_lambda_1550_stdlib.compiler.codegen.type_to_ll, ptr %t84700
+  store ptr @__sprout_lambda_1551_stdlib.compiler.codegen.type_to_ll, ptr %t84700
   %t84701 = alloca ptr
   store ptr %t84700, ptr %t84701
   %t84702 = call i64 @sprout_gc_push_ptr_root(ptr %t84701)
@@ -139695,7 +139695,7 @@ match_br14586:
   %t84948 = add i64 8, 0
   %t84949 = call i64 @sprout_alloc_closure_env(i64 %t84948)
   %t84950 = inttoptr i64 %t84949 to ptr
-  store ptr @__sprout_lambda_1551_stdlib.compiler.codegen.tuple_items_from_type, ptr %t84950
+  store ptr @__sprout_lambda_1552_stdlib.compiler.codegen.tuple_items_from_type, ptr %t84950
   %t84951 = alloca ptr
   store ptr %t84950, ptr %t84951
   %t84952 = call i64 @sprout_gc_push_ptr_root(ptr %t84951)
@@ -144111,7 +144111,7 @@ entry:
   %t87206 = add i64 24, 0
   %t87207 = call i64 @sprout_alloc_closure_env(i64 %t87206)
   %t87208 = inttoptr i64 %t87207 to ptr
-  store ptr @__sprout_lambda_1552_stdlib.compiler.codegen.dbg_next_line, ptr %t87208
+  store ptr @__sprout_lambda_1553_stdlib.compiler.codegen.dbg_next_line, ptr %t87208
   %t87209 = getelementptr i64, ptr %t87208, i64 1
   store i64 %pos, ptr %t87209
   %t87210 = getelementptr i64, ptr %t87208, i64 2
@@ -144155,7 +144155,7 @@ entry:
   %t87267 = add i64 8, 0
   %t87268 = call i64 @sprout_alloc_closure_env(i64 %t87267)
   %t87269 = inttoptr i64 %t87268 to ptr
-  store ptr @__sprout_lambda_1553_stdlib.compiler.codegen.dbg_is_header_line, ptr %t87269
+  store ptr @__sprout_lambda_1554_stdlib.compiler.codegen.dbg_is_header_line, ptr %t87269
   %t87270 = alloca ptr
   store ptr %t87269, ptr %t87270
   %t87271 = call i64 @sprout_gc_push_ptr_root(ptr %t87270)
@@ -145675,7 +145675,7 @@ entry:
   %t88245 = add i64 16, 0
   %t88246 = call i64 @sprout_alloc_closure_env(i64 %t88245)
   %t88247 = inttoptr i64 %t88246 to ptr
-  store ptr @__sprout_lambda_1554_stdlib.compiler.codegen.str_ends_with_colon, ptr %t88247
+  store ptr @__sprout_lambda_1555_stdlib.compiler.codegen.str_ends_with_colon, ptr %t88247
   %t88248 = getelementptr i64, ptr %t88247, i64 1
   store i64 %s, ptr %t88248
   %t88249 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -145973,7 +145973,7 @@ entry:
   %t88471 = add i64 8, 0
   %t88472 = call i64 @sprout_alloc_closure_env(i64 %t88471)
   %t88473 = inttoptr i64 %t88472 to ptr
-  store ptr @__sprout_lambda_1555_stdlib.compiler.codegen.escape_char_for_ir, ptr %t88473
+  store ptr @__sprout_lambda_1556_stdlib.compiler.codegen.escape_char_for_ir, ptr %t88473
   %t88474 = alloca ptr
   store ptr %t88473, ptr %t88474
   %t88475 = call i64 @sprout_gc_push_ptr_root(ptr %t88474)
@@ -151005,7 +151005,7 @@ entry:
   %t92159 = add i64 16, 0
   %t92160 = call i64 @sprout_alloc_closure_env(i64 %t92159)
   %t92161 = inttoptr i64 %t92160 to ptr
-  store ptr @__sprout_lambda_1556_stdlib.compiler.codegen.str_ends_with_colon2, ptr %t92161
+  store ptr @__sprout_lambda_1557_stdlib.compiler.codegen.str_ends_with_colon2, ptr %t92161
   %t92162 = getelementptr i64, ptr %t92161, i64 1
   store i64 %s, ptr %t92162
   %t92163 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -158109,7 +158109,7 @@ entry:
   %t96966 = add i64 8, 0
   %t96967 = call i64 @sprout_alloc_closure_env(i64 %t96966)
   %t96968 = inttoptr i64 %t96967 to ptr
-  store ptr @__sprout_lambda_1557_stdlib.compiler.codegen.list_length, ptr %t96968
+  store ptr @__sprout_lambda_1558_stdlib.compiler.codegen.list_length, ptr %t96968
   %t96969 = alloca ptr
   store ptr %t96968, ptr %t96969
   %t96970 = call i64 @sprout_gc_push_ptr_root(ptr %t96969)
@@ -158130,7 +158130,7 @@ entry:
   %t96986 = add i64 8, 0
   %t96987 = call i64 @sprout_alloc_closure_env(i64 %t96986)
   %t96988 = inttoptr i64 %t96987 to ptr
-  store ptr @__sprout_lambda_1558_stdlib.compiler.codegen.list_length_vals, ptr %t96988
+  store ptr @__sprout_lambda_1559_stdlib.compiler.codegen.list_length_vals, ptr %t96988
   %t96989 = alloca ptr
   store ptr %t96988, ptr %t96989
   %t96990 = call i64 @sprout_gc_push_ptr_root(ptr %t96989)
@@ -158802,7 +158802,7 @@ match_br15908:
   %t97377 = add i64 8, 0
   %t97378 = call i64 @sprout_alloc_closure_env(i64 %t97377)
   %t97379 = inttoptr i64 %t97378 to ptr
-  store ptr @__sprout_lambda_1559_stdlib.compiler.codegen.collect_free_vars, ptr %t97379
+  store ptr @__sprout_lambda_1560_stdlib.compiler.codegen.collect_free_vars, ptr %t97379
   %t97380 = alloca ptr
   store ptr %t97379, ptr %t97380
   %t97381 = call i64 @sprout_gc_push_ptr_root(ptr %t97380)
@@ -159421,7 +159421,7 @@ match_br16011:
   %t97707 = add i64 8, 0
   %t97708 = call i64 @sprout_alloc_closure_env(i64 %t97707)
   %t97709 = inttoptr i64 %t97708 to ptr
-  store ptr @__sprout_lambda_1560_stdlib.compiler.codegen.collect_free_vars_branches, ptr %t97709
+  store ptr @__sprout_lambda_1561_stdlib.compiler.codegen.collect_free_vars_branches, ptr %t97709
   %t97710 = alloca ptr
   store ptr %t97709, ptr %t97710
   %t97711 = call i64 @sprout_gc_push_ptr_root(ptr %t97710)
@@ -159761,7 +159761,7 @@ match_br16065:
   %t97913 = add i64 8, 0
   %t97914 = call i64 @sprout_alloc_closure_env(i64 %t97913)
   %t97915 = inttoptr i64 %t97914 to ptr
-  store ptr @__sprout_lambda_1561_stdlib.compiler.codegen.collect_free_vars_steps, ptr %t97915
+  store ptr @__sprout_lambda_1562_stdlib.compiler.codegen.collect_free_vars_steps, ptr %t97915
   %t97916 = alloca ptr
   store ptr %t97915, ptr %t97916
   %t97917 = call i64 @sprout_gc_push_ptr_root(ptr %t97916)
@@ -161577,7 +161577,7 @@ entry:
   %t99274 = add i64 8, 0
   %t99275 = call i64 @sprout_alloc_closure_env(i64 %t99274)
   %t99276 = inttoptr i64 %t99275 to ptr
-  store ptr @__sprout_lambda_1562_stdlib.compiler.codegen.build_closure_args_ir, ptr %t99276
+  store ptr @__sprout_lambda_1563_stdlib.compiler.codegen.build_closure_args_ir, ptr %t99276
   %t99277 = alloca ptr
   store ptr %t99276, ptr %t99277
   %t99278 = call i64 @sprout_gc_push_ptr_root(ptr %t99277)
@@ -161631,7 +161631,7 @@ if_else16082:
   %t99313 = add i64 8, 0
   %t99314 = call i64 @sprout_alloc_closure_env(i64 %t99313)
   %t99315 = inttoptr i64 %t99314 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t99315
+  store ptr @__sprout_fn_closure_1486, ptr %t99315
   %t99316 = alloca ptr
   store ptr %t99315, ptr %t99316
   %t99317 = call i64 @sprout_gc_push_ptr_root(ptr %t99316)
@@ -161938,7 +161938,7 @@ entry:
   %t99789 = add i64 32, 0
   %t99790 = call i64 @sprout_alloc_closure_env(i64 %t99789)
   %t99791 = inttoptr i64 %t99790 to ptr
-  store ptr @__sprout_lambda_1563_stdlib.compiler.codegen.emit_named_fn_wrapper_lines, ptr %t99791
+  store ptr @__sprout_lambda_1564_stdlib.compiler.codegen.emit_named_fn_wrapper_lines, ptr %t99791
   %t99792 = getelementptr i64, ptr %t99791, i64 1
   store i64 %fn_name_, ptr %t99792
   %t99793 = getelementptr i64, ptr %t99791, i64 2
@@ -162205,7 +162205,7 @@ entry:
   %t100489 = add i64 40, 0
   %t100490 = call i64 @sprout_alloc_closure_env(i64 %t100489)
   %t100491 = inttoptr i64 %t100490 to ptr
-  store ptr @__sprout_lambda_1566_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100491
+  store ptr @__sprout_lambda_1567_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100491
   %t100492 = getelementptr i64, ptr %t100491, i64 1
   store i64 %applied, ptr %t100492
   %t100493 = getelementptr i64, ptr %t100491, i64 2
@@ -167795,7 +167795,7 @@ entry:
   %t103896 = add i64 8, 0
   %t103897 = call i64 @sprout_alloc_closure_env(i64 %t103896)
   %t103898 = inttoptr i64 %t103897 to ptr
-  store ptr @__sprout_lambda_1573_stdlib.compiler.codegen.emit_tuple_expr, ptr %t103898
+  store ptr @__sprout_lambda_1574_stdlib.compiler.codegen.emit_tuple_expr, ptr %t103898
   %t103899 = alloca ptr
   store ptr %t103898, ptr %t103899
   %t103900 = call i64 @sprout_gc_push_ptr_root(ptr %t103899)
@@ -169675,7 +169675,7 @@ entry:
   %t105256 = add i64 16, 0
   %t105257 = call i64 @sprout_alloc_closure_env(i64 %t105256)
   %t105258 = inttoptr i64 %t105257 to ptr
-  store ptr @__sprout_lambda_1574_stdlib.compiler.codegen.is_nothing_ctor, ptr %t105258
+  store ptr @__sprout_lambda_1575_stdlib.compiler.codegen.is_nothing_ctor, ptr %t105258
   %t105259 = getelementptr i64, ptr %t105258, i64 1
   store i64 %name, ptr %t105259
   %t105260 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -169705,7 +169705,7 @@ entry:
   %t105302 = add i64 16, 0
   %t105303 = call i64 @sprout_alloc_closure_env(i64 %t105302)
   %t105304 = inttoptr i64 %t105303 to ptr
-  store ptr @__sprout_lambda_1575_stdlib.compiler.codegen.is_entry_fn_name, ptr %t105304
+  store ptr @__sprout_lambda_1576_stdlib.compiler.codegen.is_entry_fn_name, ptr %t105304
   %t105305 = getelementptr i64, ptr %t105304, i64 1
   store i64 %name, ptr %t105305
   %t105306 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -170107,7 +170107,7 @@ entry:
   %t105605 = add i64 8, 0
   %t105606 = call i64 @sprout_alloc_closure_env(i64 %t105605)
   %t105607 = inttoptr i64 %t105606 to ptr
-  store ptr @__sprout_lambda_1576_stdlib.compiler.codegen.pack_and_call_ctor_wrapper, ptr %t105607
+  store ptr @__sprout_lambda_1577_stdlib.compiler.codegen.pack_and_call_ctor_wrapper, ptr %t105607
   %t105608 = alloca ptr
   store ptr %t105607, ptr %t105608
   %t105609 = call i64 @sprout_gc_push_ptr_root(ptr %t105608)
@@ -170122,7 +170122,7 @@ entry:
   %t105616 = add i64 8, 0
   %t105617 = call i64 @sprout_alloc_closure_env(i64 %t105616)
   %t105618 = inttoptr i64 %t105617 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t105618
+  store ptr @__sprout_fn_closure_1486, ptr %t105618
   %t105619 = alloca ptr
   store ptr %t105618, ptr %t105619
   %t105620 = call i64 @sprout_gc_push_ptr_root(ptr %t105619)
@@ -170710,7 +170710,7 @@ entry:
   %t106067 = add i64 8, 0
   %t106068 = call i64 @sprout_alloc_closure_env(i64 %t106067)
   %t106069 = inttoptr i64 %t106068 to ptr
-  store ptr @__sprout_lambda_1577_stdlib.compiler.codegen.lambda_free_names, ptr %t106069
+  store ptr @__sprout_lambda_1578_stdlib.compiler.codegen.lambda_free_names, ptr %t106069
   %t106070 = alloca ptr
   store ptr %t106069, ptr %t106070
   %t106071 = call i64 @sprout_gc_push_ptr_root(ptr %t106070)
@@ -170918,7 +170918,7 @@ if_else16844:
   %t106217 = add i64 8, 0
   %t106218 = call i64 @sprout_alloc_closure_env(i64 %t106217)
   %t106219 = inttoptr i64 %t106218 to ptr
-  store ptr @__sprout_lambda_1578_stdlib.compiler.codegen.emit_lambda_expr, ptr %t106219
+  store ptr @__sprout_lambda_1579_stdlib.compiler.codegen.emit_lambda_expr, ptr %t106219
   %t106220 = alloca ptr
   store ptr %t106219, ptr %t106220
   %t106221 = call i64 @sprout_gc_push_ptr_root(ptr %t106220)
@@ -170969,7 +170969,7 @@ if_done16845:
   %t106263 = add i64 8, 0
   %t106264 = call i64 @sprout_alloc_closure_env(i64 %t106263)
   %t106265 = inttoptr i64 %t106264 to ptr
-  store ptr @__sprout_lambda_1579_stdlib.compiler.codegen.emit_lambda_expr, ptr %t106265
+  store ptr @__sprout_lambda_1580_stdlib.compiler.codegen.emit_lambda_expr, ptr %t106265
   %t106266 = alloca ptr
   store ptr %t106265, ptr %t106266
   %t106267 = call i64 @sprout_gc_push_ptr_root(ptr %t106266)
@@ -171548,7 +171548,7 @@ entry:
   %t106605 = add i64 8, 0
   %t106606 = call i64 @sprout_alloc_closure_env(i64 %t106605)
   %t106607 = inttoptr i64 %t106606 to ptr
-  store ptr @__sprout_lambda_1580_stdlib.compiler.codegen.list_length_params, ptr %t106607
+  store ptr @__sprout_lambda_1581_stdlib.compiler.codegen.list_length_params, ptr %t106607
   %t106608 = alloca ptr
   store ptr %t106607, ptr %t106608
   %t106609 = call i64 @sprout_gc_push_ptr_root(ptr %t106608)
@@ -177720,7 +177720,7 @@ if_else17061:
   %t111125 = add i64 8, 0
   %t111126 = call i64 @sprout_alloc_closure_env(i64 %t111125)
   %t111127 = inttoptr i64 %t111126 to ptr
-  store ptr @__sprout_lambda_1581_stdlib.compiler.codegen.emit_match_heap, ptr %t111127
+  store ptr @__sprout_lambda_1582_stdlib.compiler.codegen.emit_match_heap, ptr %t111127
   %t111128 = alloca ptr
   store ptr %t111127, ptr %t111128
   %t111129 = call i64 @sprout_gc_push_ptr_root(ptr %t111128)
@@ -177735,7 +177735,7 @@ if_else17061:
   %t111136 = add i64 8, 0
   %t111137 = call i64 @sprout_alloc_closure_env(i64 %t111136)
   %t111138 = inttoptr i64 %t111137 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t111138
+  store ptr @__sprout_fn_closure_1486, ptr %t111138
   %t111139 = alloca ptr
   store ptr %t111138, ptr %t111139
   %t111140 = call i64 @sprout_gc_push_ptr_root(ptr %t111139)
@@ -181538,7 +181538,7 @@ entry:
   %t113617 = add i64 8, 0
   %t113618 = call i64 @sprout_alloc_closure_env(i64 %t113617)
   %t113619 = inttoptr i64 %t113618 to ptr
-  store ptr @__sprout_lambda_1582_stdlib.compiler.codegen.emit_match_unboxed_call, ptr %t113619
+  store ptr @__sprout_lambda_1583_stdlib.compiler.codegen.emit_match_unboxed_call, ptr %t113619
   %t113620 = alloca ptr
   store ptr %t113619, ptr %t113620
   %t113621 = call i64 @sprout_gc_push_ptr_root(ptr %t113620)
@@ -181553,7 +181553,7 @@ entry:
   %t113628 = add i64 8, 0
   %t113629 = call i64 @sprout_alloc_closure_env(i64 %t113628)
   %t113630 = inttoptr i64 %t113629 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t113630
+  store ptr @__sprout_fn_closure_1486, ptr %t113630
   %t113631 = alloca ptr
   store ptr %t113630, ptr %t113631
   %t113632 = call i64 @sprout_gc_push_ptr_root(ptr %t113631)
@@ -182071,7 +182071,7 @@ if_else17295:
   %t114058 = add i64 8, 0
   %t114059 = call i64 @sprout_alloc_closure_env(i64 %t114058)
   %t114060 = inttoptr i64 %t114059 to ptr
-  store ptr @__sprout_lambda_1583_stdlib.compiler.codegen.emit_match_unboxed_call, ptr %t114060
+  store ptr @__sprout_lambda_1584_stdlib.compiler.codegen.emit_match_unboxed_call, ptr %t114060
   %t114061 = alloca ptr
   store ptr %t114060, ptr %t114061
   %t114062 = call i64 @sprout_gc_push_ptr_root(ptr %t114061)
@@ -182086,7 +182086,7 @@ if_else17295:
   %t114069 = add i64 8, 0
   %t114070 = call i64 @sprout_alloc_closure_env(i64 %t114069)
   %t114071 = inttoptr i64 %t114070 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t114071
+  store ptr @__sprout_fn_closure_1486, ptr %t114071
   %t114072 = alloca ptr
   store ptr %t114071, ptr %t114072
   %t114073 = call i64 @sprout_gc_push_ptr_root(ptr %t114072)
@@ -184094,7 +184094,7 @@ entry:
   %t115495 = add i64 16, 0
   %t115496 = call i64 @sprout_alloc_closure_env(i64 %t115495)
   %t115497 = inttoptr i64 %t115496 to ptr
-  store ptr @__sprout_lambda_1584_stdlib.compiler.codegen.strip_module_prefix, ptr %t115497
+  store ptr @__sprout_lambda_1585_stdlib.compiler.codegen.strip_module_prefix, ptr %t115497
   %t115498 = getelementptr i64, ptr %t115497, i64 1
   store i64 %name, ptr %t115498
   %t115499 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -184407,7 +184407,7 @@ match_br17412:
   %t115715 = add i64 8, 0
   %t115716 = call i64 @sprout_alloc_closure_env(i64 %t115715)
   %t115717 = inttoptr i64 %t115716 to ptr
-  store ptr @__sprout_lambda_1585_stdlib.compiler.codegen.emit_named_call, ptr %t115717
+  store ptr @__sprout_lambda_1586_stdlib.compiler.codegen.emit_named_call, ptr %t115717
   %t115718 = alloca ptr
   store ptr %t115717, ptr %t115718
   %t115719 = call i64 @sprout_gc_push_ptr_root(ptr %t115718)
@@ -185837,7 +185837,7 @@ entry:
   %t117461 = add i64 48, 0
   %t117462 = call i64 @sprout_alloc_closure_env(i64 %t117461)
   %t117463 = inttoptr i64 %t117462 to ptr
-  store ptr @__sprout_lambda_1586_stdlib.compiler.codegen.emit_ctor_call_expr, ptr %t117463
+  store ptr @__sprout_lambda_1587_stdlib.compiler.codegen.emit_ctor_call_expr, ptr %t117463
   %t117464 = getelementptr i64, ptr %t117463, i64 1
   store i64 %locals, ptr %t117464
   %t117465 = getelementptr i64, ptr %t117463, i64 2
@@ -186379,7 +186379,7 @@ entry:
   %t117850 = add i64 8, 0
   %t117851 = call i64 @sprout_alloc_closure_env(i64 %t117850)
   %t117852 = inttoptr i64 %t117851 to ptr
-  store ptr @__sprout_lambda_1589_stdlib.compiler.codegen.emit_ctor_partial_wrapper, ptr %t117852
+  store ptr @__sprout_lambda_1590_stdlib.compiler.codegen.emit_ctor_partial_wrapper, ptr %t117852
   %t117853 = alloca ptr
   store ptr %t117852, ptr %t117853
   %t117854 = call i64 @sprout_gc_push_ptr_root(ptr %t117853)
@@ -186394,7 +186394,7 @@ entry:
   %t117861 = add i64 8, 0
   %t117862 = call i64 @sprout_alloc_closure_env(i64 %t117861)
   %t117863 = inttoptr i64 %t117862 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t117863
+  store ptr @__sprout_fn_closure_1486, ptr %t117863
   %t117864 = alloca ptr
   store ptr %t117863, ptr %t117864
   %t117865 = call i64 @sprout_gc_push_ptr_root(ptr %t117864)
@@ -187371,7 +187371,7 @@ entry:
   %t118951 = add i64 72, 0
   %t118952 = call i64 @sprout_alloc_closure_env(i64 %t118951)
   %t118953 = inttoptr i64 %t118952 to ptr
-  store ptr @__sprout_lambda_1590_stdlib.compiler.codegen.emit_direct_fn_call, ptr %t118953
+  store ptr @__sprout_lambda_1591_stdlib.compiler.codegen.emit_direct_fn_call, ptr %t118953
   %t118954 = getelementptr i64, ptr %t118953, i64 1
   store i64 %ty, ptr %t118954
   %t118955 = getelementptr i64, ptr %t118953, i64 2
@@ -187476,7 +187476,7 @@ entry:
   %t119049 = add i64 8, 0
   %t119050 = call i64 @sprout_alloc_closure_env(i64 %t119049)
   %t119051 = inttoptr i64 %t119050 to ptr
-  store ptr @__sprout_lambda_1592_stdlib.compiler.codegen.emit_regular_direct_call, ptr %t119051
+  store ptr @__sprout_lambda_1593_stdlib.compiler.codegen.emit_regular_direct_call, ptr %t119051
   %t119052 = alloca ptr
   store ptr %t119051, ptr %t119052
   %t119053 = call i64 @sprout_gc_push_ptr_root(ptr %t119052)
@@ -187491,7 +187491,7 @@ entry:
   %t119060 = add i64 8, 0
   %t119061 = call i64 @sprout_alloc_closure_env(i64 %t119060)
   %t119062 = inttoptr i64 %t119061 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t119062
+  store ptr @__sprout_fn_closure_1486, ptr %t119062
   %t119063 = alloca ptr
   store ptr %t119062, ptr %t119063
   %t119064 = call i64 @sprout_gc_push_ptr_root(ptr %t119063)
@@ -188388,7 +188388,7 @@ entry:
   %t120349 = add i64 32, 0
   %t120350 = call i64 @sprout_alloc_closure_env(i64 %t120349)
   %t120351 = inttoptr i64 %t120350 to ptr
-  store ptr @__sprout_lambda_1593_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120351
+  store ptr @__sprout_lambda_1594_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120351
   %t120352 = getelementptr i64, ptr %t120351, i64 1
   store i64 %applied, ptr %t120352
   %t120353 = getelementptr i64, ptr %t120351, i64 2
@@ -188766,7 +188766,7 @@ entry:
   %t120605 = add i64 8, 0
   %t120606 = call i64 @sprout_alloc_closure_env(i64 %t120605)
   %t120607 = inttoptr i64 %t120606 to ptr
-  store ptr @__sprout_lambda_1602_stdlib.compiler.codegen.list_length_exprs, ptr %t120607
+  store ptr @__sprout_lambda_1603_stdlib.compiler.codegen.list_length_exprs, ptr %t120607
   %t120608 = alloca ptr
   store ptr %t120607, ptr %t120608
   %t120609 = call i64 @sprout_gc_push_ptr_root(ptr %t120608)
@@ -193371,7 +193371,7 @@ entry:
   %t124714 = add i64 80, 0
   %t124715 = call i64 @sprout_alloc_closure_env(i64 %t124714)
   %t124716 = inttoptr i64 %t124715 to ptr
-  store ptr @__sprout_lambda_1603_stdlib.compiler.codegen.emit_fn_decl, ptr %t124716
+  store ptr @__sprout_lambda_1604_stdlib.compiler.codegen.emit_fn_decl, ptr %t124716
   %t124717 = getelementptr i64, ptr %t124716, i64 1
   store i64 %runtime_lets, ptr %t124717
   %t124718 = getelementptr i64, ptr %t124716, i64 2
@@ -208781,7 +208781,7 @@ entry:
   %t135325 = add i64 8, 0
   %t135326 = call i64 @sprout_alloc_closure_env(i64 %t135325)
   %t135327 = inttoptr i64 %t135326 to ptr
-  store ptr @__sprout_lambda_1604_stdlib.compiler.codegen.emit_worker_cpr_do, ptr %t135327
+  store ptr @__sprout_lambda_1605_stdlib.compiler.codegen.emit_worker_cpr_do, ptr %t135327
   %t135328 = alloca ptr
   store ptr %t135327, ptr %t135328
   %t135329 = call i64 @sprout_gc_push_ptr_root(ptr %t135328)
@@ -208796,7 +208796,7 @@ entry:
   %t135336 = add i64 8, 0
   %t135337 = call i64 @sprout_alloc_closure_env(i64 %t135336)
   %t135338 = inttoptr i64 %t135337 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t135338
+  store ptr @__sprout_fn_closure_1486, ptr %t135338
   %t135339 = alloca ptr
   store ptr %t135338, ptr %t135339
   %t135340 = call i64 @sprout_gc_push_ptr_root(ptr %t135339)
@@ -209868,7 +209868,7 @@ match_br18496:
   %t136194 = add i64 8, 0
   %t136195 = call i64 @sprout_alloc_closure_env(i64 %t136194)
   %t136196 = inttoptr i64 %t136195 to ptr
-  store ptr @__sprout_lambda_1605_stdlib.compiler.codegen.emit_worker_match, ptr %t136196
+  store ptr @__sprout_lambda_1606_stdlib.compiler.codegen.emit_worker_match, ptr %t136196
   %t136197 = alloca ptr
   store ptr %t136196, ptr %t136197
   %t136198 = call i64 @sprout_gc_push_ptr_root(ptr %t136197)
@@ -209883,7 +209883,7 @@ match_br18496:
   %t136205 = add i64 8, 0
   %t136206 = call i64 @sprout_alloc_closure_env(i64 %t136205)
   %t136207 = inttoptr i64 %t136206 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t136207
+  store ptr @__sprout_fn_closure_1486, ptr %t136207
   %t136208 = alloca ptr
   store ptr %t136207, ptr %t136208
   %t136209 = call i64 @sprout_gc_push_ptr_root(ptr %t136208)
@@ -212629,7 +212629,7 @@ match_br18679:
   %t137939 = add i64 16, 0
   %t137940 = call i64 @sprout_alloc_closure_env(i64 %t137939)
   %t137941 = inttoptr i64 %t137940 to ptr
-  store ptr @__sprout_lambda_1606_stdlib.compiler.codegen.type_expr_to_ll_subst, ptr %t137941
+  store ptr @__sprout_lambda_1607_stdlib.compiler.codegen.type_expr_to_ll_subst, ptr %t137941
   %t137942 = getelementptr i64, ptr %t137941, i64 1
   store i64 %t137856, ptr %t137942
   %t137943 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -212759,7 +212759,7 @@ entry:
   %t138033 = add i64 16, 0
   %t138034 = call i64 @sprout_alloc_closure_env(i64 %t138033)
   %t138035 = inttoptr i64 %t138034 to ptr
-  store ptr @__sprout_lambda_1607_stdlib.compiler.codegen.apply_subst_to_type_exprs, ptr %t138035
+  store ptr @__sprout_lambda_1608_stdlib.compiler.codegen.apply_subst_to_type_exprs, ptr %t138035
   %t138036 = getelementptr i64, ptr %t138035, i64 1
   store i64 %subst, ptr %t138036
   %t138037 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -212962,7 +212962,7 @@ match_br18717:
   %t138152 = add i64 8, 0
   %t138153 = call i64 @sprout_alloc_closure_env(i64 %t138152)
   %t138154 = inttoptr i64 %t138153 to ptr
-  store ptr @__sprout_lambda_1608_stdlib.compiler.codegen.build_fn_sigs_acc, ptr %t138154
+  store ptr @__sprout_lambda_1609_stdlib.compiler.codegen.build_fn_sigs_acc, ptr %t138154
   %t138155 = alloca ptr
   store ptr %t138154, ptr %t138155
   %t138156 = call i64 @sprout_gc_push_ptr_root(ptr %t138155)
@@ -213067,7 +213067,7 @@ if_else18731:
   %t138223 = add i64 8, 0
   %t138224 = call i64 @sprout_alloc_closure_env(i64 %t138223)
   %t138225 = inttoptr i64 %t138224 to ptr
-  store ptr @__sprout_lambda_1609_stdlib.compiler.codegen.build_fn_sigs_acc, ptr %t138225
+  store ptr @__sprout_lambda_1610_stdlib.compiler.codegen.build_fn_sigs_acc, ptr %t138225
   %t138226 = alloca ptr
   store ptr %t138225, ptr %t138226
   %t138227 = call i64 @sprout_gc_push_ptr_root(ptr %t138226)
@@ -213833,7 +213833,7 @@ match_br18808:
   %t138661 = add i64 8, 0
   %t138662 = call i64 @sprout_alloc_closure_env(i64 %t138661)
   %t138663 = inttoptr i64 %t138662 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t138663
+  store ptr @__sprout_fn_closure_1486, ptr %t138663
   %t138664 = alloca ptr
   store ptr %t138663, ptr %t138664
   %t138665 = call i64 @sprout_gc_push_ptr_root(ptr %t138664)
@@ -217096,7 +217096,7 @@ entry:
   %t140768 = add i64 24, 0
   %t140769 = call i64 @sprout_alloc_closure_env(i64 %t140768)
   %t140770 = inttoptr i64 %t140769 to ptr
-  store ptr @__sprout_lambda_1610_stdlib.compiler.compiler.next_line, ptr %t140770
+  store ptr @__sprout_lambda_1611_stdlib.compiler.compiler.next_line, ptr %t140770
   %t140771 = getelementptr i64, ptr %t140770, i64 1
   store i64 %pos, ptr %t140771
   %t140772 = getelementptr i64, ptr %t140770, i64 2
@@ -220574,7 +220574,7 @@ entry:
   %t142869 = add i64 24, 0
   %t142870 = call i64 @sprout_alloc_closure_env(i64 %t142869)
   %t142871 = inttoptr i64 %t142870 to ptr
-  store ptr @__sprout_lambda_1611_main.next_line, ptr %t142871
+  store ptr @__sprout_lambda_1612_main.next_line, ptr %t142871
   %t142872 = getelementptr i64, ptr %t142871, i64 1
   store i64 %pos, ptr %t142872
   %t142873 = getelementptr i64, ptr %t142871, i64 2
@@ -224839,317 +224839,303 @@ entry:
   ret i64 %value
 }
 
+define i64 @__tc_ToString_IntRange_to_string(i64 %value) {
+entry:
+  %t145619 = alloca i64
+  store i64 %value, ptr %t145619
+  %t145620 = call i64 @sprout_gc_push_i64_root(ptr %t145619)
+  %t145621 = getelementptr inbounds [10 x i8], ptr @.str.2780, i64 0, i64 0
+  %t145622 = ptrtoint ptr %t145621 to i64
+  %t145623 = alloca i64
+  store i64 %t145622, ptr %t145623
+  %t145624 = call i64 @sprout_gc_push_i64_root(ptr %t145623)
+  %t145625 = alloca i64
+  store i64 %value, ptr %t145625
+  %t145626 = call i64 @sprout_gc_push_i64_root(ptr %t145625)
+  %t145627 = call i64 @range_start(i64 %value)
+  %t145628 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145629 = call i64 @int_to_string(i64 %t145627)
+  %t145630 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145631 = call i64 @str_concat(i64 %t145622, i64 %t145629)
+  %t145632 = alloca i64
+  store i64 %t145631, ptr %t145632
+  %t145633 = call i64 @sprout_gc_push_i64_root(ptr %t145632)
+  %t145634 = getelementptr inbounds [3 x i8], ptr @.str.2781, i64 0, i64 0
+  %t145635 = ptrtoint ptr %t145634 to i64
+  %t145636 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145637 = call i64 @str_concat(i64 %t145631, i64 %t145635)
+  %t145638 = alloca i64
+  store i64 %t145637, ptr %t145638
+  %t145639 = call i64 @sprout_gc_push_i64_root(ptr %t145638)
+  %t145640 = alloca i64
+  store i64 %value, ptr %t145640
+  %t145641 = call i64 @sprout_gc_push_i64_root(ptr %t145640)
+  %t145642 = call i64 @range_end(i64 %value)
+  %t145643 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145644 = call i64 @int_to_string(i64 %t145642)
+  %t145645 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145646 = call i64 @str_concat(i64 %t145637, i64 %t145644)
+  %t145647 = alloca i64
+  store i64 %t145646, ptr %t145647
+  %t145648 = call i64 @sprout_gc_push_i64_root(ptr %t145647)
+  %t145649 = getelementptr inbounds [2 x i8], ptr @.str.2782, i64 0, i64 0
+  %t145650 = ptrtoint ptr %t145649 to i64
+  %t145651 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145652 = call i64 @str_concat(i64 %t145646, i64 %t145650)
+  %t145653 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t145652
+}
+
 define i64 @__tc_Ord_Int_compare(i64 %left, i64 %right) {
 entry:
-  %t145619 = icmp slt i64 %left, %right
-  br i1 %t145619, label %if_then19877, label %if_else19878
+  %t145654 = icmp slt i64 %left, %right
+  br i1 %t145654, label %if_then19877, label %if_else19878
 if_then19877:
-  %t145620 = sub i64 0, 1
+  %t145655 = sub i64 0, 1
   br label %if_done19879
 if_else19878:
-  %t145621 = icmp sgt i64 %left, %right
-  br i1 %t145621, label %if_then19880, label %if_else19881
+  %t145656 = icmp sgt i64 %left, %right
+  br i1 %t145656, label %if_then19880, label %if_else19881
 if_then19880:
   br label %if_done19882
 if_else19881:
   br label %if_done19882
 if_done19882:
-  %t145622 = phi i64 [ 1, %if_then19880 ], [ 0, %if_else19881 ]
+  %t145657 = phi i64 [ 1, %if_then19880 ], [ 0, %if_else19881 ]
   br label %if_done19879
 if_done19879:
-  %t145623 = phi i64 [ %t145620, %if_then19877 ], [ %t145622, %if_done19882 ]
-  ret i64 %t145623
+  %t145658 = phi i64 [ %t145655, %if_then19877 ], [ %t145657, %if_done19882 ]
+  ret i64 %t145658
 }
 
 define i64 @__tc_Ord_Bool_compare(i64 %left, i64 %right) {
 entry:
-  %t145624 = icmp eq i64 %left, %right
-  br i1 %t145624, label %if_then19883, label %if_else19884
+  %t145659 = icmp eq i64 %left, %right
+  br i1 %t145659, label %if_then19883, label %if_else19884
 if_then19883:
   br label %if_done19885
 if_else19884:
-  %t145625 = trunc i64 %left to i1
-  br i1 %t145625, label %if_then19886, label %if_else19887
+  %t145660 = trunc i64 %left to i1
+  br i1 %t145660, label %if_then19886, label %if_else19887
 if_then19886:
   br label %if_done19888
 if_else19887:
-  %t145626 = sub i64 0, 1
+  %t145661 = sub i64 0, 1
   br label %if_done19888
 if_done19888:
-  %t145627 = phi i64 [ 1, %if_then19886 ], [ %t145626, %if_else19887 ]
+  %t145662 = phi i64 [ 1, %if_then19886 ], [ %t145661, %if_else19887 ]
   br label %if_done19885
 if_done19885:
-  %t145628 = phi i64 [ 0, %if_then19883 ], [ %t145627, %if_done19888 ]
-  ret i64 %t145628
+  %t145663 = phi i64 [ 0, %if_then19883 ], [ %t145662, %if_done19888 ]
+  ret i64 %t145663
 }
 
 define i64 @__tc_Ord_String_compare(i64 %left, i64 %right) {
 entry:
-  %t145629 = alloca i64
-  store i64 %left, ptr %t145629
-  %t145630 = call i64 @sprout_gc_push_i64_root(ptr %t145629)
-  %t145631 = alloca i64
-  store i64 %right, ptr %t145631
-  %t145632 = call i64 @sprout_gc_push_i64_root(ptr %t145631)
-  %t145633 = alloca i64
-  store i64 %left, ptr %t145633
-  %t145634 = call i64 @sprout_gc_push_i64_root(ptr %t145633)
-  %t145635 = alloca i64
-  store i64 %right, ptr %t145635
-  %t145636 = call i64 @sprout_gc_push_i64_root(ptr %t145635)
-  %t145637 = call i64 @str_compare(i64 %left, i64 %right)
-  %t145638 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145639 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t145637
+  %t145664 = alloca i64
+  store i64 %left, ptr %t145664
+  %t145665 = call i64 @sprout_gc_push_i64_root(ptr %t145664)
+  %t145666 = alloca i64
+  store i64 %right, ptr %t145666
+  %t145667 = call i64 @sprout_gc_push_i64_root(ptr %t145666)
+  %t145668 = alloca i64
+  store i64 %left, ptr %t145668
+  %t145669 = call i64 @sprout_gc_push_i64_root(ptr %t145668)
+  %t145670 = alloca i64
+  store i64 %right, ptr %t145670
+  %t145671 = call i64 @sprout_gc_push_i64_root(ptr %t145670)
+  %t145672 = call i64 @str_compare(i64 %left, i64 %right)
+  %t145673 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145674 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t145672
 }
 
 define { i64, i64, i64 } @__tc_Semigroup_List_a_append_worker(i64 %left, i64 %right) {
 entry:
-  %t145640 = alloca i64
-  store i64 %left, ptr %t145640
-  %t145641 = call i64 @sprout_gc_push_i64_root(ptr %t145640)
-  %t145642 = alloca i64
-  store i64 %right, ptr %t145642
-  %t145643 = call i64 @sprout_gc_push_i64_root(ptr %t145642)
-  %t145644 = alloca i64
-  store i64 %left, ptr %t145644
-  %t145645 = call i64 @sprout_gc_push_i64_root(ptr %t145644)
-  %t145646 = alloca i64
-  store i64 %right, ptr %t145646
-  %t145647 = call i64 @sprout_gc_push_i64_root(ptr %t145646)
-  %t145648 = call { i64, i64, i64 } @list_append_worker(i64 %left, i64 %right)
-  %t145649 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145650 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret { i64, i64, i64 } %t145648
+  %t145675 = alloca i64
+  store i64 %left, ptr %t145675
+  %t145676 = call i64 @sprout_gc_push_i64_root(ptr %t145675)
+  %t145677 = alloca i64
+  store i64 %right, ptr %t145677
+  %t145678 = call i64 @sprout_gc_push_i64_root(ptr %t145677)
+  %t145679 = alloca i64
+  store i64 %left, ptr %t145679
+  %t145680 = call i64 @sprout_gc_push_i64_root(ptr %t145679)
+  %t145681 = alloca i64
+  store i64 %right, ptr %t145681
+  %t145682 = call i64 @sprout_gc_push_i64_root(ptr %t145681)
+  %t145683 = call { i64, i64, i64 } @list_append_worker(i64 %left, i64 %right)
+  %t145684 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145685 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret { i64, i64, i64 } %t145683
 }
 
 define i64 @__tc_Semigroup_List_a_append(i64 %left, i64 %right) {
 entry:
-  %t145651 = call { i64, i64, i64 } @__tc_Semigroup_List_a_append_worker(i64 %left, i64 %right)
-  %t145652 = extractvalue { i64, i64, i64 } %t145651, 0
-  %t145653 = extractvalue { i64, i64, i64 } %t145651, 1
-  %t145654 = alloca i64
-  store i64 %t145653, ptr %t145654
-  %t145655 = call i64 @sprout_gc_push_i64_root(ptr %t145654)
-  %t145656 = extractvalue { i64, i64, i64 } %t145651, 2
-  %t145657 = alloca i64
-  store i64 %t145656, ptr %t145657
-  %t145658 = call i64 @sprout_gc_push_i64_root(ptr %t145657)
-  %t145659 = call i64 @sprout_rebox3(i64 %t145652, i64 %t145653, i64 %t145656)
-  %t145660 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t145659
+  %t145686 = call { i64, i64, i64 } @__tc_Semigroup_List_a_append_worker(i64 %left, i64 %right)
+  %t145687 = extractvalue { i64, i64, i64 } %t145686, 0
+  %t145688 = extractvalue { i64, i64, i64 } %t145686, 1
+  %t145689 = alloca i64
+  store i64 %t145688, ptr %t145689
+  %t145690 = call i64 @sprout_gc_push_i64_root(ptr %t145689)
+  %t145691 = extractvalue { i64, i64, i64 } %t145686, 2
+  %t145692 = alloca i64
+  store i64 %t145691, ptr %t145692
+  %t145693 = call i64 @sprout_gc_push_i64_root(ptr %t145692)
+  %t145694 = call i64 @sprout_rebox3(i64 %t145687, i64 %t145688, i64 %t145691)
+  %t145695 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t145694
 }
 
 define i64 @__tc_Monoid_String_empty() {
 entry:
-  %t145661 = getelementptr inbounds [1 x i8], ptr @.str.2780, i64 0, i64 0
-  %t145662 = ptrtoint ptr %t145661 to i64
-  ret i64 %t145662
+  %t145696 = getelementptr inbounds [1 x i8], ptr @.str.2783, i64 0, i64 0
+  %t145697 = ptrtoint ptr %t145696 to i64
+  ret i64 %t145697
 }
 
 define { i64, i64, i64 } @__tc_Monoid_List_a_empty_worker() {
 entry:
-  %t145663 = call i64 @sprout_make0(i64 6)
-  %t145664 = call i64 @sprout_tag(i64 %t145663)
-  %t145665 = call i64 @sprout_field(i64 %t145663, i64 0)
-  %t145666 = insertvalue { i64, i64, i64 } undef, i64 %t145664, 0
-  %t145667 = insertvalue { i64, i64, i64 } %t145666, i64 %t145665, 1
-  %t145668 = call i64 @sprout_field(i64 %t145663, i64 1)
-  %t145669 = insertvalue { i64, i64, i64 } %t145667, i64 %t145668, 2
-  ret { i64, i64, i64 } %t145669
+  %t145698 = call i64 @sprout_make0(i64 6)
+  %t145699 = call i64 @sprout_tag(i64 %t145698)
+  %t145700 = call i64 @sprout_field(i64 %t145698, i64 0)
+  %t145701 = insertvalue { i64, i64, i64 } undef, i64 %t145699, 0
+  %t145702 = insertvalue { i64, i64, i64 } %t145701, i64 %t145700, 1
+  %t145703 = call i64 @sprout_field(i64 %t145698, i64 1)
+  %t145704 = insertvalue { i64, i64, i64 } %t145702, i64 %t145703, 2
+  ret { i64, i64, i64 } %t145704
 }
 
 define i64 @__tc_Monoid_List_a_empty() {
 entry:
-  %t145670 = call { i64, i64, i64 } @__tc_Monoid_List_a_empty_worker()
-  %t145671 = extractvalue { i64, i64, i64 } %t145670, 0
-  %t145672 = extractvalue { i64, i64, i64 } %t145670, 1
-  %t145673 = alloca i64
-  store i64 %t145672, ptr %t145673
-  %t145674 = call i64 @sprout_gc_push_i64_root(ptr %t145673)
-  %t145675 = extractvalue { i64, i64, i64 } %t145670, 2
-  %t145676 = alloca i64
-  store i64 %t145675, ptr %t145676
-  %t145677 = call i64 @sprout_gc_push_i64_root(ptr %t145676)
-  %t145678 = call i64 @sprout_rebox3(i64 %t145671, i64 %t145672, i64 %t145675)
-  %t145679 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t145678
+  %t145705 = call { i64, i64, i64 } @__tc_Monoid_List_a_empty_worker()
+  %t145706 = extractvalue { i64, i64, i64 } %t145705, 0
+  %t145707 = extractvalue { i64, i64, i64 } %t145705, 1
+  %t145708 = alloca i64
+  store i64 %t145707, ptr %t145708
+  %t145709 = call i64 @sprout_gc_push_i64_root(ptr %t145708)
+  %t145710 = extractvalue { i64, i64, i64 } %t145705, 2
+  %t145711 = alloca i64
+  store i64 %t145710, ptr %t145711
+  %t145712 = call i64 @sprout_gc_push_i64_root(ptr %t145711)
+  %t145713 = call i64 @sprout_rebox3(i64 %t145706, i64 %t145707, i64 %t145710)
+  %t145714 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t145713
 }
 
 define { i64, i64, i64 } @__tc_Functor_List_fmap_worker(i64 %f, i64 %xs) {
 entry:
-  %t145680 = alloca i64
-  store i64 %f, ptr %t145680
-  %t145681 = call i64 @sprout_gc_push_i64_root(ptr %t145680)
-  %t145682 = alloca i64
-  store i64 %xs, ptr %t145682
-  %t145683 = call i64 @sprout_gc_push_i64_root(ptr %t145682)
-  %t145684 = alloca i64
-  store i64 %f, ptr %t145684
-  %t145685 = call i64 @sprout_gc_push_i64_root(ptr %t145684)
-  %t145686 = alloca i64
-  store i64 %xs, ptr %t145686
-  %t145687 = call i64 @sprout_gc_push_i64_root(ptr %t145686)
-  %t145688 = inttoptr i64 %f to ptr
-  %t145689 = call { i64, i64, i64 } @list_map_worker(ptr %t145688, i64 %xs)
-  %t145690 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145691 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret { i64, i64, i64 } %t145689
+  %t145715 = alloca i64
+  store i64 %f, ptr %t145715
+  %t145716 = call i64 @sprout_gc_push_i64_root(ptr %t145715)
+  %t145717 = alloca i64
+  store i64 %xs, ptr %t145717
+  %t145718 = call i64 @sprout_gc_push_i64_root(ptr %t145717)
+  %t145719 = alloca i64
+  store i64 %f, ptr %t145719
+  %t145720 = call i64 @sprout_gc_push_i64_root(ptr %t145719)
+  %t145721 = alloca i64
+  store i64 %xs, ptr %t145721
+  %t145722 = call i64 @sprout_gc_push_i64_root(ptr %t145721)
+  %t145723 = inttoptr i64 %f to ptr
+  %t145724 = call { i64, i64, i64 } @list_map_worker(ptr %t145723, i64 %xs)
+  %t145725 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145726 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret { i64, i64, i64 } %t145724
 }
 
 define i64 @__tc_Functor_List_fmap(i64 %f, i64 %xs) {
 entry:
-  %t145692 = call { i64, i64, i64 } @__tc_Functor_List_fmap_worker(i64 %f, i64 %xs)
-  %t145693 = extractvalue { i64, i64, i64 } %t145692, 0
-  %t145694 = extractvalue { i64, i64, i64 } %t145692, 1
-  %t145695 = alloca i64
-  store i64 %t145694, ptr %t145695
-  %t145696 = call i64 @sprout_gc_push_i64_root(ptr %t145695)
-  %t145697 = extractvalue { i64, i64, i64 } %t145692, 2
-  %t145698 = alloca i64
-  store i64 %t145697, ptr %t145698
-  %t145699 = call i64 @sprout_gc_push_i64_root(ptr %t145698)
-  %t145700 = call i64 @sprout_rebox3(i64 %t145693, i64 %t145694, i64 %t145697)
-  %t145701 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t145700
+  %t145727 = call { i64, i64, i64 } @__tc_Functor_List_fmap_worker(i64 %f, i64 %xs)
+  %t145728 = extractvalue { i64, i64, i64 } %t145727, 0
+  %t145729 = extractvalue { i64, i64, i64 } %t145727, 1
+  %t145730 = alloca i64
+  store i64 %t145729, ptr %t145730
+  %t145731 = call i64 @sprout_gc_push_i64_root(ptr %t145730)
+  %t145732 = extractvalue { i64, i64, i64 } %t145727, 2
+  %t145733 = alloca i64
+  store i64 %t145732, ptr %t145733
+  %t145734 = call i64 @sprout_gc_push_i64_root(ptr %t145733)
+  %t145735 = call i64 @sprout_rebox3(i64 %t145728, i64 %t145729, i64 %t145732)
+  %t145736 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t145735
 }
 
 define { i64, i64 } @__tc_Functor_Maybe_fmap_worker(i64 %f, i64 %xs) {
 entry:
-  %t145702 = alloca i64
-  store i64 %f, ptr %t145702
-  %t145703 = call i64 @sprout_gc_push_i64_root(ptr %t145702)
-  %t145704 = alloca i64
-  store i64 %xs, ptr %t145704
-  %t145705 = call i64 @sprout_gc_push_i64_root(ptr %t145704)
-  %t145706 = call i64 @sprout_tag(i64 %xs)
-  %t145707 = icmp eq i64 %t145706, 1
-  br i1 %t145707, label %match_br19890, label %match_next19891
+  %t145737 = alloca i64
+  store i64 %f, ptr %t145737
+  %t145738 = call i64 @sprout_gc_push_i64_root(ptr %t145737)
+  %t145739 = alloca i64
+  store i64 %xs, ptr %t145739
+  %t145740 = call i64 @sprout_gc_push_i64_root(ptr %t145739)
+  %t145741 = call i64 @sprout_tag(i64 %xs)
+  %t145742 = icmp eq i64 %t145741, 1
+  br i1 %t145742, label %match_br19890, label %match_next19891
 match_br19890:
-  %t145708 = call i64 @sprout_nothing(i64 1)
-  %t145709 = call i64 @sprout_tag(i64 %t145708)
-  %t145710 = call i64 @sprout_field(i64 %t145708, i64 0)
-  %t145711 = insertvalue { i64, i64 } undef, i64 %t145709, 0
-  %t145712 = insertvalue { i64, i64 } %t145711, i64 %t145710, 1
+  %t145743 = call i64 @sprout_nothing(i64 1)
+  %t145744 = call i64 @sprout_tag(i64 %t145743)
+  %t145745 = call i64 @sprout_field(i64 %t145743, i64 0)
+  %t145746 = insertvalue { i64, i64 } undef, i64 %t145744, 0
+  %t145747 = insertvalue { i64, i64 } %t145746, i64 %t145745, 1
   br label %match_done19889
 match_next19891:
-  %t145713 = call i64 @sprout_tag(i64 %xs)
-  %t145714 = icmp eq i64 %t145713, 0
-  br i1 %t145714, label %ctor_chk19894, label %ctor_miss19895
+  %t145748 = call i64 @sprout_tag(i64 %xs)
+  %t145749 = icmp eq i64 %t145748, 0
+  br i1 %t145749, label %ctor_chk19894, label %ctor_miss19895
 ctor_chk19894:
-  %t145715 = call i64 @sprout_field(i64 %xs, i64 0)
+  %t145750 = call i64 @sprout_field(i64 %xs, i64 0)
   br i1 1, label %ctor_next19897, label %ctor_miss19895
 ctor_next19897:
   br label %ctor_done19896
 ctor_miss19895:
   br label %ctor_done19896
 ctor_done19896:
-  %t145716 = phi i1 [ 1, %ctor_next19897 ], [ 0, %ctor_miss19895 ]
-  br i1 %t145716, label %match_br19892, label %match_next19893
+  %t145751 = phi i1 [ 1, %ctor_next19897 ], [ 0, %ctor_miss19895 ]
+  br i1 %t145751, label %match_br19892, label %match_next19893
 match_br19892:
-  %t145717 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t145718 = alloca i64
-  store i64 %t145717, ptr %t145718
-  %t145719 = call i64 @sprout_gc_push_i64_root(ptr %t145718)
-  %t145720 = alloca i64
-  store i64 %f, ptr %t145720
-  %t145721 = call i64 @sprout_gc_push_i64_root(ptr %t145720)
-  %t145722 = inttoptr i64 %f to ptr
-  %t145723 = alloca i64
-  store i64 %t145717, ptr %t145723
-  %t145724 = call i64 @sprout_gc_push_i64_root(ptr %t145723)
-  %t145725 = load ptr, ptr %t145722
-  %t145726 = call i64 %t145725(ptr %t145722, i64 %t145717)
-  %t145727 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145728 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145729 = alloca i64
-  store i64 %t145726, ptr %t145729
-  %t145730 = call i64 @sprout_gc_push_i64_root(ptr %t145729)
-  %t145731 = alloca i64
-  store i64 %t145726, ptr %t145731
-  %t145732 = call i64 @sprout_gc_push_i64_root(ptr %t145731)
-  %t145733 = call i64 @sprout_make1(i64 0, i64 %t145726)
-  %t145734 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145735 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145736 = call i64 @sprout_tag(i64 %t145733)
-  %t145737 = call i64 @sprout_field(i64 %t145733, i64 0)
-  %t145738 = insertvalue { i64, i64 } undef, i64 %t145736, 0
-  %t145739 = insertvalue { i64, i64 } %t145738, i64 %t145737, 1
-  %t145740 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145752 = call i64 @sprout_field(i64 %xs, i64 0)
+  %t145753 = alloca i64
+  store i64 %t145752, ptr %t145753
+  %t145754 = call i64 @sprout_gc_push_i64_root(ptr %t145753)
+  %t145755 = alloca i64
+  store i64 %f, ptr %t145755
+  %t145756 = call i64 @sprout_gc_push_i64_root(ptr %t145755)
+  %t145757 = inttoptr i64 %f to ptr
+  %t145758 = alloca i64
+  store i64 %t145752, ptr %t145758
+  %t145759 = call i64 @sprout_gc_push_i64_root(ptr %t145758)
+  %t145760 = load ptr, ptr %t145757
+  %t145761 = call i64 %t145760(ptr %t145757, i64 %t145752)
+  %t145762 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145763 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145764 = alloca i64
+  store i64 %t145761, ptr %t145764
+  %t145765 = call i64 @sprout_gc_push_i64_root(ptr %t145764)
+  %t145766 = alloca i64
+  store i64 %t145761, ptr %t145766
+  %t145767 = call i64 @sprout_gc_push_i64_root(ptr %t145766)
+  %t145768 = call i64 @sprout_make1(i64 0, i64 %t145761)
+  %t145769 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145770 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145771 = call i64 @sprout_tag(i64 %t145768)
+  %t145772 = call i64 @sprout_field(i64 %t145768, i64 0)
+  %t145773 = insertvalue { i64, i64 } undef, i64 %t145771, 0
+  %t145774 = insertvalue { i64, i64 } %t145773, i64 %t145772, 1
+  %t145775 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %match_done19889
 match_next19893:
-  %t145741 = call i64 @sprout_abort_match()
+  %t145776 = call i64 @sprout_abort_match()
   unreachable
 match_done19889:
-  %t145742 = phi { i64, i64 } [ %t145712, %match_br19890 ], [ %t145739, %match_br19892 ]
-  %t145743 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret { i64, i64 } %t145742
+  %t145777 = phi { i64, i64 } [ %t145747, %match_br19890 ], [ %t145774, %match_br19892 ]
+  %t145778 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret { i64, i64 } %t145777
 }
 
 define i64 @__tc_Functor_Maybe_fmap(i64 %f, i64 %xs) {
 entry:
-  %t145744 = call { i64, i64 } @__tc_Functor_Maybe_fmap_worker(i64 %f, i64 %xs)
-  %t145745 = extractvalue { i64, i64 } %t145744, 0
-  %t145746 = extractvalue { i64, i64 } %t145744, 1
-  %t145747 = alloca i64
-  store i64 %t145746, ptr %t145747
-  %t145748 = call i64 @sprout_gc_push_i64_root(ptr %t145747)
-  %t145749 = call i64 @sprout_rebox2(i64 %t145745, i64 %t145746)
-  %t145750 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t145749
-}
-
-define i64 @__tc_Foldable_List_fold_values(i64 %step, i64 %init, i64 %xs) {
-entry:
-  %t145751 = alloca i64
-  store i64 %step, ptr %t145751
-  %t145752 = call i64 @sprout_gc_push_i64_root(ptr %t145751)
-  %t145753 = alloca i64
-  store i64 %init, ptr %t145753
-  %t145754 = call i64 @sprout_gc_push_i64_root(ptr %t145753)
-  %t145755 = alloca i64
-  store i64 %xs, ptr %t145755
-  %t145756 = call i64 @sprout_gc_push_i64_root(ptr %t145755)
-  %t145757 = alloca i64
-  store i64 %step, ptr %t145757
-  %t145758 = call i64 @sprout_gc_push_i64_root(ptr %t145757)
-  %t145759 = alloca i64
-  store i64 %init, ptr %t145759
-  %t145760 = call i64 @sprout_gc_push_i64_root(ptr %t145759)
-  %t145761 = alloca i64
-  store i64 %xs, ptr %t145761
-  %t145762 = call i64 @sprout_gc_push_i64_root(ptr %t145761)
-  %t145763 = inttoptr i64 %step to ptr
-  %t145764 = call i64 @list_fold(ptr %t145763, i64 %init, i64 %xs)
-  %t145765 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t145766 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %t145764
-}
-
-define { i64, i64 } @__tc_Functor_Vec_fmap_worker(i64 %f, i64 %xs) {
-entry:
-  %t145767 = alloca i64
-  store i64 %f, ptr %t145767
-  %t145768 = call i64 @sprout_gc_push_i64_root(ptr %t145767)
-  %t145769 = alloca i64
-  store i64 %xs, ptr %t145769
-  %t145770 = call i64 @sprout_gc_push_i64_root(ptr %t145769)
-  %t145771 = alloca i64
-  store i64 %f, ptr %t145771
-  %t145772 = call i64 @sprout_gc_push_i64_root(ptr %t145771)
-  %t145773 = alloca i64
-  store i64 %xs, ptr %t145773
-  %t145774 = call i64 @sprout_gc_push_i64_root(ptr %t145773)
-  %t145775 = inttoptr i64 %f to ptr
-  %t145776 = call { i64, i64 } @vec_map_worker(ptr %t145775, i64 %xs)
-  %t145777 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145778 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret { i64, i64 } %t145776
-}
-
-define i64 @__tc_Functor_Vec_fmap(i64 %f, i64 %xs) {
-entry:
-  %t145779 = call { i64, i64 } @__tc_Functor_Vec_fmap_worker(i64 %f, i64 %xs)
+  %t145779 = call { i64, i64 } @__tc_Functor_Maybe_fmap_worker(i64 %f, i64 %xs)
   %t145780 = extractvalue { i64, i64 } %t145779, 0
   %t145781 = extractvalue { i64, i64 } %t145779, 1
   %t145782 = alloca i64
@@ -225160,7 +225146,7 @@ entry:
   ret i64 %t145784
 }
 
-define i64 @__tc_Foldable_Vec_fold_values(i64 %step, i64 %init, i64 %xs) {
+define i64 @__tc_Foldable_List_fold_values(i64 %step, i64 %init, i64 %xs) {
 entry:
   %t145786 = alloca i64
   store i64 %step, ptr %t145786
@@ -225181,502 +225167,563 @@ entry:
   store i64 %xs, ptr %t145796
   %t145797 = call i64 @sprout_gc_push_i64_root(ptr %t145796)
   %t145798 = inttoptr i64 %step to ptr
-  %t145799 = call i64 @vec_fold(ptr %t145798, i64 %init, i64 %xs)
+  %t145799 = call i64 @list_fold(ptr %t145798, i64 %init, i64 %xs)
   %t145800 = call i64 @sprout_gc_pop_roots(i64 3)
   %t145801 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t145799
 }
 
-define { i64, i64 } @__tc_Semigroup_Vec_a_append_worker(i64 %left, i64 %right) {
+define { i64, i64 } @__tc_Functor_Vec_fmap_worker(i64 %f, i64 %xs) {
 entry:
   %t145802 = alloca i64
-  store i64 %left, ptr %t145802
+  store i64 %f, ptr %t145802
   %t145803 = call i64 @sprout_gc_push_i64_root(ptr %t145802)
   %t145804 = alloca i64
-  store i64 %right, ptr %t145804
+  store i64 %xs, ptr %t145804
   %t145805 = call i64 @sprout_gc_push_i64_root(ptr %t145804)
   %t145806 = alloca i64
-  store i64 %left, ptr %t145806
+  store i64 %f, ptr %t145806
   %t145807 = call i64 @sprout_gc_push_i64_root(ptr %t145806)
-  %t145808 = call i64 @vec_to_list(i64 %left)
-  %t145809 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145810 = alloca i64
-  store i64 %t145808, ptr %t145810
-  %t145811 = call i64 @sprout_gc_push_i64_root(ptr %t145810)
-  %t145812 = alloca i64
-  store i64 %right, ptr %t145812
-  %t145813 = call i64 @sprout_gc_push_i64_root(ptr %t145812)
-  %t145814 = call i64 @vec_to_list(i64 %right)
-  %t145815 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145816 = alloca i64
-  store i64 %t145814, ptr %t145816
-  %t145817 = call i64 @sprout_gc_push_i64_root(ptr %t145816)
-  %t145818 = call i64 @list_append(i64 %t145808, i64 %t145814)
-  %t145819 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145820 = alloca i64
-  store i64 %t145818, ptr %t145820
-  %t145821 = call i64 @sprout_gc_push_i64_root(ptr %t145820)
-  %t145822 = call { i64, i64 } @vec_from_list_worker(i64 %t145818)
-  %t145823 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145824 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret { i64, i64 } %t145822
+  %t145808 = alloca i64
+  store i64 %xs, ptr %t145808
+  %t145809 = call i64 @sprout_gc_push_i64_root(ptr %t145808)
+  %t145810 = inttoptr i64 %f to ptr
+  %t145811 = call { i64, i64 } @vec_map_worker(ptr %t145810, i64 %xs)
+  %t145812 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145813 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret { i64, i64 } %t145811
+}
+
+define i64 @__tc_Functor_Vec_fmap(i64 %f, i64 %xs) {
+entry:
+  %t145814 = call { i64, i64 } @__tc_Functor_Vec_fmap_worker(i64 %f, i64 %xs)
+  %t145815 = extractvalue { i64, i64 } %t145814, 0
+  %t145816 = extractvalue { i64, i64 } %t145814, 1
+  %t145817 = alloca i64
+  store i64 %t145816, ptr %t145817
+  %t145818 = call i64 @sprout_gc_push_i64_root(ptr %t145817)
+  %t145819 = call i64 @sprout_rebox2(i64 %t145815, i64 %t145816)
+  %t145820 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t145819
+}
+
+define i64 @__tc_Foldable_Vec_fold_values(i64 %step, i64 %init, i64 %xs) {
+entry:
+  %t145821 = alloca i64
+  store i64 %step, ptr %t145821
+  %t145822 = call i64 @sprout_gc_push_i64_root(ptr %t145821)
+  %t145823 = alloca i64
+  store i64 %init, ptr %t145823
+  %t145824 = call i64 @sprout_gc_push_i64_root(ptr %t145823)
+  %t145825 = alloca i64
+  store i64 %xs, ptr %t145825
+  %t145826 = call i64 @sprout_gc_push_i64_root(ptr %t145825)
+  %t145827 = alloca i64
+  store i64 %step, ptr %t145827
+  %t145828 = call i64 @sprout_gc_push_i64_root(ptr %t145827)
+  %t145829 = alloca i64
+  store i64 %init, ptr %t145829
+  %t145830 = call i64 @sprout_gc_push_i64_root(ptr %t145829)
+  %t145831 = alloca i64
+  store i64 %xs, ptr %t145831
+  %t145832 = call i64 @sprout_gc_push_i64_root(ptr %t145831)
+  %t145833 = inttoptr i64 %step to ptr
+  %t145834 = call i64 @vec_fold(ptr %t145833, i64 %init, i64 %xs)
+  %t145835 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t145836 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t145834
+}
+
+define { i64, i64 } @__tc_Semigroup_Vec_a_append_worker(i64 %left, i64 %right) {
+entry:
+  %t145837 = alloca i64
+  store i64 %left, ptr %t145837
+  %t145838 = call i64 @sprout_gc_push_i64_root(ptr %t145837)
+  %t145839 = alloca i64
+  store i64 %right, ptr %t145839
+  %t145840 = call i64 @sprout_gc_push_i64_root(ptr %t145839)
+  %t145841 = alloca i64
+  store i64 %left, ptr %t145841
+  %t145842 = call i64 @sprout_gc_push_i64_root(ptr %t145841)
+  %t145843 = call i64 @vec_to_list(i64 %left)
+  %t145844 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145845 = alloca i64
+  store i64 %t145843, ptr %t145845
+  %t145846 = call i64 @sprout_gc_push_i64_root(ptr %t145845)
+  %t145847 = alloca i64
+  store i64 %right, ptr %t145847
+  %t145848 = call i64 @sprout_gc_push_i64_root(ptr %t145847)
+  %t145849 = call i64 @vec_to_list(i64 %right)
+  %t145850 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145851 = alloca i64
+  store i64 %t145849, ptr %t145851
+  %t145852 = call i64 @sprout_gc_push_i64_root(ptr %t145851)
+  %t145853 = call i64 @list_append(i64 %t145843, i64 %t145849)
+  %t145854 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145855 = alloca i64
+  store i64 %t145853, ptr %t145855
+  %t145856 = call i64 @sprout_gc_push_i64_root(ptr %t145855)
+  %t145857 = call { i64, i64 } @vec_from_list_worker(i64 %t145853)
+  %t145858 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145859 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret { i64, i64 } %t145857
 }
 
 define i64 @__tc_Semigroup_Vec_a_append(i64 %left, i64 %right) {
 entry:
-  %t145825 = call { i64, i64 } @__tc_Semigroup_Vec_a_append_worker(i64 %left, i64 %right)
-  %t145826 = extractvalue { i64, i64 } %t145825, 0
-  %t145827 = extractvalue { i64, i64 } %t145825, 1
-  %t145828 = alloca i64
-  store i64 %t145827, ptr %t145828
-  %t145829 = call i64 @sprout_gc_push_i64_root(ptr %t145828)
-  %t145830 = call i64 @sprout_rebox2(i64 %t145826, i64 %t145827)
-  %t145831 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t145830
+  %t145860 = call { i64, i64 } @__tc_Semigroup_Vec_a_append_worker(i64 %left, i64 %right)
+  %t145861 = extractvalue { i64, i64 } %t145860, 0
+  %t145862 = extractvalue { i64, i64 } %t145860, 1
+  %t145863 = alloca i64
+  store i64 %t145862, ptr %t145863
+  %t145864 = call i64 @sprout_gc_push_i64_root(ptr %t145863)
+  %t145865 = call i64 @sprout_rebox2(i64 %t145861, i64 %t145862)
+  %t145866 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t145865
 }
 
 define { i64, i64 } @__tc_Semigroup_Dict_v_append_worker(i64 %left, i64 %right) {
 entry:
-  %t145832 = alloca i64
-  store i64 %left, ptr %t145832
-  %t145833 = call i64 @sprout_gc_push_i64_root(ptr %t145832)
-  %t145834 = alloca i64
-  store i64 %right, ptr %t145834
-  %t145835 = call i64 @sprout_gc_push_i64_root(ptr %t145834)
-  %t145836 = call i64 @sprout_tag(i64 %right)
-  %t145837 = icmp eq i64 %t145836, 10
-  br i1 %t145837, label %ctor_chk19901, label %ctor_miss19902
+  %t145867 = alloca i64
+  store i64 %left, ptr %t145867
+  %t145868 = call i64 @sprout_gc_push_i64_root(ptr %t145867)
+  %t145869 = alloca i64
+  store i64 %right, ptr %t145869
+  %t145870 = call i64 @sprout_gc_push_i64_root(ptr %t145869)
+  %t145871 = call i64 @sprout_tag(i64 %right)
+  %t145872 = icmp eq i64 %t145871, 10
+  br i1 %t145872, label %ctor_chk19901, label %ctor_miss19902
 ctor_chk19901:
-  %t145838 = call i64 @sprout_field(i64 %right, i64 0)
+  %t145873 = call i64 @sprout_field(i64 %right, i64 0)
   br i1 1, label %ctor_next19904, label %ctor_miss19902
 ctor_next19904:
   br label %ctor_done19903
 ctor_miss19902:
   br label %ctor_done19903
 ctor_done19903:
-  %t145839 = phi i1 [ 1, %ctor_next19904 ], [ 0, %ctor_miss19902 ]
-  br i1 %t145839, label %match_br19899, label %match_next19900
+  %t145874 = phi i1 [ 1, %ctor_next19904 ], [ 0, %ctor_miss19902 ]
+  br i1 %t145874, label %match_br19899, label %match_next19900
 match_br19899:
-  %t145840 = call i64 @sprout_field(i64 %right, i64 0)
-  %t145841 = alloca i64
-  store i64 %t145840, ptr %t145841
-  %t145842 = call i64 @sprout_gc_push_i64_root(ptr %t145841)
-  %t145843 = alloca i64
-  store i64 %left, ptr %t145843
-  %t145844 = call i64 @sprout_gc_push_i64_root(ptr %t145843)
-  %t145845 = alloca i64
-  store i64 %t145840, ptr %t145845
-  %t145846 = call i64 @sprout_gc_push_i64_root(ptr %t145845)
-  %t145847 = alloca i64
-  store i64 %t145840, ptr %t145847
-  %t145848 = call i64 @sprout_gc_push_i64_root(ptr %t145847)
-  %t145849 = call i64 @map_size(i64 %t145840)
-  %t145850 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145851 = call i64 @dict_append_entries(i64 %left, i64 %t145840, i64 0, i64 %t145849)
-  %t145852 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145853 = call i64 @sprout_tag(i64 %t145851)
-  %t145854 = call i64 @sprout_field(i64 %t145851, i64 0)
-  %t145855 = insertvalue { i64, i64 } undef, i64 %t145853, 0
-  %t145856 = insertvalue { i64, i64 } %t145855, i64 %t145854, 1
-  %t145857 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145875 = call i64 @sprout_field(i64 %right, i64 0)
+  %t145876 = alloca i64
+  store i64 %t145875, ptr %t145876
+  %t145877 = call i64 @sprout_gc_push_i64_root(ptr %t145876)
+  %t145878 = alloca i64
+  store i64 %left, ptr %t145878
+  %t145879 = call i64 @sprout_gc_push_i64_root(ptr %t145878)
+  %t145880 = alloca i64
+  store i64 %t145875, ptr %t145880
+  %t145881 = call i64 @sprout_gc_push_i64_root(ptr %t145880)
+  %t145882 = alloca i64
+  store i64 %t145875, ptr %t145882
+  %t145883 = call i64 @sprout_gc_push_i64_root(ptr %t145882)
+  %t145884 = call i64 @map_size(i64 %t145875)
+  %t145885 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145886 = call i64 @dict_append_entries(i64 %left, i64 %t145875, i64 0, i64 %t145884)
+  %t145887 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145888 = call i64 @sprout_tag(i64 %t145886)
+  %t145889 = call i64 @sprout_field(i64 %t145886, i64 0)
+  %t145890 = insertvalue { i64, i64 } undef, i64 %t145888, 0
+  %t145891 = insertvalue { i64, i64 } %t145890, i64 %t145889, 1
+  %t145892 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %match_done19898
 match_next19900:
-  %t145858 = call i64 @sprout_abort_match()
+  %t145893 = call i64 @sprout_abort_match()
   unreachable
 match_done19898:
-  %t145859 = phi { i64, i64 } [ %t145856, %match_br19899 ]
-  %t145860 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret { i64, i64 } %t145859
+  %t145894 = phi { i64, i64 } [ %t145891, %match_br19899 ]
+  %t145895 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret { i64, i64 } %t145894
 }
 
 define i64 @__tc_Semigroup_Dict_v_append(i64 %left, i64 %right) {
 entry:
-  %t145861 = call { i64, i64 } @__tc_Semigroup_Dict_v_append_worker(i64 %left, i64 %right)
-  %t145862 = extractvalue { i64, i64 } %t145861, 0
-  %t145863 = extractvalue { i64, i64 } %t145861, 1
-  %t145864 = alloca i64
-  store i64 %t145863, ptr %t145864
-  %t145865 = call i64 @sprout_gc_push_i64_root(ptr %t145864)
-  %t145866 = call i64 @sprout_rebox2(i64 %t145862, i64 %t145863)
-  %t145867 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t145866
+  %t145896 = call { i64, i64 } @__tc_Semigroup_Dict_v_append_worker(i64 %left, i64 %right)
+  %t145897 = extractvalue { i64, i64 } %t145896, 0
+  %t145898 = extractvalue { i64, i64 } %t145896, 1
+  %t145899 = alloca i64
+  store i64 %t145898, ptr %t145899
+  %t145900 = call i64 @sprout_gc_push_i64_root(ptr %t145899)
+  %t145901 = call i64 @sprout_rebox2(i64 %t145897, i64 %t145898)
+  %t145902 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t145901
 }
 
 define i64 @__tc_ToString_Maybe_a_to_string(i64 %x, i64 %__tc_ToString_0_to_string) {
 entry:
-  %t145868 = alloca i64
-  store i64 %x, ptr %t145868
-  %t145869 = call i64 @sprout_gc_push_i64_root(ptr %t145868)
-  %t145870 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t145870
-  %t145871 = call i64 @sprout_gc_push_i64_root(ptr %t145870)
-  %t145872 = call i64 @sprout_tag(i64 %x)
-  %t145873 = icmp eq i64 %t145872, 1
-  br i1 %t145873, label %match_br19906, label %match_next19907
+  %t145903 = alloca i64
+  store i64 %x, ptr %t145903
+  %t145904 = call i64 @sprout_gc_push_i64_root(ptr %t145903)
+  %t145905 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t145905
+  %t145906 = call i64 @sprout_gc_push_i64_root(ptr %t145905)
+  %t145907 = call i64 @sprout_tag(i64 %x)
+  %t145908 = icmp eq i64 %t145907, 1
+  br i1 %t145908, label %match_br19906, label %match_next19907
 match_br19906:
-  %t145874 = getelementptr inbounds [8 x i8], ptr @.str.2781, i64 0, i64 0
-  %t145875 = ptrtoint ptr %t145874 to i64
+  %t145909 = getelementptr inbounds [8 x i8], ptr @.str.2784, i64 0, i64 0
+  %t145910 = ptrtoint ptr %t145909 to i64
   br label %match_done19905
 match_next19907:
-  %t145876 = call i64 @sprout_tag(i64 %x)
-  %t145877 = icmp eq i64 %t145876, 0
-  br i1 %t145877, label %ctor_chk19910, label %ctor_miss19911
+  %t145911 = call i64 @sprout_tag(i64 %x)
+  %t145912 = icmp eq i64 %t145911, 0
+  br i1 %t145912, label %ctor_chk19910, label %ctor_miss19911
 ctor_chk19910:
-  %t145878 = call i64 @sprout_field(i64 %x, i64 0)
+  %t145913 = call i64 @sprout_field(i64 %x, i64 0)
   br i1 1, label %ctor_next19913, label %ctor_miss19911
 ctor_next19913:
   br label %ctor_done19912
 ctor_miss19911:
   br label %ctor_done19912
 ctor_done19912:
-  %t145879 = phi i1 [ 1, %ctor_next19913 ], [ 0, %ctor_miss19911 ]
-  br i1 %t145879, label %match_br19908, label %match_next19909
+  %t145914 = phi i1 [ 1, %ctor_next19913 ], [ 0, %ctor_miss19911 ]
+  br i1 %t145914, label %match_br19908, label %match_next19909
 match_br19908:
-  %t145880 = call i64 @sprout_field(i64 %x, i64 0)
-  %t145881 = alloca i64
-  store i64 %t145880, ptr %t145881
-  %t145882 = call i64 @sprout_gc_push_i64_root(ptr %t145881)
-  %t145883 = getelementptr inbounds [6 x i8], ptr @.str.2782, i64 0, i64 0
-  %t145884 = ptrtoint ptr %t145883 to i64
-  %t145885 = alloca i64
-  store i64 %t145884, ptr %t145885
-  %t145886 = call i64 @sprout_gc_push_i64_root(ptr %t145885)
-  %t145887 = alloca i64
-  store i64 %t145880, ptr %t145887
-  %t145888 = call i64 @sprout_gc_push_i64_root(ptr %t145887)
-  %t145889 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t145889
-  %t145890 = call i64 @sprout_gc_push_i64_root(ptr %t145889)
-  %t145891 = call i64 @to_string(i64 %t145880, i64 %__tc_ToString_0_to_string)
-  %t145892 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145893 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145894 = call i64 @str_concat(i64 %t145884, i64 %t145891)
-  %t145895 = alloca i64
-  store i64 %t145894, ptr %t145895
-  %t145896 = call i64 @sprout_gc_push_i64_root(ptr %t145895)
-  %t145897 = getelementptr inbounds [2 x i8], ptr @.str.2783, i64 0, i64 0
-  %t145898 = ptrtoint ptr %t145897 to i64
-  %t145899 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145900 = call i64 @str_concat(i64 %t145894, i64 %t145898)
-  %t145901 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145915 = call i64 @sprout_field(i64 %x, i64 0)
+  %t145916 = alloca i64
+  store i64 %t145915, ptr %t145916
+  %t145917 = call i64 @sprout_gc_push_i64_root(ptr %t145916)
+  %t145918 = getelementptr inbounds [6 x i8], ptr @.str.2785, i64 0, i64 0
+  %t145919 = ptrtoint ptr %t145918 to i64
+  %t145920 = alloca i64
+  store i64 %t145919, ptr %t145920
+  %t145921 = call i64 @sprout_gc_push_i64_root(ptr %t145920)
+  %t145922 = alloca i64
+  store i64 %t145915, ptr %t145922
+  %t145923 = call i64 @sprout_gc_push_i64_root(ptr %t145922)
+  %t145924 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t145924
+  %t145925 = call i64 @sprout_gc_push_i64_root(ptr %t145924)
+  %t145926 = call i64 @to_string(i64 %t145915, i64 %__tc_ToString_0_to_string)
+  %t145927 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145928 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145929 = call i64 @str_concat(i64 %t145919, i64 %t145926)
+  %t145930 = alloca i64
+  store i64 %t145929, ptr %t145930
+  %t145931 = call i64 @sprout_gc_push_i64_root(ptr %t145930)
+  %t145932 = getelementptr inbounds [2 x i8], ptr @.str.2786, i64 0, i64 0
+  %t145933 = ptrtoint ptr %t145932 to i64
+  %t145934 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145935 = call i64 @str_concat(i64 %t145929, i64 %t145933)
+  %t145936 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %match_done19905
 match_next19909:
-  %t145902 = call i64 @sprout_abort_match()
+  %t145937 = call i64 @sprout_abort_match()
   unreachable
 match_done19905:
-  %t145903 = phi i64 [ %t145875, %match_br19906 ], [ %t145900, %match_br19908 ]
-  %t145904 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t145903
+  %t145938 = phi i64 [ %t145910, %match_br19906 ], [ %t145935, %match_br19908 ]
+  %t145939 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t145938
 }
 
 define i64 @__tc_ToString_List_a_to_string(i64 %xs, i64 %__tc_ToString_0_to_string) {
 entry:
-  %t145905 = alloca i64
-  store i64 %xs, ptr %t145905
-  %t145906 = call i64 @sprout_gc_push_i64_root(ptr %t145905)
-  %t145907 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t145907
-  %t145908 = call i64 @sprout_gc_push_i64_root(ptr %t145907)
-  %t145909 = getelementptr inbounds [2 x i8], ptr @.str.2784, i64 0, i64 0
-  %t145910 = ptrtoint ptr %t145909 to i64
-  %t145911 = alloca i64
-  store i64 %t145910, ptr %t145911
-  %t145912 = call i64 @sprout_gc_push_i64_root(ptr %t145911)
-  %t145928 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t145928
-  %t145929 = call i64 @sprout_gc_push_i64_root(ptr %t145928)
-  %t145930 = add i64 16, 0
-  %t145931 = call i64 @sprout_alloc_closure_env(i64 %t145930)
-  %t145932 = inttoptr i64 %t145931 to ptr
-  store ptr @__sprout_lambda_1612___tc_ToString_List_a_to_string, ptr %t145932
-  %t145933 = getelementptr i64, ptr %t145932, i64 1
-  store i64 %__tc_ToString_0_to_string, ptr %t145933
-  %t145934 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145935 = alloca ptr
-  store ptr %t145932, ptr %t145935
-  %t145936 = call i64 @sprout_gc_push_ptr_root(ptr %t145935)
-  %t145937 = alloca i64
-  store i64 %xs, ptr %t145937
-  %t145938 = call i64 @sprout_gc_push_i64_root(ptr %t145937)
-  %t145939 = call i64 @list_map(ptr %t145932, i64 %xs)
-  %t145940 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145941 = alloca i64
-  store i64 %t145939, ptr %t145941
-  %t145942 = call i64 @sprout_gc_push_i64_root(ptr %t145941)
-  %t145943 = getelementptr inbounds [1 x i8], ptr @.str.2785, i64 0, i64 0
-  %t145944 = ptrtoint ptr %t145943 to i64
-  %t145945 = alloca i64
-  store i64 %t145944, ptr %t145945
-  %t145946 = call i64 @sprout_gc_push_i64_root(ptr %t145945)
-  %t145947 = call i64 @list_to_string_go(i64 %t145939, i64 %t145944)
-  %t145948 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145949 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145950 = call i64 @str_concat(i64 %t145910, i64 %t145947)
-  %t145951 = alloca i64
-  store i64 %t145950, ptr %t145951
-  %t145952 = call i64 @sprout_gc_push_i64_root(ptr %t145951)
-  %t145953 = getelementptr inbounds [2 x i8], ptr @.str.2786, i64 0, i64 0
-  %t145954 = ptrtoint ptr %t145953 to i64
-  %t145955 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145956 = call i64 @str_concat(i64 %t145950, i64 %t145954)
-  %t145957 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t145956
+  %t145940 = alloca i64
+  store i64 %xs, ptr %t145940
+  %t145941 = call i64 @sprout_gc_push_i64_root(ptr %t145940)
+  %t145942 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t145942
+  %t145943 = call i64 @sprout_gc_push_i64_root(ptr %t145942)
+  %t145944 = getelementptr inbounds [2 x i8], ptr @.str.2787, i64 0, i64 0
+  %t145945 = ptrtoint ptr %t145944 to i64
+  %t145946 = alloca i64
+  store i64 %t145945, ptr %t145946
+  %t145947 = call i64 @sprout_gc_push_i64_root(ptr %t145946)
+  %t145963 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t145963
+  %t145964 = call i64 @sprout_gc_push_i64_root(ptr %t145963)
+  %t145965 = add i64 16, 0
+  %t145966 = call i64 @sprout_alloc_closure_env(i64 %t145965)
+  %t145967 = inttoptr i64 %t145966 to ptr
+  store ptr @__sprout_lambda_1613___tc_ToString_List_a_to_string, ptr %t145967
+  %t145968 = getelementptr i64, ptr %t145967, i64 1
+  store i64 %__tc_ToString_0_to_string, ptr %t145968
+  %t145969 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145970 = alloca ptr
+  store ptr %t145967, ptr %t145970
+  %t145971 = call i64 @sprout_gc_push_ptr_root(ptr %t145970)
+  %t145972 = alloca i64
+  store i64 %xs, ptr %t145972
+  %t145973 = call i64 @sprout_gc_push_i64_root(ptr %t145972)
+  %t145974 = call i64 @list_map(ptr %t145967, i64 %xs)
+  %t145975 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145976 = alloca i64
+  store i64 %t145974, ptr %t145976
+  %t145977 = call i64 @sprout_gc_push_i64_root(ptr %t145976)
+  %t145978 = getelementptr inbounds [1 x i8], ptr @.str.2788, i64 0, i64 0
+  %t145979 = ptrtoint ptr %t145978 to i64
+  %t145980 = alloca i64
+  store i64 %t145979, ptr %t145980
+  %t145981 = call i64 @sprout_gc_push_i64_root(ptr %t145980)
+  %t145982 = call i64 @list_to_string_go(i64 %t145974, i64 %t145979)
+  %t145983 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145984 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145985 = call i64 @str_concat(i64 %t145945, i64 %t145982)
+  %t145986 = alloca i64
+  store i64 %t145985, ptr %t145986
+  %t145987 = call i64 @sprout_gc_push_i64_root(ptr %t145986)
+  %t145988 = getelementptr inbounds [2 x i8], ptr @.str.2789, i64 0, i64 0
+  %t145989 = ptrtoint ptr %t145988 to i64
+  %t145990 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t145991 = call i64 @str_concat(i64 %t145985, i64 %t145989)
+  %t145992 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t145991
 }
 
 define i64 @__tc_ToString_Result_e_a_to_string(i64 %x, i64 %__tc_ToString_0_to_string, i64 %__tc_ToString_1_to_string) {
 entry:
-  %t145958 = alloca i64
-  store i64 %x, ptr %t145958
-  %t145959 = call i64 @sprout_gc_push_i64_root(ptr %t145958)
-  %t145960 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t145960
-  %t145961 = call i64 @sprout_gc_push_i64_root(ptr %t145960)
-  %t145962 = alloca i64
-  store i64 %__tc_ToString_1_to_string, ptr %t145962
-  %t145963 = call i64 @sprout_gc_push_i64_root(ptr %t145962)
-  %t145964 = call i64 @sprout_tag(i64 %x)
-  %t145965 = icmp eq i64 %t145964, 7
-  br i1 %t145965, label %ctor_chk19917, label %ctor_miss19918
+  %t145993 = alloca i64
+  store i64 %x, ptr %t145993
+  %t145994 = call i64 @sprout_gc_push_i64_root(ptr %t145993)
+  %t145995 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t145995
+  %t145996 = call i64 @sprout_gc_push_i64_root(ptr %t145995)
+  %t145997 = alloca i64
+  store i64 %__tc_ToString_1_to_string, ptr %t145997
+  %t145998 = call i64 @sprout_gc_push_i64_root(ptr %t145997)
+  %t145999 = call i64 @sprout_tag(i64 %x)
+  %t146000 = icmp eq i64 %t145999, 7
+  br i1 %t146000, label %ctor_chk19917, label %ctor_miss19918
 ctor_chk19917:
-  %t145966 = call i64 @sprout_field(i64 %x, i64 0)
+  %t146001 = call i64 @sprout_field(i64 %x, i64 0)
   br i1 1, label %ctor_next19920, label %ctor_miss19918
 ctor_next19920:
   br label %ctor_done19919
 ctor_miss19918:
   br label %ctor_done19919
 ctor_done19919:
-  %t145967 = phi i1 [ 1, %ctor_next19920 ], [ 0, %ctor_miss19918 ]
-  br i1 %t145967, label %match_br19915, label %match_next19916
+  %t146002 = phi i1 [ 1, %ctor_next19920 ], [ 0, %ctor_miss19918 ]
+  br i1 %t146002, label %match_br19915, label %match_next19916
 match_br19915:
-  %t145968 = call i64 @sprout_field(i64 %x, i64 0)
-  %t145969 = alloca i64
-  store i64 %t145968, ptr %t145969
-  %t145970 = call i64 @sprout_gc_push_i64_root(ptr %t145969)
-  %t145971 = getelementptr inbounds [4 x i8], ptr @.str.2787, i64 0, i64 0
-  %t145972 = ptrtoint ptr %t145971 to i64
-  %t145973 = alloca i64
-  store i64 %t145972, ptr %t145973
-  %t145974 = call i64 @sprout_gc_push_i64_root(ptr %t145973)
-  %t145975 = alloca i64
-  store i64 %t145968, ptr %t145975
-  %t145976 = call i64 @sprout_gc_push_i64_root(ptr %t145975)
-  %t145977 = alloca i64
-  store i64 %__tc_ToString_1_to_string, ptr %t145977
-  %t145978 = call i64 @sprout_gc_push_i64_root(ptr %t145977)
-  %t145979 = call i64 @to_string(i64 %t145968, i64 %__tc_ToString_1_to_string)
-  %t145980 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145981 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145982 = call i64 @str_concat(i64 %t145972, i64 %t145979)
-  %t145983 = alloca i64
-  store i64 %t145982, ptr %t145983
-  %t145984 = call i64 @sprout_gc_push_i64_root(ptr %t145983)
-  %t145985 = getelementptr inbounds [2 x i8], ptr @.str.2788, i64 0, i64 0
-  %t145986 = ptrtoint ptr %t145985 to i64
-  %t145987 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t145988 = call i64 @str_concat(i64 %t145982, i64 %t145986)
-  %t145989 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146003 = call i64 @sprout_field(i64 %x, i64 0)
+  %t146004 = alloca i64
+  store i64 %t146003, ptr %t146004
+  %t146005 = call i64 @sprout_gc_push_i64_root(ptr %t146004)
+  %t146006 = getelementptr inbounds [4 x i8], ptr @.str.2790, i64 0, i64 0
+  %t146007 = ptrtoint ptr %t146006 to i64
+  %t146008 = alloca i64
+  store i64 %t146007, ptr %t146008
+  %t146009 = call i64 @sprout_gc_push_i64_root(ptr %t146008)
+  %t146010 = alloca i64
+  store i64 %t146003, ptr %t146010
+  %t146011 = call i64 @sprout_gc_push_i64_root(ptr %t146010)
+  %t146012 = alloca i64
+  store i64 %__tc_ToString_1_to_string, ptr %t146012
+  %t146013 = call i64 @sprout_gc_push_i64_root(ptr %t146012)
+  %t146014 = call i64 @to_string(i64 %t146003, i64 %__tc_ToString_1_to_string)
+  %t146015 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t146016 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146017 = call i64 @str_concat(i64 %t146007, i64 %t146014)
+  %t146018 = alloca i64
+  store i64 %t146017, ptr %t146018
+  %t146019 = call i64 @sprout_gc_push_i64_root(ptr %t146018)
+  %t146020 = getelementptr inbounds [2 x i8], ptr @.str.2791, i64 0, i64 0
+  %t146021 = ptrtoint ptr %t146020 to i64
+  %t146022 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146023 = call i64 @str_concat(i64 %t146017, i64 %t146021)
+  %t146024 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %match_done19914
 match_next19916:
-  %t145990 = call i64 @sprout_tag(i64 %x)
-  %t145991 = icmp eq i64 %t145990, 8
-  br i1 %t145991, label %ctor_chk19923, label %ctor_miss19924
+  %t146025 = call i64 @sprout_tag(i64 %x)
+  %t146026 = icmp eq i64 %t146025, 8
+  br i1 %t146026, label %ctor_chk19923, label %ctor_miss19924
 ctor_chk19923:
-  %t145992 = call i64 @sprout_field(i64 %x, i64 0)
+  %t146027 = call i64 @sprout_field(i64 %x, i64 0)
   br i1 1, label %ctor_next19926, label %ctor_miss19924
 ctor_next19926:
   br label %ctor_done19925
 ctor_miss19924:
   br label %ctor_done19925
 ctor_done19925:
-  %t145993 = phi i1 [ 1, %ctor_next19926 ], [ 0, %ctor_miss19924 ]
-  br i1 %t145993, label %match_br19921, label %match_next19922
+  %t146028 = phi i1 [ 1, %ctor_next19926 ], [ 0, %ctor_miss19924 ]
+  br i1 %t146028, label %match_br19921, label %match_next19922
 match_br19921:
-  %t145994 = call i64 @sprout_field(i64 %x, i64 0)
-  %t145995 = alloca i64
-  store i64 %t145994, ptr %t145995
-  %t145996 = call i64 @sprout_gc_push_i64_root(ptr %t145995)
-  %t145997 = getelementptr inbounds [5 x i8], ptr @.str.2789, i64 0, i64 0
-  %t145998 = ptrtoint ptr %t145997 to i64
-  %t145999 = alloca i64
-  store i64 %t145998, ptr %t145999
-  %t146000 = call i64 @sprout_gc_push_i64_root(ptr %t145999)
-  %t146001 = alloca i64
-  store i64 %t145994, ptr %t146001
-  %t146002 = call i64 @sprout_gc_push_i64_root(ptr %t146001)
-  %t146003 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t146003
-  %t146004 = call i64 @sprout_gc_push_i64_root(ptr %t146003)
-  %t146005 = call i64 @to_string(i64 %t145994, i64 %__tc_ToString_0_to_string)
-  %t146006 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t146007 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146008 = call i64 @str_concat(i64 %t145998, i64 %t146005)
-  %t146009 = alloca i64
-  store i64 %t146008, ptr %t146009
-  %t146010 = call i64 @sprout_gc_push_i64_root(ptr %t146009)
-  %t146011 = getelementptr inbounds [2 x i8], ptr @.str.2790, i64 0, i64 0
-  %t146012 = ptrtoint ptr %t146011 to i64
-  %t146013 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146014 = call i64 @str_concat(i64 %t146008, i64 %t146012)
-  %t146015 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146029 = call i64 @sprout_field(i64 %x, i64 0)
+  %t146030 = alloca i64
+  store i64 %t146029, ptr %t146030
+  %t146031 = call i64 @sprout_gc_push_i64_root(ptr %t146030)
+  %t146032 = getelementptr inbounds [5 x i8], ptr @.str.2792, i64 0, i64 0
+  %t146033 = ptrtoint ptr %t146032 to i64
+  %t146034 = alloca i64
+  store i64 %t146033, ptr %t146034
+  %t146035 = call i64 @sprout_gc_push_i64_root(ptr %t146034)
+  %t146036 = alloca i64
+  store i64 %t146029, ptr %t146036
+  %t146037 = call i64 @sprout_gc_push_i64_root(ptr %t146036)
+  %t146038 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t146038
+  %t146039 = call i64 @sprout_gc_push_i64_root(ptr %t146038)
+  %t146040 = call i64 @to_string(i64 %t146029, i64 %__tc_ToString_0_to_string)
+  %t146041 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t146042 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146043 = call i64 @str_concat(i64 %t146033, i64 %t146040)
+  %t146044 = alloca i64
+  store i64 %t146043, ptr %t146044
+  %t146045 = call i64 @sprout_gc_push_i64_root(ptr %t146044)
+  %t146046 = getelementptr inbounds [2 x i8], ptr @.str.2793, i64 0, i64 0
+  %t146047 = ptrtoint ptr %t146046 to i64
+  %t146048 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146049 = call i64 @str_concat(i64 %t146043, i64 %t146047)
+  %t146050 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %match_done19914
 match_next19922:
-  %t146016 = call i64 @sprout_abort_match()
+  %t146051 = call i64 @sprout_abort_match()
   unreachable
 match_done19914:
-  %t146017 = phi i64 [ %t145988, %match_br19915 ], [ %t146014, %match_br19921 ]
-  %t146018 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %t146017
+  %t146052 = phi i64 [ %t146023, %match_br19915 ], [ %t146049, %match_br19921 ]
+  %t146053 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t146052
 }
 
 define i64 @__tc_ToString_Vec_a_to_string(i64 %vec, i64 %__tc_ToString_0_to_string) {
 entry:
-  %t146019 = alloca i64
-  store i64 %vec, ptr %t146019
-  %t146020 = call i64 @sprout_gc_push_i64_root(ptr %t146019)
-  %t146021 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t146021
-  %t146022 = call i64 @sprout_gc_push_i64_root(ptr %t146021)
-  %t146023 = getelementptr inbounds [2 x i8], ptr @.str.2791, i64 0, i64 0
-  %t146024 = ptrtoint ptr %t146023 to i64
-  %t146025 = alloca i64
-  store i64 %t146024, ptr %t146025
-  %t146026 = call i64 @sprout_gc_push_i64_root(ptr %t146025)
-  %t146027 = alloca i64
-  store i64 %vec, ptr %t146027
-  %t146028 = call i64 @sprout_gc_push_i64_root(ptr %t146027)
-  %t146029 = alloca i64
-  store i64 %vec, ptr %t146029
-  %t146030 = call i64 @sprout_gc_push_i64_root(ptr %t146029)
-  %t146031 = call i64 @vec_length(i64 %vec)
-  %t146032 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146033 = getelementptr inbounds [1 x i8], ptr @.str.2792, i64 0, i64 0
-  %t146034 = ptrtoint ptr %t146033 to i64
-  %t146035 = alloca i64
-  store i64 %t146034, ptr %t146035
-  %t146036 = call i64 @sprout_gc_push_i64_root(ptr %t146035)
-  %t146037 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t146037
-  %t146038 = call i64 @sprout_gc_push_i64_root(ptr %t146037)
-  %t146039 = call i64 @vec_to_string_go(i64 %vec, i64 0, i64 %t146031, i64 %t146034, i64 %__tc_ToString_0_to_string)
-  %t146040 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t146041 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146042 = call i64 @str_concat(i64 %t146024, i64 %t146039)
-  %t146043 = alloca i64
-  store i64 %t146042, ptr %t146043
-  %t146044 = call i64 @sprout_gc_push_i64_root(ptr %t146043)
-  %t146045 = getelementptr inbounds [2 x i8], ptr @.str.2793, i64 0, i64 0
-  %t146046 = ptrtoint ptr %t146045 to i64
-  %t146047 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146048 = call i64 @str_concat(i64 %t146042, i64 %t146046)
-  %t146049 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t146048
+  %t146054 = alloca i64
+  store i64 %vec, ptr %t146054
+  %t146055 = call i64 @sprout_gc_push_i64_root(ptr %t146054)
+  %t146056 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t146056
+  %t146057 = call i64 @sprout_gc_push_i64_root(ptr %t146056)
+  %t146058 = getelementptr inbounds [2 x i8], ptr @.str.2794, i64 0, i64 0
+  %t146059 = ptrtoint ptr %t146058 to i64
+  %t146060 = alloca i64
+  store i64 %t146059, ptr %t146060
+  %t146061 = call i64 @sprout_gc_push_i64_root(ptr %t146060)
+  %t146062 = alloca i64
+  store i64 %vec, ptr %t146062
+  %t146063 = call i64 @sprout_gc_push_i64_root(ptr %t146062)
+  %t146064 = alloca i64
+  store i64 %vec, ptr %t146064
+  %t146065 = call i64 @sprout_gc_push_i64_root(ptr %t146064)
+  %t146066 = call i64 @vec_length(i64 %vec)
+  %t146067 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146068 = getelementptr inbounds [1 x i8], ptr @.str.2795, i64 0, i64 0
+  %t146069 = ptrtoint ptr %t146068 to i64
+  %t146070 = alloca i64
+  store i64 %t146069, ptr %t146070
+  %t146071 = call i64 @sprout_gc_push_i64_root(ptr %t146070)
+  %t146072 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t146072
+  %t146073 = call i64 @sprout_gc_push_i64_root(ptr %t146072)
+  %t146074 = call i64 @vec_to_string_go(i64 %vec, i64 0, i64 %t146066, i64 %t146069, i64 %__tc_ToString_0_to_string)
+  %t146075 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t146076 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146077 = call i64 @str_concat(i64 %t146059, i64 %t146074)
+  %t146078 = alloca i64
+  store i64 %t146077, ptr %t146078
+  %t146079 = call i64 @sprout_gc_push_i64_root(ptr %t146078)
+  %t146080 = getelementptr inbounds [2 x i8], ptr @.str.2796, i64 0, i64 0
+  %t146081 = ptrtoint ptr %t146080 to i64
+  %t146082 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146083 = call i64 @str_concat(i64 %t146077, i64 %t146081)
+  %t146084 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t146083
 }
 
 define i64 @__tc_ToString_Dict_v_to_string(i64 %dict, i64 %__tc_ToString_0_to_string) {
 entry:
-  %t146050 = alloca i64
-  store i64 %dict, ptr %t146050
-  %t146051 = call i64 @sprout_gc_push_i64_root(ptr %t146050)
-  %t146052 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t146052
-  %t146053 = call i64 @sprout_gc_push_i64_root(ptr %t146052)
-  %t146054 = getelementptr inbounds [2 x i8], ptr @.str.2794, i64 0, i64 0
-  %t146055 = ptrtoint ptr %t146054 to i64
-  %t146056 = alloca i64
-  store i64 %t146055, ptr %t146056
-  %t146057 = call i64 @sprout_gc_push_i64_root(ptr %t146056)
-  %t146058 = alloca i64
-  store i64 %dict, ptr %t146058
-  %t146059 = call i64 @sprout_gc_push_i64_root(ptr %t146058)
-  %t146060 = call i64 @dict_entries(i64 %dict)
-  %t146061 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146062 = alloca i64
-  store i64 %t146060, ptr %t146062
-  %t146063 = call i64 @sprout_gc_push_i64_root(ptr %t146062)
-  %t146064 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t146064
-  %t146065 = call i64 @sprout_gc_push_i64_root(ptr %t146064)
-  %t146066 = call i64 @dict_entries_to_string(i64 %t146060, i64 %__tc_ToString_0_to_string)
-  %t146067 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t146068 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146069 = call i64 @str_concat(i64 %t146055, i64 %t146066)
-  %t146070 = alloca i64
-  store i64 %t146069, ptr %t146070
-  %t146071 = call i64 @sprout_gc_push_i64_root(ptr %t146070)
-  %t146072 = getelementptr inbounds [2 x i8], ptr @.str.2795, i64 0, i64 0
-  %t146073 = ptrtoint ptr %t146072 to i64
-  %t146074 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146075 = call i64 @str_concat(i64 %t146069, i64 %t146073)
-  %t146076 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t146075
+  %t146085 = alloca i64
+  store i64 %dict, ptr %t146085
+  %t146086 = call i64 @sprout_gc_push_i64_root(ptr %t146085)
+  %t146087 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t146087
+  %t146088 = call i64 @sprout_gc_push_i64_root(ptr %t146087)
+  %t146089 = getelementptr inbounds [2 x i8], ptr @.str.2797, i64 0, i64 0
+  %t146090 = ptrtoint ptr %t146089 to i64
+  %t146091 = alloca i64
+  store i64 %t146090, ptr %t146091
+  %t146092 = call i64 @sprout_gc_push_i64_root(ptr %t146091)
+  %t146093 = alloca i64
+  store i64 %dict, ptr %t146093
+  %t146094 = call i64 @sprout_gc_push_i64_root(ptr %t146093)
+  %t146095 = call i64 @dict_entries(i64 %dict)
+  %t146096 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146097 = alloca i64
+  store i64 %t146095, ptr %t146097
+  %t146098 = call i64 @sprout_gc_push_i64_root(ptr %t146097)
+  %t146099 = alloca i64
+  store i64 %__tc_ToString_0_to_string, ptr %t146099
+  %t146100 = call i64 @sprout_gc_push_i64_root(ptr %t146099)
+  %t146101 = call i64 @dict_entries_to_string(i64 %t146095, i64 %__tc_ToString_0_to_string)
+  %t146102 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t146103 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146104 = call i64 @str_concat(i64 %t146090, i64 %t146101)
+  %t146105 = alloca i64
+  store i64 %t146104, ptr %t146105
+  %t146106 = call i64 @sprout_gc_push_i64_root(ptr %t146105)
+  %t146107 = getelementptr inbounds [2 x i8], ptr @.str.2798, i64 0, i64 0
+  %t146108 = ptrtoint ptr %t146107 to i64
+  %t146109 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146110 = call i64 @str_concat(i64 %t146104, i64 %t146108)
+  %t146111 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t146110
 }
 
 define i1 @__tc_Eq_Effect_eq(i64 %left, i64 %right) {
 entry:
-  %t146077 = alloca i64
-  store i64 %left, ptr %t146077
-  %t146078 = call i64 @sprout_gc_push_i64_root(ptr %t146077)
-  %t146079 = alloca i64
-  store i64 %right, ptr %t146079
-  %t146080 = call i64 @sprout_gc_push_i64_root(ptr %t146079)
-  %t146081 = alloca i64
-  store i64 %left, ptr %t146081
-  %t146082 = call i64 @sprout_gc_push_i64_root(ptr %t146081)
-  %t146083 = alloca i64
-  store i64 %right, ptr %t146083
-  %t146084 = call i64 @sprout_gc_push_i64_root(ptr %t146083)
-  %t146085 = call i1 @stdlib.compiler.types.effect_eq(i64 %left, i64 %right)
-  %t146086 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t146087 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i1 %t146085
+  %t146112 = alloca i64
+  store i64 %left, ptr %t146112
+  %t146113 = call i64 @sprout_gc_push_i64_root(ptr %t146112)
+  %t146114 = alloca i64
+  store i64 %right, ptr %t146114
+  %t146115 = call i64 @sprout_gc_push_i64_root(ptr %t146114)
+  %t146116 = alloca i64
+  store i64 %left, ptr %t146116
+  %t146117 = call i64 @sprout_gc_push_i64_root(ptr %t146116)
+  %t146118 = alloca i64
+  store i64 %right, ptr %t146118
+  %t146119 = call i64 @sprout_gc_push_i64_root(ptr %t146118)
+  %t146120 = call i1 @stdlib.compiler.types.effect_eq(i64 %left, i64 %right)
+  %t146121 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t146122 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i1 %t146120
 }
 
 define i1 @__tc_Eq_Type_eq(i64 %left, i64 %right) {
 entry:
-  %t146088 = alloca i64
-  store i64 %left, ptr %t146088
-  %t146089 = call i64 @sprout_gc_push_i64_root(ptr %t146088)
-  %t146090 = alloca i64
-  store i64 %right, ptr %t146090
-  %t146091 = call i64 @sprout_gc_push_i64_root(ptr %t146090)
-  %t146092 = alloca i64
-  store i64 %left, ptr %t146092
-  %t146093 = call i64 @sprout_gc_push_i64_root(ptr %t146092)
-  %t146094 = alloca i64
-  store i64 %right, ptr %t146094
-  %t146095 = call i64 @sprout_gc_push_i64_root(ptr %t146094)
-  %t146096 = call i1 @stdlib.compiler.types.type_eq(i64 %left, i64 %right)
-  %t146097 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t146098 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i1 %t146096
+  %t146123 = alloca i64
+  store i64 %left, ptr %t146123
+  %t146124 = call i64 @sprout_gc_push_i64_root(ptr %t146123)
+  %t146125 = alloca i64
+  store i64 %right, ptr %t146125
+  %t146126 = call i64 @sprout_gc_push_i64_root(ptr %t146125)
+  %t146127 = alloca i64
+  store i64 %left, ptr %t146127
+  %t146128 = call i64 @sprout_gc_push_i64_root(ptr %t146127)
+  %t146129 = alloca i64
+  store i64 %right, ptr %t146129
+  %t146130 = call i64 @sprout_gc_push_i64_root(ptr %t146129)
+  %t146131 = call i1 @stdlib.compiler.types.type_eq(i64 %left, i64 %right)
+  %t146132 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t146133 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i1 %t146131
 }
 
 define i64 @__tc_ToString_Effect_to_string(i64 %e) {
 entry:
-  %t146099 = alloca i64
-  store i64 %e, ptr %t146099
-  %t146100 = call i64 @sprout_gc_push_i64_root(ptr %t146099)
-  %t146101 = alloca i64
-  store i64 %e, ptr %t146101
-  %t146102 = call i64 @sprout_gc_push_i64_root(ptr %t146101)
-  %t146103 = call i64 @stdlib.compiler.types.effect_to_string(i64 %e)
-  %t146104 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146105 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t146103
+  %t146134 = alloca i64
+  store i64 %e, ptr %t146134
+  %t146135 = call i64 @sprout_gc_push_i64_root(ptr %t146134)
+  %t146136 = alloca i64
+  store i64 %e, ptr %t146136
+  %t146137 = call i64 @sprout_gc_push_i64_root(ptr %t146136)
+  %t146138 = call i64 @stdlib.compiler.types.effect_to_string(i64 %e)
+  %t146139 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146140 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t146138
 }
 
 define i64 @__tc_ToString_Type_to_string(i64 %t) {
 entry:
-  %t146106 = alloca i64
-  store i64 %t, ptr %t146106
-  %t146107 = call i64 @sprout_gc_push_i64_root(ptr %t146106)
-  %t146108 = alloca i64
-  store i64 %t, ptr %t146108
-  %t146109 = call i64 @sprout_gc_push_i64_root(ptr %t146108)
-  %t146110 = call i64 @stdlib.compiler.types.type_to_string(i64 %t)
-  %t146111 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t146112 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t146110
+  %t146141 = alloca i64
+  store i64 %t, ptr %t146141
+  %t146142 = call i64 @sprout_gc_push_i64_root(ptr %t146141)
+  %t146143 = alloca i64
+  store i64 %t, ptr %t146143
+  %t146144 = call i64 @sprout_gc_push_i64_root(ptr %t146143)
+  %t146145 = call i64 @stdlib.compiler.types.type_to_string(i64 %t)
+  %t146146 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t146147 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t146145
 }
 
 @.str.0 = private unnamed_addr constant [5 x i8] c"Cons\00"
@@ -228459,22 +228506,25 @@ entry:
 @.str.2777 = private unnamed_addr constant [164 x i8] c"ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name>] <stdlib-root> <file>...\00"
 @.str.2778 = private unnamed_addr constant [5 x i8] c"true\00"
 @.str.2779 = private unnamed_addr constant [6 x i8] c"false\00"
-@.str.2780 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.2781 = private unnamed_addr constant [8 x i8] c"Nothing\00"
-@.str.2782 = private unnamed_addr constant [6 x i8] c"Just(\00"
-@.str.2783 = private unnamed_addr constant [2 x i8] c")\00"
-@.str.2784 = private unnamed_addr constant [2 x i8] c"[\00"
-@.str.2785 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.2786 = private unnamed_addr constant [2 x i8] c"]\00"
-@.str.2787 = private unnamed_addr constant [4 x i8] c"Ok(\00"
-@.str.2788 = private unnamed_addr constant [2 x i8] c")\00"
-@.str.2789 = private unnamed_addr constant [5 x i8] c"Err(\00"
-@.str.2790 = private unnamed_addr constant [2 x i8] c")\00"
-@.str.2791 = private unnamed_addr constant [2 x i8] c"[\00"
-@.str.2792 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.2793 = private unnamed_addr constant [2 x i8] c"]\00"
-@.str.2794 = private unnamed_addr constant [2 x i8] c"{\00"
-@.str.2795 = private unnamed_addr constant [2 x i8] c"}\00"
+@.str.2780 = private unnamed_addr constant [10 x i8] c"IntRange(\00"
+@.str.2781 = private unnamed_addr constant [3 x i8] c", \00"
+@.str.2782 = private unnamed_addr constant [2 x i8] c")\00"
+@.str.2783 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.2784 = private unnamed_addr constant [8 x i8] c"Nothing\00"
+@.str.2785 = private unnamed_addr constant [6 x i8] c"Just(\00"
+@.str.2786 = private unnamed_addr constant [2 x i8] c")\00"
+@.str.2787 = private unnamed_addr constant [2 x i8] c"[\00"
+@.str.2788 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.2789 = private unnamed_addr constant [2 x i8] c"]\00"
+@.str.2790 = private unnamed_addr constant [4 x i8] c"Ok(\00"
+@.str.2791 = private unnamed_addr constant [2 x i8] c")\00"
+@.str.2792 = private unnamed_addr constant [5 x i8] c"Err(\00"
+@.str.2793 = private unnamed_addr constant [2 x i8] c")\00"
+@.str.2794 = private unnamed_addr constant [2 x i8] c"[\00"
+@.str.2795 = private unnamed_addr constant [1 x i8] c"\00"
+@.str.2796 = private unnamed_addr constant [2 x i8] c"]\00"
+@.str.2797 = private unnamed_addr constant [2 x i8] c"{\00"
+@.str.2798 = private unnamed_addr constant [2 x i8] c"}\00"
 define i64 @__sprout_fn_closure_0(ptr %env, i64 %a0) {
 entry:
   %ret = call i64 @template_to_string(i64 %a0)
@@ -237337,146 +237387,152 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1477(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1477(ptr %env, i64 %a0) {
 entry:
-  %ret = call i64 @__tc_Ord_Int_compare(i64 %a0, i64 %a1)
+  %ret = call i64 @__tc_ToString_IntRange_to_string(i64 %a0)
   ret i64 %ret
 }
 
 define i64 @__sprout_fn_closure_1478(ptr %env, i64 %a0, i64 %a1) {
 entry:
-  %ret = call i64 @__tc_Ord_Bool_compare(i64 %a0, i64 %a1)
+  %ret = call i64 @__tc_Ord_Int_compare(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
 define i64 @__sprout_fn_closure_1479(ptr %env, i64 %a0, i64 %a1) {
 entry:
-  %ret = call i64 @__tc_Ord_String_compare(i64 %a0, i64 %a1)
+  %ret = call i64 @__tc_Ord_Bool_compare(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
 define i64 @__sprout_fn_closure_1480(ptr %env, i64 %a0, i64 %a1) {
 entry:
-  %ret = call i64 @__tc_Semigroup_List_a_append(i64 %a0, i64 %a1)
+  %ret = call i64 @__tc_Ord_String_compare(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1481(ptr %env) {
+define i64 @__sprout_fn_closure_1481(ptr %env, i64 %a0, i64 %a1) {
 entry:
-  %ret = call i64 @__tc_Monoid_String_empty()
+  %ret = call i64 @__tc_Semigroup_List_a_append(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
 define i64 @__sprout_fn_closure_1482(ptr %env) {
 entry:
-  %ret = call i64 @__tc_Monoid_List_a_empty()
+  %ret = call i64 @__tc_Monoid_String_empty()
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1483(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1483(ptr %env) {
 entry:
-  %ret = call i64 @__tc_Functor_List_fmap(i64 %a0, i64 %a1)
+  %ret = call i64 @__tc_Monoid_List_a_empty()
   ret i64 %ret
 }
 
 define i64 @__sprout_fn_closure_1484(ptr %env, i64 %a0, i64 %a1) {
 entry:
+  %ret = call i64 @__tc_Functor_List_fmap(i64 %a0, i64 %a1)
+  ret i64 %ret
+}
+
+define i64 @__sprout_fn_closure_1485(ptr %env, i64 %a0, i64 %a1) {
+entry:
   %ret = call i64 @__tc_Functor_Maybe_fmap(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1485(ptr %env, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_fn_closure_1486(ptr %env, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %ret = call i64 @__tc_Foldable_List_fold_values(i64 %a0, i64 %a1, i64 %a2)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1486(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1487(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_Functor_Vec_fmap(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1487(ptr %env, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_fn_closure_1488(ptr %env, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %ret = call i64 @__tc_Foldable_Vec_fold_values(i64 %a0, i64 %a1, i64 %a2)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1488(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1489(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_Semigroup_Vec_a_append(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1489(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1490(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_Semigroup_Dict_v_append(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1490(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1491(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_ToString_Maybe_a_to_string(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1491(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1492(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_ToString_List_a_to_string(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1492(ptr %env, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_fn_closure_1493(ptr %env, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %ret = call i64 @__tc_ToString_Result_e_a_to_string(i64 %a0, i64 %a1, i64 %a2)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1493(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1494(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_ToString_Vec_a_to_string(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1494(ptr %env, i64 %a0, i64 %a1) {
+define i64 @__sprout_fn_closure_1495(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_ToString_Dict_v_to_string(i64 %a0, i64 %a1)
   ret i64 %ret
 }
 
-define i1 @__sprout_fn_closure_1495(ptr %env, i64 %a0, i64 %a1) {
+define i1 @__sprout_fn_closure_1496(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i1 @__tc_Eq_Effect_eq(i64 %a0, i64 %a1)
   ret i1 %ret
 }
 
-define i1 @__sprout_fn_closure_1496(ptr %env, i64 %a0, i64 %a1) {
+define i1 @__sprout_fn_closure_1497(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %ret = call i1 @__tc_Eq_Type_eq(i64 %a0, i64 %a1)
   ret i1 %ret
 }
 
-define i64 @__sprout_fn_closure_1497(ptr %env, i64 %a0) {
+define i64 @__sprout_fn_closure_1498(ptr %env, i64 %a0) {
 entry:
   %ret = call i64 @__tc_ToString_Effect_to_string(i64 %a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1498(ptr %env, i64 %a0) {
+define i64 @__sprout_fn_closure_1499(ptr %env, i64 %a0) {
 entry:
   %ret = call i64 @__tc_ToString_Type_to_string(i64 %a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_fn_closure_1499(ptr %env, i64 %a0) {
+define i64 @__sprout_fn_closure_1500(ptr %env, i64 %a0) {
 entry:
   %ret = call i64 @parse_int(i64 %a0)
   ret i64 %ret
 }
 
-; __sprout_lambda_1500_vec_sum_by (in vec_sum_by)
-define i64 @__sprout_lambda_1500_vec_sum_by(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1501_vec_sum_by (in vec_sum_by)
+define i64 @__sprout_lambda_1501_vec_sum_by(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t1687 = alloca ptr
   store ptr %env, ptr %t1687
@@ -237508,8 +237564,8 @@ entry:
   ret i64 %t1706
 }
 
-; __sprout_lambda_1501_vec_sort (in vec_sort)
-define i64 @__sprout_lambda_1501_vec_sort(ptr %env, i64 %a0) {
+; __sprout_lambda_1502_vec_sort (in vec_sort)
+define i64 @__sprout_lambda_1502_vec_sort(ptr %env, i64 %a0) {
 entry:
   %t2850 = alloca ptr
   store ptr %env, ptr %t2850
@@ -237521,8 +237577,8 @@ entry:
   ret i64 %a0
 }
 
-; __sprout_lambda_1502_fold_indexed (in fold_indexed)
-define i64 @__sprout_lambda_1502_fold_indexed(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1503_fold_indexed (in fold_indexed)
+define i64 @__sprout_lambda_1503_fold_indexed(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t3454 = alloca ptr
   store ptr %env, ptr %t3454
@@ -237599,8 +237655,8 @@ match_done550:
   ret i64 %t3504
 }
 
-; __sprout_lambda_1503_mconcat (in mconcat)
-define i64 @__sprout_lambda_1503_mconcat(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1504_mconcat (in mconcat)
+define i64 @__sprout_lambda_1504_mconcat(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t3564 = alloca ptr
   store ptr %env, ptr %t3564
@@ -237620,8 +237676,8 @@ entry:
   ret i64 0
 }
 
-; __sprout_lambda_1504_foldable_to_vec (in foldable_to_vec)
-define i64 @__sprout_lambda_1504_foldable_to_vec(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1505_foldable_to_vec (in foldable_to_vec)
+define i64 @__sprout_lambda_1505_foldable_to_vec(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t3934 = alloca ptr
   store ptr %env, ptr %t3934
@@ -237651,8 +237707,8 @@ entry:
   ret i64 %t3948
 }
 
-; __sprout_lambda_1505_stdlib.string.find (in stdlib.string.find)
-define i64 @__sprout_lambda_1505_stdlib.string.find(ptr %env, i64 %a0) {
+; __sprout_lambda_1506_stdlib.string.find (in stdlib.string.find)
+define i64 @__sprout_lambda_1506_stdlib.string.find(ptr %env, i64 %a0) {
 entry:
   %t4851 = alloca ptr
   store ptr %env, ptr %t4851
@@ -237678,8 +237734,8 @@ if_done808:
   ret i64 %t4861
 }
 
-; __sprout_lambda_1506_stdlib.string.join (in stdlib.string.join)
-define i64 @__sprout_lambda_1506_stdlib.string.join(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1507_stdlib.string.join (in stdlib.string.join)
+define i64 @__sprout_lambda_1507_stdlib.string.join(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t5375 = alloca ptr
   store ptr %env, ptr %t5375
@@ -237710,8 +237766,8 @@ entry:
   ret i64 %t5391
 }
 
-; __sprout_lambda_1507_stdlib.compiler.lexer.scan_ident_next (in stdlib.compiler.lexer.scan_ident_next)
-define i64 @__sprout_lambda_1507_stdlib.compiler.lexer.scan_ident_next(ptr %env, i64 %a0) {
+; __sprout_lambda_1508_stdlib.compiler.lexer.scan_ident_next (in stdlib.compiler.lexer.scan_ident_next)
+define i64 @__sprout_lambda_1508_stdlib.compiler.lexer.scan_ident_next(ptr %env, i64 %a0) {
 entry:
   %t9110 = alloca ptr
   store ptr %env, ptr %t9110
@@ -237764,8 +237820,8 @@ entry:
   ret i64 %t9143
 }
 
-; __sprout_lambda_1508_stdlib.compiler.lexer.scan_int_next (in stdlib.compiler.lexer.scan_int_next)
-define i64 @__sprout_lambda_1508_stdlib.compiler.lexer.scan_int_next(ptr %env, i64 %a0) {
+; __sprout_lambda_1509_stdlib.compiler.lexer.scan_int_next (in stdlib.compiler.lexer.scan_int_next)
+define i64 @__sprout_lambda_1509_stdlib.compiler.lexer.scan_int_next(ptr %env, i64 %a0) {
 entry:
   %t9178 = alloca ptr
   store ptr %env, ptr %t9178
@@ -237822,8 +237878,8 @@ entry:
   ret i64 %t9214
 }
 
-; __sprout_lambda_1511_stdlib.compiler.parser.scan_do_step_end (in stdlib.compiler.parser.scan_do_step_end)
-define i64 @__sprout_lambda_1511_stdlib.compiler.parser.scan_do_step_end(ptr %env, i64 %a0) {
+; __sprout_lambda_1512_stdlib.compiler.parser.scan_do_step_end (in stdlib.compiler.parser.scan_do_step_end)
+define i64 @__sprout_lambda_1512_stdlib.compiler.parser.scan_do_step_end(ptr %env, i64 %a0) {
 entry:
   %t14754 = alloca ptr
   store ptr %env, ptr %t14754
@@ -237960,8 +238016,8 @@ if_done2038:
   ret i64 %t14824
 }
 
-; __sprout_lambda_1510_stdlib.compiler.parser.scan_do_step_end (in stdlib.compiler.parser.scan_do_step_end)
-define i64 @__sprout_lambda_1510_stdlib.compiler.parser.scan_do_step_end(ptr %env, i64 %a0) {
+; __sprout_lambda_1511_stdlib.compiler.parser.scan_do_step_end (in stdlib.compiler.parser.scan_do_step_end)
+define i64 @__sprout_lambda_1511_stdlib.compiler.parser.scan_do_step_end(ptr %env, i64 %a0) {
 entry:
   %t14722 = alloca ptr
   store ptr %env, ptr %t14722
@@ -238031,7 +238087,7 @@ entry:
   %t14842 = add i64 72, 0
   %t14843 = call i64 @sprout_alloc_closure_env(i64 %t14842)
   %t14844 = inttoptr i64 %t14843 to ptr
-  store ptr @__sprout_lambda_1511_stdlib.compiler.parser.scan_do_step_end, ptr %t14844
+  store ptr @__sprout_lambda_1512_stdlib.compiler.parser.scan_do_step_end, ptr %t14844
   %t14845 = getelementptr i64, ptr %t14844, i64 1
   store i64 %t14725, ptr %t14845
   %t14846 = getelementptr i64, ptr %t14844, i64 2
@@ -238069,8 +238125,8 @@ entry:
   ret i64 %t14865
 }
 
-; __sprout_lambda_1509_stdlib.compiler.parser.scan_do_step_end (in stdlib.compiler.parser.scan_do_step_end)
-define i64 @__sprout_lambda_1509_stdlib.compiler.parser.scan_do_step_end(ptr %env, i64 %a0) {
+; __sprout_lambda_1510_stdlib.compiler.parser.scan_do_step_end (in stdlib.compiler.parser.scan_do_step_end)
+define i64 @__sprout_lambda_1510_stdlib.compiler.parser.scan_do_step_end(ptr %env, i64 %a0) {
 entry:
   %t14694 = alloca ptr
   store ptr %env, ptr %t14694
@@ -238132,7 +238188,7 @@ entry:
   %t14882 = add i64 64, 0
   %t14883 = call i64 @sprout_alloc_closure_env(i64 %t14882)
   %t14884 = inttoptr i64 %t14883 to ptr
-  store ptr @__sprout_lambda_1510_stdlib.compiler.parser.scan_do_step_end, ptr %t14884
+  store ptr @__sprout_lambda_1511_stdlib.compiler.parser.scan_do_step_end, ptr %t14884
   %t14885 = getelementptr i64, ptr %t14884, i64 1
   store i64 %t14697, ptr %t14885
   %t14886 = getelementptr i64, ptr %t14884, i64 2
@@ -238168,8 +238224,8 @@ entry:
   ret i64 %t14904
 }
 
-; __sprout_lambda_1512_stdlib.compiler.parser.fresh_where_tmp_name_from_exprs (in stdlib.compiler.parser.fresh_where_tmp_name_from_exprs)
-define i64 @__sprout_lambda_1512_stdlib.compiler.parser.fresh_where_tmp_name_from_exprs(ptr %env, i64 %a0) {
+; __sprout_lambda_1513_stdlib.compiler.parser.fresh_where_tmp_name_from_exprs (in stdlib.compiler.parser.fresh_where_tmp_name_from_exprs)
+define i64 @__sprout_lambda_1513_stdlib.compiler.parser.fresh_where_tmp_name_from_exprs(ptr %env, i64 %a0) {
 entry:
   %t24245 = alloca ptr
   store ptr %env, ptr %t24245
@@ -238233,8 +238289,8 @@ if_done3319:
   ret i64 %t24281
 }
 
-; __sprout_lambda_1513_stdlib.compiler.parser.fresh_where_tmp_name_from (in stdlib.compiler.parser.fresh_where_tmp_name_from)
-define i64 @__sprout_lambda_1513_stdlib.compiler.parser.fresh_where_tmp_name_from(ptr %env, i64 %a0) {
+; __sprout_lambda_1514_stdlib.compiler.parser.fresh_where_tmp_name_from (in stdlib.compiler.parser.fresh_where_tmp_name_from)
+define i64 @__sprout_lambda_1514_stdlib.compiler.parser.fresh_where_tmp_name_from(ptr %env, i64 %a0) {
 entry:
   %t24314 = alloca ptr
   store ptr %env, ptr %t24314
@@ -238285,8 +238341,8 @@ if_done3322:
   ret i64 %t24343
 }
 
-; __sprout_lambda_1514_stdlib.compiler.parser.parse_program (in stdlib.compiler.parser.parse_program)
-define i64 @__sprout_lambda_1514_stdlib.compiler.parser.parse_program(ptr %env, i64 %a0) {
+; __sprout_lambda_1515_stdlib.compiler.parser.parse_program (in stdlib.compiler.parser.parse_program)
+define i64 @__sprout_lambda_1515_stdlib.compiler.parser.parse_program(ptr %env, i64 %a0) {
 entry:
   %t29084 = alloca ptr
   store ptr %env, ptr %t29084
@@ -238358,8 +238414,8 @@ do_done3802:
   ret i64 %t29131
 }
 
-; __sprout_lambda_1515_stdlib.compiler.types.scheme_to_string_renamed (in stdlib.compiler.types.scheme_to_string_renamed)
-define i64 @__sprout_lambda_1515_stdlib.compiler.types.scheme_to_string_renamed(ptr %env, i64 %a0) {
+; __sprout_lambda_1516_stdlib.compiler.types.scheme_to_string_renamed (in stdlib.compiler.types.scheme_to_string_renamed)
+define i64 @__sprout_lambda_1516_stdlib.compiler.types.scheme_to_string_renamed(ptr %env, i64 %a0) {
 entry:
   %t30741 = alloca ptr
   store ptr %env, ptr %t30741
@@ -238446,8 +238502,8 @@ entry:
   ret i64 %t30804
 }
 
-; __sprout_lambda_1516_stdlib.compiler.unifier.strip_module_prefix (in stdlib.compiler.unifier.strip_module_prefix)
-define i64 @__sprout_lambda_1516_stdlib.compiler.unifier.strip_module_prefix(ptr %env, i64 %a0) {
+; __sprout_lambda_1517_stdlib.compiler.unifier.strip_module_prefix (in stdlib.compiler.unifier.strip_module_prefix)
+define i64 @__sprout_lambda_1517_stdlib.compiler.unifier.strip_module_prefix(ptr %env, i64 %a0) {
 entry:
   %t31222 = alloca ptr
   store ptr %env, ptr %t31222
@@ -238489,8 +238545,8 @@ if_done4377:
   ret i64 %t31245
 }
 
-; __sprout_lambda_1517_stdlib.compiler.unifier.ftv_env (in stdlib.compiler.unifier.ftv_env)
-define i64 @__sprout_lambda_1517_stdlib.compiler.unifier.ftv_env(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1518_stdlib.compiler.unifier.ftv_env (in stdlib.compiler.unifier.ftv_env)
+define i64 @__sprout_lambda_1518_stdlib.compiler.unifier.ftv_env(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t33499 = alloca ptr
   store ptr %env, ptr %t33499
@@ -238518,8 +238574,8 @@ entry:
   ret i64 %t33513
 }
 
-; __sprout_lambda_1518_stdlib.compiler.typed_ast.type_to_type_expr (in stdlib.compiler.typed_ast.type_to_type_expr)
-define i64 @__sprout_lambda_1518_stdlib.compiler.typed_ast.type_to_type_expr(ptr %env, i64 %a0) {
+; __sprout_lambda_1519_stdlib.compiler.typed_ast.type_to_type_expr (in stdlib.compiler.typed_ast.type_to_type_expr)
+define i64 @__sprout_lambda_1519_stdlib.compiler.typed_ast.type_to_type_expr(ptr %env, i64 %a0) {
 entry:
   %t34143 = alloca ptr
   store ptr %env, ptr %t34143
@@ -238536,8 +238592,8 @@ entry:
   ret i64 %t34149
 }
 
-; __sprout_lambda_1519_stdlib.compiler.infer.strip_module_prefix (in stdlib.compiler.infer.strip_module_prefix)
-define i64 @__sprout_lambda_1519_stdlib.compiler.infer.strip_module_prefix(ptr %env, i64 %a0) {
+; __sprout_lambda_1520_stdlib.compiler.infer.strip_module_prefix (in stdlib.compiler.infer.strip_module_prefix)
+define i64 @__sprout_lambda_1520_stdlib.compiler.infer.strip_module_prefix(ptr %env, i64 %a0) {
 entry:
   %t34309 = alloca ptr
   store ptr %env, ptr %t34309
@@ -238579,8 +238635,8 @@ if_done5152:
   ret i64 %t34332
 }
 
-; __sprout_lambda_1520_stdlib.compiler.infer.is_lowercase_name (in stdlib.compiler.infer.is_lowercase_name)
-define i1 @__sprout_lambda_1520_stdlib.compiler.infer.is_lowercase_name(ptr %env, i64 %a0) {
+; __sprout_lambda_1521_stdlib.compiler.infer.is_lowercase_name (in stdlib.compiler.infer.is_lowercase_name)
+define i1 @__sprout_lambda_1521_stdlib.compiler.infer.is_lowercase_name(ptr %env, i64 %a0) {
 entry:
   %t34980 = alloca ptr
   store ptr %env, ptr %t34980
@@ -238869,8 +238925,8 @@ logic_done5318:
   ret i1 %t35153
 }
 
-; __sprout_lambda_1521_stdlib.compiler.infer.scheme_from_fn_parts_inner (in stdlib.compiler.infer.scheme_from_fn_parts_inner)
-define i64 @__sprout_lambda_1521_stdlib.compiler.infer.scheme_from_fn_parts_inner(ptr %env, i64 %a0) {
+; __sprout_lambda_1522_stdlib.compiler.infer.scheme_from_fn_parts_inner (in stdlib.compiler.infer.scheme_from_fn_parts_inner)
+define i64 @__sprout_lambda_1522_stdlib.compiler.infer.scheme_from_fn_parts_inner(ptr %env, i64 %a0) {
 entry:
   %t35274 = alloca ptr
   store ptr %env, ptr %t35274
@@ -238959,8 +239015,8 @@ entry:
   ret i64 %t35333
 }
 
-; __sprout_lambda_1522_stdlib.compiler.infer.infer_call_inner (in stdlib.compiler.infer.infer_call_inner)
-define i64 @__sprout_lambda_1522_stdlib.compiler.infer.infer_call_inner(ptr %env, i64 %a0) {
+; __sprout_lambda_1523_stdlib.compiler.infer.infer_call_inner (in stdlib.compiler.infer.infer_call_inner)
+define i64 @__sprout_lambda_1523_stdlib.compiler.infer.infer_call_inner(ptr %env, i64 %a0) {
 entry:
   %t37951 = alloca ptr
   store ptr %env, ptr %t37951
@@ -238977,8 +239033,8 @@ entry:
   ret i64 %t37957
 }
 
-; __sprout_lambda_1523_stdlib.compiler.infer.infer_tuple (in stdlib.compiler.infer.infer_tuple)
-define i64 @__sprout_lambda_1523_stdlib.compiler.infer.infer_tuple(ptr %env, i64 %a0) {
+; __sprout_lambda_1524_stdlib.compiler.infer.infer_tuple (in stdlib.compiler.infer.infer_tuple)
+define i64 @__sprout_lambda_1524_stdlib.compiler.infer.infer_tuple(ptr %env, i64 %a0) {
 entry:
   %t43085 = alloca ptr
   store ptr %env, ptr %t43085
@@ -238995,8 +239051,8 @@ entry:
   ret i64 %t43091
 }
 
-; __sprout_lambda_1524_stdlib.compiler.infer.make_record_field_scheme (in stdlib.compiler.infer.make_record_field_scheme)
-define i64 @__sprout_lambda_1524_stdlib.compiler.infer.make_record_field_scheme(ptr %env, i64 %a0) {
+; __sprout_lambda_1525_stdlib.compiler.infer.make_record_field_scheme (in stdlib.compiler.infer.make_record_field_scheme)
+define i64 @__sprout_lambda_1525_stdlib.compiler.infer.make_record_field_scheme(ptr %env, i64 %a0) {
 entry:
   %t47082 = alloca ptr
   store ptr %env, ptr %t47082
@@ -239031,8 +239087,8 @@ entry:
   ret i64 %t47102
 }
 
-; __sprout_lambda_1525_stdlib.compiler.infer.register_single_param_alias (in stdlib.compiler.infer.register_single_param_alias)
-define i64 @__sprout_lambda_1525_stdlib.compiler.infer.register_single_param_alias(ptr %env, i64 %a0) {
+; __sprout_lambda_1526_stdlib.compiler.infer.register_single_param_alias (in stdlib.compiler.infer.register_single_param_alias)
+define i64 @__sprout_lambda_1526_stdlib.compiler.infer.register_single_param_alias(ptr %env, i64 %a0) {
 entry:
   %t48420 = alloca ptr
   store ptr %env, ptr %t48420
@@ -239163,8 +239219,8 @@ match_done7675:
   ret i64 %t48492
 }
 
-; __sprout_lambda_1526_stdlib.compiler.infer.remove_constrained_fn_markers (in stdlib.compiler.infer.remove_constrained_fn_markers)
-define i64 @__sprout_lambda_1526_stdlib.compiler.infer.remove_constrained_fn_markers(ptr %env, i64 %a0) {
+; __sprout_lambda_1527_stdlib.compiler.infer.remove_constrained_fn_markers (in stdlib.compiler.infer.remove_constrained_fn_markers)
+define i64 @__sprout_lambda_1527_stdlib.compiler.infer.remove_constrained_fn_markers(ptr %env, i64 %a0) {
 entry:
   %t52704 = alloca ptr
   store ptr %env, ptr %t52704
@@ -239231,8 +239287,8 @@ match_done8598:
   ret i64 %t52743
 }
 
-; __sprout_lambda_1527_stdlib.compiler.checker.strip_module_prefix (in stdlib.compiler.checker.strip_module_prefix)
-define i64 @__sprout_lambda_1527_stdlib.compiler.checker.strip_module_prefix(ptr %env, i64 %a0) {
+; __sprout_lambda_1528_stdlib.compiler.checker.strip_module_prefix (in stdlib.compiler.checker.strip_module_prefix)
+define i64 @__sprout_lambda_1528_stdlib.compiler.checker.strip_module_prefix(ptr %env, i64 %a0) {
 entry:
   %t53701 = alloca ptr
   store ptr %env, ptr %t53701
@@ -239274,8 +239330,8 @@ if_done8750:
   ret i64 %t53724
 }
 
-; __sprout_lambda_1528_stdlib.compiler.module_loader.prefix_constrained_key (in stdlib.compiler.module_loader.prefix_constrained_key)
-define i64 @__sprout_lambda_1528_stdlib.compiler.module_loader.prefix_constrained_key(ptr %env, i64 %a0) {
+; __sprout_lambda_1529_stdlib.compiler.module_loader.prefix_constrained_key (in stdlib.compiler.module_loader.prefix_constrained_key)
+define i64 @__sprout_lambda_1529_stdlib.compiler.module_loader.prefix_constrained_key(ptr %env, i64 %a0) {
 entry:
   %t61195 = alloca ptr
   store ptr %env, ptr %t61195
@@ -239342,8 +239398,8 @@ entry:
   ret i64 %t61241
 }
 
-; __sprout_lambda_1529_stdlib.compiler.module_loader.next_line_ml (in stdlib.compiler.module_loader.next_line_ml)
-define i64 @__sprout_lambda_1529_stdlib.compiler.module_loader.next_line_ml(ptr %env, i64 %a0) {
+; __sprout_lambda_1530_stdlib.compiler.module_loader.next_line_ml (in stdlib.compiler.module_loader.next_line_ml)
+define i64 @__sprout_lambda_1530_stdlib.compiler.module_loader.next_line_ml(ptr %env, i64 %a0) {
 entry:
   %t62050 = alloca ptr
   store ptr %env, ptr %t62050
@@ -239381,8 +239437,8 @@ if_done10129:
   ret i64 %t62070
 }
 
-; __sprout_lambda_1530_stdlib.compiler.bundler.split_at_dot (in stdlib.compiler.bundler.split_at_dot)
-define i64 @__sprout_lambda_1530_stdlib.compiler.bundler.split_at_dot(ptr %env, i64 %a0) {
+; __sprout_lambda_1531_stdlib.compiler.bundler.split_at_dot (in stdlib.compiler.bundler.split_at_dot)
+define i64 @__sprout_lambda_1531_stdlib.compiler.bundler.split_at_dot(ptr %env, i64 %a0) {
 entry:
   %t64008 = alloca ptr
   store ptr %env, ptr %t64008
@@ -239455,8 +239511,8 @@ if_done10573:
   ret i64 %t64054
 }
 
-; __sprout_lambda_1531_stdlib.compiler.bundler.scan_lines (in stdlib.compiler.bundler.scan_lines)
-define i64 @__sprout_lambda_1531_stdlib.compiler.bundler.scan_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1532_stdlib.compiler.bundler.scan_lines (in stdlib.compiler.bundler.scan_lines)
+define i64 @__sprout_lambda_1532_stdlib.compiler.bundler.scan_lines(ptr %env, i64 %a0) {
 entry:
   %t64682 = alloca ptr
   store ptr %env, ptr %t64682
@@ -239596,8 +239652,8 @@ if_done10683:
   ret i64 %t64775
 }
 
-; __sprout_lambda_1532_stdlib.compiler.bundler.strip_headers_b (in stdlib.compiler.bundler.strip_headers_b)
-define i64 @__sprout_lambda_1532_stdlib.compiler.bundler.strip_headers_b(ptr %env, i64 %a0) {
+; __sprout_lambda_1533_stdlib.compiler.bundler.strip_headers_b (in stdlib.compiler.bundler.strip_headers_b)
+define i64 @__sprout_lambda_1533_stdlib.compiler.bundler.strip_headers_b(ptr %env, i64 %a0) {
 entry:
   %t65276 = alloca ptr
   store ptr %env, ptr %t65276
@@ -239667,8 +239723,8 @@ if_done10744:
   ret i64 %t65317
 }
 
-; __sprout_lambda_1533_stdlib.compiler.bundler.add_value_to_symbols (in stdlib.compiler.bundler.add_value_to_symbols)
-define i64 @__sprout_lambda_1533_stdlib.compiler.bundler.add_value_to_symbols(ptr %env, i64 %a0) {
+; __sprout_lambda_1534_stdlib.compiler.bundler.add_value_to_symbols (in stdlib.compiler.bundler.add_value_to_symbols)
+define i64 @__sprout_lambda_1534_stdlib.compiler.bundler.add_value_to_symbols(ptr %env, i64 %a0) {
 entry:
   %t67156 = alloca ptr
   store ptr %env, ptr %t67156
@@ -239847,8 +239903,8 @@ match_done11105:
   ret i64 %t67260
 }
 
-; __sprout_lambda_1534_stdlib.compiler.bundler.add_record_to_symbols (in stdlib.compiler.bundler.add_record_to_symbols)
-define i64 @__sprout_lambda_1534_stdlib.compiler.bundler.add_record_to_symbols(ptr %env, i64 %a0) {
+; __sprout_lambda_1535_stdlib.compiler.bundler.add_record_to_symbols (in stdlib.compiler.bundler.add_record_to_symbols)
+define i64 @__sprout_lambda_1535_stdlib.compiler.bundler.add_record_to_symbols(ptr %env, i64 %a0) {
 entry:
   %t67295 = alloca ptr
   store ptr %env, ptr %t67295
@@ -240027,8 +240083,8 @@ match_done11122:
   ret i64 %t67399
 }
 
-; __sprout_lambda_1535_stdlib.compiler.bundler.add_class_to_symbols (in stdlib.compiler.bundler.add_class_to_symbols)
-define i64 @__sprout_lambda_1535_stdlib.compiler.bundler.add_class_to_symbols(ptr %env, i64 %a0) {
+; __sprout_lambda_1536_stdlib.compiler.bundler.add_class_to_symbols (in stdlib.compiler.bundler.add_class_to_symbols)
+define i64 @__sprout_lambda_1536_stdlib.compiler.bundler.add_class_to_symbols(ptr %env, i64 %a0) {
 entry:
   %t67436 = alloca ptr
   store ptr %env, ptr %t67436
@@ -240225,8 +240281,8 @@ match_done11139:
   ret i64 %t67554
 }
 
-; __sprout_lambda_1538_stdlib.compiler.bundler.add_type_to_symbols (in stdlib.compiler.bundler.add_type_to_symbols)
-define i64 @__sprout_lambda_1538_stdlib.compiler.bundler.add_type_to_symbols(ptr %env, i1 %a0) {
+; __sprout_lambda_1539_stdlib.compiler.bundler.add_type_to_symbols (in stdlib.compiler.bundler.add_type_to_symbols)
+define i64 @__sprout_lambda_1539_stdlib.compiler.bundler.add_type_to_symbols(ptr %env, i1 %a0) {
 entry:
   %t67725 = alloca ptr
   store ptr %env, ptr %t67725
@@ -240480,8 +240536,8 @@ match_done11176:
   ret i64 %t67879
 }
 
-; __sprout_lambda_1537_stdlib.compiler.bundler.add_type_to_symbols (in stdlib.compiler.bundler.add_type_to_symbols)
-define i64 @__sprout_lambda_1537_stdlib.compiler.bundler.add_type_to_symbols(ptr %env, i1 %a0) {
+; __sprout_lambda_1538_stdlib.compiler.bundler.add_type_to_symbols (in stdlib.compiler.bundler.add_type_to_symbols)
+define i64 @__sprout_lambda_1538_stdlib.compiler.bundler.add_type_to_symbols(ptr %env, i1 %a0) {
 entry:
   %t67699 = alloca ptr
   store ptr %env, ptr %t67699
@@ -240534,7 +240590,7 @@ entry:
   %t67891 = add i64 56, 0
   %t67892 = call i64 @sprout_alloc_closure_env(i64 %t67891)
   %t67893 = inttoptr i64 %t67892 to ptr
-  store ptr @__sprout_lambda_1538_stdlib.compiler.bundler.add_type_to_symbols, ptr %t67893
+  store ptr @__sprout_lambda_1539_stdlib.compiler.bundler.add_type_to_symbols, ptr %t67893
   %t67894 = zext i1 %a0 to i64
   %t67895 = getelementptr i64, ptr %t67893, i64 1
   store i64 %t67894, ptr %t67895
@@ -240567,8 +240623,8 @@ entry:
   ret i64 %t67911
 }
 
-; __sprout_lambda_1536_stdlib.compiler.bundler.add_type_to_symbols (in stdlib.compiler.bundler.add_type_to_symbols)
-define i64 @__sprout_lambda_1536_stdlib.compiler.bundler.add_type_to_symbols(ptr %env, i64 %a0) {
+; __sprout_lambda_1537_stdlib.compiler.bundler.add_type_to_symbols (in stdlib.compiler.bundler.add_type_to_symbols)
+define i64 @__sprout_lambda_1537_stdlib.compiler.bundler.add_type_to_symbols(ptr %env, i64 %a0) {
 entry:
   %t67671 = alloca ptr
   store ptr %env, ptr %t67671
@@ -240627,7 +240683,7 @@ entry:
   %t67926 = add i64 56, 0
   %t67927 = call i64 @sprout_alloc_closure_env(i64 %t67926)
   %t67928 = inttoptr i64 %t67927 to ptr
-  store ptr @__sprout_lambda_1537_stdlib.compiler.bundler.add_type_to_symbols, ptr %t67928
+  store ptr @__sprout_lambda_1538_stdlib.compiler.bundler.add_type_to_symbols, ptr %t67928
   %t67929 = getelementptr i64, ptr %t67928, i64 1
   store i64 %t67678, ptr %t67929
   %t67930 = getelementptr i64, ptr %t67928, i64 2
@@ -240659,8 +240715,8 @@ entry:
   ret i64 %t67945
 }
 
-; __sprout_lambda_1539_stdlib.compiler.bundler.make_bundle_or_err (in stdlib.compiler.bundler.make_bundle_or_err)
-define i64 @__sprout_lambda_1539_stdlib.compiler.bundler.make_bundle_or_err(ptr %env, i64 %a0) {
+; __sprout_lambda_1540_stdlib.compiler.bundler.make_bundle_or_err (in stdlib.compiler.bundler.make_bundle_or_err)
+define i64 @__sprout_lambda_1540_stdlib.compiler.bundler.make_bundle_or_err(ptr %env, i64 %a0) {
 entry:
   %t72553 = alloca ptr
   store ptr %env, ptr %t72553
@@ -240749,8 +240805,8 @@ match_done12092:
   ret i64 %t72604
 }
 
-; __sprout_lambda_1540_stdlib.compiler.lowering.strip_module_prefix (in stdlib.compiler.lowering.strip_module_prefix)
-define i64 @__sprout_lambda_1540_stdlib.compiler.lowering.strip_module_prefix(ptr %env, i64 %a0) {
+; __sprout_lambda_1541_stdlib.compiler.lowering.strip_module_prefix (in stdlib.compiler.lowering.strip_module_prefix)
+define i64 @__sprout_lambda_1541_stdlib.compiler.lowering.strip_module_prefix(ptr %env, i64 %a0) {
 entry:
   %t77572 = alloca ptr
   store ptr %env, ptr %t77572
@@ -240791,8 +240847,8 @@ if_done13177:
   ret i64 %t77594
 }
 
-; __sprout_lambda_1541_stdlib.compiler.lowering.type_to_eta_typeexpr (in stdlib.compiler.lowering.type_to_eta_typeexpr)
-define i64 @__sprout_lambda_1541_stdlib.compiler.lowering.type_to_eta_typeexpr(ptr %env, i64 %a0) {
+; __sprout_lambda_1542_stdlib.compiler.lowering.type_to_eta_typeexpr (in stdlib.compiler.lowering.type_to_eta_typeexpr)
+define i64 @__sprout_lambda_1542_stdlib.compiler.lowering.type_to_eta_typeexpr(ptr %env, i64 %a0) {
 entry:
   %t79468 = alloca ptr
   store ptr %env, ptr %t79468
@@ -240809,8 +240865,8 @@ entry:
   ret i64 %t79474
 }
 
-; __sprout_lambda_1542_stdlib.compiler.lowering.resolve_tdict_with_key (in stdlib.compiler.lowering.resolve_tdict_with_key)
-define i64 @__sprout_lambda_1542_stdlib.compiler.lowering.resolve_tdict_with_key(ptr %env, i64 %a0) {
+; __sprout_lambda_1543_stdlib.compiler.lowering.resolve_tdict_with_key (in stdlib.compiler.lowering.resolve_tdict_with_key)
+define i64 @__sprout_lambda_1543_stdlib.compiler.lowering.resolve_tdict_with_key(ptr %env, i64 %a0) {
 entry:
   %t82314 = alloca ptr
   store ptr %env, ptr %t82314
@@ -240864,8 +240920,8 @@ entry:
   ret i64 %t82348
 }
 
-; __sprout_lambda_1543_stdlib.compiler.lowering.resolve_tdict_with_key (in stdlib.compiler.lowering.resolve_tdict_with_key)
-define i64 @__sprout_lambda_1543_stdlib.compiler.lowering.resolve_tdict_with_key(ptr %env, i64 %a0) {
+; __sprout_lambda_1544_stdlib.compiler.lowering.resolve_tdict_with_key (in stdlib.compiler.lowering.resolve_tdict_with_key)
+define i64 @__sprout_lambda_1544_stdlib.compiler.lowering.resolve_tdict_with_key(ptr %env, i64 %a0) {
 entry:
   %t82430 = alloca ptr
   store ptr %env, ptr %t82430
@@ -240926,8 +240982,8 @@ entry:
   ret i64 %t82469
 }
 
-; __sprout_lambda_1544_stdlib.compiler.lowering.resolve_tdict_for_inst (in stdlib.compiler.lowering.resolve_tdict_for_inst)
-define i64 @__sprout_lambda_1544_stdlib.compiler.lowering.resolve_tdict_for_inst(ptr %env, i64 %a0) {
+; __sprout_lambda_1545_stdlib.compiler.lowering.resolve_tdict_for_inst (in stdlib.compiler.lowering.resolve_tdict_for_inst)
+define i64 @__sprout_lambda_1545_stdlib.compiler.lowering.resolve_tdict_for_inst(ptr %env, i64 %a0) {
 entry:
   %t82538 = alloca ptr
   store ptr %env, ptr %t82538
@@ -240981,8 +241037,8 @@ entry:
   ret i64 %t82572
 }
 
-; __sprout_lambda_1545_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts (in stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts)
-define i64 @__sprout_lambda_1545_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts(ptr %env, i64 %a0) {
+; __sprout_lambda_1546_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts (in stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts)
+define i64 @__sprout_lambda_1546_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts(ptr %env, i64 %a0) {
 entry:
   %t82698 = alloca ptr
   store ptr %env, ptr %t82698
@@ -241031,8 +241087,8 @@ entry:
   ret i64 %t82728
 }
 
-; __sprout_lambda_1546_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts (in stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts)
-define i64 @__sprout_lambda_1546_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts(ptr %env, i64 %a0) {
+; __sprout_lambda_1547_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts (in stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts)
+define i64 @__sprout_lambda_1547_stdlib.compiler.lowering.resolve_tdict_apply_inner_dicts(ptr %env, i64 %a0) {
 entry:
   %t82753 = alloca ptr
   store ptr %env, ptr %t82753
@@ -241089,8 +241145,8 @@ entry:
   ret i64 %t82789
 }
 
-; __sprout_lambda_1547_stdlib.compiler.lowering.substitute_constraint (in stdlib.compiler.lowering.substitute_constraint)
-define i64 @__sprout_lambda_1547_stdlib.compiler.lowering.substitute_constraint(ptr %env, i64 %a0) {
+; __sprout_lambda_1548_stdlib.compiler.lowering.substitute_constraint (in stdlib.compiler.lowering.substitute_constraint)
+define i64 @__sprout_lambda_1548_stdlib.compiler.lowering.substitute_constraint(ptr %env, i64 %a0) {
 entry:
   %t83466 = alloca ptr
   store ptr %env, ptr %t83466
@@ -241115,8 +241171,8 @@ entry:
   ret i64 %t83478
 }
 
-; __sprout_lambda_1548_stdlib.compiler.lowering.build_lambda_helper (in stdlib.compiler.lowering.build_lambda_helper)
-define i64 @__sprout_lambda_1548_stdlib.compiler.lowering.build_lambda_helper(ptr %env, i64 %a0) {
+; __sprout_lambda_1549_stdlib.compiler.lowering.build_lambda_helper (in stdlib.compiler.lowering.build_lambda_helper)
+define i64 @__sprout_lambda_1549_stdlib.compiler.lowering.build_lambda_helper(ptr %env, i64 %a0) {
 entry:
   %t83621 = alloca ptr
   store ptr %env, ptr %t83621
@@ -241144,8 +241200,8 @@ entry:
   ret i64 %t83634
 }
 
-; __sprout_lambda_1549_stdlib.compiler.lowering.build_lambda_helper (in stdlib.compiler.lowering.build_lambda_helper)
-define i64 @__sprout_lambda_1549_stdlib.compiler.lowering.build_lambda_helper(ptr %env, i64 %a0) {
+; __sprout_lambda_1550_stdlib.compiler.lowering.build_lambda_helper (in stdlib.compiler.lowering.build_lambda_helper)
+define i64 @__sprout_lambda_1550_stdlib.compiler.lowering.build_lambda_helper(ptr %env, i64 %a0) {
 entry:
   %t83675 = alloca ptr
   store ptr %env, ptr %t83675
@@ -241194,8 +241250,8 @@ entry:
   ret i64 %t83704
 }
 
-; __sprout_lambda_1550_stdlib.compiler.codegen.type_to_ll (in stdlib.compiler.codegen.type_to_ll)
-define i64 @__sprout_lambda_1550_stdlib.compiler.codegen.type_to_ll(ptr %env, i64 %a0) {
+; __sprout_lambda_1551_stdlib.compiler.codegen.type_to_ll (in stdlib.compiler.codegen.type_to_ll)
+define i64 @__sprout_lambda_1551_stdlib.compiler.codegen.type_to_ll(ptr %env, i64 %a0) {
 entry:
   %t84689 = alloca ptr
   store ptr %env, ptr %t84689
@@ -241212,8 +241268,8 @@ entry:
   ret i64 %t84695
 }
 
-; __sprout_lambda_1551_stdlib.compiler.codegen.tuple_items_from_type (in stdlib.compiler.codegen.tuple_items_from_type)
-define i64 @__sprout_lambda_1551_stdlib.compiler.codegen.tuple_items_from_type(ptr %env, i64 %a0) {
+; __sprout_lambda_1552_stdlib.compiler.codegen.tuple_items_from_type (in stdlib.compiler.codegen.tuple_items_from_type)
+define i64 @__sprout_lambda_1552_stdlib.compiler.codegen.tuple_items_from_type(ptr %env, i64 %a0) {
 entry:
   %t84939 = alloca ptr
   store ptr %env, ptr %t84939
@@ -241230,8 +241286,8 @@ entry:
   ret i64 %t84945
 }
 
-; __sprout_lambda_1552_stdlib.compiler.codegen.dbg_next_line (in stdlib.compiler.codegen.dbg_next_line)
-define i64 @__sprout_lambda_1552_stdlib.compiler.codegen.dbg_next_line(ptr %env, i64 %a0) {
+; __sprout_lambda_1553_stdlib.compiler.codegen.dbg_next_line (in stdlib.compiler.codegen.dbg_next_line)
+define i64 @__sprout_lambda_1553_stdlib.compiler.codegen.dbg_next_line(ptr %env, i64 %a0) {
 entry:
   %t87180 = alloca ptr
   store ptr %env, ptr %t87180
@@ -241269,8 +241325,8 @@ if_done15237:
   ret i64 %t87200
 }
 
-; __sprout_lambda_1553_stdlib.compiler.codegen.dbg_is_header_line (in stdlib.compiler.codegen.dbg_is_header_line)
-define i1 @__sprout_lambda_1553_stdlib.compiler.codegen.dbg_is_header_line(ptr %env, i64 %a0) {
+; __sprout_lambda_1554_stdlib.compiler.codegen.dbg_is_header_line (in stdlib.compiler.codegen.dbg_is_header_line)
+define i1 @__sprout_lambda_1554_stdlib.compiler.codegen.dbg_is_header_line(ptr %env, i64 %a0) {
 entry:
   %t87236 = alloca ptr
   store ptr %env, ptr %t87236
@@ -241322,8 +241378,8 @@ logic_done15241:
   ret i1 %t87265
 }
 
-; __sprout_lambda_1554_stdlib.compiler.codegen.str_ends_with_colon (in stdlib.compiler.codegen.str_ends_with_colon)
-define i1 @__sprout_lambda_1554_stdlib.compiler.codegen.str_ends_with_colon(ptr %env, i64 %a0) {
+; __sprout_lambda_1555_stdlib.compiler.codegen.str_ends_with_colon (in stdlib.compiler.codegen.str_ends_with_colon)
+define i1 @__sprout_lambda_1555_stdlib.compiler.codegen.str_ends_with_colon(ptr %env, i64 %a0) {
 entry:
   %t88222 = alloca ptr
   store ptr %env, ptr %t88222
@@ -241359,8 +241415,8 @@ if_done15319:
   ret i1 %t88241
 }
 
-; __sprout_lambda_1555_stdlib.compiler.codegen.escape_char_for_ir (in stdlib.compiler.codegen.escape_char_for_ir)
-define i64 @__sprout_lambda_1555_stdlib.compiler.codegen.escape_char_for_ir(ptr %env, i64 %a0) {
+; __sprout_lambda_1556_stdlib.compiler.codegen.escape_char_for_ir (in stdlib.compiler.codegen.escape_char_for_ir)
+define i64 @__sprout_lambda_1556_stdlib.compiler.codegen.escape_char_for_ir(ptr %env, i64 %a0) {
 entry:
   %t88426 = alloca ptr
   store ptr %env, ptr %t88426
@@ -241442,8 +241498,8 @@ if_done15343:
   ret i64 %t88469
 }
 
-; __sprout_lambda_1556_stdlib.compiler.codegen.str_ends_with_colon2 (in stdlib.compiler.codegen.str_ends_with_colon2)
-define i1 @__sprout_lambda_1556_stdlib.compiler.codegen.str_ends_with_colon2(ptr %env, i64 %a0) {
+; __sprout_lambda_1557_stdlib.compiler.codegen.str_ends_with_colon2 (in stdlib.compiler.codegen.str_ends_with_colon2)
+define i1 @__sprout_lambda_1557_stdlib.compiler.codegen.str_ends_with_colon2(ptr %env, i64 %a0) {
 entry:
   %t92136 = alloca ptr
   store ptr %env, ptr %t92136
@@ -241479,8 +241535,8 @@ if_done15456:
   ret i1 %t92155
 }
 
-; __sprout_lambda_1557_stdlib.compiler.codegen.list_length (in stdlib.compiler.codegen.list_length)
-define i64 @__sprout_lambda_1557_stdlib.compiler.codegen.list_length(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1558_stdlib.compiler.codegen.list_length (in stdlib.compiler.codegen.list_length)
+define i64 @__sprout_lambda_1558_stdlib.compiler.codegen.list_length(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t96958 = alloca ptr
   store ptr %env, ptr %t96958
@@ -241496,8 +241552,8 @@ entry:
   ret i64 %t96964
 }
 
-; __sprout_lambda_1558_stdlib.compiler.codegen.list_length_vals (in stdlib.compiler.codegen.list_length_vals)
-define i64 @__sprout_lambda_1558_stdlib.compiler.codegen.list_length_vals(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1559_stdlib.compiler.codegen.list_length_vals (in stdlib.compiler.codegen.list_length_vals)
+define i64 @__sprout_lambda_1559_stdlib.compiler.codegen.list_length_vals(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t96978 = alloca ptr
   store ptr %env, ptr %t96978
@@ -241513,8 +241569,8 @@ entry:
   ret i64 %t96984
 }
 
-; __sprout_lambda_1559_stdlib.compiler.codegen.collect_free_vars (in stdlib.compiler.codegen.collect_free_vars)
-define i64 @__sprout_lambda_1559_stdlib.compiler.codegen.collect_free_vars(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1560_stdlib.compiler.codegen.collect_free_vars (in stdlib.compiler.codegen.collect_free_vars)
+define i64 @__sprout_lambda_1560_stdlib.compiler.codegen.collect_free_vars(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t97352 = alloca ptr
   store ptr %env, ptr %t97352
@@ -241566,8 +241622,8 @@ match_done15917:
   ret i64 %t97375
 }
 
-; __sprout_lambda_1560_stdlib.compiler.codegen.collect_free_vars_branches (in stdlib.compiler.codegen.collect_free_vars_branches)
-define i64 @__sprout_lambda_1560_stdlib.compiler.codegen.collect_free_vars_branches(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1561_stdlib.compiler.codegen.collect_free_vars_branches (in stdlib.compiler.codegen.collect_free_vars_branches)
+define i64 @__sprout_lambda_1561_stdlib.compiler.codegen.collect_free_vars_branches(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t97694 = alloca ptr
   store ptr %env, ptr %t97694
@@ -241590,8 +241646,8 @@ entry:
   ret i64 %t97704
 }
 
-; __sprout_lambda_1561_stdlib.compiler.codegen.collect_free_vars_steps (in stdlib.compiler.codegen.collect_free_vars_steps)
-define i64 @__sprout_lambda_1561_stdlib.compiler.codegen.collect_free_vars_steps(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1562_stdlib.compiler.codegen.collect_free_vars_steps (in stdlib.compiler.codegen.collect_free_vars_steps)
+define i64 @__sprout_lambda_1562_stdlib.compiler.codegen.collect_free_vars_steps(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t97900 = alloca ptr
   store ptr %env, ptr %t97900
@@ -241614,8 +241670,8 @@ entry:
   ret i64 %t97910
 }
 
-; __sprout_lambda_1562_stdlib.compiler.codegen.build_closure_args_ir (in stdlib.compiler.codegen.build_closure_args_ir)
-define i64 @__sprout_lambda_1562_stdlib.compiler.codegen.build_closure_args_ir(ptr %env, i64 %a0) {
+; __sprout_lambda_1563_stdlib.compiler.codegen.build_closure_args_ir (in stdlib.compiler.codegen.build_closure_args_ir)
+define i64 @__sprout_lambda_1563_stdlib.compiler.codegen.build_closure_args_ir(ptr %env, i64 %a0) {
 entry:
   %t99246 = alloca ptr
   store ptr %env, ptr %t99246
@@ -241660,8 +241716,8 @@ match_done16078:
   ret i64 %t99272
 }
 
-; __sprout_lambda_1565_stdlib.compiler.codegen.emit_named_fn_wrapper_lines (in stdlib.compiler.codegen.emit_named_fn_wrapper_lines)
-define i64 @__sprout_lambda_1565_stdlib.compiler.codegen.emit_named_fn_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1566_stdlib.compiler.codegen.emit_named_fn_wrapper_lines (in stdlib.compiler.codegen.emit_named_fn_wrapper_lines)
+define i64 @__sprout_lambda_1566_stdlib.compiler.codegen.emit_named_fn_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t99531 = alloca ptr
   store ptr %env, ptr %t99531
@@ -241830,8 +241886,8 @@ entry:
   ret i64 %t99656
 }
 
-; __sprout_lambda_1564_stdlib.compiler.codegen.emit_named_fn_wrapper_lines (in stdlib.compiler.codegen.emit_named_fn_wrapper_lines)
-define i64 @__sprout_lambda_1564_stdlib.compiler.codegen.emit_named_fn_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1565_stdlib.compiler.codegen.emit_named_fn_wrapper_lines (in stdlib.compiler.codegen.emit_named_fn_wrapper_lines)
+define i64 @__sprout_lambda_1565_stdlib.compiler.codegen.emit_named_fn_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t99511 = alloca ptr
   store ptr %env, ptr %t99511
@@ -241871,7 +241927,7 @@ entry:
   %t99666 = add i64 32, 0
   %t99667 = call i64 @sprout_alloc_closure_env(i64 %t99666)
   %t99668 = inttoptr i64 %t99667 to ptr
-  store ptr @__sprout_lambda_1565_stdlib.compiler.codegen.emit_named_fn_wrapper_lines, ptr %t99668
+  store ptr @__sprout_lambda_1566_stdlib.compiler.codegen.emit_named_fn_wrapper_lines, ptr %t99668
   %t99669 = getelementptr i64, ptr %t99668, i64 1
   store i64 %t99518, ptr %t99669
   %t99670 = getelementptr i64, ptr %t99668, i64 2
@@ -241979,8 +242035,8 @@ if_done16113:
   ret i64 %t99746
 }
 
-; __sprout_lambda_1563_stdlib.compiler.codegen.emit_named_fn_wrapper_lines (in stdlib.compiler.codegen.emit_named_fn_wrapper_lines)
-define i64 @__sprout_lambda_1563_stdlib.compiler.codegen.emit_named_fn_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1564_stdlib.compiler.codegen.emit_named_fn_wrapper_lines (in stdlib.compiler.codegen.emit_named_fn_wrapper_lines)
+define i64 @__sprout_lambda_1564_stdlib.compiler.codegen.emit_named_fn_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t99495 = alloca ptr
   store ptr %env, ptr %t99495
@@ -242018,7 +242074,7 @@ entry:
   %t99758 = add i64 40, 0
   %t99759 = call i64 @sprout_alloc_closure_env(i64 %t99758)
   %t99760 = inttoptr i64 %t99759 to ptr
-  store ptr @__sprout_lambda_1564_stdlib.compiler.codegen.emit_named_fn_wrapper_lines, ptr %t99760
+  store ptr @__sprout_lambda_1565_stdlib.compiler.codegen.emit_named_fn_wrapper_lines, ptr %t99760
   %t99761 = getelementptr i64, ptr %t99760, i64 1
   store i64 %t99498, ptr %t99761
   %t99762 = getelementptr i64, ptr %t99760, i64 2
@@ -242052,8 +242108,8 @@ entry:
   ret i64 %t99779
 }
 
-; __sprout_lambda_1572_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
-define i64 @__sprout_lambda_1572_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1573_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
+define i64 @__sprout_lambda_1573_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t100094 = alloca ptr
   store ptr %env, ptr %t100094
@@ -242235,8 +242291,8 @@ entry:
   ret i64 %t100229
 }
 
-; __sprout_lambda_1571_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
-define i64 @__sprout_lambda_1571_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1572_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
+define i64 @__sprout_lambda_1572_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t100070 = alloca ptr
   store ptr %env, ptr %t100070
@@ -242284,7 +242340,7 @@ entry:
   %t100241 = add i64 40, 0
   %t100242 = call i64 @sprout_alloc_closure_env(i64 %t100241)
   %t100243 = inttoptr i64 %t100242 to ptr
-  store ptr @__sprout_lambda_1572_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100243
+  store ptr @__sprout_lambda_1573_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100243
   %t100244 = getelementptr i64, ptr %t100243, i64 1
   store i64 %t100077, ptr %t100244
   %t100245 = getelementptr i64, ptr %t100243, i64 2
@@ -242365,8 +242421,8 @@ if_done16142:
   ret i64 %t100298
 }
 
-; __sprout_lambda_1570_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
-define i64 @__sprout_lambda_1570_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1571_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
+define i64 @__sprout_lambda_1571_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t100042 = alloca ptr
   store ptr %env, ptr %t100042
@@ -242422,7 +242478,7 @@ entry:
   %t100312 = add i64 48, 0
   %t100313 = call i64 @sprout_alloc_closure_env(i64 %t100312)
   %t100314 = inttoptr i64 %t100313 to ptr
-  store ptr @__sprout_lambda_1571_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100314
+  store ptr @__sprout_lambda_1572_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100314
   %t100315 = getelementptr i64, ptr %t100314, i64 1
   store i64 %t100049, ptr %t100315
   %t100316 = getelementptr i64, ptr %t100314, i64 2
@@ -242456,8 +242512,8 @@ entry:
   ret i64 %t100332
 }
 
-; __sprout_lambda_1569_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
-define i64 @__sprout_lambda_1569_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1570_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
+define i64 @__sprout_lambda_1570_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t100014 = alloca ptr
   store ptr %env, ptr %t100014
@@ -242516,7 +242572,7 @@ entry:
   %t100348 = add i64 56, 0
   %t100349 = call i64 @sprout_alloc_closure_env(i64 %t100348)
   %t100350 = inttoptr i64 %t100349 to ptr
-  store ptr @__sprout_lambda_1570_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100350
+  store ptr @__sprout_lambda_1571_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100350
   %t100351 = getelementptr i64, ptr %t100350, i64 1
   store i64 %a0, ptr %t100351
   %t100352 = getelementptr i64, ptr %t100350, i64 2
@@ -242549,8 +242605,8 @@ entry:
   ret i64 %t100367
 }
 
-; __sprout_lambda_1568_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
-define i64 @__sprout_lambda_1568_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1569_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
+define i64 @__sprout_lambda_1569_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t99986 = alloca ptr
   store ptr %env, ptr %t99986
@@ -242609,7 +242665,7 @@ entry:
   %t100383 = add i64 56, 0
   %t100384 = call i64 @sprout_alloc_closure_env(i64 %t100383)
   %t100385 = inttoptr i64 %t100384 to ptr
-  store ptr @__sprout_lambda_1569_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100385
+  store ptr @__sprout_lambda_1570_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100385
   %t100386 = getelementptr i64, ptr %t100385, i64 1
   store i64 %t99993, ptr %t100386
   %t100387 = getelementptr i64, ptr %t100385, i64 2
@@ -242647,8 +242703,8 @@ entry:
   ret i64 %t100406
 }
 
-; __sprout_lambda_1567_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
-define i64 @__sprout_lambda_1567_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1568_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
+define i64 @__sprout_lambda_1568_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t99962 = alloca ptr
   store ptr %env, ptr %t99962
@@ -242702,7 +242758,7 @@ entry:
   %t100422 = add i64 56, 0
   %t100423 = call i64 @sprout_alloc_closure_env(i64 %t100422)
   %t100424 = inttoptr i64 %t100423 to ptr
-  store ptr @__sprout_lambda_1568_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100424
+  store ptr @__sprout_lambda_1569_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100424
   %t100425 = getelementptr i64, ptr %t100424, i64 1
   store i64 %t99965, ptr %t100425
   %t100426 = getelementptr i64, ptr %t100424, i64 2
@@ -242740,8 +242796,8 @@ entry:
   ret i64 %t100445
 }
 
-; __sprout_lambda_1566_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
-define i64 @__sprout_lambda_1566_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1567_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines (in stdlib.compiler.codegen.emit_partial_direct_wrapper_lines)
+define i64 @__sprout_lambda_1567_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t99942 = alloca ptr
   store ptr %env, ptr %t99942
@@ -242787,7 +242843,7 @@ entry:
   %t100459 = add i64 48, 0
   %t100460 = call i64 @sprout_alloc_closure_env(i64 %t100459)
   %t100461 = inttoptr i64 %t100460 to ptr
-  store ptr @__sprout_lambda_1567_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100461
+  store ptr @__sprout_lambda_1568_stdlib.compiler.codegen.emit_partial_direct_wrapper_lines, ptr %t100461
   %t100462 = getelementptr i64, ptr %t100461, i64 1
   store i64 %t99945, ptr %t100462
   %t100463 = getelementptr i64, ptr %t100461, i64 2
@@ -242818,8 +242874,8 @@ entry:
   ret i64 %t100477
 }
 
-; __sprout_lambda_1573_stdlib.compiler.codegen.emit_tuple_expr (in stdlib.compiler.codegen.emit_tuple_expr)
-define i64 @__sprout_lambda_1573_stdlib.compiler.codegen.emit_tuple_expr(ptr %env, i64 %a0) {
+; __sprout_lambda_1574_stdlib.compiler.codegen.emit_tuple_expr (in stdlib.compiler.codegen.emit_tuple_expr)
+define i64 @__sprout_lambda_1574_stdlib.compiler.codegen.emit_tuple_expr(ptr %env, i64 %a0) {
 entry:
   %t103876 = alloca ptr
   store ptr %env, ptr %t103876
@@ -242853,8 +242909,8 @@ match_done16741:
   ret i64 %t103894
 }
 
-; __sprout_lambda_1574_stdlib.compiler.codegen.is_nothing_ctor (in stdlib.compiler.codegen.is_nothing_ctor)
-define i1 @__sprout_lambda_1574_stdlib.compiler.codegen.is_nothing_ctor(ptr %env, i64 %a0) {
+; __sprout_lambda_1575_stdlib.compiler.codegen.is_nothing_ctor (in stdlib.compiler.codegen.is_nothing_ctor)
+define i1 @__sprout_lambda_1575_stdlib.compiler.codegen.is_nothing_ctor(ptr %env, i64 %a0) {
 entry:
   %t105227 = alloca ptr
   store ptr %env, ptr %t105227
@@ -242898,8 +242954,8 @@ logic_done16806:
   ret i1 %t105252
 }
 
-; __sprout_lambda_1575_stdlib.compiler.codegen.is_entry_fn_name (in stdlib.compiler.codegen.is_entry_fn_name)
-define i1 @__sprout_lambda_1575_stdlib.compiler.codegen.is_entry_fn_name(ptr %env, i64 %a0) {
+; __sprout_lambda_1576_stdlib.compiler.codegen.is_entry_fn_name (in stdlib.compiler.codegen.is_entry_fn_name)
+define i1 @__sprout_lambda_1576_stdlib.compiler.codegen.is_entry_fn_name(ptr %env, i64 %a0) {
 entry:
   %t105273 = alloca ptr
   store ptr %env, ptr %t105273
@@ -242943,8 +242999,8 @@ logic_done16810:
   ret i1 %t105298
 }
 
-; __sprout_lambda_1576_stdlib.compiler.codegen.pack_and_call_ctor_wrapper (in stdlib.compiler.codegen.pack_and_call_ctor_wrapper)
-define i64 @__sprout_lambda_1576_stdlib.compiler.codegen.pack_and_call_ctor_wrapper(ptr %env, i64 %a0) {
+; __sprout_lambda_1577_stdlib.compiler.codegen.pack_and_call_ctor_wrapper (in stdlib.compiler.codegen.pack_and_call_ctor_wrapper)
+define i64 @__sprout_lambda_1577_stdlib.compiler.codegen.pack_and_call_ctor_wrapper(ptr %env, i64 %a0) {
 entry:
   %t105594 = alloca ptr
   store ptr %env, ptr %t105594
@@ -242963,8 +243019,8 @@ entry:
   ret i64 %t105603
 }
 
-; __sprout_lambda_1577_stdlib.compiler.codegen.lambda_free_names (in stdlib.compiler.codegen.lambda_free_names)
-define i64 @__sprout_lambda_1577_stdlib.compiler.codegen.lambda_free_names(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1578_stdlib.compiler.codegen.lambda_free_names (in stdlib.compiler.codegen.lambda_free_names)
+define i64 @__sprout_lambda_1578_stdlib.compiler.codegen.lambda_free_names(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t106042 = alloca ptr
   store ptr %env, ptr %t106042
@@ -243016,8 +243072,8 @@ match_done16829:
   ret i64 %t106065
 }
 
-; __sprout_lambda_1578_stdlib.compiler.codegen.emit_lambda_expr (in stdlib.compiler.codegen.emit_lambda_expr)
-define i64 @__sprout_lambda_1578_stdlib.compiler.codegen.emit_lambda_expr(ptr %env, i64 %a0) {
+; __sprout_lambda_1579_stdlib.compiler.codegen.emit_lambda_expr (in stdlib.compiler.codegen.emit_lambda_expr)
+define i64 @__sprout_lambda_1579_stdlib.compiler.codegen.emit_lambda_expr(ptr %env, i64 %a0) {
 entry:
   %t106211 = alloca ptr
   store ptr %env, ptr %t106211
@@ -243030,8 +243086,8 @@ entry:
   ret i64 %t106215
 }
 
-; __sprout_lambda_1579_stdlib.compiler.codegen.emit_lambda_expr (in stdlib.compiler.codegen.emit_lambda_expr)
-define i64 @__sprout_lambda_1579_stdlib.compiler.codegen.emit_lambda_expr(ptr %env, i64 %a0) {
+; __sprout_lambda_1580_stdlib.compiler.codegen.emit_lambda_expr (in stdlib.compiler.codegen.emit_lambda_expr)
+define i64 @__sprout_lambda_1580_stdlib.compiler.codegen.emit_lambda_expr(ptr %env, i64 %a0) {
 entry:
   %t106254 = alloca ptr
   store ptr %env, ptr %t106254
@@ -243048,8 +243104,8 @@ entry:
   ret i64 %t106260
 }
 
-; __sprout_lambda_1580_stdlib.compiler.codegen.list_length_params (in stdlib.compiler.codegen.list_length_params)
-define i64 @__sprout_lambda_1580_stdlib.compiler.codegen.list_length_params(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1581_stdlib.compiler.codegen.list_length_params (in stdlib.compiler.codegen.list_length_params)
+define i64 @__sprout_lambda_1581_stdlib.compiler.codegen.list_length_params(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t106597 = alloca ptr
   store ptr %env, ptr %t106597
@@ -243065,8 +243121,8 @@ entry:
   ret i64 %t106603
 }
 
-; __sprout_lambda_1581_stdlib.compiler.codegen.emit_match_heap (in stdlib.compiler.codegen.emit_match_heap)
-define i64 @__sprout_lambda_1581_stdlib.compiler.codegen.emit_match_heap(ptr %env, i64 %a0) {
+; __sprout_lambda_1582_stdlib.compiler.codegen.emit_match_heap (in stdlib.compiler.codegen.emit_match_heap)
+define i64 @__sprout_lambda_1582_stdlib.compiler.codegen.emit_match_heap(ptr %env, i64 %a0) {
 entry:
   %t111077 = alloca ptr
   store ptr %env, ptr %t111077
@@ -243134,8 +243190,8 @@ match_done17063:
   ret i64 %t111123
 }
 
-; __sprout_lambda_1582_stdlib.compiler.codegen.emit_match_unboxed_call (in stdlib.compiler.codegen.emit_match_unboxed_call)
-define i64 @__sprout_lambda_1582_stdlib.compiler.codegen.emit_match_unboxed_call(ptr %env, i64 %a0) {
+; __sprout_lambda_1583_stdlib.compiler.codegen.emit_match_unboxed_call (in stdlib.compiler.codegen.emit_match_unboxed_call)
+define i64 @__sprout_lambda_1583_stdlib.compiler.codegen.emit_match_unboxed_call(ptr %env, i64 %a0) {
 entry:
   %t113589 = alloca ptr
   store ptr %env, ptr %t113589
@@ -243180,8 +243236,8 @@ match_done17279:
   ret i64 %t113615
 }
 
-; __sprout_lambda_1583_stdlib.compiler.codegen.emit_match_unboxed_call (in stdlib.compiler.codegen.emit_match_unboxed_call)
-define i64 @__sprout_lambda_1583_stdlib.compiler.codegen.emit_match_unboxed_call(ptr %env, i64 %a0) {
+; __sprout_lambda_1584_stdlib.compiler.codegen.emit_match_unboxed_call (in stdlib.compiler.codegen.emit_match_unboxed_call)
+define i64 @__sprout_lambda_1584_stdlib.compiler.codegen.emit_match_unboxed_call(ptr %env, i64 %a0) {
 entry:
   %t114010 = alloca ptr
   store ptr %env, ptr %t114010
@@ -243249,8 +243305,8 @@ match_done17297:
   ret i64 %t114056
 }
 
-; __sprout_lambda_1584_stdlib.compiler.codegen.strip_module_prefix (in stdlib.compiler.codegen.strip_module_prefix)
-define i64 @__sprout_lambda_1584_stdlib.compiler.codegen.strip_module_prefix(ptr %env, i64 %a0) {
+; __sprout_lambda_1585_stdlib.compiler.codegen.strip_module_prefix (in stdlib.compiler.codegen.strip_module_prefix)
+define i64 @__sprout_lambda_1585_stdlib.compiler.codegen.strip_module_prefix(ptr %env, i64 %a0) {
 entry:
   %t115469 = alloca ptr
   store ptr %env, ptr %t115469
@@ -243291,8 +243347,8 @@ if_done17384:
   ret i64 %t115491
 }
 
-; __sprout_lambda_1585_stdlib.compiler.codegen.emit_named_call (in stdlib.compiler.codegen.emit_named_call)
-define i64 @__sprout_lambda_1585_stdlib.compiler.codegen.emit_named_call(ptr %env, i64 %a0) {
+; __sprout_lambda_1586_stdlib.compiler.codegen.emit_named_call (in stdlib.compiler.codegen.emit_named_call)
+define i64 @__sprout_lambda_1586_stdlib.compiler.codegen.emit_named_call(ptr %env, i64 %a0) {
 entry:
   %t115702 = alloca ptr
   store ptr %env, ptr %t115702
@@ -243314,8 +243370,8 @@ entry:
   ret i64 %t115712
 }
 
-; __sprout_lambda_1588_stdlib.compiler.codegen.emit_ctor_call_expr (in stdlib.compiler.codegen.emit_ctor_call_expr)
-define i64 @__sprout_lambda_1588_stdlib.compiler.codegen.emit_ctor_call_expr(ptr %env, i64 %a0) {
+; __sprout_lambda_1589_stdlib.compiler.codegen.emit_ctor_call_expr (in stdlib.compiler.codegen.emit_ctor_call_expr)
+define i64 @__sprout_lambda_1589_stdlib.compiler.codegen.emit_ctor_call_expr(ptr %env, i64 %a0) {
 entry:
   %t117104 = alloca ptr
   store ptr %env, ptr %t117104
@@ -243334,8 +243390,8 @@ entry:
   ret i64 %t117113
 }
 
-; __sprout_lambda_1587_stdlib.compiler.codegen.emit_ctor_call_expr (in stdlib.compiler.codegen.emit_ctor_call_expr)
-define i64 @__sprout_lambda_1587_stdlib.compiler.codegen.emit_ctor_call_expr(ptr %env, i64 %a0) {
+; __sprout_lambda_1588_stdlib.compiler.codegen.emit_ctor_call_expr (in stdlib.compiler.codegen.emit_ctor_call_expr)
+define i64 @__sprout_lambda_1588_stdlib.compiler.codegen.emit_ctor_call_expr(ptr %env, i64 %a0) {
 entry:
   %t116697 = alloca ptr
   store ptr %env, ptr %t116697
@@ -243885,7 +243941,7 @@ if_else17487:
   %t117115 = add i64 8, 0
   %t117116 = call i64 @sprout_alloc_closure_env(i64 %t117115)
   %t117117 = inttoptr i64 %t117116 to ptr
-  store ptr @__sprout_lambda_1588_stdlib.compiler.codegen.emit_ctor_call_expr, ptr %t117117
+  store ptr @__sprout_lambda_1589_stdlib.compiler.codegen.emit_ctor_call_expr, ptr %t117117
   %t117118 = alloca ptr
   store ptr %t117117, ptr %t117118
   %t117119 = call i64 @sprout_gc_push_ptr_root(ptr %t117118)
@@ -243900,7 +243956,7 @@ if_else17487:
   %t117126 = add i64 8, 0
   %t117127 = call i64 @sprout_alloc_closure_env(i64 %t117126)
   %t117128 = inttoptr i64 %t117127 to ptr
-  store ptr @__sprout_fn_closure_1485, ptr %t117128
+  store ptr @__sprout_fn_closure_1486, ptr %t117128
   %t117129 = alloca ptr
   store ptr %t117128, ptr %t117129
   %t117130 = call i64 @sprout_gc_push_ptr_root(ptr %t117129)
@@ -244287,8 +244343,8 @@ if_done17482:
   ret i64 %t117417
 }
 
-; __sprout_lambda_1586_stdlib.compiler.codegen.emit_ctor_call_expr (in stdlib.compiler.codegen.emit_ctor_call_expr)
-define i64 @__sprout_lambda_1586_stdlib.compiler.codegen.emit_ctor_call_expr(ptr %env, i64 %a0) {
+; __sprout_lambda_1587_stdlib.compiler.codegen.emit_ctor_call_expr (in stdlib.compiler.codegen.emit_ctor_call_expr)
+define i64 @__sprout_lambda_1587_stdlib.compiler.codegen.emit_ctor_call_expr(ptr %env, i64 %a0) {
 entry:
   %t116673 = alloca ptr
   store ptr %env, ptr %t116673
@@ -244342,7 +244398,7 @@ entry:
   %t117431 = add i64 56, 0
   %t117432 = call i64 @sprout_alloc_closure_env(i64 %t117431)
   %t117433 = inttoptr i64 %t117432 to ptr
-  store ptr @__sprout_lambda_1587_stdlib.compiler.codegen.emit_ctor_call_expr, ptr %t117433
+  store ptr @__sprout_lambda_1588_stdlib.compiler.codegen.emit_ctor_call_expr, ptr %t117433
   %t117434 = getelementptr i64, ptr %t117433, i64 1
   store i64 %t116676, ptr %t117434
   %t117435 = getelementptr i64, ptr %t117433, i64 2
@@ -244371,8 +244427,8 @@ entry:
   ret i64 %t117448
 }
 
-; __sprout_lambda_1589_stdlib.compiler.codegen.emit_ctor_partial_wrapper (in stdlib.compiler.codegen.emit_ctor_partial_wrapper)
-define i64 @__sprout_lambda_1589_stdlib.compiler.codegen.emit_ctor_partial_wrapper(ptr %env, i64 %a0) {
+; __sprout_lambda_1590_stdlib.compiler.codegen.emit_ctor_partial_wrapper (in stdlib.compiler.codegen.emit_ctor_partial_wrapper)
+define i64 @__sprout_lambda_1590_stdlib.compiler.codegen.emit_ctor_partial_wrapper(ptr %env, i64 %a0) {
 entry:
   %t117839 = alloca ptr
   store ptr %env, ptr %t117839
@@ -244391,8 +244447,8 @@ entry:
   ret i64 %t117848
 }
 
-; __sprout_lambda_1591_stdlib.compiler.codegen.emit_direct_fn_call (in stdlib.compiler.codegen.emit_direct_fn_call)
-define i64 @__sprout_lambda_1591_stdlib.compiler.codegen.emit_direct_fn_call(ptr %env, i64 %a0) {
+; __sprout_lambda_1592_stdlib.compiler.codegen.emit_direct_fn_call (in stdlib.compiler.codegen.emit_direct_fn_call)
+define i64 @__sprout_lambda_1592_stdlib.compiler.codegen.emit_direct_fn_call(ptr %env, i64 %a0) {
 entry:
   %t118601 = alloca ptr
   store ptr %env, ptr %t118601
@@ -244811,8 +244867,8 @@ if_done17530:
   ret i64 %t118892
 }
 
-; __sprout_lambda_1590_stdlib.compiler.codegen.emit_direct_fn_call (in stdlib.compiler.codegen.emit_direct_fn_call)
-define i64 @__sprout_lambda_1590_stdlib.compiler.codegen.emit_direct_fn_call(ptr %env, i64 %a0) {
+; __sprout_lambda_1591_stdlib.compiler.codegen.emit_direct_fn_call (in stdlib.compiler.codegen.emit_direct_fn_call)
+define i64 @__sprout_lambda_1591_stdlib.compiler.codegen.emit_direct_fn_call(ptr %env, i64 %a0) {
 entry:
   %t118565 = alloca ptr
   store ptr %env, ptr %t118565
@@ -244890,7 +244946,7 @@ entry:
   %t118912 = add i64 80, 0
   %t118913 = call i64 @sprout_alloc_closure_env(i64 %t118912)
   %t118914 = inttoptr i64 %t118913 to ptr
-  store ptr @__sprout_lambda_1591_stdlib.compiler.codegen.emit_direct_fn_call, ptr %t118914
+  store ptr @__sprout_lambda_1592_stdlib.compiler.codegen.emit_direct_fn_call, ptr %t118914
   %t118915 = getelementptr i64, ptr %t118914, i64 1
   store i64 %t118568, ptr %t118915
   %t118916 = getelementptr i64, ptr %t118914, i64 2
@@ -244925,8 +244981,8 @@ entry:
   ret i64 %t118932
 }
 
-; __sprout_lambda_1592_stdlib.compiler.codegen.emit_regular_direct_call (in stdlib.compiler.codegen.emit_regular_direct_call)
-define i64 @__sprout_lambda_1592_stdlib.compiler.codegen.emit_regular_direct_call(ptr %env, i64 %a0) {
+; __sprout_lambda_1593_stdlib.compiler.codegen.emit_regular_direct_call (in stdlib.compiler.codegen.emit_regular_direct_call)
+define i64 @__sprout_lambda_1593_stdlib.compiler.codegen.emit_regular_direct_call(ptr %env, i64 %a0) {
 entry:
   %t119021 = alloca ptr
   store ptr %env, ptr %t119021
@@ -244971,8 +245027,8 @@ match_done17545:
   ret i64 %t119047
 }
 
-; __sprout_lambda_1601_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1601_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1602_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1602_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119852 = alloca ptr
   store ptr %env, ptr %t119852
@@ -245167,8 +245223,8 @@ entry:
   ret i64 %t119997
 }
 
-; __sprout_lambda_1600_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1600_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1601_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1601_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119828 = alloca ptr
   store ptr %env, ptr %t119828
@@ -245219,7 +245275,7 @@ entry:
   %t120011 = add i64 48, 0
   %t120012 = call i64 @sprout_alloc_closure_env(i64 %t120011)
   %t120013 = inttoptr i64 %t120012 to ptr
-  store ptr @__sprout_lambda_1601_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120013
+  store ptr @__sprout_lambda_1602_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120013
   %t120014 = getelementptr i64, ptr %t120013, i64 1
   store i64 %t119831, ptr %t120014
   %t120015 = getelementptr i64, ptr %t120013, i64 2
@@ -245297,8 +245353,8 @@ if_done17606:
   ret i64 %t120065
 }
 
-; __sprout_lambda_1599_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1599_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1600_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1600_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119800 = alloca ptr
   store ptr %env, ptr %t119800
@@ -245354,7 +245410,7 @@ entry:
   %t120079 = add i64 48, 0
   %t120080 = call i64 @sprout_alloc_closure_env(i64 %t120079)
   %t120081 = inttoptr i64 %t120080 to ptr
-  store ptr @__sprout_lambda_1600_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120081
+  store ptr @__sprout_lambda_1601_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120081
   %t120082 = getelementptr i64, ptr %t120081, i64 1
   store i64 %t119807, ptr %t120082
   %t120083 = getelementptr i64, ptr %t120081, i64 2
@@ -245388,8 +245444,8 @@ entry:
   ret i64 %t120099
 }
 
-; __sprout_lambda_1598_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1598_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1599_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1599_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119772 = alloca ptr
   store ptr %env, ptr %t119772
@@ -245448,7 +245504,7 @@ entry:
   %t120115 = add i64 56, 0
   %t120116 = call i64 @sprout_alloc_closure_env(i64 %t120115)
   %t120117 = inttoptr i64 %t120116 to ptr
-  store ptr @__sprout_lambda_1599_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120117
+  store ptr @__sprout_lambda_1600_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120117
   %t120118 = getelementptr i64, ptr %t120117, i64 1
   store i64 %a0, ptr %t120118
   %t120119 = getelementptr i64, ptr %t120117, i64 2
@@ -245481,8 +245537,8 @@ entry:
   ret i64 %t120134
 }
 
-; __sprout_lambda_1597_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1597_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1598_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1598_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119740 = alloca ptr
   store ptr %env, ptr %t119740
@@ -245546,7 +245602,7 @@ entry:
   %t120150 = add i64 56, 0
   %t120151 = call i64 @sprout_alloc_closure_env(i64 %t120150)
   %t120152 = inttoptr i64 %t120151 to ptr
-  store ptr @__sprout_lambda_1598_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120152
+  store ptr @__sprout_lambda_1599_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120152
   %t120153 = getelementptr i64, ptr %t120152, i64 1
   store i64 %t119751, ptr %t120153
   %t120154 = getelementptr i64, ptr %t120152, i64 2
@@ -245579,8 +245635,8 @@ entry:
   ret i64 %t120169
 }
 
-; __sprout_lambda_1596_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1596_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1597_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1597_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119712 = alloca ptr
   store ptr %env, ptr %t119712
@@ -245642,7 +245698,7 @@ entry:
   %t120187 = add i64 64, 0
   %t120188 = call i64 @sprout_alloc_closure_env(i64 %t120187)
   %t120189 = inttoptr i64 %t120188 to ptr
-  store ptr @__sprout_lambda_1597_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120189
+  store ptr @__sprout_lambda_1598_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120189
   %t120190 = getelementptr i64, ptr %t120189, i64 1
   store i64 %t119715, ptr %t120190
   %t120191 = getelementptr i64, ptr %t120189, i64 2
@@ -245724,8 +245780,8 @@ entry:
   ret i64 %t120243
 }
 
-; __sprout_lambda_1595_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1595_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1596_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1596_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119688 = alloca ptr
   store ptr %env, ptr %t119688
@@ -245779,7 +245835,7 @@ entry:
   %t120259 = add i64 56, 0
   %t120260 = call i64 @sprout_alloc_closure_env(i64 %t120259)
   %t120261 = inttoptr i64 %t120260 to ptr
-  store ptr @__sprout_lambda_1596_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120261
+  store ptr @__sprout_lambda_1597_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120261
   %t120262 = getelementptr i64, ptr %t120261, i64 1
   store i64 %t119691, ptr %t120262
   %t120263 = getelementptr i64, ptr %t120261, i64 2
@@ -245812,8 +245868,8 @@ entry:
   ret i64 %t120278
 }
 
-; __sprout_lambda_1594_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1594_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1595_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1595_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119668 = alloca ptr
   store ptr %env, ptr %t119668
@@ -245859,7 +245915,7 @@ entry:
   %t120292 = add i64 48, 0
   %t120293 = call i64 @sprout_alloc_closure_env(i64 %t120292)
   %t120294 = inttoptr i64 %t120293 to ptr
-  store ptr @__sprout_lambda_1595_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120294
+  store ptr @__sprout_lambda_1596_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120294
   %t120295 = getelementptr i64, ptr %t120294, i64 1
   store i64 %t119671, ptr %t120295
   %t120296 = getelementptr i64, ptr %t120294, i64 2
@@ -245890,8 +245946,8 @@ entry:
   ret i64 %t120310
 }
 
-; __sprout_lambda_1593_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
-define i64 @__sprout_lambda_1593_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
+; __sprout_lambda_1594_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines (in stdlib.compiler.codegen.emit_partial_closure_wrapper_lines)
+define i64 @__sprout_lambda_1594_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines(ptr %env, i64 %a0) {
 entry:
   %t119652 = alloca ptr
   store ptr %env, ptr %t119652
@@ -245929,7 +245985,7 @@ entry:
   %t120322 = add i64 40, 0
   %t120323 = call i64 @sprout_alloc_closure_env(i64 %t120322)
   %t120324 = inttoptr i64 %t120323 to ptr
-  store ptr @__sprout_lambda_1594_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120324
+  store ptr @__sprout_lambda_1595_stdlib.compiler.codegen.emit_partial_closure_wrapper_lines, ptr %t120324
   %t120325 = getelementptr i64, ptr %t120324, i64 1
   store i64 %t119655, ptr %t120325
   %t120326 = getelementptr i64, ptr %t120324, i64 2
@@ -245958,8 +246014,8 @@ entry:
   ret i64 %t120339
 }
 
-; __sprout_lambda_1602_stdlib.compiler.codegen.list_length_exprs (in stdlib.compiler.codegen.list_length_exprs)
-define i64 @__sprout_lambda_1602_stdlib.compiler.codegen.list_length_exprs(ptr %env, i64 %a0, i64 %a1) {
+; __sprout_lambda_1603_stdlib.compiler.codegen.list_length_exprs (in stdlib.compiler.codegen.list_length_exprs)
+define i64 @__sprout_lambda_1603_stdlib.compiler.codegen.list_length_exprs(ptr %env, i64 %a0, i64 %a1) {
 entry:
   %t120597 = alloca ptr
   store ptr %env, ptr %t120597
@@ -245975,8 +246031,8 @@ entry:
   ret i64 %t120603
 }
 
-; __sprout_lambda_1603_stdlib.compiler.codegen.emit_fn_decl (in stdlib.compiler.codegen.emit_fn_decl)
-define i64 @__sprout_lambda_1603_stdlib.compiler.codegen.emit_fn_decl(ptr %env, i64 %a0) {
+; __sprout_lambda_1604_stdlib.compiler.codegen.emit_fn_decl (in stdlib.compiler.codegen.emit_fn_decl)
+define i64 @__sprout_lambda_1604_stdlib.compiler.codegen.emit_fn_decl(ptr %env, i64 %a0) {
 entry:
   %t123902 = alloca ptr
   store ptr %env, ptr %t123902
@@ -247101,8 +247157,8 @@ if_done17756:
   ret i64 %t124696
 }
 
-; __sprout_lambda_1604_stdlib.compiler.codegen.emit_worker_cpr_do (in stdlib.compiler.codegen.emit_worker_cpr_do)
-define i64 @__sprout_lambda_1604_stdlib.compiler.codegen.emit_worker_cpr_do(ptr %env, i64 %a0) {
+; __sprout_lambda_1605_stdlib.compiler.codegen.emit_worker_cpr_do (in stdlib.compiler.codegen.emit_worker_cpr_do)
+define i64 @__sprout_lambda_1605_stdlib.compiler.codegen.emit_worker_cpr_do(ptr %env, i64 %a0) {
 entry:
   %t135297 = alloca ptr
   store ptr %env, ptr %t135297
@@ -247147,8 +247203,8 @@ match_done18484:
   ret i64 %t135323
 }
 
-; __sprout_lambda_1605_stdlib.compiler.codegen.emit_worker_match (in stdlib.compiler.codegen.emit_worker_match)
-define i64 @__sprout_lambda_1605_stdlib.compiler.codegen.emit_worker_match(ptr %env, i64 %a0) {
+; __sprout_lambda_1606_stdlib.compiler.codegen.emit_worker_match (in stdlib.compiler.codegen.emit_worker_match)
+define i64 @__sprout_lambda_1606_stdlib.compiler.codegen.emit_worker_match(ptr %env, i64 %a0) {
 entry:
   %t136150 = alloca ptr
   store ptr %env, ptr %t136150
@@ -247211,8 +247267,8 @@ match_done18498:
   ret i64 %t136192
 }
 
-; __sprout_lambda_1606_stdlib.compiler.codegen.type_expr_to_ll_subst (in stdlib.compiler.codegen.type_expr_to_ll_subst)
-define i64 @__sprout_lambda_1606_stdlib.compiler.codegen.type_expr_to_ll_subst(ptr %env, i64 %a0) {
+; __sprout_lambda_1607_stdlib.compiler.codegen.type_expr_to_ll_subst (in stdlib.compiler.codegen.type_expr_to_ll_subst)
+define i64 @__sprout_lambda_1607_stdlib.compiler.codegen.type_expr_to_ll_subst(ptr %env, i64 %a0) {
 entry:
   %t137922 = alloca ptr
   store ptr %env, ptr %t137922
@@ -247237,8 +247293,8 @@ entry:
   ret i64 %t137934
 }
 
-; __sprout_lambda_1607_stdlib.compiler.codegen.apply_subst_to_type_exprs (in stdlib.compiler.codegen.apply_subst_to_type_exprs)
-define i64 @__sprout_lambda_1607_stdlib.compiler.codegen.apply_subst_to_type_exprs(ptr %env, i64 %a0) {
+; __sprout_lambda_1608_stdlib.compiler.codegen.apply_subst_to_type_exprs (in stdlib.compiler.codegen.apply_subst_to_type_exprs)
+define i64 @__sprout_lambda_1608_stdlib.compiler.codegen.apply_subst_to_type_exprs(ptr %env, i64 %a0) {
 entry:
   %t138016 = alloca ptr
   store ptr %env, ptr %t138016
@@ -247263,8 +247319,8 @@ entry:
   ret i64 %t138028
 }
 
-; __sprout_lambda_1608_stdlib.compiler.codegen.build_fn_sigs_acc (in stdlib.compiler.codegen.build_fn_sigs_acc)
-define i64 @__sprout_lambda_1608_stdlib.compiler.codegen.build_fn_sigs_acc(ptr %env, i64 %a0) {
+; __sprout_lambda_1609_stdlib.compiler.codegen.build_fn_sigs_acc (in stdlib.compiler.codegen.build_fn_sigs_acc)
+define i64 @__sprout_lambda_1609_stdlib.compiler.codegen.build_fn_sigs_acc(ptr %env, i64 %a0) {
 entry:
   %t138146 = alloca ptr
   store ptr %env, ptr %t138146
@@ -247277,8 +247333,8 @@ entry:
   ret i64 %t138150
 }
 
-; __sprout_lambda_1609_stdlib.compiler.codegen.build_fn_sigs_acc (in stdlib.compiler.codegen.build_fn_sigs_acc)
-define i64 @__sprout_lambda_1609_stdlib.compiler.codegen.build_fn_sigs_acc(ptr %env, i64 %a0) {
+; __sprout_lambda_1610_stdlib.compiler.codegen.build_fn_sigs_acc (in stdlib.compiler.codegen.build_fn_sigs_acc)
+define i64 @__sprout_lambda_1610_stdlib.compiler.codegen.build_fn_sigs_acc(ptr %env, i64 %a0) {
 entry:
   %t138217 = alloca ptr
   store ptr %env, ptr %t138217
@@ -247291,8 +247347,8 @@ entry:
   ret i64 %t138221
 }
 
-; __sprout_lambda_1610_stdlib.compiler.compiler.next_line (in stdlib.compiler.compiler.next_line)
-define i64 @__sprout_lambda_1610_stdlib.compiler.compiler.next_line(ptr %env, i64 %a0) {
+; __sprout_lambda_1611_stdlib.compiler.compiler.next_line (in stdlib.compiler.compiler.next_line)
+define i64 @__sprout_lambda_1611_stdlib.compiler.compiler.next_line(ptr %env, i64 %a0) {
 entry:
   %t140742 = alloca ptr
   store ptr %env, ptr %t140742
@@ -247330,8 +247386,8 @@ if_done19025:
   ret i64 %t140762
 }
 
-; __sprout_lambda_1611_main.next_line (in main.next_line)
-define i64 @__sprout_lambda_1611_main.next_line(ptr %env, i64 %a0) {
+; __sprout_lambda_1612_main.next_line (in main.next_line)
+define i64 @__sprout_lambda_1612_main.next_line(ptr %env, i64 %a0) {
 entry:
   %t142843 = alloca ptr
   store ptr %env, ptr %t142843
@@ -247369,29 +247425,29 @@ if_done19376:
   ret i64 %t142863
 }
 
-; __sprout_lambda_1612___tc_ToString_List_a_to_string (in __tc_ToString_List_a_to_string)
-define i64 @__sprout_lambda_1612___tc_ToString_List_a_to_string(ptr %env, i64 %a0) {
+; __sprout_lambda_1613___tc_ToString_List_a_to_string (in __tc_ToString_List_a_to_string)
+define i64 @__sprout_lambda_1613___tc_ToString_List_a_to_string(ptr %env, i64 %a0) {
 entry:
-  %t145913 = alloca ptr
-  store ptr %env, ptr %t145913
-  %t145914 = call i64 @sprout_gc_push_ptr_root(ptr %t145913)
-  %t145915 = getelementptr i64, ptr %env, i64 1
-  %t145916 = load i64, ptr %t145915
-  %t145917 = alloca i64
-  store i64 %t145916, ptr %t145917
-  %t145918 = call i64 @sprout_gc_push_i64_root(ptr %t145917)
-  %t145919 = alloca i64
-  store i64 %a0, ptr %t145919
-  %t145920 = call i64 @sprout_gc_push_i64_root(ptr %t145919)
-  %t145921 = alloca i64
-  store i64 %a0, ptr %t145921
-  %t145922 = call i64 @sprout_gc_push_i64_root(ptr %t145921)
-  %t145923 = alloca i64
-  store i64 %t145916, ptr %t145923
-  %t145924 = call i64 @sprout_gc_push_i64_root(ptr %t145923)
-  %t145925 = call i64 @to_string(i64 %a0, i64 %t145916)
-  %t145926 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t145927 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %t145925
+  %t145948 = alloca ptr
+  store ptr %env, ptr %t145948
+  %t145949 = call i64 @sprout_gc_push_ptr_root(ptr %t145948)
+  %t145950 = getelementptr i64, ptr %env, i64 1
+  %t145951 = load i64, ptr %t145950
+  %t145952 = alloca i64
+  store i64 %t145951, ptr %t145952
+  %t145953 = call i64 @sprout_gc_push_i64_root(ptr %t145952)
+  %t145954 = alloca i64
+  store i64 %a0, ptr %t145954
+  %t145955 = call i64 @sprout_gc_push_i64_root(ptr %t145954)
+  %t145956 = alloca i64
+  store i64 %a0, ptr %t145956
+  %t145957 = call i64 @sprout_gc_push_i64_root(ptr %t145956)
+  %t145958 = alloca i64
+  store i64 %t145951, ptr %t145958
+  %t145959 = call i64 @sprout_gc_push_i64_root(ptr %t145958)
+  %t145960 = call i64 @to_string(i64 %a0, i64 %t145951)
+  %t145961 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t145962 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t145960
 }
 
