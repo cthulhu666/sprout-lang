@@ -257,6 +257,22 @@ fn ctor_fn_type(fields: List ast.TypeExpr, local_vars: Dict types.Type, result: 
   | Cons f rest ->
       types.TFunc(type_from_ast(f, local_vars), ctor_fn_type(rest, local_vars, result), types.EffectPure)
 
+fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | ast.TypeDecl name _ ctors _ ->
+          build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
+      | _ -> build_ctor_map(rest, acc)
+
+fn collect_ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
+  match ctors with
+  | Nil -> acc
+  | Cons ctor rest ->
+      match ctor with
+      | ast.TypeConstructor name _ -> collect_ctor_names(rest, Cons(name, acc))
+
 # ---------------------------------------------------------------------------
 # Effect merging
 # ---------------------------------------------------------------------------
@@ -1466,6 +1482,68 @@ fn infer_unary(
           typed_ast.TUnary(op, typed_operand, typed_ast.typed_expr_type(typed_operand), pos),
           s1, es1, eff)
 
+# --- Exhaustiveness checking ---
+
+fn extract_adt_name(t: types.Type) -> Maybe String =
+  match t with
+  | types.TConst name -> Just(name)
+  | types.TApp base _ -> extract_adt_name(base)
+  | _ -> Nothing
+
+fn is_catchall_pattern(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.WildcardPattern _ -> true
+  | ast.VarPattern _ _ -> true
+  | _ -> false
+
+fn branches_have_catchall(branches: List typed_ast.TypedMatchBranch) -> Bool =
+  match branches with
+  | Nil -> false
+  | Cons branch rest ->
+      match branch with
+      | typed_ast.TypedMatchBranch pat _ ->
+          if is_catchall_pattern(pat) then true else branches_have_catchall(rest)
+
+fn collect_seen_ctors(branches: List typed_ast.TypedMatchBranch, acc: List String) -> List String =
+  match branches with
+  | Nil -> acc
+  | Cons branch rest ->
+      match branch with
+      | typed_ast.TypedMatchBranch pat _ ->
+          match pat with
+          | ast.ConstructorPattern name _ _ -> collect_seen_ctors(rest, Cons(name, acc))
+          | _ -> collect_seen_ctors(rest, acc)
+
+fn join_comma(names: List String) -> String =
+  match names with
+  | Nil -> ""
+  | Cons n Nil -> strip_module_prefix(n)
+  | Cons n rest -> strip_module_prefix(n) ++ ", " ++ join_comma(rest)
+
+fn missing_ctor_names(all_ctors: List String, branches: List typed_ast.TypedMatchBranch) -> List String =
+  types.list_diff(all_ctors, collect_seen_ctors(branches, Nil))
+
+fn check_missing_ctors(adt_name: String, missing: List String) -> Maybe String =
+  match missing with
+  | Nil -> Nothing
+  | Cons _ _ -> Just("Non-exhaustive match on " ++ adt_name ++ ", missing: " ++ join_comma(missing))
+
+fn exhaustiveness_check(
+  ctor_map: Dict (List String),
+  subst: Dict types.Type,
+  scrut_type: types.Type,
+  branches: List typed_ast.TypedMatchBranch
+) -> Maybe String =
+  if branches_have_catchall(branches) then Nothing
+  else
+    match extract_adt_name(unifier.apply_subst(subst, scrut_type)) with
+    | Nothing -> Nothing
+    | Just adt_name ->
+        match dict_get(adt_name, ctor_map) with
+        | Nothing -> Nothing
+        | Just all_ctors ->
+            check_missing_ctors(adt_name, missing_ctor_names(all_ctors, branches))
+
 # --- Match ---
 
 fn infer_match(
@@ -1500,11 +1578,15 @@ fn infer_branches(
 ) -> InferResult !{IO} =
   match branches with
   | Nil ->
-      InferOk(
-        typed_ast.TMatch(typed_scrut,
-                         typed_branch_list_reverse(acc_branches),
-                         unifier.apply_subst(subst, ret_type), pos),
-        subst, eff_subst, acc_eff)
+      do
+        let reversed = typed_branch_list_reverse(acc_branches)
+        ctor_map <- unifier.get_ctor_map(state)
+        match exhaustiveness_check(ctor_map, subst, typed_ast.typed_expr_type(typed_scrut), reversed) with
+        | Just err -> InferErr(err)
+        | Nothing ->
+            InferOk(
+              typed_ast.TMatch(typed_scrut, reversed, unifier.apply_subst(subst, ret_type), pos),
+              subst, eff_subst, acc_eff)
   | Cons branch rest ->
       match branch with
       | ast.MatchBranch pat _ ->
@@ -2108,6 +2190,7 @@ export fn typecheck_decls(
     # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
     # is defined later in the same file).
     let scanned_env = pre_scan_fn_decls(decls, env, dict_empty())
+    unifier.set_ctor_map(state, build_ctor_map(decls, dict_empty()))
     typecheck_decls_inner(state, decls, scanned_env, subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
 
 # Pre-scan pass: register FnDecl signatures, @constrained_N markers, and

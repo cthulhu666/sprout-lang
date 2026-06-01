@@ -69,4 +69,18 @@ fn main() -> Unit !{IO} =
     assert_true(state, "zero-arg call on function fails", is_check_err(r12))
     assert_true(state, "zero-arg error names the callee", str_find(check_err_msg(r12), "'f'") != -1)
 
+    # Exhaustiveness checking
+    r13 <- run_check("type Color = Red | Green | Blue\nfn f(c: Color) -> Int = match c with | Red -> 1 | Blue -> 2")
+    assert_true(state, "non-exhaustive match on ADT fails", is_check_err(r13))
+    assert_true(state, "non-exhaustive error mentions missing ctor", str_find(check_err_msg(r13), "Green") != -1)
+
+    r14 <- run_check("type Color = Red | Green | Blue\nfn f(c: Color) -> Int = match c with | Red -> 1 | Blue -> 2 | Green -> 3")
+    assert_true(state, "exhaustive match on ADT typechecks", is_check_ok(r14))
+
+    r15 <- run_check("type Color = Red | Green | Blue\nfn f(c: Color) -> Int = match c with | Red -> 1 | _ -> 2")
+    assert_true(state, "wildcard arm makes match exhaustive", is_check_ok(r15))
+
+    r16 <- run_check("type Color = Red | Green | Blue\nfn f(c: Color) -> Int = match c with | Red -> 1 | x -> 2")
+    assert_true(state, "var-pattern arm makes match exhaustive", is_check_ok(r16))
+
     summary(state)

@@ -19,18 +19,19 @@ fn strip_module_prefix(name: String) -> String =
 # Only the fresh-variable counters need mutation.
 
 export type InferState (..) =
-  | InferState (Ref Int) (Ref Int)
-  # InferState next_type_id  next_effect_id
+  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String)))
+  # InferState next_type_id  next_effect_id  ctor_map
 
 export fn new_state() -> InferState !{IO} =
   do
     t_id <- ref_new(0)
     e_id <- ref_new(0)
-    InferState(t_id, e_id)
+    ctor_ref <- ref_new(dict_empty())
+    InferState(t_id, e_id, ctor_ref)
 
 export fn fresh(state: InferState) -> String !{IO} =
   match state with
-  | InferState t_ref _ ->
+  | InferState t_ref _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)
@@ -38,11 +39,19 @@ export fn fresh(state: InferState) -> String !{IO} =
 
 export fn fresh_effect(state: InferState) -> String !{IO} =
   match state with
-  | InferState _ e_ref ->
+  | InferState _ e_ref _ ->
       do
         n <- ref_read(e_ref)
         ref_write(e_ref, n + 1)
         "e" ++ int_to_string(n)
+
+export fn set_ctor_map(state: InferState, ctor_map: Dict (List String)) -> Unit !{IO} =
+  match state with
+  | InferState _ _ ctor_ref -> ref_write(ctor_ref, ctor_map)
+
+export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
+  match state with
+  | InferState _ _ ctor_ref -> ref_read(ctor_ref)
 
 # ---------------------------------------------------------------------------
 # apply_subst — walk a Type, replacing bound TVars
