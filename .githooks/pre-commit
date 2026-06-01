@@ -15,6 +15,19 @@ files=$(git diff --cached --name-only --diff-filter=ACMR -z \
         | tr '\0' '\n' | grep -E '\.(sprout|spr)$' || true)
 [[ -z "$files" ]] && exit 0
 
+fail=0
+
+# If any stdlib/compiler/*.sprout is staged, the seed fingerprint must be current.
+# This catches the common case of editing compiler sources without running refresh-seed.
+compiler_staged=$(printf '%s\n' "$files" | grep '^stdlib/compiler/' || true)
+if [[ -n "$compiler_staged" ]]; then
+  if ! just seed-stale >/dev/null 2>&1; then
+    echo "[pre-commit] compiler sources staged but seed fingerprint is stale." >&2
+    echo "    Run: just refresh-seed   (then stage the updated bootstrap/compile_driver.ll)" >&2
+    fail=1
+  fi
+fi
+
 FMT="./build/fmt_bin"
 if [[ ! -x "$FMT" ]]; then
   echo "[pre-commit] $FMT absent — run: just build-fmt-from-seed" >&2
@@ -36,7 +49,6 @@ while IFS= read -r f; do
   fi
 done <<< "$files"
 
-fail=0
 if (( ${#needs_fmt[@]} > 0 )); then
   echo "[pre-commit] formatting drift:" >&2
   printf '  %s\n' "${needs_fmt[@]}" >&2

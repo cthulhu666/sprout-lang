@@ -485,8 +485,9 @@ refresh-seed: bootstrap-from-seed
     opt --passes=verify "$NEXT" -o /dev/null
     if cmp -s "$PREV" "$NEXT"; then
       echo "==> Fixed point reached at iteration $ITER."
-      cp "$NEXT" bootstrap/compile_driver.ll
-      echo "==> bootstrap/compile_driver.ll updated."
+      FP=$(find stdlib/compiler -name "*.sprout" | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+      { echo "; seed-fingerprint: $FP"; cat "$NEXT"; } > bootstrap/compile_driver.ll
+      echo "==> bootstrap/compile_driver.ll updated (fingerprint: $FP)."
       break
     fi
     echo "    Diverges from previous; rebuilding stage from new IR..."
@@ -504,11 +505,36 @@ verify-bootstrap-fixed-point: bootstrap-from-seed
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Re-emitting IR via stage-1..."
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
-  if cmp -s bootstrap/compile_driver.ll "$TMP_LL"; then
+  # Strip the fingerprint comment (line 1) before comparing — stage-1 output has no comment.
+  if cmp -s <(tail -n +2 bootstrap/compile_driver.ll) "$TMP_LL"; then
     echo "==> Fixed point ✓ — bootstrap/compile_driver.ll matches stage-1 output."
   else
     echo "==> FIXED POINT BROKEN ✗" >&2
     echo "    bootstrap/compile_driver.ll diverges from current stage-1 output." >&2
+    echo "    Run: just refresh-seed   (then stage the updated bootstrap/compile_driver.ll)" >&2
+    exit 1
+  fi
+
+# Instant seed-freshness check — no compilation required.
+# Reads the '; seed-fingerprint: <hash>' comment embedded in line 1 of
+# bootstrap/compile_driver.ll (written by refresh-seed) and compares it
+# against a freshly computed hash of all stdlib/compiler/*.sprout sources.
+[group('bootstrap')]
+seed-stale:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  CURRENT=$(find stdlib/compiler -name "*.sprout" | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+  FIRST=$(head -1 bootstrap/compile_driver.ll)
+  if [[ "$FIRST" != "; seed-fingerprint: "* ]]; then
+    echo "==> SEED STALE ✗ — no fingerprint comment found in bootstrap/compile_driver.ll." >&2
+    echo "    Run: just refresh-seed   (then stage the updated bootstrap/compile_driver.ll)" >&2
+    exit 1
+  fi
+  STORED="${FIRST#; seed-fingerprint: }"
+  if [[ "$CURRENT" == "$STORED" ]]; then
+    echo "==> Seed fingerprint ✓ — compiler sources unchanged since last refresh-seed."
+  else
+    echo "==> SEED STALE ✗ — compiler sources changed since last refresh-seed." >&2
     echo "    Run: just refresh-seed   (then stage the updated bootstrap/compile_driver.ll)" >&2
     exit 1
   fi
