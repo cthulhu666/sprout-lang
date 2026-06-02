@@ -55,6 +55,8 @@ crypto_bytes_xor
 crypto_hmac_sha256
 crypto_random_bytes
 crypto_sha256
+eprint  # stderr write bridge for old stage-1 codegen that emits @eprint(i64); takes raw i64 heap pointer — ABI compat layer, cannot express fprintf(stderr) from Sprout
+eprint_str  # writes C string to stderr; Sprout has no stderr output primitive (print/print_str target stdout only)
 env_get
 http_request
 int_range

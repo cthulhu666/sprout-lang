@@ -192,4 +192,15 @@ fn main() -> Unit !{IO} =
     warns2 <- get_warns(pure_tco_src)
     assert_true(state, "pure TCO fn (no cross-fn calls) emits no warning", list_length(warns2) == 0)
 
+    # Mutual-TCO: step_a has a self-tail-call (enters seed); helper tail-calls step_a
+    # so it is expanded into mutual_tco_fns.  Both are excluded from CPR and all
+    # cross-function tail calls within the group emit musttail rather than warnings.
+    let mutual_tco_src = "type R = | ROk Int | RFail\nfn helper(n: Int) -> R = step_a(n)\nfn step_a(n: Int) -> R = if n <= 0 then ROk(n) else if n == 1 then helper(n) else step_a(n - 1)"
+    mutual_ir <- get_ir(mutual_tco_src)
+    mutual_warns <- get_warns(mutual_tco_src)
+    assert_true(state, "mutual TCO emits musttail call i64", ir_contains(mutual_ir, "musttail call i64"))
+    assert_false(state, "mutual TCO helper not CPR-ified (no helper_worker)", ir_contains(mutual_ir, "helper_worker"))
+    assert_false(state, "mutual TCO step_a not CPR-ified (no step_a_worker)", ir_contains(mutual_ir, "step_a_worker"))
+    assert_true(state, "mutual TCO cross-fn calls emit no stack-frame warning", list_length(mutual_warns) == 0)
+
     summary(state)

@@ -39,6 +39,17 @@ fn lex_ok(src: String) -> Bool =
   | Ok _ -> true
   | Err _ -> false
 
+fn token_count(src: String) -> Int =
+  match lexer.tokenize(src) with
+  | Err _ -> -1
+  | Ok toks -> vec_length(toks)
+
+# Build a string of n backtick template literals "`x` " to stress the
+# tokenize_from ↔ scan_template_from mutual recursion cycle.
+fn make_templates(n: Int, acc: List String) -> String =
+  if n <= 0 then string_concat_many(list_reverse(acc))
+  else make_templates(n - 1, Cons("`x` ", acc))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -111,5 +122,9 @@ fn main() -> Unit !{IO} =
 
     # String escape sequence — ensures escape decoding preserves order
     assert_eq(state, "string escape text", tok_text_at("\"a\\nb\"", 0), "a\nb")
+
+    # Mutual-recursion stress: tokenize_from ↔ scan_template_from cycle.
+    # N simple templates produce 3N + 1 tokens (start, lit, end per template, plus eof).
+    assert_eq(state, "200 templates token count", token_count(make_templates(200, Nil)), 601)
 
     summary(state)

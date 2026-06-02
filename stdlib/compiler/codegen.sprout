@@ -75,17 +75,17 @@ export type GlobalInfo (..) =
 # TCO context (threaded through expression emission)
 # ---------------------------------------------------------------------------
 
-# TcoCtx is present only when we are inside a self-recursive function that
-# uses tail-call optimisation via an explicit loop.
+# TcoCtx is present only when we are inside a TCO or mutual-TCO function.
 #
-# fn_name   — name of the function being TCO'd
-# loop_lbl  — label of the loop-header block
-# slots     — (alloca_ir, lltype) for each parameter
-# ret_ll    — return lltype of the function
-# outer_roots — cumulative GC roots registered in enclosing pattern branches
-# sp_save   — IR register from llvm.stacksave(); restored at each back-edge
+# fn_name     — name of the function being compiled
+# loop_lbl    — label of the loop-header block (back-edge target)
+# slots       — (alloca_ir, lltype) for each parameter
+# ret_ll      — return lltype of the function
+# n_roots     — GC roots pushed at function entry (parameter slots); constant
+# outer_roots — cumulative extra GC roots in enclosing pattern branches
+# sp_save     — IR register from llvm.stacksave(); restored at each back-edge
 export type TcoCtx (..) =
-  | TcoCtx String String (List (String, String)) String Int String
+  | TcoCtx String String (List (String, String)) String Int Int String
 
 # ---------------------------------------------------------------------------
 # Emitter state  (9 fields → fits sprout_make9; do NOT add more fields here)
@@ -155,7 +155,8 @@ export type CgCtx (..) =
       (String)
       (Dict Int)
       (Dict FnSig)
-  # fn_sigs, ctor_sigs, globals, adt_names, extern_sigs, scope, cpr_fns, cpr_extern_sigs
+      (Set)
+  # fn_sigs, ctor_sigs, globals, adt_names, extern_sigs, scope, cpr_fns, cpr_extern_sigs, mutual_tco_fns
 
 # ---------------------------------------------------------------------------
 # Public result type
@@ -375,25 +376,28 @@ fn gi_call_sig(g: GlobalInfo) -> Maybe CallSig =
 
 # TcoCtx accessors
 fn tco_fn_name(t: TcoCtx) -> String =
-  match t with | TcoCtx n _ _ _ _ _ -> n
+  match t with | TcoCtx n _ _ _ _ _ _ -> n
 
 fn tco_loop_lbl(t: TcoCtx) -> String =
-  match t with | TcoCtx _ l _ _ _ _ -> l
+  match t with | TcoCtx _ l _ _ _ _ _ -> l
 
 fn tco_slots(t: TcoCtx) -> List (String, String) =
-  match t with | TcoCtx _ _ s _ _ _ -> s
+  match t with | TcoCtx _ _ s _ _ _ _ -> s
 
 fn tco_ret_ll(t: TcoCtx) -> String =
-  match t with | TcoCtx _ _ _ r _ _ -> r
+  match t with | TcoCtx _ _ _ r _ _ _ -> r
+
+fn tco_n_roots(t: TcoCtx) -> Int =
+  match t with | TcoCtx _ _ _ _ nr _ _ -> nr
 
 fn tco_outer_roots(t: TcoCtx) -> Int =
-  match t with | TcoCtx _ _ _ _ or _ -> or
+  match t with | TcoCtx _ _ _ _ _ or _ -> or
 
 fn tco_sp_save(t: TcoCtx) -> String =
-  match t with | TcoCtx _ _ _ _ _ sp -> sp
+  match t with | TcoCtx _ _ _ _ _ _ sp -> sp
 
 fn tco_with_outer_roots(t: TcoCtx, n: Int) -> TcoCtx =
-  match t with | TcoCtx fnm lp sl rt _ sp -> TcoCtx(fnm, lp, sl, rt, n, sp)
+  match t with | TcoCtx fnm lp sl rt nr _ sp -> TcoCtx(fnm, lp, sl, rt, nr, n, sp)
 
 # ===========================================================================
 # Section 4 — EmitterState helpers
@@ -1585,34 +1589,37 @@ fn emit_defs_list(lines: List String, em: Emitter) -> Unit !{IO} =
 # ===========================================================================
 
 fn ctx_fn_sigs(ctx: CgCtx) -> Dict FnSig =
-  match ctx with | CgCtx fs _ _ _ _ _ _ _ -> fs
+  match ctx with | CgCtx fs _ _ _ _ _ _ _ _ -> fs
 
 fn ctx_ctor_sigs(ctx: CgCtx) -> Dict CtorSig =
-  match ctx with | CgCtx _ cs _ _ _ _ _ _ -> cs
+  match ctx with | CgCtx _ cs _ _ _ _ _ _ _ -> cs
 
 fn ctx_globals(ctx: CgCtx) -> Dict GlobalInfo =
-  match ctx with | CgCtx _ _ g _ _ _ _ _ -> g
+  match ctx with | CgCtx _ _ g _ _ _ _ _ _ -> g
 
 fn ctx_adt_names(ctx: CgCtx) -> Set =
-  match ctx with | CgCtx _ _ _ an _ _ _ _ -> an
+  match ctx with | CgCtx _ _ _ an _ _ _ _ _ -> an
 
 fn ctx_extern_sigs(ctx: CgCtx) -> Dict FnSig =
-  match ctx with | CgCtx _ _ _ _ es _ _ _ -> es
+  match ctx with | CgCtx _ _ _ _ es _ _ _ _ -> es
 
 fn ctx_scope(ctx: CgCtx) -> String =
-  match ctx with | CgCtx _ _ _ _ _ sc _ _ -> sc
+  match ctx with | CgCtx _ _ _ _ _ sc _ _ _ -> sc
 
 fn ctx_cpr_fns(ctx: CgCtx) -> Dict Int =
-  match ctx with | CgCtx _ _ _ _ _ _ cf _ -> cf
+  match ctx with | CgCtx _ _ _ _ _ _ cf _ _ -> cf
 
 fn ctx_cpr_extern_sigs(ctx: CgCtx) -> Dict FnSig =
-  match ctx with | CgCtx _ _ _ _ _ _ _ ces -> ces
+  match ctx with | CgCtx _ _ _ _ _ _ _ ces _ -> ces
+
+fn ctx_mutual_tco_fns(ctx: CgCtx) -> Set =
+  match ctx with | CgCtx _ _ _ _ _ _ _ _ mt -> mt
 
 fn ctx_with_globals(ctx: CgCtx, g: Dict GlobalInfo) -> CgCtx =
-  match ctx with | CgCtx fs cs _ an es sc cf ces -> CgCtx(fs, cs, g, an, es, sc, cf, ces)
+  match ctx with | CgCtx fs cs _ an es sc cf ces mt -> CgCtx(fs, cs, g, an, es, sc, cf, ces, mt)
 
 fn ctx_with_scope(ctx: CgCtx, name: String) -> CgCtx =
-  match ctx with | CgCtx fs cs g an es _ cf ces -> CgCtx(fs, cs, g, an, es, name, cf, ces)
+  match ctx with | CgCtx fs cs g an es _ cf ces mt -> CgCtx(fs, cs, g, an, es, name, cf, ces, mt)
 
 # ===========================================================================
 # Section 16 — TCO helpers
@@ -1645,6 +1652,99 @@ fn do_last_has_tail(steps: List typed_ast.TypedDoStep, fn_name_: String) -> Bool
       | typed_ast.TDoExprStep e -> has_self_tail_calls(e, fn_name_)
       | _ -> false
   | Cons _ rest -> do_last_has_tail(rest, fn_name_)
+
+# has_tail_call_to_set: generalises has_self_tail_calls to a Set of names.
+fn has_tail_call_to_set(e: typed_ast.TypedExpr, names: Set) -> Bool =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar name _ _) _ _ _ ->
+      set_member(name, names)
+  | typed_ast.TIf _ thn els _ _ ->
+      has_tail_call_to_set(thn, names) || has_tail_call_to_set(els, names)
+  | typed_ast.TMatch _ branches _ _ ->
+      any_branch_has_tail_to_set(branches, names)
+  | typed_ast.TDo steps _ _ ->
+      do_last_has_tail_to_set(steps, names)
+  | _ -> false
+
+fn any_branch_has_tail_to_set(branches: List typed_ast.TypedMatchBranch, names: Set) -> Bool =
+  match branches with
+  | Nil -> false
+  | Cons (typed_ast.TypedMatchBranch _ body) rest ->
+      has_tail_call_to_set(body, names) || any_branch_has_tail_to_set(rest, names)
+
+fn do_last_has_tail_to_set(steps: List typed_ast.TypedDoStep, names: Set) -> Bool =
+  match steps with
+  | Nil -> false
+  | [step] ->
+      match step with
+      | typed_ast.TDoExprStep e -> has_tail_call_to_set(e, names)
+      | _ -> false
+  | Cons _ rest -> do_last_has_tail_to_set(rest, names)
+
+# ---------------------------------------------------------------------------
+# build_mutual_tco_fns: fixed-point expansion of the mutual-TCO set.
+# Start from TCO functions (those with self-tail-calls), then transitively
+# include any function that tail-calls into the current set.
+# All functions in the returned Set must return i64 (excluded from CPR).
+
+# Only collect functions whose return type maps to LLVM i64.
+# Bool (→ i1) and tuples (→ struct) are excluded: musttail requires identical
+# caller/callee return types, and the mutual-TCO path hardcodes i64.
+fn body_ret_is_i64(body: typed_ast.TypedExpr) -> Bool =
+  match typed_ast.typed_expr_type(body) with
+  | types.TConst "Bool" -> false
+  | types.TTuple _ -> false
+  | _ -> true
+
+fn collect_fn_bodies(decls: List typed_ast.TypedDecl, acc: List (String, typed_ast.TypedExpr)) -> List (String, typed_ast.TypedExpr) =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | typed_ast.TFnDecl name _ _ _ _ body ->
+          if body_ret_is_i64(body) then
+            collect_fn_bodies(rest, Cons((name, body), acc))
+          else
+            collect_fn_bodies(rest, acc)
+      | _ -> collect_fn_bodies(rest, acc)
+
+fn seed_mutual_tco(bodies: List (String, typed_ast.TypedExpr), acc: Set) -> Set =
+  match bodies with
+  | Nil -> acc
+  | Cons (name, body) rest ->
+      if has_self_tail_calls(body, name) then
+        seed_mutual_tco(rest, set_insert(name, acc))
+      else
+        seed_mutual_tco(rest, acc)
+
+fn expand_mutual_tco_step(bodies: List (String, typed_ast.TypedExpr), current: Set, changed: Bool) -> (Set, Bool) =
+  match bodies with
+  | Nil -> (current, changed)
+  | Cons (name, body) rest ->
+      if set_member(name, current) then
+        expand_mutual_tco_step(rest, current, changed)
+      else if has_tail_call_to_set(body, current) then
+        expand_mutual_tco_step(rest, set_insert(name, current), true)
+      else
+        expand_mutual_tco_step(rest, current, changed)
+
+fn expand_mutual_tco_until_stable(bodies: List (String, typed_ast.TypedExpr), current: Set) -> Set =
+  match expand_mutual_tco_step(bodies, current, false) with
+  | (new_set, true) -> expand_mutual_tco_until_stable(bodies, new_set)
+  | (final_set, false) -> final_set
+
+fn build_mutual_tco_fns(decls: List typed_ast.TypedDecl) -> Set =
+  expand_mutual_tco_until_stable(bodies, seed_mutual_tco(bodies, set_empty()))
+  where bodies = collect_fn_bodies(decls, Nil)
+
+# musttail requires that the callee prototype exactly matches the enclosing
+# (caller) function prototype: same parameter count and types.
+# Compare callee's declared ll param types against caller's TCO-slot ll types.
+fn params_match_slots(params: List String, slots: List (String, String)) -> Bool =
+  match (params, slots) with
+  | (Nil, Nil) -> true
+  | (Cons p rest_p, Cons(_, ll) rest_s) -> p == ll && params_match_slots(rest_p, rest_s)
+  | _ -> false
 
 fn emit_tco_back_edge(tco: TcoCtx, new_args: List Value, extra_roots: Int, em: Emitter) -> Unit !{IO} =
   do
@@ -2658,6 +2758,33 @@ fn emit_direct_fn_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr,
             coerced_args <- coerce_tco_args(raw_args, tco_slots(tc), em)
             pop_temp_roots(rooted_args, em)
             val_with_tco_args(val_make(tco_ret_ll(tc), "undef"), Just(coerced_args))
+        else if set_member(name, ctx_mutual_tco_fns(ctx)) && n_args == n_params then
+          # Callee is in the mutual-TCO group.  musttail also requires that the
+          # caller returns i64 and has identical parameter types to the callee
+          # (LLVM IR constraint — both return-type and param-type must match).
+          if tco_ret_ll(tc) == ll_i64() && params_match_slots(fn_params(sig), tco_slots(tc)) then
+            # Cross-function tail call within mutual-TCO group → musttail
+            do
+              (arg_vals, rooted_args) <- emit_tco_args(args, ctx, locals, em)
+              coerced <- coerce_args(fn_params(sig), arg_vals, em)
+              let args_ir = string.join(", ", list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
+              pop_temp_roots(rooted_args + tco_outer_roots(tc) + tco_n_roots(tc), em)
+              let sp = tco_sp_save(tc)
+              if str_len(sp) > 0 then
+                emit_template(em, `  call void @llvm.stackrestore(ptr ${sp})`)
+              else ()
+              result_tmp <- fresh_tmp(em)
+              let call_name = emitted_fn_name(name)
+              let call_str = if args_ir == ""
+                             then "  " ++ result_tmp ++ " = musttail call i64 @" ++ call_name ++ "()"
+                             else "  " ++ result_tmp ++ " = musttail call i64 @" ++ call_name ++ "(" ++ args_ir ++ ")"
+              emit_line(em, call_str)
+              emit_line(em, "  ret i64 " ++ result_tmp)
+              val_for_ll(tco_ret_ll(tc), "undef")
+          else
+            # Signature mismatch (different return type or param types) — emit a
+            # plain call; musttail would violate LLVM's prototype-match constraint.
+            emit_regular_direct_call(name, sig, args, type_to_ll(ty), ctx, locals, em)
         else
           emit_warn_and_regular_call(tco_fn_name(tc), name, sig, args, type_to_ll(ty), ctx, locals, em)
     | Nothing ->
@@ -2957,7 +3084,7 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
     if is_entry == false && fn_arity(sig) != list_length_params(params) then
       panic("codegen: FnSig arity mismatch for " ++ name ++ ": sig=" ++ int_to_string(fn_arity(sig)) ++ " ast=" ++ int_to_string(list_length_params(params)))
     else ()
-    if is_entry == false && has_self_tail_calls(body, name) then
+    if is_entry == false && (has_self_tail_calls(body, name) || set_member(name, ctx_mutual_tco_fns(ctx))) then
       emit_fn_tco(name, params, body, sig, sctx, em)
     else
       match (if is_entry then Nothing else dict_get(name, ctx_cpr_fns(ctx))) with
@@ -3141,7 +3268,7 @@ fn emit_fn_tco(name: String, params: List ast.Param, body: typed_ast.TypedExpr, 
     emit_template(em, `  br label %${loop_lbl}`)
     emit_label(em, loop_lbl)
     tco_locals <- load_tco_params(params, slots, em)
-    let tco = TcoCtx(name, loop_lbl, slots, fn_ret(sig), 0, sp_save)
+    let tco = TcoCtx(name, loop_lbl, slots, fn_ret(sig), n_roots, 0, sp_save)
     result <- emit_expr(ctx, tco_locals, em, Just(tco), body)
     match val_tco_args(result) with
     | Just new_args ->
@@ -3420,11 +3547,12 @@ fn cpr_width_for_type_expr(ret_ty: Maybe ast.TypeExpr, arities: Dict Int) -> May
 
 # Build the cpr_fns dict: function name → unboxed struct width (2 or 3).
 # Covers externs (always eligible) and user-defined functions whose return type
-# is a small ADT and that do not self-tail-call (TCO functions are excluded).
-fn build_cpr_fns(decls: List typed_ast.TypedDecl, arities: Dict Int) -> Dict Int =
-  build_cpr_fns_acc(decls, arities, dict_empty())
+# is a small ADT, do not self-tail-call (TCO functions are excluded), and are
+# not in the mutual-TCO set (which also requires i64 return for musttail).
+fn build_cpr_fns(decls: List typed_ast.TypedDecl, arities: Dict Int, mutual_tco: Set) -> Dict Int =
+  build_cpr_fns_acc(decls, arities, mutual_tco, dict_empty())
 
-fn build_cpr_fns_acc(decls: List typed_ast.TypedDecl, arities: Dict Int, acc: Dict Int) -> Dict Int =
+fn build_cpr_fns_acc(decls: List typed_ast.TypedDecl, arities: Dict Int, mutual_tco: Set, acc: Dict Int) -> Dict Int =
   match decls with
   | Nil -> acc
   | Cons decl rest ->
@@ -3432,18 +3560,18 @@ fn build_cpr_fns_acc(decls: List typed_ast.TypedDecl, arities: Dict Int, acc: Di
       | typed_ast.TExternFnDecl name _ ret_ty _ ->
           if is_cpr_extern_allowlisted(name) then
             match cpr_width_for_type_expr(ret_ty, arities) with
-            | Nothing -> build_cpr_fns_acc(rest, arities, acc)
-            | Just width -> build_cpr_fns_acc(rest, arities, dict_set(name, width, acc))
+            | Nothing -> build_cpr_fns_acc(rest, arities, mutual_tco, acc)
+            | Just width -> build_cpr_fns_acc(rest, arities, mutual_tco, dict_set(name, width, acc))
           else
-            build_cpr_fns_acc(rest, arities, acc)
+            build_cpr_fns_acc(rest, arities, mutual_tco, acc)
       | typed_ast.TFnDecl name _ ret_ty _ _ body ->
-          if has_self_tail_calls(body, name) then
-            build_cpr_fns_acc(rest, arities, acc)
+          if has_self_tail_calls(body, name) || set_member(name, mutual_tco) then
+            build_cpr_fns_acc(rest, arities, mutual_tco, acc)
           else
             match cpr_width_for_type_expr(ret_ty, arities) with
-            | Nothing -> build_cpr_fns_acc(rest, arities, acc)
-            | Just width -> build_cpr_fns_acc(rest, arities, dict_set(name, width, acc))
-      | _ -> build_cpr_fns_acc(rest, arities, acc)
+            | Nothing -> build_cpr_fns_acc(rest, arities, mutual_tco, acc)
+            | Just width -> build_cpr_fns_acc(rest, arities, mutual_tco, dict_set(name, width, acc))
+      | _ -> build_cpr_fns_acc(rest, arities, mutual_tco, acc)
 
 # Build FnSig entries for the _unboxed extern variants so that emit_extern_decls
 # emits the required `declare { i64, i64 } @name_unboxed(...)` lines.
@@ -3939,9 +4067,10 @@ export fn compile_to_ir_lines_one_fn(fn_name: String, prog: typed_ast.TypedProgr
         let gi = match gi_rt_pair with | (g, _) -> g
         let runtime_lets = match gi_rt_pair with | (_, r) -> r
         let adt_arities = build_adt_arities(decls)
-        let cpr_fns_ = build_cpr_fns(decls, adt_arities)
+        let mutual_tco_ = build_mutual_tco_fns(decls)
+        let cpr_fns_ = build_cpr_fns(decls, adt_arities, mutual_tco_)
         let cpr_extern_decls = build_cpr_extern_sigs(decls, adt_arities, externs)
-        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "", cpr_fns_, cpr_extern_decls)
+        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "", cpr_fns_, cpr_extern_decls, mutual_tco_)
         emit_line(em, "; Generated by sprout codegen.sprout (M6) -- single-function mode")
         emit_line(em, "target triple = \"unknown-unknown-unknown\"")
         emit_line(em, "")
@@ -4033,9 +4162,10 @@ export fn compile_to_ir_lines(prog: typed_ast.TypedProgram, env: Dict types.Sche
         let gi = match gi_rt_pair with | (g, _) -> g
         let runtime_lets = match gi_rt_pair with | (_, r) -> r
         let adt_arities = build_adt_arities(decls)
-        let cpr_fns_ = build_cpr_fns(decls, adt_arities)
+        let mutual_tco_ = build_mutual_tco_fns(decls)
+        let cpr_fns_ = build_cpr_fns(decls, adt_arities, mutual_tco_)
         let cpr_extern_decls = build_cpr_extern_sigs(decls, adt_arities, externs)
-        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "", cpr_fns_, cpr_extern_decls)
+        let ctx = CgCtx(fn_sigs_, ctor_sigs_, gi, adt_names_, externs, "", cpr_fns_, cpr_extern_decls, mutual_tco_)
         # Header
         emit_line(em, "; Generated by sprout codegen.sprout (M6)")
         emit_line(em, "target triple = \"unknown-unknown-unknown\"")
