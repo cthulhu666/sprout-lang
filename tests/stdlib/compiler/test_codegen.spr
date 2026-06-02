@@ -180,9 +180,8 @@ fn main() -> Unit !{IO} =
     closure_ir <- get_ir(closure_src)
     assert_true(state, "capture closure emits getelementptr env slot", ir_contains(closure_ir, "getelementptr i64, ptr %env"))
 
-    # Missed-TCO warning: a TCO function (self-tail-call) that also makes a cross-function tail
-    # call should emit a warning.  `count` has a self-tail-call (→ TCO active) and a tail call to
-    # `helper` in the base case (→ cross-fn tail call in TCO context → warning).
+    # A cross-function tail call from inside a TCO function should warn: the stack frame
+    # cannot be eliminated.
     let tco_cross_src = "fn helper(n: Int) -> Int = n\nfn count(n: Int) -> Int = if n == 0 then helper(n) else count(n - 1)"
     warns1 <- get_warns(tco_cross_src)
     assert_true(state, "cross-fn tail call in TCO fn emits warning", list_length(warns1) > 0)
@@ -191,10 +190,13 @@ fn main() -> Unit !{IO} =
     let pure_tco_src = "fn count_down(n: Int) -> Int = if n == 0 then 0 else count_down(n - 1)"
     warns2 <- get_warns(pure_tco_src)
     assert_true(state, "pure TCO fn (no cross-fn calls) emits no warning", list_length(warns2) == 0)
+    # Regression: has_self_tail_calls must still correctly identify TCO candidates after any
+    # refactoring.  The self-recursive function must emit the tco_loop back-edge label, not
+    # a plain recursive call.
+    pure_tco_ir <- get_ir(pure_tco_src)
+    assert_true(state, "self-recursive fn emits TCO loop label", ir_contains(pure_tco_ir, "tco_loop"))
 
-    # Mutual-TCO: step_a has a self-tail-call (enters seed); helper tail-calls step_a
-    # so it is expanded into mutual_tco_fns.  Both are excluded from CPR and all
-    # cross-function tail calls within the group emit musttail rather than warnings.
+    # Mutual-TCO: functions in the detected cycle emit musttail, not warnings.
     let mutual_tco_src = "type R = | ROk Int | RFail\nfn helper(n: Int) -> R = step_a(n)\nfn step_a(n: Int) -> R = if n <= 0 then ROk(n) else if n == 1 then helper(n) else step_a(n - 1)"
     mutual_ir <- get_ir(mutual_tco_src)
     mutual_warns <- get_warns(mutual_tco_src)

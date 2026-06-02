@@ -1626,32 +1626,7 @@ fn ctx_with_scope(ctx: CgCtx, name: String) -> CgCtx =
 # ===========================================================================
 
 fn has_self_tail_calls(e: typed_ast.TypedExpr, fn_name_: String) -> Bool =
-  match e with
-  | typed_ast.TCall (typed_ast.TVar name _ _) _ _ _ ->
-      name == fn_name_
-  | typed_ast.TIf _ thn els _ _ ->
-      has_self_tail_calls(thn, fn_name_) || has_self_tail_calls(els, fn_name_)
-  | typed_ast.TMatch _ branches _ _ ->
-      any_branch_has_tail(branches, fn_name_)
-  | typed_ast.TDo steps _ _ ->
-      do_last_has_tail(steps, fn_name_)
-  | _ -> false
-
-fn any_branch_has_tail(branches: List typed_ast.TypedMatchBranch, fn_name_: String) -> Bool =
-  match branches with
-  | Nil -> false
-  | Cons (typed_ast.TypedMatchBranch _ body) rest ->
-      has_self_tail_calls(body, fn_name_) || any_branch_has_tail(rest, fn_name_)
-
-# Only the last TDoExprStep is in tail position; TDoBindStep always has a continuation.
-fn do_last_has_tail(steps: List typed_ast.TypedDoStep, fn_name_: String) -> Bool =
-  match steps with
-  | Nil -> false
-  | [step] ->
-      match step with
-      | typed_ast.TDoExprStep e -> has_self_tail_calls(e, fn_name_)
-      | _ -> false
-  | Cons _ rest -> do_last_has_tail(rest, fn_name_)
+  has_tail_call_to_set(e, set_insert(fn_name_, set_empty()))
 
 # has_tail_call_to_set: generalises has_self_tail_calls to a Set of names.
 fn has_tail_call_to_set(e: typed_ast.TypedExpr, names: Set) -> Bool =
@@ -2759,11 +2734,8 @@ fn emit_direct_fn_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr,
             pop_temp_roots(rooted_args, em)
             val_with_tco_args(val_make(tco_ret_ll(tc), "undef"), Just(coerced_args))
         else if set_member(name, ctx_mutual_tco_fns(ctx)) && n_args == n_params then
-          # Callee is in the mutual-TCO group.  musttail also requires that the
-          # caller returns i64 and has identical parameter types to the callee
-          # (LLVM IR constraint — both return-type and param-type must match).
+          # musttail requires identical return type (i64) and param types; skip if not met.
           if tco_ret_ll(tc) == ll_i64() && params_match_slots(fn_params(sig), tco_slots(tc)) then
-            # Cross-function tail call within mutual-TCO group → musttail
             do
               (arg_vals, rooted_args) <- emit_tco_args(args, ctx, locals, em)
               coerced <- coerce_args(fn_params(sig), arg_vals, em)
@@ -2782,8 +2754,6 @@ fn emit_direct_fn_call(name: String, sig: FnSig, args: List typed_ast.TypedExpr,
               emit_line(em, "  ret i64 " ++ result_tmp)
               val_for_ll(tco_ret_ll(tc), "undef")
           else
-            # Signature mismatch (different return type or param types) — emit a
-            # plain call; musttail would violate LLVM's prototype-match constraint.
             emit_regular_direct_call(name, sig, args, type_to_ll(ty), ctx, locals, em)
         else
           emit_warn_and_regular_call(tco_fn_name(tc), name, sig, args, type_to_ll(ty), ctx, locals, em)
@@ -3084,7 +3054,7 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
     if is_entry == false && fn_arity(sig) != list_length_params(params) then
       panic("codegen: FnSig arity mismatch for " ++ name ++ ": sig=" ++ int_to_string(fn_arity(sig)) ++ " ast=" ++ int_to_string(list_length_params(params)))
     else ()
-    if is_entry == false && (has_self_tail_calls(body, name) || set_member(name, ctx_mutual_tco_fns(ctx))) then
+    if is_entry == false && set_member(name, ctx_mutual_tco_fns(ctx)) then
       emit_fn_tco(name, params, body, sig, sctx, em)
     else
       match (if is_entry then Nothing else dict_get(name, ctx_cpr_fns(ctx))) with
@@ -3564,8 +3534,8 @@ fn build_cpr_fns_acc(decls: List typed_ast.TypedDecl, arities: Dict Int, mutual_
             | Just width -> build_cpr_fns_acc(rest, arities, mutual_tco, dict_set(name, width, acc))
           else
             build_cpr_fns_acc(rest, arities, mutual_tco, acc)
-      | typed_ast.TFnDecl name _ ret_ty _ _ body ->
-          if has_self_tail_calls(body, name) || set_member(name, mutual_tco) then
+      | typed_ast.TFnDecl name _ ret_ty _ _ _ ->
+          if set_member(name, mutual_tco) then
             build_cpr_fns_acc(rest, arities, mutual_tco, acc)
           else
             match cpr_width_for_type_expr(ret_ty, arities) with

@@ -505,7 +505,7 @@ verify-bootstrap-fixed-point: bootstrap-from-seed
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Re-emitting IR via stage-1..."
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
-  # Strip the fingerprint comment (line 1) before comparing — stage-1 output has no comment.
+  # The fingerprint header is written only by refresh-seed; stage-1 output omits it.
   if cmp -s <(tail -n +2 bootstrap/compile_driver.ll) "$TMP_LL"; then
     echo "==> Fixed point ✓ — bootstrap/compile_driver.ll matches stage-1 output."
   else
