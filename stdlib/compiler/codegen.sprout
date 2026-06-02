@@ -1971,28 +1971,33 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
       let left_ty = typed_ast.typed_expr_type(left)
       rooted <- push_temp_root_typed(lv, left_ty, em)
       rv <- emit_expr(ctx, locals, em, Nothing, right)
-      pop_temp_roots(rooted, em)
+      let right_ty = typed_ast.typed_expr_type(right)
       if op == "+" || op == "-" || op == "*" || op == "/" then
         do
+          pop_temp_roots(rooted, em)
           tmp <- fresh_tmp(em)
           let inst = if op == "+" then "add" else if op == "-" then "sub" else if op == "*" then "mul" else "sdiv"
           emit_template(em, `  ${tmp} = ${inst} i64 ${val_ir (lv)}, ${val_ir (rv)}`)
           val_make(ll_i64(), tmp)
       else if op == "%" then
         do
+          pop_temp_roots(rooted, em)
           tmp <- fresh_tmp(em)
           emit_template(em, `  ${tmp} = srem i64 ${val_ir (lv)}, ${val_ir (rv)}`)
           val_make(ll_i64(), tmp)
       else
         do
-          let right_ty = typed_ast.typed_expr_type(right)
           if compare_needs_ptr_dispatch(left_ty, right_ty) then
             do
+              rooted_rv <- push_temp_root_typed(rv, right_ty, em)
               lp <- coerce_value(lv, ll_ptr(), em)
               rp <- coerce_value(rv, ll_ptr(), em)
+              pop_temp_roots(rooted + rooted_rv, em)
               emit_ptr_comparison(op, lp, rp, em)
           else
-            emit_comparison(op, lv, rv, em)
+            do
+              pop_temp_roots(rooted, em)
+              emit_comparison(op, lv, rv, em)
 
 fn emit_str_binary_concat(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   do

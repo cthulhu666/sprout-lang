@@ -67,4 +67,12 @@ fn main() -> Unit !{IO} =
       "abc" |> replace_all("a", "X") |> replace_all("c", "Y"),
       "XbY")
 
+    # Regression: GC rooting hole in emit_binary string comparison path.
+    # lv and rv were unrooted when coerce_value triggered GC (string_concat_many
+    # in emit_template). Under SPROUT_GC_THRESHOLD=1 this crashes or gives wrong results.
+    assert_true(state, "str == eq", "hello" == "hello")
+    assert_false(state, "str == ne", "hello" == "world")
+    assert_true(state, "str != ne", "hello" != "world")
+    assert_false(state, "str != eq", "hello" != "hello")
+
     summary(state)
