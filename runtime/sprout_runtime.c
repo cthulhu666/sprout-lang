@@ -3123,7 +3123,7 @@ static void sprout_debug_field(long long fval, char kind, int depth) {
     case 's': {
       /* Strings are stored as i64 raw pointers to a C string (GC Option C). */
       const char* s = (const char*)(uintptr_t)fval;
-      if (s == NULL) { fprintf(stderr, "(null)"); break; }
+      if (s == NULL) { fprintf(stderr, "<null-string>"); break; }
       fprintf(stderr, "\"%.80s%s\"", s, (strlen(s) > 80 ? "..." : ""));
       break;
     }
