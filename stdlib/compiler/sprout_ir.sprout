@@ -8,27 +8,42 @@ module stdlib.compiler.sprout_ir
 # (see docs/gc-rooting-model-c-plan-2026-06-02.md).
 #
 # PR 1.1 introduced the empty shell.  PR 1.2 added the two minimal scalar
-# constructors (IRConst, IRRet) and PR 1.3 extends them with scalar
-# arithmetic + comparison:
+# constructors (IRConst, IRRet); PR 1.3 added scalar arithmetic + comparison;
+# PR 1.4 adds control-flow primitives:
 #
-#   IRConst String Int                — bind a fresh result name to an Int literal.
-#   IRRet   String                    — return-from-function, referencing a value name.
-#   IRIAdd  String String String      — result = lhs + rhs   (i64)
-#   IRISub  String String String      — result = lhs - rhs   (i64)
-#   IRIMul  String String String      — result = lhs * rhs   (i64)
-#   IRICmp  String String String String
+#   IRConst  String Int                — bind a fresh result name to an Int literal.
+#   IRRet    String                    — return-from-function, referencing a value name.
+#   IRIAdd   String String String      — result = lhs + rhs   (i64)
+#   IRISub   String String String      — result = lhs - rhs   (i64)
+#   IRIMul   String String String      — result = lhs * rhs   (i64)
+#   IRICmp   String String String String
 #       — result = icmp <pred> lhs, rhs   (i1)
 #       — argument order: result-name, predicate, lhs, rhs.
 #         Predicate is one of LLVM's i-cmp keywords: "eq", "ne",
 #         "slt", "sle", "sgt", "sge".
+#   IRBr     String                    — unconditional branch to a block label.
+#                                          field: target block label (NO '%' prefix).
+#   IRCondBr String String String      — br i1 %<cond>, label %<then>, label %<else>.
+#                                          fields: cond value-name (carries '%' prefix
+#                                          if it's a temp), then-label, else-label.
+#   IRPhi    String String (List (String, String))
+#       — result = phi <type> [<value>, %<label>], ...
+#       — fields: result-name, LLVM type ("i64"/"i1"), incoming pairs.
+#         Convention for the incoming pairs: the first String is the value
+#         name with its '%' prefix already present (matching how it arrives
+#         from translate_expr — e.g. "%x" for a parameter, "%t3" for a temp);
+#         the second String is the block label WITHOUT a '%' prefix (e.g.
+#         "then_0").  lower_op adds the '%' before the label at render time.
 #
 # Value names are plain Strings: parameters carry the source-level name and
 # IRConst/IRIAdd/etc. introduce fresh names chosen by the AST→IR translator
-# (typically "%t0", "%t1", …).
+# (typically "%t0", "%t1", …).  Block labels are bare strings — "entry",
+# "then_0", "else_0", "join_0", … — and lower_op prepends '%' where LLVM
+# syntax requires it.
 #
-# IRFunction grows an LLVM-level return-type field (third String) — "i64" for
-# Int-returning functions and "i1" for Bool-returning ones.  Future PRs will
-# add calls, control-flow joins (phi), and heap categories.
+# IRFunction's third String is the LLVM return-type ("i64" or "i1") and the
+# fourth field is a List IRBlock.  Future PRs will add calls and heap
+# categories.
 #
 # print_ir_program is a debugging helper used by tests and tooling.  It does
 # NOT produce LLVM — that is ir_lowering.lower_program's job.
@@ -40,6 +55,9 @@ export type IROp (..) =
   | IRISub String String String
   | IRIMul String String String
   | IRICmp String String String String
+  | IRBr String
+  | IRCondBr String String String
+  | IRPhi String String (List (String, String))
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -54,6 +72,16 @@ export type IRProgram (..) = IRProgram(List IRFunction)
 # Pretty printer (for diagnostics / tests).
 # Renders each IROp as a single human-readable line; does NOT produce LLVM.
 
+fn print_phi_pairs(pairs: List (String, String)) -> String =
+  match pairs with
+  | Nil -> ""
+  | Cons p Nil ->
+      match p with
+      | (v, lbl) -> "[" ++ v ++ ", " ++ lbl ++ "]"
+  | Cons p rest ->
+      match p with
+      | (v, lbl) -> "[" ++ v ++ ", " ++ lbl ++ "], " ++ print_phi_pairs(rest)
+
 fn print_op(op: IROp) -> String =
   match op with
   | IRConst name n -> "    " ++ name ++ " = const " ++ int_to_string(n)
@@ -62,6 +90,9 @@ fn print_op(op: IROp) -> String =
   | IRISub r a b -> "    " ++ r ++ " = isub " ++ a ++ ", " ++ b
   | IRIMul r a b -> "    " ++ r ++ " = imul " ++ a ++ ", " ++ b
   | IRICmp r pred a b -> "    " ++ r ++ " = icmp " ++ pred ++ " " ++ a ++ ", " ++ b
+  | IRBr lbl -> "    br " ++ lbl
+  | IRCondBr cond t e -> "    condbr " ++ cond ++ ", " ++ t ++ ", " ++ e
+  | IRPhi r ty pairs -> "    " ++ r ++ " = phi " ++ ty ++ " " ++ print_phi_pairs(pairs)
 
 fn print_ops(ops: List IROp) -> String =
   match ops with

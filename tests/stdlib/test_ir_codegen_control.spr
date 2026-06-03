@@ -1,0 +1,167 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+
+# ---------------------------------------------------------------------------
+# Tests for Milestone 1, PR 1.4: control-flow IR ops (IRBr, IRCondBr, IRPhi)
+# and AST→IR shape for if-then-else.
+# See docs/gc-rooting-model-c-plan-2026-06-02.md.
+#
+# These tests construct IRPrograms by hand (mirroring what the AST→IR
+# translator emits) and assert on the rendered LLVM and the pretty
+# printer.  The translator itself is exercised end-to-end via the driver
+# in the verification step recorded in the PR description.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Build the IR equivalent of:
+#   fn abs(x: Int) -> Int = if x < 0 then 0 - x else x
+#
+# entry:
+#   %t0 = const 0
+#   %t1 = icmp slt %x, %t0
+#   condbr %t1, then_2, else_3
+# then_2:
+#   %t5 = const 0
+#   %t6 = isub %t5, %x
+#   br join_4
+# else_3:
+#   br join_4
+# join_4:
+#   %t7 = phi i64 [%t6, then_2], [%x, else_3]
+#   ret %t7
+fn abs_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("abs", Cons("x", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 0),
+        Cons(sprout_ir.IRICmp("%t1", "slt", "%x", "%t0"),
+        Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
+      Cons(sprout_ir.IRBlock("then_2", Cons(
+        sprout_ir.IRConst("%t5", 0),
+        Cons(sprout_ir.IRISub("%t6", "%t5", "%x"),
+        Cons(sprout_ir.IRBr("join_4"), Nil)))),
+      Cons(sprout_ir.IRBlock("else_3", Cons(
+        sprout_ir.IRBr("join_4"), Nil)),
+      Cons(sprout_ir.IRBlock("join_4", Cons(
+        sprout_ir.IRPhi("%t7", "i64",
+          Cons(("%t6", "then_2"), Cons(("%x", "else_3"), Nil))),
+        Cons(sprout_ir.IRRet("%t7"), Nil))),
+      Nil))))),
+    Nil))
+
+# Build the IR equivalent of a nested if-then-else:
+#   fn sign(x: Int) -> Int =
+#     if x == 0 then 0
+#     else if x > 0 then 1
+#     else (0 - 1)
+#
+# Layout:
+#   entry:                          x == 0 ?
+#     %t0 = const 0
+#     %t1 = icmp eq %x, %t0
+#     condbr %t1, then_2, else_3
+#   then_2:  (outer then: return 0)
+#     %t5 = const 0
+#     br join_4
+#   else_3:  (outer else: nested if x > 0)
+#     %t6 = const 0
+#     %t7 = icmp sgt %x, %t6
+#     condbr %t7, then_8, else_9
+#   then_8:  (inner then: return 1)
+#     %t11 = const 1
+#     br join_10
+#   else_9:  (inner else: return 0 - 1)
+#     %t12 = const 0
+#     %t13 = const 1
+#     %t14 = isub %t12, %t13
+#     br join_10
+#   join_10: (inner join)
+#     %t15 = phi i64 [%t11, then_8], [%t14, else_9]
+#     br join_4
+#   join_4:  (outer join)
+#     %t16 = phi i64 [%t5, then_2], [%t15, join_10]
+#     ret %t16
+fn sign_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("sign", Cons("x", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 0),
+        Cons(sprout_ir.IRICmp("%t1", "eq", "%x", "%t0"),
+        Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
+      Cons(sprout_ir.IRBlock("then_2", Cons(
+        sprout_ir.IRConst("%t5", 0),
+        Cons(sprout_ir.IRBr("join_4"), Nil))),
+      Cons(sprout_ir.IRBlock("else_3", Cons(
+        sprout_ir.IRConst("%t6", 0),
+        Cons(sprout_ir.IRICmp("%t7", "sgt", "%x", "%t6"),
+        Cons(sprout_ir.IRCondBr("%t7", "then_8", "else_9"), Nil)))),
+      Cons(sprout_ir.IRBlock("then_8", Cons(
+        sprout_ir.IRConst("%t11", 1),
+        Cons(sprout_ir.IRBr("join_10"), Nil))),
+      Cons(sprout_ir.IRBlock("else_9", Cons(
+        sprout_ir.IRConst("%t12", 0),
+        Cons(sprout_ir.IRConst("%t13", 1),
+        Cons(sprout_ir.IRISub("%t14", "%t12", "%t13"),
+        Cons(sprout_ir.IRBr("join_10"), Nil))))),
+      Cons(sprout_ir.IRBlock("join_10", Cons(
+        sprout_ir.IRPhi("%t15", "i64",
+          Cons(("%t11", "then_8"), Cons(("%t14", "else_9"), Nil))),
+        Cons(sprout_ir.IRBr("join_4"), Nil))),
+      Cons(sprout_ir.IRBlock("join_4", Cons(
+        sprout_ir.IRPhi("%t16", "i64",
+          Cons(("%t5", "then_2"), Cons(("%t15", "join_10"), Nil))),
+        Cons(sprout_ir.IRRet("%t16"), Nil))),
+      Nil)))))))),
+    Nil))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Pretty printer covers the new ops.
+    assert_true(state, "pretty: condbr op rendered",
+                contains(sprout_ir.print_ir_program(abs_program()), "condbr"))
+    assert_true(state, "pretty: br op rendered",
+                contains(sprout_ir.print_ir_program(abs_program()), "br join_4"))
+    assert_true(state, "pretty: phi op rendered",
+                contains(sprout_ir.print_ir_program(abs_program()), "phi i64"))
+
+    # --- Lowering: abs.
+    assert_true(state, "abs defines i64 result",
+                contains(ir_lowering.lower_program(abs_program()), "define i64 @abs(i64 %x)"))
+    assert_true(state, "abs emits icmp slt",
+                contains(ir_lowering.lower_program(abs_program()), "icmp slt i64 %x, %t0"))
+    assert_true(state, "abs emits conditional branch",
+                contains(ir_lowering.lower_program(abs_program()), "br i1 %t1, label %then_2, label %else_3"))
+    assert_true(state, "abs emits then-block label",
+                contains(ir_lowering.lower_program(abs_program()), "then_2:"))
+    assert_true(state, "abs emits else-block label",
+                contains(ir_lowering.lower_program(abs_program()), "else_3:"))
+    assert_true(state, "abs emits join-block label",
+                contains(ir_lowering.lower_program(abs_program()), "join_4:"))
+    assert_true(state, "abs emits unconditional br to join",
+                contains(ir_lowering.lower_program(abs_program()), "br label %join_4"))
+    assert_true(state, "abs emits phi i64 merging two values",
+                contains(ir_lowering.lower_program(abs_program()), "phi i64 [%t6, %then_2], [%x, %else_3]"))
+    assert_true(state, "abs returns i64 %t7",
+                contains(ir_lowering.lower_program(abs_program()), "ret i64 %t7"))
+
+    # --- Lowering: nested sign-or-zero.
+    assert_true(state, "sign defines i64 result",
+                contains(ir_lowering.lower_program(sign_program()), "define i64 @sign(i64 %x)"))
+    # Outer condbr.
+    assert_true(state, "sign emits outer condbr",
+                contains(ir_lowering.lower_program(sign_program()), "br i1 %t1, label %then_2, label %else_3"))
+    # Inner condbr — proves there are two layers of branching.
+    assert_true(state, "sign emits inner condbr",
+                contains(ir_lowering.lower_program(sign_program()), "br i1 %t7, label %then_8, label %else_9"))
+    # Inner phi.
+    assert_true(state, "sign emits inner phi",
+                contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t11, %then_8], [%t14, %else_9]"))
+    # Outer phi — picks up the inner join label as one of its incoming labels.
+    assert_true(state, "sign emits outer phi merging at inner-join",
+                contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t5, %then_2], [%t15, %join_10]"))
+
+    summary(state)

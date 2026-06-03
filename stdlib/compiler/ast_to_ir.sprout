@@ -8,7 +8,7 @@ import stdlib.compiler.sprout_ir as sprout_ir
 # AST → Sprout-IR translator.
 # ---------------------------------------------------------------------------
 #
-# Milestone 1, PR 1.3 (see docs/gc-rooting-model-c-plan-2026-06-02.md).
+# Milestone 1, PR 1.4 (see docs/gc-rooting-model-c-plan-2026-06-02.md).
 #
 # Supports the scalar subset of Sprout used for the IR-codegen bring-up:
 #   - fn foo() -> Int = <intlit>            → IRConst + IRRet
@@ -17,6 +17,9 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #   - fn sub1, mul2 — likewise for Sub / Mul
 #   - fn is_zero(x: Int) -> Bool = x == 0   → IRConst, IRICmp, IRRet  (i1)
 #     (and the rest of the comparison family: !=, <, <=, >, >=)
+#   - fn abs(x: Int) -> Int = if x < 0 then 0 - x else x
+#       → IRICmp, IRCondBr, then-block, else-block, IRPhi, IRRet
+#   - nested if-then-else, with each branch contributing its own blocks.
 #
 # The user-declared `main` function is intentionally skipped here: it has a
 # different LLVM calling convention (i32 @main(i32, ptr)) and the IR
@@ -24,11 +27,61 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #
 # Any other AST construct returns Err with a clear message — we never
 # silently produce wrong IR.
+#
+# ---------------------------------------------------------------------------
+# translate_expr contract (PR 1.4)
+# ---------------------------------------------------------------------------
+#
+# Multi-block-aware expression translator.  The signature is:
+#
+#   translate_expr(expr, params, idx, cur_label, cur_ops) ->
+#     Result String (List IRBlock, String, List IROp, String, Int)
+#                    completed-blocks, new-cur-label, new-cur-ops,
+#                    result-name, next-idx
+#
+# Inputs:
+#   cur_label  — the label of the block currently being assembled (e.g.
+#                "entry" at the function start, or a fresh join-label after
+#                a previous if).
+#   cur_ops    — the ops accumulated so far for cur_label (in forward
+#                order).  Pure expressions append to it; control-flow
+#                constructs seal it into a completed block and start a new
+#                "current" block.
+#
+# Outputs:
+#   completed-blocks — any blocks introduced by this sub-expression that
+#                are NOT the current one.  These are FULLY SEALED — each
+#                ends with IRBr or IRCondBr.  Order is the order they
+#                should appear in the function (then before else before
+#                join, for the if-case).
+#   new-cur-label, new-cur-ops — the block label and forward-ordered ops
+#                that the caller continues appending to.  For a pure
+#                expression this is just (cur_label, cur_ops ++ new_ops).
+#                For an if-expression this is the freshly-started join
+#                block, whose first op is the merging IRPhi.
+#   result-name — the value-name (with '%' prefix) holding the expression's
+#                result.  For an if this is the phi's result-name.
+#   next-idx    — the updated fresh-name counter.
+#
+# Invariant: the function-level driver (translate_body) is responsible for
+# sealing the final "current" block with IRRet and collecting the produced
+# (List IRBlock).  Sub-expressions never emit IRRet.
 
 # Fresh-name counter threaded through the translator.
 # %t0, %t1, … name intermediate results introduced by the IR.
+# The same counter is reused for block labels via fresh_then/else/join_label
+# below — different namespaces, so uniqueness is preserved.
 fn fresh_name(idx: Int) -> String =
   "%t" ++ int_to_string(idx)
+
+fn fresh_then_label(idx: Int) -> String =
+  "then_" ++ int_to_string(idx)
+
+fn fresh_else_label(idx: Int) -> String =
+  "else_" ++ int_to_string(idx)
+
+fn fresh_join_label(idx: Int) -> String =
+  "join_" ++ int_to_string(idx)
 
 # Map a TBinary op String to its LLVM icmp predicate, if it is a comparison.
 # Returns Nothing for non-comparison ops (the caller handles those separately).
@@ -60,30 +113,31 @@ fn is_bool_type(t: types.Type) -> Bool =
 fn llvm_ret_type(t: types.Type) -> String =
   if is_bool_type(t) then "i1" else "i64"
 
-# Wrap an IntLit constant into the (ops, name, next-idx) triple.
-fn intlit_triple(n: Int, idx: Int) -> (List sprout_ir.IROp, String, Int) =
-  (Cons(sprout_ir.IRConst(name, n), Nil), name, idx + 1)
-  where name = fresh_name(idx)
-
-# Translate a TypedExpr into (ops_to_produce_value, result-name, next-idx).
-# - For TVar x: ops=[], name="%x".
-# - For TInt n: ops=[IRConst %tN n], name="%tN".
-# - For TBinary: recursively translate operands, then append the arith/cmp op.
-# Returns Err for any unsupported expression.
-fn translate_expr(expr: typed_ast.TypedExpr, params: List String, idx: Int) -> Result String (List sprout_ir.IROp, String, Int) =
+# Translate a TypedExpr in a multi-block-aware fashion.  See the contract
+# block at the top of this file for the full signature description.
+#
+# Returns: (completed-blocks, new-cur-label, new-cur-ops, result-name, next-idx)
+fn translate_expr(expr: typed_ast.TypedExpr, params: List String, idx: Int,
+                  cur_label: String, cur_ops: List sprout_ir.IROp) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
   match expr with
-  | typed_ast.TInt n _ _ -> Ok(intlit_triple(n, idx))
+  | typed_ast.TInt n _ _ ->
+      Ok((Nil, cur_label,
+           list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(idx), n), Nil)),
+           fresh_name(idx), idx + 1))
   | typed_ast.TVar name _ _ ->
       if param_known(name, params)
-      then Ok((Nil, "%" ++ name, idx))
+      then Ok((Nil, cur_label, cur_ops, "%" ++ name, idx))
       else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
-  | typed_ast.TBinary op left right _ _ -> translate_binary(op, left, right, params, idx)
+  | typed_ast.TBinary op left right _ _ ->
+      translate_binary(op, left, right, params, idx, cur_label, cur_ops)
+  | typed_ast.TIf cond t e ty _ ->
+      translate_if(cond, t, e, ty, params, idx, cur_label, cur_ops)
   | typed_ast.TBool _ _ _ -> Err("ast_to_ir: Bool literal not yet supported")
   | typed_ast.TString _ _ _ -> Err("ast_to_ir: String literal not yet supported")
   | typed_ast.TChar _ _ _ -> Err("ast_to_ir: Char literal not yet supported")
   | typed_ast.TUnit _ _ -> Err("ast_to_ir: Unit literal not yet supported")
   | typed_ast.TTuple _ _ _ -> Err("ast_to_ir: Tuple not yet supported")
-  | typed_ast.TIf _ _ _ _ _ -> Err("ast_to_ir: if-then-else not yet supported")
   | typed_ast.TMatch _ _ _ _ -> Err("ast_to_ir: match not yet supported")
   | typed_ast.TCall _ _ _ _ -> Err("ast_to_ir: call not yet supported")
   | typed_ast.TDict _ _ _ -> Err("ast_to_ir: TDict not yet supported")
@@ -98,32 +152,43 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String, idx: Int) -> R
 # +, -, *, ==, !=, <, <=, >, >=.  Both operands must be Int-typed
 # (Char comparison is intentionally rejected at this milestone).
 fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
-                    params: List String, idx: Int) -> Result String (List sprout_ir.IROp, String, Int) =
+                    params: List String, idx: Int,
+                    cur_label: String, cur_ops: List sprout_ir.IROp) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
   if ! (is_int_type(typed_ast.typed_expr_type(left)) && is_int_type(typed_ast.typed_expr_type(right)))
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int operands")
   else
-    match translate_expr(left, params, idx) with
+    match translate_expr(left, params, idx, cur_label, cur_ops) with
     | Err msg -> Err(msg)
-    | Ok lpair ->
-        match lpair with
-        | (l_ops, l_name, idx1) ->
-            match translate_expr(right, params, idx1) with
+    | Ok lr ->
+        match lr with
+        | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
+            match translate_expr(right, params, idx1, lcur_lbl, lcur_ops) with
             | Err msg -> Err(msg)
-            | Ok rpair ->
-                match rpair with
-                | (r_ops, r_name, idx2) -> finish_binary(op, l_ops, l_name, r_ops, r_name, idx2)
+            | Ok rr ->
+                match rr with
+                | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
+                    finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops,
+                                  l_name, r_name, idx2)
 
-fn finish_binary(op: String, l_ops: List sprout_ir.IROp, l_name: String,
-                 r_ops: List sprout_ir.IROp, r_name: String,
-                 idx: Int) -> Result String (List sprout_ir.IROp, String, Int) =
+fn finish_binary(op: String,
+                 lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+                 cur_lbl: String, cur_ops: List sprout_ir.IROp,
+                 l_name: String, r_name: String,
+                 idx: Int) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
   match arith_op(op, result, l_name, r_name) with
-  | Just iop -> Ok((list_append(l_ops, list_append(r_ops, Cons(iop, Nil))), result, idx + 1))
+  | Just iop ->
+      Ok((list_append(lblocks, rblocks), cur_lbl,
+           list_append(cur_ops, Cons(iop, Nil)),
+           result, idx + 1))
   | Nothing ->
       match cmp_predicate(op) with
       | Just pred ->
-          Ok((list_append(l_ops, list_append(r_ops,
-                Cons(sprout_ir.IRICmp(result, pred, l_name, r_name), Nil))),
-              result, idx + 1))
+          Ok((list_append(lblocks, rblocks), cur_lbl,
+               list_append(cur_ops,
+                 Cons(sprout_ir.IRICmp(result, pred, l_name, r_name), Nil)),
+               result, idx + 1))
       | Nothing -> Err("ast_to_ir: binary op '" ++ op ++ "' not yet supported")
   where result = fresh_name(idx)
 
@@ -135,13 +200,118 @@ fn arith_op(op: String, result: String, lhs: String, rhs: String) -> Maybe sprou
   else if op == "*" then Just(sprout_ir.IRIMul(result, lhs, rhs))
   else Nothing
 
-# Translate a function body into a complete list of ops terminated by IRRet.
-fn translate_body(body: typed_ast.TypedExpr, params: List String, idx: Int) -> Result String (List sprout_ir.IROp, Int) =
-  match translate_expr(body, params, idx) with
+# Translate an if-then-else.
+#
+# Block layout produced (per if-expression):
+#   <cur_label>:                      ← sealed with IRCondBr
+#     ... cur_ops ...
+#     %cN = icmp/...   <cond>
+#     br i1 %cN, label %then_K, label %else_K
+#   then_K:                           ← may itself contain nested if-blocks
+#     ... then-branch ops ...
+#     br label %join_K
+#   else_K:
+#     ... else-branch ops ...
+#     br label %join_K
+#   join_K:                           ← becomes the new cur_label
+#     %rN = phi <ty> [<v_then>, %<then-final-lbl>], [<v_else>, %<else-final-lbl>]
+#
+# Crucially the incoming labels of the phi are NOT necessarily "then_K" /
+# "else_K" — if a branch itself contained nested ifs, the value was
+# produced in the inner join block.  We capture each branch's final
+# cur_label after sub-translation and use it for the phi.
+#
+# K is allocated by consuming one fresh-name slot for each of then/else/join.
+fn translate_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
+                if_ty: types.Type, params: List String, idx: Int,
+                cur_label: String, cur_ops: List sprout_ir.IROp) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match translate_expr(cond, params, idx, cur_label, cur_ops) with
   | Err msg -> Err(msg)
-  | Ok triple ->
-      match triple with
-      | (ops, name, next_idx) -> Ok((list_append(ops, Cons(sprout_ir.IRRet(name), Nil)), next_idx))
+  | Ok cr ->
+      match cr with
+      | (cblocks, ccur_lbl, ccur_ops, c_name, idx1) ->
+          translate_if_after_cond(t, e, if_ty, params,
+                                  cblocks, ccur_lbl, ccur_ops, c_name, idx1)
+
+fn translate_if_after_cond(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
+                           if_ty: types.Type, params: List String,
+                           cblocks: List sprout_ir.IRBlock,
+                           ccur_lbl: String, ccur_ops: List sprout_ir.IROp,
+                           c_name: String, idx: Int) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  # Allocate one fresh id `idx` shared by then_<idx> / else_<idx> / join_<idx>
+  # — they live in disjoint label namespaces so uniqueness is preserved.
+  # Then consume idx+1 for the phi result-name.  Sub-translation continues
+  # from idx+2.
+  match translate_expr(t, params, idx + 2, then_lbl, Nil) with
+  | Err msg -> Err(msg)
+  | Ok tr ->
+      match tr with
+      | (tblocks, tcur_lbl, tcur_ops, t_name, idx2) ->
+          match translate_expr(e, params, idx2, else_lbl, Nil) with
+          | Err msg -> Err(msg)
+          | Ok er ->
+              match er with
+              | (eblocks, ecur_lbl, ecur_ops, e_name, idx3) ->
+                  finish_if(if_ty, cblocks, ccur_lbl, ccur_ops, c_name,
+                            then_lbl, tblocks, tcur_lbl, tcur_ops, t_name,
+                            else_lbl, eblocks, ecur_lbl, ecur_ops, e_name,
+                            join_lbl, phi_name, idx3)
+  where then_lbl = fresh_then_label(idx)
+        else_lbl = fresh_else_label(idx)
+        join_lbl = fresh_join_label(idx)
+        phi_name = fresh_name(idx + 1)
+
+fn finish_if(if_ty: types.Type,
+             cblocks: List sprout_ir.IRBlock,
+             ccur_lbl: String, ccur_ops: List sprout_ir.IROp, c_name: String,
+             then_lbl: String, tblocks: List sprout_ir.IRBlock,
+             tcur_lbl: String, tcur_ops: List sprout_ir.IROp, t_name: String,
+             else_lbl: String, eblocks: List sprout_ir.IRBlock,
+             ecur_lbl: String, ecur_ops: List sprout_ir.IROp, e_name: String,
+             join_lbl: String, phi_name: String, idx: Int) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  Ok((all_blocks, join_lbl, Cons(phi_op, Nil), phi_name, idx))
+  where phi_ty = llvm_ret_type(if_ty)
+        phi_op = sprout_ir.IRPhi(phi_name, phi_ty,
+                                 Cons((t_name, tcur_lbl),
+                                 Cons((e_name, ecur_lbl), Nil)))
+        # Seal the entry/condition block with IRCondBr.
+        cond_block = sprout_ir.IRBlock(ccur_lbl,
+                       list_append(ccur_ops,
+                         Cons(sprout_ir.IRCondBr(c_name, then_lbl, else_lbl), Nil)))
+        # Seal the then-branch's final block with IRBr → join.
+        then_final = sprout_ir.IRBlock(tcur_lbl,
+                       list_append(tcur_ops, Cons(sprout_ir.IRBr(join_lbl), Nil)))
+        # Seal the else-branch's final block with IRBr → join.
+        else_final = sprout_ir.IRBlock(ecur_lbl,
+                       list_append(ecur_ops, Cons(sprout_ir.IRBr(join_lbl), Nil)))
+        # Order: cond-blocks (already-completed inner blocks of cond) then
+        # this-if's cond block, then-blocks (inner) then this then_final,
+        # else-blocks (inner) then this else_final.  Join is the new cur,
+        # not in the completed list — translate_body / outer if will seal it.
+        all_blocks = list_append(cblocks,
+                       Cons(cond_block,
+                       list_append(tblocks,
+                         Cons(then_final,
+                         list_append(eblocks, Cons(else_final, Nil))))))
+
+# Translate a function body into a complete List IRBlock.  The body always
+# starts in the "entry" block; the final block (whatever cur_label is after
+# translation) is sealed with IRRet.
+fn translate_body(body: typed_ast.TypedExpr, params: List String, idx: Int) ->
+    Result String (List sprout_ir.IRBlock, Int) =
+  match translate_expr(body, params, idx, "entry", Nil) with
+  | Err msg -> Err(msg)
+  | Ok r ->
+      match r with
+      | (blocks, cur_lbl, cur_ops, name, next_idx) ->
+          Ok((list_append(blocks,
+                Cons(sprout_ir.IRBlock(cur_lbl,
+                       list_append(cur_ops, Cons(sprout_ir.IRRet(name), Nil))),
+                Nil)),
+              next_idx))
 
 fn param_known(name: String, params: List String) -> Bool =
   match params with
@@ -155,9 +325,12 @@ fn param_names(params: List ast.Param) -> List String =
       match p with
       | ast.Param n _ -> Cons(n, param_names(rest))
 
-# Build an IRFunction from a (name, param-names, ret-type, body) tuple.
-fn build_fn(name: String, pnames: List String, ret_ty: String, ops: List sprout_ir.IROp) -> sprout_ir.IRFunction =
-  sprout_ir.IRFunction(name, pnames, ret_ty, Cons(sprout_ir.IRBlock("entry", ops), Nil))
+# Build an IRFunction from a (name, param-names, ret-type, blocks) tuple.
+# `blocks` is already a fully-assembled List IRBlock — typically starting
+# with an "entry" block — produced by translate_body.
+fn build_fn(name: String, pnames: List String, ret_ty: String,
+            blocks: List sprout_ir.IRBlock) -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(name, pnames, ret_ty, blocks)
 
 # Translate a single TypedDecl into Maybe IRFunction.
 # Returns Ok Nothing for decls we deliberately skip (main, externs, instances,
@@ -179,7 +352,7 @@ fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExp
   | Err msg -> Err(msg)
   | Ok pair ->
       match pair with
-      | (ops, _) -> Ok(Just(build_fn(name, pnames, ret_ty, ops)))
+      | (blocks, _) -> Ok(Just(build_fn(name, pnames, ret_ty, blocks)))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
 
 fn translate_decls(decls: List typed_ast.TypedDecl, acc: List sprout_ir.IRFunction) -> Result String (List sprout_ir.IRFunction) =
