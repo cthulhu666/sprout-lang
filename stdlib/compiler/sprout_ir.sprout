@@ -1,29 +1,29 @@
 module stdlib.compiler.sprout_ir
 
 # ---------------------------------------------------------------------------
-# Sprout-IR — typed intermediate representation (skeleton).
+# Sprout-IR — typed intermediate representation.
 # ---------------------------------------------------------------------------
 #
-# This module is the first PR of Milestone 1 of the "Model C" plan
-# (see docs/gc-rooting-model-c-plan-2026-06-02.md).  It introduces the
-# top-level shape only; no ops are implemented, no AST→IR translator
-# exists yet, and no LLVM lowering pass consumes it.  The current
-# direct AST→LLVM codegen in stdlib/compiler/codegen.sprout remains the
-# default path; --use-ir-codegen is wired in compile_driver.sprout but
-# fails fast.
+# This module belongs to Milestone 1 of the "Model C" plan
+# (see docs/gc-rooting-model-c-plan-2026-06-02.md).
 #
-# Later PRs will:
-#   - Populate IROp with constructors (IRConst, IRRet, IRIAdd, IRCall, ...)
-#   - Add an AST→IR translator and a per-program builder API.
-#   - Add an IR→LLVM lowering pass that mechanically translates ops.
-#   - Switch to richer parameter representations (carrying types/positions).
+# PR 1.1 introduced the empty shell.  PR 1.2 populates IROp with the two
+# minimal constructors needed for "trivial programs":
 #
-# Until then, the shapes here are intentionally minimal: List String for
-# function parameters (pure names, no AST/types dependency), and a single
-# placeholder IROp constructor so the ADT is non-empty.
+#   IRConst String Int  — bind a fresh result name to an Int literal.
+#   IRRet   String      — return-from-function, referencing a value name.
+#
+# Value names are plain Strings: parameters carry the source-level name and
+# IRConst introduces fresh names chosen by the AST→IR translator (typically
+# "%t0", "%t1", …).  Future PRs will add arithmetic ops (IRIAdd, …), calls,
+# control-flow joins (phi), and heap categories.
+#
+# print_ir_program is a debugging helper used by tests and tooling.  It does
+# NOT produce LLVM — that is ir_lowering.lower_program's job.
 
 export type IROp (..) =
-  | IROpPlaceholder
+  | IRConst String Int
+  | IRRet String
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -31,8 +31,48 @@ export type IRFunction (..) = IRFunction String (List String) (List IRBlock)
 
 export type IRProgram (..) = IRProgram(List IRFunction)
 
-# print_ir_program: stub printer used as a smoke target for future passes.
-# Returns a single-line marker until real ops exist to render.
+# ---------------------------------------------------------------------------
+# Pretty printer (for diagnostics / tests).
+# Renders each IROp as a single human-readable line; does NOT produce LLVM.
+
+fn print_op(op: IROp) -> String =
+  match op with
+  | IRConst name n -> "    " ++ name ++ " = const " ++ int_to_string(n)
+  | IRRet name -> "    ret " ++ name
+
+fn print_ops(ops: List IROp) -> String =
+  match ops with
+  | Nil -> ""
+  | Cons op rest -> print_op(op) ++ "\n" ++ print_ops(rest)
+
+fn print_block(b: IRBlock) -> String =
+  match b with
+  | IRBlock label ops -> "  " ++ label ++ ":\n" ++ print_ops(ops)
+
+fn print_blocks(bs: List IRBlock) -> String =
+  match bs with
+  | Nil -> ""
+  | Cons b rest -> print_block(b) ++ print_blocks(rest)
+
+fn print_params(ps: List String) -> String =
+  match ps with
+  | Nil -> ""
+  | Cons p Nil -> p
+  | Cons p rest -> p ++ ", " ++ print_params(rest)
+
+fn print_fn(f: IRFunction) -> String =
+  match f with
+  | IRFunction name params blocks ->
+      "fn " ++ name ++ "(" ++ print_params(params) ++ "):\n" ++ print_blocks(blocks)
+
+fn print_fns(fs: List IRFunction) -> String =
+  match fs with
+  | Nil -> ""
+  | Cons f rest -> print_fn(f) ++ print_fns(rest)
+
 export fn print_ir_program(prog: IRProgram) -> String =
   match prog with
-  | IRProgram _ -> "; sprout-ir: empty"
+  | IRProgram fns ->
+      match fns with
+      | Nil -> "; sprout-ir: empty"
+      | _ -> "; sprout-ir\n" ++ print_fns(fns)

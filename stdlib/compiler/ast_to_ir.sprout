@@ -1,0 +1,118 @@
+module stdlib.compiler.ast_to_ir
+import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.sprout_ir as sprout_ir
+
+# ---------------------------------------------------------------------------
+# AST → Sprout-IR translator.
+# ---------------------------------------------------------------------------
+#
+# Milestone 1, PR 1.2 (see docs/gc-rooting-model-c-plan-2026-06-02.md).
+#
+# Supports the absolute minimum needed for trivial programs:
+#   - fn foo() -> Int = <intlit>         → IRConst + IRRet
+#   - fn id(x: Int) -> Int = x           → IRRet "%x" (parameter reference)
+#
+# The user-declared `main` function is intentionally skipped here: it has a
+# different LLVM calling convention (i32 @main(i32, ptr)) and the IR
+# lowering emits a synthetic shim for it.  This isolates the "main ABI"
+# question from PR 1.2.
+#
+# Any other AST construct returns Err with a clear message — we never
+# silently produce wrong IR.
+
+# Fresh-name counter threaded through the translator.
+# %t0, %t1, … name IRConst results.
+fn fresh_name(idx: Int) -> String =
+  "%t" ++ int_to_string(idx)
+
+# Build the (ops, next_idx) pair for an IntLit body.
+fn intlit_body(n: Int, idx: Int) -> (List sprout_ir.IROp, Int) =
+  (Cons(sprout_ir.IRConst(name, n), Cons(sprout_ir.IRRet(name), Nil)), idx + 1)
+  where name = fresh_name(idx)
+
+# Translate a function body (TypedExpr) into a (List IROp, Int) pair where
+# the Int is the next free fresh-name index.  Returns Err on unsupported.
+fn translate_body(body: typed_ast.TypedExpr, params: List String, idx: Int) -> Result String (List sprout_ir.IROp, Int) =
+  match body with
+  | typed_ast.TInt n _ _ -> Ok(intlit_body(n, idx))
+  | typed_ast.TVar name _ _ ->
+      # Identity-style: return a named SSA value directly (parameter %name).
+      if param_known(name, params)
+      then Ok((Cons(sprout_ir.IRRet("%" ++ name), Nil), idx))
+      else Err("ast_to_ir: unbound variable '" ++ name ++ "' (PR 1.2 only resolves direct parameter references)")
+  | typed_ast.TBool _ _ _ -> Err("ast_to_ir: Bool literal not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TString _ _ _ -> Err("ast_to_ir: String literal not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TChar _ _ _ -> Err("ast_to_ir: Char literal not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TUnit _ _ -> Err("ast_to_ir: Unit literal not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TTuple _ _ _ -> Err("ast_to_ir: Tuple not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TIf _ _ _ _ _ -> Err("ast_to_ir: if-then-else not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TMatch _ _ _ _ -> Err("ast_to_ir: match not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TCall _ _ _ _ -> Err("ast_to_ir: call not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TDict _ _ _ -> Err("ast_to_ir: TDict not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TLambda _ _ _ _ -> Err("ast_to_ir: lambda not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TBinary _ _ _ _ _ -> Err("ast_to_ir: binary op not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TUnary _ _ _ _ -> Err("ast_to_ir: unary op not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TRange _ _ _ _ -> Err("ast_to_ir: range not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TDo _ _ _ -> Err("ast_to_ir: do-block not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TRecord _ _ _ _ -> Err("ast_to_ir: record not yet supported (PR 1.2 only handles IntLit + identity)")
+  | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: field access not yet supported (PR 1.2 only handles IntLit + identity)")
+
+fn param_known(name: String, params: List String) -> Bool =
+  match params with
+  | Nil -> false
+  | Cons p rest -> if p == name then true else param_known(name, rest)
+
+fn param_names(params: List ast.Param) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.Param n _ -> Cons(n, param_names(rest))
+
+# Build an IRFunction from a (name, param-names, body) triple.
+fn build_fn(name: String, pnames: List String, ops: List sprout_ir.IROp) -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(name, pnames, Cons(sprout_ir.IRBlock("entry", ops), Nil))
+
+# Translate a single TypedDecl into Maybe IRFunction.
+# Returns Ok Nothing for decls we deliberately skip (main, externs, instances,
+# pass-throughs, let-decls).  Returns Ok (Just f) for translated functions.
+# Returns Err for an unsupported body surfaced by a function we tried to lower.
+fn translate_decl(d: typed_ast.TypedDecl) -> Result String (Maybe sprout_ir.IRFunction) =
+  match d with
+  | typed_ast.TFnDecl name params _ _ _ body ->
+      if name == "main"
+      then Ok(Nothing)  # synthesized by ir_lowering as the C-ABI shim
+      else translate_user_fn(name, param_names(params), body)
+  | typed_ast.TExternFnDecl _ _ _ _ -> Ok(Nothing)
+  | typed_ast.TLetDecl _ _ -> Ok(Nothing)
+  | typed_ast.TInstanceDecl _ _ _ -> Ok(Nothing)
+  | typed_ast.TPassThrough _ -> Ok(Nothing)
+
+fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExpr) -> Result String (Maybe sprout_ir.IRFunction) =
+  match translate_body(body, pnames, 0) with
+  | Err msg -> Err(msg)
+  | Ok pair ->
+      match pair with
+      | (ops, _) -> Ok(Just(build_fn(name, pnames, ops)))
+
+fn translate_decls(decls: List typed_ast.TypedDecl, acc: List sprout_ir.IRFunction) -> Result String (List sprout_ir.IRFunction) =
+  match decls with
+  | Nil -> Ok(list_reverse(acc))
+  | Cons d rest ->
+      match translate_decl(d) with
+      | Err msg -> Err(msg)
+      | Ok maybe_f ->
+          match maybe_f with
+          | Nothing -> translate_decls(rest, acc)
+          | Just f -> translate_decls(rest, Cons(f, acc))
+
+# translate_program: top-level entry.  Accepts a TypedProgram (the output of
+# compile_phase_recheck) and returns either the translated IRProgram or an
+# Err describing the first unsupported AST node encountered.
+export fn translate_program(prog: typed_ast.TypedProgram) -> Result String sprout_ir.IRProgram =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      match translate_decls(decls, Nil) with
+      | Err msg -> Err(msg)
+      | Ok fns -> Ok(sprout_ir.IRProgram(fns))
