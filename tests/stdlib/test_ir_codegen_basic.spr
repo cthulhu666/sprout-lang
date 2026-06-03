@@ -12,7 +12,7 @@ fn contains(haystack: String, needle: String) -> Bool =
 # Build the IR equivalent of `fn answer() -> Int = 42`.
 fn answer_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("answer", Nil, Cons(
+    sprout_ir.IRFunction("answer", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 42),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
@@ -22,7 +22,7 @@ fn answer_program() -> sprout_ir.IRProgram =
 # Build the IR equivalent of `fn id(x: Int) -> Int = x`.
 fn identity_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("id", Cons("x", Nil), Cons(
+    sprout_ir.IRFunction("id", Cons("x", Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRRet("%x"),
         Nil)),

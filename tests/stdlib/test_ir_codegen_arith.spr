@@ -1,0 +1,102 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+
+# ---------------------------------------------------------------------------
+# Tests for Milestone 1, PR 1.3: scalar arithmetic + comparison IR ops.
+# See docs/gc-rooting-model-c-plan-2026-06-02.md.
+#
+# These tests construct IRPrograms by hand (mirroring what the AST→IR
+# translator would emit) and assert on the rendered LLVM and the pretty
+# printer.  The translator itself is exercised end-to-end via the driver
+# in the verification step recorded in the PR description.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Build `fn add1(x: Int) -> Int = x + 1` as IR.
+#   %t0 = add i64 0, 1
+#   %t1 = add i64 %x, %t0
+#   ret i64 %t1
+fn add1_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("add1", Cons("x", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 1),
+        Cons(sprout_ir.IRIAdd("%t1", "%x", "%t0"),
+        Cons(sprout_ir.IRRet("%t1"), Nil)))),
+      Nil)),
+    Nil))
+
+# Build `fn sub1(x: Int) -> Int = x - 1` as IR.
+fn sub1_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("sub1", Cons("x", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 1),
+        Cons(sprout_ir.IRISub("%t1", "%x", "%t0"),
+        Cons(sprout_ir.IRRet("%t1"), Nil)))),
+      Nil)),
+    Nil))
+
+# Build `fn mul2(x: Int) -> Int = x * 2` as IR.
+fn mul2_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("mul2", Cons("x", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 2),
+        Cons(sprout_ir.IRIMul("%t1", "%x", "%t0"),
+        Cons(sprout_ir.IRRet("%t1"), Nil)))),
+      Nil)),
+    Nil))
+
+# Build `fn is_zero(x: Int) -> Bool = x == 0` as IR — returns i1.
+fn is_zero_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("is_zero", Cons("x", Nil), "i1", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 0),
+        Cons(sprout_ir.IRICmp("%t1", "eq", "%x", "%t0"),
+        Cons(sprout_ir.IRRet("%t1"), Nil)))),
+      Nil)),
+    Nil))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Pretty printer covers each new op.
+    assert_true(state, "pretty: iadd op rendered",
+                contains(sprout_ir.print_ir_program(add1_program()), "iadd"))
+    assert_true(state, "pretty: isub op rendered",
+                contains(sprout_ir.print_ir_program(sub1_program()), "isub"))
+    assert_true(state, "pretty: imul op rendered",
+                contains(sprout_ir.print_ir_program(mul2_program()), "imul"))
+    assert_true(state, "pretty: icmp op rendered",
+                contains(sprout_ir.print_ir_program(is_zero_program()), "icmp eq"))
+    assert_true(state, "pretty: ret-ty rendered for i1",
+                contains(sprout_ir.print_ir_program(is_zero_program()), "-> i1"))
+
+    # --- Lowering: add1 (Int-returning).
+    assert_true(state, "add1 defines i64 result",
+                contains(ir_lowering.lower_program(add1_program()), "define i64 @add1(i64 %x)"))
+    assert_true(state, "add1 emits add i64 %x, %t0",
+                contains(ir_lowering.lower_program(add1_program()), "add i64 %x, %t0"))
+    assert_true(state, "add1 returns i64 %t1",
+                contains(ir_lowering.lower_program(add1_program()), "ret i64 %t1"))
+
+    # --- Lowering: sub1, mul2 share the same shape with sub / mul instructions.
+    assert_true(state, "sub1 emits sub i64 %x, %t0",
+                contains(ir_lowering.lower_program(sub1_program()), "sub i64 %x, %t0"))
+    assert_true(state, "mul2 emits mul i64 %x, %t0",
+                contains(ir_lowering.lower_program(mul2_program()), "mul i64 %x, %t0"))
+
+    # --- Lowering: is_zero (Bool-returning) — note define i1 and ret i1.
+    assert_true(state, "is_zero defines i1 result",
+                contains(ir_lowering.lower_program(is_zero_program()), "define i1 @is_zero(i64 %x)"))
+    assert_true(state, "is_zero emits icmp eq i64 %x, %t0",
+                contains(ir_lowering.lower_program(is_zero_program()), "icmp eq i64 %x, %t0"))
+    assert_true(state, "is_zero returns i1 %t1",
+                contains(ir_lowering.lower_program(is_zero_program()), "ret i1 %t1"))
+
+    summary(state)

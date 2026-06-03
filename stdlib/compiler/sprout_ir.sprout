@@ -7,16 +7,28 @@ module stdlib.compiler.sprout_ir
 # This module belongs to Milestone 1 of the "Model C" plan
 # (see docs/gc-rooting-model-c-plan-2026-06-02.md).
 #
-# PR 1.1 introduced the empty shell.  PR 1.2 populates IROp with the two
-# minimal constructors needed for "trivial programs":
+# PR 1.1 introduced the empty shell.  PR 1.2 added the two minimal scalar
+# constructors (IRConst, IRRet) and PR 1.3 extends them with scalar
+# arithmetic + comparison:
 #
-#   IRConst String Int  — bind a fresh result name to an Int literal.
-#   IRRet   String      — return-from-function, referencing a value name.
+#   IRConst String Int                — bind a fresh result name to an Int literal.
+#   IRRet   String                    — return-from-function, referencing a value name.
+#   IRIAdd  String String String      — result = lhs + rhs   (i64)
+#   IRISub  String String String      — result = lhs - rhs   (i64)
+#   IRIMul  String String String      — result = lhs * rhs   (i64)
+#   IRICmp  String String String String
+#       — result = icmp <pred> lhs, rhs   (i1)
+#       — argument order: result-name, predicate, lhs, rhs.
+#         Predicate is one of LLVM's i-cmp keywords: "eq", "ne",
+#         "slt", "sle", "sgt", "sge".
 #
 # Value names are plain Strings: parameters carry the source-level name and
-# IRConst introduces fresh names chosen by the AST→IR translator (typically
-# "%t0", "%t1", …).  Future PRs will add arithmetic ops (IRIAdd, …), calls,
-# control-flow joins (phi), and heap categories.
+# IRConst/IRIAdd/etc. introduce fresh names chosen by the AST→IR translator
+# (typically "%t0", "%t1", …).
+#
+# IRFunction grows an LLVM-level return-type field (third String) — "i64" for
+# Int-returning functions and "i1" for Bool-returning ones.  Future PRs will
+# add calls, control-flow joins (phi), and heap categories.
 #
 # print_ir_program is a debugging helper used by tests and tooling.  It does
 # NOT produce LLVM — that is ir_lowering.lower_program's job.
@@ -24,10 +36,17 @@ module stdlib.compiler.sprout_ir
 export type IROp (..) =
   | IRConst String Int
   | IRRet String
+  | IRIAdd String String String
+  | IRISub String String String
+  | IRIMul String String String
+  | IRICmp String String String String
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
-export type IRFunction (..) = IRFunction String (List String) (List IRBlock)
+# IRFunction <name> <param-names> <llvm-return-type> <blocks>
+# The return-type field is the LLVM type string ("i64" or "i1").  It is
+# determined by the AST→IR translator from the function body's inferred type.
+export type IRFunction (..) = IRFunction String (List String) String (List IRBlock)
 
 export type IRProgram (..) = IRProgram(List IRFunction)
 
@@ -39,6 +58,10 @@ fn print_op(op: IROp) -> String =
   match op with
   | IRConst name n -> "    " ++ name ++ " = const " ++ int_to_string(n)
   | IRRet name -> "    ret " ++ name
+  | IRIAdd r a b -> "    " ++ r ++ " = iadd " ++ a ++ ", " ++ b
+  | IRISub r a b -> "    " ++ r ++ " = isub " ++ a ++ ", " ++ b
+  | IRIMul r a b -> "    " ++ r ++ " = imul " ++ a ++ ", " ++ b
+  | IRICmp r pred a b -> "    " ++ r ++ " = icmp " ++ pred ++ " " ++ a ++ ", " ++ b
 
 fn print_ops(ops: List IROp) -> String =
   match ops with
@@ -62,8 +85,8 @@ fn print_params(ps: List String) -> String =
 
 fn print_fn(f: IRFunction) -> String =
   match f with
-  | IRFunction name params blocks ->
-      "fn " ++ name ++ "(" ++ print_params(params) ++ "):\n" ++ print_blocks(blocks)
+  | IRFunction name params ret_ty blocks ->
+      "fn " ++ name ++ "(" ++ print_params(params) ++ ") -> " ++ ret_ty ++ ":\n" ++ print_blocks(blocks)
 
 fn print_fns(fs: List IRFunction) -> String =
   match fs with

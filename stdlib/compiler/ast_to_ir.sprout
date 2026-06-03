@@ -1,62 +1,147 @@
 module stdlib.compiler.ast_to_ir
 import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
 import stdlib.compiler.sprout_ir as sprout_ir
 
 # ---------------------------------------------------------------------------
 # AST → Sprout-IR translator.
 # ---------------------------------------------------------------------------
 #
-# Milestone 1, PR 1.2 (see docs/gc-rooting-model-c-plan-2026-06-02.md).
+# Milestone 1, PR 1.3 (see docs/gc-rooting-model-c-plan-2026-06-02.md).
 #
-# Supports the absolute minimum needed for trivial programs:
-#   - fn foo() -> Int = <intlit>         → IRConst + IRRet
-#   - fn id(x: Int) -> Int = x           → IRRet "%x" (parameter reference)
+# Supports the scalar subset of Sprout used for the IR-codegen bring-up:
+#   - fn foo() -> Int = <intlit>            → IRConst + IRRet
+#   - fn id(x: Int) -> Int = x              → IRRet "%x"   (parameter reference)
+#   - fn add1(x: Int) -> Int = x + 1        → IRConst, IRIAdd, IRRet
+#   - fn sub1, mul2 — likewise for Sub / Mul
+#   - fn is_zero(x: Int) -> Bool = x == 0   → IRConst, IRICmp, IRRet  (i1)
+#     (and the rest of the comparison family: !=, <, <=, >, >=)
 #
 # The user-declared `main` function is intentionally skipped here: it has a
 # different LLVM calling convention (i32 @main(i32, ptr)) and the IR
-# lowering emits a synthetic shim for it.  This isolates the "main ABI"
-# question from PR 1.2.
+# lowering emits a synthetic shim for it.
 #
 # Any other AST construct returns Err with a clear message — we never
 # silently produce wrong IR.
 
 # Fresh-name counter threaded through the translator.
-# %t0, %t1, … name IRConst results.
+# %t0, %t1, … name intermediate results introduced by the IR.
 fn fresh_name(idx: Int) -> String =
   "%t" ++ int_to_string(idx)
 
-# Build the (ops, next_idx) pair for an IntLit body.
-fn intlit_body(n: Int, idx: Int) -> (List sprout_ir.IROp, Int) =
-  (Cons(sprout_ir.IRConst(name, n), Cons(sprout_ir.IRRet(name), Nil)), idx + 1)
+# Map a TBinary op String to its LLVM icmp predicate, if it is a comparison.
+# Returns Nothing for non-comparison ops (the caller handles those separately).
+fn cmp_predicate(op: String) -> Maybe String =
+  if op == "==" then Just("eq")
+  else if op == "!=" then Just("ne")
+  else if op == "<" then Just("slt")
+  else if op == "<=" then Just("sle")
+  else if op == ">" then Just("sgt")
+  else if op == ">=" then Just("sge")
+  else Nothing
+
+# True iff t is the monomorphic Int type.
+fn is_int_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name -> name == "Int"
+  | _ -> false
+
+# True iff t is the monomorphic Bool type.
+fn is_bool_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name -> name == "Bool"
+  | _ -> false
+
+# Map an inferred return type to the LLVM type used for `define`/`ret`.
+# PR 1.3 only emits i64 (Int) and i1 (Bool); anything else falls back to i64
+# but the translator will already have rejected unsupported bodies before
+# we get here.
+fn llvm_ret_type(t: types.Type) -> String =
+  if is_bool_type(t) then "i1" else "i64"
+
+# Wrap an IntLit constant into the (ops, name, next-idx) triple.
+fn intlit_triple(n: Int, idx: Int) -> (List sprout_ir.IROp, String, Int) =
+  (Cons(sprout_ir.IRConst(name, n), Nil), name, idx + 1)
   where name = fresh_name(idx)
 
-# Translate a function body (TypedExpr) into a (List IROp, Int) pair where
-# the Int is the next free fresh-name index.  Returns Err on unsupported.
-fn translate_body(body: typed_ast.TypedExpr, params: List String, idx: Int) -> Result String (List sprout_ir.IROp, Int) =
-  match body with
-  | typed_ast.TInt n _ _ -> Ok(intlit_body(n, idx))
+# Translate a TypedExpr into (ops_to_produce_value, result-name, next-idx).
+# - For TVar x: ops=[], name="%x".
+# - For TInt n: ops=[IRConst %tN n], name="%tN".
+# - For TBinary: recursively translate operands, then append the arith/cmp op.
+# Returns Err for any unsupported expression.
+fn translate_expr(expr: typed_ast.TypedExpr, params: List String, idx: Int) -> Result String (List sprout_ir.IROp, String, Int) =
+  match expr with
+  | typed_ast.TInt n _ _ -> Ok(intlit_triple(n, idx))
   | typed_ast.TVar name _ _ ->
-      # Identity-style: return a named SSA value directly (parameter %name).
       if param_known(name, params)
-      then Ok((Cons(sprout_ir.IRRet("%" ++ name), Nil), idx))
-      else Err("ast_to_ir: unbound variable '" ++ name ++ "' (PR 1.2 only resolves direct parameter references)")
-  | typed_ast.TBool _ _ _ -> Err("ast_to_ir: Bool literal not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TString _ _ _ -> Err("ast_to_ir: String literal not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TChar _ _ _ -> Err("ast_to_ir: Char literal not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TUnit _ _ -> Err("ast_to_ir: Unit literal not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TTuple _ _ _ -> Err("ast_to_ir: Tuple not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TIf _ _ _ _ _ -> Err("ast_to_ir: if-then-else not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TMatch _ _ _ _ -> Err("ast_to_ir: match not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TCall _ _ _ _ -> Err("ast_to_ir: call not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TDict _ _ _ -> Err("ast_to_ir: TDict not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TLambda _ _ _ _ -> Err("ast_to_ir: lambda not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TBinary _ _ _ _ _ -> Err("ast_to_ir: binary op not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TUnary _ _ _ _ -> Err("ast_to_ir: unary op not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TRange _ _ _ _ -> Err("ast_to_ir: range not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TDo _ _ _ -> Err("ast_to_ir: do-block not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TRecord _ _ _ _ -> Err("ast_to_ir: record not yet supported (PR 1.2 only handles IntLit + identity)")
-  | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: field access not yet supported (PR 1.2 only handles IntLit + identity)")
+      then Ok((Nil, "%" ++ name, idx))
+      else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
+  | typed_ast.TBinary op left right _ _ -> translate_binary(op, left, right, params, idx)
+  | typed_ast.TBool _ _ _ -> Err("ast_to_ir: Bool literal not yet supported")
+  | typed_ast.TString _ _ _ -> Err("ast_to_ir: String literal not yet supported")
+  | typed_ast.TChar _ _ _ -> Err("ast_to_ir: Char literal not yet supported")
+  | typed_ast.TUnit _ _ -> Err("ast_to_ir: Unit literal not yet supported")
+  | typed_ast.TTuple _ _ _ -> Err("ast_to_ir: Tuple not yet supported")
+  | typed_ast.TIf _ _ _ _ _ -> Err("ast_to_ir: if-then-else not yet supported")
+  | typed_ast.TMatch _ _ _ _ -> Err("ast_to_ir: match not yet supported")
+  | typed_ast.TCall _ _ _ _ -> Err("ast_to_ir: call not yet supported")
+  | typed_ast.TDict _ _ _ -> Err("ast_to_ir: TDict not yet supported")
+  | typed_ast.TLambda _ _ _ _ -> Err("ast_to_ir: lambda not yet supported")
+  | typed_ast.TUnary _ _ _ _ -> Err("ast_to_ir: unary op not yet supported")
+  | typed_ast.TRange _ _ _ _ -> Err("ast_to_ir: range not yet supported")
+  | typed_ast.TDo _ _ _ -> Err("ast_to_ir: do-block not yet supported")
+  | typed_ast.TRecord _ _ _ _ -> Err("ast_to_ir: record not yet supported")
+  | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: field access not yet supported")
+
+# Translate `left <op> right` into IR ops.  Op must be one of
+# +, -, *, ==, !=, <, <=, >, >=.  Both operands must be Int-typed
+# (Char comparison is intentionally rejected at this milestone).
+fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
+                    params: List String, idx: Int) -> Result String (List sprout_ir.IROp, String, Int) =
+  if ! (is_int_type(typed_ast.typed_expr_type(left)) && is_int_type(typed_ast.typed_expr_type(right)))
+  then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int operands")
+  else
+    match translate_expr(left, params, idx) with
+    | Err msg -> Err(msg)
+    | Ok lpair ->
+        match lpair with
+        | (l_ops, l_name, idx1) ->
+            match translate_expr(right, params, idx1) with
+            | Err msg -> Err(msg)
+            | Ok rpair ->
+                match rpair with
+                | (r_ops, r_name, idx2) -> finish_binary(op, l_ops, l_name, r_ops, r_name, idx2)
+
+fn finish_binary(op: String, l_ops: List sprout_ir.IROp, l_name: String,
+                 r_ops: List sprout_ir.IROp, r_name: String,
+                 idx: Int) -> Result String (List sprout_ir.IROp, String, Int) =
+  match arith_op(op, result, l_name, r_name) with
+  | Just iop -> Ok((list_append(l_ops, list_append(r_ops, Cons(iop, Nil))), result, idx + 1))
+  | Nothing ->
+      match cmp_predicate(op) with
+      | Just pred ->
+          Ok((list_append(l_ops, list_append(r_ops,
+                Cons(sprout_ir.IRICmp(result, pred, l_name, r_name), Nil))),
+              result, idx + 1))
+      | Nothing -> Err("ast_to_ir: binary op '" ++ op ++ "' not yet supported")
+  where result = fresh_name(idx)
+
+# Map a TBinary op String to the matching arithmetic IR constructor.
+# Returns Nothing for non-arith ops; the caller falls back to cmp_predicate.
+fn arith_op(op: String, result: String, lhs: String, rhs: String) -> Maybe sprout_ir.IROp =
+  if op == "+" then Just(sprout_ir.IRIAdd(result, lhs, rhs))
+  else if op == "-" then Just(sprout_ir.IRISub(result, lhs, rhs))
+  else if op == "*" then Just(sprout_ir.IRIMul(result, lhs, rhs))
+  else Nothing
+
+# Translate a function body into a complete list of ops terminated by IRRet.
+fn translate_body(body: typed_ast.TypedExpr, params: List String, idx: Int) -> Result String (List sprout_ir.IROp, Int) =
+  match translate_expr(body, params, idx) with
+  | Err msg -> Err(msg)
+  | Ok triple ->
+      match triple with
+      | (ops, name, next_idx) -> Ok((list_append(ops, Cons(sprout_ir.IRRet(name), Nil)), next_idx))
 
 fn param_known(name: String, params: List String) -> Bool =
   match params with
@@ -70,9 +155,9 @@ fn param_names(params: List ast.Param) -> List String =
       match p with
       | ast.Param n _ -> Cons(n, param_names(rest))
 
-# Build an IRFunction from a (name, param-names, body) triple.
-fn build_fn(name: String, pnames: List String, ops: List sprout_ir.IROp) -> sprout_ir.IRFunction =
-  sprout_ir.IRFunction(name, pnames, Cons(sprout_ir.IRBlock("entry", ops), Nil))
+# Build an IRFunction from a (name, param-names, ret-type, body) tuple.
+fn build_fn(name: String, pnames: List String, ret_ty: String, ops: List sprout_ir.IROp) -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(name, pnames, ret_ty, Cons(sprout_ir.IRBlock("entry", ops), Nil))
 
 # Translate a single TypedDecl into Maybe IRFunction.
 # Returns Ok Nothing for decls we deliberately skip (main, externs, instances,
@@ -94,7 +179,8 @@ fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExp
   | Err msg -> Err(msg)
   | Ok pair ->
       match pair with
-      | (ops, _) -> Ok(Just(build_fn(name, pnames, ops)))
+      | (ops, _) -> Ok(Just(build_fn(name, pnames, ret_ty, ops)))
+  where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
 
 fn translate_decls(decls: List typed_ast.TypedDecl, acc: List sprout_ir.IRFunction) -> Result String (List sprout_ir.IRFunction) =
   match decls with
