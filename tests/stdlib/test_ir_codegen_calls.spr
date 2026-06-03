@@ -1,0 +1,180 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+
+# ---------------------------------------------------------------------------
+# Tests for Milestone 1, PR 1.5: direct calls + recursion (IRCall).
+# See docs/gc-rooting-model-c-plan-2026-06-02.md.
+#
+# These tests construct IRPrograms by hand (mirroring what the AST→IR
+# translator would emit) and assert on the rendered LLVM and the pretty
+# printer.  The translator itself is exercised end-to-end via the driver
+# in the verification step recorded in the PR description.
+#
+# Programs covered:
+#   - fact: recursive factorial — single self-call site in the else arm.
+#   - fib:  recursive Fibonacci — two self-call sites whose results are
+#           added together.
+#   - simple non-recursive sequencing — a tiny callee feeds an outer call.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Build the IR equivalent of:
+#   fn fact(n: Int) -> Int = if n == 0 then 1 else n * fact(n - 1)
+#
+# entry:
+#   %t0 = const 0
+#   %t1 = icmp eq %n, %t0
+#   condbr %t1, then_2, else_3
+# then_2:
+#   %t5 = const 1
+#   br join_4
+# else_3:
+#   %t6 = const 1
+#   %t7 = isub %n, %t6
+#   %t8 = call i64 @fact(%t7)
+#   %t9 = imul %n, %t8
+#   br join_4
+# join_4:
+#   %t10 = phi i64 [%t5, then_2], [%t9, else_3]
+#   ret %t10
+fn fact_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("fact", Cons("n", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 0),
+        Cons(sprout_ir.IRICmp("%t1", "eq", "%n", "%t0"),
+        Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
+      Cons(sprout_ir.IRBlock("then_2", Cons(
+        sprout_ir.IRConst("%t5", 1),
+        Cons(sprout_ir.IRBr("join_4"), Nil))),
+      Cons(sprout_ir.IRBlock("else_3", Cons(
+        sprout_ir.IRConst("%t6", 1),
+        Cons(sprout_ir.IRISub("%t7", "%n", "%t6"),
+        Cons(sprout_ir.IRCall("%t8", "i64", "fact", Cons("%t7", Nil)),
+        Cons(sprout_ir.IRIMul("%t9", "%n", "%t8"),
+        Cons(sprout_ir.IRBr("join_4"), Nil)))))),
+      Cons(sprout_ir.IRBlock("join_4", Cons(
+        sprout_ir.IRPhi("%t10", "i64",
+          Cons(("%t5", "then_2"), Cons(("%t9", "else_3"), Nil))),
+        Cons(sprout_ir.IRRet("%t10"), Nil))),
+      Nil))))),
+    Nil))
+
+# Build the IR equivalent of:
+#   fn fib(n: Int) -> Int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+#
+# entry:
+#   %t0 = const 2
+#   %t1 = icmp slt %n, %t0
+#   condbr %t1, then_2, else_3
+# then_2:
+#   br join_4
+# else_3:
+#   %t5 = const 1
+#   %t6 = isub %n, %t5
+#   %t7 = call i64 @fib(%t6)
+#   %t8 = const 2
+#   %t9 = isub %n, %t8
+#   %t10 = call i64 @fib(%t9)
+#   %t11 = iadd %t7, %t10
+#   br join_4
+# join_4:
+#   %t12 = phi i64 [%n, then_2], [%t11, else_3]
+#   ret %t12
+fn fib_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("fib", Cons("n", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 2),
+        Cons(sprout_ir.IRICmp("%t1", "slt", "%n", "%t0"),
+        Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
+      Cons(sprout_ir.IRBlock("then_2", Cons(
+        sprout_ir.IRBr("join_4"), Nil)),
+      Cons(sprout_ir.IRBlock("else_3", Cons(
+        sprout_ir.IRConst("%t5", 1),
+        Cons(sprout_ir.IRISub("%t6", "%n", "%t5"),
+        Cons(sprout_ir.IRCall("%t7", "i64", "fib", Cons("%t6", Nil)),
+        Cons(sprout_ir.IRConst("%t8", 2),
+        Cons(sprout_ir.IRISub("%t9", "%n", "%t8"),
+        Cons(sprout_ir.IRCall("%t10", "i64", "fib", Cons("%t9", Nil)),
+        Cons(sprout_ir.IRIAdd("%t11", "%t7", "%t10"),
+        Cons(sprout_ir.IRBr("join_4"), Nil))))))))),
+      Cons(sprout_ir.IRBlock("join_4", Cons(
+        sprout_ir.IRPhi("%t12", "i64",
+          Cons(("%n", "then_2"), Cons(("%t11", "else_3"), Nil))),
+        Cons(sprout_ir.IRRet("%t12"), Nil))),
+      Nil))))),
+    Nil))
+
+# Build a tiny non-recursive caller/callee pair to prove sequencing of
+# multiple call sites in a single block:
+#   fn twice(n: Int) -> Int = n + n
+#   fn add4(n: Int) -> Int = twice(n) + twice(n)
+fn twice_and_add4_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("twice", Cons("n", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRIAdd("%t0", "%n", "%n"),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Cons(sprout_ir.IRFunction("add4", Cons("n", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRCall("%t0", "i64", "twice", Cons("%n", Nil)),
+        Cons(sprout_ir.IRCall("%t1", "i64", "twice", Cons("%n", Nil)),
+        Cons(sprout_ir.IRIAdd("%t2", "%t0", "%t1"),
+        Cons(sprout_ir.IRRet("%t2"), Nil))))),
+      Nil)),
+    Nil)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Pretty printer covers the new op.
+    assert_true(state, "pretty: call op rendered",
+                contains(sprout_ir.print_ir_program(fact_program()), "= call i64 @fact"))
+    assert_true(state, "pretty: call args rendered",
+                contains(sprout_ir.print_ir_program(fact_program()), "@fact(%t7)"))
+
+    # --- Lowering: fact.
+    assert_true(state, "fact defines i64 result",
+                contains(ir_lowering.lower_program(fact_program()), "define i64 @fact(i64 %n)"))
+    assert_true(state, "fact emits recursive call site",
+                contains(ir_lowering.lower_program(fact_program()), "%t8 = call i64 @fact(i64 %t7)"))
+    assert_true(state, "fact emits then-block",
+                contains(ir_lowering.lower_program(fact_program()), "then_2:"))
+    assert_true(state, "fact emits else-block",
+                contains(ir_lowering.lower_program(fact_program()), "else_3:"))
+    assert_true(state, "fact emits join-block phi",
+                contains(ir_lowering.lower_program(fact_program()),
+                         "phi i64 [%t5, %then_2], [%t9, %else_3]"))
+    assert_true(state, "fact emits final ret",
+                contains(ir_lowering.lower_program(fact_program()), "ret i64 %t10"))
+
+    # --- Lowering: fib — two recursive call sites with different args.
+    assert_true(state, "fib defines i64 result",
+                contains(ir_lowering.lower_program(fib_program()), "define i64 @fib(i64 %n)"))
+    assert_true(state, "fib emits first recursive call site (fib(n-1))",
+                contains(ir_lowering.lower_program(fib_program()), "%t7 = call i64 @fib(i64 %t6)"))
+    assert_true(state, "fib emits second recursive call site (fib(n-2))",
+                contains(ir_lowering.lower_program(fib_program()), "%t10 = call i64 @fib(i64 %t9)"))
+    assert_true(state, "fib sums the two recursive results",
+                contains(ir_lowering.lower_program(fib_program()), "add i64 %t7, %t10"))
+    assert_true(state, "fib emits phi merging n with sum",
+                contains(ir_lowering.lower_program(fib_program()),
+                         "phi i64 [%n, %then_2], [%t11, %else_3]"))
+
+    # --- Lowering: sequencing two call sites in one block (add4 → twice).
+    assert_true(state, "add4 defines i64 result",
+                contains(ir_lowering.lower_program(twice_and_add4_program()),
+                         "define i64 @add4(i64 %n)"))
+    assert_true(state, "add4 emits first twice() call",
+                contains(ir_lowering.lower_program(twice_and_add4_program()),
+                         "%t0 = call i64 @twice(i64 %n)"))
+    assert_true(state, "add4 emits second twice() call",
+                contains(ir_lowering.lower_program(twice_and_add4_program()),
+                         "%t1 = call i64 @twice(i64 %n)"))
+
+    summary(state)

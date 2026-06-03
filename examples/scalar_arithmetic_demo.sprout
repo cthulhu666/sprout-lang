@@ -1,0 +1,25 @@
+# Scalar-only example used to verify the Milestone 1 acceptance criterion
+# of the Model C plan (docs/gc-rooting-model-c-plan-2026-06-02.md).
+#
+# At M1 the --use-ir-codegen path only supports:
+#   - Int and Bool scalars
+#   - + - * and the comparison family
+#   - if-then-else
+#   - direct named calls + recursion
+#   - a trivially-() main
+#
+# It does NOT yet support print / IO, so this demo's main is unit and the
+# user-defined functions are only exercised when the test harness invokes
+# them directly (via --emit-ir for inspection and via clang+link for an
+# exit-0 build).  Heap features are explicitly out of scope until M2.
+
+fn fact(n: Int) -> Int =
+  if n == 0 then 1 else n * fact(n - 1)
+
+fn fib(n: Int) -> Int =
+  if n < 2 then n else fib(n - 1) + fib(n - 2)
+
+fn abs_diff(a: Int, b: Int) -> Int =
+  if a < b then b - a else a - b
+
+fn main() -> Unit !{IO} = ()

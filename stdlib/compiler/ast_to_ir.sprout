@@ -8,7 +8,7 @@ import stdlib.compiler.sprout_ir as sprout_ir
 # AST → Sprout-IR translator.
 # ---------------------------------------------------------------------------
 #
-# Milestone 1, PR 1.4 (see docs/gc-rooting-model-c-plan-2026-06-02.md).
+# Milestone 1, PR 1.5 (see docs/gc-rooting-model-c-plan-2026-06-02.md).
 #
 # Supports the scalar subset of Sprout used for the IR-codegen bring-up:
 #   - fn foo() -> Int = <intlit>            → IRConst + IRRet
@@ -20,10 +20,22 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #   - fn abs(x: Int) -> Int = if x < 0 then 0 - x else x
 #       → IRICmp, IRCondBr, then-block, else-block, IRPhi, IRRet
 #   - nested if-then-else, with each branch contributing its own blocks.
+#   - direct calls: fn f(x: Int) -> Int = g(x + 1)  →  IRCall site after
+#     arg eval; method / closure / typeclass dispatch are out of scope at
+#     this milestone and produce a clear Err.
+#   - self-recursive scalar calls: fn fact(n) = if n == 0 then 1 else n * fact(n - 1).
+#     Recursion needs no special handling — the callee name `fact` is just
+#     the TVar inside the TCall.
 #
-# The user-declared `main` function is intentionally skipped here: it has a
-# different LLVM calling convention (i32 @main(i32, ptr)) and the IR
-# lowering emits a synthetic shim for it.
+# The user-declared `main` function is special-cased here.  Its LLVM
+# calling convention (i32 @main(i32, ptr)) differs from Sprout fns, and
+# ir_lowering emits a synthetic shim for it that ignores the user body.
+# That synthetic shim is silent: if the user wrote a non-trivial main
+# body (e.g. one that calls print), the shim would still emit a no-op
+# binary and the user would be confused.  To prevent that, translate_decl
+# REJECTS any main whose body is not literally the unit literal `()`.
+# A trivially-Unit main is skipped (Ok Nothing); any other main body
+# returns Err with a clear message.
 #
 # Any other AST construct returns Err with a clear message — we never
 # silently produce wrong IR.
@@ -133,13 +145,14 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String, idx: Int,
       translate_binary(op, left, right, params, idx, cur_label, cur_ops)
   | typed_ast.TIf cond t e ty _ ->
       translate_if(cond, t, e, ty, params, idx, cur_label, cur_ops)
+  | typed_ast.TCall callee args ty _ ->
+      translate_call(callee, args, ty, params, idx, cur_label, cur_ops)
   | typed_ast.TBool _ _ _ -> Err("ast_to_ir: Bool literal not yet supported")
   | typed_ast.TString _ _ _ -> Err("ast_to_ir: String literal not yet supported")
   | typed_ast.TChar _ _ _ -> Err("ast_to_ir: Char literal not yet supported")
   | typed_ast.TUnit _ _ -> Err("ast_to_ir: Unit literal not yet supported")
   | typed_ast.TTuple _ _ _ -> Err("ast_to_ir: Tuple not yet supported")
   | typed_ast.TMatch _ _ _ _ -> Err("ast_to_ir: match not yet supported")
-  | typed_ast.TCall _ _ _ _ -> Err("ast_to_ir: call not yet supported")
   | typed_ast.TDict _ _ _ -> Err("ast_to_ir: TDict not yet supported")
   | typed_ast.TLambda _ _ _ _ -> Err("ast_to_ir: lambda not yet supported")
   | typed_ast.TUnary _ _ _ _ -> Err("ast_to_ir: unary op not yet supported")
@@ -297,6 +310,87 @@ fn finish_if(if_ty: types.Type,
                          Cons(then_final,
                          list_append(eblocks, Cons(else_final, Nil))))))
 
+# Translate a TCall node.
+#
+# Dispatch on the callee shape:
+#   - TVar fname _ _ where fname is NOT a parameter → direct named call to
+#     @fname.  Recursion just works: a self-call's TVar carries the
+#     defining function's own name.
+#   - TVar fname _ _ where fname IS a parameter → first-class function
+#     value, out of scope for PR 1.5 (would need indirect call lowering).
+#   - TGetField _ _ _ _ → method/record-field call, out of scope.
+#   - TLambda _ _ _ _ → IIFE / closure application, out of scope.
+#   - TDict _ _ _ → typeclass-dictionary dispatch, out of scope.
+#   - anything else → "indirect call not yet supported".
+#
+# Each argument is translated left-to-right via translate_args; the
+# resulting (lbl, ops, idx) is the call site's current block.  PR 1.5
+# only handles scalar (Int) arguments; the IRCall lowering hard-codes
+# `i64` for every arg position.  The call's LLVM ret-type comes from
+# `call_ty` (the TCall node's own inferred type), mapped via
+# llvm_ret_type — typically "i64" for Int callees, "i1" for Bool.
+fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
+                  call_ty: types.Type, params: List String, idx: Int,
+                  cur_label: String, cur_ops: List sprout_ir.IROp) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match callee with
+  | typed_ast.TVar fname _ _ ->
+      if param_known(fname, params)
+      then Err("ast_to_ir: indirect (first-class) call to parameter '" ++ fname ++ "' not yet supported")
+      else translate_direct_call(fname, args, call_ty, params, idx, cur_label, cur_ops)
+  | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: method/field call not yet supported")
+  | typed_ast.TLambda _ _ _ _ -> Err("ast_to_ir: lambda call not yet supported")
+  | typed_ast.TDict _ _ _ -> Err("ast_to_ir: typeclass dispatch call not yet supported")
+  | _ -> Err("ast_to_ir: indirect call not yet supported")
+
+fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
+                         call_ty: types.Type, params: List String, idx: Int,
+                         cur_label: String, cur_ops: List sprout_ir.IROp) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match translate_args(args, params, idx, cur_label, cur_ops, Nil, Nil) with
+  | Err msg -> Err(msg)
+  | Ok r ->
+      match r with
+      | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
+          finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                             arg_cur_ops, arg_names, idx1)
+
+fn finish_direct_call(fname: String, call_ty: types.Type,
+                      arg_blocks: List sprout_ir.IRBlock, arg_cur_lbl: String,
+                      arg_cur_ops: List sprout_ir.IROp, arg_names: List String,
+                      idx: Int) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  Ok((arg_blocks, arg_cur_lbl,
+       list_append(arg_cur_ops, Cons(call_op, Nil)),
+       result, idx + 1))
+  where result = fresh_name(idx)
+        call_op = sprout_ir.IRCall(result, llvm_ret_type(call_ty),
+                                   fname, arg_names)
+
+# Thread a list of argument expressions through translate_expr, accumulating
+# completed blocks, current-block ops, and the result-name of each arg.
+# `acc_blocks` is in already-correct order (we append, not prepend); the
+# arg-name list `acc_names` is built in reverse and reversed at the end so
+# the caller sees them in source order.
+fn translate_args(args: List typed_ast.TypedExpr, params: List String,
+                  idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
+                  acc_blocks: List sprout_ir.IRBlock, acc_names: List String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, List String, Int) =
+  match args with
+  | Nil -> Ok((acc_blocks, cur_label, cur_ops, list_reverse(acc_names), idx))
+  | Cons a rest ->
+      if ! is_int_type (typed_ast.typed_expr_type(a))
+      then Err("ast_to_ir: call argument must be Int (PR 1.5 only handles scalar Int args)")
+      else
+        match translate_expr(a, params, idx, cur_label, cur_ops) with
+        | Err msg -> Err(msg)
+        | Ok ar ->
+            match ar with
+            | (ablocks, acur_lbl, acur_ops, a_name, idx1) ->
+                translate_args(rest, params, idx1, acur_lbl, acur_ops,
+                               list_append(acc_blocks, ablocks),
+                               Cons(a_name, acc_names))
+
 # Translate a function body into a complete List IRBlock.  The body always
 # starts in the "entry" block; the final block (whatever cur_label is after
 # translation) is sealed with IRRet.
@@ -333,19 +427,30 @@ fn build_fn(name: String, pnames: List String, ret_ty: String,
   sprout_ir.IRFunction(name, pnames, ret_ty, blocks)
 
 # Translate a single TypedDecl into Maybe IRFunction.
-# Returns Ok Nothing for decls we deliberately skip (main, externs, instances,
-# pass-throughs, let-decls).  Returns Ok (Just f) for translated functions.
-# Returns Err for an unsupported body surfaced by a function we tried to lower.
+# Returns Ok Nothing for decls we deliberately skip (a trivially-Unit main,
+# externs, instances, pass-throughs, let-decls).  Returns Ok (Just f) for
+# translated functions.  Returns Err for an unsupported body surfaced by a
+# function we tried to lower — including a non-trivial `main` body, since
+# the synthetic shim would otherwise silently emit a no-op binary.
 fn translate_decl(d: typed_ast.TypedDecl) -> Result String (Maybe sprout_ir.IRFunction) =
   match d with
   | typed_ast.TFnDecl name params _ _ _ body ->
       if name == "main"
-      then Ok(Nothing)  # synthesized by ir_lowering as the C-ABI shim
+      then validate_main_body(body)
       else translate_user_fn(name, param_names(params), body)
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(Nothing)
   | typed_ast.TLetDecl _ _ -> Ok(Nothing)
   | typed_ast.TInstanceDecl _ _ _ -> Ok(Nothing)
   | typed_ast.TPassThrough _ -> Ok(Nothing)
+
+# Accept `main` only if its body is the literal unit expression `()`.
+# Any other body would be silently dropped by ir_lowering's synthetic
+# shim, leaving the user with a no-op binary; we surface a clear Err
+# instead.  This is the documented PR 1.5 contract.
+fn validate_main_body(body: typed_ast.TypedExpr) -> Result String (Maybe sprout_ir.IRFunction) =
+  match body with
+  | typed_ast.TUnit _ _ -> Ok(Nothing)
+  | _ -> Err("ast_to_ir: main body must be () at this milestone — IR codegen does not yet lower IO/print")
 
 fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExpr) -> Result String (Maybe sprout_ir.IRFunction) =
   match translate_body(body, pnames, 0) with

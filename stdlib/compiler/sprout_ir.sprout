@@ -9,7 +9,7 @@ module stdlib.compiler.sprout_ir
 #
 # PR 1.1 introduced the empty shell.  PR 1.2 added the two minimal scalar
 # constructors (IRConst, IRRet); PR 1.3 added scalar arithmetic + comparison;
-# PR 1.4 adds control-flow primitives:
+# PR 1.4 added control-flow primitives; PR 1.5 adds direct calls + recursion:
 #
 #   IRConst  String Int                — bind a fresh result name to an Int literal.
 #   IRRet    String                    — return-from-function, referencing a value name.
@@ -34,6 +34,13 @@ module stdlib.compiler.sprout_ir
 #         from translate_expr — e.g. "%x" for a parameter, "%t3" for a temp);
 #         the second String is the block label WITHOUT a '%' prefix (e.g.
 #         "then_0").  lower_op adds the '%' before the label at render time.
+#   IRCall   String String String (List String)
+#       — result = call <ret-ty> @<fn-name>(<arg-ty> %<a0>, ...)
+#       — fields: result-name, LLVM ret-type ("i64" or "i1"),
+#         callee function name (NO '@' prefix), list of arg value-names
+#         (each carries its '%' prefix already).
+#         PR 1.5 implies every arg is i64 (only scalar Int args are
+#         supported at this milestone).
 #
 # Value names are plain Strings: parameters carry the source-level name and
 # IRConst/IRIAdd/etc. introduce fresh names chosen by the AST→IR translator
@@ -58,6 +65,7 @@ export type IROp (..) =
   | IRBr String
   | IRCondBr String String String
   | IRPhi String String (List (String, String))
+  | IRCall String String String (List String)
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -82,6 +90,12 @@ fn print_phi_pairs(pairs: List (String, String)) -> String =
       match p with
       | (v, lbl) -> "[" ++ v ++ ", " ++ lbl ++ "], " ++ print_phi_pairs(rest)
 
+fn print_call_args(args: List String) -> String =
+  match args with
+  | Nil -> ""
+  | Cons a Nil -> a
+  | Cons a rest -> a ++ ", " ++ print_call_args(rest)
+
 fn print_op(op: IROp) -> String =
   match op with
   | IRConst name n -> "    " ++ name ++ " = const " ++ int_to_string(n)
@@ -93,6 +107,8 @@ fn print_op(op: IROp) -> String =
   | IRBr lbl -> "    br " ++ lbl
   | IRCondBr cond t e -> "    condbr " ++ cond ++ ", " ++ t ++ ", " ++ e
   | IRPhi r ty pairs -> "    " ++ r ++ " = phi " ++ ty ++ " " ++ print_phi_pairs(pairs)
+  | IRCall r ret_ty fname args ->
+      "    " ++ r ++ " = call " ++ ret_ty ++ " @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
 
 fn print_ops(ops: List IROp) -> String =
   match ops with
