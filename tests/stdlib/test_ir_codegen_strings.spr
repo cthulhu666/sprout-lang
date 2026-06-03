@@ -1,0 +1,146 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+
+# ---------------------------------------------------------------------------
+# Tests for Milestone 2, PR 2.1: string-allocating IR ops + lowering.
+# See docs/gc-rooting-model-c-plan-2026-06-02.md.
+#
+# Hand-built IRPrograms exercise each of the four new ops in isolation:
+#   - IRStrConst   — global emission + GEP + ptrtoint
+#   - IRStrConcat  — @str_concat call
+#   - IRStrSlice   — @str_slice call
+#   - IRStrFromInt — @int_to_string call  (name divergence is intentional)
+#
+# End-to-end runnable tests are deferred to PR 2.2 (validate_main_body in
+# ast_to_ir.sprout still rejects non-trivial main).
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# fn greeting() -> String = "hello"
+fn greeting_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("greeting", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%t1", "%t0", "hello"),
+        Cons(sprout_ir.IRRet("%t1"), Nil))),
+      Nil)),
+    Nil))
+
+# fn ab() -> String = str_concat("a", "b")
+fn concat_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("ab", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%t1", "%t0", "a"),
+        Cons(sprout_ir.IRStrConst("%t3", "%t2", "b"),
+        Cons(sprout_ir.IRStrConcat("%t4", "%t1", "%t3"),
+        Cons(sprout_ir.IRRet("%t4"), Nil))))),
+      Nil)),
+    Nil))
+
+# fn take(s: Int) -> String = str_slice("hello", 0, s)
+fn slice_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("take", Cons("s", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%t1", "%t0", "hello"),
+        Cons(sprout_ir.IRConst("%t2", 0),
+        Cons(sprout_ir.IRStrSlice("%t3", "%t1", "%t2", "%s"),
+        Cons(sprout_ir.IRRet("%t3"), Nil))))),
+      Nil)),
+    Nil))
+
+# fn show(n: Int) -> String = int_to_string(n)
+fn from_int_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("show", Cons("n", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrFromInt("%t0", "%n"),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Nil))
+
+# Two functions that each use a "%t0" raw-ptr name — exercises the per-function
+# Dict keying so the second function's global index increments correctly.
+fn two_fns_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("g1", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%t1", "%t0", "first"),
+        Cons(sprout_ir.IRRet("%t1"), Nil))),
+      Nil)),
+    Cons(sprout_ir.IRFunction("g2", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%t1", "%t0", "second"),
+        Cons(sprout_ir.IRRet("%t1"), Nil))),
+      Nil)),
+    Nil)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Pretty printer covers the new ops.
+    assert_true(state, "pretty: strconst rendered",
+                contains(sprout_ir.print_ir_program(greeting_program()), "strconst"))
+    assert_true(state, "pretty: strconcat rendered",
+                contains(sprout_ir.print_ir_program(concat_program()), "str_concat"))
+    assert_true(state, "pretty: strslice rendered",
+                contains(sprout_ir.print_ir_program(slice_program()), "str_slice"))
+    assert_true(state, "pretty: strfromint rendered",
+                contains(sprout_ir.print_ir_program(from_int_program()), "int_to_string"))
+
+    # --- Header declares the three new runtime functions.
+    assert_true(state, "header declares @str_concat",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "declare i64 @str_concat(i64, i64)"))
+    assert_true(state, "header declares @str_slice",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "declare i64 @str_slice(i64, i64, i64)"))
+    assert_true(state, "header declares @int_to_string",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "declare i64 @int_to_string(i64)"))
+
+    # --- IRStrConst: global, GEP, ptrtoint.
+    assert_true(state, "strconst emits @.str.0 global",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "@.str.0 = private unnamed_addr constant"))
+    assert_true(state, "strconst emits literal body",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "[6 x i8] c\"hello\\00\""))
+    assert_true(state, "strconst emits getelementptr",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "%t0 = getelementptr inbounds [6 x i8], ptr @.str.0, i64 0, i64 0"))
+    assert_true(state, "strconst emits ptrtoint",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "%t1 = ptrtoint ptr %t0 to i64"))
+
+    # --- IRStrConcat lowering.
+    assert_true(state, "strconcat emits call @str_concat",
+                contains(ir_lowering.lower_program(concat_program()),
+                         "%t4 = call i64 @str_concat(i64 %t1, i64 %t3)"))
+    assert_true(state, "two strconsts get distinct globals (.0 and .1)",
+                contains(ir_lowering.lower_program(concat_program()), "@.str.1 ="))
+
+    # --- IRStrSlice lowering.
+    assert_true(state, "strslice emits call @str_slice with three i64 args",
+                contains(ir_lowering.lower_program(slice_program()),
+                         "%t3 = call i64 @str_slice(i64 %t1, i64 %t2, i64 %s)"))
+
+    # --- IRStrFromInt lowering (op name diverges from runtime name).
+    assert_true(state, "strfromint emits call @int_to_string",
+                contains(ir_lowering.lower_program(from_int_program()),
+                         "%t0 = call i64 @int_to_string(i64 %n)"))
+
+    # --- Multi-function globals: same raw-ptr name in two fns gets distinct globals.
+    assert_true(state, "two-fn program emits @.str.0",
+                contains(ir_lowering.lower_program(two_fns_program()), "@.str.0"))
+    assert_true(state, "two-fn program emits @.str.1",
+                contains(ir_lowering.lower_program(two_fns_program()), "@.str.1"))
+    assert_true(state, "second fn's GEP references @.str.1, not @.str.0",
+                contains(ir_lowering.lower_program(two_fns_program()),
+                         "ptr @.str.1, i64 0, i64 0"))
+
+    summary(state)

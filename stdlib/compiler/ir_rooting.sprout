@@ -1,0 +1,511 @@
+module stdlib.compiler.ir_rooting
+import stdlib.compiler.sprout_ir as sprout_ir
+
+# ---------------------------------------------------------------------------
+# IR rooting pass (Milestone 2, PR 2.2 — Model C plan).
+#
+# Inserts IRRoot/IRUnroot ops around GC-triggering ops to keep heap-typed
+# values alive across runtime allocation calls.  Operates as a separate
+# post-translation pass over IRProgram; pure-functional (no Refs).
+#
+# Representation note (load-bearing): live sets and heap-origin are stored as
+# deduped List String, not Set.  Storing Set values through nested function
+# calls and recursive folds caused empty-set anomalies in this codebase
+# (reproduced via diagnostic IRRoot sentinels); plain lists round-trip safely.
+# This is O(N²) in set operations but acceptable for M2 (small blocks).
+#
+# Algorithm summary:
+#   For each function:
+#     1. Forward-scan blocks to compute heap-origin (names of heap-typed defs).
+#     2. Backward dataflow per function: per-block use/def, live_in/live_out.
+#        CFG is a DAG through M2 (no loops); single reverse-topo pass.
+#        Phi successors contribute only the operand from the right predecessor.
+#     3. Forward rewrite per block:
+#        - For each op, compute live_after on-the-fly by walking remaining
+#          ops backward from block's live_out.
+#        - For trigger ops, compute live_across (heap-typed values defined
+#          earlier that remain live), emit IRRoot before / IRUnroot after.
+
+# ---------------------------------------------------------------------------
+# List-as-set helpers (deduped, order = insertion order)
+
+fn ls_empty() -> List String = Nil
+
+fn ls_member(x: String, xs: List String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons h rest -> if h == x then true else ls_member(x, rest)
+
+fn ls_insert(x: String, xs: List String) -> List String =
+  if ls_member(x, xs) then xs else Cons(x, xs)
+
+fn ls_union_loop(ys: List String, acc: List String) -> List String =
+  match ys with
+  | Nil -> acc
+  | Cons y rest -> ls_union_loop(rest, ls_insert(y, acc))
+
+fn ls_union(xs: List String, ys: List String) -> List String =
+  ls_union_loop(ys, xs)
+
+fn ls_remove_loop(xs: List String, target: String, acc: List String) -> List String =
+  match xs with
+  | Nil -> list_reverse(acc)
+  | Cons x rest ->
+      if x == target then ls_remove_loop(rest, target, acc)
+      else ls_remove_loop(rest, target, Cons(x, acc))
+
+fn ls_remove(target: String, xs: List String) -> List String =
+  ls_remove_loop(xs, target, Nil)
+
+fn ls_intersect_loop(xs: List String, ys: List String, acc: List String) -> List String =
+  match xs with
+  | Nil -> list_reverse(acc)
+  | Cons x rest ->
+      if ls_member(x, ys) then ls_intersect_loop(rest, ys, Cons(x, acc))
+      else ls_intersect_loop(rest, ys, acc)
+
+fn ls_intersect(xs: List String, ys: List String) -> List String =
+  ls_intersect_loop(xs, ys, Nil)
+
+# ---------------------------------------------------------------------------
+# Trigger / heap predicates
+
+fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRStrSlice _ _ _ _ -> true
+  | sprout_ir.IRStrConcat _ _ _ -> true
+  | sprout_ir.IRStrFromInt _ _ -> true
+  | sprout_ir.IRStrConst _ _ _ -> false
+  # Conservative: every user call may transitively allocate.  Over-roots
+  # non-allocating callees; correctness > optimization at M2.
+  | sprout_ir.IRCall _ _ _ _ -> true
+  | _ -> false
+
+# Returns Just <result-name> if op directly produces a heap value (excluding
+# IRPhi, whose heap-ness depends on operand membership in HeapOrigin and is
+# handled separately in compute_heap_origin / update_scope).
+fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
+  match op with
+  | sprout_ir.IRStrConst r _ _ -> Just(r)
+  | sprout_ir.IRStrSlice r _ _ _ -> Just(r)
+  | sprout_ir.IRStrConcat r _ _ -> Just(r)
+  | sprout_ir.IRStrFromInt r _ -> Just(r)
+  | _ -> Nothing
+
+# ---------------------------------------------------------------------------
+# CFG helpers
+
+fn op_successors(op: sprout_ir.IROp) -> List String =
+  match op with
+  | sprout_ir.IRBr lbl -> Cons(lbl, Nil)
+  | sprout_ir.IRCondBr _ t e -> Cons(t, Cons(e, Nil))
+  | _ -> Nil
+
+fn last_op(ops: List sprout_ir.IROp) -> Maybe sprout_ir.IROp =
+  match ops with
+  | Nil -> Nothing
+  | Cons op Nil -> Just(op)
+  | Cons _ rest -> last_op(rest)
+
+fn block_successors(b: sprout_ir.IRBlock) -> List String =
+  match b with
+  | sprout_ir.IRBlock _ ops ->
+      match last_op(ops) with
+      | Nothing -> Nil
+      | Just op -> op_successors(op)
+
+fn block_label(b: sprout_ir.IRBlock) -> String =
+  match b with
+  | sprout_ir.IRBlock lbl _ -> lbl
+
+fn block_ops(b: sprout_ir.IRBlock) -> List sprout_ir.IROp =
+  match b with
+  | sprout_ir.IRBlock _ ops -> ops
+
+fn find_block(label: String, blocks: List sprout_ir.IRBlock) -> Maybe sprout_ir.IRBlock =
+  match blocks with
+  | Nil -> Nothing
+  | Cons b rest ->
+      if block_label(b) == label then Just(b)
+      else find_block(label, rest)
+
+# ---------------------------------------------------------------------------
+# Per-op use/def
+
+fn op_uses(op: sprout_ir.IROp) -> List String =
+  match op with
+  | sprout_ir.IRConst _ _ -> Nil
+  | sprout_ir.IRRet name -> Cons(name, Nil)
+  | sprout_ir.IRIAdd _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRISub _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRIMul _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRICmp _ _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRBr _ -> Nil
+  | sprout_ir.IRCondBr cond _ _ -> Cons(cond, Nil)
+  # Phi's "uses" are per-predecessor and contribute to the predecessor's
+  # live_out — see successor_live_in_for_pred.  Intra-block uses are empty.
+  | sprout_ir.IRPhi _ _ _ -> Nil
+  | sprout_ir.IRCall _ _ _ args -> args
+  | sprout_ir.IRStrConst _ _ _ -> Nil
+  | sprout_ir.IRStrSlice _ s start len -> Cons(s, Cons(start, Cons(len, Nil)))
+  | sprout_ir.IRStrConcat _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRStrFromInt _ n -> Cons(n, Nil)
+  | sprout_ir.IRRoot _ v _ -> Cons(v, Nil)
+  | sprout_ir.IRUnroot _ _ -> Nil
+
+fn op_def(op: sprout_ir.IROp) -> Maybe String =
+  match op with
+  | sprout_ir.IRConst r _ -> Just(r)
+  | sprout_ir.IRIAdd r _ _ -> Just(r)
+  | sprout_ir.IRISub r _ _ -> Just(r)
+  | sprout_ir.IRIMul r _ _ -> Just(r)
+  | sprout_ir.IRICmp r _ _ _ -> Just(r)
+  | sprout_ir.IRPhi r _ _ -> Just(r)
+  | sprout_ir.IRCall r _ _ _ -> Just(r)
+  | sprout_ir.IRStrConst r _ _ -> Just(r)
+  | sprout_ir.IRStrSlice r _ _ _ -> Just(r)
+  | sprout_ir.IRStrConcat r _ _ -> Just(r)
+  | sprout_ir.IRStrFromInt r _ -> Just(r)
+  | sprout_ir.IRRoot _ _ discard -> Just(discard)
+  | sprout_ir.IRUnroot _ discard -> Just(discard)
+  | _ -> Nothing
+
+# ---------------------------------------------------------------------------
+# Liveness — backward dataflow per function.
+
+fn add_uses(used: List String, uses: List String, defs: List String) -> List String =
+  match used with
+  | Nil -> uses
+  | Cons u rest ->
+      if ls_member(u, defs) then add_uses(rest, uses, defs)
+      else add_uses(rest, ls_insert(u, uses), defs)
+
+fn add_def_maybe(d: Maybe String, defs: List String) -> List String =
+  match d with
+  | Nothing -> defs
+  | Just name -> ls_insert(name, defs)
+
+fn block_use_def_loop(ops: List sprout_ir.IROp,
+                      uses: List String,
+                      defs: List String) -> (List String, List String) =
+  match ops with
+  | Nil -> (uses, defs)
+  | Cons op rest ->
+      block_use_def_loop(rest,
+                         add_uses(op_uses(op), uses, defs),
+                         add_def_maybe(op_def(op), defs))
+
+fn block_use_def(b: sprout_ir.IRBlock) -> (List String, List String) =
+  block_use_def_loop(block_ops(b), Nil, Nil)
+
+# For each IRPhi in S, replace its def-name in s_live_in with the operand
+# chosen on the B→S edge.  Names that are not phi-defs pass through unchanged.
+fn add_phi_operand_for_pred(pred_label: String,
+                            pairs: List (String, String),
+                            acc: List String) -> List String =
+  match pairs with
+  | Nil -> acc
+  | Cons p rest ->
+      match p with
+      | (v, lbl) ->
+          if lbl == pred_label then ls_insert(v, acc)
+          else add_phi_operand_for_pred(pred_label, rest, acc)
+
+fn rewrite_phi_in_set(pred_label: String, r: String,
+                      pairs: List (String, String),
+                      acc: List String) -> List String =
+  if ls_member(r, acc)
+  then add_phi_operand_for_pred(pred_label, pairs, ls_remove(r, acc))
+  else acc
+
+fn s_live_in_phi_rewrite(pred_label: String,
+                         ops: List sprout_ir.IROp,
+                         acc: List String) -> List String =
+  match ops with
+  | Nil -> acc
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi r _ pairs ->
+          s_live_in_phi_rewrite(pred_label, rest,
+                                rewrite_phi_in_set(pred_label, r, pairs, acc))
+      | _ -> s_live_in_phi_rewrite(pred_label, rest, acc)
+
+fn successor_live_in_for_pred(pred_label: String,
+                              s: sprout_ir.IRBlock,
+                              s_live_in: List String) -> List String =
+  s_live_in_phi_rewrite(pred_label, block_ops(s), s_live_in)
+
+fn lookup_live(lbl: String, dict: Dict (List String)) -> List String =
+  match dict_get(lbl, dict) with
+  | Just xs -> xs
+  | Nothing -> Nil
+
+fn compute_live_out_loop(pred_label: String, succs: List String,
+                         blocks: List sprout_ir.IRBlock,
+                         live_in_map: Dict (List String),
+                         acc: List String) -> List String =
+  match succs with
+  | Nil -> acc
+  | Cons s_lbl rest ->
+      match find_block(s_lbl, blocks) with
+      | Nothing -> compute_live_out_loop(pred_label, rest, blocks, live_in_map, acc)
+      | Just s ->
+          compute_live_out_loop(pred_label, rest, blocks, live_in_map,
+            ls_union(acc, successor_live_in_for_pred(pred_label, s, lookup_live(s_lbl, live_in_map))))
+
+fn compute_live_out(b: sprout_ir.IRBlock,
+                    blocks: List sprout_ir.IRBlock,
+                    live_in_map: Dict (List String)) -> List String =
+  compute_live_out_loop(block_label(b), block_successors(b), blocks, live_in_map, Nil)
+
+fn ls_diff_loop(xs: List String, removes: List String, acc: List String) -> List String =
+  match xs with
+  | Nil -> list_reverse(acc)
+  | Cons x rest ->
+      if ls_member(x, removes) then ls_diff_loop(rest, removes, acc)
+      else ls_diff_loop(rest, removes, Cons(x, acc))
+
+fn ls_diff(a: List String, removes: List String) -> List String =
+  ls_diff_loop(a, removes, Nil)
+
+fn block_live_in(b: sprout_ir.IRBlock,
+                 all_blocks: List sprout_ir.IRBlock,
+                 live_in_map: Dict (List String)) -> List String =
+  match block_use_def(b) with
+  | (uses, defs) ->
+      ls_union(uses, ls_diff(compute_live_out(b, all_blocks, live_in_map), defs))
+
+fn compute_liveness_loop(rev_blocks: List sprout_ir.IRBlock,
+                         all_blocks: List sprout_ir.IRBlock,
+                         acc: Dict (List String)) -> Dict (List String) =
+  match rev_blocks with
+  | Nil -> acc
+  | Cons b rest ->
+      compute_liveness_loop(rest, all_blocks,
+        dict_set(block_label(b), block_live_in(b, all_blocks, acc), acc))
+
+fn compute_liveness(blocks: List sprout_ir.IRBlock) -> Dict (List String) =
+  compute_liveness_loop(list_reverse(blocks), blocks, dict_empty())
+
+# ---------------------------------------------------------------------------
+# Per-op live_after, computed on-the-fly.
+
+fn after_minus_def(d: Maybe String, after_set: List String) -> List String =
+  match d with
+  | Nothing -> after_set
+  | Just name -> ls_remove(name, after_set)
+
+fn add_list_to_ls(xs: List String, acc: List String) -> List String =
+  match xs with
+  | Nil -> acc
+  | Cons x rest -> add_list_to_ls(rest, ls_insert(x, acc))
+
+fn op_live_before(op: sprout_ir.IROp, live_after_op: List String) -> List String =
+  add_list_to_ls(op_uses(op), after_minus_def(op_def(op), live_after_op))
+
+# live_after for the HEAD of `ops` given the block's live_out — by walking the
+# REST of ops backward, undoing each op.  O(N) per call → O(N²) per block.
+fn live_after_head(ops: List sprout_ir.IROp, block_live_out: List String) -> List String =
+  match ops with
+  | Nil -> block_live_out
+  | Cons _ rest -> live_before_first(rest, block_live_out)
+
+fn live_before_first(ops: List sprout_ir.IROp, block_live_out: List String) -> List String =
+  match ops with
+  | Nil -> block_live_out
+  | Cons op rest -> op_live_before(op, live_before_first(rest, block_live_out))
+
+# ---------------------------------------------------------------------------
+# HeapOrigin propagation
+#
+# Forward-scan blocks (topological order matches the IR's block-list order).
+# Mark every heap-producing op's result, then any phi whose operands include
+# a marked value.
+
+fn any_pair_in_heap(pairs: List (String, String), heap: List String) -> Bool =
+  match pairs with
+  | Nil -> false
+  | Cons p rest ->
+      match p with
+      | (v, _) ->
+          if ls_member(v, heap) then true
+          else any_pair_in_heap(rest, heap)
+
+fn mark_if_heap(op: sprout_ir.IROp, acc: List String) -> List String =
+  match op_produces_simple_heap(op) with
+  | Just r -> ls_insert(r, acc)
+  | Nothing ->
+      match op with
+      | sprout_ir.IRPhi r _ pairs ->
+          if any_pair_in_heap(pairs, acc) then ls_insert(r, acc) else acc
+      | _ -> acc
+
+fn scan_block_for_heap(ops: List sprout_ir.IROp, acc: List String) -> List String =
+  match ops with
+  | Nil -> acc
+  | Cons op rest -> scan_block_for_heap(rest, mark_if_heap(op, acc))
+
+fn compute_heap_origin_loop(blocks: List sprout_ir.IRBlock, acc: List String) -> List String =
+  match blocks with
+  | Nil -> acc
+  | Cons b rest ->
+      compute_heap_origin_loop(rest, scan_block_for_heap(block_ops(b), acc))
+
+fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> List String =
+  compute_heap_origin_loop(blocks, Nil)
+
+# ---------------------------------------------------------------------------
+# Forward rewrite — insert IRRoot/IRUnroot around trigger ops.
+
+# Filter in_scope_ord (in reverse-def order) to those still live, returning in
+# DEFINITION order so emitted IRRoots are deterministic.
+fn live_across_loop(in_scope_ord_rev: List String,
+                    live_after_op: List String,
+                    acc: List String) -> List String =
+  match in_scope_ord_rev with
+  | Nil -> acc
+  | Cons v rest ->
+      if ls_member(v, live_after_op)
+      then live_across_loop(rest, live_after_op, Cons(v, acc))
+      else live_across_loop(rest, live_after_op, acc)
+
+fn live_across(in_scope_ord_rev: List String, live_after_op: List String) -> List String =
+  live_across_loop(in_scope_ord_rev, live_after_op, Nil)
+
+fn list_length_of(xs: List String) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons _ rest -> 1 + list_length_of(rest)
+
+# Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
+# slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
+fn emit_roots_loop(vs: List String, idx: Int, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+  match vs with
+  | Nil -> (acc, idx)
+  | Cons v rest ->
+      emit_roots_loop(rest, idx + 2,
+        Cons(sprout_ir.IRRoot("%t" ++ int_to_string(idx),
+                              v,
+                              "%t" ++ int_to_string(idx + 1)), acc))
+
+fn unroot_op(n: Int, idx: Int) -> (sprout_ir.IROp, Int) =
+  (sprout_ir.IRUnroot(n, "%t" ++ int_to_string(idx)), idx + 1)
+
+fn emit_with_roots(op: sprout_ir.IROp, live: List String, n: Int, idx: Int,
+                   acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+  match emit_roots_loop(live, idx, acc) with
+  | (acc1, idx1) ->
+      match unroot_op(n, idx1) with
+      | (op_unroot, idx2) ->
+          (Cons(op_unroot, Cons(op, acc1)), idx2)
+
+fn maybe_wrap_trigger(op: sprout_ir.IROp, live: List String, idx: Int,
+                      acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+  match live with
+  | Nil -> (Cons(op, acc), idx)
+  | _ -> emit_with_roots(op, live, list_length_of(live), idx, acc)
+
+fn maybe_wrap(op: sprout_ir.IROp,
+              live_after_op: List String,
+              in_scope_ord: List String,
+              idx: Int,
+              acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+  if op_triggers_gc(op)
+  then maybe_wrap_trigger(op, live_across(in_scope_ord, live_after_op), idx, acc)
+  else (Cons(op, acc), idx)
+
+# Carry both a reverse-definition-order list and a flag for membership.
+fn add_def(name: String, ord: List String) -> List String =
+  if ls_member(name, ord) then ord else Cons(name, ord)
+
+fn update_scope(op: sprout_ir.IROp, heap_origin: List String,
+                ord: List String) -> List String =
+  match op_produces_simple_heap(op) with
+  | Just r -> add_def(r, ord)
+  | Nothing ->
+      match op with
+      | sprout_ir.IRPhi r _ _ ->
+          if ls_member(r, heap_origin)
+          then add_def(r, ord)
+          else ord
+      | _ -> ord
+
+fn rewrite_ops(ops: List sprout_ir.IROp,
+               block_live_out: List String,
+               heap_origin: List String,
+               in_scope_ord: List String,
+               idx: Int,
+               acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+  match ops with
+  | Nil -> (list_reverse(acc), idx)
+  | Cons op rest ->
+      match maybe_wrap(op, live_after_head(ops, block_live_out),
+                       in_scope_ord, idx, acc) with
+      | (acc1, idx1) ->
+          rewrite_ops(rest, block_live_out, heap_origin,
+                      update_scope(op, heap_origin, in_scope_ord),
+                      idx1, acc1)
+
+fn seed_in_scope_loop(names: List String, ord: List String) -> List String =
+  match names with
+  | Nil -> ord
+  | Cons n rest -> seed_in_scope_loop(rest, add_def(n, ord))
+
+fn seed_in_scope(names: List String) -> List String =
+  seed_in_scope_loop(names, Nil)
+
+fn rewrite_block_full(b: sprout_ir.IRBlock,
+                      live_in_map: Dict (List String),
+                      heap_origin: List String,
+                      all_blocks: List sprout_ir.IRBlock,
+                      idx: Int) -> (sprout_ir.IRBlock, Int) =
+  match b with
+  | sprout_ir.IRBlock lbl ops ->
+      match rewrite_ops(ops,
+                        compute_live_out(b, all_blocks, live_in_map),
+                        heap_origin,
+                        seed_in_scope(ls_intersect(lookup_live(lbl, live_in_map), heap_origin)),
+                        idx, Nil) with
+      | (new_ops, idx_out) -> (sprout_ir.IRBlock(lbl, new_ops), idx_out)
+
+fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
+                     live_in_map: Dict (List String),
+                     heap_origin: List String,
+                     all_blocks: List sprout_ir.IRBlock,
+                     idx: Int,
+                     acc: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
+  match blocks with
+  | Nil -> list_reverse(acc)
+  | Cons b rest ->
+      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx) with
+      | (b1, idx1) ->
+          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, Cons(b1, acc))
+
+fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int) -> sprout_ir.IRFunction =
+  match f with
+  | sprout_ir.IRFunction name params ret_ty blocks ->
+      sprout_ir.IRFunction(name, params, ret_ty,
+        rewrite_fn_blocks(blocks, compute_liveness(blocks), compute_heap_origin(blocks),
+                          blocks, start_idx, Nil))
+
+# ---------------------------------------------------------------------------
+# Per-program driver.
+
+fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
+  match f with
+  | sprout_ir.IRFunction name _ _ _ ->
+      match dict_get(name, idx_map) with
+      | Just i -> rewrite_fn(f, i)
+      | Nothing -> rewrite_fn(f, 0)
+
+fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int,
+               acc: List sprout_ir.IRFunction) -> List sprout_ir.IRFunction =
+  match fns with
+  | Nil -> list_reverse(acc)
+  | Cons f rest -> rewrite_fns(rest, idx_map, Cons(rewrite_one_fn(f, idx_map), acc))
+
+# Entry point.  idx_map maps fn-name → next-free temp index produced by
+# ast_to_ir.translate_program.  Unmapped functions default to 0.
+export fn insert_roots(prog: sprout_ir.IRProgram, idx_map: Dict Int) -> sprout_ir.IRProgram =
+  match prog with
+  | sprout_ir.IRProgram fns -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil))

@@ -12,6 +12,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
 
 # ---------------------------------------------------------------------------
 # Header stripping (mirrors compiler.sprout / type_driver.sprout)
@@ -188,7 +189,10 @@ fn run_file_use_ir_codegen(path: String, stdlib_root: String) -> Unit !{IO} =
     | typed_ast.TypedOk typed_prog _ ->
         match ast_to_ir.translate_program(typed_prog) with
         | Err msg -> print("ERROR: " ++ msg)
-        | Ok ir_prog -> print(ir_lowering.lower_program(ir_prog))
+        | Ok pair ->
+            match pair with
+            | (ir_prog, idx_map) ->
+                print(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
 
 # ---------------------------------------------------------------------------
 # Phase: scan-info — call scan_source_info and print mod_name + exports.

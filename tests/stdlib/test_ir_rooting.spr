@@ -1,0 +1,176 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+
+# ---------------------------------------------------------------------------
+# Tests for Milestone 2, PR 2.2: dataflow rooting pass.
+# See docs/gc-rooting-model-c-plan-2026-06-02.md and the corrected test
+# specification in the implementation prompt.
+#
+# Each test hand-builds an IRProgram and asserts on the LLVM rendered by
+# `ir_lowering.lower_program(ir_rooting.insert_roots(prog, dict_empty()))`.
+#
+# Live-across semantics used here: an op's operands are NOT considered live
+# across that op at the IR level — the runtime's internal SPROUT_HANDLE
+# covers the call window.  The IR pass only roots values defined before a
+# trigger AND used after it.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+# Pipeline: insert_roots then lower.
+fn lower(prog: sprout_ir.IRProgram) -> String =
+  ir_lowering.lower_program(ir_rooting.insert_roots(prog, dict_empty()))
+
+# ---------------------------------------------------------------------------
+# Test 1: single concat — no rooting needed (concat's operands are not "live
+# across" the concat at the IR level; concat's result has no downstream use).
+
+# fn one_concat() -> String = "a" ++ "b"
+fn test1_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("one_concat", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%t1", "%t0", "a"),
+        Cons(sprout_ir.IRStrConst("%t3", "%t2", "b"),
+        Cons(sprout_ir.IRStrConcat("%t4", "%t1", "%t3"),
+        Cons(sprout_ir.IRRet("%t4"), Nil))))),
+      Nil)),
+    Nil))
+
+# ---------------------------------------------------------------------------
+# Test 2: %ab live across the second concat (which is a trigger).
+# Expected: 1 IRRoot before %cd's concat, 1 IRUnroot(i64 1) after.
+
+# IR for:
+#   %ab = "a" ++ "b"
+#   %cd = "c" ++ "d"      ← root %ab across this
+#   %r  = %ab ++ %cd
+fn test2_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("one_live", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%a1", "%a1_raw", "a"),
+        Cons(sprout_ir.IRStrConst("%a2", "%a2_raw", "b"),
+        Cons(sprout_ir.IRStrConcat("%ab", "%a1", "%a2"),
+        Cons(sprout_ir.IRStrConst("%c1", "%c1_raw", "c"),
+        Cons(sprout_ir.IRStrConst("%c2", "%c2_raw", "d"),
+        Cons(sprout_ir.IRStrConcat("%cd", "%c1", "%c2"),
+        Cons(sprout_ir.IRStrConcat("%r", "%ab", "%cd"),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))))),
+      Nil)),
+    Nil))
+
+# ---------------------------------------------------------------------------
+# Test 3: two heap values live across a trigger, plus a 1-root and another
+# 1-root.  Expected counts per op: 0, 1, 2, 1, 0 = 4 total roots.
+
+# IR for:
+#   %ab = "a"++"b";  %cd = "c"++"d" [live_across = %ab]
+#   %ef = "e"++"f"   [live_across = %ab, %cd]
+#   %t1 = %ab ++ %cd [live_across = %ef]
+#   %r  = %t1 ++ %ef
+fn test3_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("three_concat", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%a1", "%a1_raw", "a"),
+        Cons(sprout_ir.IRStrConst("%a2", "%a2_raw", "b"),
+        Cons(sprout_ir.IRStrConcat("%ab", "%a1", "%a2"),
+        Cons(sprout_ir.IRStrConst("%c1", "%c1_raw", "c"),
+        Cons(sprout_ir.IRStrConst("%c2", "%c2_raw", "d"),
+        Cons(sprout_ir.IRStrConcat("%cd", "%c1", "%c2"),
+        Cons(sprout_ir.IRStrConst("%e1", "%e1_raw", "e"),
+        Cons(sprout_ir.IRStrConst("%e2", "%e2_raw", "f"),
+        Cons(sprout_ir.IRStrConcat("%ef", "%e1", "%e2"),
+        Cons(sprout_ir.IRStrConcat("%t1", "%ab", "%cd"),
+        Cons(sprout_ir.IRStrConcat("%r", "%t1", "%ef"),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))))))))),
+      Nil)),
+    Nil))
+
+# ---------------------------------------------------------------------------
+# Test 4: phi-of-heap with a trigger AFTER the join — validates the load-
+# bearing assumption that each arm roots locally and IRBr is not a trigger.
+#
+# IR shape:
+#   entry: condbr %cond, then, else
+#   then:  %xt = "x"; br join
+#   else:  %ye = "y"; br join
+#   join:  %phi = phi [%xt, then], [%ye, else]
+#          %z1 = "z"; %z2 = "w"; %zw = %z1++%z2    [trigger; live_across = %phi]
+#          %r  = %phi ++ %zw; ret %r
+
+fn test4_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("phi_heap", Cons("cond", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRCondBr("%cond", "then", "else"), Nil)),
+      Cons(sprout_ir.IRBlock("then", Cons(
+        sprout_ir.IRStrConst("%xt", "%xt_raw", "x"),
+        Cons(sprout_ir.IRBr("join"), Nil))),
+      Cons(sprout_ir.IRBlock("else", Cons(
+        sprout_ir.IRStrConst("%ye", "%ye_raw", "y"),
+        Cons(sprout_ir.IRBr("join"), Nil))),
+      Cons(sprout_ir.IRBlock("join", Cons(
+        sprout_ir.IRPhi("%phi", "i64",
+          Cons(("%xt", "then"), Cons(("%ye", "else"), Nil))),
+        Cons(sprout_ir.IRStrConst("%z1", "%z1_raw", "z"),
+        Cons(sprout_ir.IRStrConst("%z2", "%z2_raw", "w"),
+        Cons(sprout_ir.IRStrConcat("%zw", "%z1", "%z2"),
+        Cons(sprout_ir.IRStrConcat("%r", "%phi", "%zw"),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))),
+      Nil))))),
+    Nil))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Test 1: no rooting emitted.  Search for the call site, not the
+    # declare line (the header always declares the runtime functions).
+    assert_false(state, "T1: no push_i64_root call site for single concat",
+                 contains(lower(test1_program()), "call i64 @sprout_gc_push_i64_root"))
+    assert_false(state, "T1: no pop_roots call site for single concat",
+                 contains(lower(test1_program()), "call i64 @sprout_gc_pop_roots"))
+
+    # --- Test 2: exactly one root pushed and one pop(i64 1).
+    assert_eq(state, "T2: exactly one push_i64_root call",
+              count(lower(test2_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T2: exactly one pop_roots(i64 1) call",
+              count(lower(test2_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+
+    # --- Test 3: 4 total root pushes; at least one pop(2); at least two pop(1).
+    assert_eq(state, "T3: four push_i64_root calls",
+              count(lower(test3_program()), "call i64 @sprout_gc_push_i64_root"), 4)
+    assert_true(state, "T3: at least one pop_roots(i64 2)",
+                contains(lower(test3_program()), "@sprout_gc_pop_roots(i64 2)"))
+    assert_true(state, "T3: at least two pop_roots(i64 1)",
+                count(lower(test3_program()), "@sprout_gc_pop_roots(i64 1)") >= 2)
+
+    # --- Test 4: phi-of-heap — exactly one push.  Neither arm pre-roots; the
+    # root sits in the join block before the %zw concat.
+    assert_eq(state, "T4: exactly one push_i64_root (phi rooted across %zw)",
+              count(lower(test4_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T4: exactly one pop_roots(i64 1)",
+              count(lower(test4_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+
+    # --- Header declares the rooting runtime functions.
+    assert_true(state, "header declares @sprout_gc_push_i64_root",
+                contains(lower(test1_program()),
+                         "declare i64 @sprout_gc_push_i64_root(ptr)"))
+    assert_true(state, "header declares @sprout_gc_pop_roots",
+                contains(lower(test1_program()),
+                         "declare i64 @sprout_gc_pop_roots(i64)"))
+
+    summary(state)

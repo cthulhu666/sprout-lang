@@ -66,6 +66,16 @@ export type IROp (..) =
   | IRCondBr String String String
   | IRPhi String String (List (String, String))
   | IRCall String String String (List String)
+  | IRStrConst String String String
+  | IRStrSlice String String String String
+  | IRStrConcat String String String
+  # IRStrFromInt's IR-op name diverges from the runtime name; it lowers to @int_to_string.
+  | IRStrFromInt String String
+  # IRRoot <slot-name> <value-being-rooted> <discard-reg-for-push-call>
+  # All names carry their '%' prefix already.
+  | IRRoot String String String
+  # IRUnroot <count-to-pop> <discard-reg-for-pop-call>
+  | IRUnroot Int String
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -109,6 +119,18 @@ fn print_op(op: IROp) -> String =
   | IRPhi r ty pairs -> "    " ++ r ++ " = phi " ++ ty ++ " " ++ print_phi_pairs(pairs)
   | IRCall r ret_ty fname args ->
       "    " ++ r ++ " = call " ++ ret_ty ++ " @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
+  | IRStrConst r raw s ->
+      "    " ++ r ++ " = strconst (" ++ raw ++ ") \"" ++ s ++ "\""
+  | IRStrSlice r s start len ->
+      "    " ++ r ++ " = str_slice " ++ s ++ ", " ++ start ++ ", " ++ len
+  | IRStrConcat r a b ->
+      "    " ++ r ++ " = str_concat " ++ a ++ ", " ++ b
+  | IRStrFromInt r n ->
+      "    " ++ r ++ " = int_to_string " ++ n
+  | IRRoot slot v discard ->
+      "    " ++ discard ++ " = root " ++ slot ++ ", " ++ v
+  | IRUnroot n discard ->
+      "    " ++ discard ++ " = unroot " ++ int_to_string(n)
 
 fn print_ops(ops: List IROp) -> String =
   match ops with

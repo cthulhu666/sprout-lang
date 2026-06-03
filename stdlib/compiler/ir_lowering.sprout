@@ -1,6 +1,24 @@
 module stdlib.compiler.ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 
+# Duplicated from codegen.sprout (escape_char_for_ir / encode_str_for_ir / global len)
+# — keep aligned with codegen.sprout: a fix here likely needs a matching change there.
+fn escape_char_for_ir(ch: Char) -> String =
+  if s == "\\" then "\\5C"
+  else if s == "\"" then "\\22"
+  else if s == "\n" then "\\0A"
+  else if s == "\r" then "\\0D"
+  else if s == "\t" then "\\09"
+  else s
+  where s = char_to_string(ch)
+
+fn encode_str_for_ir(s: String, i: Int, acc: String) -> String =
+  if i >= str_len(s) then acc
+  else
+    match str_char_at(s, i) with
+    | Nothing -> acc
+    | Just ch -> encode_str_for_ir(s, i + 1, acc ++ escape_char_for_ir(ch))
+
 # ---------------------------------------------------------------------------
 # Sprout-IR → LLVM IR text lowering.
 # ---------------------------------------------------------------------------
@@ -54,7 +72,9 @@ fn lower_call_args(args: List String) -> String =
   | Cons a rest -> "i64 " ++ a ++ ", " ++ lower_call_args(rest)
 
 # Render a single IROp as one LLVM IR line (without trailing newline).
-fn lower_op(op: sprout_ir.IROp, ret_ty: String) -> String =
+# str_table maps raw-ptr names (e.g. "%t0") introduced by IRStrConst to
+# (global_name, byte_length) — populated by collect_str_consts before lowering.
+fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match op with
   | sprout_ir.IRConst name n -> "  " ++ name ++ " = add i64 0, " ++ int_to_string(n)
   | sprout_ir.IRRet name -> "  ret " ++ ret_ty ++ " " ++ name
@@ -69,20 +89,41 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String) -> String =
       if call_ret_ty == "void"
       then "  call void @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")"
       else "  " ++ r ++ " = call " ++ call_ret_ty ++ " @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")"
+  | sprout_ir.IRStrConst r raw _ ->
+      match dict_get(raw, str_table) with
+      | Just entry ->
+          match entry with
+          | (gname, len) ->
+              "  " ++ raw ++ " = getelementptr inbounds [" ++ int_to_string(len) ++
+                " x i8], ptr " ++ gname ++ ", i64 0, i64 0\n" ++
+              "  " ++ r ++ " = ptrtoint ptr " ++ raw ++ " to i64"
+      | Nothing -> "  ; ERROR: missing str global for " ++ raw
+  | sprout_ir.IRStrSlice r s start len ->
+      "  " ++ r ++ " = call i64 @str_slice(i64 " ++ s ++ ", i64 " ++ start ++ ", i64 " ++ len ++ ")"
+  | sprout_ir.IRStrConcat r a b ->
+      "  " ++ r ++ " = call i64 @str_concat(i64 " ++ a ++ ", i64 " ++ b ++ ")"
+  | sprout_ir.IRStrFromInt r n ->
+      "  " ++ r ++ " = call i64 @int_to_string(i64 " ++ n ++ ")"
+  | sprout_ir.IRRoot slot v discard ->
+      "  " ++ slot ++ " = alloca i64\n" ++
+      "  store i64 " ++ v ++ ", ptr " ++ slot ++ "\n" ++
+      "  " ++ discard ++ " = call i64 @sprout_gc_push_i64_root(ptr " ++ slot ++ ")"
+  | sprout_ir.IRUnroot n discard ->
+      "  " ++ discard ++ " = call i64 @sprout_gc_pop_roots(i64 " ++ int_to_string(n) ++ ")"
 
-fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String) -> String =
+fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match ops with
   | Nil -> ""
-  | Cons op rest -> lower_op(op, ret_ty) ++ "\n" ++ lower_ops(rest, ret_ty)
+  | Cons op rest -> lower_op(op, ret_ty, str_table) ++ "\n" ++ lower_ops(rest, ret_ty, str_table)
 
-fn lower_block(b: sprout_ir.IRBlock, ret_ty: String) -> String =
+fn lower_block(b: sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match b with
-  | sprout_ir.IRBlock label ops -> label ++ ":\n" ++ lower_ops(ops, ret_ty)
+  | sprout_ir.IRBlock label ops -> label ++ ":\n" ++ lower_ops(ops, ret_ty, str_table)
 
-fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String) -> String =
+fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match bs with
   | Nil -> ""
-  | Cons b rest -> lower_block(b, ret_ty) ++ lower_blocks(rest, ret_ty)
+  | Cons b rest -> lower_block(b, ret_ty, str_table) ++ lower_blocks(rest, ret_ty, str_table)
 
 # Build the comma-separated "i64 %a, i64 %b, ..." parameter list.
 fn lower_params(params: List String) -> String =
@@ -91,21 +132,33 @@ fn lower_params(params: List String) -> String =
   | Cons p Nil -> "i64 %" ++ p
   | Cons p rest -> "i64 %" ++ p ++ ", " ++ lower_params(rest)
 
-fn lower_fn(f: sprout_ir.IRFunction) -> String =
+fn lower_fn(f: sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
-      "define " ++ ret_ty ++ " @" ++ name ++ "(" ++ lower_params(params) ++ ") {\n" ++ lower_blocks(blocks, ret_ty) ++ "}\n"
+      "define " ++ ret_ty ++ " @" ++ name ++ "(" ++ lower_params(params) ++ ") {\n" ++ lower_blocks(blocks, ret_ty, fn_table_for(name, fn_tables)) ++ "}\n"
 
-fn lower_fns(fns: List sprout_ir.IRFunction) -> String =
+fn fn_table_for(name: String, fn_tables: Dict (Dict (String, Int))) -> Dict (String, Int) =
+  match dict_get(name, fn_tables) with
+  | Just t -> t
+  | Nothing -> dict_empty()
+
+fn lower_fns(fns: List sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
   match fns with
   | Nil -> ""
-  | Cons f rest -> lower_fn(f) ++ "\n" ++ lower_fns(rest)
+  | Cons f rest -> lower_fn(f, fn_tables) ++ "\n" ++ lower_fns(rest, fn_tables)
 
 # Header: the minimum prelude clang/opt accept.  Matches the existing
 # codegen.sprout choice ("unknown-unknown-unknown") so the two paths share
-# a target spec.
+# a target spec.  Runtime declares duplicate codegen.sprout's compiler-intrinsic
+# table — keep aligned with codegen.sprout.
 fn ir_header() -> String =
-  "; Generated by sprout ir_lowering.sprout (M1 PR 1.5)\ntarget triple = \"unknown-unknown-unknown\"\n\n"
+  "; Generated by sprout ir_lowering.sprout (M2 PR 2.1)\n" ++
+  "target triple = \"unknown-unknown-unknown\"\n" ++
+  "declare i64 @str_concat(i64, i64)\n" ++
+  "declare i64 @str_slice(i64, i64, i64)\n" ++
+  "declare i64 @int_to_string(i64)\n" ++
+  "declare i64 @sprout_gc_push_i64_root(ptr)\n" ++
+  "declare i64 @sprout_gc_pop_roots(i64)\n\n"
 
 # Synthetic C-ABI main shim.  PR 1.5 still cannot lower the user's `main`
 # body in general (anything beyond `()` requires heap/IO ops that don't
@@ -115,7 +168,67 @@ fn ir_header() -> String =
 fn main_shim() -> String =
   "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n  ret i32 0\n}\n"
 
+# String-constant collection pre-pass.  Walks every IRStrConst in document
+# order, allocates @.str.K names, and produces:
+#   - globals_text: the "@.str.K = private unnamed_addr constant ..." lines.
+#   - fn_tables:    Dict fn_name (Dict raw_ptr (gname, byte_len)).  raw_ptr
+#                   names are per-function ("%t0", ...) and would collide
+#                   across functions if keyed flat, hence the outer Dict.
+fn collect_str_consts(fns: List sprout_ir.IRFunction) -> (String, Dict (Dict (String, Int)), Int) =
+  collect_str_consts_loop(fns, 0, "", dict_empty())
+
+fn collect_str_consts_loop(fns: List sprout_ir.IRFunction, next_idx: Int,
+                           globals_acc: String, tables_acc: Dict (Dict (String, Int))) ->
+    (String, Dict (Dict (String, Int)), Int) =
+  match fns with
+  | Nil -> (globals_acc, tables_acc, next_idx)
+  | Cons f rest ->
+      match f with
+      | sprout_ir.IRFunction name _ _ blocks ->
+          match walk_blocks_for_strs(blocks, next_idx, globals_acc, dict_empty()) with
+          | (gs2, idx2, fn_table) ->
+              collect_str_consts_loop(rest, idx2, gs2,
+                                      dict_set(name, fn_table, tables_acc))
+
+fn walk_blocks_for_strs(blocks: List sprout_ir.IRBlock, next_idx: Int,
+                        globals_acc: String, fn_table: Dict (String, Int)) ->
+    (String, Int, Dict (String, Int)) =
+  match blocks with
+  | Nil -> (globals_acc, next_idx, fn_table)
+  | Cons b rest ->
+      match b with
+      | sprout_ir.IRBlock _ ops ->
+          match walk_ops_for_strs(ops, next_idx, globals_acc, fn_table) with
+          | (gs2, idx2, ft2) -> walk_blocks_for_strs(rest, idx2, gs2, ft2)
+
+fn walk_ops_for_strs(ops: List sprout_ir.IROp, next_idx: Int,
+                     globals_acc: String, fn_table: Dict (String, Int)) ->
+    (String, Int, Dict (String, Int)) =
+  match ops with
+  | Nil -> (globals_acc, next_idx, fn_table)
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRStrConst _ raw s ->
+          match emit_str_global(next_idx, s) with
+          | (decl, len, gname) ->
+              walk_ops_for_strs(rest, next_idx + 1,
+                                globals_acc ++ decl,
+                                dict_set(raw, (gname, len), fn_table))
+      | _ -> walk_ops_for_strs(rest, next_idx, globals_acc, fn_table)
+
+fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
+  (gname ++ " = private unnamed_addr constant [" ++ int_to_string(len) ++
+     " x i8] c\"" ++ body ++ "\"\n",
+   len, gname)
+  where gname = "@.str." ++ int_to_string(idx)
+        body = encode_str_for_ir(s, 0, "") ++ "\\00"
+        len = str_byte_len(s) + 1
+
 # lower_program: top-level entry.  Returns the complete LLVM IR text.
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =
   match prog with
-  | sprout_ir.IRProgram fns -> ir_header() ++ lower_fns(fns) ++ main_shim()
+  | sprout_ir.IRProgram fns ->
+      match collect_str_consts(fns) with
+      | (globals_text, fn_tables, _) ->
+          ir_header() ++ globals_text ++ (if globals_text == "" then "" else "\n") ++
+            lower_fns(fns, fn_tables) ++ main_shim()
