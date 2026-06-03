@@ -491,27 +491,45 @@ export fn dict_entries(dict: Dict v) -> Vec (String, v) =
   match dict with
   | Dict raw -> vec_from_list(list_reverse_go(dict_entries_from(raw, 0, map_size(raw), Nil), Nil))
 
+# O(1).
 export fn set_empty() -> Set =
   Set(native_set_empty())
 
-# O(n): the native set is backed by a linear map and insert copies on growth.
+# O(log n): persistent AVL tree (self-balancing) with path-copying on insert.
 export fn set_insert(item: String, s: Set) -> Set =
   match s with
   | Set raw -> Set(native_set_insert(item, raw))
 
-# O(n): membership is a linear scan over stored keys.
+# O(log n): AVL binary search.
 export fn set_member(item: String, s: Set) -> Bool =
   match s with
   | Set raw -> native_set_member(item, raw)
 
-# O(n): materializes a fresh list of all stored keys.
+# O(n): in-order traversal; the returned list is sorted by interned-key order.
 export fn set_to_list(s: Set) -> List String =
   match s with
   | Set raw -> native_set_to_list(raw)
 
+# O(1): the AVL nodes cache `size`.
 export fn set_size(s: Set) -> Int =
   match s with
   | Set raw -> native_set_size(raw)
+
+# O(m log(n+m)) where n = |xs|, m = |ys|: walks ys (O(m)), set_inserts each
+# into xs (O(log(n+m)) per insert as the tree grows).
+export fn set_union(xs: Set, ys: Set) -> Set =
+  list_fold(\ (acc, y) -> set_insert(y, acc), xs, set_to_list(ys))
+
+# O(n log(n+m)) where n = |xs|, m = |ys|: walks xs (O(n)), checks ys
+# membership (O(log m)), inserts kept items into a fresh set (O(log n)).
+export fn set_diff(xs: Set, ys: Set) -> Set =
+  list_fold(\ (acc, x) -> if set_member(x, ys) then acc else set_insert(x, acc),
+            set_empty(), set_to_list(xs))
+
+# O(n log n): reinserts every element into a fresh set, dropping the target.
+export fn set_remove(target: String, xs: Set) -> Set =
+  list_fold(\ (acc, x) -> if x == target then acc else set_insert(x, acc),
+            set_empty(), set_to_list(xs))
 
 export class Semigroup t {
   fn append(left: t, right: t) -> t
@@ -843,6 +861,13 @@ fn dict_entries_to_string(entries: Vec (String, v)) -> String where ToString v =
 instance ToString (Dict v) where ToString v {
   fn to_string(dict: Dict v) -> String =
     "{" ++ dict_entries_to_string(dict_entries(dict)) ++ "}"
+}
+
+instance ToString Set {
+  # O(n²): set_to_list is O(n); list_to_string_go does n string concats each
+  # touching the growing accumulator (worst-case O(n)).
+  fn to_string(s: Set) -> String =
+    "{" ++ list_to_string_go(set_to_list(s), "") ++ "}"
 }
 
 # ---------------------------------------------------------------------------

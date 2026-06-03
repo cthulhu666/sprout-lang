@@ -8,15 +8,9 @@ import stdlib.compiler.sprout_ir as sprout_ir
 # values alive across runtime allocation calls.  Operates as a separate
 # post-translation pass over IRProgram; pure-functional (no Refs).
 #
-# Representation note (load-bearing): live sets and heap-origin are stored as
-# deduped List String, not Set.  Storing Set values through nested function
-# calls and recursive folds caused empty-set anomalies in this codebase
-# (reproduced via diagnostic IRRoot sentinels); plain lists round-trip safely.
-# This is O(N²) in set operations but acceptable for M2 (small blocks).
-#
 # Algorithm summary:
 #   For each function:
-#     1. Forward-scan blocks to compute heap-origin (names of heap-typed defs).
+#     1. Forward-scan blocks to compute heap_origin (Set of heap-typed defs).
 #     2. Backward dataflow per function: per-block use/def, live_in/live_out.
 #        CFG is a DAG through M2 (no loops); single reverse-topo pass.
 #        Phi successors contribute only the operand from the right predecessor.
@@ -25,47 +19,10 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #          ops backward from block's live_out.
 #        - For trigger ops, compute live_across (heap-typed values defined
 #          earlier that remain live), emit IRRoot before / IRUnroot after.
-
-# ---------------------------------------------------------------------------
-# List-as-set helpers (deduped, order = insertion order)
-
-fn ls_empty() -> List String = Nil
-
-fn ls_member(x: String, xs: List String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons h rest -> if h == x then true else ls_member(x, rest)
-
-fn ls_insert(x: String, xs: List String) -> List String =
-  if ls_member(x, xs) then xs else Cons(x, xs)
-
-fn ls_union_loop(ys: List String, acc: List String) -> List String =
-  match ys with
-  | Nil -> acc
-  | Cons y rest -> ls_union_loop(rest, ls_insert(y, acc))
-
-fn ls_union(xs: List String, ys: List String) -> List String =
-  ls_union_loop(ys, xs)
-
-fn ls_remove_loop(xs: List String, target: String, acc: List String) -> List String =
-  match xs with
-  | Nil -> list_reverse(acc)
-  | Cons x rest ->
-      if x == target then ls_remove_loop(rest, target, acc)
-      else ls_remove_loop(rest, target, Cons(x, acc))
-
-fn ls_remove(target: String, xs: List String) -> List String =
-  ls_remove_loop(xs, target, Nil)
-
-fn ls_intersect_loop(xs: List String, ys: List String, acc: List String) -> List String =
-  match xs with
-  | Nil -> list_reverse(acc)
-  | Cons x rest ->
-      if ls_member(x, ys) then ls_intersect_loop(rest, ys, Cons(x, acc))
-      else ls_intersect_loop(rest, ys, acc)
-
-fn ls_intersect(xs: List String, ys: List String) -> List String =
-  ls_intersect_loop(xs, ys, Nil)
+#
+# Representation: liveness/heap sets are `Set`; `in_scope_ord` stays a
+# `List String` because the order of definitions is observable — IRRoot
+# emission order is deterministic in definition order.
 
 # ---------------------------------------------------------------------------
 # Trigger / heap predicates
@@ -82,7 +39,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
-# IRPhi, whose heap-ness depends on operand membership in HeapOrigin and is
+# IRPhi, whose heap-ness depends on operand membership in heap_origin and is
 # handled separately in compute_heap_origin / update_scope).
 fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   match op with
@@ -173,21 +130,16 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
 # ---------------------------------------------------------------------------
 # Liveness — backward dataflow per function.
 
-fn add_uses(used: List String, uses: List String, defs: List String) -> List String =
-  match used with
-  | Nil -> uses
-  | Cons u rest ->
-      if ls_member(u, defs) then add_uses(rest, uses, defs)
-      else add_uses(rest, ls_insert(u, uses), defs)
+fn add_uses(used: List String, uses: Set, defs: Set) -> Set =
+  list_fold(\ (acc, u) -> if set_member(u, defs) then acc else set_insert(u, acc),
+            uses, used)
 
-fn add_def_maybe(d: Maybe String, defs: List String) -> List String =
+fn add_def_maybe(d: Maybe String, defs: Set) -> Set =
   match d with
   | Nothing -> defs
-  | Just name -> ls_insert(name, defs)
+  | Just name -> set_insert(name, defs)
 
-fn block_use_def_loop(ops: List sprout_ir.IROp,
-                      uses: List String,
-                      defs: List String) -> (List String, List String) =
+fn block_use_def_loop(ops: List sprout_ir.IROp, uses: Set, defs: Set) -> (Set, Set) =
   match ops with
   | Nil -> (uses, defs)
   | Cons op rest ->
@@ -195,32 +147,32 @@ fn block_use_def_loop(ops: List sprout_ir.IROp,
                          add_uses(op_uses(op), uses, defs),
                          add_def_maybe(op_def(op), defs))
 
-fn block_use_def(b: sprout_ir.IRBlock) -> (List String, List String) =
-  block_use_def_loop(block_ops(b), Nil, Nil)
+fn block_use_def(b: sprout_ir.IRBlock) -> (Set, Set) =
+  block_use_def_loop(block_ops(b), set_empty(), set_empty())
 
 # For each IRPhi in S, replace its def-name in s_live_in with the operand
 # chosen on the B→S edge.  Names that are not phi-defs pass through unchanged.
 fn add_phi_operand_for_pred(pred_label: String,
                             pairs: List (String, String),
-                            acc: List String) -> List String =
+                            acc: Set) -> Set =
   match pairs with
   | Nil -> acc
   | Cons p rest ->
       match p with
       | (v, lbl) ->
-          if lbl == pred_label then ls_insert(v, acc)
+          if lbl == pred_label then set_insert(v, acc)
           else add_phi_operand_for_pred(pred_label, rest, acc)
 
 fn rewrite_phi_in_set(pred_label: String, r: String,
                       pairs: List (String, String),
-                      acc: List String) -> List String =
-  if ls_member(r, acc)
-  then add_phi_operand_for_pred(pred_label, pairs, ls_remove(r, acc))
+                      acc: Set) -> Set =
+  if set_member(r, acc)
+  then add_phi_operand_for_pred(pred_label, pairs, set_remove(r, acc))
   else acc
 
 fn s_live_in_phi_rewrite(pred_label: String,
                          ops: List sprout_ir.IROp,
-                         acc: List String) -> List String =
+                         acc: Set) -> Set =
   match ops with
   | Nil -> acc
   | Cons op rest ->
@@ -232,18 +184,18 @@ fn s_live_in_phi_rewrite(pred_label: String,
 
 fn successor_live_in_for_pred(pred_label: String,
                               s: sprout_ir.IRBlock,
-                              s_live_in: List String) -> List String =
+                              s_live_in: Set) -> Set =
   s_live_in_phi_rewrite(pred_label, block_ops(s), s_live_in)
 
-fn lookup_live(lbl: String, dict: Dict (List String)) -> List String =
+fn lookup_live(lbl: String, dict: Dict Set) -> Set =
   match dict_get(lbl, dict) with
   | Just xs -> xs
-  | Nothing -> Nil
+  | Nothing -> set_empty()
 
 fn compute_live_out_loop(pred_label: String, succs: List String,
                          blocks: List sprout_ir.IRBlock,
-                         live_in_map: Dict (List String),
-                         acc: List String) -> List String =
+                         live_in_map: Dict Set,
+                         acc: Set) -> Set =
   match succs with
   | Nil -> acc
   | Cons s_lbl rest ->
@@ -251,131 +203,117 @@ fn compute_live_out_loop(pred_label: String, succs: List String,
       | Nothing -> compute_live_out_loop(pred_label, rest, blocks, live_in_map, acc)
       | Just s ->
           compute_live_out_loop(pred_label, rest, blocks, live_in_map,
-            ls_union(acc, successor_live_in_for_pred(pred_label, s, lookup_live(s_lbl, live_in_map))))
+            set_union(acc, successor_live_in_for_pred(pred_label, s, lookup_live(s_lbl, live_in_map))))
 
 fn compute_live_out(b: sprout_ir.IRBlock,
                     blocks: List sprout_ir.IRBlock,
-                    live_in_map: Dict (List String)) -> List String =
-  compute_live_out_loop(block_label(b), block_successors(b), blocks, live_in_map, Nil)
-
-fn ls_diff_loop(xs: List String, removes: List String, acc: List String) -> List String =
-  match xs with
-  | Nil -> list_reverse(acc)
-  | Cons x rest ->
-      if ls_member(x, removes) then ls_diff_loop(rest, removes, acc)
-      else ls_diff_loop(rest, removes, Cons(x, acc))
-
-fn ls_diff(a: List String, removes: List String) -> List String =
-  ls_diff_loop(a, removes, Nil)
+                    live_in_map: Dict Set) -> Set =
+  compute_live_out_loop(block_label(b), block_successors(b), blocks, live_in_map, set_empty())
 
 fn block_live_in(b: sprout_ir.IRBlock,
                  all_blocks: List sprout_ir.IRBlock,
-                 live_in_map: Dict (List String)) -> List String =
+                 live_in_map: Dict Set) -> Set =
   match block_use_def(b) with
   | (uses, defs) ->
-      ls_union(uses, ls_diff(compute_live_out(b, all_blocks, live_in_map), defs))
+      set_union(uses, set_diff(compute_live_out(b, all_blocks, live_in_map), defs))
 
 fn compute_liveness_loop(rev_blocks: List sprout_ir.IRBlock,
                          all_blocks: List sprout_ir.IRBlock,
-                         acc: Dict (List String)) -> Dict (List String) =
+                         acc: Dict Set) -> Dict Set =
   match rev_blocks with
   | Nil -> acc
   | Cons b rest ->
       compute_liveness_loop(rest, all_blocks,
         dict_set(block_label(b), block_live_in(b, all_blocks, acc), acc))
 
-fn compute_liveness(blocks: List sprout_ir.IRBlock) -> Dict (List String) =
+fn compute_liveness(blocks: List sprout_ir.IRBlock) -> Dict Set =
   compute_liveness_loop(list_reverse(blocks), blocks, dict_empty())
 
 # ---------------------------------------------------------------------------
 # Per-op live_after, computed on-the-fly.
 
-fn after_minus_def(d: Maybe String, after_set: List String) -> List String =
+fn after_minus_def(d: Maybe String, after_set: Set) -> Set =
   match d with
   | Nothing -> after_set
-  | Just name -> ls_remove(name, after_set)
+  | Just name -> set_remove(name, after_set)
 
-fn add_list_to_ls(xs: List String, acc: List String) -> List String =
-  match xs with
-  | Nil -> acc
-  | Cons x rest -> add_list_to_ls(rest, ls_insert(x, acc))
-
-fn op_live_before(op: sprout_ir.IROp, live_after_op: List String) -> List String =
-  add_list_to_ls(op_uses(op), after_minus_def(op_def(op), live_after_op))
+fn op_live_before(op: sprout_ir.IROp, live_after_op: Set) -> Set =
+  list_fold(\ (acc, u) -> set_insert(u, acc),
+            after_minus_def(op_def(op), live_after_op),
+            op_uses(op))
 
 # live_after for the HEAD of `ops` given the block's live_out — by walking the
 # REST of ops backward, undoing each op.  O(N) per call → O(N²) per block.
-fn live_after_head(ops: List sprout_ir.IROp, block_live_out: List String) -> List String =
+fn live_after_head(ops: List sprout_ir.IROp, block_live_out: Set) -> Set =
   match ops with
   | Nil -> block_live_out
   | Cons _ rest -> live_before_first(rest, block_live_out)
 
-fn live_before_first(ops: List sprout_ir.IROp, block_live_out: List String) -> List String =
+fn live_before_first(ops: List sprout_ir.IROp, block_live_out: Set) -> Set =
   match ops with
   | Nil -> block_live_out
   | Cons op rest -> op_live_before(op, live_before_first(rest, block_live_out))
 
 # ---------------------------------------------------------------------------
-# HeapOrigin propagation
+# heap_origin propagation
 #
 # Forward-scan blocks (topological order matches the IR's block-list order).
 # Mark every heap-producing op's result, then any phi whose operands include
 # a marked value.
 
-fn any_pair_in_heap(pairs: List (String, String), heap: List String) -> Bool =
+fn any_pair_in_heap(pairs: List (String, String), heap: Set) -> Bool =
   match pairs with
   | Nil -> false
   | Cons p rest ->
       match p with
       | (v, _) ->
-          if ls_member(v, heap) then true
+          if set_member(v, heap) then true
           else any_pair_in_heap(rest, heap)
 
-fn mark_if_heap(op: sprout_ir.IROp, acc: List String) -> List String =
+fn mark_if_heap(op: sprout_ir.IROp, acc: Set) -> Set =
   match op_produces_simple_heap(op) with
-  | Just r -> ls_insert(r, acc)
+  | Just r -> set_insert(r, acc)
   | Nothing ->
       match op with
       | sprout_ir.IRPhi r _ pairs ->
-          if any_pair_in_heap(pairs, acc) then ls_insert(r, acc) else acc
+          if any_pair_in_heap(pairs, acc) then set_insert(r, acc) else acc
       | _ -> acc
 
-fn scan_block_for_heap(ops: List sprout_ir.IROp, acc: List String) -> List String =
+fn scan_block_for_heap(ops: List sprout_ir.IROp, acc: Set) -> Set =
   match ops with
   | Nil -> acc
   | Cons op rest -> scan_block_for_heap(rest, mark_if_heap(op, acc))
 
-fn compute_heap_origin_loop(blocks: List sprout_ir.IRBlock, acc: List String) -> List String =
+fn compute_heap_origin_loop(blocks: List sprout_ir.IRBlock, acc: Set) -> Set =
   match blocks with
   | Nil -> acc
   | Cons b rest ->
       compute_heap_origin_loop(rest, scan_block_for_heap(block_ops(b), acc))
 
-fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> List String =
-  compute_heap_origin_loop(blocks, Nil)
+fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> Set =
+  compute_heap_origin_loop(blocks, set_empty())
 
 # ---------------------------------------------------------------------------
 # Forward rewrite — insert IRRoot/IRUnroot around trigger ops.
+#
+# in_scope_ord is a List String (NOT a Set) because IRRoot emission order is
+# observable: roots are emitted in definition order so identical input IR
+# produces byte-identical LLVM output.
 
 # Filter in_scope_ord (in reverse-def order) to those still live, returning in
 # DEFINITION order so emitted IRRoots are deterministic.
 fn live_across_loop(in_scope_ord_rev: List String,
-                    live_after_op: List String,
+                    live_after_op: Set,
                     acc: List String) -> List String =
   match in_scope_ord_rev with
   | Nil -> acc
   | Cons v rest ->
-      if ls_member(v, live_after_op)
+      if set_member(v, live_after_op)
       then live_across_loop(rest, live_after_op, Cons(v, acc))
       else live_across_loop(rest, live_after_op, acc)
 
-fn live_across(in_scope_ord_rev: List String, live_after_op: List String) -> List String =
+fn live_across(in_scope_ord_rev: List String, live_after_op: Set) -> List String =
   live_across_loop(in_scope_ord_rev, live_after_op, Nil)
-
-fn list_length_of(xs: List String) -> Int =
-  match xs with
-  | Nil -> 0
-  | Cons _ rest -> 1 + list_length_of(rest)
 
 # Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
 # slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
@@ -403,10 +341,10 @@ fn maybe_wrap_trigger(op: sprout_ir.IROp, live: List String, idx: Int,
                       acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match live with
   | Nil -> (Cons(op, acc), idx)
-  | _ -> emit_with_roots(op, live, list_length_of(live), idx, acc)
+  | _ -> emit_with_roots(op, live, list_length(live), idx, acc)
 
 fn maybe_wrap(op: sprout_ir.IROp,
-              live_after_op: List String,
+              live_after_op: Set,
               in_scope_ord: List String,
               idx: Int,
               acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
@@ -414,25 +352,25 @@ fn maybe_wrap(op: sprout_ir.IROp,
   then maybe_wrap_trigger(op, live_across(in_scope_ord, live_after_op), idx, acc)
   else (Cons(op, acc), idx)
 
-# Carry both a reverse-definition-order list and a flag for membership.
+# Carry both a reverse-definition-order list and dedup via list_member.
 fn add_def(name: String, ord: List String) -> List String =
-  if ls_member(name, ord) then ord else Cons(name, ord)
+  if list_member(name, ord) then ord else Cons(name, ord)
 
-fn update_scope(op: sprout_ir.IROp, heap_origin: List String,
+fn update_scope(op: sprout_ir.IROp, heap_origin: Set,
                 ord: List String) -> List String =
   match op_produces_simple_heap(op) with
   | Just r -> add_def(r, ord)
   | Nothing ->
       match op with
       | sprout_ir.IRPhi r _ _ ->
-          if ls_member(r, heap_origin)
+          if set_member(r, heap_origin)
           then add_def(r, ord)
           else ord
       | _ -> ord
 
 fn rewrite_ops(ops: List sprout_ir.IROp,
-               block_live_out: List String,
-               heap_origin: List String,
+               block_live_out: Set,
+               heap_origin: Set,
                in_scope_ord: List String,
                idx: Int,
                acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
@@ -454,9 +392,15 @@ fn seed_in_scope_loop(names: List String, ord: List String) -> List String =
 fn seed_in_scope(names: List String) -> List String =
   seed_in_scope_loop(names, Nil)
 
+# Filter a Set down to those names also present in `keep`, returning a List.
+# Used to seed in_scope_ord from (live_in ∩ heap_origin) at block entry.
+fn intersect_to_list(s: Set, keep: Set) -> List String =
+  list_fold(\ (acc, x) -> if set_member(x, keep) then Cons(x, acc) else acc,
+            Nil, set_to_list(s))
+
 fn rewrite_block_full(b: sprout_ir.IRBlock,
-                      live_in_map: Dict (List String),
-                      heap_origin: List String,
+                      live_in_map: Dict Set,
+                      heap_origin: Set,
                       all_blocks: List sprout_ir.IRBlock,
                       idx: Int) -> (sprout_ir.IRBlock, Int) =
   match b with
@@ -464,13 +408,13 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
       match rewrite_ops(ops,
                         compute_live_out(b, all_blocks, live_in_map),
                         heap_origin,
-                        seed_in_scope(ls_intersect(lookup_live(lbl, live_in_map), heap_origin)),
+                        seed_in_scope(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
                         idx, Nil) with
       | (new_ops, idx_out) -> (sprout_ir.IRBlock(lbl, new_ops), idx_out)
 
 fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
-                     live_in_map: Dict (List String),
-                     heap_origin: List String,
+                     live_in_map: Dict Set,
+                     heap_origin: Set,
                      all_blocks: List sprout_ir.IRBlock,
                      idx: Int,
                      acc: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =

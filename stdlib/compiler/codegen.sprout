@@ -3668,9 +3668,13 @@ fn emit_worker_expr(width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter, e: 
       emit_worker_box_unbox(width, ctx, locals, em, e)
 
 # Dispatch to _unboxed (extern) or _worker (user-defined) variant.
+# Width=3 externs use sret (see emit_extern_decl_keys for the ABI rationale).
 fn emit_worker_cpr_call(name: String, call_args: List typed_ast.TypedExpr, width: Int, ctx: CgCtx, locals: Dict Value, em: Emitter) -> String !{IO} =
   match dict_get(name ++ "_unboxed", ctx_cpr_extern_sigs(ctx)) with
-  | Just sig -> emit_worker_cpr_do(name ++ "_unboxed", sig, call_args, width, em, ctx, locals)
+  | Just sig ->
+      if width == 3
+      then emit_worker_cpr_do_sret(name ++ "_unboxed", sig, call_args, width, em, ctx, locals)
+      else emit_worker_cpr_do(name ++ "_unboxed", sig, call_args, width, em, ctx, locals)
   | Nothing ->
       match dict_get(name, ctx_fn_sigs(ctx)) with
       | Just sig -> emit_worker_cpr_do(emitted_fn_name(name) ++ "_worker", sig, call_args, width, em, ctx, locals)
@@ -3688,6 +3692,25 @@ fn emit_worker_cpr_do(call_fn: String, sig: FnSig, call_args: List typed_ast.Typ
                    else "  " ++ r ++ " = call " ++ ll_struct ++ " @" ++ call_fn ++ "(" ++ args_ir ++ ")"
     emit_line(em, call_str)
     pop_temp_roots(rooted_args, em)
+    r
+
+# Sret-aware variant for width=3 externs: alloca a {i64,i64,i64} return slot,
+# pass it as the sret first arg, then load the struct back.  Matches Clang's
+# AAPCS / SysV lowering of `SproutUnboxed3 f(...)`.
+fn emit_worker_cpr_do_sret(call_fn: String, sig: FnSig, call_args: List typed_ast.TypedExpr, width: Int, em: Emitter, ctx: CgCtx, locals: Dict Value) -> String !{IO} =
+  do
+    (arg_vals, rooted_args) <- emit_args_with_roots(call_args, ctx, locals, em)
+    coerced <- coerce_args(fn_params(sig), arg_vals, em)
+    let args_ir = string.join(", ", list_map(\p -> match p with | (ll, ir) -> format_ll_ir(ll, ir), coerced))
+    let ll_struct = ll_for_unboxed_width(width)
+    retslot <- fresh_tmp(em)
+    emit_template(em, `  ${retslot} = alloca ${ll_struct}`)
+    let sret_arg = "ptr sret(" ++ ll_struct ++ ") align 8 " ++ retslot
+    let call_args_str = if args_ir == "" then sret_arg else sret_arg ++ ", " ++ args_ir
+    emit_template(em, `  call void @${call_fn}(${call_args_str})`)
+    pop_temp_roots(rooted_args, em)
+    r <- fresh_tmp(em)
+    emit_template(em, `  ${r} = load ${ll_struct}, ptr ${retslot}`)
     r
 
 # Fallback: emit the expression via normal heap path, then unbox tag + fields
@@ -3935,7 +3958,16 @@ fn emit_extern_decl_keys(keys: Vec String, externs: Dict FnSig, em: Emitter, idx
         | Just sig ->
             do
               let params_str = string.join(", ", fn_params(sig))
-              emit_template(em, `declare ${fn_ret (sig)} @${fn_name (sig)}(${params_str})`)
+              # ABI fix: width=3 unboxed externs (24-byte SproutUnboxed3) must
+              # use sret on arm64 Darwin and the SysV AMD64 ABI.  Clang lowers
+              # `SproutUnboxed3 f(...)` to a void function with an sret first
+              # arg; a bare `{i64,i64,i64}` direct-return declare would silently
+              # misread the call's return registers.  Width=2 (16-byte
+              # SproutUnboxed2) fits in two return registers and stays direct.
+              if fn_ret(sig) == "{ i64, i64, i64 }" then
+                emit_template(em, `declare void @${fn_name (sig)}(ptr sret({ i64, i64, i64 }) align 8, ${params_str})`)
+              else
+                emit_template(em, `declare ${fn_ret (sig)} @${fn_name (sig)}(${params_str})`)
               emit_extern_decl_keys(keys, externs, em, idx + 1)
 
 # Emit global variable declarations.
