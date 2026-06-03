@@ -36,7 +36,7 @@ Establishes the IR module, lowering pass, and a working end-to-end path for non-
 | # | PR | What | Risk |
 |---|---|---|---|
 | 1.1 | IR module skeleton | `stdlib/compiler/sprout_ir.sprout` with `IRProgram`, `IRFunction`, `IRBlock`, empty `IROp`, printer. `--use-ir-codegen` flag added but fails fast on any input. | Nil |
-| 1.2 | Trivial programs | `IRConst Int`, `IRRet`. AST→IR for `IntLit` and `fn id(x) = x`. First `tests/test_ir_codegen_basic.py`. | Low |
+| 1.2 | Trivial programs | `IRConst Int`, `IRRet`. AST→IR for `IntLit` and `fn id(x) = x`. First `tests/stdlib/test_ir_codegen_basic.spr`. | Low |
 | 1.3 | Scalar arithmetic | `IRIAdd`, `IRISub`, `IRIMul`, `IRICmp`. AST→IR for `+`, `-`, `*`, comparison. | Low |
 | 1.4 | Control flow | `IRBr`, `IRCondBr`, `IRPhi`. AST→IR for `if-then-else`. | Medium — phi placement is the first non-trivial design |
 | 1.5 | Calls + recursion | `IRCall` for scalar-returning functions. Tests: `fib`, `factorial`. | Medium |
