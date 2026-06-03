@@ -13,19 +13,6 @@ install-hooks:
   git config core.hooksPath .githooks
   @echo "Hooks installed — .githooks/pre-commit is now active."
 
-# Acknowledge that DoD criteria are met for the currently staged tree.
-# Required by .claude/settings.json PreToolUse Bash hook on `git commit`.
-# Writes `git write-tree` hash to .git/dod-ack; hook compares the hash on the
-# pending commit's staged tree.  Same tree → ack reused (e.g. amend message).
-# Different tree → re-run `just dod-ack` to re-attest.
-dod-ack:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd "{{invocation_directory()}}"
-  ACK="$(git rev-parse --git-dir)/dod-ack"
-  git write-tree > "$ACK"
-  echo "DoD acked for staged tree: $(cat "$ACK")"
-
 # Bypass the bootstrap seed gate for one commit when a compiler change does not
 # affect IR output.  Run `just verify-bootstrap-fixed-point` first to confirm.
 seed-fp-ack:

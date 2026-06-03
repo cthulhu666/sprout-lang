@@ -108,7 +108,7 @@ For coding tasks, work is done only when **all applicable** items below are true
 9. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bootstrap seed: run `just refresh-seed` and stage the updated `bootstrap/compile_driver.ll`. CI's `just verify-bootstrap-fixed-point` gates on this; a stale seed blocks all CI gates. Use the 2-step bootstrap if the committed seed predates a parser change (see Bootstrap section below).
 10. **Runtime changes** (any edit to `runtime/sprout_runtime.c`) — APPROVED_BUILTINS: every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
 11. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` each compile *and run* to completion without crash. (`just compile-examples-stage1` only covers compile; running these is currently a manual gate until CI covers it.)
-12. The changes are committed (via the DoD-ack workflow — see "Commit Guidance").
+12. The changes are committed.
 13. A self-review has been performed before handoff.
 
 ## Verification Policy
@@ -239,16 +239,16 @@ Use commit messages that explain intent, for example:
 - `parser: add infix precedence for comparison operators`
 - `types: improve error for mismatched function arguments`
 
-### Agent commit workflow (DoD acknowledgement)
+### Agent commit workflow (DoD review)
 
-A Claude Code PreToolUse hook (`scripts/dod_check_on_commit.sh`, wired via `.claude/settings.json`) intercepts any Bash call running `git commit` and blocks it unless an acknowledgement file at `.git/dod-ack` matches the currently staged tree's `git write-tree` hash. The hook exists to force a deliberate Definition-of-Done check before committing.
+Two hooks enforce DoD at commit time and at session end:
+
+**Seed gate** — `scripts/seed_gate.sh`, wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed `bootstrap/compile_driver.ll`. Bypass (when IR is genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp-ack`.
+
+**DoD reviewer** — `scripts/dod_stop_reviewer.sh`, wired as a Stop hook. Fires when the agent stops. Checks whether the HEAD commit has already been reviewed (per-worktree marker at `$(git rev-parse --absolute-git-dir)/dod-reviewed-<hash>`). If not, spawns an independent `claude -p` sub-agent with a fixed, hardcoded prompt that reads AGENTS.md §Definition of Done, inspects `git diff HEAD~1..HEAD`, determines which DoD items apply to the changed files, checks each one, and returns a JSON verdict. On pass: writes the marker and allows stop. On fail: blocks the agent with specific findings — fix the issues, recommit, and the reviewer will re-run on the next stop.
 
 Workflow:
-1. Stage everything intended for the commit (`git add …`). Staged tree must be final before acking.
-2. Mentally verify the DoD criteria above for the staged changes.
-3. Run `just dod-ack` — writes the current `git write-tree` hash to `.git/dod-ack`.
-4. Run `git commit …`. The hook re-computes `git write-tree` and compares; matching hash → commit proceeds.
-
-Re-acking is required whenever the staged tree changes (re-`git add` after the ack invalidates it). `git commit --amend` for message-only changes does *not* require re-acking — the tree is unchanged.
-
-The hook substring-matches `git commit` in the Bash tool's command text; this means a Bash invocation that *contains* the literal string `git commit` (e.g., inside an echo or a for-loop iteration list) will also trigger. Recovery is the same `just dod-ack && retry` ceremony; the false-positive cost is intentional and accepted.
+1. Do the work. Run all applicable DoD checks (tests, smoke-shapes, etc.).
+2. Commit with `git commit …`. The seed gate blocks if seed is stale.
+3. When done, stop. The DoD reviewer fires automatically and checks the commit.
+4. If the reviewer blocks: address each finding, `git commit --amend` or make a follow-up commit, then stop again.

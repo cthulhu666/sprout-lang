@@ -15,7 +15,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/dod_check_on_commit.sh"
+            "command": "bash scripts/seed_gate.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/dod_stop_reviewer.sh"
           }
         ]
       }
