@@ -1,0 +1,21 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.string as string
+
+# Regression: a top-level `let` bound to a partial application (closure)
+# must be invokable from `main` and return the correct result.
+#
+# Symptom of the bug: codegen for the call site loaded the closure
+# pointer from the global but omitted the application, so the closure
+# value itself was passed to consumers (e.g. `print_str(closure_ptr)`
+# emitted instead of `print_str(apply(closure, arg))`), producing
+# garbage output rather than the expected string.
+
+let f = string.repeat("dupa")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "top-level let closure: f(3) = dupadupadupa", f(3), "dupadupadupa")
+    assert_eq(state, "top-level let closure: f(0) = ''", f(0), "")
+    assert_eq(state, "top-level let closure: f(1) = dupa", f(1), "dupa")
+    summary(state)

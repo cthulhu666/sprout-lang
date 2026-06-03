@@ -3908,7 +3908,7 @@ fn classify_let_decls_acc(decls: List typed_ast.TypedDecl, env: Dict types.Schem
               | Just const_ir ->
                   classify_let_decls_acc(rest, env, dict_set(name, GlobalInfo(ll, true, Just(const_ir), Nothing), gi), runtime)
               | Nothing ->
-                  classify_let_decls_acc(rest, env, dict_set(name, GlobalInfo(ll, false, Nothing, Nothing), gi), Cons((name, body), runtime))
+                  classify_let_decls_acc(rest, env, dict_set(name, GlobalInfo(ll, false, Nothing, call_sig_from_type(typed_ast.typed_expr_type(body))), gi), Cons((name, body), runtime))
       | _ ->
           classify_let_decls_acc(rest, env, gi, runtime)
 
