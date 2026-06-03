@@ -1,0 +1,38 @@
+module stdlib.compiler.sprout_ir
+
+# ---------------------------------------------------------------------------
+# Sprout-IR — typed intermediate representation (skeleton).
+# ---------------------------------------------------------------------------
+#
+# This module is the first PR of Milestone 1 of the "Model C" plan
+# (see docs/gc-rooting-model-c-plan-2026-06-02.md).  It introduces the
+# top-level shape only; no ops are implemented, no AST→IR translator
+# exists yet, and no LLVM lowering pass consumes it.  The current
+# direct AST→LLVM codegen in stdlib/compiler/codegen.sprout remains the
+# default path; --use-ir-codegen is wired in compile_driver.sprout but
+# fails fast.
+#
+# Later PRs will:
+#   - Populate IROp with constructors (IRConst, IRRet, IRIAdd, IRCall, ...)
+#   - Add an AST→IR translator and a per-program builder API.
+#   - Add an IR→LLVM lowering pass that mechanically translates ops.
+#   - Switch to richer parameter representations (carrying types/positions).
+#
+# Until then, the shapes here are intentionally minimal: List String for
+# function parameters (pure names, no AST/types dependency), and a single
+# placeholder IROp constructor so the ADT is non-empty.
+
+export type IROp (..) =
+  | IROpPlaceholder
+
+export type IRBlock (..) = IRBlock String (List IROp)
+
+export type IRFunction (..) = IRFunction String (List String) (List IRBlock)
+
+export type IRProgram (..) = IRProgram(List IRFunction)
+
+# print_ir_program: stub printer used as a smoke target for future passes.
+# Returns a single-line marker until real ops exist to render.
+export fn print_ir_program(prog: IRProgram) -> String =
+  match prog with
+  | IRProgram _ -> "; sprout-ir: empty"

@@ -9,6 +9,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.codegen as codegen
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.sprout_ir as sprout_ir
 
 # ---------------------------------------------------------------------------
 # Header stripping (mirrors compiler.sprout / type_driver.sprout)
@@ -250,7 +251,11 @@ fn main() -> Unit !{IO} =
         print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> <file>...")
     | ["--phase" | _] ->
         print("ERROR: --phase requires an argument: bundle|check|lower|recheck|ir|scan-info|dump-qualify")
+    | ["--use-ir-codegen", _, _ | _] ->
+        print("ERROR: --use-ir-codegen is not yet implemented (M1 PR 1.1 scaffolding only)")
+    | ["--use-ir-codegen" | _] ->
+        print("ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> <file>...")
     | [stdlib_root | _] ->
         run_batch(stdlib_root, 1, "", false)
     | _ ->
-        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name>] <stdlib-root> <file>...")
+        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name> | --use-ir-codegen] <stdlib-root> <file>...")
