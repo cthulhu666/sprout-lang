@@ -174,9 +174,16 @@ fn ir_header() -> String =
   "declare i64 @int_to_string(i64)\n" ++
   "declare i64 @sprout_gc_push_i64_root(ptr)\n" ++
   "declare i64 @sprout_gc_pop_roots(i64)\n" ++
+  # @sprout_register_ctor populates g_ctor_meta[] in the runtime so find_ctor(tag)
+  # returns metadata and sprout_heap_child_count traces heap-typed fields during GC.
+  # Called once per constructor in @main's entry block before any user code runs.
+  "declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)\n" ++
   # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make9 set in
   # codegen.sprout (compiler intrinsic table).  All arities are declared
   # unconditionally — only the ones actually called are linked.
+  # IMPORTANT: arity cap is 9.  ast_to_ir rejects arity >= 10 with a clear Err.
+  # To lift this cap, add a @sprout_make_wide runtime entry point and remove
+  # the guard in ast_to_ir.translate_boxed_ctor_call.
   "declare i64 @sprout_make0(i64)\n" ++
   "declare i64 @sprout_make1(i64, i64)\n" ++
   "declare i64 @sprout_make2(i64, i64, i64)\n" ++
@@ -188,13 +195,76 @@ fn ir_header() -> String =
   "declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n\n"
 
+# ---------------------------------------------------------------------------
+# Ctor-registration global-string collection pre-pass.
+#
+# For each CtorReg we emit two LLVM global string constants keyed by tag:
+#   @.cname.<tag>  — the constructor's source-level name.
+#   @.cfkinds.<tag> — the field-kinds string ('i','b','s','p','_' per field).
+# These are consumed by the @sprout_register_ctor calls emitted in main_shim.
+# Naming by tag (not name) avoids collisions across modules.
+
+fn collect_ctor_globals(regs: List sprout_ir.CtorReg) -> String =
+  collect_ctor_globals_loop(regs, "")
+
+fn collect_ctor_globals_loop(regs: List sprout_ir.CtorReg, acc: String) -> String =
+  match regs with
+  | Nil -> acc
+  | Cons reg rest ->
+      match reg with
+      | sprout_ir.CtorReg name tag _ fkinds ->
+          collect_ctor_globals_loop(rest, acc ++ emit_ctor_name_global(tag, name) ++
+                                          emit_ctor_fkinds_global(tag, fkinds))
+
+fn emit_ctor_name_global(tag: Int, name: String) -> String =
+  "@.cname." ++ int_to_string(tag) ++ " = private unnamed_addr constant [" ++
+    int_to_string(str_byte_len(name) + 1) ++ " x i8] c\"" ++
+    encode_str_for_ir(name, 0, "") ++ "\\00\"\n"
+
+fn emit_ctor_fkinds_global(tag: Int, fkinds: String) -> String =
+  "@.cfkinds." ++ int_to_string(tag) ++ " = private unnamed_addr constant [" ++
+    int_to_string(str_byte_len(fkinds) + 1) ++ " x i8] c\"" ++
+    encode_str_for_ir(fkinds, 0, "") ++ "\\00\"\n"
+
+# Emit one @sprout_register_ctor call for a single CtorReg.
+# Shape (verbatim from legacy codegen.sprout:3222-3226):
+#   %ptrN   = getelementptr inbounds [<NAME_LEN> x i8], ptr @.cname.<tag>, i64 0, i64 0
+#   %fkptrN = getelementptr inbounds [<FKLEN> x i8], ptr @.cfkinds.<tag>, i64 0, i64 0
+#   %regN   = call i64 @sprout_register_ctor(i64 <tag>, ptr %ptrN, i64 <arity>, ptr %fkptrN)
+fn emit_ctor_reg_call(reg: sprout_ir.CtorReg, counter: Int) -> String =
+  match reg with
+  | sprout_ir.CtorReg name tag arity fkinds ->
+      "  " ++ ptr_reg ++ " = getelementptr inbounds [" ++ int_to_string(str_byte_len(name) + 1) ++
+        " x i8], ptr @.cname." ++ int_to_string(tag) ++ ", i64 0, i64 0\n" ++
+      "  " ++ fkptr_reg ++ " = getelementptr inbounds [" ++ int_to_string(str_byte_len(fkinds) + 1) ++
+        " x i8], ptr @.cfkinds." ++ int_to_string(tag) ++ ", i64 0, i64 0\n" ++
+      "  " ++ reg_reg ++ " = call i64 @sprout_register_ctor(i64 " ++ int_to_string(tag) ++
+        ", ptr " ++ ptr_reg ++ ", i64 " ++ int_to_string(arity) ++
+        ", ptr " ++ fkptr_reg ++ ")\n"
+  where ptr_reg = "%cname_ptr_" ++ int_to_string(counter)
+        fkptr_reg = "%cfkinds_ptr_" ++ int_to_string(counter)
+        reg_reg = "%creg_" ++ int_to_string(counter)
+
+fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg, counter: Int) -> String =
+  match regs with
+  | Nil -> ""
+  | Cons reg rest ->
+      emit_ctor_reg_call(reg, counter) ++ emit_ctor_reg_calls(rest, counter + 1)
+
 # Synthetic C-ABI main shim.  PR 1.5 still cannot lower the user's `main`
 # body in general (anything beyond `()` requires heap/IO ops that don't
 # arrive until M2), so we emit a minimal `int main(int, char**) { return
 # 0; }`.  The AST→IR translator rejects non-trivial `main` bodies so the
 # user gets a clean Err rather than a silently no-op binary.
-fn main_shim() -> String =
-  "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n  ret i32 0\n}\n"
+#
+# IMPORTANT: @sprout_register_ctor calls must run BEFORE any user code in
+# @main.  When validate_main_body is lifted, keep these calls at the start
+# of entry so the runtime's g_ctor_meta[] table is populated before any
+# heap allocation or GC tracing can occur.
+fn main_shim(regs: List sprout_ir.CtorReg) -> String =
+  "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n" ++
+    emit_ctor_reg_calls(regs, 0) ++
+    "  ret i32 0\n}\n"
 
 # String-constant collection pre-pass.  Walks every IRStrConst in document
 # order, allocates @.str.K names, and produces:
@@ -255,8 +325,14 @@ fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
 # lower_program: top-level entry.  Returns the complete LLVM IR text.
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =
   match prog with
-  | sprout_ir.IRProgram fns ->
+  | sprout_ir.IRProgram fns ctor_regs ->
       match collect_str_consts(fns) with
       | (globals_text, fn_tables, _) ->
-          ir_header() ++ globals_text ++ (if globals_text == "" then "" else "\n") ++
-            lower_fns(fns, fn_tables) ++ main_shim()
+          lower_program_body(fns, ctor_regs, globals_text, fn_tables)
+
+fn lower_program_body(fns: List sprout_ir.IRFunction, ctor_regs: List sprout_ir.CtorReg,
+                      globals_text: String, fn_tables: Dict (Dict (String, Int))) -> String =
+  ir_header() ++ globals_text ++ ctor_globals ++
+    (if globals_text == "" && ctor_globals == "" then "" else "\n") ++
+    lower_fns(fns, fn_tables) ++ main_shim(ctor_regs)
+  where ctor_globals = collect_ctor_globals(ctor_regs)

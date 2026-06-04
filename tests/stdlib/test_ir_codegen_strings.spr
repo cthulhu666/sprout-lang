@@ -26,7 +26,7 @@ fn greeting_program() -> sprout_ir.IRProgram =
         sprout_ir.IRStrConst("%t1", "%t0", "hello"),
         Cons(sprout_ir.IRRet("%t1"), Nil))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # fn ab() -> String = str_concat("a", "b")
 fn concat_program() -> sprout_ir.IRProgram =
@@ -38,7 +38,7 @@ fn concat_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%t4", "%t1", "%t3"),
         Cons(sprout_ir.IRRet("%t4"), Nil))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # fn take(s: Int) -> String = str_slice("hello", 0, s)
 fn slice_program() -> sprout_ir.IRProgram =
@@ -50,7 +50,7 @@ fn slice_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrSlice("%t3", "%t1", "%t2", "%s"),
         Cons(sprout_ir.IRRet("%t3"), Nil))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # fn show(n: Int) -> String = int_to_string(n)
 fn from_int_program() -> sprout_ir.IRProgram =
@@ -60,7 +60,7 @@ fn from_int_program() -> sprout_ir.IRProgram =
         sprout_ir.IRStrFromInt("%t0", "%n"),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # Two functions that each use a "%t0" raw-ptr name — exercises the per-function
 # Dict keying so the second function's global index increments correctly.
@@ -76,7 +76,7 @@ fn two_fns_program() -> sprout_ir.IRProgram =
         sprout_ir.IRStrConst("%t1", "%t0", "second"),
         Cons(sprout_ir.IRRet("%t1"), Nil))),
       Nil)),
-    Nil)))
+    Nil)), Nil)
 
 fn main() -> Unit !{IO} =
   do

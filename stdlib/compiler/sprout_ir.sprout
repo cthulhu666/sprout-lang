@@ -79,8 +79,10 @@ export type IROp (..) =
   #     mirrors codegen.sprout's `build_ctor_sigs_from_decls` numbering.
   #   - args: list of '%'-prefixed value-names, one per ctor field, in source
   #     order.  Arity = length args; length determines which `@sprout_makeN`
-  #     is called.  PR 2.3 supports BOXED ADTs only; CPR-eligible types are
-  #     rejected at translate time and never reach this op.
+  #     is called.  PR 2.3 scope: ast_to_ir rejects CPR-eligible types before
+  #     construction (see ctor_is_cpr_eligible). ir_lowering does NOT enforce
+  #     this invariant — future IR passes that synthesize IRMakeCtor for CPR
+  #     types must either lower differently or pre-check at the source.
   | IRMakeCtor String String Int (List String)
   # IRRoot <slot-name> <value-being-rooted> <discard-reg-for-push-call>
   # All names carry their '%' prefix already.
@@ -95,7 +97,19 @@ export type IRBlock (..) = IRBlock String (List IROp)
 # determined by the AST→IR translator from the function body's inferred type.
 export type IRFunction (..) = IRFunction String (List String) String (List IRBlock)
 
-export type IRProgram (..) = IRProgram(List IRFunction)
+# CtorReg carries the metadata emitted as @sprout_register_ctor calls in @main.
+# Fields: name (source-level, possibly qualified), tag, arity, field_kinds.
+# field_kinds encoding: 'i'=Int, 'b'=Bool, 's'=String/Char, 'p'=ADT/closure/tuple,
+# '_'=type-var.  Matches codegen.sprout's ctor_field_kinds_string byte-for-byte.
+# Every constructor (boxed and CPR-eligible) is registered so the runtime's
+# find_ctor(tag) never returns NULL during GC tracing.
+export type CtorReg (..) = CtorReg String Int Int String
+
+# IRProgram <functions> <ctor-registrations>
+# The ctor-registrations list is populated by ast_to_ir.translate_program and
+# consumed by ir_lowering.lower_program to emit @sprout_register_ctor calls at
+# the top of @main, before any user code runs.
+export type IRProgram (..) = IRProgram(List IRFunction) (List CtorReg)
 
 # ---------------------------------------------------------------------------
 # Pretty printer (for diagnostics / tests).
@@ -177,7 +191,7 @@ fn print_fns(fs: List IRFunction) -> String =
 
 export fn print_ir_program(prog: IRProgram) -> String =
   match prog with
-  | IRProgram fns ->
+  | IRProgram fns _ ->
       match fns with
       | Nil -> "; sprout-ir: empty"
       | _ -> "; sprout-ir\n" ++ print_fns(fns)

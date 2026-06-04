@@ -83,7 +83,7 @@ fn t1_program() -> sprout_ir.IRProgram =
         sprout_ir.IRMakeCtor("%t0", "NilLike", 0, Nil),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # T2: 2-arity boxed ctor with two scalar Int args, no rooting expected.
 fn t2_program() -> sprout_ir.IRProgram =
@@ -96,7 +96,7 @@ fn t2_program() -> sprout_ir.IRProgram =
                                   Cons("%t0", Cons("%t1", Nil))),
         Cons(sprout_ir.IRRet("%t2"), Nil))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # T3: 2-arity boxed ctor with two heap-typed String args.  Operands of the
 # trigger op are NOT live across it (the use kills them), so no rooting is
@@ -111,7 +111,7 @@ fn t3_program() -> sprout_ir.IRProgram =
                                   Cons("%sa", Cons("%sb", Nil))),
         Cons(sprout_ir.IRRet("%r"), Nil))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # T4: Two boxed ctors back-to-back; first ctor result lives across second.
 fn t4_program() -> sprout_ir.IRProgram =
@@ -126,7 +126,7 @@ fn t4_program() -> sprout_ir.IRProgram =
                                   Cons("%first", Cons("%second", Nil))),
         Cons(sprout_ir.IRRet("%r"), Nil))))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # T5: Ctor-of-ctor composition.  Inner ctor result feeds directly into outer.
 fn t5_program() -> sprout_ir.IRProgram =
@@ -140,7 +140,21 @@ fn t5_program() -> sprout_ir.IRProgram =
                                   Cons("%sy", Cons("%i", Nil))),
         Cons(sprout_ir.IRRet("%o"), Nil)))))),
       Nil)),
-    Nil))
+    Nil), Nil)
+
+# M test 1 helper: hand-built IRProgram with one CtorReg (NilLike, tag=0, arity=0, fkinds="").
+# Wraps lower_program + insert_roots so it can be called from inside main's do-block.
+fn m1_lowered() -> String =
+  ir_lowering.lower_program(
+    ir_rooting.insert_roots(
+      sprout_ir.IRProgram(
+        Cons(sprout_ir.IRFunction("dummy", Nil, "i64",
+          Cons(sprout_ir.IRBlock("entry",
+            Cons(sprout_ir.IRConst("%t0", 0),
+            Cons(sprout_ir.IRRet("%t0"), Nil))),
+          Nil)), Nil),
+        Cons(sprout_ir.CtorReg("NilLike", 0, 0, ""), Nil)),
+      dict_empty()))
 
 fn main() -> Unit !{IO} =
   do
@@ -262,5 +276,82 @@ fn main() -> Unit !{IO} =
     assert_true(state,
                 "translate_program: 0-arity boxed ctor (Z via bare TVar) lowers to @sprout_make0",
                 boxed_zero)
+
+    # ---------------------------------------------------------------------------
+    # Fix A and Fix B: the explicit Err paths in ast_to_ir (`bare reference to
+    # non-zero-arity ctor` and `wrong arity`) are defensive backstops for
+    # hand-built IR or future IR-synthesis passes — the typechecker rejects
+    # the same sources with TYPE errors before ast_to_ir is reached, so they
+    # cannot be exercised via translated_err_contains. The backstop Err
+    # remains load-bearing; see translate_expr (TVar→ctor) and
+    # translate_boxed_ctor_call in ast_to_ir.sprout.
+
+    # Fix C: ctor with an ADT-typed field.  HolderBoxed is a 3-arity boxed
+    # ctor (max_arity=3) whose first field is an ADT value (InnerT, also
+    # boxed with max_arity=3).  translate_args_ctor must accept the
+    # ADT-typed arg without the Int/String filter that translate_args_scalar
+    # applies for IRCall sites.
+    fix_c <- translated_ok_ir_contains(
+      "type InnerT = InnerT Int Int Int\ntype HolderBoxed = HolderBoxed InnerT Int Int\nfn mk() -> HolderBoxed = HolderBoxed(InnerT(1, 2, 3), 0, 0)",
+      "call i64 @sprout_make3")
+    assert_true(state,
+                "Fix C: ctor with ADT-typed field lowers successfully via translate_args_ctor",
+                fix_c)
+
+    # ---------------------------------------------------------------------------
+    # M test 1: hand-built IRProgram with a CtorReg — verify lower_program
+    # emits @sprout_register_ctor declaration, ctor name/fkinds globals, and
+    # the registration call in @main.
+    #
+    # IRProgram carries one CtorReg: ("NilLike", tag=0, arity=0, fkinds="").
+    # The function body is a trivial constant (irrelevant to registration).
+    assert_true(state, "M test 1: header declares @sprout_register_ctor",
+                contains(m1_lowered(), "declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)"))
+    assert_true(state, "M test 1: @.cname.0 global emitted",
+                contains(m1_lowered(), "@.cname.0"))
+    assert_true(state, "M test 1: @.cfkinds.0 global emitted",
+                contains(m1_lowered(), "@.cfkinds.0"))
+    assert_true(state, "M test 1: @sprout_register_ctor call in @main with tag 0",
+                contains(m1_lowered(), "call i64 @sprout_register_ctor(i64 0, ptr"))
+
+    # ---------------------------------------------------------------------------
+    # M test 2: end-to-end translate_program of a 3-field boxed ADT (max_arity=3).
+    # `type Triple = Triple Int Int Int` — field_kinds string is "iii".
+    # We use a non-constructing function (fn mk() -> Int = 0) to avoid triggering
+    # CPR or boxed ctor lowering; the registration still fires because build_ctor_table
+    # walks all TypeDecl regardless of use.
+    m2_cname <- translated_ok_ir_contains(
+      "type Triple = Triple Int Int Int\nfn mk() -> Int = 0",
+      "@.cname.0")
+    assert_true(state, "M test 2: @.cname.0 appears for boxed ADT Triple",
+                m2_cname)
+    # field_kinds "iii" is the encoded constant in @.cfkinds.0
+    m2_fkinds <- translated_ok_ir_contains(
+      "type Triple = Triple Int Int Int\nfn mk() -> Int = 0",
+      "iii")
+    assert_true(state, "M test 2: field_kinds string \"iii\" emitted for Triple Int Int Int",
+                m2_fkinds)
+    m2_reg <- translated_ok_ir_contains(
+      "type Triple = Triple Int Int Int\nfn mk() -> Int = 0",
+      "call i64 @sprout_register_ctor(i64 0, ptr")
+    assert_true(state, "M test 2: @sprout_register_ctor called with tag 0 for Triple",
+                m2_reg)
+    # Arity field in the call must be i64 3 (Triple has 3 fields)
+    m2_arity <- translated_ok_ir_contains(
+      "type Triple = Triple Int Int Int\nfn mk() -> Int = 0",
+      ", i64 3, ptr")
+    assert_true(state, "M test 2: arity 3 emitted in @sprout_register_ctor call",
+                m2_arity)
+
+    # ---------------------------------------------------------------------------
+    # S3 test: 10-arity ctor must yield Err "arity exceeds 9".
+    # max_arity = 10 -> not CPR-eligible (CPR is max_arity <= 2), so the boxed
+    # path fires and hits the guard in translate_boxed_ctor_call before
+    # emitting @sprout_make10 (which is undeclared in ir_header).
+    s3 <- translated_err_contains(
+      "type BigCtor = BigCtor Int Int Int Int Int Int Int Int Int Int\nfn mk() -> BigCtor = BigCtor(1,2,3,4,5,6,7,8,9,10)",
+      "arity exceeds 9")
+    assert_true(state, "S3: 10-arity ctor yields Err \"arity exceeds 9\"",
+                s3)
 
     summary(state)

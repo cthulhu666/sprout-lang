@@ -46,7 +46,7 @@ fn test1_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%t4", "%t1", "%t3"),
         Cons(sprout_ir.IRRet("%t4"), Nil))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # ---------------------------------------------------------------------------
 # Test 2: %ab live across the second concat (which is a trigger).
@@ -69,7 +69,7 @@ fn test2_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%r", "%ab", "%cd"),
         Cons(sprout_ir.IRRet("%r"), Nil))))))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # ---------------------------------------------------------------------------
 # Test 3: two heap values live across a trigger, plus a 1-root and another
@@ -97,7 +97,7 @@ fn test3_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%r", "%t1", "%ef"),
         Cons(sprout_ir.IRRet("%r"), Nil))))))))))))),
       Nil)),
-    Nil))
+    Nil), Nil)
 
 # ---------------------------------------------------------------------------
 # Test 4: phi-of-heap with a trigger AFTER the join — validates the load-
@@ -131,7 +131,32 @@ fn test4_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%r", "%phi", "%zw"),
         Cons(sprout_ir.IRRet("%r"), Nil))))))),
       Nil))))),
-    Nil))
+    Nil), Nil)
+
+# ---------------------------------------------------------------------------
+# Test 5: heap param live across a trigger (bug S2 regression).
+#
+# IR for:
+#   fn f(%s: String) -> T3 =
+#     %r0 = call bar(%s)           ← IRCall trigger; %s live across (used by IRMakeCtor)
+#     %ctor = IRMakeCtor "T3" 0 [%s, %z0, %z0]
+#     ret %ctor
+#
+# Without seeding params_heap_origin, %s is absent from heap_origin, no
+# IRRoot is emitted, and %s's string storage may be freed inside bar().
+# With the fix, %s IS in heap_origin → it appears in in_scope_ord at block
+# entry → live_across for the IRCall includes %s → 1 root is emitted.
+
+fn test5_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("f_heap_param", Cons("s", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRConst("%z0", 0),
+        Cons(sprout_ir.IRCall("%r0", "i64", "bar", Cons("%s", Nil)),
+        Cons(sprout_ir.IRMakeCtor("%ctor", "T3", 0, Cons("%s", Cons("%z0", Cons("%z0", Nil)))),
+        Cons(sprout_ir.IRRet("%ctor"), Nil))))),
+      Nil)),
+    Nil), Nil)
 
 fn main() -> Unit !{IO} =
   do
@@ -164,6 +189,15 @@ fn main() -> Unit !{IO} =
               count(lower(test4_program()), "call i64 @sprout_gc_push_i64_root"), 1)
     assert_eq(state, "T4: exactly one pop_roots(i64 1)",
               count(lower(test4_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+
+    # --- Test 5: heap param %s seeded into heap_origin (S2 regression).
+    # %s is live across IRCall bar(%s) because IRMakeCtor uses it afterward.
+    # Exactly one root is pushed (for %s); no second root needed at IRMakeCtor
+    # because %s is an operand of that op, not live after it.
+    assert_eq(state, "T5: exactly one push_i64_root for heap param live across call",
+              count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T5: exactly one pop_roots(i64 1) for heap param",
+              count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
 
     # --- Header declares the rooting runtime functions.
     assert_true(state, "header declares @sprout_gc_push_i64_root",

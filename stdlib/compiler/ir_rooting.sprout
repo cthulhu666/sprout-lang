@@ -434,8 +434,23 @@ fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       sprout_ir.IRFunction(name, params, ret_ty,
-        rewrite_fn_blocks(blocks, compute_liveness(blocks), compute_heap_origin(blocks),
+        rewrite_fn_blocks(blocks, compute_liveness(blocks),
+                          set_union(params_heap_origin(params), compute_heap_origin(blocks)),
                           blocks, start_idx, Nil))
+
+# ---------------------------------------------------------------------------
+# Seed heap_origin from function parameters.
+#
+# Conservative: IRFunction lacks per-param type info as of PR 2.3; over-roots
+# all params.  Parameters carry no '%' prefix in the IRFunction param list, so
+# we prepend '%' here to match the naming convention used throughout the pass.
+fn params_heap_origin_loop(params: List String, acc: Set) -> Set =
+  match params with
+  | Nil -> acc
+  | Cons p rest -> params_heap_origin_loop(rest, set_insert("%" ++ p, acc))
+
+fn params_heap_origin(params: List String) -> Set =
+  params_heap_origin_loop(params, set_empty())
 
 # ---------------------------------------------------------------------------
 # Per-program driver.
@@ -457,4 +472,4 @@ fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int,
 # ast_to_ir.translate_program.  Unmapped functions default to 0.
 export fn insert_roots(prog: sprout_ir.IRProgram, idx_map: Dict Int) -> sprout_ir.IRProgram =
   match prog with
-  | sprout_ir.IRProgram fns -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil))
+  | sprout_ir.IRProgram fns ctors -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil), ctors)

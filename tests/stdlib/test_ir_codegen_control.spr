@@ -49,7 +49,7 @@ fn abs_program() -> sprout_ir.IRProgram =
           Cons(("%t6", "then_2"), Cons(("%x", "else_3"), Nil))),
         Cons(sprout_ir.IRRet("%t7"), Nil))),
       Nil))))),
-    Nil))
+    Nil), Nil)
 
 # Build the IR equivalent of a nested if-then-else:
 #   fn sign(x: Int) -> Int =
@@ -114,7 +114,7 @@ fn sign_program() -> sprout_ir.IRProgram =
           Cons(("%t5", "then_2"), Cons(("%t15", "join_10"), Nil))),
         Cons(sprout_ir.IRRet("%t16"), Nil))),
       Nil)))))))),
-    Nil))
+    Nil), Nil)
 
 fn main() -> Unit !{IO} =
   do
