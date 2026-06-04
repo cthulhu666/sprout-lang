@@ -71,6 +71,17 @@ export type IROp (..) =
   | IRStrConcat String String String
   # IRStrFromInt's IR-op name diverges from the runtime name; it lowers to @int_to_string.
   | IRStrFromInt String String
+  # IRMakeCtor <result> <ctor-name> <tag> <args>
+  #   - result: '%t<N>' for the i64 handle returned by sprout_makeN.
+  #   - ctor-name: source-level constructor name (for diagnostics only — never
+  #     used by the runtime call; tag is baked in at translate-time).
+  #   - tag: ctor tag literal, resolved by ast_to_ir from a ctor-table that
+  #     mirrors codegen.sprout's `build_ctor_sigs_from_decls` numbering.
+  #   - args: list of '%'-prefixed value-names, one per ctor field, in source
+  #     order.  Arity = length args; length determines which `@sprout_makeN`
+  #     is called.  PR 2.3 supports BOXED ADTs only; CPR-eligible types are
+  #     rejected at translate time and never reach this op.
+  | IRMakeCtor String String Int (List String)
   # IRRoot <slot-name> <value-being-rooted> <discard-reg-for-push-call>
   # All names carry their '%' prefix already.
   | IRRoot String String String
@@ -127,6 +138,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = str_concat " ++ a ++ ", " ++ b
   | IRStrFromInt r n ->
       "    " ++ r ++ " = int_to_string " ++ n
+  | IRMakeCtor r name tag args ->
+      "    " ++ r ++ " = make_ctor " ++ name ++ "(tag=" ++ int_to_string(tag) ++ ")(" ++ print_call_args(args) ++ ")"
   | IRRoot slot v discard ->
       "    " ++ discard ++ " = root " ++ slot ++ ", " ++ v
   | IRUnroot n discard ->

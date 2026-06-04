@@ -36,6 +36,8 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # Conservative: every user call may transitively allocate.  Over-roots
   # non-allocating callees; correctness > optimization at M2.
   | sprout_ir.IRCall _ _ _ _ -> true
+  # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
+  | sprout_ir.IRMakeCtor _ _ _ _ -> true
   | _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
@@ -47,6 +49,7 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRStrSlice r _ _ _ -> Just(r)
   | sprout_ir.IRStrConcat r _ _ -> Just(r)
   | sprout_ir.IRStrFromInt r _ -> Just(r)
+  | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------
@@ -107,6 +110,7 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRStrSlice _ s start len -> Cons(s, Cons(start, Cons(len, Nil)))
   | sprout_ir.IRStrConcat _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRStrFromInt _ n -> Cons(n, Nil)
+  | sprout_ir.IRMakeCtor _ _ _ args -> args
   | sprout_ir.IRRoot _ v _ -> Cons(v, Nil)
   | sprout_ir.IRUnroot _ _ -> Nil
 
@@ -123,6 +127,7 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRStrSlice r _ _ _ -> Just(r)
   | sprout_ir.IRStrConcat r _ _ -> Just(r)
   | sprout_ir.IRStrFromInt r _ -> Just(r)
+  | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
   | sprout_ir.IRRoot _ _ discard -> Just(discard)
   | sprout_ir.IRUnroot _ discard -> Just(discard)
   | _ -> Nothing

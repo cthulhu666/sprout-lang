@@ -1,0 +1,266 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+
+# Tests for Milestone 2, PR 2.3: constructor allocation (boxed ADTs only).
+# See docs/gc-rooting-model-c-plan-2026-06-02.md.
+#
+# Hand-built IRPrograms exercise IRMakeCtor (boxed sprout_makeN lowering).
+# Ctor names used here are fresh placeholders that do NOT match Maybe/List;
+# those are CPR-eligible and would be rejected at translate_program.  Hand-
+# built IR bypasses the translator and lowers any tag/name pair as boxed.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+# Pipeline: insert_roots then lower.  Same shape as test_ir_rooting.spr.
+fn lower_with_roots(prog: sprout_ir.IRProgram) -> String =
+  ir_lowering.lower_program(ir_rooting.insert_roots(prog, dict_empty()))
+
+# Drive a Sprout source string through lex -> parse -> typecheck_typed ->
+# lower_program -> ast_to_ir.translate_program.  Used to test the AST -> IR
+# constructor dispatch end-to-end (build_ctor_table, threaded ctors arg, TVar
+# / TCall ctor case, CPR rejection).  Returns the translator's Result.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+# True iff translate_source(src) returned Err whose message contains needle.
+# Important: must `match translate_source(...)` DIRECTLY rather than binding
+# via `<-` first — do-block `<-` strips both the Result AND IO layers, so
+# `r <- translate_source(src)` would give r:String, not Result.  See CLAUDE
+# memory `project_do_block_result_io_quirk`.
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+# True iff translate_source(src) returned Ok whose lowered IR contains needle.
+fn translated_ok_ir_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+# T1: 0-arity boxed ctor (Nil-style) -> @sprout_make0 with tag literal.
+fn t1_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("t1", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRMakeCtor("%t0", "NilLike", 0, Nil),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Nil))
+
+# T2: 2-arity boxed ctor with two scalar Int args, no rooting expected.
+fn t2_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("t2", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%t0", 1),
+        Cons(sprout_ir.IRConst("%t1", 2),
+        Cons(sprout_ir.IRMakeCtor("%t2", "PairBoxed", 7,
+                                  Cons("%t0", Cons("%t1", Nil))),
+        Cons(sprout_ir.IRRet("%t2"), Nil))))),
+      Nil)),
+    Nil))
+
+# T3: 2-arity boxed ctor with two heap-typed String args.  Operands of the
+# trigger op are NOT live across it (the use kills them), so no rooting is
+# emitted.  This test verifies the heap-arg ctor lowers cleanly.
+fn t3_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("t3", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%sa", "%sa_raw", "a"),
+        Cons(sprout_ir.IRStrConst("%sb", "%sb_raw", "b"),
+        Cons(sprout_ir.IRMakeCtor("%r", "PairBoxed", 7,
+                                  Cons("%sa", Cons("%sb", Nil))),
+        Cons(sprout_ir.IRRet("%r"), Nil))))),
+      Nil)),
+    Nil))
+
+# T4: Two boxed ctors back-to-back; first ctor result lives across second.
+fn t4_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("t4", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConst("%c0", 0),
+        Cons(sprout_ir.IRConst("%c1", 1),
+        Cons(sprout_ir.IRMakeCtor("%first", "SinglePtr", 11, Cons("%c0", Nil)),
+        Cons(sprout_ir.IRMakeCtor("%second", "SinglePtr", 11, Cons("%c1", Nil)),
+        Cons(sprout_ir.IRMakeCtor("%r", "WrapPair", 12,
+                                  Cons("%first", Cons("%second", Nil))),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))),
+      Nil)),
+    Nil))
+
+# T5: Ctor-of-ctor composition.  Inner ctor result feeds directly into outer.
+fn t5_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("t5", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%sx", "%sx_raw", "x"),
+        Cons(sprout_ir.IRMakeCtor("%i", "InnerSingle", 20, Cons("%sx", Nil)),
+        Cons(sprout_ir.IRStrConst("%sy", "%sy_raw", "y"),
+        Cons(sprout_ir.IRMakeCtor("%o", "OuterPair", 21,
+                                  Cons("%sy", Cons("%i", Nil))),
+        Cons(sprout_ir.IRRet("%o"), Nil)))))),
+      Nil)),
+    Nil))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Pretty printer covers the new op.
+    assert_true(state, "pretty: make_ctor rendered",
+                contains(sprout_ir.print_ir_program(t1_program()), "make_ctor"))
+    assert_true(state, "pretty: tag literal appears in pretty output",
+                contains(sprout_ir.print_ir_program(t2_program()), "tag=7"))
+
+    # Header declares the boxed-ctor runtime intrinsics.
+    assert_true(state, "header declares @sprout_make0",
+                contains(ir_lowering.lower_program(t1_program()),
+                         "declare i64 @sprout_make0(i64)"))
+    assert_true(state, "header declares @sprout_make2",
+                contains(ir_lowering.lower_program(t1_program()),
+                         "declare i64 @sprout_make2(i64, i64, i64)"))
+    assert_true(state, "header declares @sprout_make9 (max arity)",
+                contains(ir_lowering.lower_program(t1_program()),
+                         "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)"))
+
+    # T1: 0-arity boxed ctor lowers to @sprout_make0 with the tag literal.
+    assert_true(state, "T1: emits @sprout_make0 call with tag literal",
+                contains(lower_with_roots(t1_program()),
+                         "%t0 = call i64 @sprout_make0(i64 0)"))
+
+    # T2: 2-arity ctor with Int args lowers without rooting.
+    assert_true(state, "T2: emits @sprout_make2 call with tag and args",
+                contains(lower_with_roots(t2_program()),
+                         "%t2 = call i64 @sprout_make2(i64 7, i64 %t0, i64 %t1)"))
+    assert_false(state, "T2: no push_i64_root call site",
+                 contains(lower_with_roots(t2_program()), "call i64 @sprout_gc_push_i64_root"))
+    assert_false(state, "T2: no pop_roots call site",
+                 contains(lower_with_roots(t2_program()), "call i64 @sprout_gc_pop_roots"))
+
+    # T3: heap-arg ctor lowers cleanly; no spurious rooting because the args
+    # are uses of the trigger op and thus killed before live_after_op.
+    assert_true(state, "T3: emits @sprout_make2 with heap args",
+                contains(lower_with_roots(t3_program()),
+                         "%r = call i64 @sprout_make2(i64 7, i64 %sa, i64 %sb)"))
+    assert_false(state, "T3: no push_i64_root (operands not live across own use)",
+                 contains(lower_with_roots(t3_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # T4: %first is heap-typed, defined before %second (a trigger), and the
+    # WrapPair uses %first - so %first must be live across the %second call.
+    assert_eq(state, "T4: exactly one push_i64_root for %first across second ctor",
+              count(lower_with_roots(t4_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T4: exactly one pop_roots(i64 1)",
+              count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    assert_eq(state, "T4: two @sprout_make1 calls (SinglePtr)",
+              count(lower_with_roots(t4_program()), "call i64 @sprout_make1(i64 11"), 2)
+    assert_true(state, "T4: WrapPair lowers with tag=12",
+                contains(lower_with_roots(t4_program()),
+                         "%r = call i64 @sprout_make2(i64 12, i64 %first, i64 %second)"))
+
+    # T5: three IRMakeCtor - InnerSingle then OuterPair - compose correctly.
+    assert_true(state, "T5: InnerSingle lowers",
+                contains(lower_with_roots(t5_program()),
+                         "%i = call i64 @sprout_make1(i64 20, i64 %sx)"))
+    assert_true(state, "T5: OuterPair lowers",
+                contains(lower_with_roots(t5_program()),
+                         "%o = call i64 @sprout_make2(i64 21, i64 %sy, i64 %i)"))
+    assert_false(state, "T5: no rooting needed (no live-across)",
+                 contains(lower_with_roots(t5_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # ---------------------------------------------------------------------------
+    # End-to-end pipeline tests: AST -> IR via ast_to_ir.translate_program.
+    # These exercise build_ctor_table, the threaded ctors parameter, and the
+    # TVar / TCall ctor dispatch.
+    #
+    # CPR-eligible ADTs are rejected here at translate time (PR 2.3 scope is
+    # boxed only).  Boxed ADTs (max_arity >= 3) lower to @sprout_makeN.
+
+    # CPR rejection - 0-arity ctor of a CPR ADT (max_arity = 1 -> CPR).
+    cpr_a <- translated_err_contains("type X = A | B Int\nfn make() -> X = A",
+                                     "CPR ctor lowering deferred")
+    assert_true(state,
+                "translate_program: 0-arity CPR ctor (A of `X = A | B Int`) rejected",
+                cpr_a)
+
+    # CPR rejection - n-arity ctor of a CPR ADT.
+    cpr_b <- translated_err_contains("type X = A | B Int\nfn make() -> X = B(7)",
+                                     "CPR ctor lowering deferred")
+    assert_true(state,
+                "translate_program: 1-arity CPR ctor (B(7)) rejected",
+                cpr_b)
+
+    # CPR rejection - max_arity = 2 is also CPR (a Pair-shaped ADT).
+    cpr_p <- translated_err_contains("type P = P Int Int\nfn mk() -> P = P(1, 2)",
+                                     "CPR ctor lowering deferred")
+    assert_true(state,
+                "translate_program: 2-arity CPR ctor (P(1, 2)) rejected",
+                cpr_p)
+
+    # Boxed lowering - max_arity = 3 makes the ADT boxed; ctor goes through
+    # IRMakeCtor -> @sprout_make3.  Tag = 0 (first ctor in the source).
+    boxed3 <- translated_ok_ir_contains(
+      "type T3 = T3 Int Int Int\nfn mk() -> T3 = T3(1, 2, 3)",
+      "call i64 @sprout_make3(i64 0")
+    assert_true(state,
+                "translate_program: 3-arity boxed ctor lowers to @sprout_make3",
+                boxed3)
+
+    # Boxed lowering - mixed ADT where a later ctor's tag is sequential.
+    # type E = Z | One Int | Two Int Int | Three Int Int Int
+    # max_arity = 3 -> boxed.  Tags: Z=0, One=1, Two=2, Three=3.
+    boxed_mid <- translated_ok_ir_contains(
+      "type E = Z | One Int | Two Int Int | Three Int Int Int\nfn mk() -> E = Two(4, 5)",
+      "call i64 @sprout_make2(i64 2, i64")
+    assert_true(state,
+                "translate_program: boxed n-arity ctor uses sequential tag (Two -> tag=2)",
+                boxed_mid)
+
+    # Boxed lowering - 0-arity boxed ctor (Z) via bare TVar reference.
+    boxed_zero <- translated_ok_ir_contains(
+      "type E = Z | One Int | Two Int Int | Three Int Int Int\nfn mk() -> E = Z",
+      "call i64 @sprout_make0(i64 0)")
+    assert_true(state,
+                "translate_program: 0-arity boxed ctor (Z via bare TVar) lowers to @sprout_make0",
+                boxed_zero)
+
+    summary(state)
