@@ -84,8 +84,42 @@ export type IROp (..) =
   #     this invariant — future IR passes that synthesize IRMakeCtor for CPR
   #     types must either lower differently or pre-check at the source.
   | IRMakeCtor String String Int (List String)
+  # IRMkClosure <result> <code-fn-name> <captures>
+  #   - result: '%t<N>' for the i64 closure handle.
+  #   - code-fn-name: top-level synthetic function name (no '@' prefix); MUST use the
+  #     '@ir_lambda_' prefix in emission to avoid collisions with legacy codegen's
+  #     '@lambda<N>' wrappers.
+  #   - captures: list of '%'-prefixed value-names to store into env slots 1..N
+  #     (slot 0 reserved for the code pointer).  Order is observable: lifted
+  #     bodies access captures via IRLoadEnvSlot at the same slot index.
+  #   Lowering: single call @sprout_alloc_closure_env(i64 sz) + GEP+store per
+  #   capture + final ptrtoint pack to i64.
+  | IRMkClosure String String (List String)
+  # IRApplyClosure <result> <callee> <args>
+  #   - result: '%t<N>' for the i64 (or i1) call result.
+  #   - callee: '%'-prefixed closure-handle value.
+  #   - args: list of '%'-prefixed value-names (excluding env; lowering passes
+  #     env as the implicit first arg).
+  #   Lowering: load code-ptr from env slot 0 + indirect LLVM call(env, args...).
+  #   Result type is i64 in M2 (everything is i64).
+  | IRApplyClosure String String (List String)
+  # IRLoadEnvSlot <result> <env-val> <slot-idx>
+  #   - result: '%t<N>' for the loaded i64 value.
+  #   - env-val: '%'-prefixed env handle (typically a parameter of a lifted lambda).
+  #   - slot-idx: 1-based; slot 0 is the code pointer, slots 1..N are captures.
+  #   Lowering: GEP + load i64.  Pure load — does NOT trigger GC.
+  | IRLoadEnvSlot String String Int
   # IRRoot <slot-name> <value-being-rooted> <discard-reg-for-push-call>
   # All names carry their '%' prefix already.
+  #
+  # Invariant: Sprout's GC is non-moving mark-sweep (see runtime/sprout_runtime.c
+  # `sprout_gc_sweep` at ~line 1063).  Marked objects stay at their allocation
+  # address — never relocated, never compacted.  This makes IRRoot's "push the
+  # alloca holding the i64 heap-address; never reload" pattern correct: the i64
+  # value stored at the alloca remains a valid heap pointer for the entire
+  # function lifetime.  If GC ever becomes moving, every IRRoot must be paired
+  # with a re-load *after* its trigger op, and every heap-typed SSA use after
+  # a trigger must source from the reload — a major rewrite.  See AGENTS.md.
   | IRRoot String String String
   # IRUnroot <count-to-pop> <discard-reg-for-pop-call>
   | IRUnroot Int String
@@ -154,6 +188,12 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = int_to_string " ++ n
   | IRMakeCtor r name tag args ->
       "    " ++ r ++ " = make_ctor " ++ name ++ "(tag=" ++ int_to_string(tag) ++ ")(" ++ print_call_args(args) ++ ")"
+  | IRMkClosure r code_fn caps ->
+      "    " ++ r ++ " = mk_closure " ++ code_fn ++ "(" ++ print_call_args(caps) ++ ")"
+  | IRApplyClosure r callee args ->
+      "    " ++ r ++ " = apply_closure " ++ callee ++ "(" ++ print_call_args(args) ++ ")"
+  | IRLoadEnvSlot r env slot ->
+      "    " ++ r ++ " = load_env_slot " ++ env ++ "[" ++ int_to_string(slot) ++ "]"
   | IRRoot slot v discard ->
       "    " ++ discard ++ " = root " ++ slot ++ ", " ++ v
   | IRUnroot n discard ->
