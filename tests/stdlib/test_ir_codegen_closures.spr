@@ -102,4 +102,15 @@ fn main() -> Unit !{IO} =
       "@ir_lambda_")
     assert_true(state, "T5: directly applied lambda lifts to @ir_lambda_", t5)
 
+    # T6: Regression — capturing lambda must emit env-slot LOADs in the lifted
+    # body. Slot 0 is the code pointer; captured values live at slots 1..N.
+    # The lowered IR for IRLoadEnvSlot contains `getelementptr i64, ptr` for
+    # the slot-pointer computation. Bug fixed 2026-06-05: subagent's initial
+    # implementation treated outer fn's params as `bound`, excluding them
+    # from compute_free_vars and breaking capture.
+    t6 <- translated_ok_ir_contains(
+      "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
+      "getelementptr i64, ptr")
+    assert_true(state, "T6: capturing lambda emits env-slot GEP for the load", t6)
+
     summary(state)

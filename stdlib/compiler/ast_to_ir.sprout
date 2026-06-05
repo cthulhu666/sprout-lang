@@ -417,10 +417,11 @@ fn is_unit_type(t: types.Type) -> Bool =
   | types.TConst name -> name == "Unit"
   | _ -> false
 
-# Scalar argument types accepted by IRCall in PR 1.5 (Int) and PR 2.1 (String).
+# Scalar argument types accepted by IRCall in PR 1.5 (Int), PR 2.1 (String),
+# and PR 2.4 (function types — closures are i64 at the IR level).
 # Bool/Unit/etc remain rejected.
 fn is_supported_arg_type(t: types.Type) -> Bool =
-  is_int_type(t) || is_string_type(t)
+  is_int_type(t) || is_string_type(t) || is_fn_type(t)
 
 # Ctor field argument types accepted by translate_args_ctor.
 #
@@ -574,8 +575,11 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   do
     let lam_param_names = fv_param_names(lparams)
-    # bound = lambda's own params + outer fn's params (both are local, not free)
-    let lam_bound = set_union(set_from_list(lam_param_names), set_from_list(params))
+    # bound = ONLY the lambda's own params. Outer fn's params (and outer
+    # captures) are *free* from the lambda's perspective — they're the
+    # capture candidates. filter_capturable below restricts to ones that are
+    # actually visible at the use site (in `params` or `captures`).
+    let lam_bound = set_from_list(lam_param_names)
     let all_frees_list = set_to_list(compute_free_vars(body, lam_bound, top_level))
     let capturable = filter_capturable(all_frees_list, params, captures)
     # Allocate this lambda's unique index BEFORE translating the body, so that
@@ -847,12 +851,14 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
       | Nothing ->
           if param_known(fname, params)
           then
-            # Parameter of function type: emit IRApplyClosure.
-            if is_fn_type(fty)
-            then translate_closure_call("%" ++ fname, args, params, ctors, idx,
-                                        cur_label, cur_ops, captures, lifted_ref, top_level,
-                                        lambda_ctr_ref)
-            else Err("ast_to_ir: call to non-function parameter '" ++ fname ++ "'")
+            # Calling a parameter: the typechecker already verified the callee
+            # is function-typed (otherwise the call wouldn't typecheck).  We
+            # don't re-check via is_fn_type because the TVar's `fty` may carry
+            # a polymorphic / unresolved type that doesn't match TFunc — the
+            # typechecker is the source of truth here.
+            translate_closure_call("%" ++ fname, args, params, ctors, idx,
+                                   cur_label, cur_ops, captures, lifted_ref, top_level,
+                                   lambda_ctr_ref)
           else
             # Constructor application takes precedence over named-call dispatch
             # because a ctor name is never simultaneously a function.  CPR-
