@@ -715,8 +715,10 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
   | Cons a rest ->
       if scalar_only && ! is_supported_arg_type (typed_ast.typed_expr_type(a))
       then Err("ast_to_ir: call argument must be Int or String at this milestone")
-      else if ! scalar_only && ! is_supported_ctor_arg_type (typed_ast.typed_expr_type(a))
+      else if ! scalar_only && is_bool_type(typed_ast.typed_expr_type(a))
       then Err("ast_to_ir: Bool ctor field not yet supported (requires zext i1 to i64 — deferred to follow-up PR)")
+      else if ! scalar_only && is_unit_type(typed_ast.typed_expr_type(a))
+      then Err("ast_to_ir: Unit ctor field not supported (Unit has no LLVM value to pass)")
       else
         match translate_expr(a, params, ctors, idx, cur_label, cur_ops) with
         | Err msg -> Err(msg)

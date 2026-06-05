@@ -385,4 +385,16 @@ fn main() -> Unit !{IO} =
                 "Regression: Bool expr result (x==0) as ctor field yields Err (i1/i64 mismatch)",
                 bool_expr_ctor)
 
+    # Case 3: Unit ctor field must surface a Unit-specific message — NOT the
+    # Bool/zext one.  is_supported_ctor_arg_type rejects both Bool and Unit,
+    # but the two rejections have different reasons (Bool needs zext i1→i64;
+    # Unit has no LLVM value at all), and conflating them sends users chasing
+    # a fix that doesn't apply.
+    unit_field_ctor <- translated_err_contains(
+      "type WU = WU Unit Int Int\nfn f() -> WU = WU((), 0, 0)",
+      "Unit ctor field not supported")
+    assert_true(state,
+                "Unit ctor field yields a Unit-specific Err (not the Bool/zext message)",
+                unit_field_ctor)
+
     summary(state)
