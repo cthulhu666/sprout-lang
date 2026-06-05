@@ -241,14 +241,8 @@ Use commit messages that explain intent, for example:
 
 ### Agent commit workflow (DoD review)
 
-Two hooks enforce DoD at commit time and at session end:
-
 **Seed gate** — `scripts/seed_gate.sh`, wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed `bootstrap/compile_driver.ll`. Bypass (when IR is genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp-ack`.
-
-**DoD reviewer** — `scripts/dod_stop_reviewer.sh`, wired as a Stop hook. Fires when the agent stops. Checks whether the HEAD commit has already been reviewed (per-worktree marker at `$(git rev-parse --absolute-git-dir)/dod-reviewed-<hash>`). If not, spawns an independent `claude -p` sub-agent with a fixed, hardcoded prompt that reads AGENTS.md §Definition of Done, inspects `git diff HEAD~1..HEAD`, determines which DoD items apply to the changed files, checks each one, and returns a JSON verdict. On pass: writes the marker and allows stop. On fail: blocks the agent with specific findings — fix the issues, recommit, and the reviewer will re-run on the next stop.
 
 Workflow:
 1. Do the work. Run all applicable DoD checks (tests, smoke-shapes, etc.).
 2. Commit with `git commit …`. The seed gate blocks if seed is stale.
-3. When done, stop. The DoD reviewer fires automatically and checks the commit.
-4. If the reviewer blocks: address each finding, `git commit --amend` or make a follow-up commit, then stop again.

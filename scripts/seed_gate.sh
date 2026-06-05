@@ -3,7 +3,7 @@
 # but bootstrap/compile_driver.ll has not been refreshed (DoD #9).
 #
 # This is a mechanical data-integrity check only — it does NOT enforce the full DoD
-# checklist. Full DoD review is handled by the Stop hook (scripts/dod_stop_reviewer.sh).
+# checklist.
 #
 # Worktree safety: ack files live under $(git rev-parse --absolute-git-dir), which is
 # per-worktree (.git/worktrees/<name>/ for linked worktrees). Parallel agents in

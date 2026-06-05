@@ -19,16 +19,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash scripts/dod_stop_reviewer.sh"
-          }
-        ]
-      }
     ]
   }
 }
