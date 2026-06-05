@@ -181,9 +181,8 @@ fn ir_header() -> String =
   # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make9 set in
   # codegen.sprout (compiler intrinsic table).  All arities are declared
   # unconditionally — only the ones actually called are linked.
-  # IMPORTANT: arity cap is 9.  ast_to_ir rejects arity >= 10 with a clear Err.
-  # To lift this cap, add a @sprout_make_wide runtime entry point and remove
-  # the guard in ast_to_ir.translate_boxed_ctor_call.
+  # NOTE: arity cap of 9 mirrored in ast_to_ir.sprout's translate_boxed_ctor_call.
+  # If you add more entries here, also lift the cap there.
   "declare i64 @sprout_make0(i64)\n" ++
   "declare i64 @sprout_make1(i64, i64)\n" ++
   "declare i64 @sprout_make2(i64, i64, i64)\n" ++
@@ -231,25 +230,35 @@ fn emit_ctor_fkinds_global(tag: Int, fkinds: String) -> String =
 #   %ptrN   = getelementptr inbounds [<NAME_LEN> x i8], ptr @.cname.<tag>, i64 0, i64 0
 #   %fkptrN = getelementptr inbounds [<FKLEN> x i8], ptr @.cfkinds.<tag>, i64 0, i64 0
 #   %regN   = call i64 @sprout_register_ctor(i64 <tag>, ptr %ptrN, i64 <arity>, ptr %fkptrN)
-fn emit_ctor_reg_call(reg: sprout_ir.CtorReg, counter: Int) -> String =
+#
+# SSA temp names are suffixed by <tag> rather than a per-call counter.  Tags
+# are guaranteed unique-by-construction (sequential across all ADT ctors in
+# program order), so this is self-protecting against future call-site changes.
+fn emit_ctor_reg_call(reg: sprout_ir.CtorReg) -> String =
   match reg with
   | sprout_ir.CtorReg name tag arity fkinds ->
-      "  " ++ ptr_reg ++ " = getelementptr inbounds [" ++ int_to_string(str_byte_len(name) + 1) ++
-        " x i8], ptr @.cname." ++ int_to_string(tag) ++ ", i64 0, i64 0\n" ++
-      "  " ++ fkptr_reg ++ " = getelementptr inbounds [" ++ int_to_string(str_byte_len(fkinds) + 1) ++
-        " x i8], ptr @.cfkinds." ++ int_to_string(tag) ++ ", i64 0, i64 0\n" ++
-      "  " ++ reg_reg ++ " = call i64 @sprout_register_ctor(i64 " ++ int_to_string(tag) ++
-        ", ptr " ++ ptr_reg ++ ", i64 " ++ int_to_string(arity) ++
-        ", ptr " ++ fkptr_reg ++ ")\n"
-  where ptr_reg = "%cname_ptr_" ++ int_to_string(counter)
-        fkptr_reg = "%cfkinds_ptr_" ++ int_to_string(counter)
-        reg_reg = "%creg_" ++ int_to_string(counter)
+      emit_ctor_reg_call_body(name, tag, arity, fkinds)
 
-fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg, counter: Int) -> String =
+# Inner helper: takes destructured fields explicitly so the `where` clause
+# can bind SSA temp names against `tag`. (Function-scope `where` cannot see
+# names introduced by an outer match arm's pattern bindings.)
+fn emit_ctor_reg_call_body(name: String, tag: Int, arity: Int, fkinds: String) -> String =
+  "  " ++ ptr_reg ++ " = getelementptr inbounds [" ++ int_to_string(str_byte_len(name) + 1) ++
+    " x i8], ptr @.cname." ++ int_to_string(tag) ++ ", i64 0, i64 0\n" ++
+  "  " ++ fkptr_reg ++ " = getelementptr inbounds [" ++ int_to_string(str_byte_len(fkinds) + 1) ++
+    " x i8], ptr @.cfkinds." ++ int_to_string(tag) ++ ", i64 0, i64 0\n" ++
+  "  " ++ reg_reg ++ " = call i64 @sprout_register_ctor(i64 " ++ int_to_string(tag) ++
+    ", ptr " ++ ptr_reg ++ ", i64 " ++ int_to_string(arity) ++
+    ", ptr " ++ fkptr_reg ++ ")\n"
+  where ptr_reg = "%cname_ptr_" ++ int_to_string(tag)
+        fkptr_reg = "%cfkinds_ptr_" ++ int_to_string(tag)
+        reg_reg = "%creg_" ++ int_to_string(tag)
+
+fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg) -> String =
   match regs with
   | Nil -> ""
   | Cons reg rest ->
-      emit_ctor_reg_call(reg, counter) ++ emit_ctor_reg_calls(rest, counter + 1)
+      emit_ctor_reg_call(reg) ++ emit_ctor_reg_calls(rest)
 
 # Synthetic C-ABI main shim.  PR 1.5 still cannot lower the user's `main`
 # body in general (anything beyond `()` requires heap/IO ops that don't
@@ -263,7 +272,7 @@ fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg, counter: Int) -> String =
 # heap allocation or GC tracing can occur.
 fn main_shim(regs: List sprout_ir.CtorReg) -> String =
   "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n" ++
-    emit_ctor_reg_calls(regs, 0) ++
+    emit_ctor_reg_calls(regs) ++
     "  ret i32 0\n}\n"
 
 # String-constant collection pre-pass.  Walks every IRStrConst in document

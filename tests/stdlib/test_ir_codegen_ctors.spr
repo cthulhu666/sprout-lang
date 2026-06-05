@@ -354,4 +354,35 @@ fn main() -> Unit !{IO} =
     assert_true(state, "S3: 10-arity ctor yields Err \"arity exceeds 9\"",
                 s3)
 
+    # ---------------------------------------------------------------------------
+    # Regression: Bool ctor field must be rejected (not silently accepted).
+    #
+    # IRMakeCtor lowering hardcodes `i64 %argN` for every field.  A Bool
+    # expression produces `i1` in LLVM IR (e.g. `%r = call i1 @helper(...)`),
+    # so emitting `i64 %r` is an LLVM ABI mismatch that either crashes the
+    # verifier or produces silent miscompilation.  Legacy codegen.sprout handles
+    # Bool ctor fields via `pack_to_i64` (codegen.sprout ~line 960) which emits
+    # `zext i1 ... to i64`; the IR path has no equivalent zext step, so Bool
+    # must be rejected until IRZextI1ToI64 is added (deferred PR).
+    #
+    # Case 1: Bool **parameter** passed directly as a ctor field.
+    # `type W2 = W2 Bool Int Int; fn f(b: Bool) -> W2 = W2(b, 0, 0)`
+    # This is the canonical regression scenario from commit 3b92d2c.
+    bool_param_ctor <- translated_err_contains(
+      "type W2 = W2 Bool Int Int\nfn f(b: Bool) -> W2 = W2(b, 0, 0)",
+      "Bool ctor field not yet supported")
+    assert_true(state,
+                "Regression 3b92d2c: Bool param as ctor field yields Err (not silent ABI mismatch)",
+                bool_param_ctor)
+
+    # Case 2: Bool **expression result** (comparison) used as a ctor field.
+    # This is the verifier-breaking scenario: `icmp eq` produces `i1`, and
+    # IRMakeCtor would emit `i64 %i1_val` — type mismatch in LLVM IR.
+    bool_expr_ctor <- translated_err_contains(
+      "type W2 = W2 Bool Int Int\nfn f(x: Int) -> W2 = W2(x == 0, 0, 0)",
+      "Bool ctor field not yet supported")
+    assert_true(state,
+                "Regression: Bool expr result (x==0) as ctor field yields Err (i1/i64 mismatch)",
+                bool_expr_ctor)
+
     summary(state)
