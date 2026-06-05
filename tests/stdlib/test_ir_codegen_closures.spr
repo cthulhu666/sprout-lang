@@ -1,0 +1,99 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+
+# Tests for Milestone 2, PR 2.4: lambda lifting + closure emission.
+# See docs/gc-rooting-model-c-plan-2026-06-02.md.
+#
+# Exercises:
+#   - TLambda -> IRMkClosure + lifted IRFunction (ir_lambda_<N>)
+#   - Closure call via IRApplyClosure when callee is a param of function type
+#   - Free-variable capture (captured vars become IRLoadEnvSlot in lifted body)
+#   - Partial application -> Err (deferred)
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Drive a Sprout source string through lex -> parse -> typecheck -> lower ->
+# ast_to_ir.translate_program.  Returns the translator's Result.
+# Mirrors translate_source in test_ir_codegen_ctors.spr.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+fn translated_ok_ir_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # T1: A lambda with no free variables should produce IRMkClosure and a
+    # lifted function named ir_lambda_0.
+    t1 <- translated_ok_ir_contains(
+      "fn apply(f: Int -> Int, x: Int) -> Int = f(x)\nfn mk() -> Int -> Int = \\x -> x + 1",
+      "ir_lambda_")
+    assert_true(state, "T1: lambda lifts to ir_lambda_ function", t1)
+
+    # T2: Closure call via parameter of function type should emit
+    # apply_closure (IRApplyClosure) rather than a direct call.
+    t2 <- translated_ok_ir_contains(
+      "fn apply(f: Int -> Int, x: Int) -> Int = f(x)",
+      "apply_closure")
+    assert_true(state, "T2: calling a fn-typed parameter emits apply_closure", t2)
+
+    # T3: Lambda capturing a variable from enclosing scope.
+    # `fn adder(n: Int) -> (Int -> Int) = \x -> x + n`
+    # The lifted body should have IRLoadEnvSlot to load `n`.
+    t3 <- translated_ok_ir_contains(
+      "fn adder(n: Int) -> (Int -> Int) = \\x -> x + n",
+      "ir_lambda_")
+    assert_true(state, "T3: capturing lambda lifts to ir_lambda_", t3)
+
+    # T4: Calling a closure stored in a captures dict (a closure passed as
+    # a param and then called) should emit apply_closure.
+    t4 <- translated_ok_ir_contains(
+      "fn twice(f: Int -> Int, x: Int) -> Int = f(f(x))",
+      "apply_closure")
+    assert_true(state, "T4: calling fn-typed param twice emits apply_closure", t4)
+
+    # T5: Directly applied lambda (IIFE): (\x -> x + 1)(5) should work.
+    # The lambda is the callee of a TCall — translate_call's TLambda case.
+    t5 <- translated_ok_ir_contains(
+      "fn iife() -> Int = (\\x -> x + 1)(5)",
+      "apply_closure")
+    assert_true(state, "T5: directly applied lambda emits apply_closure", t5)
+
+    summary(state)
