@@ -1,5 +1,12 @@
 # GC Rooting — Systemic Fix Plan
 
+> **Status (2026-06-02): superseded.** The project has chosen the Model C path
+> in [gc-rooting-model-c-plan-2026-06-02.md](gc-rooting-model-c-plan-2026-06-02.md);
+> the linter + Option-2/3 framing below is no longer the intended execution
+> path. Milestones 1.1–1.5 (scalar IR) and 2.1–2.2 (heap ops + dataflow rooting)
+> have already landed (see `git log` for branch `m2-pr-*`); M2 PR 2.3 (ctors) is
+> in progress. Retained as the original Problem A / Problem B framing.
+
 **Date:** 2026-06-01
 **Context:** The `emit_binary` GC rooting hole (TokenizeError bootstrap bug) was fixed in commit `3729039`.
 Stress-mode verification (`SPROUT_GC_THRESHOLD=1`) confirmed the fix is real (all 30 suites pass).

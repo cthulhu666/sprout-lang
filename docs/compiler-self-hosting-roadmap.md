@@ -1,14 +1,23 @@
 # Compiler Self-Hosting Roadmap
 
+> **Status (2026-05-24): retired — goal achieved.** The staged direction this
+> document described has been delivered. The Python pipeline was removed on
+> 2026-05-24; the self-hosted compiler reached stage-3 fixed point on
+> 2026-05-17 (M7); the default build path is now `compile_driver_bin_stage1`
+> rebuilt from the committed IR seed. See:
+>
+> - [bootstrap-chain.md](./bootstrap-chain.md) — current reproducible build chain.
+> - [self-hosting-eliminate-python-backlog.md](./self-hosting-eliminate-python-backlog.md) — full execution log of Phases 0–12.
+> - `BACKLOG.md` §"Minimum Viable Path to Escape Python" — milestones M1–M7 (all complete).
+>
+> Future incremental work — generational GC, IR-codegen Model C, deeper LSP —
+> is tracked in `BACKLOG.md` and dated design docs, not here. The text below
+> is retained as historical context for the staged approach that was used.
+
 This document outlines a pragmatic path toward a Sprout compiler whose core
 implementation is itself written in Sprout.
 
 It is a tooling and architecture roadmap, not a normative language spec.
-
-Status note: this is not the active near-term milestone. The current priority
-remains the native-capable hosted REPL bridge and the reusable language-service
-boundary below it. This roadmap describes the intended direction after that
-bridge work reaches its pause point.
 
 ## Problem Statement
 
@@ -65,11 +74,11 @@ substrate for things like:
 
 The important question is which layer owns the compiler pipeline logic.
 
-## Current Baseline
+## Current Baseline *(at time of writing — see banner for current state)*
 
-Today the repository has three important pieces of groundwork:
+Originally this document was written when the repository had:
 
-1. the host implementation in `sprout/`,
+1. the host implementation in `sprout/` *(removed 2026-05-24)*,
 2. a Sprout-owned REPL frontend in `stdlib/repl.sprout`, and
 3. a bridge that is increasingly shaped as reusable analysis/compiler
    infrastructure rather than REPL-only glue.

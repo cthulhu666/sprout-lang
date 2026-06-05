@@ -1,5 +1,20 @@
 # Generational GC V1 — Implementation Plan
 
+> **Status (2026-05-28): deprioritized.** Profiling after the type-aware GC
+> rooting fix (N-queens P0, see
+> [nqueens-optim-iteration-2026-05-28.md](nqueens-optim-iteration-2026-05-28.md))
+> showed `register_managed_ptr` is only ~1% of CPU on N-queens — not the
+> bottleneck this draft assumes. The current bottleneck (~44% of CPU) is the
+> function-call boundary into `sprout_gc_push_i64_root` / `sprout_gc_pop_roots`,
+> which a per-`ManagedNode` generational split does not address.
+>
+> Successor direction: a **bump-allocated nursery** (no per-object metadata;
+> objects identified by address-range membership) is the higher-leverage
+> variant for allocation-heavy workloads. See N-queens P4 in BACKLOG.md. This
+> document remains useful for the empirical baseline and write-barrier
+> analysis; do **not** treat the implementation plan below as the intended
+> path.
+
 This document captures the design, empirical background, and advisor-reviewed
 implementation plan for a generational garbage collector for the Sprout native
 runtime. It supersedes the in-conversation design discussion from 2026-05-27.

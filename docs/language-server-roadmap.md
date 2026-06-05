@@ -3,14 +3,31 @@
 This document outlines a pragmatic plan for adding a Sprout language server for
 editor and IDE support.
 
+> **Status (2026-05-26): partially superseded.** A minimal LSP layer landed
+> as **sproutd M4** in `stdlib/compiler/lsp_driver.sprout`: handles
+> `initialize`, `textDocument/didOpen|didChange|didClose|hover`, full-sync
+> document state, and stub completion. Launched via
+> `build/sproutd --lsp <stdlib_root>`. The remaining "Python file map" near the
+> bottom of this doc (`sprout/lsp_server.py`, `sprout/diagnostics.py`, etc.)
+> is **obsolete** — those files never shipped; the LSP is implemented entirely
+> in `stdlib/compiler/lsp_driver.sprout` on top of the existing self-hosted
+> compiler API (`stdlib/compiler.sprout`).
+>
+> Open follow-up work (still relevant):
+>
+> - precise diagnostic positions (current LSP reports full-range first-error only)
+> - real completion (currently a stub)
+> - workspace-wide symbol search, go-to-definition, rename
+> - incremental analysis / module dependency tracking
+>
+> The high-level direction below remains valid.
+
 Status:
 
 - This is an implementation-planning document.
 - It does not change the normative language contract.
 - Any language-server support shipped from this plan should be labeled
   experimental until the feature set and protocol surface stabilize.
-- This work is currently deferred behind native REPL bridge work and should be
-  treated as a v2+ direction rather than an active near-term milestone.
 
 ## 1. Problem Statement
 
@@ -261,25 +278,25 @@ After the MVP is stable, add:
 These should come only after spans, symbol metadata, and workspace invalidation
 are proven reliable.
 
-## 8. Recommended File Layout
+## 8. Actual File Layout (as implemented)
 
-Likely new files:
+The minimal LSP layer that shipped (sproutd M4, 2026-05-26) lives entirely in
+self-hosted Sprout code:
 
-- `sprout/analysis.py`
-- `sprout/workspace.py`
-- `sprout/diagnostics.py`
-- `sprout/lsp_server.py`
+- `stdlib/compiler/lsp_driver.sprout` — LSP transport (Content-Length framing,
+  JSON-RPC dispatch), `LspState` (open documents + shutdown flag), and request
+  handlers for `initialize`, `textDocument/didOpen|didChange|didClose|hover`,
+  and stub `completion`.
+- `stdlib/compiler.sprout` — the *public* compiler API the LSP consumes
+  (`diagnostics_in_source`, `type_of_in_source`, etc.). Internal compiler modules
+  (`bundler`, `infer`, `checker`, `lowering`, `codegen`) are not touched by the
+  LSP directly; this avoids the qualified-name path through self-hosted
+  internals.
+- `runtime/sprout_runtime.c` — adds `stdin_read_bytes(n)` for LSP body framing
+  and `sproutd_init_with_root(stdlib_root)` for the `--lsp <stdlib_root>` entry.
 
-Likely touched existing files:
-
-- `sprout/ast.py`
-- `sprout/parser.py`
-- `sprout/module_loader.py`
-- `sprout/typechecker.py`
-- `sprout/formatter.py`
-- `sprout/cli.py`
-
-This separation keeps semantic logic out of the LSP transport layer.
+Future features (workspace symbols, rename, semantic tokens) extend the same
+module; semantic logic stays outside the transport layer either way.
 
 ## 9. Testing Strategy
 

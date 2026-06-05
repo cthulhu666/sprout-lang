@@ -1,5 +1,16 @@
 # REPL Self-Hosting v1 Draft
 
+> **Status (2026-05-26): partially superseded.** The "host-backed REPL session
+> bridge" framing below describes a state that no longer exists — Python was
+> removed on 2026-05-24 and the REPL session engine is already Sprout-owned via
+> the sproutd daemon work (M2 stateful session protocol + M3 combined binary).
+> The remaining design open question — replacing the compile-and-run model for
+> `eval_expr_in_source` with an in-Sprout tree-walking interpreter
+> (`stdlib/compiler/eval.sprout`) — is tracked in BACKLOG.md ("Implement
+> in-Sprout tree-walking interpreter for REPL eval"). The motivation, problem
+> statement, and forward-looking design below remain relevant; the references
+> to `sprout/repl_host.py`, `sprout.analysis.py`, etc. are historical.
+
 This document is a draft design for a Sprout-implemented REPL session engine in
 v1.
 
@@ -7,31 +18,21 @@ It is not part of normative v0. Its purpose is to define the first credible
 path from the current host-backed REPL session bridge to a REPL whose session
 semantics are implemented in Sprout code.
 
-Status note: this is no longer the active near-term milestone. Native REPL
-bridge work comes first; this document now describes a later follow-on
-direction after the hosted native-capable path is working.
+## 1. Problem Statement *(as originally written — see banner for current state)*
 
-## 1. Problem Statement
-
-Sprout now has a REPL frontend that is mostly written in Sprout:
+When this document was drafted, Sprout had a REPL frontend that was mostly
+written in Sprout:
 
 - the prompt loop lives in `stdlib/repl.sprout`,
 - line editing, history, completion behavior, and command parsing live in
   Sprout code,
-- Python is down to launcher and host-service responsibilities.
+- Python was down to launcher and host-service responsibilities.
 
-But the actual session engine still lives in host code:
-
-- `sprout/repl_host.py` owns session state,
-- `sprout.analysis.py` now mainly acts as a compatibility facade over split
-  analysis backends, with snapshot-oriented symbol/diagnostic queries living in
-  `sprout.analysis_snapshot_backend` and execution-oriented checks/eval/type
-  queries living in `sprout.analysis_execution_backend`,
-- completion data and session mutation are still host-implemented,
-- the frontend reaches those services through the experimental `repl_*`
-  builtins.
-
-That is a good hosted architecture, but it is not a self-hosted REPL.
+The actual session engine then still lived in host Python code (since removed
+2026-05-24 — the Sprout-owned sproutd daemon now owns session state, analysis
+queries, and completion). The original framing below described the host-vs-
+Sprout split that motivated the redesign; it does **not** describe the current
+implementation.
 
 ## 2. Goals
 

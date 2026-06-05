@@ -1,6 +1,14 @@
 # CPR (Constructed Product Result) Unboxing — V1 Implementation Notes
 
-Date: 2026-05-27. **Implemented and shipped on branch `perf/cpr-unboxing`.**
+> **Status (2026-06-03): shipped + width=3 sret ABI follow-up landed.** CPR
+> v1 (extern unboxed variants) and v2 (worker/wrapper for non-recursive
+> user-defined functions) merged from `perf/cpr-unboxing` in May 2026.
+> Width=3 unboxed externs were migrated to the sret ABI on 2026-06-03
+> (see `git log -- stdlib/compiler/codegen.sprout`). The "draft" suffix is
+> retained because the file name is referenced from BACKLOG.md; it is not
+> a current design proposal.
+
+Date: 2026-05-27.
 
 Supersedes: `docs/unboxed-maybe-v1-draft.md` (extern-only scope).
 

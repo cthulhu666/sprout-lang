@@ -1,18 +1,31 @@
 # Native REPL Roadmap
 
+> **Status (2026-05-26): retired — goal achieved.** The native REPL shipped
+> via the sproutd daemon work:
+>
+> - **sproutd M0–M3** (2026-05-25 → 2026-05-26) delivered the combined
+>   `build/sproutd` binary that launches as the REPL by default and as the
+>   analysis service with `--analysis-service <stdlib_root>`. Auto-discovery
+>   via `sproutd_self_init()` resolves stdlib root from the executable path;
+>   `SPROUT_ANALYSIS_SERVICE_CMD` works as an explicit override.
+> - **sproutd M4** (2026-05-26) added a minimal LSP layer
+>   (`stdlib/compiler/lsp_driver.sprout`) covering `initialize`,
+>   `textDocument/didOpen|didChange|didClose|hover`, and stub completion.
+> - The Python-backed REPL and analysis service were removed on 2026-05-23/24;
+>   `just repl` now invokes the native sproutd binary.
+>
+> Remaining incremental REPL work — full LSP coverage, generational tab
+> completion, in-Sprout interpreter for eval — is tracked in `BACKLOG.md`
+> (§"Phase 9", §"M2–M4 sproutd" entries) and
+> [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md). The
+> staging text below is retained for historical context.
+
 This document outlines a pragmatic path from the current hosted Python REPL to
 a future Sprout-native REPL binary.
 
 For the longer-term self-hosting direction where the REPL session engine itself
 becomes Sprout-owned rather than host-backed, see
 [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
-
-Current priority note: that self-hosting track is no longer the active
-near-term milestone. The active goal is a native-capable REPL path that keeps
-the current Sprout frontend and narrows the remaining host bridge below it.
-That bridge should not be treated as REPL-only glue; it should be shaped as a
-reusable language-service boundary that later compiler and language-server work
-can also target.
 
 It is an implementation/tooling roadmap, not a normative language spec.
 
@@ -36,11 +49,12 @@ Python elimination:
 2. keep the native REPL docs/tests aligned with that narrower backend-focused
    status.
 
-## Problem Statement
+## Problem Statement *(as originally written — see banner for current state)*
 
-The current REPL is implemented inside the Python CLI. It already supports
-incremental declarations, imports, type queries, instance queries, auto-printing
-of pure expressions, and a Sprout-side interactive input loop.
+At the time this document was written, the REPL was implemented inside the
+Python CLI. It already supported incremental declarations, imports, type
+queries, instance queries, auto-printing of pure expressions, and a Sprout-side
+interactive input loop.
 
 That is useful today, but it mixes three different concerns:
 

@@ -169,5 +169,4 @@ coercion site, both of which are comprehensible and auditable.
 - `docs/spec-v0.md` — normative spec (template literals added as experimental
   in Phase 1 spec patch)
 - `stdlib/compiler/codegen.sprout` — primary motivation; current `++` chains
-- `sprout/ast.py` — Python AST node `StringTemplateExpr` added in Phase 1
-- `stdlib/compiler/ast.sprout` — Sprout AST mirror added in Phase 1
+- `stdlib/compiler/ast.sprout` — defines `StringTemplateExpr` and `TemplateExprPart`

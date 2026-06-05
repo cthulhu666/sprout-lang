@@ -39,7 +39,14 @@ If constraints conflict, you get a type error.
 
 ## Core building blocks in code
 
-File: `sprout/typechecker.py`
+Self-hosted typechecker source lives in `stdlib/compiler/`:
+
+- `types.sprout` defines `Type` (`TVar`, `TConst`, `TFunc`, `TApp`, `TTuple`), `Scheme`, and `Effect`.
+- `unifier.sprout` is the pure substitution + unification engine.
+- `infer.sprout` runs constraint generation and solving over the AST.
+- `checker.sprout` wraps `infer.typecheck_decls` behind a `CheckResult` ADT.
+
+The terms:
 
 - `TVar`: unknown type variable (like `t0`, `t1`).
 - `TConst`: concrete type (`Int`, `Bool`, `String`).

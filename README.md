@@ -23,9 +23,10 @@ via LLVM IR and clang. Python is no longer part of the compiler or tooling pipel
 - [Effect System v1 Draft](./docs/effect-system-v1-draft.md)
 - [Int Ranges v1 Draft](./docs/int-ranges-v1-draft.md)
 - [Char and Text v1 Draft](./docs/char-text-v1-draft.md)
-- [Native REPL Roadmap](./docs/native-repl-roadmap.md)
-- [REPL Self-Hosting v1 Draft](./docs/repl-self-hosting-v1-draft.md)
-- [Compiler Self-Hosting Roadmap](./docs/compiler-self-hosting-roadmap.md)
+- [Bootstrap Chain](./docs/bootstrap-chain.md)
+- [Native REPL Roadmap](./docs/native-repl-roadmap.md) *(historical — sproutd M4 shipped 2026-05-26)*
+- [REPL Self-Hosting v1 Draft](./docs/repl-self-hosting-v1-draft.md) *(partially superseded)*
+- [Compiler Self-Hosting Roadmap](./docs/compiler-self-hosting-roadmap.md) *(historical — M7 fixed point reached 2026-05-17)*
 - [Sequencing Sugar v1 Draft](./docs/sequencing-sugar-v1-draft.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 - [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)

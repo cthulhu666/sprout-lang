@@ -1,5 +1,13 @@
 # Self-Hosting Backlog: Eliminate Python From The Compiler Pipeline
 
+> **Status (2026-05-24): completed history.** All twelve phases were delivered.
+> The `sprout/` Python frontend and all Python test/script files were deleted
+> on 2026-05-24; bootstrap genesis is now a committed LLVM IR seed (see
+> [bootstrap-chain.md](bootstrap-chain.md)). The remaining `[ ]` / `[~]`
+> checkboxes below are preserved as the original execution plan — they do
+> **not** reflect open work. Future self-hosting follow-ups are tracked in
+> `BACKLOG.md` and in the active roadmap docs.
+
 This document turns the broader self-hosting direction into a concrete
 implementation backlog with an explicit end goal:
 

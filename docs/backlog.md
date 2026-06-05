@@ -4,23 +4,22 @@ This file tracks open design, implementation, and tooling follow-up work.
 
 ## Current Priorities
 
-1. Implement a native REPL launcher.
-   Context: the Python-backed REPL and analysis service have been removed (2026-05-24).
-   The REPL frontend lives in `stdlib/repl.sprout` and the self-hosted analysis service
-   binary (`analysis_service_bin`) is built via `just build-analysis-service`. What is
-   missing is a native launcher: a small host entry point that compiles `stdlib/repl.sprout`
-   to a binary (or uses a pre-compiled cache) and starts `analysis_service_bin` as a
-   subprocess behind `SPROUT_ANALYSIS_SERVICE_CMD`.
-   Design docs: [native-repl-roadmap.md](./native-repl-roadmap.md), [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
-   Near-term scope:
-   - write a minimal native launcher (shell script or small C shim) that: (a) finds or
-     builds the REPL binary from `stdlib/repl.sprout`; (b) starts `analysis_service_bin`
-     and sets `SPROUT_ANALYSIS_SERVICE_CMD`; (c) exec's the REPL binary.
-   - wire `just repl` to invoke this launcher.
-   - verify `:type`, `:instances`, `import`, and evaluation work end-to-end.
-   Completed groundwork: `analysis_service_bin` implements all snapshot analysis ops over
-   JSON-over-stdio; `stdlib/repl.sprout` implements the full REPL frontend with line
-   editing, history, tab completion, multiline blocks, and session management.
+1. Execute Model C GC-rooting plan (typed Sprout-IR + linear types).
+   Design doc: [gc-rooting-model-c-plan-2026-06-02.md](./gc-rooting-model-c-plan-2026-06-02.md).
+   Status: Milestone 1 (scalar IR scaffolding, PRs 1.1–1.5) and Milestone 2 PRs 2.1–2.3
+   (heap ops + dataflow rooting + boxed ctor allocation) have landed. Remaining M2 work:
+   PR 2.4 (closures), PR 2.5 (pattern matching). Five deferred items from the PR 2.3
+   code-review pass are tracked in `BACKLOG.md`.
+   After M2: flip default to `--use-ir-codegen` (M3), then linear types as a user-facing
+   feature (M4), then apply linearity to Sprout-IR (M5) so GC rooting correctness becomes
+   a theorem rather than a discipline.
+   Native REPL groundwork is complete: the combined `build/sproutd` binary (sproutd M3,
+   2026-05-26) launches as REPL by default and as the analysis service with
+   `--analysis-service <stdlib_root>`. `sproutd_self_init()` auto-resolves stdlib root
+   from the executable path; `SPROUT_ANALYSIS_SERVICE_CMD` still works as an explicit
+   override. `just repl` wires this launcher. The minimal LSP layer (sproutd M4,
+   `stdlib/compiler/lsp_driver.sprout`) handles `initialize`, `textDocument/didOpen/
+   didChange/didClose`, `textDocument/hover`, and stub completion.
 2. Extend native backend coverage (broader ADT lowering and remaining interpreter parity gaps).
    Native-performance follow-up:
    - make tight Sprout string-processing loops competitive with host builtins so moderate stdin/text workloads do not require dedicated host helpers just to be practical
