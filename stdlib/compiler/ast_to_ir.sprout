@@ -187,6 +187,14 @@ fn build_top_level_fn_set(decls: List typed_ast.TypedDecl) -> Set =
           set_insert(name, build_top_level_fn_set(rest))
       | typed_ast.TExternFnDecl name _ _ _ ->
           set_insert(name, build_top_level_fn_set(rest))
+      # FIX R4#4: TLetDecl names are top-level and must not be treated as free
+      # variables inside nested lambdas. Adding them here prevents compute_free_vars
+      # from classifying them as captures (filter_capturable drops them because
+      # they appear in top_level but not in params).
+      # NOTE: TVar resolution for top-level let names still requires a follow-up
+      # decision — see T20 gap note in final review report.
+      | typed_ast.TLetDecl name _ ->
+          set_insert(name, build_top_level_fn_set(rest))
       | _ -> build_top_level_fn_set(rest)
 
 # Filter a list of free-var names to those that are in `params` or `captures`.
@@ -255,23 +263,49 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
       build_lifted_captures_go(rest, base_idx, i + 1,
         dict_set(v, "%t$" ++ int_to_string(base_idx + i), acc))
 
+# Determine the IRLoadEnvSlot kind for a single captured variable: "scalar" if
+# Int or Char (no GC root needed); "heap" for everything else.
+# FIX R4#7.
+# O(n) where n = body size (scans body for the TVar occurrence).
+fn capture_kind(v: String, body: typed_ast.TypedExpr) -> String =
+  match find_capture_type(body, v) with
+  | Nothing -> "heap"
+  | Just t ->
+      if is_int_type(t) || is_char_type(t)
+      then "scalar"
+      else "heap"
+
+# Build a parallel list of kinds for each name in `frees`, given the lambda body.
+# O(n * m) where n = frees length, m = body size.
+fn build_capture_kinds(frees: List String, body: typed_ast.TypedExpr) -> List String =
+  match frees with
+  | Nil -> Nil
+  | Cons v rest -> Cons(capture_kind(v, body), build_capture_kinds(rest, body))
+
 # Build the IRLoadEnvSlot ops for the lifted lambda entry block.
-# Each free var at index i gets: IRLoadEnvSlot("%t$<base+i>", "%env$", i+1).
+# Each free var at index i gets: IRLoadEnvSlot("%t$<base+i>", "%env$", i+1, kind).
 # (Slot 0 is the code pointer; captures start at slot 1.)
 # "%t$" uses '$' which Sprout's lexer cannot produce in user identifiers,
 # so lifted-body SSA names are guaranteed disjoint from any user-written
 # lambda param name (e.g. "t0").
 # "%env$" is likewise '$'-safe; disjoint from any user-written lambda param.
+# FIX R4#7: now accepts a `kinds` list (parallel to frees) for scalar vs heap.
 # O(n).
-fn build_load_env_ops(frees: List String, base_idx: Int) -> List sprout_ir.IROp =
-  build_load_env_ops_go(frees, base_idx, 0)
+fn build_load_env_ops(frees: List String, kinds: List String, base_idx: Int) -> List sprout_ir.IROp =
+  build_load_env_ops_go(frees, kinds, base_idx, 0)
 
-fn build_load_env_ops_go(frees: List String, base_idx: Int, i: Int) -> List sprout_ir.IROp =
+fn build_load_env_ops_go(frees: List String, kinds: List String, base_idx: Int, i: Int) -> List sprout_ir.IROp =
   match frees with
   | Nil -> Nil
-  | Cons _ rest ->
-      Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1),
-           build_load_env_ops_go(rest, base_idx, i + 1))
+  | Cons _ rest_frees ->
+      match kinds with
+      | Nil ->
+          # Defensive: more frees than kinds (should not happen); treat as heap.
+          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1, "heap"),
+               build_load_env_ops_go(rest_frees, Nil, base_idx, i + 1))
+      | Cons k rest_kinds ->
+          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1, k),
+               build_load_env_ops_go(rest_frees, rest_kinds, base_idx, i + 1))
 
 # ---------------------------------------------------------------------------
 # Constructor table — name → (tag, actual_arity, max_arity_of_owning_ADT).
@@ -511,6 +545,12 @@ fn is_string_type(t: types.Type) -> Bool =
   | types.TConst name -> name == "String"
   | _ -> false
 
+# True iff t is the monomorphic Char type.
+fn is_char_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name -> name == "Char"
+  | _ -> false
+
 # True iff t is the monomorphic Unit type.
 fn is_unit_type(t: types.Type) -> Bool =
   match t with
@@ -679,18 +719,25 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
       find_capture_type(operand, name)
   | typed_ast.TCall callee args _ _ ->
       find_capture_type_first(Cons(callee, args), name)
-  | typed_ast.TLambda _ body _ _ ->
-      find_capture_type(body, name)
+  | typed_ast.TLambda lparams body _ _ ->
+      # FIX R4#1: if `name` is shadowed by the inner lambda's own param, stop —
+      # the inner body's TVar resolves to the param, not the outer capture.
+      if param_known(name, fv_param_names(lparams))
+      then Nothing
+      else find_capture_type(body, name)
   | typed_ast.TRange s e _ _ ->
       find_capture_type_first(Cons(s, Cons(e, Nil)), name)
-  | typed_ast.TDo _ _ _ -> Nothing
+  | typed_ast.TDo steps _ _ ->
+      # FIX R4#6: mirror compute_free_vars_do_steps; walk steps threading shadow info.
+      find_capture_type_do_steps(steps, name)
   | typed_ast.TDict _ _ _ -> Nothing
   | typed_ast.TRecord _ fields _ _ ->
       find_capture_type_fields(fields, name)
   | typed_ast.TMatch scrut arms _ _ ->
-      # TODO: also walk arm bodies via find_capture_type_arms when TMatch
-      # lowering lands. Currently unreachable (translate_expr rejects TMatch).
-      find_capture_type_first(Cons(scrut, Nil), name)
+      # FIX R4#6: mirror compute_free_vars_match_arms; walk arm bodies with pattern shadowing.
+      match find_capture_type(scrut, name) with
+      | Just t -> Just(t)
+      | Nothing -> find_capture_type_match_arms(arms, name)
   | typed_ast.TGetField obj _ _ _ ->
       find_capture_type(obj, name)
 
@@ -715,6 +762,52 @@ fn find_capture_type_fields(fields: List typed_ast.TypedRecordField, name: Strin
           match find_capture_type(e, name) with
           | Just t -> Just(t)
           | Nothing -> find_capture_type_fields(rest, name)
+
+# FIX R4#6: walk TMatch arms, respecting pattern shadowing.
+# If the arm pattern binds `name`, skip the arm body (the reference resolves
+# to the pattern variable, not the outer capture).
+# O(n * k) where n = arm count, k = arm body size.
+fn find_capture_type_match_arms(arms: List typed_ast.TypedMatchBranch, name: String) -> Maybe types.Type =
+  match arms with
+  | Nil -> Nothing
+  | Cons arm rest ->
+      match arm with
+      | typed_ast.TypedMatchBranch pat body ->
+          if param_known(name, pattern_names(pat))
+          then find_capture_type_match_arms(rest, name)
+          else
+            match find_capture_type(body, name) with
+            | Just t -> Just(t)
+            | Nothing -> find_capture_type_match_arms(rest, name)
+
+# FIX R4#6: walk TDo steps, threading shadow information left-to-right.
+# TDoBindStep and TDoLetStep add new names to the shadowed set; once `name`
+# is bound in a step, stop searching subsequent steps (mirroring
+# compute_free_vars_do_steps which removes a newly-bound name from free vars).
+# O(n * k) where n = step count, k = expr size.
+fn find_capture_type_do_steps(steps: List typed_ast.TypedDoStep, name: String) -> Maybe types.Type =
+  match steps with
+  | Nil -> Nothing
+  | Cons step rest ->
+      match step with
+      | typed_ast.TDoBindStep pat e ->
+          match find_capture_type(e, name) with
+          | Just t -> Just(t)
+          | Nothing ->
+              if param_known(name, pattern_names(pat))
+              then Nothing
+              else find_capture_type_do_steps(rest, name)
+      | typed_ast.TDoLetStep lname e ->
+          match find_capture_type(e, name) with
+          | Just t -> Just(t)
+          | Nothing ->
+              if lname == name
+              then Nothing
+              else find_capture_type_do_steps(rest, name)
+      | typed_ast.TDoExprStep e ->
+          match find_capture_type(e, name) with
+          | Just t -> Just(t)
+          | Nothing -> find_capture_type_do_steps(rest, name)
 
 # Check whether any name in capturable is Bool-typed in the lambda body.
 # Returns Just(name) for the first Bool-typed capture, Nothing if none.
@@ -861,8 +954,11 @@ fn translate_lambda_lifted(lparams: List ast.Param, body: typed_ast.TypedExpr,
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   do
     let n_caps = list_length(capturable)
+    # FIX R4#7: compute scalar vs heap kind for each capture so ir_rooting can
+    # skip rooting Int/Char captures (they are i64 scalars, never GC'd).
+    let cap_kinds = build_capture_kinds(capturable, body)
     # IRLoadEnvSlot ops seeding the lifted entry block (slots 1..n_caps).
-    let load_ops = build_load_env_ops(capturable, 0)
+    let load_ops = build_load_env_ops(capturable, cap_kinds, 0)
     # captures dict for the lifted body: free-var name → "%t$<i>" for slot i.
     let lifted_captures = build_lifted_captures(capturable, 0)
     # Lifted body uses "%t$" prefix to avoid colliding with user lambda params
@@ -1314,18 +1410,18 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                                           cur_label, cur_ops, captures, lifted_ref, top_level,
                                           lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | Nothing ->
-      if is_string_type(call_ty)
-      then Err("ast_to_ir: user fn returning String not yet supported in IR codegen")
-      else
-        match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
-                                    captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
-                                    name_prefix) with
-        | Err msg -> Err(msg)
-        | Ok r ->
-            match r with
-            | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
-                finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                   arg_cur_ops, arg_names, idx1, name_prefix)
+      # FIX R4#3: removed the is_string_type(call_ty) rejection that was here.
+      # All IR values are i64 — String-returning user fns are i64 just like Int.
+      # The check was a placeholder from PR 1.5 that blocked capturing-IIFE-returning-String.
+      match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+                                  captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                                  name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok r ->
+          match r with
+          | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
+              finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                 arg_cur_ops, arg_names, idx1, name_prefix)
 
 fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             args: List typed_ast.TypedExpr,
@@ -1551,6 +1647,21 @@ fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExp
               Ok(Just((build_fn(name, pnames, ret_ty, blocks), next_idx, list_reverse(lifted))))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
 
+# Validate that no TInstanceDecl method name starts with "__sprout_".
+# TInstanceDecl carries a List TypedInstanceMethod; each method's first field
+# is the method name (TypedInstanceMethod String ...).
+# FIX R4#5.
+# O(n) where n = number of instance methods.
+fn validate_instance_methods(methods: List typed_ast.TypedInstanceMethod) -> Result String Unit =
+  match methods with
+  | Nil -> Ok(())
+  | Cons m rest ->
+      match m with
+      | typed_ast.TypedInstanceMethod mname _ _ _ _ ->
+          if str_starts_with(mname, "__sprout_")
+          then Err("ast_to_ir: instance method '" ++ mname ++ "' is reserved (cannot start with '__sprout_')")
+          else validate_instance_methods(rest)
+
 # Validate that no user declaration uses the reserved "__sprout_" name prefix.
 # Checked once up-front in translate_program so every decl variant is covered
 # by a single source of truth (avoids per-arm repetition and bypass bugs).
@@ -1576,6 +1687,12 @@ fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result String
           if str_starts_with(name, "__sprout_")
           then Err("ast_to_ir: name '" ++ name ++ "' is reserved (cannot start with '__sprout_')")
           else validate_reserved_namespace(rest)
+      # FIX R4#5: TInstanceDecl methods were not checked. A user instance with a
+      # method named __sprout_ir_lambda_<N> would silently collide with lifted lambdas.
+      | typed_ast.TInstanceDecl _ _ methods ->
+          match validate_instance_methods(methods) with
+          | Err msg -> Err(msg)
+          | Ok _ -> validate_reserved_namespace(rest)
       | _ -> validate_reserved_namespace(rest)
 
 fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int),

@@ -222,4 +222,52 @@ fn main() -> Unit !{IO} =
     # Sprout adds either multi-arg lambdas or a typechecker mode that permits
     # over-application past a closure boundary.
 
+    # T18: Round-4 Finding #1 — find_capture_type TLambda shadowing. The outer
+    # lambda captures the outer fn's Bool param `b` (used in `if b ...`); an
+    # inner lambda `\\b -> b + 1` introduces its own param named `b` (Int),
+    # shadowing in its own scope only. Pre-fix: find_capture_type's TLambda arm
+    # descended into the inner lambda's body and returned the inner param's Int
+    # type for `b`, so the Bool-capture guard silently passed. Fix: the TLambda
+    # arm must exclude names that are the inner lambda's own param from the
+    # search. Assertion: the outer Bool capture is still rejected.
+    t18 <- translated_err_contains(
+      "fn outer(b: Bool) -> Int = (\\y -> if b then (\\b -> b + 1)(5) else 0)(7)",
+      "Bool capture")
+    assert_true(state, "T18: Bool capture detected despite inner lambda shadowing `b` (find_capture_type respects lambda scope)", t18)
+
+    # T19: Round-4 Finding #2 — derived SSA name collision. A user fn param
+    # named `t0_raw` collides with the IRMkClosure-derived `%t0_raw` SSA name
+    # (built from result `%t0` + `_raw` suffix in ir_lowering). Fix: use the
+    # `$raw` separator so derived names cannot match any source identifier.
+    # Assertion: the emitted LLVM contains `%t0$raw`, proving the separator.
+    t19 <- translated_ok_ir_contains(
+      "fn f(t0_raw: Int) -> Int = (\\x -> x + 1)(t0_raw)",
+      "%t0$raw")
+    assert_true(state, "T19: IRMkClosure-derived SSA name uses $raw separator (no collision with user param `t0_raw`)", t19)
+
+    # T20 (deferred): Round-4 Finding #4 — top-level let binding visible to
+    # lambda body. build_top_level_fn_set now includes TLetDecl names (so
+    # compute_free_vars correctly excludes them as free vars), but translate_expr
+    # still errs at the TVar lookup since no path resolves top-level let names
+    # to SSA values. Needs architectural decision: option (a) 0-arg IRFunction,
+    # (b) inline body translation at use site, or (c) LLVM global with init.
+    # Tracked in BACKLOG.md.
+
+    # T21 (deferred): Round-4 Finding #3 — capturing IIFE returning String.
+    # translate_direct_call's String-rejection was removed, but the source
+    # `fn f(n: Int) -> String = (\\x -> int_to_string(x + n))(7)` still fails
+    # to translate at a subtler step (likely outer fn's return-type handling
+    # or a propagation issue not fully traced). The String rejection removal
+    # is still valid; the test's specific source pattern needs separate
+    # investigation. Tracked in BACKLOG.md.
+
+    # T22: Round-4 Finding #10 (T7b restoration) — rooting pass must NOT emit
+    # "%t0 = alloca" for any lifted lambda body. Uses a non-capturing source
+    # since T21's source is still blocked. If the idx_map fix regressed, the
+    # rooting pass would reuse %t0 for a root alloca, causing duplicate-SSA.
+    t22 <- translated_ok_ir_contains(
+      "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
+      "%t0 = alloca")
+    assert_false(state, "T22: idx_map fix — rooting pass must not emit %t0 alloca in lifted body (would collide with IRLoadEnvSlot)", t22)
+
     summary(state)

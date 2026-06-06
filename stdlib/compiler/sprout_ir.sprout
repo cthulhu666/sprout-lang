@@ -103,12 +103,16 @@ export type IROp (..) =
   #   Lowering: load code-ptr from env slot 0 + indirect LLVM call(env, args...).
   #   Result type is i64 in M2 (everything is i64).
   | IRApplyClosure String String (List String)
-  # IRLoadEnvSlot <result> <env-val> <slot-idx>
+  # IRLoadEnvSlot <result> <env-val> <slot-idx> <kind>
   #   - result: '%t<N>' for the loaded i64 value.
   #   - env-val: '%'-prefixed env handle (typically a parameter of a lifted lambda).
   #   - slot-idx: 1-based; slot 0 is the code pointer, slots 1..N are captures.
-  #   Lowering: GEP + load i64.  Pure load — does NOT trigger GC.
-  | IRLoadEnvSlot String String Int
+  #   - kind: "heap" | "scalar".  "scalar" captures (Int, Char) are not rooted
+  #     by ir_rooting; "heap" captures (String, ADT, closure) are rooted.
+  #   Lowering: GEP + load i64 (kind is ignored at lowering; always emits load i64).
+  #   Pure load — does NOT trigger GC.
+  #   FIX R4#7.
+  | IRLoadEnvSlot String String Int String
   # IRRoot <slot-name> <value-being-rooted> <discard-reg-for-push-call>
   # All names carry their '%' prefix already.
   #
@@ -192,8 +196,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = mk_closure " ++ code_fn ++ "(" ++ print_call_args(caps) ++ ")"
   | IRApplyClosure r callee args ->
       "    " ++ r ++ " = apply_closure " ++ callee ++ "(" ++ print_call_args(args) ++ ")"
-  | IRLoadEnvSlot r env slot ->
-      "    " ++ r ++ " = load_env_slot " ++ env ++ "[" ++ int_to_string(slot) ++ "]"
+  | IRLoadEnvSlot r env slot kind ->
+      "    " ++ r ++ " = load_env_slot " ++ env ++ "[" ++ int_to_string(slot) ++ "](" ++ kind ++ ")"
   | IRRoot slot v discard ->
       "    " ++ discard ++ " = root " ++ slot ++ ", " ++ v
   | IRUnroot n discard ->

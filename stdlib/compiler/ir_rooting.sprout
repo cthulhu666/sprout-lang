@@ -43,7 +43,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # IRApplyClosure does an indirect call to a user-provided code-ptr; conservative trigger.
   | sprout_ir.IRApplyClosure _ _ _ -> true
   # IRLoadEnvSlot is a pure i64 load — does NOT trigger GC.
-  | sprout_ir.IRLoadEnvSlot _ _ _ -> false
+  | sprout_ir.IRLoadEnvSlot _ _ _ _ -> false
   | _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
@@ -60,9 +60,11 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRMkClosure r _ _ -> Just(r)
   # Closure-application result is conservatively heap-typed (M2: all results are i64).
   | sprout_ir.IRApplyClosure r _ _ -> Just(r)
-  # Loaded env slot may hold a heap value; over-roots scalar slots but mirrors the
-  # M2 "all i64 are potentially heap" convention used everywhere else.
-  | sprout_ir.IRLoadEnvSlot r _ _ -> Just(r)
+  # FIX R4#7: honour the kind field. "scalar" slots (Int, Char) are NOT heap;
+  # "heap" slots (String, ADT, closure) are. This avoids over-rooting scalar
+  # captures in deep-recursive closures with many Int/Char captures.
+  | sprout_ir.IRLoadEnvSlot r _ _ kind ->
+      if kind == "scalar" then Nothing else Just(r)
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------
@@ -126,7 +128,7 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRMakeCtor _ _ _ args -> args
   | sprout_ir.IRMkClosure _ _ caps -> caps
   | sprout_ir.IRApplyClosure _ callee args -> Cons(callee, args)
-  | sprout_ir.IRLoadEnvSlot _ env _ -> Cons(env, Nil)
+  | sprout_ir.IRLoadEnvSlot _ env _ _ -> Cons(env, Nil)
   | sprout_ir.IRRoot _ v _ -> Cons(v, Nil)
   | sprout_ir.IRUnroot _ _ -> Nil
 
@@ -146,7 +148,7 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
   | sprout_ir.IRMkClosure r _ _ -> Just(r)
   | sprout_ir.IRApplyClosure r _ _ -> Just(r)
-  | sprout_ir.IRLoadEnvSlot r _ _ -> Just(r)
+  | sprout_ir.IRLoadEnvSlot r _ _ _ -> Just(r)
   | sprout_ir.IRRoot _ _ discard -> Just(discard)
   | sprout_ir.IRUnroot _ discard -> Just(discard)
   | _ -> Nothing

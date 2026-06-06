@@ -585,7 +585,15 @@ static long long sprout_make_registered_obj(long long tag, long long f0, long lo
 long long sprout_alloc_closure_env(long long size) {
   if (size < 0) tcp_fail("sprout_alloc_closure_env: size must be >= 0");
   sprout_gc_maybe_collect_threshold();
+  /* SYNC WITH stdlib/compiler/ir_lowering.sprout IRMkClosure lowering (FIX R4#8):
+   *   IR computes size = (n_caps + 1) * 8.
+   *   Runtime computes aux_slots = (size / 8) - 1 = n_caps.
+   * Any layout change must update both formulas. */
   void* out = sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
+  /* FIX R4#9: zero-init the env block to eliminate any window between
+   * register_managed_ptr and the IR-emitted capture stores where GC could
+   * observe uninitialized slot values. */
+  if (size > 0) memset(out, 0, (size_t)size);
   size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
   register_managed_ptr(out, SPROUT_HEAP_CLOSURE, slots);
   return (long long)(uintptr_t)out;

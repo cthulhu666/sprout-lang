@@ -79,16 +79,18 @@ fn make_ctor_args_tail(args: List String) -> String =
   | _ -> ", " ++ lower_call_args(args)
 
 # Emit GEP+store pairs for each capture in an IRMkClosure env.
-# raw_name: the local ptr name (e.g. "%t5_raw"); idx: 1-based slot index.
+# raw_name: the local ptr name (e.g. "%t5$raw"); idx: 1-based slot index.
+# FIX R4#2: slot temp names use "$slot$" (was "_slot_") so they cannot collide
+# with any source-level identifier (Sprout's lexer rejects '$' in identifiers).
 # Returns a String starting with "\n" for each pair, or "" if caps is empty.
 # O(n) in number of captures.
 fn mk_closure_cap_stores(caps: List String, raw_name: String, idx: Int) -> String =
   match caps with
   | Nil -> ""
   | Cons cap rest ->
-      "\n  " ++ raw_name ++ "_slot_" ++ int_to_string(idx) ++
+      "\n  " ++ raw_name ++ "$slot$" ++ int_to_string(idx) ++
         " = getelementptr i64, ptr " ++ raw_name ++ ", i64 " ++ int_to_string(idx) ++ "\n" ++
-      "  store i64 " ++ cap ++ ", ptr " ++ raw_name ++ "_slot_" ++ int_to_string(idx) ++
+      "  store i64 " ++ cap ++ ", ptr " ++ raw_name ++ "$slot$" ++ int_to_string(idx) ++
       mk_closure_cap_stores(rest, raw_name, idx + 1)
 
 # Produce a comma-separated list of n "i64" tokens for a function-type signature.
@@ -144,23 +146,31 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRMkClosure r code_fn caps ->
       # sz = (num_captures + 1) * 8 bytes; slot 0 holds the code pointer.
       # r is the i64 closure handle — directly the return of sprout_alloc_closure_env.
-      # Why no re-pack: alloc already returns i64; inttoptr view is a local temp only.
+      # FIX R4#2: derived SSA names use '$' separator (was '_') so they cannot
+      # collide with any user-written identifier. '$' is rejected by Sprout's lexer.
+      # SYNC WITH runtime/sprout_runtime.c sprout_alloc_closure_env:
+      #   IR computes size = (n_caps + 1) * 8.
+      #   Runtime computes slots = (size / 8) - 1 = n_caps.
+      # Any layout change must update both formulas. (See also FIX R4#8.)
       "  " ++ r ++ " = call i64 @sprout_alloc_closure_env(i64 " ++
         int_to_string((list_length(caps) + 1) * 8) ++ ")\n" ++
-      "  " ++ r ++ "_raw = inttoptr i64 " ++ r ++ " to ptr\n" ++
-      "  store ptr @" ++ code_fn ++ ", ptr " ++ r ++ "_raw" ++
-      mk_closure_cap_stores(caps, r ++ "_raw", 1)
+      "  " ++ r ++ "$raw = inttoptr i64 " ++ r ++ " to ptr\n" ++
+      "  store ptr @" ++ code_fn ++ ", ptr " ++ r ++ "$raw" ++
+      mk_closure_cap_stores(caps, r ++ "$raw", 1)
   | sprout_ir.IRApplyClosure r callee args ->
       # env (the closure handle) is passed as the implicit first arg per M2 ABI.
       # Opaque-pointer LLVM (15+) requires the function type spelled out at each indirect call.
-      "  " ++ r ++ "_env_ptr = inttoptr i64 " ++ callee ++ " to ptr\n" ++
-      "  " ++ r ++ "_code = load ptr, ptr " ++ r ++ "_env_ptr\n" ++
+      # FIX R4#2: derived names use '$' separator.
+      "  " ++ r ++ "$env_ptr = inttoptr i64 " ++ callee ++ " to ptr\n" ++
+      "  " ++ r ++ "$code = load ptr, ptr " ++ r ++ "$env_ptr\n" ++
       "  " ++ r ++ " = call i64 (" ++ replicate_i64_csv(1 + list_length(args)) ++ ") " ++
-        r ++ "_code(i64 " ++ callee ++ make_ctor_args_tail(args) ++ ")"
-  | sprout_ir.IRLoadEnvSlot r env slot ->
-      "  " ++ r ++ "_env_ptr = inttoptr i64 " ++ env ++ " to ptr\n" ++
-      "  " ++ r ++ "_slot_ptr = getelementptr i64, ptr " ++ r ++ "_env_ptr, i64 " ++ int_to_string(slot) ++ "\n" ++
-      "  " ++ r ++ " = load i64, ptr " ++ r ++ "_slot_ptr"
+        r ++ "$code(i64 " ++ callee ++ make_ctor_args_tail(args) ++ ")"
+  | sprout_ir.IRLoadEnvSlot r env slot _ ->
+      # kind field (FIX R4#7) is ignored at lowering — always emit load i64.
+      # FIX R4#2: derived names use '$' separator.
+      "  " ++ r ++ "$env_ptr = inttoptr i64 " ++ env ++ " to ptr\n" ++
+      "  " ++ r ++ "$slot_ptr = getelementptr i64, ptr " ++ r ++ "$env_ptr, i64 " ++ int_to_string(slot) ++ "\n" ++
+      "  " ++ r ++ " = load i64, ptr " ++ r ++ "$slot_ptr"
   | sprout_ir.IRRoot slot v discard ->
       "  " ++ slot ++ " = alloca i64\n" ++
       "  store i64 " ++ v ++ ", ptr " ++ slot ++ "\n" ++
