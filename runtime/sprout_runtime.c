@@ -889,6 +889,11 @@ static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
       break;
     }
     case SPROUT_HEAP_CLOSURE: {
+      /* Slot 0 holds the function code-pointer (text-segment address) and is
+       * NEVER traced by the GC — it is not a heap value.  Slots 1..N hold
+       * captured heap values and ARE traced.  The +1 offset here skips slot 0.
+       * Any change to closure-env layout (e.g. trampoline ops storing heap
+       * values at slot 0) must be paired with an update here. */
       long long* slots = (long long*)node->ptr;
       return slots[index + 1];
     }

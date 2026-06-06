@@ -96,7 +96,8 @@ fn mk_closure_cap_stores(caps: List String, raw_name: String, idx: Int) -> Strin
 # Used by IRApplyClosure to spell out the callee's type for opaque-pointer LLVM (15+).
 # O(n).
 fn replicate_i64_csv(n: Int) -> String =
-  if n <= 1 then "i64"
+  if n == 0 then ""
+  else if n == 1 then "i64"
   else "i64, " ++ replicate_i64_csv(n - 1)
 
 # Render a single IROp as one LLVM IR line (without trailing newline).

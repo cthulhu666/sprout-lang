@@ -341,39 +341,42 @@ fn live_across(in_scope_ord_rev: List String, live_after_op: Set) -> List String
 
 # Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
 # slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
-fn emit_roots_loop(vs: List String, idx: Int, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+# prefix: "%t" for user fns; "%t$" for lifted lambdas (avoids colliding with
+# the IRLoadEnvSlot names %t$0, %t$1, ... emitted by build_load_env_ops_go).
+fn emit_roots_loop(vs: List String, idx: Int, prefix: String, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match vs with
   | Nil -> (acc, idx)
   | Cons v rest ->
-      emit_roots_loop(rest, idx + 2,
-        Cons(sprout_ir.IRRoot("%t" ++ int_to_string(idx),
+      emit_roots_loop(rest, idx + 2, prefix,
+        Cons(sprout_ir.IRRoot(prefix ++ int_to_string(idx),
                               v,
-                              "%t" ++ int_to_string(idx + 1)), acc))
+                              prefix ++ int_to_string(idx + 1)), acc))
 
-fn unroot_op(n: Int, idx: Int) -> (sprout_ir.IROp, Int) =
-  (sprout_ir.IRUnroot(n, "%t" ++ int_to_string(idx)), idx + 1)
+fn unroot_op(n: Int, idx: Int, prefix: String) -> (sprout_ir.IROp, Int) =
+  (sprout_ir.IRUnroot(n, prefix ++ int_to_string(idx)), idx + 1)
 
 fn emit_with_roots(op: sprout_ir.IROp, live: List String, n: Int, idx: Int,
-                   acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
-  match emit_roots_loop(live, idx, acc) with
+                   prefix: String, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+  match emit_roots_loop(live, idx, prefix, acc) with
   | (acc1, idx1) ->
-      match unroot_op(n, idx1) with
+      match unroot_op(n, idx1, prefix) with
       | (op_unroot, idx2) ->
           (Cons(op_unroot, Cons(op, acc1)), idx2)
 
 fn maybe_wrap_trigger(op: sprout_ir.IROp, live: List String, idx: Int,
-                      acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+                      prefix: String, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match live with
   | Nil -> (Cons(op, acc), idx)
-  | _ -> emit_with_roots(op, live, list_length(live), idx, acc)
+  | _ -> emit_with_roots(op, live, list_length(live), idx, prefix, acc)
 
 fn maybe_wrap(op: sprout_ir.IROp,
               live_after_op: Set,
               in_scope_ord: List String,
               idx: Int,
+              prefix: String,
               acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   if op_triggers_gc(op)
-  then maybe_wrap_trigger(op, live_across(in_scope_ord, live_after_op), idx, acc)
+  then maybe_wrap_trigger(op, live_across(in_scope_ord, live_after_op), idx, prefix, acc)
   else (Cons(op, acc), idx)
 
 # Carry both a reverse-definition-order list and dedup via list_member.
@@ -397,16 +400,17 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
                heap_origin: Set,
                in_scope_ord: List String,
                idx: Int,
+               prefix: String,
                acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match ops with
   | Nil -> (list_reverse(acc), idx)
   | Cons op rest ->
       match maybe_wrap(op, live_after_head(ops, block_live_out),
-                       in_scope_ord, idx, acc) with
+                       in_scope_ord, idx, prefix, acc) with
       | (acc1, idx1) ->
           rewrite_ops(rest, block_live_out, heap_origin,
                       update_scope(op, heap_origin, in_scope_ord),
-                      idx1, acc1)
+                      idx1, prefix, acc1)
 
 fn seed_in_scope_loop(names: List String, ord: List String) -> List String =
   match names with
@@ -426,14 +430,15 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
                       live_in_map: Dict Set,
                       heap_origin: Set,
                       all_blocks: List sprout_ir.IRBlock,
-                      idx: Int) -> (sprout_ir.IRBlock, Int) =
+                      idx: Int,
+                      prefix: String) -> (sprout_ir.IRBlock, Int) =
   match b with
   | sprout_ir.IRBlock lbl ops ->
       match rewrite_ops(ops,
                         compute_live_out(b, all_blocks, live_in_map),
                         heap_origin,
                         seed_in_scope(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
-                        idx, Nil) with
+                        idx, prefix, Nil) with
       | (new_ops, idx_out) -> (sprout_ir.IRBlock(lbl, new_ops), idx_out)
 
 fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
@@ -441,21 +446,22 @@ fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
                      heap_origin: Set,
                      all_blocks: List sprout_ir.IRBlock,
                      idx: Int,
+                     prefix: String,
                      acc: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
   match blocks with
   | Nil -> list_reverse(acc)
   | Cons b rest ->
-      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx) with
+      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx, prefix) with
       | (b1, idx1) ->
-          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, Cons(b1, acc))
+          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, prefix, Cons(b1, acc))
 
-fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int) -> sprout_ir.IRFunction =
+fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, prefix: String) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       sprout_ir.IRFunction(name, params, ret_ty,
         rewrite_fn_blocks(blocks, compute_liveness(blocks),
                           set_union(params_heap_origin(params), compute_heap_origin(blocks)),
-                          blocks, start_idx, Nil))
+                          blocks, start_idx, prefix, Nil))
 
 # ---------------------------------------------------------------------------
 # Seed heap_origin from function parameters.
@@ -477,9 +483,20 @@ fn params_heap_origin(params: List String) -> Set =
 fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name _ _ _ ->
+      # Lifted lambda bodies use "%t$" as the fresh-name prefix to avoid colliding
+      # with the IRLoadEnvSlot names "%t$0", "%t$1", ... emitted by build_load_env_ops.
+      # User functions use "%t" (the classic prefix).  The start_idx from idx_map
+      # prevents the rooting pass from reusing indices already consumed by the
+      # translator; lifted lambdas in idx_map carry body_next_idx which starts
+      # after the n_caps IRLoadEnvSlot names.
       match dict_get(name, idx_map) with
-      | Just i -> rewrite_fn(f, i)
-      | Nothing -> rewrite_fn(f, 0)
+      | Just i -> rewrite_fn(f, i, prefix_for_fn(name))
+      | Nothing -> rewrite_fn(f, 0, prefix_for_fn(name))
+
+# Pick the SSA fresh-name prefix for a function: "%t$" for lifted lambdas,
+# "%t" for user functions.  O(n) in the function name length.
+fn prefix_for_fn(name: String) -> String =
+  if str_starts_with(name, "__sprout_ir_lambda_") then "%t$" else "%t"
 
 fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int,
                acc: List sprout_ir.IRFunction) -> List sprout_ir.IRFunction =
