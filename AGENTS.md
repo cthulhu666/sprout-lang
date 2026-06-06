@@ -34,7 +34,7 @@ For coding tasks, work is done only when **all applicable** items below are true
 6. `mise exec -- just compile-examples-stage1` passes (or the failing examples exactly match the pre-existing known-broken set). Run after every change that touches `stdlib/`, the runtime, or any example file.
 7. **Compiler-source changes** (any edit under `stdlib/compiler/`) — smoke shapes: each shape in `tests/smoke_shapes/*.spr` emits IR cleanly via `compile_driver_bin_stage1 --emit-ir`, the IR contains at least one `define` block, and contains no `str_concat(ptr null,…)` occurrence (null-ptr codegen regression guard).
 8. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bundle smoke: `compile_driver_bin_stage1 --phase bundle` on `stdlib/compiler/token.sprout`, `stdlib/compiler/ast.sprout`, and `stdlib/prelude.sprout` produces non-empty output containing no dot-prefix qualified names (lines beginning with `.`).
-9. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bootstrap seed: run `just refresh-seed` and stage the updated `bootstrap/compile_driver.ll`. CI's `just verify-bootstrap-fixed-point` gates on this; a stale seed blocks all CI gates. Use the 2-step bootstrap if the committed seed predates a parser change (see [docs/bootstrap.md §2-Step Bootstrap Protocol](docs/bootstrap.md#2-step-bootstrap-protocol)).
+9. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bootstrap seed: run `just refresh-seed` and stage the updated `bootstrap/compile_driver.ll`. CI's `just verify-bootstrap-fixed-point` gates on this; a stale seed blocks all CI gates. Use the 2-step bootstrap if the committed seed predates a parser change (see [docs/debugging.md §2-Step Bootstrap Protocol](docs/debugging.md#2-step-bootstrap-protocol)).
 10. **Runtime changes** (any edit to `runtime/sprout_runtime.c`) — APPROVED_BUILTINS: every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
 11. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` each compile *and run* to completion without crash. (`just compile-examples-stage1` only covers compile; running these is currently a manual gate until CI covers it.)
 12. The changes are committed.
@@ -131,9 +131,10 @@ For any non-trivial language change, include:
 5. If a feature could plausibly live in Sprout stdlib, discuss that tradeoff with the user before implementing it as a builtin.
 6. Performance is **not** sufficient justification for a builtin unless there is a concrete, measured bottleneck. Correctness requirements (e.g. raw byte I/O that `term_read_line` cannot express) are sufficient.
 
-## Bootstrap and Debugging Tools
+## Compiler Internals and Debugging Tools
 
-See [docs/bootstrap.md](docs/bootstrap.md) for diagnostic phases, GC ABI invariants, type-aware rooting, the GC safety linter, and the 2-step bootstrap protocol (parser-change catch-22).
+- **Before editing `stdlib/compiler/` or `runtime/`:** read [docs/compiler-internals.md](docs/compiler-internals.md) for GC ABI invariants, type-aware rooting rules, and the GC safety linter.
+- **When something is broken:** see [docs/debugging.md](docs/debugging.md) for diagnostic phases (`--phase`), the 2-step bootstrap protocol (parser-change catch-22), and `just llvm-where <ll_file> <line>` (maps an `opt --passes=verify` error line to its enclosing Sprout function).
 
 ## Known Limitations
 

@@ -526,6 +526,16 @@ seed-stale:
     exit 1
   fi
 
+# ── Diagnostic Tools ──────────────────────────────────────────────────────────
+
+# Map an opt/clang error line number back to its enclosing Sprout function.
+# When opt --passes=verify fails with "error at line N of stage2.ll", run:
+#   just llvm-where build/stage2.ll N
+# See docs/debugging.md §llvm-where for full context.
+[group('dev')]
+llvm-where ll_file line:
+  bash scripts/llvm_diag.sh "{{ll_file}}" "{{line}}"
+
 # ── DoD CI Gates ──────────────────────────────────────────────────────────────
 #
 # These recipes enforce DoD items #7–#10 — the checks that previously lived in
