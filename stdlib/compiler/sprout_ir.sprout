@@ -87,8 +87,8 @@ export type IROp (..) =
   # IRMkClosure <result> <code-fn-name> <captures>
   #   - result: '%t<N>' for the i64 closure handle.
   #   - code-fn-name: top-level synthetic function name (no '@' prefix); MUST use the
-  #     '@ir_lambda_' prefix in emission to avoid collisions with legacy codegen's
-  #     '@lambda<N>' wrappers.
+  #     '@__sprout_ir_lambda_' prefix in emission to avoid collisions with user-defined
+  #     functions (the '__sprout_' namespace is reserved by the compiler).
   #   - captures: list of '%'-prefixed value-names to store into env slots 1..N
   #     (slot 0 reserved for the code pointer).  Order is observable: lifted
   #     bodies access captures via IRLoadEnvSlot at the same slot index.

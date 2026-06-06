@@ -13,7 +13,7 @@ import stdlib.compiler.typed_ast as typed_ast
 # See docs/gc-rooting-model-c-plan-2026-06-02.md.
 #
 # Exercises:
-#   - TLambda -> IRMkClosure + lifted IRFunction (ir_lambda_<N>)
+#   - TLambda -> IRMkClosure + lifted IRFunction (__sprout_ir_lambda_<N>)
 #   - Closure call via IRApplyClosure when callee is a param of function type
 #   - Free-variable capture (captured vars become IRLoadEnvSlot in lifted body)
 #   - Partial application -> Err (deferred)
@@ -65,12 +65,12 @@ fn main() -> Unit !{IO} =
     # param annotation. Tests below use polymorphic shapes that match prelude
     # conventions. Lowering still asserts on the SSA-level LLVM substring.
 
-    # T1: A lambda lifted into a synthetic function gets named ir_lambda_<N>.
-    # The @ir_lambda_ prefix should appear in the emitted LLVM.
+    # T1: A lambda lifted into a synthetic function gets named __sprout_ir_lambda_<N>.
+    # The @__sprout_ir_lambda_ prefix should appear in the emitted LLVM.
     t1 <- translated_ok_ir_contains(
       "fn mk() -> (a -> a) = \\x -> x",
-      "@ir_lambda_")
-    assert_true(state, "T1: lambda lifts to @ir_lambda_ function", t1)
+      "@__sprout_ir_lambda_")
+    assert_true(state, "T1: lambda lifts to @__sprout_ir_lambda_ function", t1)
 
     # T2: Closure call via a lambda-bound param. Outer lambda takes `f` (an
     # inner lambda), body calls f(5). Body of outer lambda emits IRApplyClosure
@@ -84,8 +84,8 @@ fn main() -> Unit !{IO} =
     # `(\\x -> x + n)(7)` lifts the lambda, captures n, applies it.
     t3 <- translated_ok_ir_contains(
       "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
-      "@ir_lambda_")
-    assert_true(state, "T3: capturing IIFE lifts to @ir_lambda_", t3)
+      "@__sprout_ir_lambda_")
+    assert_true(state, "T3: capturing IIFE lifts to @__sprout_ir_lambda_", t3)
 
     # T4: Capturing lambda emits sprout_alloc_closure_env at the IRMkClosure
     # site (call into the runtime to allocate the env+captures heap block).
@@ -96,11 +96,11 @@ fn main() -> Unit !{IO} =
 
     # T5: Directly-applied lambda (IIFE): (\x -> x + 1)(5).
     # translate_call's TLambda case lifts then immediately applies — output
-    # should still contain @ir_lambda_ (the lifted body).
+    # should still contain @__sprout_ir_lambda_ (the lifted body).
     t5 <- translated_ok_ir_contains(
       "fn iife() -> Int = (\\x -> x + 1)(5)",
-      "@ir_lambda_")
-    assert_true(state, "T5: directly applied lambda lifts to @ir_lambda_", t5)
+      "@__sprout_ir_lambda_")
+    assert_true(state, "T5: directly applied lambda lifts to @__sprout_ir_lambda_", t5)
 
     # T6: Regression — capturing lambda must emit env-slot LOADs in the lifted
     # body. Slot 0 is the code pointer; captured values live at slots 1..N.
@@ -112,5 +112,43 @@ fn main() -> Unit !{IO} =
       "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
       "getelementptr i64, ptr")
     assert_true(state, "T6: capturing lambda emits env-slot GEP for the load", t6)
+
+    # T7: Finding #1 — idx_map collision: rooting pass starts fresh names at
+    # idx=0 for lifted lambdas not in idx_map, colliding with %t0..%t(n_caps-1)
+    # emitted by IRLoadEnvSlot. A capturing lambda whose body has a GC-trigger
+    # (str_concat) must NOT emit "%t0 = alloca" — that would shadow the
+    # IRLoadEnvSlot %t0 = inttoptr. Assert no such alloca appears.
+    t7 <- translated_ok_ir_contains(
+      "fn f(s: String) -> String = (\\x -> str_concat(x, s))(\"!\")",
+      "%t0 = alloca i64")
+    assert_false(state, "T7: rooting pass must not allocate %t0 alloca in lifted lambda body (would collide with IRLoadEnvSlot %t0)", t7)
+
+    # T8: Finding #5 — TVar-typed higher-order function argument. A function
+    # that takes a polymorphic fn-typed parameter and applies it twice should
+    # translate to Ok, not fail with "must be Int or String". Verifies
+    # is_supported_arg_type accepts TFunc (or resolved TVar -> TFunc).
+    t8 <- translated_ok_ir_contains(
+      "fn twice_then(g: a -> a, x: a) -> a = g(g(x))",
+      "load ptr, ptr")
+    assert_true(state, "T8: polymorphic fn-typed arg (a -> a) accepted by translator (no TVar rejection)", t8)
+
+    # T9: Finding #6 — is_supported_arg_type widening must not leak to direct
+    # calls. Passing a closure (fn-typed) to a direct-call site expecting Int
+    # should be rejected. Latent — fix the source if Sprout typechecker changes.
+    # Currently the typechecker enforces the type mismatch, so we assert Err.
+    t9 <- translated_err_contains(
+      "fn id(x: Int) -> Int = x\nfn bad(c: a -> a) -> Int = id(c)",
+      "check:")
+    assert_true(state, "T9: closure arg passed to Int-expecting direct call is rejected (typechecker or translator)", t9)
+
+    # T10: Finding #10 — name collision guard. A user-defined function named
+    # ir_lambda_0 coexists with a lifted lambda in another function; the
+    # synthesized lambda uses @__sprout_ir_lambda_ (distinct prefix), so no
+    # LLVM symbol collision occurs. Assert the LLVM still contains the user's
+    # ir_lambda_0 define (the guard did not accidentally suppress it).
+    t10 <- translated_ok_ir_contains(
+      "fn ir_lambda_0(x: Int) -> Int = x\nfn lifter() -> Int = (\\y -> y + 1)(5)",
+      "define i64 @ir_lambda_0(")
+    assert_true(state, "T10: user function named ir_lambda_0 still appears in LLVM (name-collision check — synthesized lambda must use a distinct name)", t10)
 
     summary(state)
