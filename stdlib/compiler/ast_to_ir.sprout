@@ -91,13 +91,29 @@ fn pattern_names(pat: ast.Pattern) -> List String =
   | ast.ConstructorPattern _ args _ -> pattern_names_list(args)
   | _ -> Nil
 
-# O(n).
+# O(n) — accumulator + prepend-each avoids the O(n²) cost of list_append
+# in a recursive call. Order is unimportant: all callers wrap the result
+# in set_from_list for membership tests.
 fn pattern_names_list(pats: List ast.Pattern) -> List String =
+  pattern_names_list_go(pats, Nil)
+
+fn pattern_names_list_go(pats: List ast.Pattern, acc: List String) -> List String =
   match pats with
-  | Nil -> Nil
-  | Cons p rest -> list_append(pattern_names(p), pattern_names_list(rest))
+  | Nil -> acc
+  | Cons p rest -> pattern_names_list_go(rest, list_prepend_all(pattern_names(p), acc))
+
+# Prepend every element of xs onto acc (in xs-order, reversed relative to acc).
+# Order within a single pattern's names does not matter for set membership.
+# O(n) where n = length of xs.
+fn list_prepend_all(xs: List String, acc: List String) -> List String =
+  match xs with
+  | Nil -> acc
+  | Cons x rest -> list_prepend_all(rest, Cons(x, acc))
 
 # Free vars in a TDo step list, threading bound names left-to-right.
+# Unreachable today (translate_expr rejects TDo); kept for when that
+# translation lands — closure capture will then be correct without further
+# changes to this helper.
 # O(n * k * log(k)) where n = steps, k = expr size.
 fn compute_free_vars_do_steps(steps: List typed_ast.TypedDoStep,
                               bound: Set, top_level: Set) -> Set =
@@ -133,6 +149,9 @@ fn compute_free_vars_match_arms(arms: List typed_ast.TypedMatchBranch,
             compute_free_vars_match_arms(rest, bound, top_level))
 
 # Free vars in a TRecord field list.
+# Unreachable today (translate_expr rejects TRecord); kept for when that
+# translation lands — closure capture will then be correct without further
+# changes to this helper.
 # O(n * k * log(k)) where n = fields, k = field expr size.
 fn compute_free_vars_record_fields(fields: List typed_ast.TypedRecordField,
                                    bound: Set, top_level: Set) -> Set =
@@ -222,8 +241,10 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
         dict_set(v, "%t" ++ int_to_string(base_idx + i), acc))
 
 # Build the IRLoadEnvSlot ops for the lifted lambda entry block.
-# Each free var at index i gets: IRLoadEnvSlot("%t<base+i>", "%env", i+1).
+# Each free var at index i gets: IRLoadEnvSlot("%t<base+i>", "%env$", i+1).
 # (Slot 0 is the code pointer; captures start at slot 1.)
+# "%env$" contains '$' which Sprout's lexer cannot produce in user identifiers,
+# so it is guaranteed disjoint from any user-written lambda param name.
 # O(n).
 fn build_load_env_ops(frees: List String, base_idx: Int) -> List sprout_ir.IROp =
   build_load_env_ops_go(frees, base_idx, 0)
@@ -232,20 +253,8 @@ fn build_load_env_ops_go(frees: List String, base_idx: Int, i: Int) -> List spro
   match frees with
   | Nil -> Nil
   | Cons _ rest ->
-      Cons(sprout_ir.IRLoadEnvSlot("%t" ++ int_to_string(base_idx + i), "%env", i + 1),
+      Cons(sprout_ir.IRLoadEnvSlot("%t" ++ int_to_string(base_idx + i), "%env$", i + 1),
            build_load_env_ops_go(rest, base_idx, i + 1))
-
-# True iff a types.Type is a function type (TFunc). O(1).
-fn is_fn_type(t: types.Type) -> Bool =
-  match t with
-  | types.TFunc _ _ _ -> true
-  | _ -> false
-
-# True iff t is an unresolved type variable. O(1).
-fn is_tvar_type(t: types.Type) -> Bool =
-  match t with
-  | types.TVar _ -> true
-  | _ -> false
 
 # ---------------------------------------------------------------------------
 # Constructor table — name → (tag, actual_arity, max_arity_of_owning_ADT).
@@ -494,6 +503,11 @@ fn is_unit_type(t: types.Type) -> Bool =
 # except Bool (i1, needs zext) and Unit (no LLVM value).  TVar-typed args
 # (polymorphic fn params not yet monomorphised) are explicitly accepted;
 # they are all i64 at the LLVM level just like TFunc closures.
+#
+# Trust contract: types that now silently pass include TTuple, TApp, TConst
+# for any name that is not "Bool"/"Unit", and all TFunc closures. These are
+# correct at the IR level (all i64) as long as the typechecker has accepted
+# the call — we rely on that and do NOT re-check compatibility here.
 fn is_supported_arg_type(t: types.Type) -> Bool =
   ! is_bool_type (t) && ! is_unit_type (t)
 
@@ -670,7 +684,8 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
     lam_idx <- ref_read(lambda_ctr_ref)
     ref_write(lambda_ctr_ref, lam_idx + 1)
     # Prefix with __sprout_ to avoid collisions with user-written fns.
-    # User fns whose names start with __sprout_ are rejected in translate_decls.
+    # User names starting with __sprout_ are rejected up-front in translate_program
+    # by validate_reserved_namespace.
     let lam_fn_name = "__sprout_ir_lambda_" ++ int_to_string(lam_idx)
     # SSA names for the captured values at the call site (outer scope).
     let cap_ssas = build_captures_list_ir(capturable, params, captures)
@@ -693,9 +708,11 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
                                 list_append(body_cur_ops,
                                   Cons(sprout_ir.IRRet(body_result), Nil)))
               let lifted_blocks = list_append(body_blocks, Cons(ret_block, Nil))
-              # Lifted fn receives "env" as first param, then lambda's own params.
+              # Lifted fn receives "env$" as first param, then lambda's own params.
+              # "env$" contains '$' which Sprout's lexer cannot produce, so it is
+              # guaranteed disjoint from any user-written lambda param name (e.g. "env").
               let lifted_fn = sprout_ir.IRFunction(lam_fn_name,
-                                Cons("env", lam_param_names), "i64", lifted_blocks)
+                                Cons("env$", lam_param_names), "i64", lifted_blocks)
               new_lifted <- ref_read(lifted_ref)
               ref_write(lifted_ref, Cons(lifted_fn, new_lifted))
               # Record the lifted fn's next-free idx so the rooting pass picks
@@ -930,7 +947,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   lifted_idx_ref: Ref (Dict Int)) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match callee with
-  | typed_ast.TVar fname fty _ ->
+  | typed_ast.TVar fname _ _ ->
       # Check captures first: a free var of function type stored in the env
       # must be called via IRApplyClosure.
       match dict_get(fname, captures) with
@@ -941,13 +958,11 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
       | Nothing ->
           if param_known(fname, params)
           then
-            # Defense-in-depth: the typechecker should already reject calling a
-            # non-callable param; we mirror that with a soft check here.
-            # Accept TFunc (concrete closure type) or TVar (polymorphic fn param
-            # not yet monomorphised) — both are i64 at the LLVM level.
-            if ! (is_fn_type(fty) || is_tvar_type(fty))
-            then Err("ast_to_ir: param '" ++ fname ++ "' is not callable (type is neither TFunc nor TVar)")
-            else translate_closure_call("%" ++ fname, args, params, ctors, idx,
+            # Trust the typechecker: any param reached here was accepted as
+            # callable at the call site. No defensive type check — that would
+            # contradict the is_supported_arg_type trust contract and create an
+            # asymmetry with the captures branch above.
+            translate_closure_call("%" ++ fname, args, params, ctors, idx,
                                    cur_label, cur_ops, captures, lifted_ref, top_level,
                                    lambda_ctr_ref, lifted_idx_ref)
           else
@@ -1302,16 +1317,42 @@ fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExp
               Ok(Just((build_fn(name, pnames, ret_ty, blocks), next_idx, list_reverse(lifted))))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
 
+# Validate that no user declaration uses the reserved "__sprout_" name prefix.
+# Checked once up-front in translate_program so every decl variant is covered
+# by a single source of truth (avoids per-arm repetition and bypass bugs).
+# TFnDecl and TExternFnDecl both carry a name field; TLetDecl carries a name
+# field; TInstanceDecl has no single name field (it's a typeclass instance) and
+# is skipped. TPassThrough contains type declarations, not fn names — skipped.
+# Returns Ok(()) on success; Err describing the first violating name on failure.
+# O(n) where n = number of declarations.
+fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result String Unit =
+  match decls with
+  | Nil -> Ok(())
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ _ ->
+          if str_starts_with(name, "__sprout_")
+          then Err("ast_to_ir: name '" ++ name ++ "' is reserved (cannot start with '__sprout_')")
+          else validate_reserved_namespace(rest)
+      | typed_ast.TExternFnDecl name _ _ _ ->
+          if str_starts_with(name, "__sprout_")
+          then Err("ast_to_ir: name '" ++ name ++ "' is reserved (cannot start with '__sprout_')")
+          else validate_reserved_namespace(rest)
+      | typed_ast.TLetDecl name _ ->
+          if str_starts_with(name, "__sprout_")
+          then Err("ast_to_ir: name '" ++ name ++ "' is reserved (cannot start with '__sprout_')")
+          else validate_reserved_namespace(rest)
+      | _ -> validate_reserved_namespace(rest)
+
 fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int),
                            top_level: Set, lambda_ctr_ref: Ref Int,
                            lifted_idx_ref: Ref (Dict Int)) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   match d with
   | typed_ast.TFnDecl name params _ _ _ body ->
-      # Reject user fns that start with __sprout_ — the synthesized lambda prefix.
-      if str_starts_with(name, "__sprout_")
-      then Err("ast_to_ir: user function name '" ++ name ++ "' is reserved (__sprout_ prefix)")
-      else if name == "main"
+      # __sprout_ reservation check is done once up-front in translate_program via
+      # validate_reserved_namespace; no per-arm check needed here.
+      if name == "main"
       then
         match validate_main_body(body) with
         | Err msg -> Err(msg)
@@ -1362,16 +1403,18 @@ fn cons_list(xs: List sprout_ir.IRFunction,
 # Merge two fn-name → idx dicts, with d2 entries taking precedence.
 # Used to fold lifted-lambda idx entries into the main idx_map.
 # O(n * log(n)) where n = |d2|.
-fn merge_idx_dicts(d1: Dict Int, d2: Dict Int) -> Dict Int =
+fn merge_idx_dicts(d1: Dict Int, d2: Dict Int) -> Result String (Dict Int) =
   merge_idx_dicts_keys(d1, vec_to_list(dict_keys(d2)), d2)
 
 # O(n * log(n)).
-fn merge_idx_dicts_keys(acc: Dict Int, keys: List String, src: Dict Int) -> Dict Int =
+fn merge_idx_dicts_keys(acc: Dict Int, keys: List String, src: Dict Int) -> Result String (Dict Int) =
   match keys with
-  | Nil -> acc
+  | Nil -> Ok(acc)
   | Cons k rest ->
       match dict_get(k, src) with
-      | Nothing -> merge_idx_dicts_keys(acc, rest, src)
+      # Nothing is unreachable: dict_keys and dict_get must agree on the same dict.
+      # If this fires, the stdlib Dict implementation has a consistency bug.
+      | Nothing -> Err("merge_idx_dicts: dict_keys/dict_get inconsistency for key '" ++ k ++ "' — this is unreachable")
       | Just v -> merge_idx_dicts_keys(dict_set(k, v, acc), rest, src)
 
 # translate_program: top-level entry.  Accepts a TypedProgram (the output of
@@ -1385,6 +1428,9 @@ export fn translate_program(prog: typed_ast.TypedProgram) ->
     Result String (sprout_ir.IRProgram, Dict Int) !{IO} =
   match prog with
   | typed_ast.TypedProgram decls ->
+      match validate_reserved_namespace(decls) with
+      | Err msg -> Err(msg)
+      | Ok _ ->
       match build_ctor_table(decls) with
       | (ctor_dict, ctor_regs) ->
           do
@@ -1404,5 +1450,6 @@ export fn translate_program(prog: typed_ast.TypedProgram) ->
                       # Merge lifted-lambda indices into idx_map so the rooting
                       # pass picks fresh names that don't collide with
                       # %t0..%t(n_caps-1) already used by IRLoadEnvSlot.
-                      Ok((sprout_ir.IRProgram(fns, ctor_regs),
-                          merge_idx_dicts(idx_map, lifted_idx)))
+                      match merge_idx_dicts(idx_map, lifted_idx) with
+                      | Err msg -> Err(msg)
+                      | Ok merged -> Ok((sprout_ir.IRProgram(fns, ctor_regs), merged))

@@ -151,4 +151,24 @@ fn main() -> Unit !{IO} =
       "define i64 @ir_lambda_0(")
     assert_true(state, "T10: user function named ir_lambda_0 still appears in LLVM (name-collision check — synthesized lambda must use a distinct name)", t10)
 
+    # T11: CRITICAL — env param collision. A lambda whose param is named `env`
+    # would produce two params both called `env` in the lifted IRFunction (the
+    # implicit closure-env pointer and the user param). LLVM rejects duplicate
+    # SSA names. The fix renames the implicit env-pointer param to `env$` (a
+    # name that source-Sprout cannot tokenize). After the fix the lowered LLVM
+    # must contain `%env$` for the implicit slot and `%env` for the user param.
+    t11 <- translated_ok_ir_contains(
+      "fn f() -> Int = (\\env -> env + 1)(5)",
+      "%env$")
+    assert_true(state, "T11: lambda param named env does not collide with implicit env ptr (implicit slot renamed to %env$)", t11)
+
+    # T12: CRITICAL — extern guard bypass. The __sprout_ reservation prefix check
+    # only fires for TFnDecl. A user `extern fn __sprout_ir_lambda_0` slips
+    # through and collides with a synthesized lifted function. After the fix,
+    # translate_program must return Err mentioning the reserved prefix.
+    t12 <- translated_err_contains(
+      "extern fn __sprout_ir_lambda_0(x: Int) -> Int\nfn lifter() -> Int = (\\y -> y + 1)(5)",
+      "__sprout_")
+    assert_true(state, "T12: extern fn with __sprout_ prefix rejected by translate_program (reserved namespace guard)", t12)
+
     summary(state)
