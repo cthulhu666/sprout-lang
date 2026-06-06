@@ -177,6 +177,16 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ discard ++ " = call i64 @sprout_gc_push_i64_root(ptr " ++ slot ++ ")"
   | sprout_ir.IRUnroot n discard ->
       "  " ++ discard ++ " = call i64 @sprout_gc_pop_roots(i64 " ++ int_to_string(n) ++ ")"
+  | sprout_ir.IRGetTag r s ->
+      "  " ++ r ++ " = call i64 @sprout_tag(i64 " ++ s ++ ")"
+  | sprout_ir.IRGetField r s i _kind ->
+      "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
+  | sprout_ir.IRAbortMatch d ->
+      "  " ++ d ++ " = call i64 @sprout_abort_match()\n  unreachable"
+  | sprout_ir.IRConstBool r b ->
+      "  " ++ r ++ " = add i1 0, " ++ (if b then "1" else "0")
+  | sprout_ir.IRICmpBool r pred a b ->
+      "  " ++ r ++ " = icmp " ++ pred ++ " i1 " ++ a ++ ", " ++ b
 
 fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match ops with
@@ -231,6 +241,9 @@ fn ir_header() -> String =
   # returns metadata and sprout_heap_child_count traces heap-typed fields during GC.
   # Called once per constructor in @main's entry block before any user code runs.
   "declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)\n" ++
+  "declare i64 @sprout_tag(i64)\n" ++
+  "declare i64 @sprout_field(i64, i64)\n" ++
+  "declare i64 @sprout_abort_match()\n" ++
   # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make9 set in
   # codegen.sprout (compiler intrinsic table).  All arities are declared
   # unconditionally — only the ones actually called are linked.

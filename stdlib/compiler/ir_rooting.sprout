@@ -44,6 +44,15 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRApplyClosure _ _ _ -> true
   # IRLoadEnvSlot is a pure i64 load — does NOT trigger GC.
   | sprout_ir.IRLoadEnvSlot _ _ _ _ -> false
+  # PR 2.5: pattern-matching ops — all five are non-trigger by design.
+  # IRGetTag / IRGetField lower to @sprout_tag / @sprout_field, pure reads.
+  # IRAbortMatch / IRConstBool / IRICmpBool never allocate.
+  # See docs/pr-2.5-pattern-matching-plan.md "Rooting" section.
+  | sprout_ir.IRGetTag _ _ -> false
+  | sprout_ir.IRGetField _ _ _ _ -> false
+  | sprout_ir.IRAbortMatch _ -> false
+  | sprout_ir.IRConstBool _ _ -> false
+  | sprout_ir.IRICmpBool _ _ _ _ -> false
   | _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
@@ -65,6 +74,18 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   # captures in deep-recursive closures with many Int/Char captures.
   | sprout_ir.IRLoadEnvSlot r _ _ kind ->
       if kind == "scalar" then Nothing else Just(r)
+  # PR 2.5: IRGetField result is heap-typed iff its kind is "heap"
+  # (the kind is decoded by translate_match from the ctors-dict
+  # field_kinds_string; 'p' → "heap", others → "scalar").
+  # IRGetTag returns an i64 tag, not a heap handle — never heap.
+  # IRConstBool / IRICmpBool define i1 scalars — never heap.
+  | sprout_ir.IRGetField r _ _ kind ->
+      if kind == "heap" then Just(r) else Nothing
+  | sprout_ir.IRGetTag _ _ -> Nothing
+  | sprout_ir.IRConstBool _ _ -> Nothing
+  | sprout_ir.IRICmpBool _ _ _ _ -> Nothing
+  # IRAbortMatch's discard reg has no consumer (block ends in unreachable).
+  | sprout_ir.IRAbortMatch _ -> Nothing
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------
@@ -74,6 +95,14 @@ fn op_successors(op: sprout_ir.IROp) -> List String =
   match op with
   | sprout_ir.IRBr lbl -> Cons(lbl, Nil)
   | sprout_ir.IRCondBr _ t e -> Cons(t, Cons(e, Nil))
+  # PR 2.5: pattern-matching ops are not control-flow terminators.
+  # (IRAbortMatch emits `unreachable` at lowering time but is not a
+  # successor-bearing branch op — the block simply ends.)
+  | sprout_ir.IRGetTag _ _ -> Nil
+  | sprout_ir.IRGetField _ _ _ _ -> Nil
+  | sprout_ir.IRAbortMatch _ -> Nil
+  | sprout_ir.IRConstBool _ _ -> Nil
+  | sprout_ir.IRICmpBool _ _ _ _ -> Nil
   | _ -> Nil
 
 fn last_op(ops: List sprout_ir.IROp) -> Maybe sprout_ir.IROp =
@@ -131,6 +160,14 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRLoadEnvSlot _ env _ _ -> Cons(env, Nil)
   | sprout_ir.IRRoot _ v _ -> Cons(v, Nil)
   | sprout_ir.IRUnroot _ _ -> Nil
+  # PR 2.5: pattern-matching ops — the scrutinee handle MUST appear here
+  # for IRGetTag / IRGetField, otherwise liveness drops the scrutinee
+  # across nested allocations inside branch bodies (silent GC bug).
+  | sprout_ir.IRGetTag _ s -> Cons(s, Nil)
+  | sprout_ir.IRGetField _ s _ _ -> Cons(s, Nil)
+  | sprout_ir.IRAbortMatch _ -> Nil
+  | sprout_ir.IRConstBool _ _ -> Nil
+  | sprout_ir.IRICmpBool _ _ a b -> Cons(a, Cons(b, Nil))
 
 fn op_def(op: sprout_ir.IROp) -> Maybe String =
   match op with
@@ -151,6 +188,14 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRLoadEnvSlot r _ _ _ -> Just(r)
   | sprout_ir.IRRoot _ _ discard -> Just(discard)
   | sprout_ir.IRUnroot _ discard -> Just(discard)
+  # PR 2.5: pattern-matching ops register their result name so liveness
+  # can reason about field bindings; IRAbortMatch's discard reg follows
+  # the IRRoot/IRUnroot convention.
+  | sprout_ir.IRGetTag r _ -> Just(r)
+  | sprout_ir.IRGetField r _ _ _ -> Just(r)
+  | sprout_ir.IRAbortMatch d -> Just(d)
+  | sprout_ir.IRConstBool r _ -> Just(r)
+  | sprout_ir.IRICmpBool r _ _ _ -> Just(r)
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------

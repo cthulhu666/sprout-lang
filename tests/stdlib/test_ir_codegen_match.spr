@@ -1,0 +1,197 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+
+# PR 2.5 — IR-level pattern matching.
+# Phase 1 (this file): hand-built IRPrograms exercising the 5 new ops
+# (IRGetTag, IRGetField, IRAbortMatch, IRConstBool, IRICmpBool) through
+# the IR lowering and dataflow-rooting passes.  Phase 2 (separate
+# translator-driven cases) lands together with `translate_match` in
+# `ast_to_ir.sprout`.
+#
+# Design reference: docs/pr-2.5-pattern-matching-plan.md.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Pipeline: insert_roots then lower.  Same shape as test_ir_rooting.spr.
+fn lower_with_roots(prog: sprout_ir.IRProgram) -> String =
+  ir_lowering.lower_program(ir_rooting.insert_roots(prog, dict_empty()))
+
+# --------------------------------------------------------------------------
+# Hand-built programs for each new op.
+# --------------------------------------------------------------------------
+
+# tag_program: IRGetTag returns a scalar i64 tag from a (pretend) handle.
+# Tests bare lowering of IRGetTag.
+fn tag_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("get_tag_demo", Cons("%h", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRGetTag("%t0", "%h"),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Nil), Nil)
+
+# field_program_scalar: IRGetField with "scalar" kind — result is not heap.
+fn field_program_scalar() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("get_field_scalar", Cons("%h", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRGetField("%t0", "%h", 0, "scalar"),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Nil), Nil)
+
+# field_program_heap: IRGetField with "heap" kind whose result lives
+# across a *non-consuming* trigger.  The first IRMakeCtor ("Marker", 0
+# args) allocates but does NOT take %f as an operand, so %f is genuinely
+# live across that trigger — rooter must push a root for %f before
+# "Marker" and pop after.  Mirrors the real pattern-matching case where
+# a field bound at the top of a branch body is used after one or more
+# intermediate allocations.
+fn field_program_heap() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("get_field_heap", Cons("%h", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRGetField("%f", "%h", 0, "heap"),
+        Cons(sprout_ir.IRMakeCtor("%marker", "Marker", 50, Nil),
+        Cons(sprout_ir.IRMakeCtor("%r", "WrapBoxed", 99,
+                                  Cons("%f", Cons("%marker", Nil))),
+        Cons(sprout_ir.IRRet("%r"), Nil))))),
+      Nil)),
+    Nil), Nil)
+
+# field_program_scalar_across_trigger: IRGetField with "scalar" kind
+# (Int field) whose result lives across an allocation.  Rooter must NOT
+# push a root — scalars are not GC handles.  Negative control.
+fn field_program_scalar_across_trigger() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("get_field_scalar_across", Cons("%h", Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRGetField("%n", "%h", 0, "scalar"),
+        Cons(sprout_ir.IRMakeCtor("%marker", "Marker", 50, Nil),
+        Cons(sprout_ir.IRMakeCtor("%r", "WrapInt", 51,
+                                  Cons("%n", Cons("%marker", Nil))),
+        Cons(sprout_ir.IRRet("%r"), Nil))))),
+      Nil)),
+    Nil), Nil)
+
+# abort_program: IRAbortMatch produces the abort+unreachable terminator pair.
+fn abort_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("abort_demo", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRAbortMatch("%d0"), Nil)),
+      Nil)),
+    Nil), Nil)
+
+# const_bool_program: IRConstBool emits "add i1 0, 1" / "add i1 0, 0".
+fn const_bool_true_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("const_bool_true", Nil, "i1", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConstBool("%t0", true),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Nil), Nil)
+
+fn const_bool_false_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("const_bool_false", Nil, "i1", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRConstBool("%t0", false),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Nil), Nil)
+
+# icmp_bool_program: IRICmpBool emits "icmp eq i1 ..." comparing two i1s.
+fn icmp_bool_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("icmp_bool_demo", Cons("%a", Cons("%b", Nil)), "i1", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRICmpBool("%t0", "eq", "%a", "%b"),
+        Cons(sprout_ir.IRRet("%t0"), Nil))),
+      Nil)),
+    Nil), Nil)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Pretty printer covers each new op ---
+    assert_true(state, "pretty: get_tag rendered",
+                contains(sprout_ir.print_ir_program(tag_program()), "get_tag"))
+    assert_true(state, "pretty: get_field rendered",
+                contains(sprout_ir.print_ir_program(field_program_scalar()), "get_field"))
+    assert_true(state, "pretty: abort_match rendered",
+                contains(sprout_ir.print_ir_program(abort_program()), "abort_match"))
+    assert_true(state, "pretty: const_bool true rendered",
+                contains(sprout_ir.print_ir_program(const_bool_true_program()), "const_bool true"))
+    assert_true(state, "pretty: icmp_bool rendered",
+                contains(sprout_ir.print_ir_program(icmp_bool_program()), "icmp_bool"))
+
+    # --- Runtime decls appear in lowered output ---
+    assert_true(state, "header declares @sprout_tag",
+                contains(ir_lowering.lower_program(tag_program()),
+                         "declare i64 @sprout_tag(i64)"))
+    assert_true(state, "header declares @sprout_field",
+                contains(ir_lowering.lower_program(field_program_scalar()),
+                         "declare i64 @sprout_field(i64, i64)"))
+    assert_true(state, "header declares @sprout_abort_match",
+                contains(ir_lowering.lower_program(abort_program()),
+                         "declare i64 @sprout_abort_match()"))
+
+    # --- IRGetTag lowers to call @sprout_tag ---
+    assert_true(state, "IRGetTag lowers to call @sprout_tag",
+                contains(ir_lowering.lower_program(tag_program()),
+                         "%t0 = call i64 @sprout_tag(i64 %h)"))
+
+    # --- IRGetField lowers to call @sprout_field with index ---
+    assert_true(state, "IRGetField lowers to call @sprout_field(handle, idx)",
+                contains(ir_lowering.lower_program(field_program_scalar()),
+                         "%t0 = call i64 @sprout_field(i64 %h, i64 0)"))
+
+    # --- IRAbortMatch emits call + unreachable ---
+    assert_true(state, "IRAbortMatch lowers to @sprout_abort_match",
+                contains(ir_lowering.lower_program(abort_program()),
+                         "%d0 = call i64 @sprout_abort_match()"))
+    assert_true(state, "IRAbortMatch emits unreachable terminator",
+                contains(ir_lowering.lower_program(abort_program()), "unreachable"))
+
+    # --- IRConstBool lowers to "add i1 0, 0|1" ---
+    assert_true(state, "IRConstBool true lowers to add i1 0, 1",
+                contains(ir_lowering.lower_program(const_bool_true_program()),
+                         "%t0 = add i1 0, 1"))
+    assert_true(state, "IRConstBool false lowers to add i1 0, 0",
+                contains(ir_lowering.lower_program(const_bool_false_program()),
+                         "%t0 = add i1 0, 0"))
+
+    # --- IRICmpBool lowers to icmp <pred> i1 ---
+    assert_true(state, "IRICmpBool eq lowers to icmp eq i1",
+                contains(ir_lowering.lower_program(icmp_bool_program()),
+                         "%t0 = icmp eq i1 %a, %b"))
+
+    # --- Rooting: IRGetField with kind="heap" whose result lives across
+    # IRMakeCtor MUST get a root pushed before the ctor and popped after.
+    # This is the load-bearing rooting case for pattern-match field binds.
+    # Looking for the CALL site (prefixed by "call i64") to exclude the
+    # `declare i64 @sprout_gc_push_i64_root(ptr)` line in the IR header,
+    # which trivially appears regardless of rooting work.
+    assert_true(state, "rooting: IRGetField heap result has a root-push call",
+                contains(lower_with_roots(field_program_heap()),
+                         "call i64 @sprout_gc_push_i64_root"))
+    assert_true(state, "rooting: IRGetField heap result has a root-pop call",
+                contains(lower_with_roots(field_program_heap()),
+                         "call i64 @sprout_gc_pop_roots"))
+    # Negative control: IRGetField with kind="scalar" across the SAME
+    # cross-trigger shape must NOT push a root — scalar fields are i64
+    # values (Int), not GC handles.  Differs from field_program_scalar
+    # above (which has no trigger at all) — this version exercises the
+    # heap-vs-scalar discrimination in op_produces_simple_heap.
+    assert_false(state, "rooting: IRGetField scalar across trigger does NOT push a root",
+                 contains(lower_with_roots(field_program_scalar_across_trigger()),
+                          "call i64 @sprout_gc_push_i64_root"))
+
+    summary(state)
