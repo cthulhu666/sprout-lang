@@ -22,6 +22,10 @@ import stdlib.compiler.typed_ast as typed_ast
 # and translate_match_arms switched from O(N²) list_append-to-tail to
 # O(N) Cons-prepend with single final reverse. Behavior unchanged; tests
 # below are the regression gate.
+# /code-review fix #10: field-kind encoder + decoder + helpers extracted
+# to stdlib.compiler.field_kinds (was triplicated across codegen.sprout
+# and ast_to_ir.sprout). Existing assertions cover behavior; structural
+# change validated by the IR codegen suite still passing end-to-end.
 
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1

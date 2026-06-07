@@ -3,6 +3,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.field_kinds as fk
 
 # ---------------------------------------------------------------------------
 # Free-variable computation helpers (mirrored from codegen.sprout — not
@@ -404,47 +405,10 @@ fn build_load_env_ops_go(frees: List String, kinds: List String, base_idx: Int, 
 # sealing the final "current" block with IRRet and collecting the produced
 # (List IRBlock).  Sub-expressions never emit IRRet.
 
-# ---------------------------------------------------------------------------
-# field_kinds helpers — duplicated from codegen.sprout (not exported there).
-# Keep aligned with codegen.sprout: ctor_field_kind / ctor_field_kinds_string.
-# Encoding: 'i'=Int  'b'=Bool  's'=String/Char  'p'=ADT/closure/tuple  '_'=type-var
-
-fn fk_char_is_uppercase(ch: Char) -> Bool =
-  str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char_to_string(ch)) >= 0
-
-fn fk_type_name_leaf_is(name: String, leaf: String) -> Bool =
-  name == leaf || fk_string_ends_with(name, "." ++ leaf)
-
-fn fk_string_ends_with(raw: String, suffix: String) -> Bool =
-  str_len(raw) >= str_len(suffix) &&
-  str_slice(raw, str_len(raw) - str_len(suffix), str_len(raw)) == suffix
-
-fn fk_strip_module_prefix(name: String) -> String =
-  if dot_pos < 0
-  then name
-  else fk_strip_module_prefix(str_slice(name, dot_pos + 1, str_len(name)))
-  where dot_pos = str_find(name, ".")
-
-fn ctor_field_kind(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeName name ->
-      if fk_type_name_leaf_is(name, "Int") then "i"
-      else if fk_type_name_leaf_is(name, "Bool") then "b"
-      else if fk_type_name_leaf_is(name, "String") then "s"
-      else if fk_type_name_leaf_is(name, "Char") then "s"
-      else
-        match str_char_at(fk_strip_module_prefix(name), 0) with
-        | Nothing -> "_"
-        | Just ch -> if fk_char_is_uppercase(ch) then "p" else "_"
-  | ast.TypeArrow _ _ _ -> "p"
-  | ast.TypeApply _ _ -> "p"
-  | ast.TypeEffect inner _ -> ctor_field_kind(inner)
-  | ast.TupleType _ -> "p"
-
-fn ctor_field_kinds_string(exprs: List ast.TypeExpr) -> String =
-  match exprs with
-  | Nil -> ""
-  | Cons e rest -> ctor_field_kind(e) ++ ctor_field_kinds_string(rest)
+# field_kinds helpers (ctor_field_kind, ctor_field_kinds_string,
+# field_kind_char_to_kind, fk_at) and their leaf utilities moved to
+# stdlib.compiler.field_kinds (/code-review fix #10). Call sites below
+# use fk.* prefix.
 
 # ---------------------------------------------------------------------------
 # Build the ctor-table by walking program declarations once.  Tag assignment
@@ -505,7 +469,7 @@ fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr,
                         dict_set(ctor_name, (next_tag, arity, max_ar, fks), acc),
                         Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs))
   where arity = list_length(ctor_args)
-        fks = ctor_field_kinds_string(ctor_args)
+        fks = fk.ctor_field_kinds_string(ctor_args)
 
 # True when an ADT with this max-arity is CPR-eligible (unboxed widths 2 or 3).
 # Mirrors `unboxed_width_for_arity` in codegen.sprout.
@@ -1274,35 +1238,9 @@ fn has_ctor_pattern_arm(arms: List typed_ast.TypedMatchBranch) -> Bool =
           | ast.ConstructorPattern _ _ _ -> true
           | _ -> has_ctor_pattern_arm(rest)
 
-# Decode a field-kinds-string byte at position i.
-# 'i', 'b' → "scalar"; 's', 'p', '_' → "heap".
-#
-# /code-review fix #1: 's' currently encodes BOTH String (heap) AND Char
-# (scalar) — see ctor_field_kind at line 433-434, which collapses both
-# source-level types to the same byte. The decoder takes the conservative
-# "heap" choice so that String fields are correctly rooted across
-# allocations in match-arm bodies (the alternative is a GC use-after-free
-# when an extracted String field is live across an alloc-trigger). Char
-# fields are slightly over-rooted as a result — correctness-safe but
-# suboptimal. A cleaner fix would split the encoding into distinct 's'
-# (String) and 'c' (Char) codes across ast_to_ir.sprout and codegen.sprout;
-# deferred until the encoder duplication is consolidated.
-fn field_kind_char_to_kind(ch: Char) -> String =
-  if ch == 'i' || ch == 'b'
-  then "scalar"
-  else "heap"
-
-# Look up the field kind string at index i in the field-kinds-string.
-# In correct compiler operation `i` is always in range (fks length is one
-# byte per ctor arg, matching the ctor arity). The Nothing branch is a
-# defensive fallback for internal-compiler-bug paths only; bind_ctor_field_args
-# guards the bounds explicitly (/code-review fix #14) so this branch is
-# unreachable when the upstream invariant holds. The conservative "heap"
-# is correctness-safe — at worst over-roots.
-fn fk_at(fks: String, i: Int) -> String =
-  match str_char_at(fks, i) with
-  | Nothing -> "heap"
-  | Just ch -> field_kind_char_to_kind(ch)
+# field_kind_char_to_kind and fk_at moved to stdlib.compiler.field_kinds
+# (/code-review fix #10). Call sites below use fk.field_kind_char_to_kind /
+# fk.fk_at.
 
 # Emit IRGetField ops for each VarPattern arg in a ConstructorPattern.
 # Advances idx and extends captures dict for each bound var.
@@ -1341,7 +1279,7 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
                                  name_prefix,
                                  Cons(sprout_ir.IRGetField(fresh_name(name_prefix, idx),
                                                            scrut_name, field_idx,
-                                                           fk_at(fks, field_idx)),
+                                                           fk.fk_at(fks, field_idx)),
                                       cur_ops),
                                  dict_set(v, fresh_name(name_prefix, idx), acc_captures))
         | _ -> Err("ast_to_ir: nested non-Var/Wildcard constructor pattern not yet supported")

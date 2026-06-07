@@ -3,6 +3,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
+import stdlib.compiler.field_kinds as fk
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -3212,26 +3213,8 @@ fn build_param_locals_and_push_roots_acc(params: List ast.Param, lls: List Strin
 fn char_is_uppercase(ch: Char) -> Bool =
   str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char_to_string(ch)) >= 0
 
-fn ctor_field_kind(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeName name ->
-      if type_name_leaf_is(name, "Int") then "i"
-      else if type_name_leaf_is(name, "Bool") then "b"
-      else if type_name_leaf_is(name, "String") then "s"
-      else if type_name_leaf_is(name, "Char") then "s"
-      else
-        match str_char_at(strip_module_prefix(name), 0) with
-        | Nothing -> "_"
-        | Just ch -> if char_is_uppercase(ch) then "p" else "_"
-  | ast.TypeArrow _ _ _ -> "p"
-  | ast.TypeApply _ _ -> "p"
-  | ast.TypeEffect inner _ -> ctor_field_kind(inner)
-  | ast.TupleType _ -> "p"
-
-fn ctor_field_kinds_string(exprs: List ast.TypeExpr) -> String =
-  match exprs with
-  | Nil -> ""
-  | Cons e rest -> ctor_field_kind(e) ++ ctor_field_kinds_string(rest)
+# ctor_field_kind / ctor_field_kinds_string moved to stdlib.compiler.field_kinds
+# (/code-review fix #10). Call sites use fk.* prefix.
 
 fn emit_ctor_registrations(meta: Dict (List (String, Int, Int, Int, String)), em: Emitter) -> Unit !{IO} =
   emit_ctor_reg_keys(dict_keys(meta), meta, em, 0)
@@ -4148,7 +4131,7 @@ fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emit
         | Just ctor ->
             do
               (gname, gname_len) <- string_const(em, k)
-              let fkinds = ctor_field_kinds_string(ctor_type_exprs(ctor))
+              let fkinds = fk.ctor_field_kinds_string(ctor_type_exprs(ctor))
               aliases <- ctor_reg_aliases(k, strip_module_prefix(k), ctor_tag(ctor), ctor_arity(ctor), gname, gname_len, fkinds, em)
               build_ctor_reg_meta_keys(keys, ctor_sigs_, em, idx + 1, dict_set(k, aliases, acc))
 
