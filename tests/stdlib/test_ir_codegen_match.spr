@@ -306,4 +306,25 @@ fn main() -> Unit !{IO} =
     assert_true(state, "T-match-5: lowered IR passes clang verifier",
                 translated_ir_verifies(src_string_field))
 
+    # T-match-6: wildcard-not-last preserves subsequent arms in the IR
+    # AND produces structurally-valid LLVM IR.
+    #
+    # /code-review #3 + #6 fix: previously translate_match_arm_body_always
+    # short-circuited without recursing into rest_arms — any arm after a
+    # wildcard was silently dropped from the IR. The runtime semantics
+    # were correct (wildcard catches everything), but the structure was
+    # fragile: the function performed an early `list_reverse` on the
+    # phi accumulator that would scramble phi ordering if anyone later
+    # added recursion. The fix unifies the recursion shape with the
+    # test-bearing arm functions, eliminating the fragility and matching
+    # the old codegen's "emit dead-arm blocks, let LLVM DCE remove them"
+    # convention.
+    let src_wildcard_first = "fn classify(n: Int) -> Int = match n with | _ -> 1 | 5 -> 99"
+    assert_true(state, "T-match-6: wildcard-first compiles via IR codegen",
+                translated_ok_ir_contains(src_wildcard_first, "define i64 @classify"))
+    assert_true(state, "T-match-6: dead arm after wildcard IS translated (icmp present)",
+                translated_ok_ir_contains(src_wildcard_first, "icmp eq i64"))
+    assert_true(state, "T-match-6: wildcard-first lowered IR passes clang verifier",
+                translated_ir_verifies(src_wildcard_first))
+
     summary(state)
