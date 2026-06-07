@@ -11,13 +11,13 @@ import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.typed_ast as typed_ast
 
 # PR 2.5 — IR-level pattern matching.
-# Phase 1 (this file): hand-built IRPrograms exercising the 5 new ops
-# (IRGetTag, IRGetField, IRAbortMatch) through
-# the IR lowering and dataflow-rooting passes.  Phase 2 (separate
-# translator-driven cases) lands together with `translate_match` in
-# `ast_to_ir.sprout`.
+# Phase 1 (this file): hand-built IRPrograms exercising the new IR ops
+# (IRGetTag, IRGetField, IRAbortMatch) through the IR lowering and
+# dataflow-rooting passes.  Phase 2 (translator-driven cases) exercises
+# `translate_match` in `ast_to_ir.sprout` end-to-end.
 #
 # Design reference: docs/pr-2.5-pattern-matching-plan.md.
+# Post-ship cleanup batch tracked in docs/backlog.md.
 
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1

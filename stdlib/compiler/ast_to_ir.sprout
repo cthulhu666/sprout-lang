@@ -487,12 +487,25 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
   | Cons tc rest ->
       match tc with
       | ast.TypeConstructor ctor_name ctor_args ->
-          register_ctor_entries(rest, next_tag + 1, max_ar,
-                                dict_set(ctor_name, (next_tag, list_length(ctor_args), max_ar,
-                                                     ctor_field_kinds_string(ctor_args)), acc),
-                                Cons(sprout_ir.CtorReg(ctor_name, next_tag, list_length(ctor_args),
-                                                       ctor_field_kinds_string(ctor_args)),
-                                     regs))
+          register_ctor_one(ctor_name, ctor_args, rest, next_tag, max_ar, acc, regs)
+
+# /code-review fix #9: helper that computes arity and fks ONCE per ctor.
+# Without this, register_ctor_entries called list_length(ctor_args) and
+# ctor_field_kinds_string(ctor_args) twice each (one pair for the dict
+# tuple, one for CtorReg) — doubled traversal/allocation with no benefit.
+# Sprout's `where` clauses don't see names bound by inner match arms, so
+# we factor the duplicate computation into this helper where the where
+# binding is visible to the call body.
+fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr,
+                     rest: List ast.TypeConstructor, next_tag: Int, max_ar: Int,
+                     acc: Dict (Int, Int, Int, String),
+                     regs: List sprout_ir.CtorReg) ->
+    (Dict (Int, Int, Int, String), Int, List sprout_ir.CtorReg) =
+  register_ctor_entries(rest, next_tag + 1, max_ar,
+                        dict_set(ctor_name, (next_tag, arity, max_ar, fks), acc),
+                        Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs))
+  where arity = list_length(ctor_args)
+        fks = ctor_field_kinds_string(ctor_args)
 
 # True when an ADT with this max-arity is CPR-eligible (unboxed widths 2 or 3).
 # Mirrors `unboxed_width_for_arity` in codegen.sprout.
@@ -1280,7 +1293,12 @@ fn field_kind_char_to_kind(ch: Char) -> String =
   else "heap"
 
 # Look up the field kind string at index i in the field-kinds-string.
-# Returns "heap" defensively if i is out of range.
+# In correct compiler operation `i` is always in range (fks length is one
+# byte per ctor arg, matching the ctor arity). The Nothing branch is a
+# defensive fallback for internal-compiler-bug paths only; bind_ctor_field_args
+# guards the bounds explicitly (/code-review fix #14) so this branch is
+# unreachable when the upstream invariant holds. The conservative "heap"
+# is correctness-safe — at worst over-roots.
 fn fk_at(fks: String, i: Int) -> String =
   match str_char_at(fks, i) with
   | Nothing -> "heap"
@@ -1299,20 +1317,31 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
   match args with
   | Nil -> Ok((cur_ops, acc_captures, idx))
   | Cons pat rest_args ->
-      match pat with
-      | ast.WildcardPattern _ ->
-          bind_ctor_field_args(rest_args, scrut_name, fks, idx, field_idx + 1,
-                               name_prefix, cur_ops, acc_captures)
-      | ast.VarPattern v _ ->
-          bind_ctor_field_args(rest_args, scrut_name, fks, idx + 1, field_idx + 1,
-                               name_prefix,
-                               list_append(cur_ops,
-                                 Cons(sprout_ir.IRGetField(fresh_name(name_prefix, idx),
-                                                           scrut_name, field_idx,
-                                                           fk_at(fks, field_idx)),
-                                 Nil)),
-                               dict_set(v, fresh_name(name_prefix, idx), acc_captures))
-      | _ -> Err("ast_to_ir: nested non-Var/Wildcard constructor pattern not yet supported")
+      # /code-review fix #14: explicit bounds check makes the
+      # field-idx/fks-length invariant visible. The upstream contract
+      # (fks has one byte per ctor arg) should always hold; if it
+      # doesn't, the silent "heap" fallback in fk_at would over-root
+      # without surfacing the indexing bug. Erroring loudly here turns
+      # an invisible misclassification into a diagnostic.
+      if field_idx >= str_len(fks) then
+        Err("ast_to_ir: internal compiler bug: bind_ctor_field_args field_idx=" ++
+            int_to_string(field_idx) ++ " exceeds fks length " ++
+            int_to_string(str_len(fks)) ++ " (expected one byte per ctor arg)")
+      else
+        match pat with
+        | ast.WildcardPattern _ ->
+            bind_ctor_field_args(rest_args, scrut_name, fks, idx, field_idx + 1,
+                                 name_prefix, cur_ops, acc_captures)
+        | ast.VarPattern v _ ->
+            bind_ctor_field_args(rest_args, scrut_name, fks, idx + 1, field_idx + 1,
+                                 name_prefix,
+                                 list_append(cur_ops,
+                                   Cons(sprout_ir.IRGetField(fresh_name(name_prefix, idx),
+                                                             scrut_name, field_idx,
+                                                             fk_at(fks, field_idx)),
+                                   Nil)),
+                                 dict_set(v, fresh_name(name_prefix, idx), acc_captures))
+        | _ -> Err("ast_to_ir: nested non-Var/Wildcard constructor pattern not yet supported")
 
 # Build a fresh arm-test label (for the test block of a given arm).
 fn fresh_arm_label(branch_idx: Int, base_idx: Int) -> String =
@@ -2213,12 +2242,14 @@ fn build_fn(name: String, pnames: List String, ret_ty: String,
   sprout_ir.IRFunction(name, pnames, ret_ty, blocks)
 
 # Accept `main` without translating it: the synthetic LLVM shim in
-# ir_lowering handles main regardless of its body.
-# TUnit: original accepted form (unit literal `()`).
-# TDo: relaxed in PR 2.5 to allow `do print(...)` main bodies in test
-#      programs.  The shim ignores the body — test assertions target
-#      non-main functions.  Other body forms are still rejected so that
-#      malformed mains (TMatch, TCall, etc.) surface a clear error.
+# ir_lowering handles main regardless of its body.  Only TUnit bodies
+# are accepted at this milestone — IR codegen does not yet lower the
+# IO/print/do machinery that user mains typically need.  Tests that
+# need to drive translate_program for IR-shape assertions write their
+# subjects as bare top-level functions and omit `fn main` entirely
+# (see test_ir_codegen_match.spr translate_source helper).
+# /code-review fix #11: removed stale "TDo: relaxed in PR 2.5" comment
+# that referred to a change earlier reverted in this branch.
 fn validate_main_body(body: typed_ast.TypedExpr) -> Result String (Maybe sprout_ir.IRFunction) =
   match body with
   | typed_ast.TUnit _ _ -> Ok(Nothing)
