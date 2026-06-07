@@ -18,6 +18,10 @@ import stdlib.compiler.typed_ast as typed_ast
 #
 # Design reference: docs/pr-2.5-pattern-matching-plan.md.
 # Post-ship cleanup batch tracked in docs/backlog.md.
+# /code-review fix #7 + #8: accumulator conventions in bind_ctor_field_args
+# and translate_match_arms switched from O(N²) list_append-to-tail to
+# O(N) Cons-prepend with single final reverse. Behavior unchanged; tests
+# below are the regression gate.
 
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
