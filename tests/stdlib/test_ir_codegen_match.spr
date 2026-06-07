@@ -11,7 +11,7 @@ import stdlib.compiler.typed_ast as typed_ast
 
 # PR 2.5 — IR-level pattern matching.
 # Phase 1 (this file): hand-built IRPrograms exercising the 5 new ops
-# (IRGetTag, IRGetField, IRAbortMatch, IRConstBool, IRICmpBool) through
+# (IRGetTag, IRGetField, IRAbortMatch) through
 # the IR lowering and dataflow-rooting passes.  Phase 2 (separate
 # translator-driven cases) lands together with `translate_match` in
 # `ast_to_ir.sprout`.
@@ -131,35 +131,6 @@ fn abort_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil)
 
-# const_bool_program: IRConstBool emits "add i1 0, 1" / "add i1 0, 0".
-fn const_bool_true_program() -> sprout_ir.IRProgram =
-  sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("const_bool_true", Nil, "i1", Cons(
-      sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRConstBool("%t0", true),
-        Cons(sprout_ir.IRRet("%t0"), Nil))),
-      Nil)),
-    Nil), Nil)
-
-fn const_bool_false_program() -> sprout_ir.IRProgram =
-  sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("const_bool_false", Nil, "i1", Cons(
-      sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRConstBool("%t0", false),
-        Cons(sprout_ir.IRRet("%t0"), Nil))),
-      Nil)),
-    Nil), Nil)
-
-# icmp_bool_program: IRICmpBool emits "icmp eq i1 ..." comparing two i1s.
-fn icmp_bool_program() -> sprout_ir.IRProgram =
-  sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("icmp_bool_demo", Cons("%a", Cons("%b", Nil)), "i1", Cons(
-      sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRICmpBool("%t0", "eq", "%a", "%b"),
-        Cons(sprout_ir.IRRet("%t0"), Nil))),
-      Nil)),
-    Nil), Nil)
-
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -171,11 +142,6 @@ fn main() -> Unit !{IO} =
                 contains(sprout_ir.print_ir_program(field_program_scalar()), "get_field"))
     assert_true(state, "pretty: abort_match rendered",
                 contains(sprout_ir.print_ir_program(abort_program()), "abort_match"))
-    assert_true(state, "pretty: const_bool true rendered",
-                contains(sprout_ir.print_ir_program(const_bool_true_program()), "const_bool true"))
-    assert_true(state, "pretty: icmp_bool rendered",
-                contains(sprout_ir.print_ir_program(icmp_bool_program()), "icmp_bool"))
-
     # --- Runtime decls appear in lowered output ---
     assert_true(state, "header declares @sprout_tag",
                 contains(ir_lowering.lower_program(tag_program()),
@@ -204,18 +170,11 @@ fn main() -> Unit !{IO} =
     assert_true(state, "IRAbortMatch emits unreachable terminator",
                 contains(ir_lowering.lower_program(abort_program()), "unreachable"))
 
-    # --- IRConstBool lowers to "add i1 0, 0|1" ---
-    assert_true(state, "IRConstBool true lowers to add i1 0, 1",
-                contains(ir_lowering.lower_program(const_bool_true_program()),
-                         "%t0 = add i1 0, 1"))
-    assert_true(state, "IRConstBool false lowers to add i1 0, 0",
-                contains(ir_lowering.lower_program(const_bool_false_program()),
-                         "%t0 = add i1 0, 0"))
-
-    # --- IRICmpBool lowers to icmp <pred> i1 ---
-    assert_true(state, "IRICmpBool eq lowers to icmp eq i1",
-                contains(ir_lowering.lower_program(icmp_bool_program()),
-                         "%t0 = icmp eq i1 %a, %b"))
+    # IRConstBool / IRICmpBool removed in /code-review fix #2 — Bool flows
+    # as i64 uniformly through the IR; the i1 specialty ops introduced an
+    # avoidable type mismatch with i64 function parameters and produced
+    # invalid LLVM IR when a Bool param was used as a match scrutinee.
+    # See the i64-uniform assertions in T-match-2 below.
 
     # --- Rooting: IRGetField with kind="heap" whose result lives across
     # IRMakeCtor MUST get a root pushed before the ctor and popped after.
@@ -259,15 +218,27 @@ fn main() -> Unit !{IO} =
                 translated_ok_ir_contains(src_int_match, "= phi i64"))
 
     # T-match-2: bool match — verifies TBool literal lowering AND
-    # BoolPattern lowering together.  Must emit `add i1 0, 1`/`add i1 0, 0`
-    # (TBool) and `icmp eq i1` (BoolPattern test).
+    # BoolPattern lowering together. After /code-review fix #2, Bool flows
+    # as i64 throughout (0 or 1), eliminating the i64/i1 LLVM type mismatch
+    # that the previous IRConstBool/IRICmpBool path produced when the
+    # scrutinee was a Bool function parameter (declared i64 by lower_params).
+    # The test asserts the *correct* i64-uniform lowering: TBool → `add i64`,
+    # BoolPattern → `icmp eq i64`. The negative assertions guard against
+    # regression of the old i1 path.
     let src_bool_match = "fn not_b(b: Bool) -> Int = match b with | true -> 0 | false -> 1"
     assert_true(state, "T-match-2: bool match compiles via IR codegen",
                 translated_ok_ir_contains(src_bool_match, "define i64 @not_b"))
-    assert_true(state, "T-match-2: bool match emits icmp eq i1",
-                translated_ok_ir_contains(src_bool_match, "icmp eq i1"))
-    assert_true(state, "T-match-2: TBool literal lowers via IRConstBool",
-                translated_ok_ir_contains(src_bool_match, "add i1 0,"))
+    assert_true(state, "T-match-2: bool match emits icmp eq i64 (no i1 mismatch)",
+                translated_ok_ir_contains(src_bool_match, "icmp eq i64"))
+    assert_true(state, "T-match-2: TBool literal lowers to add i64 (uniform i64 path)",
+                translated_ok_ir_contains(src_bool_match, "add i64 0,"))
+    # /code-review fix #2 regression: must NOT emit `icmp eq i1 %b` where %b
+    # is a Bool function parameter declared i64. The old path emitted this
+    # and produced invalid LLVM IR (silently passing substring tests).
+    assert_false(state, "T-match-2: must NOT emit icmp eq i1 %b (Bool param i64/i1 mismatch)",
+                 translated_ok_ir_contains(src_bool_match, "icmp eq i1 %b"))
+    assert_false(state, "T-match-2: must NOT emit add i1 (Bool literal kept as i64)",
+                 translated_ok_ir_contains(src_bool_match, "add i1 0,"))
 
     # T-match-3: ctor match no binding — boxed ADT (0-arity, escapes
     # ctor_is_cpr_eligible: max_arity ∈ {1,2}).  Asserts @sprout_tag.
@@ -286,5 +257,15 @@ fn main() -> Unit !{IO} =
                 translated_ok_ir_contains(src_ctor_bind, "call i64 @sprout_tag"))
     assert_true(state, "T-match-4: emits @sprout_field for binding extraction",
                 translated_ok_ir_contains(src_ctor_bind, "call i64 @sprout_field"))
+
+    # T-match-5: String constructor field translates end-to-end. This is a
+    # translator-level smoke test for /code-review fix #1 (field-kinds 's'
+    # → "heap"). The fix's rooting correctness — that IRGetField with
+    # kind="heap" results in @sprout_gc_push_i64_root when the field is
+    # live across an alloc — is already covered by the Phase-1 hand-built
+    # `field_program_heap` test above. Using max_arity=3 to escape CPR.
+    let src_string_field = "type StrBox = SBox3 String Int Int | EmptyBox\nfn extract(w: StrBox) -> Int = match w with | SBox3 _ n _ -> n | EmptyBox -> 0"
+    assert_true(state, "T-match-5: String-field ctor match translates end-to-end",
+                translated_ok_ir_contains(src_string_field, "define i64 @extract"))
 
     summary(state)

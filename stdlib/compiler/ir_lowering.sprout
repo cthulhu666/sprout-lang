@@ -183,10 +183,6 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
   | sprout_ir.IRAbortMatch d ->
       "  " ++ d ++ " = call i64 @sprout_abort_match()\n  unreachable"
-  | sprout_ir.IRConstBool r b ->
-      "  " ++ r ++ " = add i1 0, " ++ (if b then "1" else "0")
-  | sprout_ir.IRICmpBool r pred a b ->
-      "  " ++ r ++ " = icmp " ++ pred ++ " i1 " ++ a ++ ", " ++ b
 
 fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match ops with

@@ -154,21 +154,11 @@ export type IROp (..) =
   # equivalent to IRCall + IRUnreachable but avoids growing the IR with a
   # standalone unreachable op that has no other use today. NOT a GC trigger.
   | IRAbortMatch String
-  # IRConstBool <result> <value>
-  # Lowers to: %result = add i1 0, <0|1>
-  # Models IRConst (line 59) which lowers to "add i64 0, N" at ir_lowering line 110.
-  # NOT a GC trigger; defines a scalar (i1) value.
-  | IRConstBool String Bool
-  # IRICmpBool <result> <pred> <lhs> <rhs>
-  # i1 sibling of IRICmp (which hard-codes i64 at ir_lowering line 115).
-  # Lowers to: %result = icmp <pred> i1 <lhs>, <rhs>
-  # Used by BoolPattern's pattern-test phase. NOT a GC trigger.
-  # Decision rationale: a dedicated op vs. retrofitting a `ty` parameter
-  # onto IRICmp. The dedicated op is smaller scope (no call-site churn
-  # on existing i64 IRICmp uses) and parallels IRConstBool symmetrically.
-  # If a third i1 arithmetic op is ever needed, revisit the type-parameter
-  # refactor.
-  | IRICmpBool String String String String
+  # /code-review fix #2: IRConstBool and IRICmpBool were removed. They
+  # produced i1 SSA values that mismatched the i64-typed parameters
+  # emitted by lower_params, causing invalid LLVM IR when a Bool
+  # parameter was used as a match scrutinee. Bool now flows as i64
+  # uniformly (0 or 1) through IRConst and IRICmp.
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -250,10 +240,6 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = get_field " ++ s ++ ", " ++ int_to_string(i) ++ " [" ++ k ++ "]"
   | IRAbortMatch d ->
       "    " ++ d ++ " = abort_match; unreachable"
-  | IRConstBool r b ->
-      "    " ++ r ++ " = const_bool " ++ (if b then "true" else "false")
-  | IRICmpBool r p a b ->
-      "    " ++ r ++ " = icmp_bool " ++ p ++ " " ++ a ++ ", " ++ b
 
 fn print_ops(ops: List IROp) -> String =
   match ops with
