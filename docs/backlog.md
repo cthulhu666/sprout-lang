@@ -14,6 +14,20 @@ This file tracks open design, implementation, and tooling follow-up work.
    `TRecord`, `TGetField`, `TDict`, `TUnary`, `TRange`. Each ships in its own follow-up
    PR alongside the matching `Pattern` (where one exists). Five deferred items from the
    PR 2.3 code-review pass are tracked in `BACKLOG.md`.
+   PR 2.5 follow-up tracked from the /code-review pass:
+   - Refactor the ctors-dict tuple `(tag, arity, max_arity, field_kinds_string)` in
+     `ast_to_ir.sprout` to a named `CtorMeta` record (currently a positional 4-tuple,
+     widened twice now). Trigger the refactor when a 5th field is forced (e.g. source
+     location for diagnostics) so the refactor pays for itself rather than being a
+     gratuitous reshape. Touch: ~3 destructure sites in ast_to_ir.sprout plus the
+     dict-value type signature in ~15 function signatures. Risk: introducing the same
+     class of bug the refactor is meant to prevent — defer until forced.
+   - Split the field-kinds encoding's `'s'` byte into distinct `'s'` (String, heap)
+     and `'c'` (Char, scalar) codes in `stdlib/compiler/field_kinds.sprout` so Char
+     fields stop being conservatively over-rooted (small per-ctor-field perf win).
+     Now a single-file edit since the encoder is consolidated (PR 2.5 /code-review
+     fix #10). Trigger when Char field rooting becomes measurable, or on the next
+     scheduled cleanup pass.
    After M2: flip default to `--use-ir-codegen` (M3), then linear types as a user-facing
    feature (M4), then apply linearity to Sprout-IR (M5) so GC rooting correctness becomes
    a theorem rather than a discipline.
