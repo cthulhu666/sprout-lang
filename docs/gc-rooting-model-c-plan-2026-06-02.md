@@ -57,7 +57,7 @@ Add heap ops with rooting handled by dataflow analysis in the AST→IR translato
 | 2.2 | Rooting ops, dataflow analysis | `IRRoot`, `IRUnroot` ops. AST→IR includes a dataflow pass: for each heap value, determine if it's live across a GC-trigger op and insert root/unroot. Tests run under `SPROUT_GC_THRESHOLD=1`. | **High — rooting correctness is established here** |
 | 2.3 | Constructor & ADT allocation | `IRMakeCtor`. AST→IR for ADT construction. Dataflow from 2.2 extends to ctor args. | Medium |
 | 2.4 | Closures | `IRAllocEnv`, `IRMkClosure`, `IRApplyClosure`. AST→IR for lambdas and applications. Verify under stress mode. | **High — closures interact with capture and TCO** |
-| 2.5 | Pattern matching | IR-level lowering of `match` to conditional branches with phi at the join. Linear-value-in-arms checking deferred to Milestone 4. | High — match lowering is intrinsically complex |
+| 2.5 | Pattern matching ✅ | IR-level lowering of `match` to conditional branches with phi at the join. Linear-value-in-arms checking deferred to Milestone 4. **Landed** (Wildcard/Var/Int/Bool/Constructor patterns; design doc `pr-2.5-pattern-matching-plan.md`). | High — match lowering is intrinsically complex |
 
 **End-of-milestone state:** `--use-ir-codegen` compiles everything the old codegen handles. Stress-mode is clean.
 

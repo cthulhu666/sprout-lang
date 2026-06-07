@@ -2,7 +2,7 @@
 
 **Branch:** `m2-pr-2.5-pattern-matching`
 **Milestone:** GC-rooting Model C — Milestone 2, PR 2.5 (see `gc-rooting-model-c-plan-2026-06-02.md`).
-**Status:** User approved scope (Bool included; residual follow-ups recorded in backlog). Ready for implementation.
+**Status:** Implemented. Phase 1 (IR ops + lowering + rooting) committed as `768a0b2`; Phase 2 (translate_match + ctors-dict widening + TBool literal) committed as `850a59b`. 29 PR-specific assertions pass; 8 sibling IR-codegen test suites pass with zero regressions. Remaining DoD gates: full `just test`, smoke shapes, bundle smoke, `compile-examples-stage1`.
 
 ## Problem statement
 

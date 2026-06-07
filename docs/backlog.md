@@ -6,10 +6,14 @@ This file tracks open design, implementation, and tooling follow-up work.
 
 1. Execute Model C GC-rooting plan (typed Sprout-IR + linear types).
    Design doc: [gc-rooting-model-c-plan-2026-06-02.md](./gc-rooting-model-c-plan-2026-06-02.md).
-   Status: Milestone 1 (scalar IR scaffolding, PRs 1.1–1.5) and Milestone 2 PRs 2.1–2.3
-   (heap ops + dataflow rooting + boxed ctor allocation) have landed. Remaining M2 work:
-   PR 2.4 (closures), PR 2.5 (pattern matching). Five deferred items from the PR 2.3
-   code-review pass are tracked in `BACKLOG.md`.
+   Status: Milestone 1 (scalar IR scaffolding, PRs 1.1–1.5) and Milestone 2 PRs 2.1–2.5
+   (heap ops + dataflow rooting + boxed ctor allocation + closures + pattern matching)
+   have landed. M2 acceptance ("stage-1 self-compile under `--use-ir-codegen` with
+   `SPROUT_GC_THRESHOLD=1`") is still gated on PR 2.6+ — the residual expression forms
+   still rejected by `ast_to_ir.translate_expr`: `TChar`, `TUnit`, `TTuple`, `TDo`,
+   `TRecord`, `TGetField`, `TDict`, `TUnary`, `TRange`. Each ships in its own follow-up
+   PR alongside the matching `Pattern` (where one exists). Five deferred items from the
+   PR 2.3 code-review pass are tracked in `BACKLOG.md`.
    After M2: flip default to `--use-ir-codegen` (M3), then linear types as a user-facing
    feature (M4), then apply linearity to Sprout-IR (M5) so GC rooting correctness becomes
    a theorem rather than a discipline.
