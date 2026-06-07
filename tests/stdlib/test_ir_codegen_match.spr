@@ -2,6 +2,12 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, 
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
 
 # PR 2.5 — IR-level pattern matching.
 # Phase 1 (this file): hand-built IRPrograms exercising the 5 new ops
@@ -18,6 +24,44 @@ fn contains(haystack: String, needle: String) -> Bool =
 # Pipeline: insert_roots then lower.  Same shape as test_ir_rooting.spr.
 fn lower_with_roots(prog: sprout_ir.IRProgram) -> String =
   ir_lowering.lower_program(ir_rooting.insert_roots(prog, dict_empty()))
+
+# Drive a Sprout source string through lex -> parse -> typecheck_typed ->
+# lower_program -> ast_to_ir.translate_program.  Same shape as
+# test_ir_codegen_ctors.spr's helper.  Used for Phase-2 translator-
+# driven match coverage.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+# True iff translate_source(src) returned Err whose message contains needle.
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+# True iff translate_source(src) returned Ok whose lowered IR contains needle.
+fn translated_ok_ir_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
 
 # --------------------------------------------------------------------------
 # Hand-built programs for each new op.
@@ -193,5 +237,54 @@ fn main() -> Unit !{IO} =
     assert_false(state, "rooting: IRGetField scalar across trigger does NOT push a root",
                  contains(lower_with_roots(field_program_scalar_across_trigger()),
                           "call i64 @sprout_gc_push_i64_root"))
+
+    # =================================================================
+    # Phase 2 — translator-driven tests for ast_to_ir.translate_match.
+    # Source pattern follows test_ir_codegen_ctors.spr exactly: bare
+    # function definitions, no `fn main()`, no `print`, no `(..)`
+    # visibility markers.  IRAbortMatch coverage stays in Phase 1
+    # (abort_program above) — adding an inexhaustive-match translator
+    # case would require an `is_open` AST flag that is out of PR 2.5
+    # scope.
+    # =================================================================
+
+    # T-match-1: int match — wildcard fallthrough.  Lowering must show
+    # icmp eq i64 (for the literal `0`) and a phi at the join.
+    let src_int_match = "fn classify(n: Int) -> Int = match n with | 0 -> 1 | _ -> 2"
+    assert_true(state, "T-match-1: int match compiles via IR codegen",
+                translated_ok_ir_contains(src_int_match, "define i64 @classify"))
+    assert_true(state, "T-match-1: int match emits icmp eq i64",
+                translated_ok_ir_contains(src_int_match, "icmp eq i64"))
+    assert_true(state, "T-match-1: int match emits phi at join",
+                translated_ok_ir_contains(src_int_match, "= phi i64"))
+
+    # T-match-2: bool match — verifies TBool literal lowering AND
+    # BoolPattern lowering together.  Must emit `add i1 0, 1`/`add i1 0, 0`
+    # (TBool) and `icmp eq i1` (BoolPattern test).
+    let src_bool_match = "fn not_b(b: Bool) -> Int = match b with | true -> 0 | false -> 1"
+    assert_true(state, "T-match-2: bool match compiles via IR codegen",
+                translated_ok_ir_contains(src_bool_match, "define i64 @not_b"))
+    assert_true(state, "T-match-2: bool match emits icmp eq i1",
+                translated_ok_ir_contains(src_bool_match, "icmp eq i1"))
+    assert_true(state, "T-match-2: TBool literal lowers via IRConstBool",
+                translated_ok_ir_contains(src_bool_match, "add i1 0,"))
+
+    # T-match-3: ctor match no binding — boxed ADT (0-arity, escapes
+    # ctor_is_cpr_eligible: max_arity ∈ {1,2}).  Asserts @sprout_tag.
+    let src_ctor_no_bind = "type Shape = Red | Blue\nfn label(c: Shape) -> Int = match c with | Red -> 0 | Blue -> 1"
+    assert_true(state, "T-match-3: 0-arity ctor match compiles",
+                translated_ok_ir_contains(src_ctor_no_bind, "define i64 @label"))
+    assert_true(state, "T-match-3: ctor match emits @sprout_tag call",
+                translated_ok_ir_contains(src_ctor_no_bind, "call i64 @sprout_tag"))
+
+    # T-match-4: ctor match WITH binding — max_arity=3 escapes CPR.
+    # Asserts @sprout_tag AND @sprout_field calls appear.
+    let src_ctor_bind = "type Trip = MyTrip Int Int Int | MyEmpty\nfn sum_or_zero(t: Trip) -> Int = match t with | MyTrip a b c -> a + b + c | MyEmpty -> 0"
+    assert_true(state, "T-match-4: ctor-with-binding match compiles",
+                translated_ok_ir_contains(src_ctor_bind, "define i64 @sum_or_zero"))
+    assert_true(state, "T-match-4: emits @sprout_tag for ctor discrimination",
+                translated_ok_ir_contains(src_ctor_bind, "call i64 @sprout_tag"))
+    assert_true(state, "T-match-4: emits @sprout_field for binding extraction",
+                translated_ok_ir_contains(src_ctor_bind, "call i64 @sprout_field"))
 
     summary(state)
