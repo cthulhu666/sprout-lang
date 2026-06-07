@@ -50,7 +50,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # See docs/pr-2.5-pattern-matching-plan.md "Rooting" section.
   | sprout_ir.IRGetTag _ _ -> false
   | sprout_ir.IRGetField _ _ _ _ -> false
-  | sprout_ir.IRAbortMatch _ -> false
+  | sprout_ir.IRAbortMatch -> false
   | _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
@@ -80,8 +80,8 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRGetField r _ _ kind ->
       if kind == "heap" then Just(r) else Nothing
   | sprout_ir.IRGetTag _ _ -> Nothing
-  # IRAbortMatch's discard reg has no consumer (block ends in unreachable).
-  | sprout_ir.IRAbortMatch _ -> Nothing
+  # IRAbortMatch defines no value (/code-review fix #15: void noreturn).
+  | sprout_ir.IRAbortMatch -> Nothing
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ fn op_successors(op: sprout_ir.IROp) -> List String =
   # successor-bearing branch op — the block simply ends.)
   | sprout_ir.IRGetTag _ _ -> Nil
   | sprout_ir.IRGetField _ _ _ _ -> Nil
-  | sprout_ir.IRAbortMatch _ -> Nil
+  | sprout_ir.IRAbortMatch -> Nil
   | _ -> Nil
 
 fn last_op(ops: List sprout_ir.IROp) -> Maybe sprout_ir.IROp =
@@ -159,7 +159,7 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   # across nested allocations inside branch bodies (silent GC bug).
   | sprout_ir.IRGetTag _ s -> Cons(s, Nil)
   | sprout_ir.IRGetField _ s _ _ -> Cons(s, Nil)
-  | sprout_ir.IRAbortMatch _ -> Nil
+  | sprout_ir.IRAbortMatch -> Nil
 
 fn op_def(op: sprout_ir.IROp) -> Maybe String =
   match op with
@@ -181,11 +181,11 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRRoot _ _ discard -> Just(discard)
   | sprout_ir.IRUnroot _ discard -> Just(discard)
   # PR 2.5: pattern-matching ops register their result name so liveness
-  # can reason about field bindings; IRAbortMatch's discard reg follows
-  # the IRRoot/IRUnroot convention.
+  # can reason about field bindings. IRAbortMatch is field-less (void
+  # noreturn — /code-review fix #15) and falls through to the catch-all.
   | sprout_ir.IRGetTag r _ -> Just(r)
   | sprout_ir.IRGetField r _ _ _ -> Just(r)
-  | sprout_ir.IRAbortMatch d -> Just(d)
+  # IRAbortMatch no longer defines anything (/code-review fix #15).
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------

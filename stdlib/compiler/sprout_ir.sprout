@@ -146,14 +146,15 @@ export type IROp (..) =
   # @sprout_field is a pure read; no allocation. NOT a GC trigger.
   # field-kind drives ir_rooting heap-vs-scalar classification of <result>.
   | IRGetField String String Int String
-  # IRAbortMatch <discard-reg>
+  # IRAbortMatch
   # Lowers to:
-  #   %discard-reg = call i64 @sprout_abort_match()
+  #   call void @sprout_abort_match()
   #   unreachable
-  # Single op so that "this block aborts" is a syntactically visible terminator;
-  # equivalent to IRCall + IRUnreachable but avoids growing the IR with a
-  # standalone unreachable op that has no other use today. NOT a GC trigger.
-  | IRAbortMatch String
+  # @sprout_abort_match is declared `void noreturn` (/code-review fix #15);
+  # no result SSA is allocated. Single op so that "this block aborts" is a
+  # syntactically visible terminator; equivalent to IRCall + IRUnreachable
+  # but avoids growing the IR with a standalone unreachable op. NOT a GC trigger.
+  | IRAbortMatch
   # /code-review fix #2: IRConstBool and IRICmpBool were removed. They
   # produced i1 SSA values that mismatched the i64-typed parameters
   # emitted by lower_params, causing invalid LLVM IR when a Bool
@@ -238,8 +239,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = get_tag " ++ s
   | IRGetField r s i k ->
       "    " ++ r ++ " = get_field " ++ s ++ ", " ++ int_to_string(i) ++ " [" ++ k ++ "]"
-  | IRAbortMatch d ->
-      "    " ++ d ++ " = abort_match; unreachable"
+  | IRAbortMatch ->
+      "    abort_match; unreachable"
 
 fn print_ops(ops: List IROp) -> String =
   match ops with

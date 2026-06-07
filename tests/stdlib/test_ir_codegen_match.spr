@@ -148,11 +148,12 @@ fn field_program_scalar_across_trigger() -> sprout_ir.IRProgram =
     Nil), Nil)
 
 # abort_program: IRAbortMatch produces the abort+unreachable terminator pair.
+# Post /code-review fix #15: IRAbortMatch is field-less (declared void noreturn).
 fn abort_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("abort_demo", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRAbortMatch("%d0"), Nil)),
+        sprout_ir.IRAbortMatch, Nil)),
       Nil)),
     Nil), Nil)
 
@@ -174,9 +175,9 @@ fn main() -> Unit !{IO} =
     assert_true(state, "header declares @sprout_field",
                 contains(ir_lowering.lower_program(field_program_scalar()),
                          "declare i64 @sprout_field(i64, i64)"))
-    assert_true(state, "header declares @sprout_abort_match",
+    assert_true(state, "header declares @sprout_abort_match (void noreturn)",
                 contains(ir_lowering.lower_program(abort_program()),
-                         "declare i64 @sprout_abort_match()"))
+                         "declare void @sprout_abort_match() noreturn"))
 
     # --- IRGetTag lowers to call @sprout_tag ---
     assert_true(state, "IRGetTag lowers to call @sprout_tag",
@@ -189,11 +190,19 @@ fn main() -> Unit !{IO} =
                          "%t0 = call i64 @sprout_field(i64 %h, i64 0)"))
 
     # --- IRAbortMatch emits call + unreachable ---
-    assert_true(state, "IRAbortMatch lowers to @sprout_abort_match",
+    # /code-review fix #15: @sprout_abort_match declared void noreturn;
+    # the call no longer allocates a dead i64 result SSA register.
+    assert_true(state, "IRAbortMatch lowers to call void @sprout_abort_match",
                 contains(ir_lowering.lower_program(abort_program()),
-                         "%d0 = call i64 @sprout_abort_match()"))
+                         "call void @sprout_abort_match()"))
     assert_true(state, "IRAbortMatch emits unreachable terminator",
                 contains(ir_lowering.lower_program(abort_program()), "unreachable"))
+    assert_false(state, "IRAbortMatch must NOT emit a dead i64 result SSA",
+                 contains(ir_lowering.lower_program(abort_program()),
+                          "= call i64 @sprout_abort_match"))
+    assert_true(state, "@sprout_abort_match declared void noreturn",
+                contains(ir_lowering.lower_program(abort_program()),
+                         "declare void @sprout_abort_match() noreturn"))
 
     # IRConstBool / IRICmpBool removed in /code-review fix #2 — Bool flows
     # as i64 uniformly through the IR; the i1 specialty ops introduced an

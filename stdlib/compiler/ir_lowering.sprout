@@ -181,8 +181,8 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ " = call i64 @sprout_tag(i64 " ++ s ++ ")"
   | sprout_ir.IRGetField r s i _kind ->
       "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
-  | sprout_ir.IRAbortMatch d ->
-      "  " ++ d ++ " = call i64 @sprout_abort_match()\n  unreachable"
+  | sprout_ir.IRAbortMatch ->
+      "  call void @sprout_abort_match()\n  unreachable"
 
 fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match ops with
@@ -239,7 +239,7 @@ fn ir_header() -> String =
   "declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)\n" ++
   "declare i64 @sprout_tag(i64)\n" ++
   "declare i64 @sprout_field(i64, i64)\n" ++
-  "declare i64 @sprout_abort_match()\n" ++
+  "declare void @sprout_abort_match() noreturn\n" ++
   # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make9 set in
   # codegen.sprout (compiler intrinsic table).  All arities are declared
   # unconditionally — only the ones actually called are linked.

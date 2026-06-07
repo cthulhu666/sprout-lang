@@ -1460,12 +1460,13 @@ fn translate_match_arms(arms: List typed_ast.TypedMatchBranch,
   match arms with
   | Nil ->
       # No more arms: current dispatch_lbl is the "miss all" block → IRAbortMatch.
+      # IRAbortMatch is field-less (/code-review fix #15: void noreturn).
       Ok((list_append(acc_blocks,
             Cons(sprout_ir.IRBlock(fresh_arm_label(branch_idx, base_idx),
-                   Cons(sprout_ir.IRAbortMatch(fresh_name(name_prefix, idx)), Nil)),
+                   Cons(sprout_ir.IRAbortMatch, Nil)),
             Nil)),
           list_reverse(acc_phi),
-          idx + 1))
+          idx))
   | Cons arm rest_arms ->
       match arm with
       | typed_ast.TypedMatchBranch pat body ->

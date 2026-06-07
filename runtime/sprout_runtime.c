@@ -212,7 +212,7 @@ long long sprout_set_current_fn(const char* fn_name) {
 }
 
 static void tcp_fail(const char* msg);
-long long sprout_abort_match(void);
+__attribute__((noreturn)) void sprout_abort_match(void);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
 long long sprout_make2(long long tag, long long a0, long long a1);
@@ -3279,7 +3279,7 @@ long long sprout_make9(long long tag, long long a0, long long a1, long long a2, 
   return sprout_box_registered_obj(obj);
 }
 
-long long sprout_abort_match(void) {
+__attribute__((noreturn)) void sprout_abort_match(void) {
   fprintf(stderr, "runtime error: non-exhaustive match\n");
   exit(1);
 }
