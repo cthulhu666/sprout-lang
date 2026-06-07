@@ -1686,11 +1686,15 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
                     fresh_arm_label(branch_idx + 1, base_idx),
                     join_lbl, match_ty, s_name, tag_name,
                     params, ctors, idx3, acc_blocks,
-                    acc_phi, arm_captures, lifted_ref,
+                    acc_phi, arm_captures, captures,
+                    lifted_ref,
                     top_level, lambda_ctr_ref,
                     lifted_idx_ref, name_prefix)
 
 # Translate body after test block is sealed, no extra preamble ops.
+# Int and Bool arm wrapper: captures == outer_captures (no shadowing happens
+# in test-only patterns), so we just pass captures both as the body-time
+# environment and as the unshadowed dict for rest_arms.
 fn translate_match_arm_body_with_test(body: typed_ast.TypedExpr,
                                        rest_arms: List typed_ast.TypedMatchBranch,
                                        branch_idx: Int, base_idx: Int,
@@ -1714,10 +1718,21 @@ fn translate_match_arm_body_with_test(body: typed_ast.TypedExpr,
   translate_match_arm_body_with_test_and_ops(body, rest_arms, branch_idx, base_idx,
                                              test_block, body_lbl, Nil, miss_lbl, join_lbl,
                                              match_ty, s_name, tag_name, params, ctors, idx,
-                                             acc_blocks, acc_phi, captures, lifted_ref, top_level,
+                                             acc_blocks, acc_phi, captures, captures,
+                                             lifted_ref, top_level,
                                              lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Translate body after test block is sealed, with optional preamble ops (field binds).
+# /code-review fix #4: takes both `captures` (arm_captures — outer
+# extended with this arm's ctor-field bindings, used to translate THIS
+# arm's body) AND `outer_captures` (the unshadowed dict from before
+# bind_ctor_field_args ran, used when recursing into rest_arms). Forwarding
+# arm_captures into the rest_arms recursion previously leaked this arm's
+# field bindings into sibling arms — if a sibling referenced an outer name
+# shadowed by a ctor-field of the same name, it resolved to the field's
+# block-local IRGetField SSA, producing an invalid cross-block reference.
+# Int/Bool arms have no field bindings, so the wrapper above passes the
+# same dict for both arguments (no-op semantically).
 fn translate_match_arm_body_with_test_and_ops(body: typed_ast.TypedExpr,
                                                rest_arms: List typed_ast.TypedMatchBranch,
                                                branch_idx: Int, base_idx: Int,
@@ -1733,6 +1748,7 @@ fn translate_match_arm_body_with_test_and_ops(body: typed_ast.TypedExpr,
                                                acc_blocks: List sprout_ir.IRBlock,
                                                acc_phi: List (String, String),
                                                captures: Dict String,
+                                               outer_captures: Dict String,
                                                lifted_ref: Ref (List sprout_ir.IRFunction),
                                                top_level: Set,
                                                lambda_ctr_ref: Ref Int,
@@ -1756,7 +1772,7 @@ fn translate_match_arm_body_with_test_and_ops(body: typed_ast.TypedExpr,
                                             Cons(sprout_ir.IRBr(join_lbl), Nil))),
                                    Nil)))),
                                Cons((body_val, body_cur_lbl), acc_phi),
-                               captures, lifted_ref, top_level,
+                               outer_captures, lifted_ref, top_level,
                                lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Seal the join block with a phi (or no phi if no incoming edges).

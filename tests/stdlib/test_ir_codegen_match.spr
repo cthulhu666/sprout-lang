@@ -327,4 +327,25 @@ fn main() -> Unit !{IO} =
     assert_true(state, "T-match-6: wildcard-first lowered IR passes clang verifier",
                 translated_ir_verifies(src_wildcard_first))
 
+    # T-match-7: ctor-field binding must NOT leak into subsequent arms.
+    #
+    # /code-review fix #4: translate_match_arm_body_with_test_and_ops
+    # previously forwarded `captures` (= arm_captures, the outer captures
+    # extended with this arm's field bindings) to translate_match_arms for
+    # rest_arms. If an outer name (e.g. a function parameter `x`) was
+    # SHADOWED by a ctor field of the same name in one arm, a SIBLING arm
+    # that referenced the outer `x` would resolve to the field binding's
+    # SSA name — a value defined in a foreign basic block. LLVM's verifier
+    # rejects cross-block SSA references without an intervening phi.
+    #
+    # Scenario from V4 verifier: outer `x` shadowed by Foo's first-field
+    # binding; Bar's body references outer `x`. Assertion uses the
+    # clang-verify gate (substring matches can't distinguish a correct
+    # %x from a leaked one — only the LLVM verifier can).
+    let src_capture_leak = "type Tag = Foo Int Int Int | Bar\nfn use_x(x: Int, t: Tag) -> Int = match t with | Foo x _ _ -> x | Bar -> x"
+    assert_true(state, "T-match-7: shadowed-field + sibling-arm match compiles",
+                translated_ok_ir_contains(src_capture_leak, "define i64 @use_x"))
+    assert_true(state, "T-match-7: lowered IR passes clang verifier (captures-leak detector)",
+                translated_ir_verifies(src_capture_leak))
+
     summary(state)
