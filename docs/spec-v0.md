@@ -342,6 +342,32 @@ Semantics:
 - The presence of `pow` and `mod` in `stdlib.math` does not imply implicit
   numeric coercions, fractional arithmetic, or floating-point support in v0.
 
+## 8.5 Standard Prelude Typeclass Instances (Experimental)
+
+The following typeclass instances are provided by `stdlib/prelude.sprout` and are
+automatically available without an explicit import.  They are experimental in v0
+(consistent with the module/typeclass extension status noted in §1).
+
+### `ToString` instances
+
+`to_string` is defined for the following types:
+
+| Type | Result |
+|---|---|
+| `Int` | decimal string, e.g. `"42"` |
+| `Bool` | `"true"` or `"false"` |
+| `String` | identity |
+| `(a, b)` | `"(s_a, s_b)"` where `s_x = to_string(x)` — requires `ToString a`, `ToString b` |
+| `(a, b, c)` | `"(s_a, s_b, s_c)"` — requires `ToString a`, `ToString b`, `ToString c` |
+| `(a, b, c, d)` | `"(s_a, …, s_d)"` — requires `ToString` on all four element types |
+| `(a, b, c, d, e)` | `"(s_a, …, s_e)"` — requires `ToString` on all five element types |
+| `List a` | `"[s_0, s_1, …]"` — requires `ToString a` |
+| `Maybe a` | `"Nothing"` or `"Just s"` — requires `ToString a` |
+
+Tuple instances format nested tuples recursively.  A 6-tuple or larger has no
+`ToString` instance in the current prelude; adding one requires an explicit
+instance declaration.
+
 ## 9. Errors
 
 Compiler diagnostics must include:

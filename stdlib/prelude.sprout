@@ -870,6 +870,34 @@ instance ToString Set {
     "{" ++ list_to_string_go(set_to_list(s), "") ++ "}"
 }
 
+# O(1)
+instance ToString (a, b) where ToString a, ToString b {
+  fn to_string(t: (a, b)) -> String =
+    match t with
+    | (x, y) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ")"
+}
+
+# O(1)
+instance ToString (a, b, c) where ToString a, ToString b, ToString c {
+  fn to_string(t: (a, b, c)) -> String =
+    match t with
+    | (x, y, z) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ")"
+}
+
+# O(1)
+instance ToString (a, b, c, d) where ToString a, ToString b, ToString c, ToString d {
+  fn to_string(t: (a, b, c, d)) -> String =
+    match t with
+    | (x, y, z, w) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ", " ++ to_string(w) ++ ")"
+}
+
+# O(1)
+instance ToString (a, b, c, d, e) where ToString a, ToString b, ToString c, ToString d, ToString e {
+  fn to_string(t: (a, b, c, d, e)) -> String =
+    match t with
+    | (x, y, z, w, v) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ", " ++ to_string(w) ++ ", " ++ to_string(v) ++ ")"
+}
+
 # ---------------------------------------------------------------------------
 # Extern fn declarations for user-callable C builtins.
 # These give the codegen accurate LLVM types without a hardcoded table.

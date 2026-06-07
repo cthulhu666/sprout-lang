@@ -970,19 +970,56 @@ fn pack_to_i64(v: Value, em: Emitter) -> String !{IO} =
       emit_template(em, `  ${w} = ptrtoint ptr ${val_ir (v)} to i64`)
       w
   else if val_is_tuple(v) then
-    do
-      let ll = val_ll(v)
-      rooted <- push_temp_root(v, em)
-      sz <- sizeof_struct(ll, em)
-      raw_i64 <- fresh_tmp(em)
-      emit_template(em, `  ${raw_i64} = call i64 @sprout_alloc_tuple_blob(i64 ${sz})`)
-      raw_ptr <- fresh_tmp(em)
-      emit_template(em, `  ${raw_ptr} = inttoptr i64 ${raw_i64} to ptr`)
-      emit_template(em, `  store ${ll} ${val_ir (v)}, ptr ${raw_ptr}`)
-      pop_temp_roots(rooted, em)
-      raw_i64
+    match val_tuple_items(v) with
+    | Nothing ->
+        do
+          let ll = val_ll(v)
+          rooted <- push_temp_root(v, em)
+          sz <- sizeof_struct(ll, em)
+          raw_i64 <- fresh_tmp(em)
+          emit_template(em, `  ${raw_i64} = call i64 @sprout_alloc_tuple_blob(i64 ${sz})`)
+          raw_ptr <- fresh_tmp(em)
+          emit_template(em, `  ${raw_ptr} = inttoptr i64 ${raw_i64} to ptr`)
+          emit_template(em, `  store ${ll} ${val_ir (v)}, ptr ${raw_ptr}`)
+          pop_temp_roots(rooted, em)
+          raw_i64
+    | Just items ->
+        do
+          let ll = val_ll(v)
+          let blob_sz = int_to_string(list_length(items) * 8)
+          rooted <- push_temp_root(v, em)
+          raw_i64 <- fresh_tmp(em)
+          emit_template(em, `  ${raw_i64} = call i64 @sprout_alloc_tuple_blob(i64 ${blob_sz})`)
+          blob_slot <- fresh_tmp(em)
+          emit_template(em, `  ${blob_slot} = alloca i64`)
+          emit_template(em, `  store i64 ${raw_i64}, ptr ${blob_slot}`)
+          blob_root <- fresh_tmp(em)
+          emit_template(em, `  ${blob_root} = call i64 @sprout_gc_push_i64_root(ptr ${blob_slot})`)
+          raw_ptr <- fresh_tmp(em)
+          emit_template(em, `  ${raw_ptr} = inttoptr i64 ${raw_i64} to ptr`)
+          pack_tuple_fields_to_blob(ll, val_ir(v), items, raw_ptr, 0, em)
+          pop_temp_roots(rooted + 1, em)
+          raw_i64
   else
     val_ir(v)  # fallback
+
+# Store each tuple field into a heap blob at one-i64-per-field stride.
+# Each field is individually normalized via pack_to_i64 before storing,
+# which handles nested tuple fields (which would otherwise be stored as
+# multi-word LLVM structs, breaking the GEP-i64 reader in the runtime).
+fn pack_tuple_fields_to_blob(src_ll: String, src_ir: String, items: List String, blob_ptr: String, idx: Int, em: Emitter) -> Unit !{IO} =
+  match items with
+  | Nil -> ()
+  | Cons item_ll rest ->
+      do
+        field_ir <- fresh_tmp(em)
+        emit_template(em, `  ${field_ir} = extractvalue ${src_ll} ${src_ir}, ${int_to_string(idx)}`)
+        let field_v = val_with_tuple_items(val_make(item_ll, field_ir), tuple_items_from_ll(item_ll))
+        packed <- pack_to_i64(field_v, em)
+        gep <- fresh_tmp(em)
+        emit_template(em, `  ${gep} = getelementptr i64, ptr ${blob_ptr}, i64 ${int_to_string(idx)}`)
+        emit_template(em, `  store i64 ${packed}, ptr ${gep}`)
+        pack_tuple_fields_to_blob(src_ll, src_ir, rest, blob_ptr, idx + 1, em)
 
 fn pack_to_i64_field(v: Value) -> String = val_ir(v)
 

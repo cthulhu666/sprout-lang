@@ -670,13 +670,14 @@ fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
   | Cons h rest -> "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
 
 # Returns the outermost constructor/variable name from a type expression.
+# For TupleType, include the arity so 2-tuple and 3-tuple instances don't collide.
 fn type_expr_head_name(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName name -> strip_module_prefix(name)
   | ast.TypeApply base _ -> type_expr_head_name(base)
   | ast.TypeArrow _ _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
-  | ast.TupleType _ -> "Tuple"
+  | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
 
 # ---------------------------------------------------------------------------
 # Instance function name
@@ -1366,6 +1367,10 @@ fn unify_type_expr(
           unify_type_expr(pat_arg, con_arg,
             unify_type_expr(pat_base, con_base, acc))
       | _ -> acc
+  | ast.TupleType pat_items ->
+      match concrete with
+      | ast.TupleType con_items -> unify_type_args_list(pat_items, con_items, acc)
+      | _ -> acc
   | _ -> acc
 
 # unify_type_args_list: unify each pair of (pattern, concrete) type args.
@@ -1391,6 +1396,8 @@ fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeEx
       ast.TypeApply(substitute_type_expr(base, subs), substitute_type_expr(arg, subs))
   | ast.TypeArrow from_ to_ effs ->
       ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs)
+  | ast.TupleType items ->
+      ast.TupleType(list_map(\item -> substitute_type_expr(item, subs), items))
   | _ -> te
 
 # substitute_constraint: apply substitution to all type args of a TypeConstraint.

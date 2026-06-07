@@ -1,0 +1,15 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "to_string 2-tuple ints", to_string((1, 2)), "(1, 2)")
+    assert_eq(state, "to_string 2-tuple mixed", to_string((true, "hi")), "(true, hi)")
+    assert_eq(state, "to_string 3-tuple ints", to_string((1, 2, 3)), "(1, 2, 3)")
+    assert_eq(state, "to_string 3-tuple mixed", to_string((false, 42, "x")), "(false, 42, x)")
+    assert_eq(state, "to_string 4-tuple", to_string((1, 2, 3, 4)), "(1, 2, 3, 4)")
+    assert_eq(state, "to_string 5-tuple", to_string((1, 2, 3, 4, 5)), "(1, 2, 3, 4, 5)")
+    assert_eq(state, "to_string nested tuple", to_string(((1, 2), (3, 4))), "((1, 2), (3, 4))")
+
+    summary(state)

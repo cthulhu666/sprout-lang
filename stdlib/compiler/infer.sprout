@@ -721,14 +721,16 @@ fn str_list_contains(xs: List String, target: String) -> Bool =
   | Cons h rest -> if h == target then true else str_list_contains(rest, target)
 
 # Convert a concrete types.Type to an ast.TypeExpr.
-# Only TConst and TApp are meaningful here; anything else falls back to "_".
+# Only TConst, TApp, and TTuple are meaningful here; anything else falls back to "_".
 fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
   | types.TConst name -> ast.TypeName(strip_module_prefix(name))
   | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base), type_to_typeexpr(arg))
+  | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_typeexpr(item), items))
   | _ -> ast.TypeName("_")
 
 # Returns Just(te) if t has a concrete (TConst) head; Nothing if the head is a TVar.
+# TTuple is always concrete (its head is a known arity, never a variable).
 fn concrete_typeexpr(t: types.Type) -> Maybe ast.TypeExpr =
   match t with
   | types.TConst name -> Just(ast.TypeName(strip_module_prefix(name)))
@@ -736,6 +738,7 @@ fn concrete_typeexpr(t: types.Type) -> Maybe ast.TypeExpr =
       match concrete_typeexpr(base) with
       | Nothing -> Nothing
       | Just _ -> Just(type_to_typeexpr(t))
+  | types.TTuple items -> Just(ast.TupleType(list_map(\item -> type_to_typeexpr(item), items)))
   | _ -> Nothing
 
 # Returns the full concrete ast.TypeExpr for the first concrete arg, or Nothing.
@@ -822,6 +825,8 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
           | types.Scheme _ _ (types.TConst prog_var) _ -> ast.TypeName(prog_var)
           | _ -> ast.TypeName("_")
       | Nothing -> ast.TypeName("_")
+  | types.TTuple items ->
+      ast.TupleType(list_map(\item -> type_to_typeexpr_with_prog_vars(item, class_name, env), items))
   | _ -> ast.TypeName("_")
 
 # Returns the outermost TVar name from the first arg whose head is a TVar after
@@ -853,6 +858,7 @@ fn type_head_str(t: types.Type) -> String =
   | types.TConst name -> name
   | types.TApp base _ -> type_head_str(base)
   | types.TVar name -> name
+  | types.TTuple items -> "Tuple" ++ int_to_string(list_length(items))
   | _ -> types.type_to_string(t)
 
 # Returns the concrete constructor name (TConst head) of a type, or Nothing if
@@ -866,6 +872,7 @@ fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with
   | types.TConst name -> Just(strip_module_prefix(name))
   | types.TApp base _ -> concrete_type_str(base)
+  | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | _ -> Nothing
 
 # --- Constrained-function TDict injection ---
