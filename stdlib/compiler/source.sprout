@@ -37,9 +37,6 @@ fn cursor_byte_offset(cursor: SourceCursor) -> Int =
   match cursor with
   | SourceCursor _ byte_offset _ -> byte_offset
 
-export fn at_end(cursor: SourceCursor) -> Bool =
-  cursor_byte_offset(cursor) >= str_byte_len(cursor_source(cursor))
-
 # peek_char: O(1) — reads one UTF-8 codepoint from the byte position.
 export fn peek_char(cursor: SourceCursor) -> Maybe Char =
   str_char_at_byte(cursor_source(cursor), cursor_byte_offset(cursor))
@@ -61,12 +58,6 @@ export fn advance_char(cursor: SourceCursor) -> SourceCursor =
       | Just ch ->
           SourceCursor(raw, byte_offset + str_char_width_at_byte(raw, byte_offset), advance_position(pos, ch))
 
-export fn match_char(expected: Char, cursor: SourceCursor) -> Maybe SourceCursor =
-  match peek_char(cursor) with
-  | Just ch ->
-      if ch == expected then Just(advance_char(cursor))
-      else Nothing
-  | Nothing -> Nothing
 
 fn advance_expected(cursor: SourceCursor, expected: String, index: Int, total: Int) -> SourceCursor =
   if index >= total then
