@@ -1,0 +1,60 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# Stress test for the @eta_fwd: marker plumbing in check_fn_body /
+# compute_eta_fwd_markers (replacing the old extract_fwd_markers env walk).
+# Covers two non-trivial cases:
+#   (1) A fn with two distinct typeclass constraints — markers must be
+#       seeded for both class names against the same fresh type-var.
+#   (2) Superclass transitive forwarding — a constraint on Ord must also
+#       seed @eta_fwd: markers for its Eq super so eta-expanded value-position
+#       class methods can locate the forwarded dict slot.
+
+class MyEq a {
+  fn my_eq(x: a, y: a) -> Bool
+}
+
+class MyShow a {
+  fn my_show(x: a) -> String
+}
+
+class MyOrd a where MyEq a {
+  fn my_lt(x: a, y: a) -> Bool
+}
+
+instance MyEq Int {
+  fn my_eq(x: Int, y: Int) -> Bool = x == y
+}
+
+instance MyShow Int {
+  fn my_show(x: Int) -> String = int_to_string(x)
+}
+
+instance MyEq Bool {
+  fn my_eq(x: Bool, y: Bool) -> Bool = x == y
+}
+
+instance MyOrd Int {
+  fn my_lt(x: Int, y: Int) -> Bool = x < y
+}
+
+# Case (1): two constraints in one signature.  The fwd_markers dict produced
+# by compute_eta_fwd_markers must contain @eta_fwd:{fresh}:MyEq AND
+# @eta_fwd:{fresh}:MyShow so the eta-expanded `my_eq` / `my_show` calls in
+# the body can resolve at lowering time.
+fn eq_and_show(x: a, y: a) -> String where MyEq a, MyShow a =
+  if my_eq(x, y) then my_show(x) else "ne"
+
+# Case (2): single constraint on MyOrd, but the body uses my_eq (the super).
+# compute_eta_fwd_markers must seed @eta_fwd:{fresh}:MyEq via the @super:
+# scan, otherwise the eta site for my_eq has no dict slot.
+fn ord_uses_eq(x: a, y: a) -> Bool where MyOrd a =
+  if my_lt(x, y) then false else my_eq(x, y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "two-constraint fn dispatches both", eq_and_show(1, 1) == "1")
+    assert_true(state, "two-constraint fn dispatches false branch", eq_and_show(1, 2) == "ne")
+    assert_true(state, "superclass forwarded dispatch (lt false, eq true)", ord_uses_eq(1, 1))
+    assert_true(state, "superclass forwarded dispatch (lt true)", ord_uses_eq(2, 1) == false)
+    summary(state)

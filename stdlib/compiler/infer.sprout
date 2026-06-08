@@ -1283,6 +1283,55 @@ fn seed_super_from_entries(class_name: String, fresh_name: String, prog_var: Str
                           types.mono(types.TConst(prog_var)), env))
           else seed_super_from_entries(class_name, fresh_name, prog_var, rest, env)
 
+# Computes the @eta_fwd:* markers that correspond to the @fwd:* entries
+# seed_forward_markers seeds. Used by check_fn_body to thread markers to
+# lowering without the old extract_fwd_markers(fwd_env) walk, which scanned
+# the entire typecheck env per FnDecl regardless of constraint count — the
+# dominant cost in self-compile (~32% of total time per `sample` profile).
+# Constraint-free decls (~98% of stdlib) now pay zero cost here.
+fn compute_eta_fwd_markers(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  compute_eta_fwd_markers_acc(constraints, prog_to_fresh, env, dict_empty())
+
+fn compute_eta_fwd_markers_acc(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type, env: Dict types.Scheme, markers: Dict types.Scheme) -> Dict types.Scheme =
+  match constraints with
+  | Nil -> markers
+  | Cons c rest ->
+      compute_eta_fwd_markers_acc(rest, prog_to_fresh, env, add_eta_for_constraint(c, prog_to_fresh, env, markers))
+
+fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type, env: Dict types.Scheme, markers: Dict types.Scheme) -> Dict types.Scheme =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> markers
+      | Cons head_te _ ->
+          match head_te with
+          | ast.TypeName prog_var ->
+              match dict_get(prog_var, prog_to_fresh) with
+              | Nothing -> markers
+              | Just fresh_t ->
+                  match fresh_t with
+                  | types.TVar fresh_name ->
+                      add_eta_with_supers(class_name, fresh_name, prog_var, env,
+                        dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ class_name,
+                                 types.mono(types.TConst(prog_var)), markers))
+                  | _ -> markers
+          | _ -> markers
+
+fn add_eta_with_supers(class_name: String, fresh_name: String, prog_var: String, env: Dict types.Scheme, markers: Dict types.Scheme) -> Dict types.Scheme =
+  add_eta_supers_from_entries(class_name, fresh_name, prog_var, vec_to_list(dict_entries(env)), markers)
+
+fn add_eta_supers_from_entries(class_name: String, fresh_name: String, prog_var: String, entries: List (String, types.Scheme), markers: Dict types.Scheme) -> Dict types.Scheme =
+  match entries with
+  | Nil -> markers
+  | Cons entry rest ->
+      match entry with
+      | (key, _) ->
+          if str_starts_with(key, "@super:" ++ class_name ++ ":")
+          then add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest,
+                 dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ str_slice(key, str_len("@super:" ++ class_name ++ ":"), str_len(key)),
+                          types.mono(types.TConst(prog_var)), markers))
+          else add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest, markers)
+
 # --- Args accumulator ---
 
 fn infer_args_acc(
@@ -2510,23 +2559,6 @@ fn assert_resolved_typed_record_fields(fn_name: String, fields: List typed_ast.T
 # FnDecl body inference
 # ---------------------------------------------------------------------------
 
-# Extract @fwd:* entries from a typechecker env. Used to thread fresh-name →
-# prog-var mappings through to lowering for value-position class method
-# eta-expansion (see try_eta_in_class in lowering.sprout).
-fn extract_fwd_markers(fwd_env: Dict types.Scheme) -> Dict types.Scheme =
-  extract_fwd_from_entries(vec_to_list(dict_entries(fwd_env)), dict_empty())
-
-fn extract_fwd_from_entries(entries: List (String, types.Scheme), acc: Dict types.Scheme) -> Dict types.Scheme =
-  match entries with
-  | Nil -> acc
-  | Cons (key, scheme) rest ->
-      if str_starts_with(key, "@fwd:") then
-        # Rewrite "@fwd:X" → "@eta_fwd:X" so these global markers don't collide with
-        # the per-function @fwd: entries that resolve_via_fwd_for_prog_var scans.
-        extract_fwd_from_entries(rest, dict_set("@eta_fwd:" ++ str_slice(key, 5, str_len(key)), scheme, acc))
-      else
-        extract_fwd_from_entries(rest, acc)
-
 fn fold_fwd_markers(markers: Dict types.Scheme, env: Dict types.Scheme) -> Dict types.Scheme =
   fold_fwd_entries(vec_to_list(dict_entries(markers)), env)
 
@@ -2549,6 +2581,9 @@ fn check_fn_body(
       do
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env))
         let fwd_env = seed_forward_markers(constraints, prog_to_fresh, env)
+        # Compute @eta_fwd:* markers in parallel without walking fwd_env post-hoc.
+        # Constraint-free decls return dict_empty() instantly.
+        let fwd_markers = compute_eta_fwd_markers(constraints, prog_to_fresh, env)
         # Seed @constrained_N:name markers into the body env so that recursive
         # constrained calls (e.g., decorated_merge_sorted calling itself) can
         # find the markers and have dict args injected by inject_constrained_fn_dicts.
@@ -2559,7 +2594,7 @@ fn check_fn_body(
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
             | Err e -> (typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e), dict_empty())
-            | Ok s2 -> (typed_ast.BodyOk(typed_body, unifier.apply_subst(s2, inst_type)), extract_fwd_markers(fwd_env))
+            | Ok s2 -> (typed_ast.BodyOk(typed_body, unifier.apply_subst(s2, inst_type)), fwd_markers)
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst("Unit")), dict_empty())
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
