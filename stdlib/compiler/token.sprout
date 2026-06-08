@@ -37,10 +37,6 @@ export fn error_message(value: TokenizeError) -> String =
   match value with
   | TokenizeError message _ -> message
 
-export fn error_position(value: TokenizeError) -> source.SourcePos =
-  match value with
-  | TokenizeError _ position -> position
-
 export fn eof_token(position: source.SourcePos) -> Token =
   Token(TokenEofKind, "", position)
 

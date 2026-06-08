@@ -12,9 +12,6 @@ extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
 type LspState = LspState String (Ref (Dict String)) (Ref Bool)
   # stdlib_root, open_documents (uri -> source), shutdown_requested
 
-fn lsp_stdlib_root(state: LspState) -> String =
-  match state with | LspState r _ _ -> r
-
 fn lsp_documents(state: LspState) -> Ref (Dict String) =
   match state with | LspState _ d _ -> d
 

@@ -55,7 +55,6 @@ export fn type_int() -> Type = TConst("Int")
 export fn type_bool() -> Type = TConst("Bool")
 export fn type_string() -> Type = TConst("String")
 export fn type_char() -> Type = TConst("Char")
-export fn type_unit() -> Type = TConst("Unit")
 export fn type_list(a: Type) -> Type = TApp(TConst("List"), a)
 export fn type_maybe(a: Type) -> Type = TApp(TConst("Maybe"), a)
 
