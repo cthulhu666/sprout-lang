@@ -3112,35 +3112,6 @@ fn build_fn_params(lls: List String, params: List ast.Param, idx: Int) -> String
           match build_fn_params(rest_lls, rest_params, idx + 1) with
           | rest_str -> if rest_str == "" then ll ++ " %" ++ name else ll ++ " %" ++ name ++ ", " ++ rest_str
 
-fn build_param_locals(params: List ast.Param, lls: List String, idx: Int) -> Dict Value !{IO} =
-  build_param_locals_acc(params, lls, idx, dict_empty())
-
-fn build_param_locals_acc(params: List ast.Param, lls: List String, idx: Int, acc: Dict Value) -> Dict Value !{IO} =
-  match params with
-  | Nil -> acc
-  | Cons (ast.Param name _) rest_params ->
-      match lls with
-      | Nil -> acc
-      | Cons ll rest_lls ->
-          build_param_locals_acc(rest_params, rest_lls, idx + 1, dict_set(name, val_for_ll(ll, "%" ++ name), acc))
-
-fn push_roots_for_params(locals: Dict Value, em: Emitter) -> Int !{IO} =
-  push_roots_for_pairs(dict_keys(locals), locals, em, 0)
-
-fn push_roots_for_pairs(keys: Vec String, locals: Dict Value, em: Emitter, idx: Int) -> Int !{IO} =
-  if idx >= vec_length(keys) then 0
-  else
-    match vec_get(idx, keys) with
-    | Nothing -> push_roots_for_pairs(keys, locals, em, idx + 1)
-    | Just k ->
-        match dict_get(k, locals) with
-        | Nothing -> push_roots_for_pairs(keys, locals, em, idx + 1)
-        | Just v ->
-            do
-              n <- push_temp_root(v, em)
-              ns <- push_roots_for_pairs(keys, locals, em, idx + 1)
-              n + ns
-
 # Build param locals dict and push GC roots in one pass, using the type
 # annotation from ast.Param (if present) to skip rooting for known scalar
 # types (Int, Bool, Char).  Returns (locals_dict, n_roots_pushed).
