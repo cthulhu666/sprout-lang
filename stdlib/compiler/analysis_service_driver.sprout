@@ -40,12 +40,6 @@ fn count_header_lines(s: String, pos: Int, count: Int) -> Int =
 export type SessionState (..) = SessionState(Vec String) (Vec String)
   # imports, declarations
 
-fn session_state_imports(s: SessionState) -> Vec String =
-  match s with | SessionState imports _ -> imports
-
-fn session_state_declarations(s: SessionState) -> Vec String =
-  match s with | SessionState _ declarations -> declarations
-
 export fn session_add_line(sess: SessionState, kind: String, line: String) -> SessionState =
   match sess with
   | SessionState imports declarations ->
