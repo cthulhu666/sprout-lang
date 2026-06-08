@@ -249,18 +249,41 @@ fn print_codegen_warns(warns: List String) -> Unit !{IO} =
         eprint("WARNING: " ++ w)
         print_codegen_warns(rest)
 
+# Gate: SPROUT_TIME_PHASES env var.  When set to anything other than "" or "0",
+# compile_full_ir_lines emits a single `[phase] recheck=Nms codegen=Mms total=Tms`
+# line to stderr per invocation.  Stdout (IR text) is unaffected, so the
+# bootstrap fixed-point invariant holds either way.
+fn timing_enabled() -> Bool !{IO} =
+  match env_get("SPROUT_TIME_PHASES") with
+  | Nothing -> false
+  | Just s -> if s == "" then false else if s == "0" then false else true
+
+fn micros_to_ms_str(us: Int) -> String = int_to_string(us / 1000)
+
 # compile_full_ir_lines uses compile_phase_recheck so that prog, typed_prog,
 # and lowered are freed before codegen runs — only typed_lowered + env survive
 # into the caller's scope.
 # debug_mode: when true, emits DWARF metadata in the 4th IR section (--debug flag).
 export fn compile_full_ir_lines(path: String, stdlib_root: String, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
   do
+    timing_on <- timing_enabled()
+    t0 <- time_now_micros()
     recheck_result <- compile_phase_recheck(path, stdlib_root)
+    t1 <- time_now_micros()
     match recheck_result with
-    | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError(msg), Nil))
+    | typed_ast.TypedErr msg ->
+        do
+          if timing_on
+            then eprint("[phase] recheck=" ++ micros_to_ms_str(t1 - t0) ++ "ms total=" ++ micros_to_ms_str(t1 - t0) ++ "ms FAILED-at-recheck path=" ++ path)
+            else ()
+          IrFullLinesFail(Cons (DiagError(msg), Nil))
     | typed_ast.TypedOk typed_lowered env ->
         do
           ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, debug_mode_, path)
+          t2 <- time_now_micros()
+          if timing_on
+            then eprint("[phase] recheck=" ++ micros_to_ms_str(t1 - t0) ++ "ms codegen=" ++ micros_to_ms_str(t2 - t1) ++ "ms total=" ++ micros_to_ms_str(t2 - t0) ++ "ms path=" ++ path)
+            else ()
           match ir_result with
           | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
               do

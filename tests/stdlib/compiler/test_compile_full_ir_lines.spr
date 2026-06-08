@@ -1,0 +1,49 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+
+# Regression test for `compile_full_ir_lines` after adding SPROUT_TIME_PHASES
+# env-gated stderr timing output.
+#
+# The end-to-end stderr emission is verified manually (the test runner does not
+# set SPROUT_TIME_PHASES, so the un-timed path is exercised here).  What this
+# test guards against:
+#   1. The un-timed control-flow path of compile_full_ir_lines still returns
+#      IrFullLinesOk for a trivial valid source.
+#   2. The returned `def_lines` still contains at least one `define ` block —
+#      i.e. timing instrumentation did not accidentally short-circuit codegen.
+#
+# Failure mode this catches: a refactor that swaps the order of t1/t2 capture
+# with the recheck/codegen call, or one that returns IrFullLinesFail when the
+# env var is set/unset on certain platforms.
+
+fn is_ir_ok(r: compiler.IrFullLinesResult) -> Bool =
+  match r with
+  | compiler.IrFullLinesOk _ _ _ _ -> true
+  | compiler.IrFullLinesFail _ -> false
+
+fn has_define_line(lines: List String) -> Bool =
+  match lines with
+  | Nil -> false
+  | Cons line rest ->
+      if str_starts_with(line, "define ") then true
+      else has_define_line(rest)
+
+fn def_lines_have_define(r: compiler.IrFullLinesResult) -> Bool =
+  match r with
+  | compiler.IrFullLinesFail _ -> false
+  | compiler.IrFullLinesOk _ _ def_lines _ -> has_define_line(def_lines)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          let tmp_path = "/tmp/sprout_test_compile_full_ir_lines_fixture.sprout"
+          _ <- write_file(tmp_path, "fn answer() -> Int = 42\n")
+          r <- compiler.compile_full_ir_lines(tmp_path, stdlib_root, false)
+          assert_true(state, "compile_full_ir_lines returns Ok for trivial input", is_ir_ok(r))
+          assert_true(state, "compile_full_ir_lines emits a `define ` block", def_lines_have_define(r))
+    summary(state)

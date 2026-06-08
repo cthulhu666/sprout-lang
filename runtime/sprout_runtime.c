@@ -265,14 +265,15 @@ static void sprout_debug_alloc_report(void) {
   if (!g_debug_alloc_enabled) return;
   fprintf(
     stderr,
-    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld gc_swept=%lld\n",
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld gc_swept=%lld gc_cycles=%lld\n",
     g_debug_alloc_sprout_obj,
     g_debug_alloc_closure,
     g_debug_alloc_vector,
     g_debug_alloc_map,
     g_debug_alloc_bytes,
     g_debug_alloc_builder,
-    g_debug_gc_swept
+    g_debug_gc_swept,
+    g_gc_cycle_count
   );
 }
 
