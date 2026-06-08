@@ -841,9 +841,6 @@ fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String
   | Just value -> Just(value)
   | Nothing -> dict_get(strip_module_prefix(method_name), method_map)
 
-fn find_fwd_method_impl(class_name: String, method_name: String, ctx: LowerCtx) -> Maybe String =
-  find_fwd_in_co_entries(class_name, method_name, vec_to_list(dict_entries(ctx_fwd(ctx))))
-
 # Exact-head lookup: returns the forwarded slot for ClassName_head if the current
 # function received that constraint as a hidden dict parameter.  Used to prefer the
 # forwarded slot over the concrete instance when both share the same key (e.g.
@@ -869,18 +866,6 @@ fn has_unresolved_dict(dicts: List typed_ast.TypedExpr) -> Bool =
           if str_starts_with(name, "__unresolved_") then true
           else has_unresolved_dict(rest)
       | _ -> has_unresolved_dict(rest)
-
-fn find_fwd_in_co_entries(class_name: String, method_name: String, entries: List (String, Dict String)) -> Maybe String =
-  match entries with
-  | Nil -> Nothing
-  | Cons (key, method_map) rest ->
-      # fwd_map keys are always stripped; strip class_name here to match.
-      if str_starts_with(key, strip_module_prefix(class_name) ++ "_") then
-        match dict_get_method(method_name, method_map) with
-        | Just impl_name -> Just(impl_name)
-        | Nothing -> find_fwd_in_co_entries(class_name, method_name, rest)
-      else
-        find_fwd_in_co_entries(class_name, method_name, rest)
 
 fn eta_param_name(i: Int) -> String =
   "__eta_x" ++ int_to_string(i)
