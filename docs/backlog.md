@@ -12,8 +12,11 @@ This file tracks open design, implementation, and tooling follow-up work.
    `SPROUT_GC_THRESHOLD=1`") is still gated on PR 2.6+ — the residual expression forms
    still rejected by `ast_to_ir.translate_expr`: `TChar`, `TUnit`, `TTuple`, `TDo`,
    `TRecord`, `TGetField`, `TDict`, `TUnary`, `TRange`. Each ships in its own follow-up
-   PR alongside the matching `Pattern` (where one exists). Five deferred items from the
-   PR 2.3 code-review pass are tracked in `BACKLOG.md`.
+   PR alongside the matching `Pattern` (where one exists). **Before PR 2.6**, land the
+   `clang_verifies_ir` promotion (see "PR 2.5 v2 code-review follow-ups (still open)"
+   below) so each new IR-codegen test for the residual forms uses the shared helper
+   from the start. Five deferred items from the PR 2.3 code-review pass are tracked
+   in `BACKLOG.md`.
    PR 2.5 v2 code-review follow-ups (still open):
    - Promote the `clang_verifies_ir` test helper (currently local to
      `tests/stdlib/test_ir_codegen_match.spr`) to a shared module under
@@ -21,6 +24,14 @@ This file tracks open design, implementation, and tooling follow-up work.
      closures / control / ctors / strings` and `test_ir_rooting`.  Closes the
      substring-blindness gap that hid bug #2 in PR 2.5.  Closed for the match
      and closures suites; remaining 6 suites need the same upgrade.
+     **Sequencing**: land this *before* any PR 2.6+ (the residual M2
+     expression-form PRs — `TChar`, `TUnit`, `TTuple`, `TDo`, `TRecord`,
+     `TGetField`, `TDict`, `TUnary`, `TRange`).  Two reasons: (a) each new
+     IR-codegen test for the residual forms should adopt the shared helper
+     from the start rather than accumulating substring-only tests that later
+     need rewriting; (b) substring-blindness is the bug class most likely to
+     recur in new-form codegen (PR 2.5 bug #2 was exactly a "substring
+     passes / clang rejects" case in freshly-added match-codegen).
    PR 2.5 (first /code-review pass) follow-ups:
    - Refactor the ctors-dict tuple `(tag, arity, max_arity, field_kinds_string)` in
      `ast_to_ir.sprout` to a named `CtorMeta` record (currently a positional 4-tuple,
