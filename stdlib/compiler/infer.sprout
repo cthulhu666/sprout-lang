@@ -50,15 +50,6 @@ fn strip_module_prefix(name: String) -> String =
   else strip_module_prefix(str_slice(name, dot + 1, str_len(name)))
   where dot = str_find(name, ".")
 
-# Normalise a TConst with a qualified name (e.g. TConst("types.Type")) to its
-# bare leaf name (TConst("Type")).  Other type forms are returned unchanged.
-# Used before unifying a pattern scrutinee type against a constructor's result
-# type so that qualified annotations match unqualified constructor registrations.
-fn strip_tconst_prefix(t: types.Type) -> types.Type =
-  match t with
-  | types.TConst name -> types.TConst(strip_module_prefix(name))
-  | _ -> t
-
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   match dict_get(name, local_vars) with
   | Just t -> t
@@ -86,12 +77,6 @@ export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect 
 # Build a Scheme from a FnDecl
 # ---------------------------------------------------------------------------
 
-export fn scheme_from_fn_decl(decl: ast.Decl) -> types.Scheme =
-  match decl with
-  | ast.FnDecl _ params ret_type_maybe effects_maybe _ _ _ ->
-      scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, dict_empty())
-  | _ -> types.mono(types.TConst("Unit"))
-
 fn scheme_from_fn_parts(
   params: List ast.Param,
   ret_type_maybe: Maybe ast.TypeExpr,
@@ -118,15 +103,6 @@ fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List Str
           match maybe_type with
           | Nothing -> collect_param_type_vars(rest, list_add_unique("_unann_" ++ name, acc))
           | Just te -> collect_param_type_vars(rest, collect_te_vars(te, acc))
-
-fn ast_param_type(p: ast.Param) -> Maybe ast.TypeExpr =
-  match p with
-  | ast.Param _ maybe_type -> maybe_type
-
-fn collect_type_expr_vars(maybe_te: Maybe ast.TypeExpr, acc: List String) -> List String =
-  match maybe_te with
-  | Nothing -> list_add_unique("_unann", acc)
-  | Just te -> collect_te_vars(te, acc)
 
 fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
   match te with
