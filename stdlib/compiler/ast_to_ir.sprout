@@ -341,7 +341,15 @@ fn build_load_env_ops_go(frees: List String, kinds: List String, base_idx: Int, 
 #   - fn id(x: Int) -> Int = x              → IRRet "%x"   (parameter reference)
 #   - fn add1(x: Int) -> Int = x + 1        → IRConst, IRIAdd, IRRet
 #   - fn sub1, mul2 — likewise for Sub / Mul
-#   - fn is_zero(x: Int) -> Bool = x == 0   → IRConst, IRICmp, IRRet  (i1)
+#   - fn is_zero(x: Int) -> Bool = x == 0   → IRConst, IRICmp, IRRet
+#     (all named SSA values at function boundaries are i64 per
+#     /code-review fix #2. IRICmp's lowering produces an i1 that LLVM
+#     accepts as the IRRet operand only when the function ret_ty is i1;
+#     because llvm_ret_type returns i64 unconditionally, Bool-returning
+#     functions whose body ends in a comparison currently rely on the
+#     fact that comparison-ending function bodies aren't yet exercised
+#     by translator-driven tests. /code-review-v2 finding #3 tracks the
+#     IRZext insertion that will close this case.)
 #     (and the rest of the comparison family: !=, <, <=, >, >=)
 #   - fn abs(x: Int) -> Int = if x < 0 then 0 - x else x
 #       → IRICmp, IRCondBr, then-block, else-block, IRPhi, IRRet
@@ -537,30 +545,28 @@ fn is_unit_type(t: types.Type) -> Bool =
 
 # Scalar argument types accepted by IRCall / IRApplyClosure (direct and
 # closure call sites).  All IR values are i64; the typechecker is the source
-# of truth for type compatibility — we trust it here and accept anything
-# except Bool (i1, needs zext) and Unit (no LLVM value).  TVar-typed args
-# (polymorphic fn params not yet monomorphised) are explicitly accepted;
-# they are all i64 at the LLVM level just like TFunc closures.
-#
-# Trust contract: types that now silently pass include TTuple, TApp, TConst
-# for any name that is not "Bool"/"Unit", and all TFunc closures. These are
-# correct at the IR level (all i64) as long as the typechecker has accepted
-# the call — we rely on that and do NOT re-check compatibility here.
+# of truth for type compatibility.  Unit is rejected (no LLVM value).  Bool
+# is rejected pending end-to-end validation of Bool-flowing-as-i64 through
+# call sites (post /code-review fix #2 the IR shape is internally consistent,
+# but the comparison-result-into-call path needs the IRZext insertion tracked
+# at /code-review-v2 finding #3 before the rejection can be lifted).
 fn is_supported_arg_type(t: types.Type) -> Bool =
   ! is_bool_type (t) && ! is_unit_type (t)
 
 # Ctor field argument types accepted by translate_args_ctor.
 #
 # IRMakeCtor lowering (ir_lowering.sprout `lower_op` / `lower_call_args`)
-# hardcodes `i64 %argN` for every argument slot.  This is correct for Int,
-# String, and heap-typed ADT values (all of which produce i64 in LLVM IR).
+# hardcodes `i64 %argN` for every argument slot.  Int, String, and heap-typed
+# ADT values all produce i64 in LLVM IR — fine.
 #
-# Bool is REJECTED: Bool expressions produce `i1` in LLVM IR (see
-# codegen.sprout `pack_to_i64`, line ~960, which emits `zext i1 ... to i64`
-# to widen Bool before passing it to sprout_makeN).  The IR path has no
-# equivalent zext step; emitting `i64 %bool_val` when `%bool_val` is `i1`
-# causes an LLVM verifier ABI mismatch.  The root fix is to add an
-# IRZextI1ToI64 op (deferred); for now, reject Bool ctor fields early.
+# Bool is REJECTED pending the same end-to-end audit referenced above.
+# Post /code-review fix #2, IRConst emits i64 for both `true` and `false`,
+# so `i64 %bool_val` IS valid when the source of %bool_val is a TBool
+# literal.  The remaining gap is the comparison-result path: `n > 0` lowers
+# to IRICmp whose result is i1, and feeding that i1 directly into IRMakeCtor
+# would still produce the verifier mismatch.  The IRZext insertion tracked
+# at /code-review-v2 finding #3 closes that path.  Until then, reject Bool
+# ctor fields early — same effect, accurate rationale.
 #
 # Unit is REJECTED: Unit produces no LLVM value; there is no valid `i64` to
 # pass.
@@ -1332,6 +1338,15 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   # Hoist IRGetTag once up-front if any arm is a ConstructorPattern.
   # This SSA name is reused in every ctor branch test.
+  #
+  # /code-review-v2 #9: s_ops arrives in SOURCE ORDER from translate_expr
+  # (translate_expr accumulates via list_append throughout). The Cons-prepend
+  # convention introduced by /code-review fix #7/#8 lives INSIDE
+  # translate_match_arms only — it does not extend to translate_expr's outputs.
+  # This list_append is O(|s_ops|) but is called ONCE per match expression
+  # (not once per arm), so it is bounded and is NOT the O(N²) pattern that
+  # fix #7/#8 eliminated. Widening the Cons-prepend convention upstream into
+  # translate_expr is a broader refactor and is out of scope here.
   if has_ctor_pattern_arm(arms)
   then
     translate_match_dispatch(arms, match_ty, params, ctors, s_blocks, s_cur_lbl,
@@ -1441,19 +1456,22 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
   match pat with
   | ast.WildcardPattern _ ->
       # Always-match: dispatch_lbl IS the body entry (no test block emitted).
+      # No shadowing: captures == outer_captures.
       translate_match_arm_body_always(body, rest_arms, branch_idx, base_idx,
                                       dispatch_lbl, join_lbl, match_ty,
                                       s_name, tag_name,
                                       params, ctors, idx, acc_blocks, acc_phi,
-                                      captures, lifted_ref, top_level, lambda_ctr_ref,
-                                      lifted_idx_ref, name_prefix)
+                                      captures, captures, lifted_ref, top_level,
+                                      lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.VarPattern v _ ->
-      # Always-match with one binding: bind v → s_name in captures.
+      # Always-match with one binding: bind v → s_name in captures for the body;
+      # pass plain captures as outer_captures so the binding does not leak into rest_arms.
       translate_match_arm_body_always(body, rest_arms, branch_idx, base_idx,
                                       dispatch_lbl, join_lbl, match_ty,
                                       s_name, tag_name,
                                       params, ctors, idx, acc_blocks, acc_phi,
-                                      dict_set(v, s_name, captures), lifted_ref, top_level,
+                                      dict_set(v, s_name, captures), captures,
+                                      lifted_ref, top_level,
                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.IntPattern n _ ->
       translate_match_arm_int(n, body, rest_arms, branch_idx, base_idx,
@@ -1509,12 +1527,16 @@ fn translate_match_arm_body_always(body: typed_ast.TypedExpr,
                                     acc_blocks: List sprout_ir.IRBlock,
                                     acc_phi: List (String, String),
                                     captures: Dict String,
+                                    outer_captures: Dict String,
                                     lifted_ref: Ref (List sprout_ir.IRFunction),
                                     top_level: Set,
                                     lambda_ctr_ref: Ref Int,
                                     lifted_idx_ref: Ref (Dict Int),
                                     name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, List (String, String), Int) !{IO} =
+  # `captures` is used by this arm's body (may include a VarPattern binding).
+  # `outer_captures` is forwarded to rest_arms — it is the unextended dict,
+  # preventing VarPattern bindings from leaking into sibling arms.
   match translate_expr(body, params, ctors, idx, body_lbl, Nil,
                        captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix) with
@@ -1534,7 +1556,7 @@ fn translate_match_arm_body_always(body: typed_ast.TypedExpr,
                                     list_append(list_reverse(body_blocks),
                                                 acc_blocks)),
                                Cons((body_val, body_cur_lbl), acc_phi),
-                               captures, lifted_ref, top_level, lambda_ctr_ref,
+                               outer_captures, lifted_ref, top_level, lambda_ctr_ref,
                                lifted_idx_ref, name_prefix)
 
 # Translate an IntPattern arm.
@@ -1764,6 +1786,14 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
                 phi_incoming: List (String, String),
                 join_lbl: String, phi_name: String, idx: Int) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  # /code-review-v2 #10: s_blocks arrives in SOURCE ORDER from translate_expr
+  # (same reason as #9). arm_blocks is reversed inside translate_match_arms but
+  # list_reverse'd to source order before being returned (see translate_match_arms
+  # Nil base, line ~1415). The Cons-prepend convention is local to
+  # translate_match_arms' internal acc_blocks accumulator and does not extend
+  # here. Both list_append calls below are O(|s_blocks|) but called ONCE per
+  # match expression — bounded, not O(N²) per arm. Widening the convention
+  # upstream into translate_expr is a broader refactor and is out of scope.
   match phi_incoming with
   | Nil ->
       # All branches terminate (abort/unreachable); join is unreachable.
@@ -1794,8 +1824,9 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
 # (lbl, ops, idx) is the call site's current block.  PR 1.5 only handles
 # scalar (Int) arguments for IRCall; the IRCall lowering hard-codes `i64`
 # for every arg position.  The call's LLVM ret-type comes from `call_ty`
-# (the TCall node's own inferred type), mapped via llvm_ret_type — typically
-# "i64" for Int callees, "i1" for Bool.
+# (the TCall node's own inferred type), mapped via llvm_ret_type, which
+# returns "i64" for every type post /code-review fix #2 (Bool flows as
+# i64 too — 0 or 1 encoded in an i64 register).
 fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   call_ty: types.Type, params: List String,
                   ctors: Dict (Int, Int, Int, String), idx: Int,

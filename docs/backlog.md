@@ -14,7 +14,24 @@ This file tracks open design, implementation, and tooling follow-up work.
    `TRecord`, `TGetField`, `TDict`, `TUnary`, `TRange`. Each ships in its own follow-up
    PR alongside the matching `Pattern` (where one exists). Five deferred items from the
    PR 2.3 code-review pass are tracked in `BACKLOG.md`.
-   PR 2.5 follow-up tracked from the /code-review pass:
+   PR 2.5 v2 code-review follow-ups (second-pass review surfaced these):
+   - Insert IRZext / IRTrunc widening around IRICmp results so Bool-returning
+     functions whose body ends in a comparison emit valid LLVM IR.  Today
+     `finish_match` emits `phi i64 [const_i64, ...], [icmp_i1, ...]` — a
+     verifier rejection waiting for the first Bool-returning match with a
+     comparison body arm.  The same fix unblocks the `translate_lambda`
+     Bool-return + Bool-capture guards, which currently reject valid programs
+     with stale i1/zext rationale.  Ship #3 + #6 + #7 in one follow-up PR.
+   - Promote the `clang_verifies_ir` test helper (currently local to
+     `tests/stdlib/test_ir_codegen_match.spr`) to a shared module under
+     `tests/stdlib/`, and adopt it in `test_ir_codegen_arith / basic / calls /
+     closures / control / ctors / strings` and `test_ir_rooting`.  Closes the
+     substring-blindness gap that hid bug #2 in PR 2.5.
+   - Finish the "translate_source runs once per test" refactor across the
+     remaining T-match-1..7 cases (T-match-8 already demonstrates the pattern).
+     Avoids the doubled-pipeline work each substring-then-clang assertion pair
+     currently triggers.
+   PR 2.5 (first /code-review pass) follow-ups:
    - Refactor the ctors-dict tuple `(tag, arity, max_arity, field_kinds_string)` in
      `ast_to_ir.sprout` to a named `CtorMeta` record (currently a positional 4-tuple,
      widened twice now). Trigger the refactor when a 5th field is forced (e.g. source

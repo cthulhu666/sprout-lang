@@ -133,15 +133,17 @@ export type IROp (..) =
   | IRGetTag String String
   # IRGetField <result> <scrut-handle> <field-idx> <field-kind>
   # field-kind: "heap" | "scalar" (mirrors IRLoadEnvSlot's kind arg).
-  # Encoding source: extend the ctors-dict value tuple from
-  #   Dict String (Int, Int, Int)        # (tag, arity, max_arity)
-  # to
+  # Encoding source: ctors-dict value tuple
   #   Dict String (Int, Int, Int, String)  # (tag, arity, max_arity, field_kinds_string)
-  # `field_kinds_string` is already computed by build_ctor_table at
-  # ast_to_ir.sprout:493 (passed to CtorReg); we'd be threading the same
-  # value into the dict. translate_match decodes per-byte: 'p' -> "heap";
-  # 'i'|'b'|'s'|'_' -> "scalar" (the '_' type-var case is the only soft
-  # spot — conservatively treat it as "heap" to avoid missed roots).
+  # `field_kinds_string` is computed by build_ctor_table and passed to
+  # CtorReg; the same value is threaded into the dict. translate_match
+  # decodes per-byte via stdlib.compiler.field_kinds.field_kind_char_to_kind:
+  #   'i' (Int)              -> "scalar"
+  #   'b' (Bool)             -> "scalar"
+  #   's' (String AND Char)  -> "heap"   (/code-review fix #1: String must
+  #                                       be rooted; Char over-rooted)
+  #   'p' (ADT|closure|tuple) -> "heap"
+  #   '_' (type-var)         -> "heap"   (conservative — avoid missed roots)
   # Lowers to: %result = call i64 @sprout_field(i64 %scrut-handle, i64 <idx>)
   # @sprout_field is a pure read; no allocation. NOT a GC trigger.
   # field-kind drives ir_rooting heap-vs-scalar classification of <result>.

@@ -38,8 +38,10 @@ fn encode_str_for_ir(s: String, i: Int, acc: String) -> String =
 #
 # Calling convention: every IRFunction lowers to
 #   `define <ret-ty> @<name>(i64 %p, ...)`
-# where <ret-ty> is the LLVM return-type field of the IRFunction ("i64" or
-# "i1").  Each parameter is typed `i64`.  A synthetic C-ABI `main` shim is
+# where <ret-ty> is the LLVM return-type field of the IRFunction, which is
+# "i64" for every function post /code-review fix #2 (Bool flows as i64 too
+# — 0 or 1 in an i64 register). Each parameter is typed `i64`. A synthetic
+# C-ABI `main` shim is
 # appended unconditionally — for PR 1.4 it just returns 0 because we cannot
 # yet lower the user's `main` body (which would typically call into IO).
 #

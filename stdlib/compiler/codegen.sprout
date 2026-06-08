@@ -2263,8 +2263,7 @@ fn emit_match_heap(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMat
 
 fn emit_match_abort(em: Emitter) -> Unit !{IO} =
   do
-    tmp <- fresh_tmp(em)
-    emit_template(em, `  ${tmp} = call i64 @sprout_abort_match()`)
+    emit_line(em, "  call void @sprout_abort_match()")
     emit_line(em, "  unreachable")
 
 fn emit_branches(branches: List typed_ast.TypedMatchBranch, scrut: Value, scrut_type: types.Type, out_ll: String, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx, done_lbl: String, acc: List (Value, String)) -> List (Value, String) !{IO} =
@@ -3392,7 +3391,7 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("sprout_nothing", FnSig("sprout_nothing", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_tag", FnSig("sprout_tag", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_field", FnSig("sprout_field", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  , ("sprout_abort_match", FnSig("sprout_abort_match", Nil, ll_i64(), Nothing))
+  , ("sprout_abort_match", FnSig("sprout_abort_match", Nil, "void", Nothing))
   , ("sprout_rebox2", FnSig("sprout_rebox2", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_rebox3", FnSig("sprout_rebox3", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
   # Closure / tuple allocation
