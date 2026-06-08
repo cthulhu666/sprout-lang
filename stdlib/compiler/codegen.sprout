@@ -240,12 +240,6 @@ fn call_sig_acc(t: types.Type, acc: List String) -> Maybe CallSig =
       | Nil -> Nothing
       | _ -> Just(CallSig(acc, type_to_ll(t), Nothing))
 
-# Extract tuple item lltypes from a types.TTuple.
-fn tuple_items_from_type(t: types.Type) -> Maybe (List String) =
-  match t with
-  | types.TTuple items -> Just(list_map(\i -> type_to_ll(i), items))
-  | _ -> Nothing
-
 # Check whether a type is a Maybe type (TApp (TConst "Maybe") _).
 fn is_maybe_type(t: types.Type) -> Bool =
   match t with
@@ -689,20 +683,8 @@ fn add_def_line(em: Emitter, line: String) -> Unit !{IO} =
 fn add_str_global(em: Emitter, line: String) -> Unit !{IO} =
   es_add_str_glb(em, line)
 
-fn get_fn_wrapper(em: Emitter, name: String) -> Maybe String !{IO} =
-  do
-    fw <- es_fn_wrap(em)
-    dict_get(name, fw)
-
 fn set_fn_wrapper(em: Emitter, fn_n: String, wrap_n: String) -> Unit !{IO} =
   es_set_fn_wrap(em, fn_n, wrap_n)
-
-fn read_cur_blk(em: Emitter) -> Maybe String !{IO} =
-  do
-    cb <- es_cur_blk(em)
-    match cb with
-    | NoBlk -> Nothing
-    | SomeBlk name -> Just(name)
 
 fn read_cur_blk_or(em: Emitter, default_blk: String) -> String !{IO} =
   do
@@ -985,8 +967,6 @@ fn pack_tuple_fields_to_blob(src_ll: String, src_ir: String, items: List String,
         emit_template(em, `  ${gep} = getelementptr i64, ptr ${blob_ptr}, i64 ${int_to_string(idx)}`)
         emit_template(em, `  store i64 ${packed}, ptr ${gep}`)
         pack_tuple_fields_to_blob(src_ll, src_ir, rest, blob_ptr, idx + 1, em)
-
-fn pack_to_i64_field(v: Value) -> String = val_ir(v)
 
 # Coerce a value to the target lltype.
 fn coerce_value(v: Value, target: String, em: Emitter) -> Value !{IO} =
@@ -1415,11 +1395,6 @@ fn list_is_nil(xs: List String) -> Bool =
   | Nil -> true
   | _ -> false
 
-fn list_is_nil_vals(xs: List Value) -> Bool =
-  match xs with
-  | Nil -> true
-  | _ -> false
-
 # ===========================================================================
 # Section 13 — Wrapper generation (named fn closure, partial application)
 # ===========================================================================
@@ -1599,9 +1574,6 @@ fn ctx_ctor_sigs(ctx: CgCtx) -> Dict CtorSig =
 fn ctx_globals(ctx: CgCtx) -> Dict GlobalInfo =
   match ctx with | CgCtx _ _ g _ _ _ _ _ _ -> g
 
-fn ctx_adt_names(ctx: CgCtx) -> Set =
-  match ctx with | CgCtx _ _ _ an _ _ _ _ _ -> an
-
 fn ctx_extern_sigs(ctx: CgCtx) -> Dict FnSig =
   match ctx with | CgCtx _ _ _ _ es _ _ _ _ -> es
 
@@ -1616,9 +1588,6 @@ fn ctx_cpr_extern_sigs(ctx: CgCtx) -> Dict FnSig =
 
 fn ctx_mutual_tco_fns(ctx: CgCtx) -> Set =
   match ctx with | CgCtx _ _ _ _ _ _ _ _ mt -> mt
-
-fn ctx_with_globals(ctx: CgCtx, g: Dict GlobalInfo) -> CgCtx =
-  match ctx with | CgCtx fs cs _ an es sc cf ces mt -> CgCtx(fs, cs, g, an, es, sc, cf, ces, mt)
 
 fn ctx_with_scope(ctx: CgCtx, name: String) -> CgCtx =
   match ctx with | CgCtx fs cs g an es _ cf ces mt -> CgCtx(fs, cs, g, an, es, name, cf, ces, mt)
@@ -2423,9 +2392,6 @@ fn emit_match_unboxed_call(call_fn: String, sig: FnSig, call_args: List typed_as
 
 fn list_is_nil_branch_vals(xs: List (Value, String)) -> Bool =
   match xs with | Nil -> true | _ -> false
-
-fn list_head_branch_val(xs: List (Value, String)) -> Maybe (Value, String) =
-  match xs with | Nil -> Nothing | Cons h _ -> Just(h)
 
 fn list_is_nil_branches(xs: List typed_ast.TypedMatchBranch) -> Bool =
   match xs with | Nil -> true | _ -> false
