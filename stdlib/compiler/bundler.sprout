@@ -176,16 +176,6 @@ fn vec_to_str_list(v: Vec String, i: Int) -> List String =
 fn dict_keys_list(d: Dict String) -> List String =
   vec_to_str_list(dict_keys(d), 0)
 
-fn dict_keys_list_of_dicts(d: Dict (Dict String)) -> List String =
-  vec_to_str_list_of_dicts(dict_keys(d), 0)
-
-fn vec_to_str_list_of_dicts(v: Vec String, i: Int) -> List String =
-  if i >= vec_length(v) then Nil
-  else
-    match vec_get(i, v) with
-    | Nothing -> vec_to_str_list_of_dicts(v, i + 1)
-    | Just k -> Cons(k, vec_to_str_list_of_dicts(v, i + 1))
-
 fn dict_merge(d1: Dict String, d2: Dict String) -> Dict String =
   dict_merge_keys(d1, dict_keys_list(d2), d2)
 
@@ -1076,24 +1066,6 @@ export fn bundle_file(path: String, stdlib_root: String) -> BundleResult !{IO} =
     match err with
     | Just msg -> BundleErr(msg)
     | Nothing -> make_bundle_or_err(modules, stdlib_root)
-
-fn tok_at_bundler(tokens: Vec token.Token, i: Int) -> token.Token =
-  match vec_get(i, tokens) with
-  | Just t -> t
-  | Nothing -> token.eof_token(source.SourcePos(0, 0, 0))
-
-fn bundler_tok_is_ident(t: token.Token) -> Bool =
-  match token.token_kind(t) with
-  | token.TokenIdentKind -> true
-  | _ -> false
-
-fn bundler_tok_is_symbol(t: token.Token, sym: String) -> Bool =
-  match token.token_kind(t) with
-  | token.TokenSymbolKind -> token.token_text(t) == sym
-  | _ -> false
-
-fn bundler_starts_where_binding(tokens: Vec token.Token, i: Int) -> Bool =
-  bundler_tok_is_ident(tok_at_bundler(tokens, i)) && bundler_tok_is_symbol(tok_at_bundler(tokens, i + 1), "=")
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module
