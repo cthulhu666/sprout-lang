@@ -484,18 +484,6 @@ fn es_fn_wrap(em: Emitter) -> Dict String !{IO} =
 fn es_cur_blk(em: Emitter) -> CurBlk !{IO} =
   ref_read(es_cur_blk_ref(em))
 
-fn es_next_tmp(em: Emitter) -> Int !{IO} =
-  ref_read(es_next_tmp_ref(em))
-
-fn es_next_blk(em: Emitter) -> Int !{IO} =
-  ref_read(es_next_blk_ref(em))
-
-fn es_next_str(em: Emitter) -> Int !{IO} =
-  ref_read(es_next_str_ref(em))
-
-fn es_next_lam(em: Emitter) -> Int !{IO} =
-  ref_read(es_next_lam_ref(em))
-
 # --- mutation helpers (operate directly on the field Refs) ---
 
 fn es_add_line(em: Emitter, line: String) -> Unit !{IO} =
@@ -506,30 +494,6 @@ fn es_add_line(em: Emitter, line: String) -> Unit !{IO} =
 
 fn es_set_cur_blk(em: Emitter, blk: CurBlk) -> Unit !{IO} =
   ref_write(es_cur_blk_ref(em), blk)
-
-fn es_bump_tmp(em: Emitter) -> Unit !{IO} =
-  do
-    let r = es_next_tmp_ref(em)
-    n <- ref_read(r)
-    ref_write(r, n + 1)
-
-fn es_bump_blk(em: Emitter) -> Unit !{IO} =
-  do
-    let r = es_next_blk_ref(em)
-    n <- ref_read(r)
-    ref_write(r, n + 1)
-
-fn es_bump_str(em: Emitter) -> Unit !{IO} =
-  do
-    let r = es_next_str_ref(em)
-    n <- ref_read(r)
-    ref_write(r, n + 1)
-
-fn es_bump_lam(em: Emitter) -> Unit !{IO} =
-  do
-    let r = es_next_lam_ref(em)
-    n <- ref_read(r)
-    ref_write(r, n + 1)
 
 fn es_add_def(em: Emitter, line: String) -> Unit !{IO} =
   do
