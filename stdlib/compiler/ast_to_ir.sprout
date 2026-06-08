@@ -866,13 +866,15 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
                     lifted_idx_ref: Ref (Dict Int),
                     name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
-  # FIX #1: reject Bool-returning lambdas (Bool needs i1 + IRZextI1ToI64).
-  if is_bool_type(typed_ast.typed_expr_type(body))
-  then Err("ast_to_ir: closure Bool return not yet supported (lifted ret_ty would need i1 + IRZextI1ToI64 at IRRet — deferred to follow-up PR)")
-  else
-    translate_lambda_after_ret_check(lparams, body, lam_ty, params, ctors, idx,
-                                     cur_label, cur_ops, captures, lifted_ref,
-                                     top_level, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  # /code-review-v2 fix #6: Bool-return guard removed. Post-fix-#2 + #3, Bool
+  # flows as i64 throughout: TBool literals emit IRConst (i64); comparison
+  # results are widened by IRZextI1ToI64 (i64); function ret_ty is "i64"
+  # uniformly. A Bool-returning lambda's lifted ret_ty is "i64"; IRRet emits
+  # `ret i64 %val` where %val is i64. Internally consistent — no zext at
+  # IRRet needed.
+  translate_lambda_after_ret_check(lparams, body, lam_ty, params, ctors, idx,
+                                   cur_label, cur_ops, captures, lifted_ref,
+                                   top_level, lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Continues translate_lambda after the Bool-return guard has passed.
 # Splitting avoids `else let` inside a do block (not valid Sprout).
@@ -900,14 +902,12 @@ fn translate_lambda_after_ret_check(lparams: List ast.Param, body: typed_ast.Typ
     # changes its slot index.
     let all_frees_list = set_to_list(compute_free_vars(body, lam_bound, top_level))
     let capturable = filter_capturable(all_frees_list, params, captures)
-    # FIX #2+#3: reject Bool-capturing lambdas (IRLoadEnvSlot returns i64).
-    match find_bool_capture(capturable, body) with
-    | Just _ ->
-        Err("ast_to_ir: closure Bool capture not yet supported (IRLoadEnvSlot returns i64 but Bool needs i1 — deferred to follow-up PR)")
-    | Nothing ->
-        translate_lambda_emit(lparams, body, capturable, lam_param_names,
-                              params, ctors, idx, cur_label, cur_ops, captures,
-                              lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+    # /code-review-v2 fix #7: Bool-capture guard removed. Post-fix-#2 + #3,
+    # Bool flows as i64; IRLoadEnvSlot returns i64; the captured Bool is i64
+    # in the env. Internally consistent.
+    translate_lambda_emit(lparams, body, capturable, lam_param_names,
+                          params, ctors, idx, cur_label, cur_ops, captures,
+                          lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Final emission stage of translate_lambda after both Bool checks pass.
 # Extracted so each match arm in the parent can return a single expression
@@ -1065,12 +1065,19 @@ fn finish_binary(op: String,
   | Nothing ->
       match cmp_predicate(op) with
       | Just pred ->
+          # /code-review-v2 fix #3: comparison op emits IRICmp (produces i1 by
+          # LLVM semantics) followed by IRZextI1ToI64 to widen the result to
+          # the i64-uniform Bool representation. Downstream consumers (phi,
+          # ret, ctor arg, IRMakeCtor arg, IRCondBr after narrow) all see
+          # i64. The "value" of the binary expression is the zext result.
           Ok((list_append(lblocks, rblocks), cur_lbl,
                list_append(cur_ops,
-                 Cons(sprout_ir.IRICmp(result, pred, l_name, r_name), Nil)),
-               result, idx + 1))
+                 Cons(sprout_ir.IRICmp(result, pred, l_name, r_name),
+                 Cons(sprout_ir.IRZextI1ToI64(zext_result, result), Nil))),
+               zext_result, idx + 2))
       | Nothing -> Err("ast_to_ir: binary op '" ++ op ++ "' not yet supported")
   where result = fresh_name(name_prefix, idx)
+        zext_result = fresh_name(name_prefix, idx + 1)
 
 # Map a TBinary op String to the matching arithmetic IR constructor.
 # Returns Nothing for non-arith ops; the caller falls back to cmp_predicate.
@@ -1159,7 +1166,7 @@ fn translate_if_after_cond(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
                   finish_if(if_ty, cblocks, ccur_lbl, ccur_ops, c_name,
                             then_lbl, tblocks, tcur_lbl, tcur_ops, t_name,
                             else_lbl, eblocks, ecur_lbl, ecur_ops, e_name,
-                            join_lbl, phi_name, idx3)
+                            join_lbl, phi_name, idx3, name_prefix)
   where then_lbl = fresh_then_label(idx)
         else_lbl = fresh_else_label(idx)
         join_lbl = fresh_join_label(idx)
@@ -1172,17 +1179,23 @@ fn finish_if(if_ty: types.Type,
              tcur_lbl: String, tcur_ops: List sprout_ir.IROp, t_name: String,
              else_lbl: String, eblocks: List sprout_ir.IRBlock,
              ecur_lbl: String, ecur_ops: List sprout_ir.IROp, e_name: String,
-             join_lbl: String, phi_name: String, idx: Int) ->
+             join_lbl: String, phi_name: String, idx: Int,
+             name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
-  Ok((all_blocks, join_lbl, Cons(phi_op, Nil), phi_name, idx))
+  Ok((all_blocks, join_lbl, Cons(phi_op, Nil), phi_name, idx + 1))
   where phi_ty = llvm_ret_type(if_ty)
         phi_op = sprout_ir.IRPhi(phi_name, phi_ty,
                                  Cons((t_name, tcur_lbl),
                                  Cons((e_name, ecur_lbl), Nil)))
-        # Seal the entry/condition block with IRCondBr.
+        # /code-review-v2 fix #3: narrow the i64-Bool cond to i1 before IRCondBr.
+        # Every cond source (comparison + IRZext, TBool IRConst, Bool param/call)
+        # produces i64 post fix #2 + fix #3; LLVM's `br i1` requires i1.
+        cond_i1_name = fresh_name(name_prefix, idx)
+        # Seal the entry/condition block with IRTrunc + IRCondBr.
         cond_block = sprout_ir.IRBlock(ccur_lbl,
                        list_append(ccur_ops,
-                         Cons(sprout_ir.IRCondBr(c_name, then_lbl, else_lbl), Nil)))
+                         Cons(sprout_ir.IRTruncI64ToI1(cond_i1_name, c_name),
+                         Cons(sprout_ir.IRCondBr(cond_i1_name, then_lbl, else_lbl), Nil))))
         # Seal the then-branch's final block with IRBr → join.
         then_final = sprout_ir.IRBlock(tcur_lbl,
                        list_append(tcur_ops, Cons(sprout_ir.IRBr(join_lbl), Nil)))

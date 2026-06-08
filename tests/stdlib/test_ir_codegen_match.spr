@@ -521,16 +521,65 @@ fn main() -> Unit !{IO} =
     assert_false(state, "translator path must NOT emit `call i64 @sprout_abort_match` (void fix regression)",
                  translated_ok_ir_contains(src_int_match, "call i64 @sprout_abort_match"))
 
-    # /code-review-v2 findings #3, #6, #7 deferred to backlog:
-    # - #3 (phi i64 with i1 incoming for Bool-returning match with comparison
-    #   body arm) requires inserting IRZext / IRTrunc ops to widen icmp results
-    #   at phi/ret sites and narrow at IRCondBr sites. Non-trivial scope; design
-    #   tracked in docs/backlog.md.
-    # - #6 (Bool-returning lambda rejection) and #7 (Bool-capturing lambda
-    #   rejection) are gated behind #3 — their guards remain in place until the
-    #   IRZext insertion lands.
-    # Tests T-match-9, -10, -11 were drafted but their assertions hinge on the
-    # fixes landing; they're removed to keep the suite green at the branch tip
-    # and queued for the follow-up PR that implements #3.
+    # T-match-9: Bool-returning match with a comparison body arm — exercises
+    # /code-review-v2 fix #3 (IRZext after IRICmp + IRTrunc before IRCondBr).
+    let src_bool_ret_match = "fn classify(n: Int) -> Bool = match n with | 0 -> false | _ -> n > 0"
+    match translate_source(src_bool_ret_match) with
+    | Err msg_9 ->
+        do
+          term_write("T-match-9 translate_source failed: ")
+          term_write(msg_9)
+          term_write("\n")
+          assert_true(state, "T-match-9: Bool-returning match compiles", false)
+    | Ok ir_bool_match ->
+        do
+          assert_true(state, "T-match-9: Bool-returning match with comparison arm compiles",
+                      contains(ir_bool_match, "define i64 @classify"))
+          assert_true(state, "T-match-9: phi at match join is typed i64 (post IRZext)",
+                      contains(ir_bool_match, "= phi i64"))
+          assert_true(state, "T-match-9: comparison result widened via zext i1 ... to i64",
+                      contains(ir_bool_match, "zext i1"))
+          clang_ok_9 <- clang_verifies_ir(ir_bool_match)
+          assert_true(state, "T-match-9: lowered IR passes clang verifier (#3 closed)",
+                      clang_ok_9)
+
+    # T-match-10: Bool-returning lambda — /code-review-v2 fix #6.
+    # Post fix #3, Bool-returning closures emit consistent i64 IR. The guard
+    # in translate_lambda was removed; this test asserts the lambda lowers
+    # cleanly (no Err) and the resulting IR is verifier-clean.
+    let src_bool_lambda = "fn apply_pred(n: Int) -> Bool = (\\x -> x > 0)(n)"
+    match translate_source(src_bool_lambda) with
+    | Err msg_10 ->
+        do
+          term_write("T-match-10 translate_source failed: ")
+          term_write(msg_10)
+          term_write("\n")
+          assert_true(state, "T-match-10: Bool-returning lambda compiles (#6 closed)", false)
+    | Ok ir_bool_lambda ->
+        do
+          assert_true(state, "T-match-10: Bool-returning lambda compiles (#6 closed)",
+                      contains(ir_bool_lambda, "define i64 @apply_pred"))
+          clang_ok_10 <- clang_verifies_ir(ir_bool_lambda)
+          assert_true(state, "T-match-10: Bool-returning lambda IR passes clang verifier",
+                      clang_ok_10)
+
+    # T-match-11: Bool-capturing lambda — /code-review-v2 fix #7.
+    # Same rationale as T-match-10. IRLoadEnvSlot returns i64 which matches
+    # the captured Bool's i64 representation.
+    let src_bool_capture = "fn apply_with_flag(flag: Bool, n: Int) -> Int = (\\x -> if flag then x + 1 else x - 1)(n)"
+    match translate_source(src_bool_capture) with
+    | Err msg_11 ->
+        do
+          term_write("T-match-11 translate_source failed: ")
+          term_write(msg_11)
+          term_write("\n")
+          assert_true(state, "T-match-11: Bool-capturing lambda compiles (#7 closed)", false)
+    | Ok ir_bool_capture ->
+        do
+          assert_true(state, "T-match-11: Bool-capturing lambda compiles (#7 closed)",
+                      contains(ir_bool_capture, "define i64 @apply_with_flag"))
+          clang_ok_11 <- clang_verifies_ir(ir_bool_capture)
+          assert_true(state, "T-match-11: Bool-capturing lambda IR passes clang verifier",
+                      clang_ok_11)
 
     summary(state)

@@ -185,6 +185,10 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
   | sprout_ir.IRAbortMatch ->
       "  call void @sprout_abort_match()\n  unreachable"
+  | sprout_ir.IRZextI1ToI64 r s ->
+      "  " ++ r ++ " = zext i1 " ++ s ++ " to i64"
+  | sprout_ir.IRTruncI64ToI1 r s ->
+      "  " ++ r ++ " = trunc i64 " ++ s ++ " to i1"
 
 fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match ops with

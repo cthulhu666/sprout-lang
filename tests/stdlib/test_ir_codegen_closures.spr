@@ -171,23 +171,22 @@ fn main() -> Unit !{IO} =
       "__sprout_")
     assert_true(state, "T12: extern fn with __sprout_ prefix rejected by translate_program (reserved namespace guard)", t12)
 
-    # T13: Bool-returning lambda rejected. translate_lambda hardcodes ret_ty to
-    # i64, but a Bool body produces i1, which the LLVM verifier rejects.
-    # The fix: translate_lambda returns Err for Bool-returning lambdas before
-    # emitting any IR. Assert the error message mentions "Bool return".
-    t13 <- translated_err_contains(
+    # T13: Bool-returning lambda now compiles. /code-review-v2 fix #6 lifted
+    # the previous rejection. With fix #2 (Bool flows as i64) + fix #3 (IRZext
+    # widens comparison results) + fix #6 (guard removed), Bool-returning
+    # closures emit consistent i64 IR.
+    t13 <- translated_ok_ir_contains(
       "fn f() -> Bool = (\\x -> x == 0)(5)",
-      "Bool return")
-    assert_true(state, "T13: Bool-returning lambda rejected with 'Bool return' error", t13)
+      "@__sprout_ir_lambda_")
+    assert_true(state, "T13: Bool-returning lambda compiles (/code-review-v2 fix #6)", t13)
 
-    # T14: Bool-captured value rejected. A lambda closing over a Bool-typed
-    # outer parameter triggers type confusion at IRLoadEnvSlot (slot loads i64
-    # but the source-level value is i1). The fix: reject at closure-build time.
-    # Assert the error message mentions "Bool capture".
-    t14 <- translated_err_contains(
+    # T14: Bool-captured lambda now compiles. /code-review-v2 fix #7 lifted
+    # the previous rejection. IRLoadEnvSlot returns i64; the captured Bool is
+    # i64 in the env per fix #2. Internally consistent.
+    t14 <- translated_ok_ir_contains(
       "fn outer(b: Bool) -> Int = (\\x -> if b then x else 0)(5)",
-      "Bool capture")
-    assert_true(state, "T14: Bool-captured lambda rejected with 'Bool capture' error", t14)
+      "@__sprout_ir_lambda_")
+    assert_true(state, "T14: Bool-capturing lambda compiles (/code-review-v2 fix #7)", t14)
 
     # T15: Lambda param named t0 no longer collides with body fresh names.
     # Previously the lifted body used %t0, %t1, ... as fresh SSA names, which
@@ -222,18 +221,17 @@ fn main() -> Unit !{IO} =
     # Sprout adds either multi-arg lambdas or a typechecker mode that permits
     # over-application past a closure boundary.
 
-    # T18: Round-4 Finding #1 — find_capture_type TLambda shadowing. The outer
-    # lambda captures the outer fn's Bool param `b` (used in `if b ...`); an
-    # inner lambda `\\b -> b + 1` introduces its own param named `b` (Int),
-    # shadowing in its own scope only. Pre-fix: find_capture_type's TLambda arm
-    # descended into the inner lambda's body and returned the inner param's Int
-    # type for `b`, so the Bool-capture guard silently passed. Fix: the TLambda
-    # arm must exclude names that are the inner lambda's own param from the
-    # search. Assertion: the outer Bool capture is still rejected.
-    t18 <- translated_err_contains(
+    # T18: Round-4 Finding #1 — find_capture_type TLambda shadowing. Originally
+    # the test asserted that the outer Bool capture was REJECTED; post
+    # /code-review-v2 fix #7, Bool captures now compile cleanly. The
+    # find_capture_type TLambda-scope fix is still load-bearing for OTHER kinds
+    # of capture inference, but the Bool-capture observable is gone. The
+    # assertion now verifies the program compiles (both outer-b capture and
+    # inner shadowing-`b` are handled correctly).
+    t18 <- translated_ok_ir_contains(
       "fn outer(b: Bool) -> Int = (\\y -> if b then (\\b -> b + 1)(5) else 0)(7)",
-      "Bool capture")
-    assert_true(state, "T18: Bool capture detected despite inner lambda shadowing `b` (find_capture_type respects lambda scope)", t18)
+      "@__sprout_ir_lambda_")
+    assert_true(state, "T18: outer-Bool-capture + inner-shadow lambda compiles (/code-review-v2 fix #7)", t18)
 
     # T19: Round-4 Finding #2 — derived SSA name collision. A user fn param
     # named `t0_raw` collides with the IRMkClosure-derived `%t0_raw` SSA name

@@ -51,6 +51,9 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRGetTag _ _ -> false
   | sprout_ir.IRGetField _ _ _ _ -> false
   | sprout_ir.IRAbortMatch -> false
+  # /code-review-v2 fix #3: width-conversion ops are pure casts; NOT triggers.
+  | sprout_ir.IRZextI1ToI64 _ _ -> false
+  | sprout_ir.IRTruncI64ToI1 _ _ -> false
   | _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
@@ -82,6 +85,9 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRGetTag _ _ -> Nothing
   # IRAbortMatch defines no value (/code-review fix #15: void noreturn).
   | sprout_ir.IRAbortMatch -> Nothing
+  # Width-conversion ops produce i64/i1 scalars — never heap.
+  | sprout_ir.IRZextI1ToI64 _ _ -> Nothing
+  | sprout_ir.IRTruncI64ToI1 _ _ -> Nothing
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------
@@ -97,6 +103,8 @@ fn op_successors(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRGetTag _ _ -> Nil
   | sprout_ir.IRGetField _ _ _ _ -> Nil
   | sprout_ir.IRAbortMatch -> Nil
+  | sprout_ir.IRZextI1ToI64 _ _ -> Nil
+  | sprout_ir.IRTruncI64ToI1 _ _ -> Nil
   | _ -> Nil
 
 fn last_op(ops: List sprout_ir.IROp) -> Maybe sprout_ir.IROp =
@@ -160,6 +168,9 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRGetTag _ s -> Cons(s, Nil)
   | sprout_ir.IRGetField _ s _ _ -> Cons(s, Nil)
   | sprout_ir.IRAbortMatch -> Nil
+  # /code-review-v2 fix #3: width-conversion ops use their single source.
+  | sprout_ir.IRZextI1ToI64 _ s -> Cons(s, Nil)
+  | sprout_ir.IRTruncI64ToI1 _ s -> Cons(s, Nil)
 
 fn op_def(op: sprout_ir.IROp) -> Maybe String =
   match op with
@@ -186,6 +197,8 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRGetTag r _ -> Just(r)
   | sprout_ir.IRGetField r _ _ _ -> Just(r)
   # IRAbortMatch no longer defines anything (/code-review fix #15).
+  | sprout_ir.IRZextI1ToI64 r _ -> Just(r)
+  | sprout_ir.IRTruncI64ToI1 r _ -> Just(r)
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------

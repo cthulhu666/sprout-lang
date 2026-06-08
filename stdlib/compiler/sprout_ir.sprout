@@ -157,11 +157,17 @@ export type IROp (..) =
   # syntactically visible terminator; equivalent to IRCall + IRUnreachable
   # but avoids growing the IR with a standalone unreachable op. NOT a GC trigger.
   | IRAbortMatch
-  # /code-review fix #2: IRConstBool and IRICmpBool were removed. They
-  # produced i1 SSA values that mismatched the i64-typed parameters
-  # emitted by lower_params, causing invalid LLVM IR when a Bool
-  # parameter was used as a match scrutinee. Bool now flows as i64
-  # uniformly (0 or 1) through IRConst and IRICmp.
+  # IRZextI1ToI64 <result> <source>
+  # Lowers to: %result = zext i1 %source to i64
+  # /code-review-v2 fix #3: emitted after every IRICmp so comparison
+  # results become i64-typed Bool values. NOT a GC trigger.
+  | IRZextI1ToI64 String String
+  # IRTruncI64ToI1 <result> <source>
+  # Lowers to: %result = trunc i64 %source to i1
+  # /code-review-v2 fix #3: emitted before every IRCondBr so the cond
+  # operand has the i1 type LLVM's `br i1` requires. NOT a GC trigger.
+  | IRTruncI64ToI1 String String
+  # /code-review fix #2: IRConstBool and IRICmpBool were removed.
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -243,6 +249,10 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = get_field " ++ s ++ ", " ++ int_to_string(i) ++ " [" ++ k ++ "]"
   | IRAbortMatch ->
       "    abort_match; unreachable"
+  | IRZextI1ToI64 r s ->
+      "    " ++ r ++ " = zext_i1_i64 " ++ s
+  | IRTruncI64ToI1 r s ->
+      "    " ++ r ++ " = trunc_i64_i1 " ++ s
 
 fn print_ops(ops: List IROp) -> String =
   match ops with
