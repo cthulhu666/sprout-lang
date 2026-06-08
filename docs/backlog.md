@@ -32,6 +32,16 @@ This file tracks open design, implementation, and tooling follow-up work.
      need rewriting; (b) substring-blindness is the bug class most likely to
      recur in new-form codegen (PR 2.5 bug #2 was exactly a "substring
      passes / clang rejects" case in freshly-added match-codegen).
+   List-pattern sugar — pending sweeps (2026-06-08):
+   - Expression-side sweep: rewrite multi-element `Cons(a, Cons(b, …))` /
+     `Cons(a, Cons(b, Cons(c, Nil)))` *constructions* in `ast_to_ir.sprout`,
+     `compiler.sprout`, and similar files to `[a, b]` / `[a, b, c]` literals.
+     Pattern-arm sweep has landed (this refactor); the expression-side rewrite
+     is bigger (hundreds of sites, mostly `Cons(IRFoo(…), Nil)` 1-element
+     cases) and should be staged in batches with bootstrap-seed refresh per
+     batch to keep diffs reviewable.  Skip the 1-element `Cons(x, Nil)` form
+     unless it materially helps reading at the call site — visual win is
+     marginal.
    PR 2.5 (first /code-review pass) follow-ups:
    - Refactor the ctors-dict tuple `(tag, arity, max_arity, field_kinds_string)` in
      `ast_to_ir.sprout` to a named `CtorMeta` record (currently a positional 4-tuple,

@@ -110,7 +110,7 @@ fn op_successors(op: sprout_ir.IROp) -> List String =
 fn last_op(ops: List sprout_ir.IROp) -> Maybe sprout_ir.IROp =
   match ops with
   | Nil -> Nothing
-  | Cons op Nil -> Just(op)
+  | [op] -> Just(op)
   | Cons _ rest -> last_op(rest)
 
 fn block_successors(b: sprout_ir.IRBlock) -> List String =

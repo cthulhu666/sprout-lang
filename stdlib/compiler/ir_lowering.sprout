@@ -57,7 +57,7 @@ fn encode_str_for_ir(s: String, i: Int, acc: String) -> String =
 fn lower_phi_pairs(pairs: List (String, String)) -> String =
   match pairs with
   | Nil -> ""
-  | Cons p Nil ->
+  | [p] ->
       match p with
       | (v, lbl) -> "[" ++ v ++ ", %" ++ lbl ++ "]"
   | Cons p rest ->
@@ -70,7 +70,7 @@ fn lower_phi_pairs(pairs: List (String, String)) -> String =
 fn lower_call_args(args: List String) -> String =
   match args with
   | Nil -> ""
-  | Cons a Nil -> "i64 " ++ a
+  | [a] -> "i64 " ++ a
   | Cons a rest -> "i64 " ++ a ++ ", " ++ lower_call_args(rest)
 
 # Render the ", i64 %a, i64 %b, ..." suffix appended after a leading "i64 <tag>"
@@ -208,7 +208,7 @@ fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (Str
 fn lower_params(params: List String) -> String =
   match params with
   | Nil -> ""
-  | Cons p Nil -> "i64 %" ++ p
+  | [p] -> "i64 %" ++ p
   | Cons p rest -> "i64 %" ++ p ++ ", " ++ lower_params(rest)
 
 fn lower_fn(f: sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =

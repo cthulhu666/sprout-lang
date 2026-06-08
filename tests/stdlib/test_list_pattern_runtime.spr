@@ -1,0 +1,64 @@
+# Runtime tests for list-pattern syntax ([x], [a, b], [a, b | rest]).
+#
+# The parser desugars [a, b | rest] -> Cons(a, Cons(b, rest)) at parse time,
+# so post-parse stages should see identical IR for the sugar and the long
+# form.  These tests pin that invariant by exercising both forms end-to-end
+# (parse -> typecheck -> IR codegen -> run) and asserting equality of return
+# values for matched inputs.
+
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+fn head_sugar(xs: List Int) -> Int =
+  match xs with
+  | [] -> 0
+  | [x] -> x
+  | _ -> -1
+
+fn head_legacy(xs: List Int) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons x Nil -> x
+  | _ -> -1
+
+fn pair_sugar(xs: List Int) -> Int =
+  match xs with
+  | [a, b] -> a * 10 + b
+  | _ -> -1
+
+fn pair_legacy(xs: List Int) -> Int =
+  match xs with
+  | Cons a (Cons b Nil) -> a * 10 + b
+  | _ -> -1
+
+fn head_tail_sugar(xs: List Int) -> Int =
+  match xs with
+  | [a, b | _] -> a + b
+  | _ -> -1
+
+fn head_tail_legacy(xs: List Int) -> Int =
+  match xs with
+  | Cons a (Cons b _) -> a + b
+  | _ -> -1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "[] -> 0 (sugar)", head_sugar([]), 0)
+    assert_eq(state, "[x] binds (sugar)", head_sugar([42]), 42)
+    assert_eq(state, "[x] rejects 2-elt (sugar)", head_sugar([1, 2]), -1)
+
+    assert_eq(state, "[x] == Cons x Nil on []", head_sugar([]), head_legacy([]))
+    assert_eq(state, "[x] == Cons x Nil on [7]", head_sugar([7]), head_legacy([7]))
+    assert_eq(state, "[x] == Cons x Nil on [1,2]", head_sugar([1, 2]), head_legacy([1, 2]))
+
+    assert_eq(state, "[a,b] binds both (sugar)", pair_sugar([3, 4]), 34)
+    assert_eq(state, "[a,b] rejects 1-elt (sugar)", pair_sugar([5]), -1)
+    assert_eq(state, "[a,b] rejects 3-elt (sugar)", pair_sugar([1, 2, 3]), -1)
+    assert_eq(state, "[a,b] == Cons _ (Cons _ Nil) on [3,4]", pair_sugar([3, 4]), pair_legacy([3, 4]))
+
+    assert_eq(state, "[a,b|_] sums head 2 of [10,20,30]", head_tail_sugar([10, 20, 30]), 30)
+    assert_eq(state, "[a,b|_] rejects [9]", head_tail_sugar([9]), -1)
+    assert_eq(state, "[a,b|_] == Cons _ (Cons _ _) on [1,2,3,4]", head_tail_sugar([1, 2, 3, 4]), head_tail_legacy([1, 2, 3, 4]))
+
+    summary(state)

@@ -2079,21 +2079,21 @@ fn finish_string_builtin(kind: StringBuiltin, fname: String,
   match kind with
   | SBStrConcat ->
       match arg_names with
-      | Cons a (Cons b Nil) ->
+      | [a, b] ->
           Ok((arg_blocks, cur_lbl,
                list_append(cur_ops, Cons(sprout_ir.IRStrConcat(result, a, b), Nil)),
                result, idx + 1))
       | _ -> Err("ast_to_ir: str_concat expects 2 arguments")
   | SBStrSlice ->
       match arg_names with
-      | Cons s (Cons st (Cons ln Nil)) ->
+      | [s, st, ln] ->
           Ok((arg_blocks, cur_lbl,
                list_append(cur_ops, Cons(sprout_ir.IRStrSlice(result, s, st, ln), Nil)),
                result, idx + 1))
       | _ -> Err("ast_to_ir: str_slice expects 3 arguments")
   | SBIntToString ->
       match arg_names with
-      | Cons n Nil ->
+      | [n] ->
           Ok((arg_blocks, cur_lbl,
                list_append(cur_ops, Cons(sprout_ir.IRStrFromInt(result, n), Nil)),
                result, idx + 1))

@@ -197,7 +197,7 @@ export type IRProgram (..) = IRProgram(List IRFunction) (List CtorReg)
 fn print_phi_pairs(pairs: List (String, String)) -> String =
   match pairs with
   | Nil -> ""
-  | Cons p Nil ->
+  | [p] ->
       match p with
       | (v, lbl) -> "[" ++ v ++ ", " ++ lbl ++ "]"
   | Cons p rest ->
@@ -207,7 +207,7 @@ fn print_phi_pairs(pairs: List (String, String)) -> String =
 fn print_call_args(args: List String) -> String =
   match args with
   | Nil -> ""
-  | Cons a Nil -> a
+  | [a] -> a
   | Cons a rest -> a ++ ", " ++ print_call_args(rest)
 
 fn print_op(op: IROp) -> String =
@@ -271,7 +271,7 @@ fn print_blocks(bs: List IRBlock) -> String =
 fn print_params(ps: List String) -> String =
   match ps with
   | Nil -> ""
-  | Cons p Nil -> p
+  | [p] -> p
   | Cons p rest -> p ++ ", " ++ print_params(rest)
 
 fn print_fn(f: IRFunction) -> String =

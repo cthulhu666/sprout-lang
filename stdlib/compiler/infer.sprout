@@ -1549,7 +1549,7 @@ fn collect_seen_ctors(branches: List typed_ast.TypedMatchBranch, acc: List Strin
 fn join_comma(names: List String) -> String =
   match names with
   | Nil -> ""
-  | Cons n Nil -> strip_module_prefix(n)
+  | [n] -> strip_module_prefix(n)
   | Cons n rest -> strip_module_prefix(n) ++ ", " ++ join_comma(rest)
 
 fn missing_ctor_names(all_ctors: List String, branches: List typed_ast.TypedMatchBranch) -> List String =
