@@ -175,43 +175,77 @@ _test-stdlib stage:
   if [[ ! -x "./$STAGE" ]]; then
     echo "ERROR: $STAGE not found" >&2; exit 1
   fi
-  TMP_LL="/tmp/sprout_test_$$.ll"
-  TMP_BIN="/tmp/sprout_testbin_$$"
-  TMP_ERR="/tmp/sprout_testerr_$$.txt"
-  TMP_RT="/tmp/sprout_runtime_$$.o"
-  trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR" "$TMP_RT"' EXIT
-  # Pre-compile the runtime once; each test just links the resulting .o.
-  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_RT" 2>"$TMP_ERR" || { echo "ERROR: runtime compile failed"; cat "$TMP_ERR"; exit 1; }
-  total_failed=0
+  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  TMPD=$(mktemp -d /tmp/sprout_tests_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  # Pre-compile the runtime once; each test links the resulting .o.
+  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
+    || { echo "ERROR: runtime compile failed"; cat "$TMPD/rt.err"; exit 1; }
+  declare -a files=()
+  declare -a outs=()
+  declare -a stats=()
   for dir in tests/stdlib tests/stdlib/compiler; do
     [ -d "$dir" ] || continue
     for f in "$dir"/*.spr "$dir"/*.sprout; do
       [ -f "$f" ] || continue
-      echo "==> $f"
-      if ! "./$STAGE" --emit-ir "{{stdlib_root}}" "$f" > "$TMP_LL" 2>"$TMP_ERR"; then
-        echo "  COMPILE FAILED:"; cat "$TMP_ERR"
-        total_failed=$((total_failed + 1)); continue
-      fi
-      if ! opt --passes=verify "$TMP_LL" -o /dev/null 2>"$TMP_ERR"; then
-        echo "  IR INVALID (opt --passes=verify):"; cat "$TMP_ERR"
-        total_failed=$((total_failed + 1)); continue
-      fi
-      if ! clang "$TMP_LL" "$TMP_RT" {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
-        echo "  LINK FAILED:"; cat "$TMP_ERR"
-        total_failed=$((total_failed + 1)); continue
-      fi
-      if out=$(SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMP_BIN" 2>&1); then
-        echo "$out"
-      else
-        status=$?
-        echo "$out"
-        echo "  RUN FAILED: exit $status"
-        total_failed=$((total_failed + 1)); continue
-      fi
-      if echo "$out" | grep -q "^SUITE FAILED"; then
-        total_failed=$((total_failed + 1))
-      fi
+      files+=("$f")
     done
+  done
+  declare -a pids=()
+  idx=0
+  active=0
+  for f in "${files[@]}"; do
+    outs+=("$TMPD/$idx.out")
+    stats+=("$TMPD/$idx.st")
+    (
+      set +e
+      echo "==> $f" > "$TMPD/$idx.out"
+      ok=1
+      "./$STAGE" --emit-ir "{{stdlib_root}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
+      if [[ $? -ne 0 ]]; then
+        { echo "  COMPILE FAILED:"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
+      elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
+        { echo "  IR INVALID (opt --passes=verify):"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
+      else
+        clang "$TMPD/$idx.ll" "$TMPD/rt.o" {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
+        if [[ $? -ne 0 ]]; then
+          { echo "  LINK FAILED:"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
+        fi
+      fi
+      if [[ $ok -eq 1 ]]; then
+        if out=$(SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMPD/$idx.bin" 2>&1); then
+          echo "$out" >> "$TMPD/$idx.out"
+          if echo "$out" | grep -q "^SUITE FAILED"; then
+            echo 1 > "$TMPD/$idx.st"
+          else
+            echo 0 > "$TMPD/$idx.st"
+          fi
+        else
+          status=$?
+          { echo "$out"; echo "  RUN FAILED: exit $status"; } >> "$TMPD/$idx.out"
+          echo 1 > "$TMPD/$idx.st"
+        fi
+      else
+        echo 1 > "$TMPD/$idx.st"
+      fi
+    ) &
+    pids+=($!)
+    idx=$((idx + 1))
+    active=$((active + 1))
+    if (( active >= JOBS )); then
+      wait -n 2>/dev/null || wait "${pids[idx - active]}" || true
+      active=$((active - 1))
+    fi
+  done
+  for pid in "${pids[@]}"; do wait "$pid" || true; done
+  total_failed=0
+  for i in "${!outs[@]}"; do
+    cat "${outs[$i]}" 2>/dev/null || true
+    case "$(cat "${stats[$i]}" 2>/dev/null || echo 1)" in
+      0) ;;
+      *) total_failed=$((total_failed + 1)) ;;
+    esac
   done
   if [ "$total_failed" -gt 0 ]; then
     echo ""
@@ -436,16 +470,26 @@ bootstrap-from-seed:
   #!/usr/bin/env bash
   set -euo pipefail
   SEED="bootstrap/compile_driver.ll"
+  RUNTIME="runtime/sprout_runtime.c"
+  OUT="{{build_dir}}/compile_driver_bin_stage1"
   if [[ ! -f "$SEED" ]]; then
     echo "ERROR: $SEED not found." >&2
     exit 1
+  fi
+  # No-op guard: if stage-1 binary is already up-to-date with seed + runtime,
+  # skip the rebuild. CI steps each invoke `just bootstrap-from-seed` as a
+  # `just` dependency in a fresh process, so just's dedupe doesn't apply —
+  # without this guard the bootstrap runs 5+ times per CI run.
+  if [[ -x "$OUT" && "$OUT" -nt "$SEED" && "$OUT" -nt "$RUNTIME" ]]; then
+    echo "==> Stage-1 binary is up-to-date with seed + runtime; skipping bootstrap."
+    exit 0
   fi
   echo "==> Validating IR seed..."
   opt --passes=verify "$SEED" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$SEED" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
-  echo "==> Built {{build_dir}}/compile_driver_bin_stage1 from IR seed."
+  clang "$SEED" "$RUNTIME" -O2 {{clang_extra}} -o "$OUT"
+  echo "==> Built $OUT from IR seed."
 
 # Refresh bootstrap/compile_driver.ll from the current compile_driver.sprout source.
 # Use this after any compiler-source change that perturbs the IR.  Reaches the
