@@ -33,15 +33,13 @@ This file tracks open design, implementation, and tooling follow-up work.
      recur in new-form codegen (PR 2.5 bug #2 was exactly a "substring
      passes / clang rejects" case in freshly-added match-codegen).
    List-pattern sugar — pending sweeps (2026-06-08):
-   - Expression-side sweep: rewrite multi-element `Cons(a, Cons(b, …))` /
-     `Cons(a, Cons(b, Cons(c, Nil)))` *constructions* in `ast_to_ir.sprout`,
-     `compiler.sprout`, and similar files to `[a, b]` / `[a, b, c]` literals.
-     Pattern-arm sweep has landed (this refactor); the expression-side rewrite
-     is bigger (hundreds of sites, mostly `Cons(IRFoo(…), Nil)` 1-element
-     cases) and should be staged in batches with bootstrap-seed refresh per
-     batch to keep diffs reviewable.  Skip the 1-element `Cons(x, Nil)` form
-     unless it materially helps reading at the call site — visual win is
-     marginal.
+   - Expression-side sweep: rewrite multi-element `Cons(a, Cons(b, …))`
+     *constructions* in `ast_to_ir.sprout`, `compiler.sprout`, and similar
+     files to `[a, b]` / `[a, b, c]` literals.  Stage in batches with a
+     bootstrap-seed refresh per batch to keep diffs reviewable.  See
+     `docs/style-guide-v0.md` §8 for the policy on what to rewrite vs leave
+     (sugar wins for 2+ heads; single-head `Cons(x, …)` constructions and
+     `| Cons x rest ->` arms stay long-form).
    PR 2.5 (first /code-review pass) follow-ups:
    - Refactor the ctors-dict tuple `(tag, arity, max_arity, field_kinds_string)` in
      `ast_to_ir.sprout` to a named `CtorMeta` record (currently a positional 4-tuple,

@@ -228,10 +228,11 @@ Rules:
   meaning.
 - Prefer list-pattern syntax (`[x]`, `[a, b]`, `[a, b | rest]`) over the
   long-form `Cons x Nil` / `Cons a (Cons b Nil)` / `Cons a (Cons b rest)`
-  when matching on fixed-length prefixes.  Both desugar to the same
+  in both fixed-length matches (`[a, b]`) and open-tail matches with two or
+  more bound heads (`[a, b | rest]`).  Both forms desugar to the same
   constructor patterns at parse time; the sugar wins on readability.  Leave
-  arms of the form `| Cons x rest ->` unchanged — the sugar `[x | rest]`
-  adds no clarity for the single-head case.
+  single-head arms of the form `| Cons x rest ->` unchanged — the sugar
+  `[x | rest]` adds no clarity for the one-bound-head case.
 
 ## 9. Effects
 

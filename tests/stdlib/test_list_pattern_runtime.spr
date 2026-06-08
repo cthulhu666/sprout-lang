@@ -1,12 +1,17 @@
 # Runtime tests for list-pattern syntax ([x], [a, b], [a, b | rest]).
 #
 # The parser desugars [a, b | rest] -> Cons(a, Cons(b, rest)) at parse time,
-# so post-parse stages should see identical IR for the sugar and the long
-# form.  These tests pin that invariant by exercising both forms end-to-end
-# (parse -> typecheck -> IR codegen -> run) and asserting equality of return
-# values for matched inputs.
+# so parse-time correctness is covered by tests/stdlib/compiler/test_parser.spr.
+# These tests pin the *runtime* leg: the sugar must compile, typecheck, and
+# execute end-to-end with the binding/value semantics it claims.  Sugar/legacy
+# parity is asserted on one matching input per form — enough to catch a
+# desugar regression that produces structurally different (but parse-legal)
+# AST — without paying for tautological cross-checks on wildcard-fallthrough
+# arms where both sides return -1 by construction.
 
 import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# One sugared function per pattern shape exercises the runtime path.
 
 fn head_sugar(xs: List Int) -> Int =
   match xs with
@@ -14,25 +19,28 @@ fn head_sugar(xs: List Int) -> Int =
   | [x] -> x
   | _ -> -1
 
-fn head_legacy(xs: List Int) -> Int =
-  match xs with
-  | Nil -> 0
-  | Cons x Nil -> x
-  | _ -> -1
-
 fn pair_sugar(xs: List Int) -> Int =
   match xs with
   | [a, b] -> a * 10 + b
   | _ -> -1
 
-fn pair_legacy(xs: List Int) -> Int =
-  match xs with
-  | Cons a (Cons b Nil) -> a * 10 + b
-  | _ -> -1
-
 fn head_tail_sugar(xs: List Int) -> Int =
   match xs with
   | [a, b | _] -> a + b
+  | _ -> -1
+
+# One legacy function per pattern shape, used once each to pin sugar/legacy
+# parity on a *matching* input.  Wildcard-fallthrough parity is not asserted
+# because both sides reduce to `-1 == -1` by construction.
+
+fn head_legacy(xs: List Int) -> Int =
+  match xs with
+  | Cons x Nil -> x
+  | _ -> -1
+
+fn pair_legacy(xs: List Int) -> Int =
+  match xs with
+  | Cons a (Cons b Nil) -> a * 10 + b
   | _ -> -1
 
 fn head_tail_legacy(xs: List Int) -> Int =
@@ -44,21 +52,24 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    assert_eq(state, "[] -> 0 (sugar)", head_sugar([]), 0)
-    assert_eq(state, "[x] binds (sugar)", head_sugar([42]), 42)
-    assert_eq(state, "[x] rejects 2-elt (sugar)", head_sugar([1, 2]), -1)
+    # [x] — single-element pattern, all three arms.
+    assert_eq(state, "[x] empty -> 0", head_sugar([]), 0)
+    assert_eq(state, "[x] binds the element", head_sugar([42]), 42)
+    assert_eq(state, "[x] rejects 2-elt", head_sugar([1, 2]), -1)
+    assert_eq(state, "[x] parity on matching input", head_sugar([7]), head_legacy([7]))
 
-    assert_eq(state, "[x] == Cons x Nil on []", head_sugar([]), head_legacy([]))
-    assert_eq(state, "[x] == Cons x Nil on [7]", head_sugar([7]), head_legacy([7]))
-    assert_eq(state, "[x] == Cons x Nil on [1,2]", head_sugar([1, 2]), head_legacy([1, 2]))
+    # [a, b] — fixed 2-element pattern, both boundaries.
+    assert_eq(state, "[a, b] binds both", pair_sugar([3, 4]), 34)
+    assert_eq(state, "[a, b] rejects empty", pair_sugar([]), -1)
+    assert_eq(state, "[a, b] rejects 1-elt", pair_sugar([5]), -1)
+    assert_eq(state, "[a, b] rejects 3-elt", pair_sugar([1, 2, 3]), -1)
+    assert_eq(state, "[a, b] parity on matching input", pair_sugar([3, 4]), pair_legacy([3, 4]))
 
-    assert_eq(state, "[a,b] binds both (sugar)", pair_sugar([3, 4]), 34)
-    assert_eq(state, "[a,b] rejects 1-elt (sugar)", pair_sugar([5]), -1)
-    assert_eq(state, "[a,b] rejects 3-elt (sugar)", pair_sugar([1, 2, 3]), -1)
-    assert_eq(state, "[a,b] == Cons _ (Cons _ Nil) on [3,4]", pair_sugar([3, 4]), pair_legacy([3, 4]))
-
-    assert_eq(state, "[a,b|_] sums head 2 of [10,20,30]", head_tail_sugar([10, 20, 30]), 30)
-    assert_eq(state, "[a,b|_] rejects [9]", head_tail_sugar([9]), -1)
-    assert_eq(state, "[a,b|_] == Cons _ (Cons _ _) on [1,2,3,4]", head_tail_sugar([1, 2, 3, 4]), head_tail_legacy([1, 2, 3, 4]))
+    # [a, b | _] — open-tail pattern; `_` must match Nil (2-elt) AND non-Nil tails.
+    assert_eq(state, "[a, b | _] 2-elt boundary (Nil tail)", head_tail_sugar([10, 20]), 30)
+    assert_eq(state, "[a, b | _] longer list", head_tail_sugar([10, 20, 30, 40]), 30)
+    assert_eq(state, "[a, b | _] rejects empty", head_tail_sugar([]), -1)
+    assert_eq(state, "[a, b | _] rejects 1-elt", head_tail_sugar([9]), -1)
+    assert_eq(state, "[a, b | _] parity on matching input", head_tail_sugar([1, 2, 3]), head_tail_legacy([1, 2, 3]))
 
     summary(state)
