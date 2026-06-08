@@ -24,6 +24,19 @@ jobs:
           sudo apt-get install -y clang-16 llvm-16 ripgrep
           echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
 
+      - name: Cache stage-1 binary
+        # Key on seed IR + runtime source. When unchanged, restore the linked
+        # stage-1 binary across CI runs — skips bootstrap-from-seed's
+        # `opt --passes=verify` + `clang -O2 ~298k LLVM IR lines` (~6s/step
+        # locally, longer on CI). The bootstrap-from-seed recipe has a guard
+        # that no-ops when build/compile_driver_bin_stage1 is newer than the
+        # seed, so restore order matters: cache step runs AFTER checkout so
+        # the restored binary's mtime > the freshly-checked-out seed's mtime.
+        uses: actions/cache@v4
+        with:
+          path: build/compile_driver_bin_stage1
+          key: stage1-${{ runner.os }}-${{ hashFiles('bootstrap/compile_driver.ll', 'runtime/sprout_runtime.c') }}
+
       - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
