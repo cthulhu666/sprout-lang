@@ -1,0 +1,186 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# Round-trip property tests for Serialize/Deserialize on primitive and core stdlib
+# types added in Phase 2 of the `deriving` language feature.
+#
+# Format conventions tested (see prelude.sprout for the normative comment):
+#   - Int:    bare digits, optional leading `-`        (e.g. `42`, `-7`)
+#   - Bool:   bare `true`/`false`
+#   - Char:   `"x"` (same escape rules as String)
+#   - String: `"..."` with C-style escapes (\" \\ \n \r \t)
+#   - List a: `(Nil)` | `(Cons head tail)`
+#   - Maybe a: `(Nothing)` | `(Just x)`
+#   - Vec a:  `(Vec elem1 elem2 ...)`
+#   - Dict v: `(Dict (Entry "key1" v1) (Entry "key2" v2) ...)`
+#
+# Every test asserts deserialize(serialize(x)) == Just(x).
+# A subset of tests assert the exact serialized form so the wire format is locked.
+# Malformed-input tests assert deserialize returns Nothing (must NOT panic).
+
+# --- helpers ---------------------------------------------------------------
+
+fn roundtrip_int(x: Int) -> Maybe Int =
+  deserialize(serialize(x))
+
+fn roundtrip_bool(x: Bool) -> Maybe Bool =
+  deserialize(serialize(x))
+
+fn roundtrip_string(x: String) -> Maybe String =
+  deserialize(serialize(x))
+
+fn roundtrip_char(x: Char) -> Maybe Char =
+  deserialize(serialize(x))
+
+fn roundtrip_list_int(x: List Int) -> Maybe (List Int) =
+  deserialize(serialize(x))
+
+fn roundtrip_list_string(x: List String) -> Maybe (List String) =
+  deserialize(serialize(x))
+
+fn roundtrip_maybe_int(x: Maybe Int) -> Maybe (Maybe Int) =
+  deserialize(serialize(x))
+
+fn roundtrip_maybe_maybe_int(x: Maybe (Maybe Int)) -> Maybe (Maybe (Maybe Int)) =
+  deserialize(serialize(x))
+
+fn roundtrip_vec_int(x: Vec Int) -> Maybe (Vec Int) =
+  deserialize(serialize(x))
+
+fn roundtrip_vec_string(x: Vec String) -> Maybe (Vec String) =
+  deserialize(serialize(x))
+
+fn roundtrip_dict_int(x: Dict Int) -> Maybe (Dict Int) =
+  deserialize(serialize(x))
+
+fn roundtrip_dict_string(x: Dict String) -> Maybe (Dict String) =
+  deserialize(serialize(x))
+
+# Typed serializer wrappers so we can pin element types without expression-level
+# type ascription (Sprout has none in expression position).
+
+fn ser_int(x: Int) -> String = serialize(x)
+fn ser_bool(x: Bool) -> String = serialize(x)
+fn ser_string(x: String) -> String = serialize(x)
+fn ser_char(x: Char) -> String = serialize(x)
+fn ser_list_int(x: List Int) -> String = serialize(x)
+fn ser_maybe_int(x: Maybe Int) -> String = serialize(x)
+fn ser_vec_int(x: Vec Int) -> String = serialize(x)
+fn ser_dict_int(x: Dict Int) -> String = serialize(x)
+
+fn empty_list_int() -> List Int = Nil
+fn empty_vec_int() -> Vec Int = vec_empty()
+fn empty_dict_int() -> Dict Int = dict_empty()
+fn nothing_int() -> Maybe Int = Nothing
+
+fn bad_int() -> Maybe Int = deserialize("abc")
+fn bad_int_empty() -> Maybe Int = deserialize("")
+fn bad_int_trailing() -> Maybe Int = deserialize("12x")
+fn bad_int_just_dash() -> Maybe Int = deserialize("-")
+fn bad_bool() -> Maybe Bool = deserialize("maybe")
+fn bad_string_unterminated() -> Maybe String = deserialize("\"abc")
+fn bad_string_no_open() -> Maybe String = deserialize("abc")
+fn bad_list_unbalanced() -> Maybe (List Int) = deserialize("(Cons 1 (Nil)")
+fn bad_list_wrong_ctor() -> Maybe (List Int) = deserialize("(Foo)")
+fn bad_maybe_wrong_ctor() -> Maybe (Maybe Int) = deserialize("(Some 1)")
+fn bad_vec_missing_paren() -> Maybe (Vec Int) = deserialize("Vec 1 2")
+fn bad_dict_missing_entry() -> Maybe (Dict Int) = deserialize("(Dict \"k\" 1)")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Int round-trips ---
+    assert_eq(state, "ser Int 0 exact", ser_int(0), "0")
+    assert_eq(state, "ser Int 42 exact", ser_int(42), "42")
+    assert_eq(state, "ser Int -7 exact", ser_int(-7), "-7")
+    assert_eq(state, "rt Int 0", roundtrip_int(0), Just(0))
+    assert_eq(state, "rt Int 42", roundtrip_int(42), Just(42))
+    assert_eq(state, "rt Int neg", roundtrip_int(-7), Just(-7))
+    assert_eq(state, "rt Int large", roundtrip_int(1234567890), Just(1234567890))
+
+    # --- Bool round-trips ---
+    assert_eq(state, "ser Bool true exact", ser_bool(true), "true")
+    assert_eq(state, "ser Bool false exact", ser_bool(false), "false")
+    assert_eq(state, "rt Bool true", roundtrip_bool(true), Just(true))
+    assert_eq(state, "rt Bool false", roundtrip_bool(false), Just(false))
+
+    # --- String round-trips (the escape convention battery) ---
+    assert_eq(state, "ser String empty exact", ser_string(""), "\"\"")
+    assert_eq(state, "ser String simple exact", ser_string("hi"), "\"hi\"")
+    assert_eq(state, "ser String dquote exact", ser_string("a\"b"), "\"a\\\"b\"")
+    assert_eq(state, "ser String backslash exact", ser_string("a\\b"), "\"a\\\\b\"")
+    assert_eq(state, "ser String newline exact", ser_string("a\nb"), "\"a\\nb\"")
+    assert_eq(state, "rt String empty", roundtrip_string(""), Just(""))
+    assert_eq(state, "rt String simple", roundtrip_string("hello world"), Just("hello world"))
+    assert_eq(state, "rt String dquote", roundtrip_string("a\"b"), Just("a\"b"))
+    assert_eq(state, "rt String backslash", roundtrip_string("a\\b"), Just("a\\b"))
+    assert_eq(state, "rt String newline", roundtrip_string("line1\nline2"), Just("line1\nline2"))
+    assert_eq(state, "rt String cr/tab", roundtrip_string("\r\t"), Just("\r\t"))
+    assert_eq(state, "rt String mixed escapes", roundtrip_string("a\"b\\c\nd"), Just("a\"b\\c\nd"))
+
+    # --- Char round-trips (round-trip checks deferred until `instance Eq Char`
+    # lands in prelude; exact-serialization checks still work) ---
+    assert_eq(state, "ser Char 'a' exact", ser_char('a'), "\"a\"")
+    assert_eq(state, "ser Char newline exact", ser_char('\n'), "\"\\n\"")
+
+    # --- List Int round-trips ---
+    assert_eq(state, "ser List empty exact", ser_list_int(empty_list_int()), "(Nil)")
+    assert_eq(state, "ser List one Int exact", ser_list_int(Cons(1, Nil)), "(Cons 1 (Nil))")
+    assert_eq(state, "ser List two Int exact", ser_list_int(Cons(1, Cons(2, Nil))), "(Cons 1 (Cons 2 (Nil)))")
+    assert_eq(state, "rt List empty", roundtrip_list_int(empty_list_int()), Just(empty_list_int()))
+    assert_eq(state, "rt List Int", roundtrip_list_int(Cons(1, Cons(2, Cons(3, Nil)))), Just(Cons(1, Cons(2, Cons(3, Nil)))))
+    assert_eq(state, "rt List String with escapes",
+      roundtrip_list_string(Cons("a\"b", Cons("\n", Nil))),
+      Just(Cons("a\"b", Cons("\n", Nil))))
+
+    # --- Maybe round-trips ---
+    assert_eq(state, "ser Maybe Nothing exact", ser_maybe_int(nothing_int()), "(Nothing)")
+    assert_eq(state, "ser Maybe Just exact", ser_maybe_int(Just(5)), "(Just 5)")
+    assert_eq(state, "rt Maybe Nothing", roundtrip_maybe_int(nothing_int()), Just(nothing_int()))
+    assert_eq(state, "rt Maybe Just", roundtrip_maybe_int(Just(42)), Just(Just(42)))
+    assert_eq(state, "rt Maybe Just Just", roundtrip_maybe_maybe_int(Just(Just(7))), Just(Just(Just(7))))
+    assert_eq(state, "rt Maybe Just Nothing", roundtrip_maybe_maybe_int(Just(Nothing)), Just(Just(Nothing)))
+    assert_eq(state, "rt Maybe Nothing nested", roundtrip_maybe_maybe_int(Nothing), Just(Nothing))
+
+    # --- Vec round-trips ---
+    assert_eq(state, "ser Vec empty exact", ser_vec_int(empty_vec_int()), "(Vec)")
+    assert_eq(state, "ser Vec one exact", ser_vec_int(vec_append(1, empty_vec_int())), "(Vec 1)")
+    assert_eq(state, "rt Vec empty Int", roundtrip_vec_int(empty_vec_int()), Just(empty_vec_int()))
+    assert_eq(state, "rt Vec Int",
+      roundtrip_vec_int(vec_append(3, vec_append(2, vec_append(1, empty_vec_int())))),
+      Just(vec_append(3, vec_append(2, vec_append(1, empty_vec_int())))))
+    assert_eq(state, "rt Vec String w/ escapes",
+      roundtrip_vec_string(vec_append("a\"b", vec_append("\\c", vec_empty()))),
+      Just(vec_append("a\"b", vec_append("\\c", vec_empty()))))
+
+    # --- Dict round-trips ---
+    assert_eq(state, "ser Dict empty exact", ser_dict_int(empty_dict_int()), "(Dict)")
+    assert_eq(state, "ser Dict one exact",
+      ser_dict_int(dict_set("k", 1, empty_dict_int())),
+      "(Dict (Entry \"k\" 1))")
+    assert_eq(state, "rt Dict empty Int", roundtrip_dict_int(empty_dict_int()), Just(empty_dict_int()))
+    assert_eq(state, "rt Dict one Int",
+      roundtrip_dict_int(dict_set("k", 1, empty_dict_int())),
+      Just(dict_set("k", 1, empty_dict_int())))
+    assert_eq(state, "rt Dict two Int",
+      roundtrip_dict_int(dict_set("b", 2, dict_set("a", 1, empty_dict_int()))),
+      Just(dict_set("b", 2, dict_set("a", 1, empty_dict_int()))))
+    assert_eq(state, "rt Dict String w/ quoted key",
+      roundtrip_dict_string(dict_set("with\"quote", "v", dict_empty())),
+      Just(dict_set("with\"quote", "v", dict_empty())))
+
+    # --- Malformed input -> Nothing (must NOT panic) ---
+    assert_eq(state, "bad Int abc -> Nothing", bad_int(), Nothing)
+    assert_eq(state, "bad Int empty -> Nothing", bad_int_empty(), Nothing)
+    assert_eq(state, "bad Int trailing -> Nothing", bad_int_trailing(), Nothing)
+    assert_eq(state, "bad Int just dash -> Nothing", bad_int_just_dash(), Nothing)
+    assert_eq(state, "bad Bool -> Nothing", bad_bool(), Nothing)
+    assert_eq(state, "bad String unterminated -> Nothing", bad_string_unterminated(), Nothing)
+    assert_eq(state, "bad String no open -> Nothing", bad_string_no_open(), Nothing)
+    assert_eq(state, "bad List unbalanced -> Nothing", bad_list_unbalanced(), Nothing)
+    assert_eq(state, "bad List wrong ctor -> Nothing", bad_list_wrong_ctor(), Nothing)
+    assert_eq(state, "bad Maybe wrong ctor -> Nothing", bad_maybe_wrong_ctor(), Nothing)
+    assert_eq(state, "bad Vec missing paren -> Nothing", bad_vec_missing_paren(), Nothing)
+    assert_eq(state, "bad Dict missing Entry -> Nothing", bad_dict_missing_entry(), Nothing)
+
+    summary(state)

@@ -301,6 +301,37 @@ export class Ord a where Eq a {
   fn compare(left: a, right: a) -> Int
 }
 
+# Serialize and Deserialize together describe a round-trip S-expression wire format
+# used by the `deriving` language feature (see docs/deriving-v1-draft.md).
+# Round-trip property: `deserialize(serialize(x)) == Just(x)` for every value of
+# every instance. Phases 4-8 derive instances for user ADTs that compose through
+# the hand-written instances below.
+#
+# Format conventions (normative for this version of the language):
+#   - Int:    bare digits, optional leading `-`                (e.g. `42`, `-7`)
+#   - Bool:   bare `true` / `false`
+#   - Char:   `"x"` (same escape rules as String — a single-codepoint string)
+#   - String: `"..."` with C-style escapes: `\"` `\\` `\n` `\r` `\t`
+#   - List a: `(Nil)` | `(Cons head tail)`                     (constructor form)
+#   - Maybe a:`(Nothing)` | `(Just x)`                         (constructor form)
+#   - Vec a:  `(Vec elem1 elem2 ...)`                          (pseudo-ctor)
+#   - Dict v: `(Dict (Entry "key1" v1) ...)`                   (pseudo-ctor; keys quoted)
+#
+# Whitespace (space, tab, newline) is allowed between tokens. Deserialize must
+# consume the entire input after trimming trailing whitespace, otherwise returns
+# Nothing. Deserialize MUST NEVER panic on malformed input — it always returns
+# Nothing on parse failure.
+
+# O(?) — depends on instance; see per-instance complexity comments below.
+export class Serialize a {
+  fn serialize(value: a) -> String
+}
+
+# O(?) — depends on instance; see per-instance complexity comments below.
+export class Deserialize a {
+  fn deserialize(input: String) -> Maybe a
+}
+
 export fn ord_lt(x: a, y: a) -> Bool where Ord a =
   compare(x, y) < 0
 
@@ -897,6 +928,578 @@ instance ToString (a, b, c, d, e) where ToString a, ToString b, ToString c, ToSt
     match t with
     | (x, y, z, w, v) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ", " ++ to_string(w) ++ ", " ++ to_string(v) ++ ")"
 }
+
+# ---------------------------------------------------------------------------
+# Serialize / Deserialize — primitive and core stdlib instances.
+# The class definitions are at the top of this file, above the Eq instances.
+# See the comment block there for the normative wire format.
+# ---------------------------------------------------------------------------
+
+# --- shared parser helpers (private) ---------------------------------------
+
+# O(1): tests ASCII byte equality.
+fn ser_is_ws(ch: Char) -> Bool =
+  ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+
+# O(1).
+fn ser_is_digit(ch: Char) -> Bool =
+  ch == '0' || ch == '1' || ch == '2' || ch == '3' || ch == '4'
+  || ch == '5' || ch == '6' || ch == '7' || ch == '8' || ch == '9'
+
+# O(1).
+fn ser_is_alpha(ch: Char) -> Bool =
+  (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+
+# O(1).
+fn ser_is_ident_continue(ch: Char) -> Bool =
+  ser_is_alpha(ch) || ser_is_digit(ch) || ch == '_'
+
+# O(n) in the number of leading whitespace bytes; returns the next non-ws byte index.
+fn ser_skip_ws(s: String, i: Int, total: Int) -> Int =
+  if i >= total then i
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> i
+    | Just ch ->
+        if ser_is_ws(ch) then ser_skip_ws(s, i + 1, total)
+        else i
+
+# O(prefix_len): checks the byte at position i matches the given ASCII char and
+# returns Just(i+1); otherwise Nothing.  Used for the `(`, `)`, `"`, digit, etc.
+# delimiters which are all 1-byte ASCII.
+fn ser_consume_char(s: String, i: Int, total: Int, expected: Char) -> Maybe Int =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ch == expected then Just(i + 1) else Nothing
+
+# O(prefix_len): consumes an exact ASCII keyword starting at byte i.  Returns
+# the new byte position on success, or Nothing on mismatch / end-of-input.
+fn ser_consume_keyword(s: String, i: Int, kw: String) -> Maybe Int =
+  if str_starts_with_at_byte(s, i, kw) then Just(i + str_byte_len(kw))
+  else Nothing
+
+# O(len of digit run + parse_int): reads an Int (optional leading -) starting at
+# the current byte position.  Returns Nothing if not a valid integer prefix.
+# Pre-validates the digit string so parse_int's panic path is never reached.
+fn ser_parse_int_at(s: String, i: Int, total: Int) -> Maybe (Int, Int) =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ch == '-' then ser_parse_int_digits(s, i, i + 1, total)
+        else ser_parse_int_digits(s, i, i, total)
+
+# Reads >=1 digit bytes starting at `digit_start`, returning the captured slice
+# parsed as Int.  `whole_start` is the position of the optional '-'; the digit
+# slice is from `digit_start` to the first non-digit byte.
+fn ser_parse_int_digits(s: String, whole_start: Int, digit_start: Int, total: Int) -> Maybe (Int, Int) =
+  match ser_scan_digits(s, digit_start, total) with
+  | Nothing -> Nothing
+  | Just end_pos ->
+      # str_slice is codepoint-indexed but digits and '-' are 1-byte ASCII; we
+      # know byte positions equal codepoint positions for this slice.
+      Just((parse_int(str_slice(s, whole_start, end_pos - whole_start)), end_pos))
+
+# Returns the byte index past the last digit, or Nothing if no digits are present.
+fn ser_scan_digits(s: String, i: Int, total: Int) -> Maybe Int =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ser_is_digit(ch) then Just(ser_scan_digits_continue(s, i + 1, total))
+        else Nothing
+
+fn ser_scan_digits_continue(s: String, i: Int, total: Int) -> Int =
+  if i >= total then i
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> i
+    | Just ch ->
+        if ser_is_digit(ch) then ser_scan_digits_continue(s, i + 1, total)
+        else i
+
+# Reads an ASCII identifier (letter then letter/digit/underscore).  Returns the
+# identifier and the byte position past it, or Nothing if no identifier starts here.
+fn ser_parse_ident_at(s: String, i: Int, total: Int) -> Maybe (String, Int) =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ser_is_alpha(ch) then
+          ser_parse_ident_continue(s, i, i + 1, total)
+        else Nothing
+
+fn ser_parse_ident_continue(s: String, start: Int, i: Int, total: Int) -> Maybe (String, Int) =
+  if i >= total then Just((str_slice(s, start, i - start), i))
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Just((str_slice(s, start, i - start), i))
+    | Just ch ->
+        if ser_is_ident_continue(ch) then ser_parse_ident_continue(s, start, i + 1, total)
+        else Just((str_slice(s, start, i - start), i))
+
+# After consuming the outer value, only trailing whitespace is allowed.
+# Returns true iff bytes [i, total) contain nothing but whitespace.
+fn ser_only_ws_remaining(s: String, i: Int, total: Int) -> Bool =
+  ser_skip_ws(s, i, total) == total
+
+# --- String escape/unescape -------------------------------------------------
+
+# O(n) where n = byte length.  Builds an escaped representation as a List String,
+# then concatenates once with string_concat_many to avoid O(n^2) appends.
+fn ser_escape_string(s: String) -> String =
+  string_concat_many(Cons("\"", ser_escape_loop(s, 0, str_byte_len(s), Nil)))
+
+fn ser_escape_loop(s: String, i: Int, total: Int, acc: List String) -> List String =
+  if i >= total then list_reverse(Cons("\"", acc))
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> list_reverse(Cons("\"", acc))
+    | Just ch ->
+        ser_escape_loop(
+          s,
+          i + str_char_width_at_byte(s, i),
+          total,
+          Cons(ser_escape_char(ch), acc))
+
+# O(1): emits the byte/codepoint as an escape sequence (for the five reserved
+# bytes) or as a single-character string (everything else, including UTF-8
+# multi-byte codepoints which pass through unchanged).
+fn ser_escape_char(ch: Char) -> String =
+  if ch == '"' then "\\\""
+  else if ch == '\\' then "\\\\"
+  else if ch == '\n' then "\\n"
+  else if ch == '\r' then "\\r"
+  else if ch == '\t' then "\\t"
+  else char_to_string(ch)
+
+# Parses a quoted string starting at byte i.  Returns (decoded_string, byte_pos_after_close)
+# or Nothing on any failure (unterminated, bad escape, missing open quote).
+fn ser_parse_quoted_string_at(s: String, i: Int, total: Int) -> Maybe (String, Int) =
+  match ser_consume_char(s, i, total, '"') with
+  | Nothing -> Nothing
+  | Just j -> ser_parse_quoted_body(s, j, total, Nil)
+
+fn ser_parse_quoted_body(s: String, i: Int, total: Int, acc: List String) -> Maybe (String, Int) =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ch == '"' then
+          Just((string_concat_many(list_reverse(acc)), i + 1))
+        else if ch == '\\' then
+          ser_parse_quoted_escape(s, i + 1, total, acc)
+        else
+          ser_parse_quoted_body(
+            s,
+            i + str_char_width_at_byte(s, i),
+            total,
+            Cons(char_to_string(ch), acc))
+
+fn ser_parse_quoted_escape(s: String, i: Int, total: Int, acc: List String) -> Maybe (String, Int) =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        match ser_decode_escape(ch) with
+        | Nothing -> Nothing
+        | Just decoded ->
+            ser_parse_quoted_body(s, i + 1, total, Cons(decoded, acc))
+
+# Mirrors ser_escape_char: only the five reserved escapes are accepted on the
+# decoder side; anything else after a backslash is an error (returns Nothing).
+fn ser_decode_escape(ch: Char) -> Maybe String =
+  if ch == '"' then Just("\"")
+  else if ch == '\\' then Just("\\")
+  else if ch == 'n' then Just("\n")
+  else if ch == 'r' then Just("\r")
+  else if ch == 't' then Just("\t")
+  else Nothing
+
+# Diagnostic helpers — exposed so callers can pinpoint where the parser fails.
+# TODO: remove before final commit; left as `export fn` only while debugging.
+export fn _ser_debug_int(input: String) -> Int =
+  ser_skip_ws(input, 0, str_byte_len(input))
+
+export fn _ser_debug_scan_digits(input: String) -> Maybe Int =
+  ser_scan_digits(input, 0, str_byte_len(input))
+
+export fn _ser_debug_parse_int(input: String) -> Maybe Int =
+  match ser_parse_int_at(input, 0, str_byte_len(input)) with
+  | Nothing -> Nothing
+  | Just t -> match t with | (v, _) -> Just(v)
+
+# --- Int instances ----------------------------------------------------------
+
+# O(log10 n).
+instance Serialize Int {
+  fn serialize(value: Int) -> String = int_to_string(value)
+}
+
+# O(n) where n = input length.
+instance Deserialize Int {
+  fn deserialize(input: String) -> Maybe Int =
+    match ser_parse_int_at(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input)) with
+    | Nothing -> Nothing
+    | Just (v, next) ->
+        if ser_only_ws_remaining(input, next, str_byte_len(input)) then Just(v)
+        else Nothing
+}
+
+# --- Bool instances ---------------------------------------------------------
+
+# O(1).
+instance Serialize Bool {
+  fn serialize(value: Bool) -> String =
+    if value then "true" else "false"
+}
+
+# O(n) where n = input length.
+instance Deserialize Bool {
+  fn deserialize(input: String) -> Maybe Bool =
+    ser_deserialize_bool_go(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input))
+}
+
+fn ser_deserialize_bool_go(s: String, i: Int, total: Int) -> Maybe Bool =
+  match ser_consume_keyword(s, i, "true") with
+  | Just next ->
+      if ser_only_ws_remaining(s, next, total) then Just(true) else Nothing
+  | Nothing ->
+      match ser_consume_keyword(s, i, "false") with
+      | Just next ->
+          if ser_only_ws_remaining(s, next, total) then Just(false) else Nothing
+      | Nothing -> Nothing
+
+# --- String instances -------------------------------------------------------
+
+# O(n).
+instance Serialize String {
+  fn serialize(value: String) -> String = ser_escape_string(value)
+}
+
+# O(n).
+instance Deserialize String {
+  fn deserialize(input: String) -> Maybe String =
+    match ser_parse_quoted_string_at(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input)) with
+    | Nothing -> Nothing
+    | Just (v, next) ->
+        if ser_only_ws_remaining(input, next, str_byte_len(input)) then Just(v)
+        else Nothing
+}
+
+# --- Char instances ---------------------------------------------------------
+
+# O(1) — a Char serializes as a single-codepoint string with the same escape rules.
+instance Serialize Char {
+  fn serialize(value: Char) -> String = ser_escape_string(char_to_string(value))
+}
+
+# O(n).
+instance Deserialize Char {
+  fn deserialize(input: String) -> Maybe Char =
+    match ser_parse_quoted_string_at(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input)) with
+    | Nothing -> Nothing
+    | Just (s, next) ->
+        if ser_only_ws_remaining(input, next, str_byte_len(input)) then
+          if str_len(s) == 1 then str_char_at(s, 0) else Nothing
+        else Nothing
+}
+
+# --- List a instances -------------------------------------------------------
+
+# O(n * cost(serialize a)).
+instance Serialize (List a) where Serialize a {
+  fn serialize(value: List a) -> String = ser_serialize_list(value)
+}
+
+# Recurses on itself (not via the class method) so the typechecker can resolve
+# without an unresolved `Serialize (List a)` obligation inside the instance body.
+fn ser_serialize_list(xs: List a) -> String where Serialize a =
+  match xs with
+  | Nil -> "(Nil)"
+  | Cons head tail ->
+      string_concat_many(
+        Cons("(Cons ",
+          Cons(serialize(head),
+            Cons(" ",
+              Cons(ser_serialize_list(tail),
+                Cons(")", Nil))))))
+
+# O(n * cost(deserialize a)).
+instance Deserialize (List a) where Deserialize a {
+  fn deserialize(input: String) -> Maybe (List a) =
+    match ser_parse_list_at(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input)) with
+    | Nothing -> Nothing
+    | Just (v, next) ->
+        if ser_only_ws_remaining(input, next, str_byte_len(input)) then Just(v)
+        else Nothing
+}
+
+# Parses one List node at byte position i; returns the value + next byte pos.
+fn ser_parse_list_at(s: String, i: Int, total: Int) -> Maybe (List a, Int) where Deserialize a =
+  match ser_consume_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match ser_parse_ident_at(s, ser_skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (name, k) ->
+          if name == "Nil" then
+            match ser_consume_char(s, ser_skip_ws(s, k, total), total, ')') with
+            | Nothing -> Nothing
+            | Just end -> Just((Nil, end))
+          else if name == "Cons" then
+            ser_parse_list_cons(s, k, total)
+          else Nothing
+
+fn ser_parse_list_cons(s: String, i: Int, total: Int) -> Maybe (List a, Int) where Deserialize a =
+  # i sits just past the "Cons" identifier; expect WS, head, WS, tail, WS, ')'.
+  match ser_parse_value_then_rest(s, ser_skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (head, after_head) ->
+      match ser_parse_list_at(s, ser_skip_ws(s, after_head, total), total) with
+      | Nothing -> Nothing
+      | Just (tail, after_tail) ->
+          match ser_consume_char(s, ser_skip_ws(s, after_tail, total), total, ')') with
+          | Nothing -> Nothing
+          | Just end -> Just((Cons(head, tail), end))
+
+# Reads one composable value (an element of a List/Vec/Dict).  We delegate to
+# the element's Deserialize instance via a "consume the matching token span"
+# helper — since Deserialize's class method requires the input string to be
+# fully consumed, we extract the smallest token span here and feed it as a
+# standalone slice. This keeps element parsing modular without exposing
+# `deserialize_at` in the class API.
+fn ser_parse_value_then_rest(s: String, i: Int, total: Int) -> Maybe (a, Int) where Deserialize a =
+  match ser_extract_value_span(s, i, total) with
+  | Nothing -> Nothing
+  | Just end ->
+      match deserialize(str_slice(s, i, end - i)) with
+      | Nothing -> Nothing
+      | Just v -> Just((v, end))
+
+# Finds the end byte position of one S-expression value starting at byte i.
+# Handles atoms (digit run with optional `-`, ident, quoted string) and
+# parenthesized expressions (balanced — respecting quoted strings).
+fn ser_extract_value_span(s: String, i: Int, total: Int) -> Maybe Int =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ch == '(' then ser_extract_paren_span(s, i + 1, total, 1)
+        else if ch == '"' then ser_extract_string_span(s, i + 1, total)
+        else if ch == '-' || ser_is_digit(ch) then Just(ser_extract_atom_span(s, i, total))
+        else if ser_is_alpha(ch) then Just(ser_extract_atom_span(s, i, total))
+        else Nothing
+
+fn ser_extract_paren_span(s: String, i: Int, total: Int, depth: Int) -> Maybe Int =
+  if depth == 0 then Just(i)
+  else if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ch == '"' then
+          match ser_extract_string_span(s, i + 1, total) with
+          | Nothing -> Nothing
+          | Just j -> ser_extract_paren_span(s, j, total, depth)
+        else if ch == '(' then ser_extract_paren_span(s, i + 1, total, depth + 1)
+        else if ch == ')' then ser_extract_paren_span(s, i + 1, total, depth - 1)
+        else ser_extract_paren_span(s, i + str_char_width_at_byte(s, i), total, depth)
+
+# Returns the byte position one past the closing '"'.
+fn ser_extract_string_span(s: String, i: Int, total: Int) -> Maybe Int =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just ch ->
+        if ch == '"' then Just(i + 1)
+        else if ch == '\\' then
+          if i + 1 >= total then Nothing
+          else ser_extract_string_span(s, i + 2, total)
+        else ser_extract_string_span(s, i + str_char_width_at_byte(s, i), total)
+
+# Atom = contiguous run of non-whitespace, non-paren bytes.
+fn ser_extract_atom_span(s: String, i: Int, total: Int) -> Int =
+  if i >= total then i
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> i
+    | Just ch ->
+        if ser_is_ws(ch) || ch == '(' || ch == ')' then i
+        else ser_extract_atom_span(s, i + str_char_width_at_byte(s, i), total)
+
+# --- Maybe a instances ------------------------------------------------------
+
+# O(cost(serialize a)).
+instance Serialize (Maybe a) where Serialize a {
+  fn serialize(value: Maybe a) -> String =
+    match value with
+    | Nothing -> "(Nothing)"
+    | Just x -> string_concat_many(Cons("(Just ", Cons(serialize(x), Cons(")", Nil))))
+}
+
+# O(n + cost(deserialize a)).
+instance Deserialize (Maybe a) where Deserialize a {
+  fn deserialize(input: String) -> Maybe (Maybe a) =
+    match ser_parse_maybe_at(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input)) with
+    | Nothing -> Nothing
+    | Just (v, next) ->
+        if ser_only_ws_remaining(input, next, str_byte_len(input)) then Just(v)
+        else Nothing
+}
+
+fn ser_parse_maybe_at(s: String, i: Int, total: Int) -> Maybe (Maybe a, Int) where Deserialize a =
+  match ser_consume_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match ser_parse_ident_at(s, ser_skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (name, k) ->
+          if name == "Nothing" then
+            match ser_consume_char(s, ser_skip_ws(s, k, total), total, ')') with
+            | Nothing -> Nothing
+            | Just end -> Just((Nothing, end))
+          else if name == "Just" then
+            match ser_parse_value_then_rest(s, ser_skip_ws(s, k, total), total) with
+            | Nothing -> Nothing
+            | Just (x, after_x) ->
+                match ser_consume_char(s, ser_skip_ws(s, after_x, total), total, ')') with
+                | Nothing -> Nothing
+                | Just end -> Just((Just(x), end))
+          else Nothing
+
+# --- Vec a instances --------------------------------------------------------
+
+# O(n * cost(serialize a)).
+instance Serialize (Vec a) where Serialize a {
+  fn serialize(value: Vec a) -> String =
+    string_concat_many(
+      Cons("(Vec",
+        list_append(
+          ser_vec_serialize_fields(value, 0, vec_length(value)),
+          Cons(")", Nil))))
+}
+
+fn ser_vec_serialize_fields(v: Vec a, i: Int, total: Int) -> List String where Serialize a =
+  if i >= total then Nil
+  else
+    match vec_get(i, v) with
+    | Nothing -> Nil
+    | Just x ->
+        Cons(" ", Cons(serialize(x), ser_vec_serialize_fields(v, i + 1, total)))
+
+# O(n * cost(deserialize a)).
+instance Deserialize (Vec a) where Deserialize a {
+  fn deserialize(input: String) -> Maybe (Vec a) =
+    match ser_parse_vec_at(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input)) with
+    | Nothing -> Nothing
+    | Just (v, next) ->
+        if ser_only_ws_remaining(input, next, str_byte_len(input)) then Just(v)
+        else Nothing
+}
+
+fn ser_parse_vec_at(s: String, i: Int, total: Int) -> Maybe (Vec a, Int) where Deserialize a =
+  match ser_consume_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match ser_parse_ident_at(s, ser_skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (name, k) ->
+          if name == "Vec" then ser_parse_vec_elems(s, k, total, vec_empty())
+          else Nothing
+
+fn ser_parse_vec_elems(s: String, i: Int, total: Int, acc: Vec a) -> Maybe (Vec a, Int) where Deserialize a =
+  match ser_consume_char(s, ser_skip_ws(s, i, total), total, ')') with
+  | Just end -> Just((acc, end))
+  | Nothing ->
+      match ser_parse_value_then_rest(s, ser_skip_ws(s, i, total), total) with
+      | Nothing -> Nothing
+      | Just (x, after_x) -> ser_parse_vec_elems(s, after_x, total, vec_append(x, acc))
+
+# --- Dict v instances -------------------------------------------------------
+
+# O(n * cost(serialize v)).
+instance Serialize (Dict v) where Serialize v {
+  fn serialize(value: Dict v) -> String =
+    string_concat_many(
+      Cons("(Dict",
+        list_append(
+          ser_dict_serialize_entries(dict_entries(value), 0, vec_length(dict_entries(value))),
+          Cons(")", Nil))))
+}
+
+fn ser_dict_serialize_entries(entries: Vec (String, v), i: Int, total: Int) -> List String where Serialize v =
+  if i >= total then Nil
+  else
+    match vec_get(i, entries) with
+    | Nothing -> Nil
+    | Just entry ->
+        match entry with
+        | (k, val) ->
+            Cons(" (Entry ",
+              Cons(ser_escape_string(k),
+                Cons(" ",
+                  Cons(serialize(val),
+                    Cons(")",
+                      ser_dict_serialize_entries(entries, i + 1, total))))))
+
+# O(n * cost(deserialize v)).
+instance Deserialize (Dict v) where Deserialize v {
+  fn deserialize(input: String) -> Maybe (Dict v) =
+    match ser_parse_dict_at(input, ser_skip_ws(input, 0, str_byte_len(input)), str_byte_len(input)) with
+    | Nothing -> Nothing
+    | Just (v, next) ->
+        if ser_only_ws_remaining(input, next, str_byte_len(input)) then Just(v)
+        else Nothing
+}
+
+fn ser_parse_dict_at(s: String, i: Int, total: Int) -> Maybe (Dict v, Int) where Deserialize v =
+  match ser_consume_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match ser_parse_ident_at(s, ser_skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (name, k) ->
+          if name == "Dict" then ser_parse_dict_entries(s, k, total, dict_empty())
+          else Nothing
+
+fn ser_parse_dict_entries(s: String, i: Int, total: Int, acc: Dict v) -> Maybe (Dict v, Int) where Deserialize v =
+  match ser_consume_char(s, ser_skip_ws(s, i, total), total, ')') with
+  | Just end -> Just((acc, end))
+  | Nothing ->
+      match ser_parse_dict_one_entry(s, ser_skip_ws(s, i, total), total) with
+      | Nothing -> Nothing
+      | Just (key, val, after) ->
+          ser_parse_dict_entries(s, after, total, dict_set(key, val, acc))
+
+fn ser_parse_dict_one_entry(s: String, i: Int, total: Int) -> Maybe (String, v, Int) where Deserialize v =
+  match ser_consume_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match ser_parse_ident_at(s, ser_skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (name, k) ->
+          if name == "Entry" then
+            match ser_parse_quoted_string_at(s, ser_skip_ws(s, k, total), total) with
+            | Nothing -> Nothing
+            | Just (key, after_key) ->
+                match ser_parse_value_then_rest(s, ser_skip_ws(s, after_key, total), total) with
+                | Nothing -> Nothing
+                | Just (val, after_val) ->
+                    match ser_consume_char(s, ser_skip_ws(s, after_val, total), total, ')') with
+                    | Nothing -> Nothing
+                    | Just end -> Just((key, val, end))
+          else Nothing
 
 # ---------------------------------------------------------------------------
 # Extern fn declarations for user-callable C builtins.
