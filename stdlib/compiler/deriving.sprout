@@ -134,12 +134,151 @@ fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.Type
       Nil),
     pos)
 
+# --- ToString emitter --------------------------------------------------------
+
+# Build the to_string body string for one ctor. For nullary ctors, returns
+# just the ctor name. For N-field ctors, returns
+# "Ctor(" ++ to_string(__d_v_0) ++ ", " ++ to_string(__d_v_1) ++ ", " ++ ... ++ ")".
+fn build_to_string_branch_body(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Expr =
+  if arity == 0 then ast.StringExpr(ctor_name, pos)
+  else build_to_string_concat_chain(ctor_name, arity, pos)
+
+# Constructs the string-concat chain for a multi-field ctor body.
+fn build_to_string_concat_chain(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Expr =
+  ast.BinaryExpr("++",
+    ast.BinaryExpr("++",
+      ast.StringExpr(ctor_name ++ "(", pos),
+      build_to_string_field_args(0, arity, pos),
+      pos),
+    ast.StringExpr(")", pos),
+    pos)
+
+# Build the to_string-of-each-field chain joined by ", ".
+fn build_to_string_field_args(i: Int, arity: Int, pos: source.SourcePos) -> ast.Expr =
+  if i >= arity - 1 then build_to_string_field_call(i, pos)
+  else ast.BinaryExpr("++",
+    ast.BinaryExpr("++",
+      build_to_string_field_call(i, pos),
+      ast.StringExpr(", ", pos),
+      pos),
+    build_to_string_field_args(i + 1, arity, pos),
+    pos)
+
+fn build_to_string_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("to_string", pos),
+    Cons(ast.VarExpr(deriv_field_name("v", i), pos), Nil),
+    pos)
+
+# Build one match branch: `| Ctor(f0, f1, ...) -> "Ctor(...)"`.
+fn build_to_string_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
+  match ctor with
+  | ast.TypeConstructor name _ ->
+      ast.MatchBranch(
+        build_ctor_var_pattern(name, "v", ctor_arity(ctor), pos),
+        build_to_string_branch_body(name, ctor_arity(ctor), pos))
+
+fn build_to_string_ctor_branches(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
+  match ctors with
+  | Nil -> Nil
+  | Cons c rest -> Cons(build_to_string_ctor_branch(c, pos), build_to_string_ctor_branches(rest, pos))
+
+fn build_to_string_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  ast.MatchExpr(
+    ast.VarExpr("value", pos),
+    build_to_string_ctor_branches(ctors, pos),
+    pos)
+
+fn emit_to_string_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("ToString", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    instance_constraints_for("ToString", type_params),
+    Cons(
+      ast.InstanceMethodImpl(
+        "to_string",
+        Cons(ast.Param("value", Just(instance_head_typeexpr(name, type_params))), Nil),
+        Just(ast.TypeName("String")),
+        Nothing,
+        build_to_string_match_body(ctors, pos)),
+      Nil),
+    pos)
+
+# --- Ord emitter (nullary-only for v1; field-bearing Ord is a follow-up) ----
+
+# Returns true iff every constructor in the list takes zero fields.
+fn all_nullary(ctors: List ast.TypeConstructor) -> Bool =
+  match ctors with
+  | Nil -> true
+  | Cons c rest -> if ctor_arity(c) == 0 then all_nullary(rest) else false
+
+# One inner-match branch: `| Ctor_j -> int_for(idx_j vs outer_idx)`.
+fn build_ord_inner_branch(c: ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> ast.MatchBranch =
+  match c with
+  | ast.TypeConstructor name _ ->
+      ast.MatchBranch(
+        ast.ConstructorPattern(name, Nil, pos),
+        ast.IntExpr(if idx < outer_idx then 1 else 0, pos))
+
+fn build_ord_inner_branches(remaining: List ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> List ast.MatchBranch =
+  match remaining with
+  | Nil -> Cons(ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos)), Nil)
+  | Cons c rest ->
+      if idx > outer_idx then Cons(ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos)), Nil)
+      else Cons(build_ord_inner_branch(c, idx, outer_idx, pos),
+                build_ord_inner_branches(rest, idx + 1, outer_idx, pos))
+
+fn build_ord_inner_match(outer_idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  ast.MatchExpr(
+    ast.VarExpr("right", pos),
+    build_ord_inner_branches(all_ctors, 0, outer_idx, pos),
+    pos)
+
+fn build_ord_outer_branch(c: ast.TypeConstructor, idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
+  match c with
+  | ast.TypeConstructor name _ ->
+      ast.MatchBranch(
+        ast.ConstructorPattern(name, Nil, pos),
+        build_ord_inner_match(idx, all_ctors, pos))
+
+fn build_ord_outer_branches(remaining: List ast.TypeConstructor, idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
+  match remaining with
+  | Nil -> Nil
+  | Cons c rest ->
+      Cons(build_ord_outer_branch(c, idx, all_ctors, pos),
+           build_ord_outer_branches(rest, idx + 1, all_ctors, pos))
+
+fn build_ord_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  ast.MatchExpr(
+    ast.VarExpr("left", pos),
+    build_ord_outer_branches(ctors, 0, ctors, pos),
+    pos)
+
+fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("Ord", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    instance_constraints_for("Ord", type_params),
+    Cons(
+      ast.InstanceMethodImpl(
+        "compare",
+        Cons(ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
+        Cons(ast.Param("right", Just(instance_head_typeexpr(name, type_params))), Nil)),
+        Just(ast.TypeName("Int")),
+        Nothing,
+        build_ord_match_body(ctors, pos)),
+      Nil),
+    pos)
+
 # --- Dispatch over class names ----------------------------------------------
 
 # Given a class name and TypeDecl fields, synthesize the corresponding
 # InstanceDecl. Returns Nothing for class names not yet supported in v1.
+# v1 limitation: deriving (Ord) requires all constructors to be nullary;
+# field-bearing Ord is tracked as a v1.x follow-up.
 fn derive_instance(class_name: String, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
   if class_name == "Eq" then Just(emit_eq_instance(name, type_params, ctors, pos))
+  else if class_name == "ToString" then Just(emit_to_string_instance(name, type_params, ctors, pos))
+  else if class_name == "Ord" then
+    if all_nullary(ctors) then Just(emit_ord_instance(name, type_params, ctors, pos)) else Nothing
   else Nothing
 
 fn derive_instances_for_classes(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos, classes: List String) -> List ast.Decl =

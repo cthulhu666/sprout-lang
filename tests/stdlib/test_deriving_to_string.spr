@@ -1,0 +1,33 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# `deriving (ToString)` synthesizes an instance whose body matches on the
+# value and produces the source-form string.
+#   Nullary ctor C    -> "C"
+#   N-field ctor C    -> "C(to_string(f0), to_string(f1), ...)"
+
+type Color (..) deriving (ToString) =
+  | Red
+  | Green
+  | Blue
+
+type Box a (..) deriving (ToString) =
+  | Empty
+  | Hold a
+
+type Pair a b (..) deriving (ToString) =
+  | Pair a b
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Nullary cases.
+    assert_eq(state, "to_string Red", to_string(Red), "Red")
+    assert_eq(state, "to_string Green", to_string(Green), "Green")
+    assert_eq(state, "to_string Blue", to_string(Blue), "Blue")
+    # Parametric type, nullary ctor.
+    assert_eq(state, "to_string Empty", to_string(Empty), "Empty")
+    # Parametric type, single-field ctor — uses ToString Int for the inner.
+    assert_eq(state, "to_string Hold 42", to_string(Hold(42)), "Hold(42)")
+    # Two-field ctor, two different inner types.
+    assert_eq(state, "to_string Pair 1 true", to_string(Pair(1, true)), "Pair(1, true)")
+    summary(state)

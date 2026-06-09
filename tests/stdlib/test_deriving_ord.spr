@@ -1,0 +1,25 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+
+# `deriving (Ord)` on a nullary-only ADT compares by declaration order:
+# first-declared is least; equal constructors return 0.
+
+type Rank (..) deriving (Eq, Ord) =
+  | Low
+  | Mid
+  | High
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Same-ctor → 0.
+    assert_eq(state, "compare Low Low", compare(Low, Low), 0)
+    assert_eq(state, "compare Mid Mid", compare(Mid, Mid), 0)
+    assert_eq(state, "compare High High", compare(High, High), 0)
+    # Declaration order: Low < Mid < High.
+    assert_true(state, "Low < Mid", compare(Low, Mid) < 0)
+    assert_true(state, "Low < High", compare(Low, High) < 0)
+    assert_true(state, "Mid < High", compare(Mid, High) < 0)
+    assert_true(state, "Mid > Low", compare(Mid, Low) > 0)
+    assert_true(state, "High > Low", compare(High, Low) > 0)
+    assert_true(state, "High > Mid", compare(High, Mid) > 0)
+    summary(state)
