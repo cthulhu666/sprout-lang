@@ -16,6 +16,24 @@ import stdlib.compiler.source as source
 # Design ref: docs/deriving-v1-draft.md
 # ---------------------------------------------------------------------------
 
+# --- Side ADT ----------------------------------------------------------------
+#
+# Identifies WHICH side of a generated body a synthesized field binding belongs
+# to. Eq compares two values so its bodies use both DLeft and DRight; ToString
+# and Serialize render one value, so they use DValue. Replacing the previous
+# string identifiers ("l", "r", "v") with this ADT makes the set of legal sides
+# explicit and turns typos into type errors.
+type Side =
+  | DLeft
+  | DRight
+  | DValue
+
+fn side_prefix(side: Side) -> String =
+  match side with
+  | DLeft -> "l"
+  | DRight -> "r"
+  | DValue -> "v"
+
 # --- Helpers -----------------------------------------------------------------
 
 # Number of field positions in a constructor, e.g. `Node Int Tree Tree` -> 3.
@@ -27,15 +45,15 @@ fn ctor_arity(ctor: ast.TypeConstructor) -> Int =
 # Fresh-ish variable name for the i-th field of one side of an eq comparison.
 # Prefix `__d_` keeps these distinct from any user-declared name.
 # O(1).
-fn deriv_field_name(side: String, i: Int) -> String =
-  "__d_" ++ side ++ "_" ++ int_to_string(i)
+fn deriv_field_name(side: Side, i: Int) -> String =
+  "__d_" ++ side_prefix(side) ++ "_" ++ int_to_string(i)
 
 # Build a pattern matching `ctor_name(__d_<side>_0, __d_<side>_1, ...)` with
 # `arity` field-binding VarPatterns.
-fn build_ctor_var_pattern(ctor_name: String, side: String, arity: Int, pos: source.SourcePos) -> ast.Pattern =
+fn build_ctor_var_pattern(ctor_name: String, side: Side, arity: Int, pos: source.SourcePos) -> ast.Pattern =
   ast.ConstructorPattern(ctor_name, build_ctor_var_field_patterns(side, 0, arity, pos), pos)
 
-fn build_ctor_var_field_patterns(side: String, i: Int, arity: Int, pos: source.SourcePos) -> List ast.Pattern =
+fn build_ctor_var_field_patterns(side: Side, i: Int, arity: Int, pos: source.SourcePos) -> List ast.Pattern =
   if i >= arity then Nil
   else Cons(ast.VarPattern(deriv_field_name(side, i), pos),
             build_ctor_var_field_patterns(side, i + 1, arity, pos))
@@ -54,8 +72,8 @@ fn build_eq_conj_acc(i: Int, arity: Int, acc: ast.Expr, pos: source.SourcePos) -
 fn build_eq_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(
     ast.VarExpr("eq", pos),
-    Cons(ast.VarExpr(deriv_field_name("l", i), pos),
-    Cons(ast.VarExpr(deriv_field_name("r", i), pos), Nil)),
+    Cons(ast.VarExpr(deriv_field_name(DLeft, i), pos),
+    Cons(ast.VarExpr(deriv_field_name(DRight, i), pos), Nil)),
     pos)
 
 # --- Eq emitter --------------------------------------------------------------
@@ -67,8 +85,8 @@ fn build_eq_same_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -
   | ast.TypeConstructor name _ ->
       ast.MatchBranch(
         ast.TuplePattern(
-          Cons(build_ctor_var_pattern(name, "l", ctor_arity(ctor), pos),
-          Cons(build_ctor_var_pattern(name, "r", ctor_arity(ctor), pos), Nil)),
+          Cons(build_ctor_var_pattern(name, DLeft, ctor_arity(ctor), pos),
+          Cons(build_ctor_var_pattern(name, DRight, ctor_arity(ctor), pos), Nil)),
           pos),
         build_eq_conjunction(ctor_arity(ctor), pos))
 
@@ -167,7 +185,7 @@ fn build_to_string_field_args(i: Int, arity: Int, pos: source.SourcePos) -> ast.
 fn build_to_string_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(
     ast.VarExpr("to_string", pos),
-    Cons(ast.VarExpr(deriv_field_name("v", i), pos), Nil),
+    Cons(ast.VarExpr(deriv_field_name(DValue, i), pos), Nil),
     pos)
 
 # Build one match branch: `| Ctor(f0, f1, ...) -> "Ctor(...)"`.
@@ -175,7 +193,7 @@ fn build_to_string_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos)
   match ctor with
   | ast.TypeConstructor name _ ->
       ast.MatchBranch(
-        build_ctor_var_pattern(name, "v", ctor_arity(ctor), pos),
+        build_ctor_var_pattern(name, DValue, ctor_arity(ctor), pos),
         build_to_string_branch_body(name, ctor_arity(ctor), pos))
 
 fn build_to_string_ctor_branches(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
@@ -277,7 +295,7 @@ fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.Typ
 fn build_serialize_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(
     ast.VarExpr("serialize", pos),
-    Cons(ast.VarExpr(deriv_field_name("v", i), pos), Nil),
+    Cons(ast.VarExpr(deriv_field_name(DValue, i), pos), Nil),
     pos)
 
 # Build "serialize(f0) ++ \" \" ++ serialize(f1) ++ \" \" ++ ... ++ serialize(fN-1)".
@@ -305,7 +323,7 @@ fn build_serialize_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos)
   match ctor with
   | ast.TypeConstructor name _ ->
       ast.MatchBranch(
-        build_ctor_var_pattern(name, "v", ctor_arity(ctor), pos),
+        build_ctor_var_pattern(name, DValue, ctor_arity(ctor), pos),
         build_serialize_branch_body(name, ctor_arity(ctor), pos))
 
 fn build_serialize_ctor_branches(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
@@ -376,21 +394,51 @@ fn emit_deserialize_instance(name: String, type_params: List String, ctors: List
       Nil),
     pos)
 
-# --- Dispatch over class names ----------------------------------------------
+# --- DerivableClass ADT + dispatch ------------------------------------------
+#
+# Models the closed set of v1-derivable classes. Parsing the user-supplied
+# class name into this ADT once (parse_derivable_class) and dispatching on it
+# replaces a long if-else chain on strings, making the supported set explicit
+# and turning "unknown class" into a single Nothing case at parse time.
+type DerivableClass =
+  | DcEq
+  | DcOrd
+  | DcToString
+  | DcSerialize
+  | DcDeserialize
 
-# Given a class name and TypeDecl fields, synthesize the corresponding
-# InstanceDecl. Returns Nothing for class names not yet supported in v1.
-# v1 limitation: deriving (Ord) requires all constructors to be nullary;
-# field-bearing Ord is tracked as a v1.x follow-up.
-fn derive_instance(class_name: String, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
-  if class_name == "Eq" then Just(emit_eq_instance(name, type_params, ctors, pos))
-  else if class_name == "ToString" then Just(emit_to_string_instance(name, type_params, ctors, pos))
-  else if class_name == "Ord" then
-    if all_nullary(ctors) then Just(emit_ord_instance(name, type_params, ctors, pos)) else Nothing
-  else if class_name == "Serialize" then Just(emit_serialize_instance(name, type_params, ctors, pos))
-  else if class_name == "Deserialize" then
-    if all_nullary(ctors) then Just(emit_deserialize_instance(name, type_params, ctors, pos)) else Nothing
+# Parse a class name as it appeared in the user's `deriving (...)` clause.
+# Returns Nothing for class names not yet supported in v1 (the caller skips
+# synthesis silently; the user gets a "no instance" error at the use site).
+fn parse_derivable_class(name: String) -> Maybe DerivableClass =
+  if name == "Eq" then Just(DcEq)
+  else if name == "Ord" then Just(DcOrd)
+  else if name == "ToString" then Just(DcToString)
+  else if name == "Serialize" then Just(DcSerialize)
+  else if name == "Deserialize" then Just(DcDeserialize)
   else Nothing
+
+# Given a parsed class and TypeDecl fields, synthesize the corresponding
+# InstanceDecl. v1 limitation: Ord and Deserialize require all constructors to
+# be nullary; field-bearing cases are tracked as v1.x follow-ups in BACKLOG.
+fn derive_instance_for(dc: DerivableClass, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
+  match dc with
+  | DcEq -> Just(emit_eq_instance(name, type_params, ctors, pos))
+  | DcToString -> Just(emit_to_string_instance(name, type_params, ctors, pos))
+  | DcSerialize -> Just(emit_serialize_instance(name, type_params, ctors, pos))
+  | DcOrd ->
+      if all_nullary(ctors) then Just(emit_ord_instance(name, type_params, ctors, pos)) else Nothing
+  | DcDeserialize ->
+      if all_nullary(ctors) then Just(emit_deserialize_instance(name, type_params, ctors, pos)) else Nothing
+
+# Bridge from the string class name (as it appears in the source `deriving`
+# clause) to the typed dispatch. Returns Nothing if the class isn't derivable
+# at all, OR if it's a derivable class but the type doesn't satisfy the
+# emitter's v1 preconditions (e.g. Ord on a field-bearing type).
+fn derive_instance(class_name: String, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
+  match parse_derivable_class(class_name) with
+  | Nothing -> Nothing
+  | Just dc -> derive_instance_for(dc, name, type_params, ctors, pos)
 
 fn derive_instances_for_classes(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos, classes: List String) -> List ast.Decl =
   match classes with
