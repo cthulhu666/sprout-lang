@@ -72,8 +72,8 @@ fn build_eq_conj_acc(i: Int, arity: Int, acc: ast.Expr, pos: source.SourcePos) -
 fn build_eq_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(
     ast.VarExpr("eq", pos),
-    Cons(ast.VarExpr(deriv_field_name(DLeft, i), pos),
-    Cons(ast.VarExpr(deriv_field_name(DRight, i), pos), Nil)),
+    [ast.VarExpr(deriv_field_name(DLeft, i), pos),
+     ast.VarExpr(deriv_field_name(DRight, i), pos)],
     pos)
 
 # --- Eq emitter --------------------------------------------------------------
@@ -85,8 +85,8 @@ fn build_eq_same_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -
   | ast.TypeConstructor name _ ->
       ast.MatchBranch(
         ast.TuplePattern(
-          Cons(build_ctor_var_pattern(name, DLeft, ctor_arity(ctor), pos),
-          Cons(build_ctor_var_pattern(name, DRight, ctor_arity(ctor), pos), Nil)),
+          [build_ctor_var_pattern(name, DLeft, ctor_arity(ctor), pos),
+           build_ctor_var_pattern(name, DRight, ctor_arity(ctor), pos)],
           pos),
         build_eq_conjunction(ctor_arity(ctor), pos))
 
@@ -103,12 +103,11 @@ fn eq_fallthrough_branch(pos: source.SourcePos) -> ast.MatchBranch =
 fn build_eq_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
   ast.MatchExpr(
     ast.TupleExpr(
-      Cons(ast.VarExpr("left", pos),
-      Cons(ast.VarExpr("right", pos), Nil)),
+      [ast.VarExpr("left", pos), ast.VarExpr("right", pos)],
       pos),
     list_append(
       build_eq_same_ctor_branches(ctors, pos),
-      Cons(eq_fallthrough_branch(pos), Nil)),
+      [eq_fallthrough_branch(pos)]),
     pos)
 
 # Build a TypeExpr representing the instance head: TypeName(name) for a
@@ -131,7 +130,7 @@ fn instance_constraints_for(class_name: String, type_params: List String) -> Lis
   match type_params with
   | Nil -> Nil
   | Cons p rest ->
-      Cons(ast.TypeConstraint(class_name, Cons(ast.TypeName(p), Nil)),
+      Cons(ast.TypeConstraint(class_name, [ast.TypeName(p)]),
            instance_constraints_for(class_name, rest))
 
 # Emit `instance Eq <T> [where Eq a, ...] { fn eq(left, right) -> Bool = ... }`.
@@ -139,17 +138,15 @@ fn instance_constraints_for(class_name: String, type_params: List String) -> Lis
 # of ast.Decl, not a separate type).
 fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
-    ast.TypeConstraint("Eq", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    ast.TypeConstraint("Eq", [instance_head_typeexpr(name, type_params)]),
     instance_constraints_for("Eq", type_params),
-    Cons(
-      ast.InstanceMethodImpl(
-        "eq",
-        Cons(ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
-        Cons(ast.Param("right", Just(instance_head_typeexpr(name, type_params))), Nil)),
-        Just(ast.TypeName("Bool")),
-        Nothing,
-        build_eq_match_body(ctors, pos)),
-      Nil),
+    [ast.InstanceMethodImpl(
+       "eq",
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("Bool")),
+       Nothing,
+       build_eq_match_body(ctors, pos))],
     pos)
 
 # --- ToString emitter --------------------------------------------------------
@@ -185,7 +182,7 @@ fn build_to_string_field_args(i: Int, arity: Int, pos: source.SourcePos) -> ast.
 fn build_to_string_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(
     ast.VarExpr("to_string", pos),
-    Cons(ast.VarExpr(deriv_field_name(DValue, i), pos), Nil),
+    [ast.VarExpr(deriv_field_name(DValue, i), pos)],
     pos)
 
 # Build one match branch: `| Ctor(f0, f1, ...) -> "Ctor(...)"`.
@@ -209,16 +206,14 @@ fn build_to_string_match_body(ctors: List ast.TypeConstructor, pos: source.Sourc
 
 fn emit_to_string_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
-    ast.TypeConstraint("ToString", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    ast.TypeConstraint("ToString", [instance_head_typeexpr(name, type_params)]),
     instance_constraints_for("ToString", type_params),
-    Cons(
-      ast.InstanceMethodImpl(
-        "to_string",
-        Cons(ast.Param("value", Just(instance_head_typeexpr(name, type_params))), Nil),
-        Just(ast.TypeName("String")),
-        Nothing,
-        build_to_string_match_body(ctors, pos)),
-      Nil),
+    [ast.InstanceMethodImpl(
+       "to_string",
+       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("String")),
+       Nothing,
+       build_to_string_match_body(ctors, pos))],
     pos)
 
 # --- Ord emitter (nullary-only for v1; field-bearing Ord is a follow-up) ----
@@ -239,9 +234,9 @@ fn build_ord_inner_branch(c: ast.TypeConstructor, idx: Int, outer_idx: Int, pos:
 
 fn build_ord_inner_branches(remaining: List ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> List ast.MatchBranch =
   match remaining with
-  | Nil -> Cons(ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos)), Nil)
+  | Nil -> [ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos))]
   | Cons c rest ->
-      if idx > outer_idx then Cons(ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos)), Nil)
+      if idx > outer_idx then [ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos))]
       else Cons(build_ord_inner_branch(c, idx, outer_idx, pos),
                 build_ord_inner_branches(rest, idx + 1, outer_idx, pos))
 
@@ -273,17 +268,15 @@ fn build_ord_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) 
 
 fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
-    ast.TypeConstraint("Ord", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    ast.TypeConstraint("Ord", [instance_head_typeexpr(name, type_params)]),
     instance_constraints_for("Ord", type_params),
-    Cons(
-      ast.InstanceMethodImpl(
-        "compare",
-        Cons(ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
-        Cons(ast.Param("right", Just(instance_head_typeexpr(name, type_params))), Nil)),
-        Just(ast.TypeName("Int")),
-        Nothing,
-        build_ord_match_body(ctors, pos)),
-      Nil),
+    [ast.InstanceMethodImpl(
+       "compare",
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("Int")),
+       Nothing,
+       build_ord_match_body(ctors, pos))],
     pos)
 
 # --- Serialize emitter -------------------------------------------------------
@@ -295,7 +288,7 @@ fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.Typ
 fn build_serialize_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(
     ast.VarExpr("serialize", pos),
-    Cons(ast.VarExpr(deriv_field_name(DValue, i), pos), Nil),
+    [ast.VarExpr(deriv_field_name(DValue, i), pos)],
     pos)
 
 # Build "serialize(f0) ++ \" \" ++ serialize(f1) ++ \" \" ++ ... ++ serialize(fN-1)".
@@ -339,16 +332,14 @@ fn build_serialize_match_body(ctors: List ast.TypeConstructor, pos: source.Sourc
 
 fn emit_serialize_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
-    ast.TypeConstraint("Serialize", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    ast.TypeConstraint("Serialize", [instance_head_typeexpr(name, type_params)]),
     instance_constraints_for("Serialize", type_params),
-    Cons(
-      ast.InstanceMethodImpl(
-        "serialize",
-        Cons(ast.Param("value", Just(instance_head_typeexpr(name, type_params))), Nil),
-        Just(ast.TypeName("String")),
-        Nothing,
-        build_serialize_match_body(ctors, pos)),
-      Nil),
+    [ast.InstanceMethodImpl(
+       "serialize",
+       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("String")),
+       Nothing,
+       build_serialize_match_body(ctors, pos))],
     pos)
 
 # --- Deserialize emitter (nullary-only for v1) ------------------------------
@@ -367,7 +358,7 @@ fn build_deserialize_check(ctor_name: String, else_branch: ast.Expr, pos: source
       pos),
     ast.CallExpr(
       ast.VarExpr("Just", pos),
-      Cons(ast.VarExpr(ctor_name, pos), Nil),
+      [ast.VarExpr(ctor_name, pos)],
       pos),
     else_branch,
     pos)
@@ -382,16 +373,14 @@ fn build_deserialize_chain(ctors: List ast.TypeConstructor, pos: source.SourcePo
 
 fn emit_deserialize_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
-    ast.TypeConstraint("Deserialize", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    ast.TypeConstraint("Deserialize", [instance_head_typeexpr(name, type_params)]),
     instance_constraints_for("Deserialize", type_params),
-    Cons(
-      ast.InstanceMethodImpl(
-        "deserialize",
-        Cons(ast.Param("input", Just(ast.TypeName("String"))), Nil),
-        Just(ast.TypeApply(ast.TypeName("Maybe"), instance_head_typeexpr(name, type_params))),
-        Nothing,
-        build_deserialize_chain(ctors, pos)),
-      Nil),
+    [ast.InstanceMethodImpl(
+       "deserialize",
+       [ast.Param("input", Just(ast.TypeName("String")))],
+       Just(ast.TypeApply(ast.TypeName("Maybe"), instance_head_typeexpr(name, type_params))),
+       Nothing,
+       build_deserialize_chain(ctors, pos))],
     pos)
 
 # --- DerivableClass ADT + dispatch ------------------------------------------
