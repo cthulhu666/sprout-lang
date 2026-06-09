@@ -268,6 +268,114 @@ fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.Typ
       Nil),
     pos)
 
+# --- Serialize emitter -------------------------------------------------------
+#
+# S-expression form: `(CtorName field0_ser field1_ser ...)`.
+# Nullary ctor C    -> "(C)"
+# N-field ctor C    -> "(C " ++ serialize(f0) ++ " " ++ ... ++ serialize(fN-1) ++ ")"
+
+fn build_serialize_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("serialize", pos),
+    Cons(ast.VarExpr(deriv_field_name("v", i), pos), Nil),
+    pos)
+
+# Build "serialize(f0) ++ \" \" ++ serialize(f1) ++ \" \" ++ ... ++ serialize(fN-1)".
+fn build_serialize_field_chain(i: Int, arity: Int, pos: source.SourcePos) -> ast.Expr =
+  if i >= arity - 1 then build_serialize_field_call(i, pos)
+  else ast.BinaryExpr("++",
+    ast.BinaryExpr("++",
+      build_serialize_field_call(i, pos),
+      ast.StringExpr(" ", pos),
+      pos),
+    build_serialize_field_chain(i + 1, arity, pos),
+    pos)
+
+fn build_serialize_branch_body(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Expr =
+  if arity == 0 then ast.StringExpr("(" ++ ctor_name ++ ")", pos)
+  else ast.BinaryExpr("++",
+    ast.BinaryExpr("++",
+      ast.StringExpr("(" ++ ctor_name ++ " ", pos),
+      build_serialize_field_chain(0, arity, pos),
+      pos),
+    ast.StringExpr(")", pos),
+    pos)
+
+fn build_serialize_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
+  match ctor with
+  | ast.TypeConstructor name _ ->
+      ast.MatchBranch(
+        build_ctor_var_pattern(name, "v", ctor_arity(ctor), pos),
+        build_serialize_branch_body(name, ctor_arity(ctor), pos))
+
+fn build_serialize_ctor_branches(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
+  match ctors with
+  | Nil -> Nil
+  | Cons c rest -> Cons(build_serialize_ctor_branch(c, pos), build_serialize_ctor_branches(rest, pos))
+
+fn build_serialize_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  ast.MatchExpr(
+    ast.VarExpr("value", pos),
+    build_serialize_ctor_branches(ctors, pos),
+    pos)
+
+fn emit_serialize_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("Serialize", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    instance_constraints_for("Serialize", type_params),
+    Cons(
+      ast.InstanceMethodImpl(
+        "serialize",
+        Cons(ast.Param("value", Just(instance_head_typeexpr(name, type_params))), Nil),
+        Just(ast.TypeName("String")),
+        Nothing,
+        build_serialize_match_body(ctors, pos)),
+      Nil),
+    pos)
+
+# --- Deserialize emitter (nullary-only for v1) ------------------------------
+#
+# For each nullary ctor C, the body chains:
+#   if input == "(C)" then Just(C) else <next>
+# Final else returns Nothing. Field-bearing Deserialize requires recursive
+# S-expression parsing and is tracked as v1.x follow-up.
+
+# Build a single check: `if input == "(CtorName)" then Just(CtorName) else <else>`.
+fn build_deserialize_check(ctor_name: String, else_branch: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  ast.IfExpr(
+    ast.BinaryExpr("==",
+      ast.VarExpr("input", pos),
+      ast.StringExpr("(" ++ ctor_name ++ ")", pos),
+      pos),
+    ast.CallExpr(
+      ast.VarExpr("Just", pos),
+      Cons(ast.VarExpr(ctor_name, pos), Nil),
+      pos),
+    else_branch,
+    pos)
+
+fn build_deserialize_chain(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  match ctors with
+  | Nil -> ast.VarExpr("Nothing", pos)
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstructor name _ ->
+          build_deserialize_check(name, build_deserialize_chain(rest, pos), pos)
+
+fn emit_deserialize_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("Deserialize", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    instance_constraints_for("Deserialize", type_params),
+    Cons(
+      ast.InstanceMethodImpl(
+        "deserialize",
+        Cons(ast.Param("input", Just(ast.TypeName("String"))), Nil),
+        Just(ast.TypeApply(ast.TypeName("Maybe"), instance_head_typeexpr(name, type_params))),
+        Nothing,
+        build_deserialize_chain(ctors, pos)),
+      Nil),
+    pos)
+
 # --- Dispatch over class names ----------------------------------------------
 
 # Given a class name and TypeDecl fields, synthesize the corresponding
@@ -279,6 +387,9 @@ fn derive_instance(class_name: String, name: String, type_params: List String, c
   else if class_name == "ToString" then Just(emit_to_string_instance(name, type_params, ctors, pos))
   else if class_name == "Ord" then
     if all_nullary(ctors) then Just(emit_ord_instance(name, type_params, ctors, pos)) else Nothing
+  else if class_name == "Serialize" then Just(emit_serialize_instance(name, type_params, ctors, pos))
+  else if class_name == "Deserialize" then
+    if all_nullary(ctors) then Just(emit_deserialize_instance(name, type_params, ctors, pos)) else Nothing
   else Nothing
 
 fn derive_instances_for_classes(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos, classes: List String) -> List ast.Decl =
