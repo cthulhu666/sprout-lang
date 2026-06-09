@@ -1,0 +1,170 @@
+module stdlib.compiler.deriving
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+# ---------------------------------------------------------------------------
+# Codegen for `deriving (...)` clauses on TypeDecls.
+#
+# v1 scope: synthesize ast.InstanceDecl nodes for each (class, type) pair in
+# a TypeDecl's deriving list. Currently implements Eq; ToString/Ord/Serialize/
+# Deserialize emitters slot in alongside emit_eq_instance.
+#
+# Entry point is expand_deriving_decls, called by the bundler after
+# qualification: it walks a list of decls, finds TypeDecls with non-empty
+# deriving_classes, and appends synthesized InstanceDecls.
+#
+# Design ref: docs/deriving-v1-draft.md
+# ---------------------------------------------------------------------------
+
+# --- Helpers -----------------------------------------------------------------
+
+# Number of field positions in a constructor, e.g. `Node Int Tree Tree` -> 3.
+# O(n).
+fn ctor_arity(ctor: ast.TypeConstructor) -> Int =
+  match ctor with
+  | ast.TypeConstructor _ fields -> list_length(fields)
+
+# Fresh-ish variable name for the i-th field of one side of an eq comparison.
+# Prefix `__d_` keeps these distinct from any user-declared name.
+# O(1).
+fn deriv_field_name(side: String, i: Int) -> String =
+  "__d_" ++ side ++ "_" ++ int_to_string(i)
+
+# Build a pattern matching `ctor_name(__d_<side>_0, __d_<side>_1, ...)` with
+# `arity` field-binding VarPatterns.
+fn build_ctor_var_pattern(ctor_name: String, side: String, arity: Int, pos: source.SourcePos) -> ast.Pattern =
+  ast.ConstructorPattern(ctor_name, build_ctor_var_field_patterns(side, 0, arity, pos), pos)
+
+fn build_ctor_var_field_patterns(side: String, i: Int, arity: Int, pos: source.SourcePos) -> List ast.Pattern =
+  if i >= arity then Nil
+  else Cons(ast.VarPattern(deriv_field_name(side, i), pos),
+            build_ctor_var_field_patterns(side, i + 1, arity, pos))
+
+# Build a conjunction `eq(l0, r0) && eq(l1, r1) && ... && eq(lN, rN)`.
+# For arity 0, returns `true`. For arity 1, returns the single eq call (no &&).
+fn build_eq_conjunction(arity: Int, pos: source.SourcePos) -> ast.Expr =
+  if arity == 0 then ast.BoolExpr(true, pos)
+  else build_eq_conj_acc(1, arity, build_eq_field_call(0, pos), pos)
+
+fn build_eq_conj_acc(i: Int, arity: Int, acc: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  if i >= arity then acc
+  else build_eq_conj_acc(i + 1, arity, ast.BinaryExpr("&&", acc, build_eq_field_call(i, pos), pos), pos)
+
+# `eq(__d_l_i, __d_r_i)` — calls the typeclass eq method on the i-th field pair.
+fn build_eq_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("eq", pos),
+    Cons(ast.VarExpr(deriv_field_name("l", i), pos),
+    Cons(ast.VarExpr(deriv_field_name("r", i), pos), Nil)),
+    pos)
+
+# --- Eq emitter --------------------------------------------------------------
+
+# Build one match branch for a single same-ctor case:
+#   (Ctor l0 l1 ..., Ctor r0 r1 ...) -> eq(l0, r0) && eq(l1, r1) && ...
+fn build_eq_same_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
+  match ctor with
+  | ast.TypeConstructor name _ ->
+      ast.MatchBranch(
+        ast.TuplePattern(
+          Cons(build_ctor_var_pattern(name, "l", ctor_arity(ctor), pos),
+          Cons(build_ctor_var_pattern(name, "r", ctor_arity(ctor), pos), Nil)),
+          pos),
+        build_eq_conjunction(ctor_arity(ctor), pos))
+
+fn build_eq_same_ctor_branches(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
+  match ctors with
+  | Nil -> Nil
+  | Cons c rest -> Cons(build_eq_same_ctor_branch(c, pos), build_eq_same_ctor_branches(rest, pos))
+
+# The wildcard fall-through arm: any (Ctor_i, Ctor_j) pair with i != j -> false.
+fn eq_fallthrough_branch(pos: source.SourcePos) -> ast.MatchBranch =
+  ast.MatchBranch(ast.WildcardPattern(pos), ast.BoolExpr(false, pos))
+
+# Build the match expression body: `match (left, right) with | (C0 ..., C0 ...) -> ... | _ -> false`.
+fn build_eq_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  ast.MatchExpr(
+    ast.TupleExpr(
+      Cons(ast.VarExpr("left", pos),
+      Cons(ast.VarExpr("right", pos), Nil)),
+      pos),
+    list_append(
+      build_eq_same_ctor_branches(ctors, pos),
+      Cons(eq_fallthrough_branch(pos), Nil)),
+    pos)
+
+# Build a TypeExpr representing the instance head: TypeName(name) for a
+# non-parametric type, or TypeApply(...) for `Maybe a`-style parametric types.
+fn instance_head_typeexpr(name: String, type_params: List String) -> ast.TypeExpr =
+  match type_params with
+  | Nil -> ast.TypeName(name)
+  | _ -> apply_type_params(ast.TypeName(name), type_params)
+
+fn apply_type_params(base: ast.TypeExpr, params: List String) -> ast.TypeExpr =
+  match params with
+  | Nil -> base
+  | Cons p rest -> apply_type_params(ast.TypeApply(base, ast.TypeName(p)), rest)
+
+# For each type parameter referenced in any field, emit `Eq <param>` as an
+# instance constraint. Conservative: just emits one constraint per type
+# parameter (Haskell's StandaloneDeriving with all params constrained).
+# A fancier implementation would walk fields to detect used vs. phantom params.
+fn instance_constraints_for(class_name: String, type_params: List String) -> List ast.TypeConstraint =
+  match type_params with
+  | Nil -> Nil
+  | Cons p rest ->
+      Cons(ast.TypeConstraint(class_name, Cons(ast.TypeName(p), Nil)),
+           instance_constraints_for(class_name, rest))
+
+# Emit `instance Eq <T> [where Eq a, ...] { fn eq(left, right) -> Bool = ... }`.
+# Returns the InstanceDecl as an ast.Decl (since InstanceDecl is a constructor
+# of ast.Decl, not a separate type).
+fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("Eq", Cons(instance_head_typeexpr(name, type_params), Nil)),
+    instance_constraints_for("Eq", type_params),
+    Cons(
+      ast.InstanceMethodImpl(
+        "eq",
+        Cons(ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
+        Cons(ast.Param("right", Just(instance_head_typeexpr(name, type_params))), Nil)),
+        Just(ast.TypeName("Bool")),
+        Nothing,
+        build_eq_match_body(ctors, pos)),
+      Nil),
+    pos)
+
+# --- Dispatch over class names ----------------------------------------------
+
+# Given a class name and TypeDecl fields, synthesize the corresponding
+# InstanceDecl. Returns Nothing for class names not yet supported in v1.
+fn derive_instance(class_name: String, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
+  if class_name == "Eq" then Just(emit_eq_instance(name, type_params, ctors, pos))
+  else Nothing
+
+fn derive_instances_for_classes(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos, classes: List String) -> List ast.Decl =
+  match classes with
+  | Nil -> Nil
+  | Cons class_name rest ->
+      match derive_instance(class_name, name, type_params, ctors, pos) with
+      | Nothing -> derive_instances_for_classes(name, type_params, ctors, pos, rest)
+      | Just inst -> Cons(inst, derive_instances_for_classes(name, type_params, ctors, pos, rest))
+
+# --- Top-level expansion -----------------------------------------------------
+
+# Walk a list of program decls. For each TypeDecl with a non-empty deriving
+# list, append synthesized InstanceDecls AFTER the TypeDecl. Declaration order
+# matters: instance lookup walks the env, and the synthesized instance body
+# references the type's constructors that the TypeDecl just registered.
+export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      match d with
+      | ast.TypeDecl name type_params ctors deriving_classes pos ->
+          match deriving_classes with
+          | Nil -> Cons(d, expand_deriving_decls(rest))
+          | _ -> Cons(d, list_append(
+                          derive_instances_for_classes(name, type_params, ctors, pos, deriving_classes),
+                          expand_deriving_decls(rest)))
+      | _ -> Cons(d, expand_deriving_decls(rest))

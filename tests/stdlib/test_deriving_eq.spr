@@ -1,0 +1,27 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# End-to-end test for `deriving (Eq)` on a nullary-constructor ADT.
+# Per docs/deriving-v1-draft.md, this is the smallest user-visible deliverable
+# of the deriving feature: the compiler synthesizes an `instance Eq Color`
+# whose body matches each (Ctor, Ctor) pair and returns true; everything else
+# returns false.
+
+type Color (..) deriving (Eq) =
+  | Red
+  | Green
+  | Blue
+
+fn not(b: Bool) -> Bool = if b then false else true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Same-constructor cases — all true.
+    assert_true(state, "Red eq Red", eq(Red, Red))
+    assert_true(state, "Green eq Green", eq(Green, Green))
+    assert_true(state, "Blue eq Blue", eq(Blue, Blue))
+    # Different-constructor cases — all false.
+    assert_true(state, "Red neq Green", not(eq(Red, Green)))
+    assert_true(state, "Green neq Blue", not(eq(Green, Blue)))
+    assert_true(state, "Blue neq Red", not(eq(Blue, Red)))
+    summary(state)

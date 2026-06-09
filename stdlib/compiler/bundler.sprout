@@ -5,6 +5,7 @@ import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
 import stdlib.compiler.parser as parser
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.deriving as deriving
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -1058,7 +1059,7 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe String =
 fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String) -> BundleResult =
   match validate_qualified_decls(qualified) with
   | Just err_msg -> BundleErr("[assert] qualify_decl: " ++ err_msg)
-  | Nothing -> BundleOk(ast.Program(qualified, dummy_pos()))
+  | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), dummy_pos()))
   where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root)
 
 export fn bundle_file(path: String, stdlib_root: String) -> BundleResult !{IO} =
