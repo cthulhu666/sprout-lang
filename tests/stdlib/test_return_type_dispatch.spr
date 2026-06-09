@@ -1,0 +1,66 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# Regression test for return-type typeclass dispatch (infer.sprout fix).
+#
+# Before the fix, a class method whose class type variable appears ONLY in the
+# return position (e.g. `deserialize :: String -> Maybe a`) silently dispatched
+# to the wrong instance: the inference-time dispatcher picked the first
+# concrete argument's type (always the input `String`), and the body of the
+# user function compiled to a no-op returning Nothing/0.
+#
+# This test introduces a minimal class with that exact shape and verifies that
+# dispatch resolves to the correct instance based on the EXPECTED RETURN TYPE
+# at the call site, not the irrelevant input arg type.
+
+class Identify a {
+  fn identify(label: String) -> Maybe a
+}
+
+instance Identify Int {
+  fn identify(label: String) -> Maybe Int =
+    if label == "one" then Just(1)
+    else if label == "two" then Just(2)
+    else Nothing
+}
+
+instance Identify Bool {
+  fn identify(label: String) -> Maybe Bool =
+    if label == "yes" then Just(true)
+    else if label == "no" then Just(false)
+    else Nothing
+}
+
+# Calling fn whose declared return type pins the class type variable.
+fn id_int(s: String) -> Maybe Int = identify(s)
+fn id_bool(s: String) -> Maybe Bool = identify(s)
+
+fn is_just_one(m: Maybe Int) -> Bool =
+  match m with | Just 1 -> true | _ -> false
+
+fn is_just_two(m: Maybe Int) -> Bool =
+  match m with | Just 2 -> true | _ -> false
+
+fn is_just_true(m: Maybe Bool) -> Bool =
+  match m with | Just b -> b | _ -> false
+
+fn is_just_false(m: Maybe Bool) -> Bool =
+  match m with | Just b -> if b then false else true | _ -> false
+
+fn is_nothing_int(m: Maybe Int) -> Bool =
+  match m with | Nothing -> true | _ -> false
+
+fn is_nothing_bool(m: Maybe Bool) -> Bool =
+  match m with | Nothing -> true | _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Int dispatch — the class var `a` is unified to Int via the expected return.
+    assert_true(state, "id_int(\"one\") = Just(1)", is_just_one(id_int("one")))
+    assert_true(state, "id_int(\"two\") = Just(2)", is_just_two(id_int("two")))
+    assert_true(state, "id_int(\"x\") = Nothing", is_nothing_int(id_int("x")))
+    # Bool dispatch — same call site shape, different return type.
+    assert_true(state, "id_bool(\"yes\") = Just(true)", is_just_true(id_bool("yes")))
+    assert_true(state, "id_bool(\"no\") = Just(false)", is_just_false(id_bool("no")))
+    assert_true(state, "id_bool(\"x\") = Nothing", is_nothing_bool(id_bool("x")))
+    summary(state)

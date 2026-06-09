@@ -579,11 +579,26 @@ fn check_call_constraint(
       | Nothing ->
           inject_constrained_fn_dicts(method_name, 0, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
       | Just class_marker ->
-          check_instance_for_marker(class_marker, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
+          check_instance_for_marker(class_marker, method_name, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
   | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# Returns true if any class type var appears in any argument of method_type.
+# When false, dispatch is by return type — the first-concrete-arg heuristic
+# is meaningless (it would pick an irrelevant arg's type) and we must instead
+# either resolve from ret_t directly or fall through to @fwd markers.
+fn method_dispatch_is_input(method_name: String, class_vars: List String, env: Dict types.Scheme) -> Bool =
+  match class_vars with
+  | Nil -> true
+  | _ ->
+      match dict_get(method_name, env) with
+      | Nothing -> true
+      | Just method_scheme ->
+          match method_scheme with
+          | types.Scheme _ _ method_type _ -> class_var_in_args(method_type, class_vars)
 
 fn check_instance_for_marker(
   class_marker: types.Scheme,
+  method_name: String,
   typed_callee: typed_ast.TypedExpr,
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
@@ -595,28 +610,33 @@ fn check_instance_for_marker(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match class_marker with
-  | types.Scheme _ _ class_type _ ->
+  | types.Scheme class_vars _ class_type _ ->
       match class_type with
       | types.TConst class_name ->
-          match first_concrete_typed_arg_str(typed_args, subst) with
-          | Just head_str ->
-              match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-              | Nothing -> InferErr("No instance of " ++ class_name ++ " for " ++ head_str)
-              | Just _ ->
-                  InferOk(
-                    typed_ast.TCall(typed_callee,
-                      Cons(typed_ast.TDict(
-                        ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_fwd(head_str, class_name, typed_args, subst, env), Nil)),
-                        types.TConst(class_name), pos),
-                        typed_args),
-                      ret_t, pos),
-                    s3, es3, call_eff)
-          | Nothing ->
-              # Polymorphic call — try to forward from a @fwd marker in env.
-              # Falls back to env scan so that container args like `xs: f a` (whose
-              # @fwd key is the TVar for `f`) are found even when an earlier arg like
-              # `init: b` returns a TVar first but has no matching @fwd marker.
-              check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+          if method_dispatch_is_input(method_name, class_vars, env) then
+            # Input-position dispatch — existing logic
+            match first_concrete_typed_arg_str(typed_args, subst) with
+            | Just head_str ->
+                match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+                | Nothing -> InferErr("No instance of " ++ class_name ++ " for " ++ head_str)
+                | Just _ ->
+                    InferOk(
+                      typed_ast.TCall(typed_callee,
+                        Cons(typed_ast.TDict(
+                          ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_fwd(head_str, class_name, typed_args, subst, env), Nil)),
+                          types.TConst(class_name), pos),
+                          typed_args),
+                        ret_t, pos),
+                      s3, es3, call_eff)
+            | Nothing ->
+                check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+          else
+            # Return-position dispatch — first_concrete_typed_arg_str would pick
+            # an irrelevant arg type (e.g. the String input of `deserialize`).
+            # Route directly to fwd markers; the post-pass walker
+            # (resolve_dispatch_typed_expr) rewrites the TDict once the outer
+            # unification has made ret_t concrete.
+            check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
       | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
 # Resolve a polymorphic class-method call by scanning args for a @fwd marker.
@@ -850,6 +870,108 @@ fn concrete_type_str(t: types.Type) -> Maybe String =
   | types.TApp base _ -> concrete_type_str(base)
   | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | _ -> Nothing
+
+# Walk a class-method's original scheme type alongside the call-site's
+# instantiated type, looking for where the class type variable `class_var`
+# lives, and return the substituted concrete type at that position.
+# Used by resolve_dispatch_typed_expr (post-pass) to correct dispatch for
+# methods whose class type variable appears only in the return type.
+fn find_class_var_in_type(orig: types.Type, inst: types.Type, class_var: String) -> Maybe types.Type =
+  match orig with
+  | types.TVar n ->
+      if n == class_var then Just(inst) else Nothing
+  | types.TConst _ -> Nothing
+  | types.TApp ob oa ->
+      match inst with
+      | types.TApp ib ia ->
+          match find_class_var_in_type(ob, ib, class_var) with
+          | Just r -> Just(r)
+          | Nothing -> find_class_var_in_type(oa, ia, class_var)
+      | _ -> Nothing
+  | types.TFunc op orr _ ->
+      match inst with
+      | types.TFunc ip ir _ ->
+          match find_class_var_in_type(op, ip, class_var) with
+          | Just r -> Just(r)
+          | Nothing -> find_class_var_in_type(orr, ir, class_var)
+      | _ -> Nothing
+  | types.TTuple oitems ->
+      match inst with
+      | types.TTuple iitems -> find_class_var_in_tuple_lists(oitems, iitems, class_var)
+      | _ -> Nothing
+
+fn find_class_var_in_tuple_lists(os: List types.Type, is: List types.Type, class_var: String) -> Maybe types.Type =
+  match os with
+  | Nil -> Nothing
+  | Cons oh orest ->
+      match is with
+      | Nil -> Nothing
+      | Cons ih irest ->
+          match find_class_var_in_type(oh, ih, class_var) with
+          | Just r -> Just(r)
+          | Nothing -> find_class_var_in_tuple_lists(orest, irest, class_var)
+
+# Walk method scheme's TFunc chain alongside typed args + return, returning
+# the substituted concrete type at the position of the class type variable.
+fn dispatch_type_walk(
+  scheme_type: types.Type,
+  typed_args: List typed_ast.TypedExpr,
+  ret_t: types.Type,
+  subst: Dict types.Type,
+  class_var: String
+) -> Maybe types.Type =
+  match scheme_type with
+  | types.TFunc param ret _ ->
+      match typed_args with
+      | Cons first_arg rest_args ->
+          match find_class_var_in_type(param, unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)), class_var) with
+          | Just t -> Just(t)
+          | Nothing -> dispatch_type_walk(ret, rest_args, ret_t, subst, class_var)
+      | Nil ->
+          find_class_var_in_type(scheme_type, unifier.apply_subst(subst, ret_t), class_var)
+  | _ ->
+      find_class_var_in_type(scheme_type, unifier.apply_subst(subst, ret_t), class_var)
+
+fn dispatch_type_for_vars(
+  scheme_type: types.Type,
+  typed_args: List typed_ast.TypedExpr,
+  ret_t: types.Type,
+  subst: Dict types.Type,
+  class_vars: List String
+) -> Maybe types.Type =
+  match class_vars with
+  | Nil -> Nothing
+  | Cons v rest ->
+      match dispatch_type_walk(scheme_type, typed_args, ret_t, subst, v) with
+      | Just t -> Just(t)
+      | Nothing -> dispatch_type_for_vars(scheme_type, typed_args, ret_t, subst, rest)
+
+fn contains_str(xs: List String, target: String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons h t -> if h == target then true else contains_str(t, target)
+
+fn type_contains_var(t: types.Type, names: List String) -> Bool =
+  match t with
+  | types.TVar n -> contains_str(names, n)
+  | types.TConst _ -> false
+  | types.TApp a b -> if type_contains_var(a, names) then true else type_contains_var(b, names)
+  | types.TFunc p r _ -> if type_contains_var(p, names) then true else type_contains_var(r, names)
+  | types.TTuple items -> tuple_contains_var(items, names)
+
+fn tuple_contains_var(items: List types.Type, names: List String) -> Bool =
+  match items with
+  | Nil -> false
+  | Cons h t -> if type_contains_var(h, names) then true else tuple_contains_var(t, names)
+
+# Returns true if any of `class_vars` appears in any ARG position of method type.
+# Used to skip rewriting input-position dispatch (already correct at inference time).
+fn class_var_in_args(method_type: types.Type, class_vars: List String) -> Bool =
+  match method_type with
+  | types.TFunc param ret _ ->
+      if type_contains_var(param, class_vars) then true
+      else class_var_in_args(ret, class_vars)
+  | _ -> false
 
 # --- Constrained-function TDict injection ---
 #
@@ -1549,7 +1671,7 @@ fn collect_seen_ctors(branches: List typed_ast.TypedMatchBranch, acc: List Strin
 fn join_comma(names: List String) -> String =
   match names with
   | Nil -> ""
-  | [n] -> strip_module_prefix(n)
+  | Cons n Nil -> strip_module_prefix(n)
   | Cons n rest -> strip_module_prefix(n) ++ ", " ++ join_comma(rest)
 
 fn missing_ctor_names(all_ctors: List String, branches: List typed_ast.TypedMatchBranch) -> List String =
@@ -2370,7 +2492,7 @@ fn typecheck_decl(
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         register_class_methods(type_params, methods,
-          register_class_method_markers(class_name, methods,
+          register_class_method_markers(class_name, type_params, methods,
             register_superclass_markers(class_name, superclasses, env))),
         env_ftv)
   | ast.InstanceDecl constraint inst_constraints methods _ ->
@@ -2459,6 +2581,161 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
       typed_ast.TRecord(name, apply_subst_typed_record_fields(subst, fields), unifier.apply_subst(subst, t), pos)
   | typed_ast.TGetField expr field t pos ->
       typed_ast.TGetField(apply_subst_typed_expr(subst, expr), field, unifier.apply_subst(subst, t), pos)
+
+# ---------------------------------------------------------------------------
+# Post-inference dispatch resolution for return-type-driven typeclass methods
+# ---------------------------------------------------------------------------
+#
+# At inference time, check_call_constraint dispatches class methods based on
+# the first concrete argument's type. For methods whose class type variable is
+# in an argument position (Eq, Ord, ToString, Serialize), this works correctly.
+# For methods whose class type variable is ONLY in the return position
+# (Deserialize), the return type's substitution comes from the OUTER context
+# (a function's declared return type) which isn't unified until AFTER
+# inference completes — so the inference-time dispatch picks the wrong instance.
+#
+# This post-pass walker runs AFTER check_fn_body's body-vs-return-type
+# unification (s2). It re-examines class method calls, computes the correct
+# dispatch using s2 + the method's scheme, and rewrites only the TDict in
+# cases where the dispatch was wrong. Original TCall.t values are preserved
+# — only the TDict's TypeConstraint changes.
+
+fn strip_leading_tdicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match args with
+  | Nil -> Nil
+  | Cons (typed_ast.TDict _ _ _) rest -> strip_leading_tdicts(rest)
+  | _ -> args
+
+fn try_rewrite_for_return_dispatch(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  fn_: typed_ast.TypedExpr,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos,
+  class_name: String,
+  class_vars: List String,
+  method_type: types.Type
+) -> typed_ast.TypedExpr =
+  match dispatch_type_for_vars(method_type, strip_leading_tdicts(args), t, subst, class_vars) with
+  | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+  | Just resolved_t ->
+      # Only rewrite when the resolved type has a concrete head.
+      # If still polymorphic (TVar), the existing inference-time dispatch via
+      # @fwd markers handles forwarding correctly; rewriting here would emit
+      # a TypeName("_") that breaks instance lookup.
+      match concrete_type_str(resolved_t) with
+      | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+      | Just _ ->
+          typed_ast.TCall(fn_,
+            Cons(typed_ast.TDict(
+              ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, env), Nil)),
+              types.TConst(class_name), pos),
+              strip_leading_tdicts(args)),
+            t, pos)
+
+fn maybe_rewrite_class_method_call(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  fn_: typed_ast.TypedExpr,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos
+) -> typed_ast.TypedExpr =
+  match fn_ with
+  | typed_ast.TVar method_name _ _ ->
+      match dict_get("@class:" ++ method_name, env) with
+      | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+      | Just class_marker ->
+          match class_marker with
+          | types.Scheme class_vars _ class_type _ ->
+              match class_type with
+              | types.TConst class_name ->
+                  match class_vars with
+                  | Nil -> typed_ast.TCall(fn_, args, t, pos)
+                  | _ ->
+                      match dict_get(method_name, env) with
+                      | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+                      | Just method_scheme ->
+                          match method_scheme with
+                          | types.Scheme _ _ method_type _ ->
+                              if class_var_in_args(method_type, class_vars) then typed_ast.TCall(fn_, args, t, pos)
+                              else try_rewrite_for_return_dispatch(env, subst, fn_, args, t, pos, class_name, class_vars, method_type)
+              | _ -> typed_ast.TCall(fn_, args, t, pos)
+  | _ -> typed_ast.TCall(fn_, args, t, pos)
+
+fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TVar _ _ _ -> e
+  | typed_ast.TInt _ _ _ -> e
+  | typed_ast.TBool _ _ _ -> e
+  | typed_ast.TString _ _ _ -> e
+  | typed_ast.TChar _ _ _ -> e
+  | typed_ast.TUnit _ _ -> e
+  | typed_ast.TTuple items t pos ->
+      typed_ast.TTuple(resolve_dispatch_typed_list(env, subst, items), t, pos)
+  | typed_ast.TIf cond then_ else_ t pos ->
+      typed_ast.TIf(resolve_dispatch_typed_expr(env, subst, cond),
+                    resolve_dispatch_typed_expr(env, subst, then_),
+                    resolve_dispatch_typed_expr(env, subst, else_),
+                    t, pos)
+  | typed_ast.TMatch scrutinee branches t pos ->
+      typed_ast.TMatch(resolve_dispatch_typed_expr(env, subst, scrutinee),
+                       resolve_dispatch_typed_branches(env, subst, branches),
+                       t, pos)
+  | typed_ast.TCall fn_ args t pos ->
+      maybe_rewrite_class_method_call(env, subst,
+        resolve_dispatch_typed_expr(env, subst, fn_),
+        resolve_dispatch_typed_list(env, subst, args),
+        t, pos)
+  | typed_ast.TDict _ _ _ -> e
+  | typed_ast.TLambda params body t pos ->
+      typed_ast.TLambda(params, resolve_dispatch_typed_expr(env, subst, body), t, pos)
+  | typed_ast.TBinary op left right t pos ->
+      typed_ast.TBinary(op, resolve_dispatch_typed_expr(env, subst, left), resolve_dispatch_typed_expr(env, subst, right), t, pos)
+  | typed_ast.TUnary op operand t pos ->
+      typed_ast.TUnary(op, resolve_dispatch_typed_expr(env, subst, operand), t, pos)
+  | typed_ast.TRange from_ to_ t pos ->
+      typed_ast.TRange(resolve_dispatch_typed_expr(env, subst, from_), resolve_dispatch_typed_expr(env, subst, to_), t, pos)
+  | typed_ast.TDo steps t pos ->
+      typed_ast.TDo(resolve_dispatch_typed_do_steps_local(env, subst, steps), t, pos)
+  | typed_ast.TRecord name fields t pos ->
+      typed_ast.TRecord(name, resolve_dispatch_typed_record_fields_local(env, subst, fields), t, pos)
+  | typed_ast.TGetField expr field t pos ->
+      typed_ast.TGetField(resolve_dispatch_typed_expr(env, subst, expr), field, t, pos)
+
+fn resolve_dispatch_typed_list(env: Dict types.Scheme, subst: Dict types.Type, xs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match xs with
+  | Nil -> Nil
+  | Cons h t -> Cons(resolve_dispatch_typed_expr(env, subst, h), resolve_dispatch_typed_list(env, subst, t))
+
+fn resolve_dispatch_typed_branches(env: Dict types.Scheme, subst: Dict types.Type, branches: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
+  match branches with
+  | Nil -> Nil
+  | Cons h t ->
+      match h with
+      | typed_ast.TypedMatchBranch pat body ->
+          Cons(typed_ast.TypedMatchBranch(pat, resolve_dispatch_typed_expr(env, subst, body)), resolve_dispatch_typed_branches(env, subst, t))
+
+fn resolve_dispatch_typed_do_steps_local(env: Dict types.Scheme, subst: Dict types.Type, steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons h t ->
+      match h with
+      | typed_ast.TDoBindStep pat expr ->
+          Cons(typed_ast.TDoBindStep(pat, resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_do_steps_local(env, subst, t))
+      | typed_ast.TDoLetStep name expr ->
+          Cons(typed_ast.TDoLetStep(name, resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_do_steps_local(env, subst, t))
+      | typed_ast.TDoExprStep expr ->
+          Cons(typed_ast.TDoExprStep(resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_do_steps_local(env, subst, t))
+
+fn resolve_dispatch_typed_record_fields_local(env: Dict types.Scheme, subst: Dict types.Type, fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
+  match fields with
+  | Nil -> Nil
+  | Cons h t ->
+      match h with
+      | typed_ast.TypedRecordField name expr ->
+          Cons(typed_ast.TypedRecordField(name, resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_record_fields_local(env, subst, t))
 
 # ---------------------------------------------------------------------------
 # Soundness validator — detect unresolved TVars in typed AST
@@ -2594,7 +2871,7 @@ fn check_fn_body(
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
             | Err e -> (typed_ast.BodyErr("Return type mismatch in " ++ name ++ ": " ++ e), dict_empty())
-            | Ok s2 -> (typed_ast.BodyOk(typed_body, unifier.apply_subst(s2, inst_type)), fwd_markers)
+            | Ok s2 -> (typed_ast.BodyOk(resolve_dispatch_typed_expr(self_env, s2, typed_body), unifier.apply_subst(s2, inst_type)), fwd_markers)
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst("Unit")), dict_empty())
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
@@ -2640,14 +2917,16 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env:
         collect_ret_type_vars(Just(ret_type), collect_param_type_vars(params, type_params)),
         params, Just(ret_type), effects_maybe, dict_empty()), env)
 
-fn register_class_method_markers(class_name: String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
+fn register_class_method_markers(class_name: String, type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
   | Nil -> env
   | Cons sig rest ->
       match sig with
       | ast.ClassMethodSig name _ _ _ ->
-          register_class_method_markers(class_name, rest,
-            dict_set("@class:" ++ name, types.mono(types.TConst(class_name)), env))
+          register_class_method_markers(class_name, type_params, rest,
+            dict_set("@class:" ++ name,
+                     types.Scheme(type_params, Nil, types.TConst(class_name), types.EffectPure),
+                     env))
 
 # Register "@super:{class_name}:{super_name}" entries for each superclass in the
 # ClassDecl's where-clause.  These are later consumed by seed_superclass_fwd_markers
@@ -2777,15 +3056,16 @@ fn check_instance_method(
       do
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty()))
         let fwd_env = seed_forward_markers(inst_constraints, prog_to_fresh, env)
-        br <- typecheck_expr(state, extend_env_with_params(params, ctor_param_types(inst_type), fwd_env), subst, eff_subst, body)
+        let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
+        br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
         | InferErr msg -> instance_method_err(name, msg)
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
             | Err e -> InstanceMethodErr("Return type mismatch in instance method " ++ name ++ ": " ++ e)
-            | Ok _ ->
+            | Ok s2 ->
                 InstanceMethodOk(
-                  typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, typed_body))
+                  typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, resolve_dispatch_typed_expr(body_env, s2, typed_body)))
 
 fn instance_method_err(name: String, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
