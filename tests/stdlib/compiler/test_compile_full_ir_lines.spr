@@ -22,6 +22,11 @@ fn is_ir_ok(r: compiler.IrFullLinesResult) -> Bool =
   | compiler.IrFullLinesOk _ _ _ _ -> true
   | compiler.IrFullLinesFail _ -> false
 
+fn is_ir_fail(r: compiler.IrFullLinesResult) -> Bool =
+  match r with
+  | compiler.IrFullLinesFail _ -> true
+  | compiler.IrFullLinesOk _ _ _ _ -> false
+
 fn has_define_line(lines: List String) -> Bool =
   match lines with
   | Nil -> false
@@ -46,4 +51,12 @@ fn main() -> Unit !{IO} =
           r <- compiler.compile_full_ir_lines(tmp_path, stdlib_root, false)
           assert_true(state, "compile_full_ir_lines returns Ok for trivial input", is_ir_ok(r))
           assert_true(state, "compile_full_ir_lines emits a `define ` block", def_lines_have_define(r))
+          # Coverage: failure branch.  Guards the fine-grained phase-timing refactor —
+          # both the failure-reporting on each phase boundary AND the IrFullLinesFail
+          # return shape must keep working when the timed code path is exercised
+          # in the future (SPROUT_TIME_PHASES env var).
+          let bad_path = "/tmp/sprout_test_compile_full_ir_lines_bad.sprout"
+          _ <- write_file(bad_path, "fn broken() -> Int = undefined_name_xyz_99887766\n")
+          r_bad <- compiler.compile_full_ir_lines(bad_path, stdlib_root, false)
+          assert_true(state, "compile_full_ir_lines returns Fail for invalid source", is_ir_fail(r_bad))
     summary(state)

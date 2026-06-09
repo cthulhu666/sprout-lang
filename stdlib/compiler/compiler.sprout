@@ -250,9 +250,14 @@ fn print_codegen_warns(warns: List String) -> Unit !{IO} =
         print_codegen_warns(rest)
 
 # Gate: SPROUT_TIME_PHASES env var.  When set to anything other than "" or "0",
-# compile_full_ir_lines emits a single `[phase] recheck=Nms codegen=Mms total=Tms`
-# line to stderr per invocation.  Stdout (IR text) is unaffected, so the
-# bootstrap fixed-point invariant holds either way.
+# compile_full_ir_lines takes a traced path that emits a single per-phase line
+# to stderr per invocation, of the form:
+#
+#   [phase] bundle=Ams prelude=Bms check=Cms lower=Dms codegen=Ems total=Tms path=<P>
+#
+# Stdout (IR text) is unaffected on either path, so the bootstrap fixed-point
+# invariant holds.  The fast path (env unset) calls compile_phase_recheck and
+# emits no timing overhead beyond the env_get + 1 if.
 fn timing_enabled() -> Bool !{IO} =
   match env_get("SPROUT_TIME_PHASES") with
   | Nothing -> false
@@ -260,36 +265,78 @@ fn timing_enabled() -> Bool !{IO} =
 
 fn micros_to_ms_str(us: Int) -> String = int_to_string(us / 1000)
 
-# compile_full_ir_lines uses compile_phase_recheck so that prog, typed_prog,
-# and lowered are freed before codegen runs — only typed_lowered + env survive
-# into the caller's scope.
-# debug_mode: when true, emits DWARF metadata in the 4th IR section (--debug flag).
-export fn compile_full_ir_lines(path: String, stdlib_root: String, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
+# Fast path: unchanged from pre-instrumentation behaviour. Uses compile_phase_recheck
+# (opaque to per-phase timing, but the cheap default).
+fn compile_full_ir_lines_fast(path: String, stdlib_root: String, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
   do
-    timing_on <- timing_enabled()
-    t0 <- time_now_micros()
     recheck_result <- compile_phase_recheck(path, stdlib_root)
-    t1 <- time_now_micros()
     match recheck_result with
-    | typed_ast.TypedErr msg ->
-        do
-          if timing_on
-            then eprint("[phase] recheck=" ++ micros_to_ms_str(t1 - t0) ++ "ms total=" ++ micros_to_ms_str(t1 - t0) ++ "ms FAILED-at-recheck path=" ++ path)
-            else ()
-          IrFullLinesFail(Cons (DiagError(msg), Nil))
+    | typed_ast.TypedErr msg -> IrFullLinesFail(Cons (DiagError(msg), Nil))
     | typed_ast.TypedOk typed_lowered env ->
         do
           ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, debug_mode_, path)
-          t2 <- time_now_micros()
-          if timing_on
-            then eprint("[phase] recheck=" ++ micros_to_ms_str(t1 - t0) ++ "ms codegen=" ++ micros_to_ms_str(t2 - t1) ++ "ms total=" ++ micros_to_ms_str(t2 - t0) ++ "ms path=" ++ path)
-            else ()
           match ir_result with
           | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
               do
                 print_codegen_warns(warns)
                 IrFullLinesOk(header_lines, str_lines, def_lines, dbg_lines)
           | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))
+
+# Traced path: inlines the recheck pipeline (bundle + load_prelude + typecheck +
+# lower) with time_now_micros() calls at each boundary, emitting one stderr line.
+# Mirrors compile_phase_recheck → compile_phase_lower → compile_phase_check exactly
+# so behaviour stays identical to the fast path apart from the eprint.
+fn compile_full_ir_lines_traced(path: String, stdlib_root: String, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
+  do
+    t0 <- time_now_micros()
+    bundle_result <- bundler.bundle_file(path, stdlib_root)
+    t1 <- time_now_micros()
+    match bundle_result with
+    | bundler.BundleErr msg ->
+        do
+          eprint("[phase] bundle=" ++ micros_to_ms_str(t1 - t0) ++ "ms total=" ++ micros_to_ms_str(t1 - t0) ++ "ms FAILED-at-bundle path=" ++ path)
+          IrFullLinesFail(Cons (DiagError("bundle: " ++ msg), Nil))
+    | bundler.BundleOk prog ->
+        do
+          cache <- module_loader.new_cache()
+          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          t2 <- time_now_micros()
+          check_result <- checker.typecheck_typed(prog, prelude_pairs)
+          t3 <- time_now_micros()
+          match check_result with
+          | typed_ast.TypedErr msg ->
+              do
+                eprint("[phase] bundle=" ++ micros_to_ms_str(t1 - t0) ++ "ms prelude=" ++ micros_to_ms_str(t2 - t1) ++ "ms check=" ++ micros_to_ms_str(t3 - t2) ++ "ms total=" ++ micros_to_ms_str(t3 - t0) ++ "ms FAILED-at-check path=" ++ path)
+                IrFullLinesFail(Cons (DiagError("check: " ++ msg), Nil))
+          | typed_ast.TypedOk typed_prog env ->
+              match lowering.lower_program(typed_prog, env) with
+              | lowering.LowerErr msg ->
+                  do
+                    t4_fail <- time_now_micros()
+                    eprint("[phase] bundle=" ++ micros_to_ms_str(t1 - t0) ++ "ms prelude=" ++ micros_to_ms_str(t2 - t1) ++ "ms check=" ++ micros_to_ms_str(t3 - t2) ++ "ms lower=" ++ micros_to_ms_str(t4_fail - t3) ++ "ms total=" ++ micros_to_ms_str(t4_fail - t0) ++ "ms FAILED-at-lower path=" ++ path)
+                    IrFullLinesFail(Cons (DiagError("lower: " ++ msg), Nil))
+              | lowering.LowerOk typed_lowered ->
+                  do
+                    t4 <- time_now_micros()
+                    ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, debug_mode_, path)
+                    t5 <- time_now_micros()
+                    eprint("[phase] bundle=" ++ micros_to_ms_str(t1 - t0) ++ "ms prelude=" ++ micros_to_ms_str(t2 - t1) ++ "ms check=" ++ micros_to_ms_str(t3 - t2) ++ "ms lower=" ++ micros_to_ms_str(t4 - t3) ++ "ms codegen=" ++ micros_to_ms_str(t5 - t4) ++ "ms total=" ++ micros_to_ms_str(t5 - t0) ++ "ms path=" ++ path)
+                    match ir_result with
+                    | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
+                        do
+                          print_codegen_warns(warns)
+                          IrFullLinesOk(header_lines, str_lines, def_lines, dbg_lines)
+                    | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError("codegen: " ++ msg), Nil))
+
+# compile_full_ir_lines: dispatches to fast (no timing) or traced (per-phase timing)
+# based on SPROUT_TIME_PHASES.  Both paths produce identical IrFullLinesResult.
+# debug_mode: when true, emits DWARF metadata in the 4th IR section (--debug flag).
+export fn compile_full_ir_lines(path: String, stdlib_root: String, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
+  do
+    timing_on <- timing_enabled()
+    if timing_on
+      then compile_full_ir_lines_traced(path, stdlib_root, debug_mode_)
+      else compile_full_ir_lines_fast(path, stdlib_root, debug_mode_)
 
 # compile_full_ir_with_cache: like compile_full_ir but uses a caller-provided module cache.
 # Avoids recreating the cache on every eval when called from the analysis service daemon.
