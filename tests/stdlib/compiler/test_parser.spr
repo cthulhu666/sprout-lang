@@ -63,8 +63,24 @@ fn first_is_type_decl(src: String) -> Bool =
               | Nil -> false
               | Cons d _ ->
                   match d with
-                  | ast.TypeDecl _ _ _ _ -> true
+                  | ast.TypeDecl _ _ _ _ _ -> true
                   | _ -> false
+
+fn first_typedecl_deriving(src: String) -> List String =
+  match lexer.tokenize(src) with
+  | Err _ -> Nil
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Nil
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | Nil -> Nil
+              | Cons d _ ->
+                  match d with
+                  | ast.TypeDecl _ _ _ deriving_classes _ -> deriving_classes
+                  | _ -> Nil
 
 fn main() -> Unit !{IO} =
   do
@@ -126,5 +142,31 @@ fn main() -> Unit !{IO} =
       parse_ok("fn f(xs: List a) -> Bool = match xs with | [Foo.Bar _ _, x | _] -> true | _ -> false"))
     assert_true(state, "list pattern two qualified constructors",
       parse_ok("fn f(xs: List a) -> Bool = match xs with | [Foo.A _ _, Foo.B _ | _] -> true | _ -> false"))
+
+    # ---------------------------------------------------------------------------
+    # deriving clause on TypeDecl (Phase 1 of docs/deriving-v1-draft.md)
+    # `deriving` is a hard keyword; clause appears between `(..)` and `=`.
+    assert_true(state, "type decl with deriving (Eq) parses",
+      parse_ok("type Color (..) deriving (Eq) = | Red | Green | Blue"))
+    assert_true(state, "type decl with multi-class deriving parses",
+      parse_ok("type Color (..) deriving (Eq, ToString, Ord) = | Red | Green"))
+    assert_true(state, "deriving works without (..) export marker",
+      parse_ok("type Color deriving (Eq) = | Red | Green"))
+    assert_true(state, "type decl without deriving still parses (backward compat)",
+      parse_ok("type Color = | Red | Green"))
+    assert_eq(state, "deriving clause class count (one)",
+      list_length(first_typedecl_deriving("type Color (..) deriving (Eq) = | Red")), 1)
+    assert_eq(state, "deriving clause class count (three)",
+      list_length(first_typedecl_deriving("type T (..) deriving (Eq, Ord, ToString) = | A")), 3)
+    assert_eq(state, "no deriving clause yields empty list",
+      list_length(first_typedecl_deriving("type Color = | Red | Green")), 0)
+    assert_true(state, "deriving () empty class list rejected",
+      parse_fails("type Color (..) deriving () = | Red"))
+    assert_true(state, "deriving without parens rejected (bare ClassName)",
+      parse_fails("type Color (..) deriving Eq = | Red"))
+    assert_true(state, "deriving as let-binding identifier rejected (hard keyword)",
+      parse_fails("let deriving = 1"))
+    assert_true(state, "deriving as fn name rejected (hard keyword)",
+      parse_fails("fn deriving() -> Int = 1"))
 
     summary(state)

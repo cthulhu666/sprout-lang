@@ -1145,11 +1145,44 @@ fn parse_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     (_, i2) <- expected_keyword("type", tokens, i)
     (name_tok, i3) <- expected_ident("type name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
-    (_, i5) <- expected_symbol("=", tokens, skip_visibility(tokens, i4))
+    let i4a = skip_visibility(tokens, i4)
+    (deriving_classes, i4b) <- parse_deriving_clause(tokens, i4a)
+    (_, i5) <- expected_symbol("=", tokens, i4b)
     let i5b = skip_optional_bar(tokens, i5)
     (first_ctor, i6) <- parse_type_constructor_def(tokens, i5b)
     (ctors, i7) <- collect_type_constructors(tokens, i6, Cons(first_ctor, Nil))
-    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), cur_pos(tokens, i)), i7))
+    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), deriving_classes, cur_pos(tokens, i)), i7))
+
+# Parses an optional `deriving (ClassName, ClassName, ...)` clause.
+# Returns Nil if no `deriving` keyword is at the current position.
+# Committed: once `deriving` is consumed, the parens and at least one class
+# name are required. See docs/deriving-v1-draft.md §Syntax.
+fn parse_deriving_clause(tokens: Vec token.Token, i: Int) -> Result ParseError (List String, Int) =
+  match match_keyword(tokens, i, "deriving") with
+  | Nothing -> Ok((Nil, i))
+  | Just (_, i2) ->
+      do
+        (_, i3) <- expected_symbol("(", tokens, i2)
+        (names, i4) <- collect_deriving_names(tokens, i3, Nil)
+        (_, i5) <- expected_symbol(")", tokens, i4)
+        match names with
+        | Nil ->
+            Err(ParseError(
+              string.concat("deriving clause must list at least one class name at ", pos_str(cur_pos(tokens, i))),
+              cur_pos(tokens, i)
+            ))
+        | _ -> Ok((list_reverse(names), i5))
+
+# Collects comma-separated class names inside a deriving clause.
+# Stops at the closing `)` without consuming it.
+fn collect_deriving_names(tokens: Vec token.Token, i: Int, acc: List String) -> Result ParseError (List String, Int) =
+  if tok_is_symbol(tok_at(tokens, i), ")") then Ok((acc, i))
+  else
+    do
+      (name_tok, i2) <- expected_ident("class name in deriving clause", tokens, i)
+      match match_symbol(tokens, i2, ",") with
+      | Nothing -> Ok((Cons(token.token_text(name_tok), acc), i2))
+      | Just (_, i3) -> collect_deriving_names(tokens, i3, Cons(token.token_text(name_tok), acc))
 
 fn skip_visibility(tokens: Vec token.Token, i: Int) -> Int =
   match match_symbol(tokens, i, "(") with

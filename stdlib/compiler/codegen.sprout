@@ -3400,7 +3400,7 @@ fn build_adt_arities_acc(decls: List typed_ast.TypedDecl, acc: Dict Int) -> Dict
   | Nil -> acc
   | Cons decl rest ->
       match decl with
-      | typed_ast.TPassThrough (ast.TypeDecl type_name _ ctors _) ->
+      | typed_ast.TPassThrough (ast.TypeDecl type_name _ ctors _ _) ->
           build_adt_arities_acc(rest, dict_set(type_name, compute_max_arity(ctors, 0), acc))
       | _ -> build_adt_arities_acc(rest, acc)
 
@@ -3740,7 +3740,7 @@ fn build_ctor_sigs_acc(decls: List typed_ast.TypedDecl, next_tag: Int, sigs: Dic
   | Nil -> (sigs, adts)
   | Cons decl rest ->
       match decl with
-      | typed_ast.TPassThrough (ast.TypeDecl type_name type_params ctors _) ->
+      | typed_ast.TPassThrough (ast.TypeDecl type_name type_params ctors _ _) ->
           match register_ctors(ctors, next_tag, sigs, adts, type_name, type_params) with
           | (new_sigs, new_adts, new_tag) ->
               build_ctor_sigs_acc(rest, new_tag, new_sigs, new_adts)

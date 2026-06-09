@@ -180,7 +180,7 @@ fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
 
 export fn register_type_decl(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
-  | ast.TypeDecl name params ctors _ ->
+  | ast.TypeDecl name params ctors _ _ ->
       register_ctors_for_type(name, params, build_local_params(params, dict_empty()), ctors, env)
   | _ -> env
 
@@ -238,7 +238,7 @@ fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List S
   | Nil -> acc
   | Cons decl rest ->
       match decl with
-      | ast.TypeDecl name _ ctors _ ->
+      | ast.TypeDecl name _ ctors _ _ ->
           build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
       | _ -> build_ctor_map(rest, acc)
 
@@ -2386,7 +2386,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
             dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
       | ast.AliasDecl name (Cons param Nil) rhs_te _ ->
           pre_scan_fn_decls(rest, env, register_single_param_alias(name, param, rhs_te, alias_env))
-      | ast.TypeDecl _ _ _ _ ->
+      | ast.TypeDecl _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl(decl, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
@@ -2434,7 +2434,7 @@ fn typecheck_decl(
   env_ftv: List String
 ) -> TypedDeclResult !{IO} =
   match decl with
-  | ast.TypeDecl _ _ _ _ ->
+  | ast.TypeDecl _ _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
   | ast.RecordDecl rec_name type_params fields _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), register_record_fields(rec_name, type_params, fields, env), env_ftv)

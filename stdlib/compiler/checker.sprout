@@ -648,7 +648,7 @@ fn dump_decl_name(d: ast.Decl, env: Dict types.Scheme) -> Unit !{IO} =
   match d with
   | ast.FnDecl name _ _ _ _ _ _ -> print_name_scheme(name, env)
   | ast.LetDecl name _ _ -> print_name_scheme(name, env)
-  | ast.TypeDecl _ _ ctors _ -> dump_ctor_names(ctors, env)
+  | ast.TypeDecl _ _ ctors _ _ -> dump_ctor_names(ctors, env)
   | _ -> ()
 
 fn dump_ctor_names(ctors: List ast.TypeConstructor, env: Dict types.Scheme) -> Unit !{IO} =

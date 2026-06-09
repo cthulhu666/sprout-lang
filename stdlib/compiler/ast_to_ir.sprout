@@ -437,7 +437,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
   | Nil -> (acc, list_reverse(regs))
   | Cons decl rest ->
       match decl with
-      | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _) ->
+      | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _ _) ->
           match register_ctor_entries(ctors, next_tag, max_arity_of(ctors, 0), acc, regs) with
           | (acc1, new_tag, regs1) -> build_ctor_table_acc(rest, new_tag, acc1, regs1)
       | _ -> build_ctor_table_acc(rest, next_tag, acc, regs)

@@ -52,7 +52,8 @@ fn is_keyword(raw: String) -> Bool =
   raw == "else" ||
   raw == "true" ||
   raw == "false" ||
-  raw == "extern"
+  raw == "extern" ||
+  raw == "deriving"
 
 fn single_symbol(ch: Char) -> Bool =
   string.contains("()=,:+-*/<>\\!{}[]|", string.string_from_char(ch))
