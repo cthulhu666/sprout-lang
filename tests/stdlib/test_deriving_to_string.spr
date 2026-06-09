@@ -5,16 +5,16 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 #   Nullary ctor C    -> "C"
 #   N-field ctor C    -> "C(to_string(f0), to_string(f1), ...)"
 
-type Color (..) deriving (ToString) =
+type Color (..) deriving(ToString) =
   | Red
   | Green
   | Blue
 
-type Box a (..) deriving (ToString) =
+type Box a (..) deriving(ToString) =
   | Empty
   | Hold a
 
-type Pair a b (..) deriving (ToString) =
+type Pair a b (..) deriving(ToString) =
   | Pair a b
 
 fn main() -> Unit !{IO} =

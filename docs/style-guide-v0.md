@@ -325,6 +325,46 @@ Rules:
   normative.
 - In examples meant for beginners, choose clarity over maximal concision.
 
+## 12.5 Deriving vs hand-written instances
+
+Prefer `deriving (Eq, Ord, ToString, Serialize, Deserialize)` over a
+hand-written `instance` when the synthesized body matches the intended
+semantics. The synthesized body is structural — equal-by-fields for `Eq`,
+declaration-order for `Ord`, "CtorName(field, ...)" rendering for `ToString`,
+S-expression form for `Serialize`/`Deserialize` (see spec §8.6).
+
+Examples:
+
+```sprout
+# Idiomatic: derive when the structural body is what you want.
+type Color (..) deriving (Eq, Ord, ToString) =
+  | Red
+  | Green
+  | Blue
+```
+
+```sprout
+# Hand-written: when the semantics differ from the structural default.
+# (Here `Set` wants set-equality, not field-equality on the internal storage.)
+type Set a (..) =
+  | Set (List a)
+
+instance Eq (Set a) where Eq a {
+  fn eq(left: Set a, right: Set a) -> Bool =
+    set_equal_by_contents(left, right)
+}
+```
+
+Mix freely: `deriving (Eq)` on the type and a hand-written `instance Ord` is
+fine — the derived instance and the hand-written one cover different classes.
+Do not mix them for the same class on the same type (the synthesizer would
+emit a duplicate instance; CI will reject).
+
+When using `deriving` on a `type` with no `(..)` constructor-export marker,
+the synthesized instance methods are still exported because instance methods
+are first-class names in the prelude/imports. The `(..)` only governs whether
+*constructors* are visible to other modules.
+
 ## 13. Guidance for AI Agents
 
 When creating or editing Sprout source, agents should:

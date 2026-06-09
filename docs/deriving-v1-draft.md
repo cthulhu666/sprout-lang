@@ -1,13 +1,29 @@
 # `deriving` — automatic typeclass instance derivation — v1 draft
 
-**Status:** experimental design draft, not normative.
-**Author:** in-flight on `feat/deriving`.
+**Status:** shipped on `feat/deriving` (2026-06-09). Spec section promoted in
+§8.6 of `docs/spec-v0.md`. Implementation has two known limitations tracked as
+BACKLOG follow-ups; see "Implementation status" below.
 **Origin:** the iface PR design (`docs/iface-precompiled-modules-v1-draft.md`)
 needed ~17 ADTs / ~65 variants across `stdlib/compiler/{types,ast,source}.sprout`
 to acquire `Serialize` and `Deserialize` instances. Hand-writing that surface is
 permanent maintenance debt that compounds with every AST churn. The project's
 "robust language and tooling" goal made `deriving` the right answer rather than
 a one-off codegen script.
+
+## Implementation status
+
+| Component | Status | Commit | Notes |
+|---|---|---|---|
+| Parser support (`deriving (...)` clause) | shipped | `c2f4d52` | bundled with return-type typeclass dispatch fix |
+| Codegen skeleton (`stdlib/compiler/deriving.sprout`) | shipped | `03124d6` | constructor enumeration, AST helpers, `expand_deriving_decls` |
+| Bundler integration | shipped | `03124d6` | `deriving.expand_deriving_decls` runs after qualification, before typecheck |
+| `Eq` emitter | shipped, full scope | `03124d6` | nullary + field-bearing + parametric |
+| `ToString` emitter | shipped, full scope | `ca663a7` | nullary + field-bearing + parametric |
+| `Ord` emitter | shipped, **nullary-only** | `ca663a7` | field-bearing tracked as BACKLOG §5 |
+| `Serialize` emitter | shipped, full scope | `0db4e60` | nullary + field-bearing + parametric |
+| `Deserialize` emitter | shipped, **nullary-only** | `0db4e60` | field-bearing tracked as BACKLOG §5 |
+| Field-class diagnostics (F1) | partial | — | "no instance" surfaces at use site; eager F1 check at deriving site is a follow-up |
+| Spec section in `docs/spec-v0.md` §8.6 | shipped | — | normative |
 
 ## Problem
 

@@ -5,16 +5,16 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 #   Nullary ctor C   -> "(C)"
 #   N-field ctor C   -> "(C " ++ serialize(f0) ++ " " ++ ... ++ serialize(fN-1) ++ ")"
 
-type Color (..) deriving (Serialize) =
+type Color (..) deriving(Serialize) =
   | Red
   | Green
   | Blue
 
-type Box a (..) deriving (Serialize) =
+type Box a (..) deriving(Serialize) =
   | Empty
   | Hold a
 
-type Pair a b (..) deriving (Serialize) =
+type Pair a b (..) deriving(Serialize) =
   | Pair a b
 
 fn main() -> Unit !{IO} =

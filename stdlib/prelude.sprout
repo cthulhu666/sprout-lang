@@ -1277,7 +1277,7 @@ fn ser_parse_list_cons(s: String, i: Int, total: Int) -> Maybe (List a, Int) whe
 # fully consumed, we extract the smallest token span here and feed it as a
 # standalone slice. This keeps element parsing modular without exposing
 # `deserialize_at` in the class API.
-fn ser_parse_value_then_rest(s: String, i: Int, total: Int) -> Maybe (a, Int) where Deserialize a =
+fn ser_parse_value_then_rest(s: String, i: Int, total: Int) -> Maybe(a, Int) where Deserialize a =
   match ser_extract_value_span(s, i, total) with
   | Nothing -> Nothing
   | Just end ->

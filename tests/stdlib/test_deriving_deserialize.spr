@@ -4,7 +4,7 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 # that recognizes "(CtorName)" inputs and returns Just(Ctor) or Nothing.
 # Round-trips with `deriving (Serialize)` for the same type.
 
-type Status (..) deriving (Serialize, Deserialize, Eq) =
+type Status (..) deriving(Serialize, Deserialize, Eq) =
   | Pending
   | Active
   | Closed

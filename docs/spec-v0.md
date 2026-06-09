@@ -368,6 +368,75 @@ Tuple instances format nested tuples recursively.  A 6-tuple or larger has no
 `ToString` instance in the current prelude; adding one requires an explicit
 instance declaration.
 
+## 8.6 Automatic Instance Derivation (`deriving`) (Experimental)
+
+A `type` declaration may carry a `deriving (...)` clause between the optional
+`(..)` constructor-export marker and the `=` sign.  The compiler synthesizes
+instance declarations for each listed class, eliminating the boilerplate of
+hand-writing instances whose body follows from the type's structure.
+
+### Syntax
+
+```
+type Name (..) deriving (Class1, Class2, ...) =
+  | Ctor1 ...
+  | Ctor2 ...
+```
+
+`deriving` is a hard keyword.  The class-name list must be parenthesized and
+non-empty.  Whitespace and line breaks inside the parentheses are allowed.
+
+### Derivable classes (this version)
+
+| Class | Scope | Synthesized method |
+|---|---|---|
+| `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false |
+| `Ord` | nullary-ctor ADTs only | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs return 0 |
+| `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field |
+| `Serialize` | all ADT shapes | `serialize(value)` — S-expression form `"(CtorName)"` or `"(CtorName field0_ser field1_ser ...)"` |
+| `Deserialize` | nullary-ctor ADTs only | `deserialize(input)` — chained string-equality check against each `"(CtorName)"` form; returns `Just(Ctor)` on match, `Nothing` otherwise |
+
+For parametric types (e.g. `type Box a = | Hold a`), the synthesized instance
+carries one instance constraint per type parameter, e.g. `instance Eq (Box a)
+where Eq a { ... }`.  This is conservative — phantom type parameters get a
+constraint they don't need; refining this is a future improvement.
+
+### Limitations (this version)
+
+- `deriving (Ord)` on a type with any field-bearing constructor is silently
+  skipped; the user gets the standard "no instance" error at the use site.
+  Lexicographic compare requires either lazy chaining via thunks or
+  per-arity helpers in prelude; tracked in BACKLOG.md.
+- `deriving (Deserialize)` on a type with any field-bearing constructor is
+  similarly skipped; field-bearing Deserialize requires an embedded
+  recursive S-expression parser per instance body. Tracked in BACKLOG.md.
+- `deriving (Hash)` is not yet supported; deferred until the polymorphic-keyed
+  dict work lands (a `Hash` instance has no in-language consumer today).
+- Multiple `deriving (...)` clauses on the same type declaration are not
+  supported (use one clause with all classes: `deriving (Eq, Ord, ToString)`).
+- Records (`record`) do not support `deriving`; v1 targets `type` declarations
+  only.
+
+### Error conditions
+
+- Unknown class in deriving clause: `cannot derive 'Foo': no derivation rule
+  for class 'Foo' in this compiler version`. Will be emitted once compiler
+  integration's error path is wired (currently the synthesis is skipped).
+- Missing field-class instance: the synthesized body references `eq(f)`,
+  `to_string(f)`, etc. on each field. If the field's type has no instance of
+  the derived class, the standard "no instance" error fires at the use site
+  rather than at the `deriving` site (an eager F1-style check at the
+  deriving site is tracked as a follow-up).
+
+### See also
+
+- `docs/deriving-v1-draft.md` — full design rationale, including the
+  rejected alternatives (`Generic`-based approach, compile-time handler
+  approach) and the trajectory toward v2 user-defined deriving.
+- `BACKLOG.md` §1, §5 — companion items: strict type-name validation
+  (improves deriving's phantom-type diagnostics), polymorphic-keyed dicts
+  (unblocks `deriving (Hash)`), field-bearing Ord/Deserialize.
+
 ## 9. Errors
 
 Compiler diagnostics must include:

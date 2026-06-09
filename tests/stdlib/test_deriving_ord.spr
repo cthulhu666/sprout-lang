@@ -3,7 +3,7 @@ import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 # `deriving (Ord)` on a nullary-only ADT compares by declaration order:
 # first-declared is least; equal constructors return 0.
 
-type Rank (..) deriving (Eq, Ord) =
+type Rank (..) deriving(Eq, Ord) =
   | Low
   | Mid
   | High

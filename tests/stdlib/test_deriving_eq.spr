@@ -6,7 +6,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 # whose body matches each (Ctor, Ctor) pair and returns true; everything else
 # returns false.
 
-type Color (..) deriving (Eq) =
+type Color (..) deriving(Eq) =
   | Red
   | Green
   | Blue
