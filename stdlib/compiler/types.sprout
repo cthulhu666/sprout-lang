@@ -315,3 +315,22 @@ instance ToString Effect {
 instance ToString Type {
   fn to_string(t: Type) -> String = type_to_string(t)
 }
+
+fn scheme_eq(left: Scheme, right: Scheme) -> Bool =
+  match left with
+  | Scheme tv1 ev1 t1 e1 -> match right with
+      | Scheme tv2 ev2 t2 e2 ->
+          if string_list_eq(tv1, tv2) then
+            if string_list_eq(ev1, ev2) then
+              if type_eq(t1, t2) then effect_eq(e1, e2)
+              else false
+            else false
+          else false
+
+instance Eq Scheme {
+  fn eq(left: Scheme, right: Scheme) -> Bool = scheme_eq(left, right)
+}
+
+instance ToString Scheme {
+  fn to_string(s: Scheme) -> String = scheme_to_string(s)
+}

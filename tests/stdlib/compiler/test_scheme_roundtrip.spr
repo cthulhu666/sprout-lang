@@ -1,0 +1,144 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.types as types
+import stdlib.compiler.iface_codec as iface_codec
+
+# Phase 1 iface codec round-trip: hand-written encode/decode for
+# types.Scheme + its transitive deps (types.Type, types.Effect) must produce
+# structurally-equal output through every Sprout-compiler-relevant variant.
+#
+# Format reference: stdlib/compiler/iface_codec.sprout module header.
+# Design ref: docs/iface-precompiled-modules-v1-draft.md §"Smallest verifiable
+# Phase 1 unit".
+
+fn roundtrip(s: types.Scheme) -> Maybe types.Scheme =
+  iface_codec.decode_scheme(iface_codec.encode_scheme(s))
+
+# Convenience constructors to keep test cases readable.
+fn mono_const(name: String) -> types.Scheme = types.mono(types.TConst(name))
+
+fn scheme_just_tvar(v: String) -> types.Scheme =
+  types.Scheme(Cons(v, Nil), Nil, types.TVar(v), types.EffectPure)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- TConst variants ---
+    assert_eq(state, "tconst int", roundtrip(mono_const("Int")), Just(mono_const("Int")))
+    assert_eq(state, "tconst bool", roundtrip(mono_const("Bool")), Just(mono_const("Bool")))
+    assert_eq(state, "tconst string", roundtrip(mono_const("String")), Just(mono_const("String")))
+    assert_eq(state, "tconst qualified",
+              roundtrip(mono_const("stdlib.compiler.types.Type")),
+              Just(mono_const("stdlib.compiler.types.Type")))
+
+    # --- TVar variants ---
+    assert_eq(state, "tvar single", roundtrip(scheme_just_tvar("a")), Just(scheme_just_tvar("a")))
+    assert_eq(state, "tvar t123",
+              roundtrip(types.Scheme(Cons("t123", Nil), Nil, types.TVar("t123"), types.EffectPure)),
+              Just(types.Scheme(Cons("t123", Nil), Nil, types.TVar("t123"), types.EffectPure)))
+
+    # --- TApp variants (parametric types) ---
+    assert_eq(state, "tapp maybe int",
+              roundtrip(types.mono(types.TApp(types.TConst("Maybe"), types.TConst("Int")))),
+              Just(types.mono(types.TApp(types.TConst("Maybe"), types.TConst("Int")))))
+    assert_eq(state, "tapp nested list maybe a",
+              roundtrip(types.Scheme(
+                Cons("a", Nil), Nil,
+                types.TApp(types.TConst("List"), types.TApp(types.TConst("Maybe"), types.TVar("a"))),
+                types.EffectPure)),
+              Just(types.Scheme(
+                Cons("a", Nil), Nil,
+                types.TApp(types.TConst("List"), types.TApp(types.TConst("Maybe"), types.TVar("a"))),
+                types.EffectPure)))
+
+    # --- TFunc with various effects ---
+    assert_eq(state, "tfunc pure",
+              roundtrip(types.mono(types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectPure))),
+              Just(types.mono(types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectPure))))
+    assert_eq(state, "tfunc io",
+              roundtrip(types.mono(types.TFunc(types.TConst("String"), types.TConst("Unit"), types.EffectIO))),
+              Just(types.mono(types.TFunc(types.TConst("String"), types.TConst("Unit"), types.EffectIO))))
+    assert_eq(state, "tfunc polymorphic",
+              roundtrip(types.Scheme(
+                Cons("a", Cons("b", Nil)), Nil,
+                types.TFunc(types.TVar("a"), types.TVar("b"), types.EffectPure),
+                types.EffectPure)),
+              Just(types.Scheme(
+                Cons("a", Cons("b", Nil)), Nil,
+                types.TFunc(types.TVar("a"), types.TVar("b"), types.EffectPure),
+                types.EffectPure)))
+
+    # --- TTuple variants ---
+    assert_eq(state, "ttuple pair",
+              roundtrip(types.mono(types.TTuple(Cons(types.TConst("Int"), Cons(types.TConst("Bool"), Nil))))),
+              Just(types.mono(types.TTuple(Cons(types.TConst("Int"), Cons(types.TConst("Bool"), Nil))))))
+    assert_eq(state, "ttuple empty",
+              roundtrip(types.mono(types.TTuple(Nil))),
+              Just(types.mono(types.TTuple(Nil))))
+    assert_eq(state, "ttuple nested",
+              roundtrip(types.mono(types.TTuple(Cons(types.TTuple(Cons(types.TConst("Int"), Nil)), Cons(types.TConst("Bool"), Nil))))),
+              Just(types.mono(types.TTuple(Cons(types.TTuple(Cons(types.TConst("Int"), Nil)), Cons(types.TConst("Bool"), Nil))))))
+
+    # --- Effect variants ---
+    assert_eq(state, "effect pure top-level",
+              roundtrip(types.Scheme(Nil, Nil, types.TConst("Int"), types.EffectPure)),
+              Just(types.Scheme(Nil, Nil, types.TConst("Int"), types.EffectPure)))
+    assert_eq(state, "effect io top-level",
+              roundtrip(types.Scheme(Nil, Nil, types.TConst("Int"), types.EffectIO)),
+              Just(types.Scheme(Nil, Nil, types.TConst("Int"), types.EffectIO)))
+    assert_eq(state, "effect var",
+              roundtrip(types.Scheme(Nil, Cons("e", Nil),
+                                     types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectVar("e")),
+                                     types.EffectPure)),
+              Just(types.Scheme(Nil, Cons("e", Nil),
+                                types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectVar("e")),
+                                types.EffectPure)))
+    assert_eq(state, "effect row multi",
+              roundtrip(types.Scheme(Nil, Nil,
+                                     types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectRow(Cons("IO", Cons("Async", Nil)))),
+                                     types.EffectPure)),
+              Just(types.Scheme(Nil, Nil,
+                                types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectRow(Cons("IO", Cons("Async", Nil)))),
+                                types.EffectPure)))
+    assert_eq(state, "effect row empty",
+              roundtrip(types.Scheme(Nil, Nil,
+                                     types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectRow(Nil)),
+                                     types.EffectPure)),
+              Just(types.Scheme(Nil, Nil,
+                                types.TFunc(types.TConst("Int"), types.TConst("Int"), types.EffectRow(Nil)),
+                                types.EffectPure)))
+
+    # --- Combined: realistic compiler-style schemes ---
+    # `forall a. (List a) -> Int`  — list_length-style
+    assert_eq(state, "list_length scheme",
+              roundtrip(types.Scheme(
+                Cons("a", Nil), Nil,
+                types.TFunc(types.TApp(types.TConst("List"), types.TVar("a")), types.TConst("Int"), types.EffectPure),
+                types.EffectPure)),
+              Just(types.Scheme(
+                Cons("a", Nil), Nil,
+                types.TFunc(types.TApp(types.TConst("List"), types.TVar("a")), types.TConst("Int"), types.EffectPure),
+                types.EffectPure)))
+    # `forall a b. a -> b -> (a, b)` — pair-construction style
+    assert_eq(state, "make_pair scheme",
+              roundtrip(types.Scheme(
+                Cons("a", Cons("b", Nil)), Nil,
+                types.TFunc(types.TVar("a"), types.TFunc(types.TVar("b"), types.TTuple(Cons(types.TVar("a"), Cons(types.TVar("b"), Nil))), types.EffectPure), types.EffectPure),
+                types.EffectPure)),
+              Just(types.Scheme(
+                Cons("a", Cons("b", Nil)), Nil,
+                types.TFunc(types.TVar("a"), types.TFunc(types.TVar("b"), types.TTuple(Cons(types.TVar("a"), Cons(types.TVar("b"), Nil))), types.EffectPure), types.EffectPure),
+                types.EffectPure)))
+
+    # --- Malformed input rejection ---
+    assert_eq(state, "decode empty rejected", iface_codec.decode_scheme(""), Nothing)
+    assert_eq(state, "decode garbage rejected", iface_codec.decode_scheme("not a scheme"), Nothing)
+    assert_eq(state, "decode trailing chars rejected",
+              iface_codec.decode_scheme("(Scheme () () (TConst Int) (EffectPure))  garbage"),
+              Nothing)
+    assert_true(state, "decode well-formed accepted",
+                match iface_codec.decode_scheme("(Scheme () () (TConst Int) (EffectPure))") with
+                | Just _ -> true
+                | Nothing -> false)
+
+    summary(state)

@@ -1,0 +1,330 @@
+module stdlib.compiler.iface_codec
+import stdlib.compiler.types as types
+
+# ============================================================================
+# Iface codec — hand-written serialize/deserialize for types.Scheme and its
+# transitive deps (types.Type, types.Effect).
+#
+# Phase 1 of the iface PR series (docs/iface-precompiled-modules-v1-draft.md
+# §"Smallest verifiable Phase 1 unit"): provides round-trip primitives only.
+# No bundler integration, no .iface file I/O, no source-hash check, no ctor
+# /class/instance metadata yet — those are follow-up phases.
+#
+# Format (bespoke S-expression, all ASCII):
+#   <scheme>  := ( Scheme <strs> <strs> <type> <effect> )
+#   <type>    := ( TVar <atom> )
+#              | ( TConst <atom> )
+#              | ( TApp <type> <type> )
+#              | ( TFunc <type> <type> <effect> )
+#              | ( TTuple <types> )
+#   <effect>  := ( EffectPure )
+#              | ( EffectIO )
+#              | ( EffectRow <strs> )
+#              | ( EffectVar <atom> )
+#   <strs>    := ( atom* )
+#   <types>   := ( <type>* )
+#   <atom>    := ASCII identifier — no whitespace, no parens, no quotes
+#
+# Atoms are bare identifiers because type-var names, ctor names, and effect
+# labels are ASCII identifiers by language spec. No escape handling needed.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Encoder — Scheme -> String
+# ----------------------------------------------------------------------------
+
+# O(n) where n = total atoms in the scheme.
+export fn encode_scheme(s: types.Scheme) -> String =
+  match s with
+  | types.Scheme tvars evars body effect ->
+      string_concat_many(Cons("(Scheme ",
+        Cons(encode_str_list(tvars),
+          Cons(" ",
+            Cons(encode_str_list(evars),
+              Cons(" ",
+                Cons(encode_type(body),
+                  Cons(" ",
+                    Cons(encode_effect(effect),
+                      Cons(")", Nil))))))))))
+
+export fn encode_type(t: types.Type) -> String =
+  match t with
+  | types.TVar n -> string_concat_many(Cons("(TVar ", Cons(n, Cons(")", Nil))))
+  | types.TConst n -> string_concat_many(Cons("(TConst ", Cons(n, Cons(")", Nil))))
+  | types.TApp a b ->
+      string_concat_many(Cons("(TApp ",
+        Cons(encode_type(a),
+          Cons(" ",
+            Cons(encode_type(b),
+              Cons(")", Nil))))))
+  | types.TFunc a b e ->
+      string_concat_many(Cons("(TFunc ",
+        Cons(encode_type(a),
+          Cons(" ",
+            Cons(encode_type(b),
+              Cons(" ",
+                Cons(encode_effect(e),
+                  Cons(")", Nil))))))))
+  | types.TTuple ts ->
+      string_concat_many(Cons("(TTuple ", Cons(encode_type_list(ts), Cons(")", Nil))))
+
+export fn encode_effect(e: types.Effect) -> String =
+  match e with
+  | types.EffectPure -> "(EffectPure)"
+  | types.EffectIO -> "(EffectIO)"
+  | types.EffectRow xs ->
+      string_concat_many(Cons("(EffectRow ", Cons(encode_str_list(xs), Cons(")", Nil))))
+  | types.EffectVar n -> string_concat_many(Cons("(EffectVar ", Cons(n, Cons(")", Nil))))
+
+fn encode_str_list(xs: List String) -> String =
+  string_concat_many(Cons("(", Cons(join_strs(xs), Cons(")", Nil))))
+
+# Join with single-space separator. O(n).
+fn join_strs(xs: List String) -> String =
+  match xs with
+  | Nil -> ""
+  | Cons x Nil -> x
+  | Cons x rest -> string_concat_many(Cons(x, Cons(" ", Cons(join_strs(rest), Nil))))
+
+fn encode_type_list(ts: List types.Type) -> String =
+  string_concat_many(Cons("(", Cons(join_types(ts), Cons(")", Nil))))
+
+fn join_types(ts: List types.Type) -> String =
+  match ts with
+  | Nil -> ""
+  | Cons t Nil -> encode_type(t)
+  | Cons t rest -> string_concat_many(Cons(encode_type(t), Cons(" ", Cons(join_types(rest), Nil))))
+
+# ----------------------------------------------------------------------------
+# Decoder — String -> Maybe Scheme
+# ----------------------------------------------------------------------------
+#
+# Top-level entry: parses input as a complete Scheme. Returns Nothing on any
+# parse failure or if there's leftover non-whitespace after the value.
+
+export fn decode_scheme(input: String) -> Maybe types.Scheme =
+  match decode_scheme_at(input, skip_ws(input, 0, n), n) with
+  | Nothing -> Nothing
+  | Just (s, next) ->
+      if only_ws_remaining(input, next, n) then Just(s) else Nothing
+  where n = str_byte_len(input)
+
+# ----------------------------------------------------------------------------
+# Tokenization primitives
+# ----------------------------------------------------------------------------
+
+fn is_ws(ch: Char) -> Bool =
+  ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+
+# O(leading-ws). Returns the byte position past any leading whitespace.
+fn skip_ws(s: String, i: Int, total: Int) -> Int =
+  if i >= total then i
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> i
+    | Just ch -> if is_ws(ch) then skip_ws(s, i + 1, total) else i
+
+# True iff bytes [i, total) contain only whitespace.
+fn only_ws_remaining(s: String, i: Int, total: Int) -> Bool =
+  skip_ws(s, i, total) == total
+
+# Expect a specific ASCII char at byte i. Returns Just(i+1) on match.
+fn expect_char(s: String, i: Int, total: Int, ch: Char) -> Maybe Int =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just c -> if c == ch then Just(i + 1) else Nothing
+
+# Atoms are runs of bytes that aren't whitespace or parens.
+fn is_atom_char(ch: Char) -> Bool =
+  if is_ws(ch) then false
+  else if ch == '(' then false
+  else if ch == ')' then false
+  else true
+
+# Reads one atom starting at byte i. Returns (atom_string, byte_pos_after).
+fn read_atom(s: String, i: Int, total: Int) -> Maybe (String, Int) =
+  if i >= total then Nothing
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> Nothing
+    | Just c -> if is_atom_char(c) then read_atom_continue(s, i, total) else Nothing
+
+fn read_atom_continue(s: String, start: Int, total: Int) -> Maybe (String, Int) =
+  Just((str_slice(s, start, end_pos - start), end_pos))
+  where end_pos = scan_atom_end(s, start + 1, total)
+
+# Scans forward from i until the next non-atom char or EOF; returns that position.
+fn scan_atom_end(s: String, i: Int, total: Int) -> Int =
+  if i >= total then i
+  else
+    match str_char_at_byte(s, i) with
+    | Nothing -> i
+    | Just c -> if is_atom_char(c) then scan_atom_end(s, i + 1, total) else i
+
+# ----------------------------------------------------------------------------
+# Decoders return Just(value, byte_pos_after) on success.
+# All decoders begin by expecting `(`, then the tagged atom, etc.
+# ----------------------------------------------------------------------------
+
+fn decode_scheme_at(s: String, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (tag, k) ->
+          if tag == "Scheme" then decode_scheme_body(s, k, total)
+          else Nothing
+
+fn decode_scheme_body(s: String, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
+  match decode_str_list_at(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (tvars, k2) ->
+      match decode_str_list_at(s, skip_ws(s, k2, total), total) with
+      | Nothing -> Nothing
+      | Just (evars, k3) ->
+          match decode_type_at(s, skip_ws(s, k3, total), total) with
+          | Nothing -> Nothing
+          | Just (body, k4) ->
+              match decode_effect_at(s, skip_ws(s, k4, total), total) with
+              | Nothing -> Nothing
+              | Just (effect, k5) ->
+                  match expect_char(s, skip_ws(s, k5, total), total, ')') with
+                  | Nothing -> Nothing
+                  | Just end -> Just((types.Scheme(tvars, evars, body, effect), end))
+
+fn decode_type_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (tag, k) -> decode_type_by_tag(s, k, total, tag)
+
+fn decode_type_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(types.Type, Int) =
+  if tag == "TVar" then decode_tvar_at(s, i, total)
+  else if tag == "TConst" then decode_tconst_at(s, i, total)
+  else if tag == "TApp" then decode_tapp_at(s, i, total)
+  else if tag == "TFunc" then decode_tfunc_at(s, i, total)
+  else if tag == "TTuple" then decode_ttuple_at(s, i, total)
+  else Nothing
+
+# Reads `<atom>)`. Returns the atom + position past the `)`.
+fn read_atom_then_close(s: String, i: Int, total: Int) -> Maybe (String, Int) =
+  match read_atom(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (name, j) ->
+      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      | Nothing -> Nothing
+      | Just end -> Just((name, end))
+
+fn decode_tvar_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match read_atom_then_close(s, i, total) with
+  | Nothing -> Nothing
+  | Just (name, end) -> Just((types.TVar(name), end))
+
+fn decode_tconst_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match read_atom_then_close(s, i, total) with
+  | Nothing -> Nothing
+  | Just (name, end) -> Just((types.TConst(name), end))
+
+fn decode_tapp_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match decode_type_at(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (t1, j) ->
+      match decode_type_at(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (t2, k) ->
+          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          | Nothing -> Nothing
+          | Just end -> Just((types.TApp(t1, t2), end))
+
+fn decode_tfunc_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match decode_type_at(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (t1, j) ->
+      match decode_type_at(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (t2, k) ->
+          match decode_effect_at(s, skip_ws(s, k, total), total) with
+          | Nothing -> Nothing
+          | Just (e, m) ->
+              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              | Nothing -> Nothing
+              | Just end -> Just((types.TFunc(t1, t2, e), end))
+
+fn decode_ttuple_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match decode_type_list_at(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (ts, j) ->
+      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      | Nothing -> Nothing
+      | Just end -> Just((types.TTuple(ts), end))
+
+fn decode_effect_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (tag, k) -> decode_effect_by_tag(s, k, total, tag)
+
+fn decode_effect_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(types.Effect, Int) =
+  if tag == "EffectPure" then decode_effect_pure_close(s, i, total)
+  else if tag == "EffectIO" then decode_effect_io_close(s, i, total)
+  else if tag == "EffectRow" then decode_effect_row_at(s, i, total)
+  else if tag == "EffectVar" then decode_effect_var_at(s, i, total)
+  else Nothing
+
+fn decode_effect_pure_close(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match expect_char(s, skip_ws(s, i, total), total, ')') with
+  | Nothing -> Nothing
+  | Just end -> Just((types.EffectPure, end))
+
+fn decode_effect_io_close(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match expect_char(s, skip_ws(s, i, total), total, ')') with
+  | Nothing -> Nothing
+  | Just end -> Just((types.EffectIO, end))
+
+fn decode_effect_row_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match decode_str_list_at(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (xs, j) ->
+      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      | Nothing -> Nothing
+      | Just end -> Just((types.EffectRow(xs), end))
+
+fn decode_effect_var_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match read_atom_then_close(s, i, total) with
+  | Nothing -> Nothing
+  | Just (name, end) -> Just((types.EffectVar(name), end))
+
+# Decodes `( atom* )` as a List String.
+fn decode_str_list_at(s: String, i: Int, total: Int) -> Maybe (List String, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j -> collect_strs(s, skip_ws(s, j, total), total, Nil)
+
+fn collect_strs(s: String, i: Int, total: Int, acc: List String) -> Maybe (List String, Int) =
+  match expect_char(s, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      match read_atom(s, i, total) with
+      | Nothing -> Nothing
+      | Just (atom, j) -> collect_strs(s, skip_ws(s, j, total), total, Cons(atom, acc))
+
+# Decodes `( <type>* )` as a List Type.
+fn decode_type_list_at(s: String, i: Int, total: Int) -> Maybe (List types.Type, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j -> collect_types(s, skip_ws(s, j, total), total, Nil)
+
+fn collect_types(s: String, i: Int, total: Int, acc: List types.Type) -> Maybe (List types.Type, Int) =
+  match expect_char(s, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      match decode_type_at(s, i, total) with
+      | Nothing -> Nothing
+      | Just (t, j) -> collect_types(s, skip_ws(s, j, total), total, Cons(t, acc))
