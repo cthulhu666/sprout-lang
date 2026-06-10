@@ -327,11 +327,10 @@ Rules:
 
 ## 12.5 Deriving vs hand-written instances
 
-Prefer `deriving (Eq, Ord, ToString, Serialize, Deserialize)` over a
-hand-written `instance` when the synthesized body matches the intended
-semantics. The synthesized body is structural — equal-by-fields for `Eq`,
-declaration-order for `Ord`, "CtorName(field, ...)" rendering for `ToString`,
-S-expression form for `Serialize`/`Deserialize` (see spec §8.6).
+Prefer `deriving (Eq, Ord, ToString)` over a hand-written `instance` when the
+synthesized body matches the intended semantics. The synthesized body is
+structural — equal-by-fields for `Eq`, declaration-order for `Ord` (nullary-only
+in v1), "CtorName(field, ...)" rendering for `ToString` (see spec §8.6).
 
 Examples:
 

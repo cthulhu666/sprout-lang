@@ -6,8 +6,9 @@ import stdlib.compiler.source as source
 # Codegen for `deriving (...)` clauses on TypeDecls.
 #
 # v1 scope: synthesize ast.InstanceDecl nodes for each (class, type) pair in
-# a TypeDecl's deriving list. Currently implements Eq; ToString/Ord/Serialize/
-# Deserialize emitters slot in alongside emit_eq_instance.
+# a TypeDecl's deriving list. Implements Eq + ToString (all ADT shapes) and
+# Ord (nullary-only). Serialize/Deserialize were explored and reverted on
+# 2026-06-10; see docs/deriving-v1-draft.md "Scope revision" for the why.
 #
 # Entry point is expand_deriving_decls, called by the bundler after
 # qualification: it walks a list of decls, finds TypeDecls with non-empty
@@ -20,8 +21,8 @@ import stdlib.compiler.source as source
 #
 # Identifies WHICH side of a generated body a synthesized field binding belongs
 # to. Eq compares two values so its bodies use both DLeft and DRight; ToString
-# and Serialize render one value, so they use DValue. Replacing the previous
-# string identifiers ("l", "r", "v") with this ADT makes the set of legal sides
+# renders one value, so it uses DValue. Replacing the previous string
+# identifiers ("l", "r", "v") with this ADT makes the set of legal sides
 # explicit and turns typos into type errors.
 type Side =
   | DLeft
@@ -100,6 +101,7 @@ fn eq_fallthrough_branch(pos: source.SourcePos) -> ast.MatchBranch =
   ast.MatchBranch(ast.WildcardPattern(pos), ast.BoolExpr(false, pos))
 
 # Build the match expression body: `match (left, right) with | (C0 ..., C0 ...) -> ... | _ -> false`.
+# O(n_ctors) — list_append walks the same-ctor branch list once to append the fallthrough.
 fn build_eq_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
   ast.MatchExpr(
     ast.TupleExpr(
@@ -236,7 +238,7 @@ fn build_ord_inner_branches(remaining: List ast.TypeConstructor, idx: Int, outer
   match remaining with
   | Nil -> [ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos))]
   | Cons c rest ->
-      if idx > outer_idx then [ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos))]
+      if idx > outer_idx then[ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos))]
       else Cons(build_ord_inner_branch(c, idx, outer_idx, pos),
                 build_ord_inner_branches(rest, idx + 1, outer_idx, pos))
 
@@ -279,110 +281,6 @@ fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.Typ
        build_ord_match_body(ctors, pos))],
     pos)
 
-# --- Serialize emitter -------------------------------------------------------
-#
-# S-expression form: `(CtorName field0_ser field1_ser ...)`.
-# Nullary ctor C    -> "(C)"
-# N-field ctor C    -> "(C " ++ serialize(f0) ++ " " ++ ... ++ serialize(fN-1) ++ ")"
-
-fn build_serialize_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
-  ast.CallExpr(
-    ast.VarExpr("serialize", pos),
-    [ast.VarExpr(deriv_field_name(DValue, i), pos)],
-    pos)
-
-# Build "serialize(f0) ++ \" \" ++ serialize(f1) ++ \" \" ++ ... ++ serialize(fN-1)".
-fn build_serialize_field_chain(i: Int, arity: Int, pos: source.SourcePos) -> ast.Expr =
-  if i >= arity - 1 then build_serialize_field_call(i, pos)
-  else ast.BinaryExpr("++",
-    ast.BinaryExpr("++",
-      build_serialize_field_call(i, pos),
-      ast.StringExpr(" ", pos),
-      pos),
-    build_serialize_field_chain(i + 1, arity, pos),
-    pos)
-
-fn build_serialize_branch_body(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Expr =
-  if arity == 0 then ast.StringExpr("(" ++ ctor_name ++ ")", pos)
-  else ast.BinaryExpr("++",
-    ast.BinaryExpr("++",
-      ast.StringExpr("(" ++ ctor_name ++ " ", pos),
-      build_serialize_field_chain(0, arity, pos),
-      pos),
-    ast.StringExpr(")", pos),
-    pos)
-
-fn build_serialize_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
-  match ctor with
-  | ast.TypeConstructor name _ ->
-      ast.MatchBranch(
-        build_ctor_var_pattern(name, DValue, ctor_arity(ctor), pos),
-        build_serialize_branch_body(name, ctor_arity(ctor), pos))
-
-fn build_serialize_ctor_branches(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
-  match ctors with
-  | Nil -> Nil
-  | Cons c rest -> Cons(build_serialize_ctor_branch(c, pos), build_serialize_ctor_branches(rest, pos))
-
-fn build_serialize_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
-  ast.MatchExpr(
-    ast.VarExpr("value", pos),
-    build_serialize_ctor_branches(ctors, pos),
-    pos)
-
-fn emit_serialize_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("Serialize", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("Serialize", type_params),
-    [ast.InstanceMethodImpl(
-       "serialize",
-       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)))],
-       Just(ast.TypeName("String")),
-       Nothing,
-       build_serialize_match_body(ctors, pos))],
-    pos)
-
-# --- Deserialize emitter (nullary-only for v1) ------------------------------
-#
-# For each nullary ctor C, the body chains:
-#   if input == "(C)" then Just(C) else <next>
-# Final else returns Nothing. Field-bearing Deserialize requires recursive
-# S-expression parsing and is tracked as v1.x follow-up.
-
-# Build a single check: `if input == "(CtorName)" then Just(CtorName) else <else>`.
-fn build_deserialize_check(ctor_name: String, else_branch: ast.Expr, pos: source.SourcePos) -> ast.Expr =
-  ast.IfExpr(
-    ast.BinaryExpr("==",
-      ast.VarExpr("input", pos),
-      ast.StringExpr("(" ++ ctor_name ++ ")", pos),
-      pos),
-    ast.CallExpr(
-      ast.VarExpr("Just", pos),
-      [ast.VarExpr(ctor_name, pos)],
-      pos),
-    else_branch,
-    pos)
-
-fn build_deserialize_chain(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
-  match ctors with
-  | Nil -> ast.VarExpr("Nothing", pos)
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstructor name _ ->
-          build_deserialize_check(name, build_deserialize_chain(rest, pos), pos)
-
-fn emit_deserialize_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("Deserialize", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("Deserialize", type_params),
-    [ast.InstanceMethodImpl(
-       "deserialize",
-       [ast.Param("input", Just(ast.TypeName("String")))],
-       Just(ast.TypeApply(ast.TypeName("Maybe"), instance_head_typeexpr(name, type_params))),
-       Nothing,
-       build_deserialize_chain(ctors, pos))],
-    pos)
-
 # --- DerivableClass ADT + dispatch ------------------------------------------
 #
 # Models the closed set of v1-derivable classes. Parsing the user-supplied
@@ -393,32 +291,25 @@ type DerivableClass =
   | DcEq
   | DcOrd
   | DcToString
-  | DcSerialize
-  | DcDeserialize
 
 # Parse a class name as it appeared in the user's `deriving (...)` clause.
-# Returns Nothing for class names not yet supported in v1 (the caller skips
-# synthesis silently; the user gets a "no instance" error at the use site).
+# Returns Nothing for class names not supported in v1 (the validation pass
+# below turns this into a user-facing error at the deriving site).
 fn parse_derivable_class(name: String) -> Maybe DerivableClass =
   if name == "Eq" then Just(DcEq)
   else if name == "Ord" then Just(DcOrd)
   else if name == "ToString" then Just(DcToString)
-  else if name == "Serialize" then Just(DcSerialize)
-  else if name == "Deserialize" then Just(DcDeserialize)
   else Nothing
 
 # Given a parsed class and TypeDecl fields, synthesize the corresponding
-# InstanceDecl. v1 limitation: Ord and Deserialize require all constructors to
-# be nullary; field-bearing cases are tracked as v1.x follow-ups in BACKLOG.
+# InstanceDecl. v1 limitation: Ord requires all constructors to be nullary;
+# field-bearing Ord is tracked as a v1.x follow-up in BACKLOG.
 fn derive_instance_for(dc: DerivableClass, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
   match dc with
   | DcEq -> Just(emit_eq_instance(name, type_params, ctors, pos))
   | DcToString -> Just(emit_to_string_instance(name, type_params, ctors, pos))
-  | DcSerialize -> Just(emit_serialize_instance(name, type_params, ctors, pos))
   | DcOrd ->
       if all_nullary(ctors) then Just(emit_ord_instance(name, type_params, ctors, pos)) else Nothing
-  | DcDeserialize ->
-      if all_nullary(ctors) then Just(emit_deserialize_instance(name, type_params, ctors, pos)) else Nothing
 
 # Bridge from the string class name (as it appears in the source `deriving`
 # clause) to the typed dispatch. Returns Nothing if the class isn't derivable
@@ -455,3 +346,51 @@ export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
                           derive_instances_for_classes(name, type_params, ctors, pos, deriving_classes),
                           expand_deriving_decls(rest)))
       | _ -> Cons(d, expand_deriving_decls(rest))
+
+# --- Validation pass --------------------------------------------------------
+#
+# Walks the program decls and checks that every `deriving (...)` clause is
+# valid for the type it appears on. Returns Nothing if all clauses pass; Just
+# msg describing the first failure otherwise. Run BEFORE expand_deriving_decls
+# in the bundler so the user gets an eager error at the deriving site rather
+# than a confusing "no instance" error at the use site.
+#
+# Closes the F1 follow-up from the v1 design doc.
+
+export fn validate_deriving_decls(decls: List ast.Decl) -> Maybe String =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match validate_one_deriving_decl(d) with
+      | Just err -> Just(err)
+      | Nothing -> validate_deriving_decls(rest)
+
+fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
+  match d with
+  | ast.TypeDecl name _ ctors deriving_classes _ ->
+      validate_deriving_classes_list(name, ctors, deriving_classes)
+  | _ -> Nothing
+
+fn validate_deriving_classes_list(name: String, ctors: List ast.TypeConstructor, classes: List String) -> Maybe String =
+  match classes with
+  | Nil -> Nothing
+  | Cons class_name rest ->
+      match validate_one_deriving_class(name, ctors, class_name) with
+      | Just err -> Just(err)
+      | Nothing -> validate_deriving_classes_list(name, ctors, rest)
+
+fn validate_one_deriving_class(name: String, ctors: List ast.TypeConstructor, class_name: String) -> Maybe String =
+  match parse_derivable_class(class_name) with
+  | Nothing ->
+      Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (v1 supports Eq, Ord, ToString)")
+  | Just dc ->
+      if dc_requires_nullary(dc) then
+        if all_nullary(ctors) then Nothing
+        else Just("cannot derive `" ++ class_name ++ "` for `" ++ name ++ "`: v1 supports " ++ class_name ++ " only for types whose constructors take no fields")
+      else Nothing
+
+fn dc_requires_nullary(dc: DerivableClass) -> Bool =
+  match dc with
+  | DcOrd -> true
+  | DcEq -> false
+  | DcToString -> false

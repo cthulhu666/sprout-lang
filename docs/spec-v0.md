@@ -393,25 +393,25 @@ non-empty.  Whitespace and line breaks inside the parentheses are allowed.
 | `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false |
 | `Ord` | nullary-ctor ADTs only | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs return 0 |
 | `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field |
-| `Serialize` | all ADT shapes | `serialize(value)` — S-expression form `"(CtorName)"` or `"(CtorName field0_ser field1_ser ...)"` |
-| `Deserialize` | nullary-ctor ADTs only | `deserialize(input)` — chained string-equality check against each `"(CtorName)"` form; returns `Just(Ctor)` on match, `Nothing` otherwise |
 
 For parametric types (e.g. `type Box a = | Hold a`), the synthesized instance
 carries one instance constraint per type parameter, e.g. `instance Eq (Box a)
 where Eq a { ... }`.  This is conservative — phantom type parameters get a
 constraint they don't need; refining this is a future improvement.
 
+Serialization (`Serialize`/`Deserialize`) and hashing (`Hash`) are intentionally
+**not** in v1.  Both require design decisions the language hasn't made yet —
+serialization needs a format-agnostic visitor abstraction (serde-style) rather
+than baking S-expressions into a class name, and `Hash` waits on polymorphic-keyed
+dicts.  Both are tracked in `BACKLOG.md`.
+
 ### Limitations (this version)
 
-- `deriving (Ord)` on a type with any field-bearing constructor is silently
-  skipped; the user gets the standard "no instance" error at the use site.
-  Lexicographic compare requires either lazy chaining via thunks or
+- `deriving (Ord)` on a type with any field-bearing constructor produces an
+  eager error at the deriving site: `cannot derive 'Ord' for 'Foo': v1
+  supports Ord only for types whose constructors take no fields`. Lexicographic
+  compare for field-bearing types requires either lazy chaining via thunks or
   per-arity helpers in prelude; tracked in BACKLOG.md.
-- `deriving (Deserialize)` on a type with any field-bearing constructor is
-  similarly skipped; field-bearing Deserialize requires an embedded
-  recursive S-expression parser per instance body. Tracked in BACKLOG.md.
-- `deriving (Hash)` is not yet supported; deferred until the polymorphic-keyed
-  dict work lands (a `Hash` instance has no in-language consumer today).
 - Multiple `deriving (...)` clauses on the same type declaration are not
   supported (use one clause with all classes: `deriving (Eq, Ord, ToString)`).
 - Records (`record`) do not support `deriving`; v1 targets `type` declarations
@@ -419,14 +419,14 @@ constraint they don't need; refining this is a future improvement.
 
 ### Error conditions
 
-- Unknown class in deriving clause: `cannot derive 'Foo': no derivation rule
-  for class 'Foo' in this compiler version`. Will be emitted once compiler
-  integration's error path is wired (currently the synthesis is skipped).
+- Unknown class in deriving clause: eager error at the deriving site:
+  `unknown class in deriving clause for 'Foo': 'Bar' (v1 supports Eq, Ord,
+  ToString)`.
 - Missing field-class instance: the synthesized body references `eq(f)`,
   `to_string(f)`, etc. on each field. If the field's type has no instance of
   the derived class, the standard "no instance" error fires at the use site
-  rather than at the `deriving` site (an eager F1-style check at the
-  deriving site is tracked as a follow-up).
+  rather than at the `deriving` site (eager checking of field-class
+  availability is a future improvement).
 
 ### See also
 
@@ -435,7 +435,8 @@ constraint they don't need; refining this is a future improvement.
   approach) and the trajectory toward v2 user-defined deriving.
 - `BACKLOG.md` §1, §5 — companion items: strict type-name validation
   (improves deriving's phantom-type diagnostics), polymorphic-keyed dicts
-  (unblocks `deriving (Hash)`), field-bearing Ord/Deserialize.
+  (unblocks `deriving (Hash)`), field-bearing Ord, format-agnostic
+  serialization design.
 
 ## 9. Errors
 

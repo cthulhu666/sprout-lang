@@ -1,29 +1,42 @@
 # `deriving` — automatic typeclass instance derivation — v1 draft
 
-**Status:** shipped on `feat/deriving` (2026-06-09). Spec section promoted in
-§8.6 of `docs/spec-v0.md`. Implementation has two known limitations tracked as
-BACKLOG follow-ups; see "Implementation status" below.
+**Status:** shipped on `feat/deriving` (2026-06-09), with scope narrowed
+2026-06-10 to Eq/Ord/ToString. Spec section in §8.6 of `docs/spec-v0.md`.
+
+**Scope revision (2026-06-10):** the initial draft included `Serialize` and
+`Deserialize` to unblock the iface PR. Reviewing the design surfaced three
+problems with that scope: (a) S-expression format was hardcoded behind a
+polymorphic-sounding class name ("serialize TO WHAT?"), conflating polymorphism
+with format choice; (b) the `Deserialize` class shape forced an O(N²) parse via
+`str_slice` composition; (c) the same shape exposed a typeclass dispatcher edge
+case (prog-var-name sensitivity in the `first_concrete_typed_arg_str` fallback).
+Rather than ship the wrong shape and migrate later, S/D were removed from v1.
+Format-agnostic serialization (serde-style Serializer/Deserializer visitor
+split) is now BACKLOG §5 as the eventual target design; in the meantime, iface
+hand-writes per-type codecs.
+
 **Origin:** the iface PR design (`docs/iface-precompiled-modules-v1-draft.md`)
-needed ~17 ADTs / ~65 variants across `stdlib/compiler/{types,ast,source}.sprout`
-to acquire `Serialize` and `Deserialize` instances. Hand-writing that surface is
+needed instance generation for ~17 ADTs / ~65 variants across
+`stdlib/compiler/{types,ast,source}.sprout`. Hand-writing that surface is
 permanent maintenance debt that compounds with every AST churn. The project's
 "robust language and tooling" goal made `deriving` the right answer rather than
-a one-off codegen script.
+a one-off codegen script — but the *content* of derivation (Eq/Ord/ToString vs.
+S/D) was narrowed after design review.
 
-## Implementation status
+## Implementation status (post-scope-revision)
 
-| Component | Status | Commit | Notes |
-|---|---|---|---|
-| Parser support (`deriving (...)` clause) | shipped | `c2f4d52` | bundled with return-type typeclass dispatch fix |
-| Codegen skeleton (`stdlib/compiler/deriving.sprout`) | shipped | `03124d6` | constructor enumeration, AST helpers, `expand_deriving_decls` |
-| Bundler integration | shipped | `03124d6` | `deriving.expand_deriving_decls` runs after qualification, before typecheck |
-| `Eq` emitter | shipped, full scope | `03124d6` | nullary + field-bearing + parametric |
-| `ToString` emitter | shipped, full scope | `ca663a7` | nullary + field-bearing + parametric |
-| `Ord` emitter | shipped, **nullary-only** | `ca663a7` | field-bearing tracked as BACKLOG §5 |
-| `Serialize` emitter | shipped, full scope | `0db4e60` | nullary + field-bearing + parametric |
-| `Deserialize` emitter | shipped, **nullary-only** | `0db4e60` | field-bearing tracked as BACKLOG §5 |
-| Field-class diagnostics (F1) | partial | — | "no instance" surfaces at use site; eager F1 check at deriving site is a follow-up |
-| Spec section in `docs/spec-v0.md` §8.6 | shipped | — | normative |
+| Component | Status | Notes |
+|---|---|---|
+| Parser support (`deriving (...)` clause) | shipped | hard keyword, clause between `(..)` and `=` |
+| Codegen skeleton (`stdlib/compiler/deriving.sprout`) | shipped | constructor enumeration, AST helpers, `expand_deriving_decls` |
+| Bundler integration | shipped | `validate_deriving_decls` runs first (eager errors), then `expand_deriving_decls`, before typecheck |
+| `Eq` emitter | shipped, full scope | nullary + field-bearing + parametric |
+| `ToString` emitter | shipped, full scope | nullary + field-bearing + parametric |
+| `Ord` emitter | shipped, **nullary-only** | field-bearing tracked as BACKLOG §5 |
+| `Serialize` emitter | **reverted** | conflated polymorphism with format choice; see Scope revision |
+| `Deserialize` emitter | **reverted** | same root cause; perf bug + dispatcher edge case were symptoms |
+| Eager errors at deriving site (F1) | shipped | unknown class + Ord-on-field-bearing produce errors at bundle time, not use site |
+| Spec section in `docs/spec-v0.md` §8.6 | shipped | normative, 3 classes |
 
 ## Problem
 

@@ -2588,11 +2588,12 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
 #
 # At inference time, check_call_constraint dispatches class methods based on
 # the first concrete argument's type. For methods whose class type variable is
-# in an argument position (Eq, Ord, ToString, Serialize), this works correctly.
+# in an argument position (e.g. `Eq.eq : a -> a -> Bool`), this works correctly.
 # For methods whose class type variable is ONLY in the return position
-# (Deserialize), the return type's substitution comes from the OUTER context
-# (a function's declared return type) which isn't unified until AFTER
-# inference completes — so the inference-time dispatch picks the wrong instance.
+# (e.g. a hypothetical `Read.read : String -> a`), the return type's
+# substitution comes from the OUTER context (a function's declared return type)
+# which isn't unified until AFTER inference completes — so the inference-time
+# dispatch picks the wrong instance.
 #
 # This post-pass walker runs AFTER check_fn_body's body-vs-return-type
 # unification (s2). It re-examines class method calls, computes the correct
