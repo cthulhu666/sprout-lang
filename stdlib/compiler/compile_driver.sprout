@@ -13,6 +13,7 @@ import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.iface_codec as iface_codec
 
 # ---------------------------------------------------------------------------
 # Header stripping (mirrors compiler.sprout / type_driver.sprout)
@@ -138,6 +139,28 @@ fn run_file_recheck(path: String, stdlib_root: String) -> Unit !{IO} =
         do
           print("OK")
           checker.dump_typed_program_names(typed_prog, env)
+
+# ---------------------------------------------------------------------------
+# Mode: --emit-iface — Phase 1.x of iface-precompiled-modules-v1-draft.md
+#
+# Parses + typechecks the given module, filters the post-typecheck env to
+# entries whose qualified name starts with `<module_name>.`, wraps them in
+# an IfaceFile (version=1), encodes via iface_codec.encode_iface_file, and
+# prints to stdout. Errors go to stderr so they don't pollute the iface
+# artifact when stdout is redirected to a file.
+#
+# Usage: compile-driver --emit-iface <stdlib-root> <module-name> <path> > out.iface
+
+fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String) -> Unit !{IO} =
+  do
+    result <- compiler.compile_phase_check(path, stdlib_root)
+    match result with
+    | typed_ast.TypedErr msg -> eprint("ERROR: " ++ msg)
+    | typed_ast.TypedOk _ env ->
+        do
+          let schemes = iface_codec.extract_named_schemes(env, module_name)
+          let iface = iface_codec.IfaceFile(1, module_name, schemes)
+          print(iface_codec.encode_iface_file(iface))
 
 # ---------------------------------------------------------------------------
 # Phase: ir — emit LLVM IR text
@@ -278,7 +301,11 @@ fn main() -> Unit !{IO} =
         run_file_use_ir_codegen(path, stdlib_root)
     | ["--use-ir-codegen" | _] ->
         print("ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> <file>")
+    | ["--emit-iface", stdlib_root, module_name, path | _] ->
+        run_file_emit_iface(module_name, path, stdlib_root)
+    | ["--emit-iface" | _] ->
+        print("ERROR: usage: compile-driver --emit-iface <stdlib-root> <module-name> <file>")
     | [stdlib_root | _] ->
         run_batch(stdlib_root, 1, "", false)
     | _ ->
-        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name> | --use-ir-codegen] <stdlib-root> <file>...")
+        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name> | --use-ir-codegen | --emit-iface <module-name>] <stdlib-root> <file>...")

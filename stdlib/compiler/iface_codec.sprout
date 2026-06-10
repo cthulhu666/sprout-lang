@@ -473,3 +473,30 @@ fn decode_named_scheme_body(s: String, i: Int, total: Int) -> Maybe (NamedScheme
           match expect_char(s, skip_ws(s, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((NamedScheme(name, scheme), end))
+
+# ============================================================================
+# Env filtering — bridge between typecheck output and IfaceFile
+# ============================================================================
+#
+# Given a post-typecheck env (Dict String -> Scheme containing every entry
+# visible to the typechecker — module-local exports, imports, prelude, etc.)
+# and a target module name, returns the subset of (name, scheme) pairs whose
+# qualified name starts with `module_name ++ "."`. Caller wraps the result
+# in an IfaceFile via `IfaceFile(version, module_name, schemes)`.
+#
+# O(n) over env entries (single linear scan via dict_entries).
+
+export fn extract_named_schemes(env: Dict types.Scheme, module_name: String) -> List NamedScheme =
+  filter_dict_entries(entries, 0, vec_length(entries), module_name ++ ".", Nil)
+  where entries = dict_entries(env)
+
+fn filter_dict_entries(entries: Vec (String, types.Scheme), i: Int, total: Int, prefix: String, acc: List NamedScheme) -> List NamedScheme =
+  if i >= total then list_reverse(acc)
+  else
+    match vec_get(i, entries) with
+    | Nothing -> filter_dict_entries(entries, i + 1, total, prefix, acc)
+    | Just entry -> match entry with
+        | (name, scheme) ->
+            if str_starts_with(name, prefix) then
+              filter_dict_entries(entries, i + 1, total, prefix, Cons (NamedScheme(name, scheme), acc))
+            else filter_dict_entries(entries, i + 1, total, prefix, acc)

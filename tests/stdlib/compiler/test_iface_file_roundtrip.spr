@@ -107,4 +107,20 @@ fn main() -> Unit !{IO} =
     assert_true(state, "decode well-formed accepted",
       match iface_codec.decode_iface_file("(IfaceFile 1 foo ())") with | Just _ -> true | _ -> false)
 
+    # --- extract_named_schemes: env-filtering helper ---
+    # Build a Dict simulating a post-typecheck env with entries from two
+    # different modules. extract_named_schemes(env, "stdlib.foo") should
+    # yield only the two stdlib.foo.* entries, dropping stdlib.other.qux.
+    let test_env =
+      dict_set("stdlib.foo.bar", types.mono(types.TConst("Int")),
+        dict_set("stdlib.foo.baz", types.mono(types.TConst("Bool")),
+          dict_set("stdlib.other.qux", types.mono(types.TConst("String")),
+            dict_empty())))
+    assert_true(state, "extract filters by module prefix",
+      list_length(iface_codec.extract_named_schemes(test_env, "stdlib.foo")) == 2)
+    assert_true(state, "extract empty prefix yields empty",
+      list_length(iface_codec.extract_named_schemes(test_env, "stdlib.absent")) == 0)
+    assert_true(state, "extract other module yields one",
+      list_length(iface_codec.extract_named_schemes(test_env, "stdlib.other")) == 1)
+
     summary(state)
