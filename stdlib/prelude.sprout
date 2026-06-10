@@ -1463,7 +1463,7 @@ instance Deserialize (Dict v) where Deserialize v {
         else Nothing
 }
 
-fn ser_parse_dict_at(s: String, i: Int, total: Int) -> Maybe (Dict v, Int) where Deserialize v =
+fn ser_parse_dict_at(s: String, i: Int, total: Int) -> Maybe (Dict a, Int) where Deserialize a =
   match ser_consume_char(s, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
@@ -1473,7 +1473,7 @@ fn ser_parse_dict_at(s: String, i: Int, total: Int) -> Maybe (Dict v, Int) where
           if name == "Dict" then ser_parse_dict_entries(s, k, total, dict_empty())
           else Nothing
 
-fn ser_parse_dict_entries(s: String, i: Int, total: Int, acc: Dict v) -> Maybe (Dict v, Int) where Deserialize v =
+fn ser_parse_dict_entries(s: String, i: Int, total: Int, acc: Dict a) -> Maybe (Dict a, Int) where Deserialize a =
   match ser_consume_char(s, ser_skip_ws(s, i, total), total, ')') with
   | Just end -> Just((acc, end))
   | Nothing ->
@@ -1482,7 +1482,7 @@ fn ser_parse_dict_entries(s: String, i: Int, total: Int, acc: Dict v) -> Maybe (
       | Just (key, val, after) ->
           ser_parse_dict_entries(s, after, total, dict_set(key, val, acc))
 
-fn ser_parse_dict_one_entry(s: String, i: Int, total: Int) -> Maybe (String, v, Int) where Deserialize v =
+fn ser_parse_dict_one_entry(s: String, i: Int, total: Int) -> Maybe (String, a, Int) where Deserialize a =
   match ser_consume_char(s, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
