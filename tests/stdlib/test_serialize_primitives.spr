@@ -128,7 +128,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "ser List one Int exact", ser_list_int(Cons(1, Nil)), "(Cons 1 (Nil))")
     assert_eq(state, "ser List two Int exact", ser_list_int(Cons(1, Cons(2, Nil))), "(Cons 1 (Cons 2 (Nil)))")
     assert_eq(state, "rt List empty", roundtrip_list_int(empty_list_int()), Just(empty_list_int()))
-    assert_eq(state, "rt List Int", roundtrip_list_int(Cons(1, Cons(2, Cons(3, Nil)))), Just(Cons(1, Cons(2, Cons(3, Nil)))))
+    assert_eq(state, "rt List Int", roundtrip_list_int(Cons(1, Cons(2, Cons(3, Nil)))), Just (Cons(1, Cons(2, Cons(3, Nil)))))
     assert_eq(state, "rt List String with escapes",
       roundtrip_list_string(Cons("a\"b", Cons("\n", Nil))),
       Just(Cons("a\"b", Cons("\n", Nil))))
@@ -137,10 +137,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "ser Maybe Nothing exact", ser_maybe_int(nothing_int()), "(Nothing)")
     assert_eq(state, "ser Maybe Just exact", ser_maybe_int(Just(5)), "(Just 5)")
     assert_eq(state, "rt Maybe Nothing", roundtrip_maybe_int(nothing_int()), Just(nothing_int()))
-    assert_eq(state, "rt Maybe Just", roundtrip_maybe_int(Just(42)), Just(Just(42)))
-    assert_eq(state, "rt Maybe Just Just", roundtrip_maybe_maybe_int(Just(Just(7))), Just(Just(Just(7))))
-    assert_eq(state, "rt Maybe Just Nothing", roundtrip_maybe_maybe_int(Just(Nothing)), Just(Just(Nothing)))
-    assert_eq(state, "rt Maybe Nothing nested", roundtrip_maybe_maybe_int(Nothing), Just(Nothing))
+    assert_eq(state, "rt Maybe Just", roundtrip_maybe_int(Just(42)), Just (Just(42)))
+    assert_eq(state, "rt Maybe Just Just", roundtrip_maybe_maybe_int(Just (Just(7))), Just (Just (Just(7))))
+    assert_eq(state, "rt Maybe Just Nothing", roundtrip_maybe_maybe_int(Just (Nothing)), Just (Just (Nothing)))
+    assert_eq(state, "rt Maybe Nothing nested", roundtrip_maybe_maybe_int(Nothing), Just (Nothing))
 
     # --- Vec round-trips ---
     assert_eq(state, "ser Vec empty exact", ser_vec_int(empty_vec_int()), "(Vec)")
