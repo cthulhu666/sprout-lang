@@ -100,6 +100,55 @@ build-fmt-from-seed: bootstrap-from-seed
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$OUT"
   echo "==> Built $OUT"
 
+# ── Iface (precompiled module interfaces) ────────────────────────────────────
+#
+# Phase 1.x of docs/iface-precompiled-modules-v1-draft.md.  Each stdlib module
+# emits a build/iface/<qualified-name>.iface artifact: an S-expression
+# listing every exported scheme.  No consumer yet wires these into the bundler
+# (that's Phase 2); this recipe just exercises the producer side end-to-end.
+
+# Compile every stdlib module to its .iface artifact under build/iface/.
+[group('iface')]
+refresh-iface: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE1="{{build_dir}}/compile_driver_bin_stage1"
+  OUT_DIR="{{build_dir}}/iface"
+  mkdir -p "$OUT_DIR"
+  count=0
+  while IFS= read -r -d '' f; do
+    # Convert path -> qualified module name (strip .sprout, / -> .).
+    module_name=$(echo "$f" | sed 's,\.sprout$,,; s,/,.,g')
+    out="$OUT_DIR/$module_name.iface"
+    "$STAGE1" --emit-iface "{{stdlib_root}}" "$module_name" "$f" > "$out" 2>/dev/null \
+      || { echo "ERROR: failed to emit iface for $f" >&2; rm -f "$out"; exit 1; }
+    count=$((count + 1))
+  done < <(find stdlib -name '*.sprout' -type f -print0)
+  echo "==> Emitted $count iface(s) to $OUT_DIR/"
+
+# Validate every cached .iface file under build/iface/ via the decoder.
+[group('iface')]
+check-iface-all: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE1="{{build_dir}}/compile_driver_bin_stage1"
+  IFACE_DIR="{{build_dir}}/iface"
+  if [[ ! -d "$IFACE_DIR" ]]; then
+    echo "ERROR: $IFACE_DIR not found; run: just refresh-iface" >&2; exit 1
+  fi
+  count=0
+  ok_count=0
+  while IFS= read -r -d '' f; do
+    count=$((count + 1))
+    if "$STAGE1" --check-iface "$f" 2>&1 | grep -q "^OK:"; then
+      ok_count=$((ok_count + 1))
+    else
+      echo "FAIL: $f"
+    fi
+  done < <(find "$IFACE_DIR" -name '*.iface' -type f -print0)
+  echo "==> $ok_count / $count ifaces validated"
+  if [[ "$ok_count" -ne "$count" ]]; then exit 1; fi
+
 # ── Check / Run ───────────────────────────────────────────────────────────────
 
 [group('dev')]

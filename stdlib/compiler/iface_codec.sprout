@@ -360,8 +360,48 @@ fn collect_types(s: String, i: Int, total: Int, acc: List types.Type) -> Maybe (
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
 
+# Constructor metadata for one ADT constructor. Captures enough to register
+# the ctor in the typechecker without re-parsing source: ctor name, owning
+# ADT name, and field types (arity is implicit in list_length(field_types)).
+#
+# Example: `type Maybe a = Just a | Nothing` yields:
+#   CtorInfo("Just", "Maybe", [TVar("a")])
+#   CtorInfo("Nothing", "Maybe", [])
+export type CtorInfo (..) =
+  | CtorInfo String String (List types.Type)
+
+# Class declaration metadata. Captures the class name, type parameters,
+# superclass-class-names (constraint heads, not full constraint exprs — v1
+# limitation; constraint TypeExpr lists are deferred), and method signatures.
+#
+# Example: `class Eq a where Ord a { fn eq(...); fn neq(...) }` yields:
+#   ClassInfo("Eq", ["a"], ["Ord"], [NamedScheme("eq", ...), NamedScheme("neq", ...)])
+export type ClassInfo (..) =
+  | ClassInfo String (List String) (List String) (List NamedScheme)
+
+# Instance declaration metadata. Captures the class being implemented, the
+# head type (e.g. `Int` in `instance Eq Int`), and the dispatch dict name
+# the typechecker uses for resolution.
+#
+# Example: `instance Eq Int { ... }` lowered with dict name `int_eq_inst`:
+#   InstanceInfo("Eq", TConst("Int"), "stdlib.prelude.int_eq_inst")
+export type InstanceInfo (..) =
+  | InstanceInfo String types.Type String
+
+# IfaceFile v2 wire format:
+#
+#   (IfaceFile 2 <module-name>
+#     (NamedScheme ...)*         # exported value/fn schemes
+#     (CtorInfo ...)*            # ADT constructor metadata
+#     (ClassInfo ...)*           # class declarations
+#     (InstanceInfo ...)*)       # instance declarations
+#
+# Phase 1.x: schemas defined here and round-trip tested with hand-built data.
+# Extraction from a typechecked program (so --emit-iface actually populates
+# the ctor/class/instance tables) is a follow-up — current --emit-iface
+# emits empty Nil lists for these three.
 export type IfaceFile (..) =
-  | IfaceFile Int String (List NamedScheme)
+  | IfaceFile Int String (List NamedScheme) (List CtorInfo) (List ClassInfo) (List InstanceInfo)
 
 # ----------------------------------------------------------------------------
 # Encoder
@@ -369,32 +409,82 @@ export type IfaceFile (..) =
 
 export fn encode_iface_file(f: IfaceFile) -> String =
   match f with
-  | IfaceFile version mod schemes ->
-      string_concat_many(Cons("(IfaceFile ",
-        Cons(int_to_string(version),
-          Cons(" ",
-            Cons(mod,
-              Cons(" ",
-                Cons(encode_named_scheme_list(schemes),
-                  Cons(")", Nil))))))))
+  | IfaceFile version mod schemes ctors classes instances ->
+      string_concat_many([
+        "(IfaceFile ", int_to_string(version),
+        " ", mod,
+        " ", encode_named_scheme_list(schemes),
+        " ", encode_ctor_info_list(ctors),
+        " ", encode_class_info_list(classes),
+        " ", encode_instance_info_list(instances),
+        ")"
+      ])
 
 fn encode_named_scheme_list(ns: List NamedScheme) -> String =
-  string_concat_many(Cons("(", Cons(join_named_schemes(ns), Cons(")", Nil))))
+  string_concat_many(["(", join_named_schemes(ns), ")"])
 
 fn join_named_schemes(ns: List NamedScheme) -> String =
   match ns with
   | Nil -> ""
   | Cons n Nil -> encode_named_scheme(n)
-  | Cons n rest -> string_concat_many(Cons(encode_named_scheme(n), Cons(" ", Cons(join_named_schemes(rest), Nil))))
+  | Cons n rest -> string_concat_many([encode_named_scheme(n), " ", join_named_schemes(rest)])
 
 fn encode_named_scheme(n: NamedScheme) -> String =
   match n with
   | NamedScheme name s ->
-      string_concat_many(Cons("(NamedScheme ",
-        Cons(name,
-          Cons(" ",
-            Cons(encode_scheme(s),
-              Cons(")", Nil))))))
+      string_concat_many(["(NamedScheme ", name, " ", encode_scheme(s), ")"])
+
+fn encode_ctor_info_list(cs: List CtorInfo) -> String =
+  string_concat_many(["(", join_ctor_infos(cs), ")"])
+
+fn join_ctor_infos(cs: List CtorInfo) -> String =
+  match cs with
+  | Nil -> ""
+  | Cons c Nil -> encode_ctor_info(c)
+  | Cons c rest -> string_concat_many([encode_ctor_info(c), " ", join_ctor_infos(rest)])
+
+fn encode_ctor_info(c: CtorInfo) -> String =
+  match c with
+  | CtorInfo ctor_name adt_name field_types ->
+      string_concat_many([
+        "(CtorInfo ", ctor_name, " ", adt_name, " ", encode_type_list(field_types), ")"
+      ])
+
+fn encode_class_info_list(cs: List ClassInfo) -> String =
+  string_concat_many(["(", join_class_infos(cs), ")"])
+
+fn join_class_infos(cs: List ClassInfo) -> String =
+  match cs with
+  | Nil -> ""
+  | Cons c Nil -> encode_class_info(c)
+  | Cons c rest -> string_concat_many([encode_class_info(c), " ", join_class_infos(rest)])
+
+fn encode_class_info(c: ClassInfo) -> String =
+  match c with
+  | ClassInfo name type_params superclasses methods ->
+      string_concat_many([
+        "(ClassInfo ", name,
+        " ", encode_str_list(type_params),
+        " ", encode_str_list(superclasses),
+        " ", encode_named_scheme_list(methods),
+        ")"
+      ])
+
+fn encode_instance_info_list(is: List InstanceInfo) -> String =
+  string_concat_many(["(", join_instance_infos(is), ")"])
+
+fn join_instance_infos(is: List InstanceInfo) -> String =
+  match is with
+  | Nil -> ""
+  | Cons i Nil -> encode_instance_info(i)
+  | Cons i rest -> string_concat_many([encode_instance_info(i), " ", join_instance_infos(rest)])
+
+fn encode_instance_info(i: InstanceInfo) -> String =
+  match i with
+  | InstanceInfo class_name head_type dict_name ->
+      string_concat_many([
+        "(InstanceInfo ", class_name, " ", encode_type(head_type), " ", dict_name, ")"
+      ])
 
 # ----------------------------------------------------------------------------
 # Decoder
@@ -423,22 +513,34 @@ fn decode_iface_file_body(s: String, i: Int, total: Int) -> Maybe (IfaceFile, In
   | Just (version_atom, j) ->
       match decode_iface_version(version_atom) with
       | Nothing -> Nothing
-      | Just version ->
-          match read_atom(s, skip_ws(s, j, total), total) with
-          | Nothing -> Nothing
-          | Just (mod_name, k) ->
-              match decode_named_scheme_list_at(s, skip_ws(s, k, total), total) with
-              | Nothing -> Nothing
-              | Just (schemes, m) ->
-                  match expect_char(s, skip_ws(s, m, total), total, ')') with
-                  | Nothing -> Nothing
-                  | Just end -> Just((IfaceFile(version, mod_name, schemes), end))
+      | Just version -> decode_iface_v2_tail(s, j, total, version)
 
-# v1: accept only "1" — future versions add to the if-chain. Using string
+fn decode_iface_v2_tail(s: String, i: Int, total: Int, version: Int) -> Maybe (IfaceFile, Int) =
+  match read_atom(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (mod_name, k) ->
+      match decode_named_scheme_list_at(s, skip_ws(s, k, total), total) with
+      | Nothing -> Nothing
+      | Just (schemes, m) ->
+          match decode_ctor_info_list_at(s, skip_ws(s, m, total), total) with
+          | Nothing -> Nothing
+          | Just (ctors, n2) ->
+              match decode_class_info_list_at(s, skip_ws(s, n2, total), total) with
+              | Nothing -> Nothing
+              | Just (classes, n3) ->
+                  match decode_instance_info_list_at(s, skip_ws(s, n3, total), total) with
+                  | Nothing -> Nothing
+                  | Just (instances, n4) ->
+                      match expect_char(s, skip_ws(s, n4, total), total, ')') with
+                      | Nothing -> Nothing
+                      | Just end -> Just((IfaceFile(version, mod_name, schemes, ctors, classes, instances), end))
+
+# v2: accept only "2" — future versions add to the if-chain. Using string
 # equality (rather than parse_int) avoids parse_int's partial behaviour on
-# non-digit input.
+# non-digit input. v1 (schemes-only) was retired when metadata tables
+# (ctors/classes/instances) were added; no in-tree consumer relied on it.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "1" then Just(1) else Nothing
+  if s == "2" then Just(2) else Nothing
 
 fn decode_named_scheme_list_at(s: String, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, i, total, '(') with
@@ -500,3 +602,113 @@ fn filter_dict_entries(entries: Vec (String, types.Scheme), i: Int, total: Int, 
             if str_starts_with(name, prefix) then
               filter_dict_entries(entries, i + 1, total, prefix, Cons (NamedScheme(name, scheme), acc))
             else filter_dict_entries(entries, i + 1, total, prefix, acc)
+
+# ============================================================================
+# Decoders for CtorInfo / ClassInfo / InstanceInfo
+# ============================================================================
+
+fn decode_ctor_info_list_at(s: String, i: Int, total: Int) -> Maybe (List CtorInfo, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j -> collect_ctor_infos(s, skip_ws(s, j, total), total, Nil)
+
+fn collect_ctor_infos(s: String, i: Int, total: Int, acc: List CtorInfo) -> Maybe (List CtorInfo, Int) =
+  match expect_char(s, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      match decode_ctor_info_at(s, i, total) with
+      | Nothing -> Nothing
+      | Just (c, j) -> collect_ctor_infos(s, skip_ws(s, j, total), total, Cons(c, acc))
+
+fn decode_ctor_info_at(s: String, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (tag, k) ->
+          if tag == "CtorInfo" then decode_ctor_info_body(s, k, total)
+          else Nothing
+
+fn decode_ctor_info_body(s: String, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
+  match read_atom(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (ctor_name, j) ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (adt_name, k) ->
+          match decode_type_list_at(s, skip_ws(s, k, total), total) with
+          | Nothing -> Nothing
+          | Just (field_types, m) ->
+              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              | Nothing -> Nothing
+              | Just end -> Just((CtorInfo(ctor_name, adt_name, field_types), end))
+
+fn decode_class_info_list_at(s: String, i: Int, total: Int) -> Maybe (List ClassInfo, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j -> collect_class_infos(s, skip_ws(s, j, total), total, Nil)
+
+fn collect_class_infos(s: String, i: Int, total: Int, acc: List ClassInfo) -> Maybe (List ClassInfo, Int) =
+  match expect_char(s, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      match decode_class_info_at(s, i, total) with
+      | Nothing -> Nothing
+      | Just (c, j) -> collect_class_infos(s, skip_ws(s, j, total), total, Cons(c, acc))
+
+fn decode_class_info_at(s: String, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (tag, k) ->
+          if tag == "ClassInfo" then decode_class_info_body(s, k, total)
+          else Nothing
+
+fn decode_class_info_body(s: String, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
+  do
+    (name, j) <- read_atom(s, skip_ws(s, i, total), total)
+    (type_params, k) <- decode_str_list_at(s, skip_ws(s, j, total), total)
+    (superclasses, m) <- decode_str_list_at(s, skip_ws(s, k, total), total)
+    (methods, n) <- decode_named_scheme_list_at(s, skip_ws(s, m, total), total)
+    end <- expect_char(s, skip_ws(s, n, total), total, ')')
+    Just((ClassInfo(name, type_params, superclasses, methods), end))
+
+fn decode_instance_info_list_at(s: String, i: Int, total: Int) -> Maybe (List InstanceInfo, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j -> collect_instance_infos(s, skip_ws(s, j, total), total, Nil)
+
+fn collect_instance_infos(s: String, i: Int, total: Int, acc: List InstanceInfo) -> Maybe (List InstanceInfo, Int) =
+  match expect_char(s, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      match decode_instance_info_at(s, i, total) with
+      | Nothing -> Nothing
+      | Just (inst, j) -> collect_instance_infos(s, skip_ws(s, j, total), total, Cons(inst, acc))
+
+fn decode_instance_info_at(s: String, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (tag, k) ->
+          if tag == "InstanceInfo" then decode_instance_info_body(s, k, total)
+          else Nothing
+
+fn decode_instance_info_body(s: String, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
+  match read_atom(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (class_name, j) ->
+      match decode_type_at(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (head_type, k) ->
+          match read_atom(s, skip_ws(s, k, total), total) with
+          | Nothing -> Nothing
+          | Just (dict_name, m) ->
+              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              | Nothing -> Nothing
+              | Just end -> Just((InstanceInfo(class_name, head_type, dict_name), end))

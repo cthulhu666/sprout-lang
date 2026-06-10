@@ -159,8 +159,41 @@ fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String) -
     | typed_ast.TypedOk _ env ->
         do
           let schemes = iface_codec.extract_named_schemes(env, module_name)
-          let iface = iface_codec.IfaceFile(1, module_name, schemes)
+          # Ctor/class/instance metadata tables: schema is in place (v2 format)
+          # but extraction from the typed program is a Phase 1.x follow-up;
+          # for now emit empty Nil lists so the artifact is format-valid.
+          let iface = iface_codec.IfaceFile(2, module_name, schemes, Nil, Nil, Nil)
           print(iface_codec.encode_iface_file(iface))
+
+# ---------------------------------------------------------------------------
+# Mode: --check-iface — Phase 1.x companion to --emit-iface
+#
+# Reads an iface file from disk, runs it through decode_iface_file, and
+# reports well-formedness. Used by `just check-iface-all` to validate cached
+# artifacts before any consumer relies on them.
+#
+# Output (stdout):
+#   OK: <path> (version <N>, <K> schemes)         on success
+#   INVALID: <path>                                on decode failure
+#
+# Exit-code-driven gating belongs in the calling recipe; this driver just
+# prints status lines.
+
+fn run_check_iface(path: String) -> Unit !{IO} =
+  do
+    contents <- read_file(path)
+    match iface_codec.decode_iface_file(contents) with
+    | Nothing -> print("INVALID: " ++ path)
+    | Just iface ->
+        match iface with
+        | iface_codec.IfaceFile version mod schemes ctors classes instances ->
+            print("OK: " ++ path
+              ++ " (version " ++ int_to_string(version)
+              ++ ", module " ++ mod
+              ++ ", " ++ int_to_string(list_length(schemes)) ++ " schemes"
+              ++ ", " ++ int_to_string(list_length(ctors)) ++ " ctors"
+              ++ ", " ++ int_to_string(list_length(classes)) ++ " classes"
+              ++ ", " ++ int_to_string(list_length(instances)) ++ " instances)")
 
 # ---------------------------------------------------------------------------
 # Phase: ir — emit LLVM IR text
@@ -305,7 +338,11 @@ fn main() -> Unit !{IO} =
         run_file_emit_iface(module_name, path, stdlib_root)
     | ["--emit-iface" | _] ->
         print("ERROR: usage: compile-driver --emit-iface <stdlib-root> <module-name> <file>")
+    | ["--check-iface", path | _] ->
+        run_check_iface(path)
+    | ["--check-iface" | _] ->
+        print("ERROR: usage: compile-driver --check-iface <iface-file>")
     | [stdlib_root | _] ->
         run_batch(stdlib_root, 1, "", false)
     | _ ->
-        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name> | --use-ir-codegen | --emit-iface <module-name>] <stdlib-root> <file>...")
+        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name> | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")

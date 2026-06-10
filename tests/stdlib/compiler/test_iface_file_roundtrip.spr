@@ -16,42 +16,19 @@ import stdlib.compiler.iface_codec as iface_codec
 # IfaceFile / NamedScheme yet (and don't need to clutter types.sprout for
 # a single test file). Use assert_true with hand-written predicates instead.
 
-fn named_scheme_eq(a: iface_codec.NamedScheme, b: iface_codec.NamedScheme) -> Bool =
-  match a with
-  | iface_codec.NamedScheme name_a scheme_a -> match b with
-      | iface_codec.NamedScheme name_b scheme_b ->
-          # NOTE: scheme_a == scheme_b does NOT dispatch to Eq Scheme — bare
-          # `==` on ADTs falls through to a runtime pointer/id primitive that
-          # returns false for distinct allocations even when structurally
-          # equal. (BACKLOG §7.5: "deriving Eq for ADT structural equality"
-          # is the planned fix.) Use the typeclass method `eq(...)` to force
-          # dispatch through the Eq Scheme instance.
-          if name_a == name_b then eq(scheme_a, scheme_b)
-          else false
-
-fn named_scheme_list_eq(a: List iface_codec.NamedScheme, b: List iface_codec.NamedScheme) -> Bool =
-  match a with
-  | Nil -> match b with | Nil -> true | Cons _ _ -> false
-  | Cons x xs -> match b with
-      | Nil -> false
-      | Cons y ys -> if named_scheme_eq(x, y) then named_scheme_list_eq(xs, ys) else false
-
-fn iface_eq(a: iface_codec.IfaceFile, b: iface_codec.IfaceFile) -> Bool =
-  match a with
-  | iface_codec.IfaceFile va ma sa -> match b with
-      | iface_codec.IfaceFile vb mb sb ->
-          if va == vb then
-            if ma == mb then named_scheme_list_eq(sa, sb)
-            else false
-          else false
-
-fn roundtrip(f: iface_codec.IfaceFile) -> Maybe iface_codec.IfaceFile =
-  iface_codec.decode_iface_file(iface_codec.encode_iface_file(f))
-
+# Round-trip test: encode(f) -> decode -> re-encode and assert the two
+# encoded strings are byte-identical. This covers every field automatically
+# (no per-ADT structural-eq helper needed) and exploits the encoder's
+# deterministic output. If a field is lost in decode but re-emitted by
+# encode, the strings would diverge — bug caught.
+#
+# Avoids the BACKLOG §7.5 "ADT == doesn't dispatch through Eq" trap by
+# never comparing ADTs directly; String == is a primitive that works.
 fn roundtrip_eq(f: iface_codec.IfaceFile) -> Bool =
-  match roundtrip(f) with
-  | Just g -> iface_eq(f, g)
+  match iface_codec.decode_iface_file(encoded) with
   | Nothing -> false
+  | Just g -> encoded == iface_codec.encode_iface_file(g)
+  where encoded = iface_codec.encode_iface_file(f)
 
 # --- Sample scheme constructors for readable test cases ------------------
 
@@ -75,37 +52,62 @@ fn main() -> Unit !{IO} =
 
     # --- Empty iface (module with no exports) ---
     assert_true(state, "empty schemes roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.compiler.empty", Nil)))
+      roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.compiler.empty", Nil, Nil, Nil, Nil)))
 
     # --- Single-scheme iface ---
     assert_true(state, "single scheme roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.foo",
-        Cons(iface_codec.NamedScheme("stdlib.foo.bar", sample_const_scheme("Int")), Nil))))
+      roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.foo",
+        Cons(iface_codec.NamedScheme("stdlib.foo.bar", sample_const_scheme("Int")), Nil),
+        Nil, Nil, Nil)))
 
     # --- Multi-scheme iface mirroring a real module shape ---
     assert_true(state, "multi-scheme roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.compiler.types",
+      roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.compiler.types",
         Cons(iface_codec.NamedScheme("stdlib.compiler.types.type_int", sample_const_scheme("Int")),
           Cons(iface_codec.NamedScheme("stdlib.compiler.types.type_bool", sample_const_scheme("Bool")),
             Cons(iface_codec.NamedScheme("stdlib.compiler.types.list_length", sample_poly_scheme()),
-              Cons(iface_codec.NamedScheme("stdlib.io.print", sample_io_scheme()), Nil)))))))
+              Cons(iface_codec.NamedScheme("stdlib.io.print", sample_io_scheme()), Nil)))),
+        Nil, Nil, Nil)))
 
     # --- Qualified module names with dots ---
     assert_true(state, "qualified module name",
-      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.compiler.iface_codec",
-        Cons(iface_codec.NamedScheme("stdlib.compiler.iface_codec.encode_scheme", sample_io_scheme()), Nil))))
+      roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.compiler.iface_codec",
+        Cons(iface_codec.NamedScheme("stdlib.compiler.iface_codec.encode_scheme", sample_io_scheme()), Nil),
+        Nil, Nil, Nil)))
 
-    # --- Malformed input rejection ---
+    # --- v2 with non-empty metadata tables ---
+    # CtorInfo: simulates `type Maybe a = Just a | Nothing` registered metadata
+    assert_true(state, "iface with ctors roundtrip",
+      roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.foo", Nil,
+        Cons(iface_codec.CtorInfo("Just", "Maybe", Cons(types.TVar("a"), Nil)),
+          Cons(iface_codec.CtorInfo("Nothing", "Maybe", Nil), Nil)),
+        Nil, Nil)))
+    # ClassInfo: simulates `class Eq a where Ord a { fn eq(...) }`
+    assert_true(state, "iface with class roundtrip",
+      roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.foo", Nil, Nil,
+        Cons(iface_codec.ClassInfo("Eq",
+          Cons("a", Nil),
+          Cons("Ord", Nil),
+          Cons(iface_codec.NamedScheme("eq", sample_poly_scheme()), Nil)), Nil),
+        Nil)))
+    # InstanceInfo: simulates `instance Eq Int = int_eq_inst`
+    assert_true(state, "iface with instances roundtrip",
+      roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.foo", Nil, Nil, Nil,
+        Cons(iface_codec.InstanceInfo("Eq", types.TConst("Int"), "stdlib.prelude.int_eq_inst"), Nil))))
+
+    # --- Malformed input rejection (v2 wire format) ---
     assert_true(state, "decode empty rejected",
       match iface_codec.decode_iface_file("") with | Nothing -> true | _ -> false)
     assert_true(state, "decode wrong-tag rejected",
-      match iface_codec.decode_iface_file("(NotAnIface 1 foo ())") with | Nothing -> true | _ -> false)
-    assert_true(state, "decode unsupported-version rejected",
-      match iface_codec.decode_iface_file("(IfaceFile 99 foo ())") with | Nothing -> true | _ -> false)
+      match iface_codec.decode_iface_file("(NotAnIface 2 foo () () () ())") with | Nothing -> true | _ -> false)
+    assert_true(state, "decode unsupported-version rejected (v99)",
+      match iface_codec.decode_iface_file("(IfaceFile 99 foo () () () ())") with | Nothing -> true | _ -> false)
+    assert_true(state, "decode v1 rejected (retired)",
+      match iface_codec.decode_iface_file("(IfaceFile 1 foo ())") with | Nothing -> true | _ -> false)
     assert_true(state, "decode trailing chars rejected",
-      match iface_codec.decode_iface_file("(IfaceFile 1 foo ()) garbage") with | Nothing -> true | _ -> false)
+      match iface_codec.decode_iface_file("(IfaceFile 2 foo () () () ()) garbage") with | Nothing -> true | _ -> false)
     assert_true(state, "decode well-formed accepted",
-      match iface_codec.decode_iface_file("(IfaceFile 1 foo ())") with | Just _ -> true | _ -> false)
+      match iface_codec.decode_iface_file("(IfaceFile 2 foo () () () ())") with | Just _ -> true | _ -> false)
 
     # --- extract_named_schemes: env-filtering helper ---
     # Build a Dict simulating a post-typecheck env with entries from two
@@ -122,5 +124,17 @@ fn main() -> Unit !{IO} =
       list_length(iface_codec.extract_named_schemes(test_env, "stdlib.absent")) == 0)
     assert_true(state, "extract other module yields one",
       list_length(iface_codec.extract_named_schemes(test_env, "stdlib.other")) == 1)
+
+    # Sanity: --check-iface CLI mode (driver-level IO wrapper) is a thin shell
+    # around decode_iface_file. These assertions pin the contract the CLI
+    # relies on: well-formed input decodes, truncated input fails.
+    assert_true(state, "check-iface contract: well-formed minimal accepted",
+      match iface_codec.decode_iface_file("(IfaceFile 2 foo () () () ())") with
+      | Just _ -> true
+      | Nothing -> false)
+    assert_true(state, "check-iface contract: missing trailing paren rejected",
+      match iface_codec.decode_iface_file("(IfaceFile 2 foo () () () ()") with
+      | Nothing -> true
+      | _ -> false)
 
     summary(state)
