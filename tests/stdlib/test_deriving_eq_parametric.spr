@@ -4,11 +4,11 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 #  - emit `instance Eq (Box a) where Eq a { ... }` (instance constraint on `a`)
 #  - generate field-comparing eq bodies that call eq recursively on inner fields
 
-type Box a (..) deriving(Eq) =
+type Box a (..) deriving (Eq) =
   | Empty
   | Hold a
 
-type Pair a b (..) deriving(Eq) =
+type Pair a b (..) deriving (Eq) =
   | Pair a b
 
 fn not(b: Bool) -> Bool = if b then false else true
