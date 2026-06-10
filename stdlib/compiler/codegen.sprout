@@ -533,21 +533,32 @@ fn es_adopt_body(em: Emitter, lines: List String, blk: CurBlk) -> Unit !{IO} =
 # lines here so emit_fn_dbg can add the offset back, giving lldb accurate
 # file line numbers.
 
-fn dbg_next_line(s: String, pos: Int) -> Int =
-  if nl == -1 then str_len(s)
-  else pos + nl + 1
-  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
+# Byte-indexed header scanning. The module/import header region is ASCII by
+# language spec, so codepoint indices and byte indices coincide; we use byte
+# offsets here to skip str_slice's codepoint→byte conversion walks and to
+# cache the source length once (`total`) instead of recomputing per iteration.
+# Saves O(header_lines × source_bytes) work per IR emission.
+fn dbg_next_line(s: String, byte_pos: Int, total: Int) -> Int =
+  if nl == -1 then total
+  else byte_pos + nl + 1
+  where nl = str_find(str_slice_bytes(s, byte_pos, total - byte_pos), "\n")
 
-fn dbg_is_header_line(s: String, pos: Int) -> Bool =
+fn dbg_is_header_line(s: String, byte_pos: Int, total: Int) -> Bool =
   str_starts_with(sl, "module ") ||
   str_starts_with(sl, "import ") ||
   str_starts_with(sl, "\n")
-  where sl = str_slice(s, pos, str_len(s))
+  where sl = str_slice_bytes(s, byte_pos, total - byte_pos)
 
-fn dbg_count_header_lines(src: String, pos: Int, count: Int) -> Int =
-  if pos >= str_len(src) then count
-  else if dbg_is_header_line(src, pos) then dbg_count_header_lines(src, dbg_next_line(src, pos), count + 1)
+# Internal recursive loop with cached `total = str_byte_len(src)`.
+fn dbg_count_header_lines_loop(src: String, byte_pos: Int, count: Int, total: Int) -> Int =
+  if byte_pos >= total then count
+  else if dbg_is_header_line(src, byte_pos, total) then dbg_count_header_lines_loop(src, dbg_next_line(src, byte_pos, total), count + 1, total)
   else count
+
+# Public entry — signature unchanged for the single call site below; computes
+# the source byte length once and threads it through.
+fn dbg_count_header_lines(src: String, pos: Int, count: Int) -> Int =
+  dbg_count_header_lines_loop(src, pos, count, str_byte_len(src))
 
 fn alloc_meta_id(em: Emitter) -> Int !{IO} =
   do

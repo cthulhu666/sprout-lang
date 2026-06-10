@@ -3448,6 +3448,50 @@ long long str_slice(long long s_i, long long start, long long length) {
   return (long long)(uintptr_t)out;
 }
 
+/* str_slice_bytes: O(strlen + L) byte-indexed substring.
+ *
+ * Why this exists alongside str_slice: str_slice converts codepoint indices
+ * to byte offsets via two O(N) walks (sprout_utf8_byte_offset, called twice),
+ * plus an O(N) codepoint count for bounds. Hot loops that already track byte
+ * positions (e.g. codegen.dbg_count_header_lines, which uses str_find for
+ * ASCII delimiters) waste those walks; this variant skips them.
+ *
+ * Safety: the caller MUST pass byte_start and byte_start+byte_len at UTF-8
+ * codepoint boundaries. We enforce this with two cheap O(1) checks: a
+ * continuation byte (0b10xxxxxx) at either endpoint indicates a mid-codepoint
+ * split and aborts. This matches Rust's &str[byte_range] panic semantics,
+ * trading a clear runtime error for silent UTF-8 corruption.
+ *
+ * Out-of-range bounds (beyond strlen) are clamped, mirroring str_slice's
+ * clamping behaviour for ergonomics.
+ */
+long long str_slice_bytes(long long s_i, long long byte_start, long long byte_len) {
+  const char* s = (const char*)(uintptr_t)s_i;
+  if (s == NULL) tcp_fail("str_slice_bytes: null input");
+  if (byte_start < 0 || byte_len < 0) tcp_fail("str_slice_bytes: byte_start/byte_len must be >= 0");
+  SPROUT_HANDLE(h_s, s_i);
+  size_t total = strlen(s);
+  size_t bs = (size_t)byte_start;
+  size_t bl = (size_t)byte_len;
+  if (bs > total) bs = total;
+  if (bs + bl > total) bl = total - bs;
+  /* Codepoint-boundary checks: a UTF-8 continuation byte has the bit pattern
+   * 10xxxxxx, i.e. (byte & 0xC0) == 0x80. The start and end of any valid
+   * codepoint sequence is never a continuation byte. */
+  if (bs > 0 && bs < total && ((unsigned char)s[bs] & 0xC0) == 0x80)
+    tcp_fail("str_slice_bytes: byte_start splits a UTF-8 codepoint");
+  if (bs + bl < total && ((unsigned char)s[bs + bl] & 0xC0) == 0x80)
+    tcp_fail("str_slice_bytes: byte_start+byte_len splits a UTF-8 codepoint");
+  sprout_gc_maybe_collect_threshold();
+  const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
+  char* out = (char*)malloc(bl + 1);
+  if (out == NULL) tcp_fail("str_slice_bytes: out of memory");
+  if (bl > 0) memcpy(out, slice_now + bs, bl);
+  out[bl] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
+}
+
 /* Pre-allocated one-byte C strings for each ASCII codepoint (0-127).
  * str_char_at returns a pointer into this table for ASCII characters,
  * completely avoiding malloc for the common case in Sprout source files. */

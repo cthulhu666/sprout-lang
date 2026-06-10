@@ -949,6 +949,13 @@ extern fn string_concat_many(xs: List String) -> String
 extern fn string_join_newlines(xs: List String) -> String
 extern fn str_len(s: String) -> Int
 extern fn str_slice(s: String, from: Int, to: Int) -> String
+# O(strlen + byte_len). Byte-indexed substring; faster than str_slice when the
+# caller already tracks byte positions (most compiler stdlib scanning loops).
+# CALLER CONTRACT: byte_start and byte_start+byte_len MUST land on UTF-8
+# codepoint boundaries. The runtime panics on mid-codepoint split rather than
+# silently emitting invalid UTF-8. For codepoint-indexed slicing of arbitrary
+# user input, use str_slice instead.
+extern fn str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String
 extern fn str_char_at(s: String, i: Int) -> Maybe Char
 extern fn str_find(haystack: String, needle: String) -> Int
 extern fn str_starts_with(s: String, prefix: String) -> Bool

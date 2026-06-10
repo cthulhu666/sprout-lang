@@ -153,6 +153,7 @@ str_concat
 str_find
 str_len
 str_slice
+str_slice_bytes  # byte-indexed substring; required to avoid two O(N) codepoint->byte conversions per call inside hot compiler loops (codegen.dbg_count_header_lines pattern). Caller responsible for UTF-8 codepoint boundary alignment; runtime panics on mid-codepoint split.
 str_split_lines
 string_concat_many
 string_join_newlines
