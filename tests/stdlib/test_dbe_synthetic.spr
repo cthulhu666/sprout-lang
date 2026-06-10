@@ -1,0 +1,63 @@
+import stdlib.prelude as prelude
+
+# Tests for Dead Let Elimination (DLE) pass.
+# These functions have TDoLetStep bindings that are pure and unreferenced.
+# After the DLE pass runs, the dead computations must be absent from IR —
+# verified by running these functions and checking only live values are used.
+
+# Case 1: unused arithmetic binding — pure, never read
+fn test_unused_int() -> Int !{IO} =
+  do
+    let _dead = 1 + 2
+    42
+
+# Case 2: unused string — involves heap allocation that must be eliminated
+fn test_unused_string() -> String !{IO} =
+  do
+    let _dead = "hello" ++ " world"
+    "result"
+
+# Case 3: cascading dead bindings — y depends on x, both unused
+fn test_cascading_dead() -> Int !{IO} =
+  do
+    let x = 10
+    let y = x + 5
+    99
+
+# Case 4: one live binding, one dead — live must be preserved
+fn test_one_live_one_dead() -> Int !{IO} =
+  do
+    let live = 7
+    let _dead = 3 + 4
+    live
+
+# Case 5: dead lambda — closure allocation must be eliminated
+fn test_dead_lambda() -> Int !{IO} =
+  do
+    let _f = \ x -> x + 1
+    0
+
+fn assert_eq_int(label: String, expected: Int, actual: Int) -> Unit !{IO} =
+  do
+    if expected == actual
+    then term_write("PASS " ++ label ++ "\n")
+    else term_write("FAIL " ++ label ++ ": expected " ++ int_to_string(expected) ++ " got " ++ int_to_string(actual) ++ "\n")
+
+fn assert_eq_str(label: String, expected: String, actual: String) -> Unit !{IO} =
+  do
+    if expected == actual
+    then term_write("PASS " ++ label ++ "\n")
+    else term_write("FAIL " ++ label ++ ": expected " ++ expected ++ " got " ++ actual ++ "\n")
+
+fn main() -> Unit !{IO} =
+  do
+    r1 <- test_unused_int()
+    assert_eq_int("unused_int", 42, r1)
+    r2 <- test_unused_string()
+    assert_eq_str("unused_string", "result", r2)
+    r3 <- test_cascading_dead()
+    assert_eq_int("cascading_dead", 99, r3)
+    r4 <- test_one_live_one_dead()
+    assert_eq_int("one_live_one_dead", 7, r4)
+    r5 <- test_dead_lambda()
+    assert_eq_int("dead_lambda", 0, r5)

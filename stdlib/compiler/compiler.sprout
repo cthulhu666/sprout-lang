@@ -9,6 +9,7 @@ import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.lowering as lowering
+import stdlib.compiler.dce as dce
 import stdlib.compiler.codegen as codegen
 
 # ---------------------------------------------------------------------------
@@ -226,7 +227,7 @@ export fn compile_phase_lower(path: String, stdlib_root: String) -> typed_ast.Ty
     | typed_ast.TypedOk typed_prog env ->
         match lowering.lower_program(typed_prog, env) with
         | lowering.LowerErr msg -> typed_ast.TypedErr("lower: " ++ msg)
-        | lowering.LowerOk lowered -> typed_ast.TypedOk(lowered, env)
+        | lowering.LowerOk lowered -> typed_ast.TypedOk(dce.elim_program(lowered), env)
 
 export fn compile_phase_recheck(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower(path, stdlib_root)
@@ -376,7 +377,7 @@ fn compile_phase_lower_with_cache(path: String, stdlib_root: String, cache) -> t
     | typed_ast.TypedOk typed_prog env ->
         match lowering.lower_program(typed_prog, env) with
         | lowering.LowerErr msg -> typed_ast.TypedErr("lower: " ++ msg)
-        | lowering.LowerOk lowered -> typed_ast.TypedOk(lowered, env)
+        | lowering.LowerOk lowered -> typed_ast.TypedOk(dce.elim_program(lowered), env)
 
 fn compile_phase_recheck_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower_with_cache(path, stdlib_root, cache)

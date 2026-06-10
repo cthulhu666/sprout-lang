@@ -1,0 +1,260 @@
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+
+# Dead Let Elimination (DLE) pass.
+# Removes TDoLetStep name expr from TDo blocks where:
+#   (1) name does not appear free in any subsequent do-step, and
+#   (2) expr is pure (has no observable side effects)
+#
+# Applied after typeclass lowering, before IR emission.
+# Recurses into all expression positions so nested TDo blocks are optimised too.
+
+# ---------------------------------------------------------------------------
+# Purity check
+# ---------------------------------------------------------------------------
+
+fn is_pure_callee_type(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc _ _ eff -> match eff with
+      | types.EffectPure -> true
+      | _ -> false
+  | _ -> false
+
+export fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
+  match e with
+  | typed_ast.TVar _ _ _         -> true
+  | typed_ast.TInt _ _ _         -> true
+  | typed_ast.TBool _ _ _        -> true
+  | typed_ast.TString _ _ _      -> true
+  | typed_ast.TChar _ _ _        -> true
+  | typed_ast.TUnit _ _          -> true
+  | typed_ast.TTuple items _ _   -> all_pure_list(items)
+  | typed_ast.TIf cond thn els _ _ ->
+      is_pure_expr(cond) && is_pure_expr(thn) && is_pure_expr(els)
+  | typed_ast.TMatch scrut arms _ _ ->
+      is_pure_expr(scrut) && all_pure_arms(arms)
+  | typed_ast.TCall callee args _ _ ->
+      is_pure_callee_type(typed_ast.typed_expr_type(callee)) &&
+      is_pure_expr(callee) && all_pure_list(args)
+  | typed_ast.TDict _ _ _         -> true
+  | typed_ast.TLambda _ _ _ _     -> true
+  | typed_ast.TBinary _ l r _ _   -> is_pure_expr(l) && is_pure_expr(r)
+  | typed_ast.TUnary _ operand _ _ -> is_pure_expr(operand)
+  | typed_ast.TRange l r _ _      -> is_pure_expr(l) && is_pure_expr(r)
+  | typed_ast.TDo _ _ _           -> false
+  | typed_ast.TRecord _ fields _ _ -> all_pure_fields(fields)
+  | typed_ast.TGetField obj _ _ _ -> is_pure_expr(obj)
+
+fn all_pure_list(es: List typed_ast.TypedExpr) -> Bool =
+  match es with
+  | Nil -> true
+  | Cons e rest -> is_pure_expr(e) && all_pure_list(rest)
+
+fn all_pure_arms(arms: List typed_ast.TypedMatchBranch) -> Bool =
+  match arms with
+  | Nil -> true
+  | Cons arm rest ->
+      match arm with
+      | typed_ast.TypedMatchBranch _ body -> is_pure_expr(body) && all_pure_arms(rest)
+
+fn all_pure_fields(fields: List typed_ast.TypedRecordField) -> Bool =
+  match fields with
+  | Nil -> true
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField _ v -> is_pure_expr(v) && all_pure_fields(rest)
+
+# ---------------------------------------------------------------------------
+# Free-variable check — is `name` free anywhere in the given construct?
+# ---------------------------------------------------------------------------
+
+fn param_binds(name: String, p: ast.Param) -> Bool =
+  match p with
+  | ast.Param n _ -> n == name
+
+fn params_bind(name: String, ps: List ast.Param) -> Bool =
+  match ps with
+  | Nil -> false
+  | Cons p rest -> param_binds(name, p) || params_bind(name, rest)
+
+fn pat_binds(name: String, pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.VarPattern n _         -> n == name
+  | ast.WildcardPattern _      -> false
+  | ast.IntPattern _ _         -> false
+  | ast.BoolPattern _ _        -> false
+  | ast.StringPattern _ _      -> false
+  | ast.CharPattern _ _        -> false
+  | ast.UnitPattern _          -> false
+  | ast.TuplePattern pats _    -> any_pat_binds(name, pats)
+  | ast.ConstructorPattern _ pats _ -> any_pat_binds(name, pats)
+
+fn any_pat_binds(name: String, pats: List ast.Pattern) -> Bool =
+  match pats with
+  | Nil -> false
+  | Cons p rest -> pat_binds(name, p) || any_pat_binds(name, rest)
+
+fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
+  match e with
+  | typed_ast.TVar n _ _     -> n == name
+  | typed_ast.TInt _ _ _     -> false
+  | typed_ast.TBool _ _ _    -> false
+  | typed_ast.TString _ _ _  -> false
+  | typed_ast.TChar _ _ _    -> false
+  | typed_ast.TUnit _ _      -> false
+  | typed_ast.TTuple items _ _ -> any_free_list(name, items)
+  | typed_ast.TIf cond thn els _ _ ->
+      is_free(name, cond) || is_free(name, thn) || is_free(name, els)
+  | typed_ast.TMatch scrut arms _ _ ->
+      is_free(name, scrut) || any_free_arms(name, arms)
+  | typed_ast.TCall callee args _ _ ->
+      is_free(name, callee) || any_free_list(name, args)
+  | typed_ast.TDict _ _ _    -> false
+  | typed_ast.TLambda params body _ _ ->
+      if params_bind(name, params) then false else is_free(name, body)
+  | typed_ast.TBinary _ l r _ _ -> is_free(name, l) || is_free(name, r)
+  | typed_ast.TUnary _ operand _ _ -> is_free(name, operand)
+  | typed_ast.TRange l r _ _    -> is_free(name, l) || is_free(name, r)
+  | typed_ast.TDo steps _ _     -> is_free_in_steps(name, steps)
+  | typed_ast.TRecord _ fields _ _ -> any_free_fields(name, fields)
+  | typed_ast.TGetField obj _ _ _ -> is_free(name, obj)
+
+fn any_free_list(name: String, es: List typed_ast.TypedExpr) -> Bool =
+  match es with
+  | Nil -> false
+  | Cons e rest -> is_free(name, e) || any_free_list(name, rest)
+
+fn any_free_arms(name: String, arms: List typed_ast.TypedMatchBranch) -> Bool =
+  match arms with
+  | Nil -> false
+  | Cons arm rest ->
+      match arm with
+      | typed_ast.TypedMatchBranch pat body ->
+          (if pat_binds(name, pat) then false else is_free(name, body)) ||
+          any_free_arms(name, rest)
+
+fn any_free_fields(name: String, fields: List typed_ast.TypedRecordField) -> Bool =
+  match fields with
+  | Nil -> false
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField _ v -> is_free(name, v) || any_free_fields(name, rest)
+
+fn is_free_in_steps(name: String, steps: List typed_ast.TypedDoStep) -> Bool =
+  match steps with
+  | Nil -> false
+  | Cons step rest ->
+      match step with
+      | typed_ast.TDoBindStep pat e ->
+          is_free(name, e) ||
+          (if pat_binds(name, pat) then false else is_free_in_steps(name, rest))
+      | typed_ast.TDoLetStep n e ->
+          is_free(name, e) ||
+          (if n == name then false else is_free_in_steps(name, rest))
+      | typed_ast.TDoExprStep e ->
+          is_free(name, e) || is_free_in_steps(name, rest)
+
+# ---------------------------------------------------------------------------
+# Rewrite pass — bottom-up elimination; recurses into all expression positions
+# ---------------------------------------------------------------------------
+
+fn elim_expr(e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TVar _ _ _    -> e
+  | typed_ast.TInt _ _ _    -> e
+  | typed_ast.TBool _ _ _   -> e
+  | typed_ast.TString _ _ _ -> e
+  | typed_ast.TChar _ _ _   -> e
+  | typed_ast.TUnit _ _     -> e
+  | typed_ast.TTuple items t p ->
+      typed_ast.TTuple(elim_list(items), t, p)
+  | typed_ast.TIf cond thn els t p ->
+      typed_ast.TIf(elim_expr(cond), elim_expr(thn), elim_expr(els), t, p)
+  | typed_ast.TMatch scrut arms t p ->
+      typed_ast.TMatch(elim_expr(scrut), elim_arms(arms), t, p)
+  | typed_ast.TCall callee args t p ->
+      typed_ast.TCall(elim_expr(callee), elim_list(args), t, p)
+  | typed_ast.TDict _ _ _  -> e
+  | typed_ast.TLambda params body t p ->
+      typed_ast.TLambda(params, elim_expr(body), t, p)
+  | typed_ast.TBinary op l r t p ->
+      typed_ast.TBinary(op, elim_expr(l), elim_expr(r), t, p)
+  | typed_ast.TUnary op operand t p ->
+      typed_ast.TUnary(op, elim_expr(operand), t, p)
+  | typed_ast.TRange l r t p ->
+      typed_ast.TRange(elim_expr(l), elim_expr(r), t, p)
+  | typed_ast.TDo steps t p ->
+      typed_ast.TDo(elim_steps(steps), t, p)
+  | typed_ast.TRecord name fields t p ->
+      typed_ast.TRecord(name, elim_record_fields(fields), t, p)
+  | typed_ast.TGetField obj fname t p ->
+      typed_ast.TGetField(elim_expr(obj), fname, t, p)
+
+fn elim_list(es: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match es with
+  | Nil -> Nil
+  | Cons e rest -> Cons(elim_expr(e), elim_list(rest))
+
+fn elim_arms(arms: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
+  match arms with
+  | Nil -> Nil
+  | Cons arm rest ->
+      match arm with
+      | typed_ast.TypedMatchBranch pat body ->
+          Cons(typed_ast.TypedMatchBranch(pat, elim_expr(body)), elim_arms(rest))
+
+fn elim_record_fields(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField name v ->
+          Cons(typed_ast.TypedRecordField(name, elim_expr(v)), elim_record_fields(rest))
+
+# elim_steps processes bottom-up: the tail is already optimised when checking
+# whether the current step's binding is dead.
+fn elim_steps(steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons step rest -> elim_one_step(step, elim_steps(rest))
+
+fn elim_one_step(step: typed_ast.TypedDoStep, tail: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
+  match step with
+  | typed_ast.TDoLetStep name e ->
+      if is_pure_expr(e) && (is_free_in_steps(name, tail) == false)
+      then tail
+      else Cons(typed_ast.TDoLetStep(name, elim_expr(e)), tail)
+  | typed_ast.TDoBindStep pat e ->
+      Cons(typed_ast.TDoBindStep(pat, elim_expr(e)), tail)
+  | typed_ast.TDoExprStep e ->
+      Cons(typed_ast.TDoExprStep(elim_expr(e)), tail)
+
+fn elim_instance_methods(ms: List typed_ast.TypedInstanceMethod) -> List typed_ast.TypedInstanceMethod =
+  match ms with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | typed_ast.TypedInstanceMethod name params ret_ann eff_ann body ->
+          Cons(typed_ast.TypedInstanceMethod(name, params, ret_ann, eff_ann, elim_expr(body)),
+               elim_instance_methods(rest))
+
+fn elim_decl(d: typed_ast.TypedDecl) -> typed_ast.TypedDecl =
+  match d with
+  | typed_ast.TFnDecl name params ret_ann eff_ann constraints body ->
+      typed_ast.TFnDecl(name, params, ret_ann, eff_ann, constraints, elim_expr(body))
+  | typed_ast.TExternFnDecl _ _ _ _ -> d
+  | typed_ast.TLetDecl name e ->
+      typed_ast.TLetDecl(name, elim_expr(e))
+  | typed_ast.TInstanceDecl constraint constraints methods ->
+      typed_ast.TInstanceDecl(constraint, constraints, elim_instance_methods(methods))
+  | typed_ast.TPassThrough _ -> d
+
+fn elim_decls(ds: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
+  match ds with
+  | Nil -> Nil
+  | Cons d rest -> Cons(elim_decl(d), elim_decls(rest))
+
+export fn elim_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
+  match prog with
+  | typed_ast.TypedProgram(decls) -> typed_ast.TypedProgram(elim_decls(decls))
