@@ -34,49 +34,71 @@ repl:
   exec "{{build_dir}}/sproutd"
 
 # ── Formatting & Linting ──────────────────────────────────────────────────────
-
-[private]
-_require-fmt-bin:
-  @[[ -x "{{build_dir}}/fmt_bin" ]] || { echo "ERROR: fmt_bin not found; run: just build-fmt-from-seed" >&2; exit 1; }
+#
+# All fmt/lint recipes depend on `build-fmt-from-seed`, which has its own
+# no-op guard. This makes `just fmt` self-sufficient: it never runs against
+# a stale fmt_bin, and the common case (everything fresh) costs only stat
+# calls. Without this dependency chain, running `just fmt` with a stale
+# fmt_bin silently produces obsolete formatting — exactly the bug that
+# broke PR #19's CI (2026-06-10): test files formatted with no-space
+# `deriving(...)` locally vs CI's fresh `deriving (...)`.
 
 [group('fmt')]
-fmt: _require-fmt-bin
+fmt: build-fmt-from-seed
   rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" fmt
 
 [group('fmt')]
-fmt-check: _require-fmt-bin
+fmt-check: build-fmt-from-seed
   rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" fmt --check
 
 [group('fmt')]
-fmt-file file: _require-fmt-bin
+fmt-file file: build-fmt-from-seed
   "{{build_dir}}/fmt_bin" fmt {{quote(file)}}
 
 [group('fmt')]
-fmt-check-file file: _require-fmt-bin
+fmt-check-file file: build-fmt-from-seed
   "{{build_dir}}/fmt_bin" fmt --check {{quote(file)}}
 
 [group('fmt')]
-lint: _require-fmt-bin
+lint: build-fmt-from-seed
   rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" lint
 
 [group('fmt')]
-lint-file file: _require-fmt-bin
+lint-file file: build-fmt-from-seed
   "{{build_dir}}/fmt_bin" lint {{quote(file)}}
 
 # Build fmt_bin via stage-1 (which is built from the IR seed).  fmt_bin chains
 # off compile_driver_bin_stage1 — no platform-specific binary required.
+#
+# No-op guard: skips rebuild when fmt_bin is newer than stage-1 binary, the
+# seed, fmt_driver source, and formatter source. Mirrors the bootstrap-from-seed
+# guard pattern so `just fmt` is cheap in the common case but always fresh.
 [group('fmt')]
 build-fmt-from-seed: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
+  OUT="{{build_dir}}/fmt_bin"
+  STAGE1="{{build_dir}}/compile_driver_bin_stage1"
+  SEED="bootstrap/compile_driver.ll"
+  FMT_DRIVER="{{stdlib_root}}/compiler/fmt_driver.sprout"
+  FORMATTER="{{stdlib_root}}/compiler/formatter.sprout"
+  # Freshness check: skip rebuild if fmt_bin is newer than every input it
+  # transitively depends on. The four checks cover: compiler changes
+  # (STAGE1, SEED), formatter rule changes (FORMATTER), driver wiring
+  # (FMT_DRIVER). Misses subtle prelude.sprout changes affecting fmt; the
+  # user can force a rebuild with `rm build/fmt_bin && just build-fmt-from-seed`.
+  if [[ -x "$OUT" && "$OUT" -nt "$STAGE1" && "$OUT" -nt "$SEED" && "$OUT" -nt "$FMT_DRIVER" && "$OUT" -nt "$FORMATTER" ]]; then
+    echo "==> fmt_bin is up-to-date with stage-1 + seed + formatter sources; skipping rebuild."
+    exit 0
+  fi
   TMP_LL="/tmp/sprout_fmt_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR for fmt_bin via stage-1..."
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/fmt_driver.sprout" > "$TMP_LL"
+  "$STAGE1" --emit-ir "{{stdlib_root}}" "$FMT_DRIVER" > "$TMP_LL"
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/fmt_bin"
-  echo "==> Built {{build_dir}}/fmt_bin"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$OUT"
+  echo "==> Built $OUT"
 
 # ── Check / Run ───────────────────────────────────────────────────────────────
 
