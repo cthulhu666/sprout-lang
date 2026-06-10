@@ -328,3 +328,148 @@ fn collect_types(s: String, i: Int, total: Int, acc: List types.Type) -> Maybe (
       match decode_type_at(s, i, total) with
       | Nothing -> Nothing
       | Just (t, j) -> collect_types(s, skip_ws(s, j, total), total, Cons(t, acc))
+
+# ============================================================================
+# IfaceFile — the top-level iface artifact for one module
+# ============================================================================
+#
+# Wraps the scheme table with metadata for format versioning and module
+# identification. Per docs/iface-precompiled-modules-v1-draft.md §Format.
+#
+# v1 schema (intentionally minimal):
+#   version      : Int — currently always 1; future bumps purge CI cache
+#   module_name  : qualified name, e.g. "stdlib.compiler.types"
+#   schemes      : list of (qualified_name, Scheme) pairs
+#
+# Deferred to later phases:
+#   - source_hash + compiler_fingerprint (freshness check; needs Phase 2
+#     `bundle_file_with_iface` integration to be load-bearing)
+#   - ctor / class / instance tables (typeclass resolution metadata)
+#   - ast_hash (parser-skipping path)
+#   - emit_time (debug only)
+#
+# Wire format:
+#   (IfaceFile 1 stdlib.compiler.types
+#     ((NamedScheme stdlib.compiler.types.mono <scheme>)
+#      (NamedScheme stdlib.compiler.types.scheme_vars <scheme>)
+#      ...))
+#
+# `version` is encoded as a bare atom and checked by string equality. When
+# v2 lands, decoder gets an if-chain or a parsed-int conversion.
+
+export type NamedScheme (..) =
+  | NamedScheme String types.Scheme
+
+export type IfaceFile (..) =
+  | IfaceFile Int String (List NamedScheme)
+
+# ----------------------------------------------------------------------------
+# Encoder
+# ----------------------------------------------------------------------------
+
+export fn encode_iface_file(f: IfaceFile) -> String =
+  match f with
+  | IfaceFile version mod schemes ->
+      string_concat_many(Cons("(IfaceFile ",
+        Cons(int_to_string(version),
+          Cons(" ",
+            Cons(mod,
+              Cons(" ",
+                Cons(encode_named_scheme_list(schemes),
+                  Cons(")", Nil))))))))
+
+fn encode_named_scheme_list(ns: List NamedScheme) -> String =
+  string_concat_many(Cons("(", Cons(join_named_schemes(ns), Cons(")", Nil))))
+
+fn join_named_schemes(ns: List NamedScheme) -> String =
+  match ns with
+  | Nil -> ""
+  | Cons n Nil -> encode_named_scheme(n)
+  | Cons n rest -> string_concat_many(Cons(encode_named_scheme(n), Cons(" ", Cons(join_named_schemes(rest), Nil))))
+
+fn encode_named_scheme(n: NamedScheme) -> String =
+  match n with
+  | NamedScheme name s ->
+      string_concat_many(Cons("(NamedScheme ",
+        Cons(name,
+          Cons(" ",
+            Cons(encode_scheme(s),
+              Cons(")", Nil))))))
+
+# ----------------------------------------------------------------------------
+# Decoder
+# ----------------------------------------------------------------------------
+
+export fn decode_iface_file(input: String) -> Maybe IfaceFile =
+  match decode_iface_file_at(input, skip_ws(input, 0, n), n) with
+  | Nothing -> Nothing
+  | Just (f, next) ->
+      if only_ws_remaining(input, next, n) then Just(f) else Nothing
+  where n = str_byte_len(input)
+
+fn decode_iface_file_at(s: String, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Just (tag, k) ->
+          if tag == "IfaceFile" then decode_iface_file_body(s, k, total)
+          else Nothing
+      | Nothing -> Nothing
+
+fn decode_iface_file_body(s: String, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
+  match read_atom(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (version_atom, j) ->
+      match decode_iface_version(version_atom) with
+      | Nothing -> Nothing
+      | Just version ->
+          match read_atom(s, skip_ws(s, j, total), total) with
+          | Nothing -> Nothing
+          | Just (mod_name, k) ->
+              match decode_named_scheme_list_at(s, skip_ws(s, k, total), total) with
+              | Nothing -> Nothing
+              | Just (schemes, m) ->
+                  match expect_char(s, skip_ws(s, m, total), total, ')') with
+                  | Nothing -> Nothing
+                  | Just end -> Just((IfaceFile(version, mod_name, schemes), end))
+
+# v1: accept only "1" — future versions add to the if-chain. Using string
+# equality (rather than parse_int) avoids parse_int's partial behaviour on
+# non-digit input.
+fn decode_iface_version(s: String) -> Maybe Int =
+  if s == "1" then Just(1) else Nothing
+
+fn decode_named_scheme_list_at(s: String, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j -> collect_named_schemes(s, skip_ws(s, j, total), total, Nil)
+
+fn collect_named_schemes(s: String, i: Int, total: Int, acc: List NamedScheme) -> Maybe (List NamedScheme, Int) =
+  match expect_char(s, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      match decode_named_scheme_at(s, i, total) with
+      | Nothing -> Nothing
+      | Just (n, j) -> collect_named_schemes(s, skip_ws(s, j, total), total, Cons(n, acc))
+
+fn decode_named_scheme_at(s: String, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
+  match expect_char(s, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j ->
+      match read_atom(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (tag, k) ->
+          if tag == "NamedScheme" then decode_named_scheme_body(s, k, total)
+          else Nothing
+
+fn decode_named_scheme_body(s: String, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
+  match read_atom(s, skip_ws(s, i, total), total) with
+  | Nothing -> Nothing
+  | Just (name, j) ->
+      match decode_scheme_at(s, skip_ws(s, j, total), total) with
+      | Nothing -> Nothing
+      | Just (scheme, k) ->
+          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          | Nothing -> Nothing
+          | Just end -> Just((NamedScheme(name, scheme), end))

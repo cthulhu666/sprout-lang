@@ -1,0 +1,110 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.types as types
+import stdlib.compiler.iface_codec as iface_codec
+
+# Phase 1.x iface file format round-trip: tests the wrapper format that
+# packages a module's schemes as a single artifact, layered on top of the
+# bare Scheme codec proven by test_scheme_roundtrip.spr.
+#
+# Format reference: stdlib/compiler/iface_codec.sprout §"IfaceFile" section.
+# Schema is intentionally minimal for Phase 1 — version, module_name,
+# named-scheme list. Source-hash + compiler-fingerprint + ctor/class/
+# instance tables are deferred to subsequent phases.
+
+# --- Manual structural comparison ----------------------------------------
+# stdlib.test.assert_eq needs Eq + ToString; we haven't added those for
+# IfaceFile / NamedScheme yet (and don't need to clutter types.sprout for
+# a single test file). Use assert_true with hand-written predicates instead.
+
+fn named_scheme_eq(a: iface_codec.NamedScheme, b: iface_codec.NamedScheme) -> Bool =
+  match a with
+  | iface_codec.NamedScheme name_a scheme_a -> match b with
+      | iface_codec.NamedScheme name_b scheme_b ->
+          # NOTE: scheme_a == scheme_b does NOT dispatch to Eq Scheme — bare
+          # `==` on ADTs falls through to a runtime pointer/id primitive that
+          # returns false for distinct allocations even when structurally
+          # equal. (BACKLOG §7.5: "deriving Eq for ADT structural equality"
+          # is the planned fix.) Use the typeclass method `eq(...)` to force
+          # dispatch through the Eq Scheme instance.
+          if name_a == name_b then eq(scheme_a, scheme_b)
+          else false
+
+fn named_scheme_list_eq(a: List iface_codec.NamedScheme, b: List iface_codec.NamedScheme) -> Bool =
+  match a with
+  | Nil -> match b with | Nil -> true | Cons _ _ -> false
+  | Cons x xs -> match b with
+      | Nil -> false
+      | Cons y ys -> if named_scheme_eq(x, y) then named_scheme_list_eq(xs, ys) else false
+
+fn iface_eq(a: iface_codec.IfaceFile, b: iface_codec.IfaceFile) -> Bool =
+  match a with
+  | iface_codec.IfaceFile va ma sa -> match b with
+      | iface_codec.IfaceFile vb mb sb ->
+          if va == vb then
+            if ma == mb then named_scheme_list_eq(sa, sb)
+            else false
+          else false
+
+fn roundtrip(f: iface_codec.IfaceFile) -> Maybe iface_codec.IfaceFile =
+  iface_codec.decode_iface_file(iface_codec.encode_iface_file(f))
+
+fn roundtrip_eq(f: iface_codec.IfaceFile) -> Bool =
+  match roundtrip(f) with
+  | Just g -> iface_eq(f, g)
+  | Nothing -> false
+
+# --- Sample scheme constructors for readable test cases ------------------
+
+fn sample_const_scheme(name: String) -> types.Scheme =
+  types.mono(types.TConst(name))
+
+fn sample_poly_scheme() -> types.Scheme =
+  # forall a. (List a) -> Int
+  types.Scheme(
+    Cons("a", Nil), Nil,
+    types.TFunc(types.TApp(types.TConst("List"), types.TVar("a")), types.TConst("Int"), types.EffectPure),
+    types.EffectPure)
+
+fn sample_io_scheme() -> types.Scheme =
+  # String -> Unit !{IO}
+  types.mono(types.TFunc(types.TConst("String"), types.TConst("Unit"), types.EffectIO))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Empty iface (module with no exports) ---
+    assert_true(state, "empty schemes roundtrip",
+      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.compiler.empty", Nil)))
+
+    # --- Single-scheme iface ---
+    assert_true(state, "single scheme roundtrip",
+      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.foo",
+        Cons(iface_codec.NamedScheme("stdlib.foo.bar", sample_const_scheme("Int")), Nil))))
+
+    # --- Multi-scheme iface mirroring a real module shape ---
+    assert_true(state, "multi-scheme roundtrip",
+      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.compiler.types",
+        Cons(iface_codec.NamedScheme("stdlib.compiler.types.type_int", sample_const_scheme("Int")),
+          Cons(iface_codec.NamedScheme("stdlib.compiler.types.type_bool", sample_const_scheme("Bool")),
+            Cons(iface_codec.NamedScheme("stdlib.compiler.types.list_length", sample_poly_scheme()),
+              Cons(iface_codec.NamedScheme("stdlib.io.print", sample_io_scheme()), Nil)))))))
+
+    # --- Qualified module names with dots ---
+    assert_true(state, "qualified module name",
+      roundtrip_eq(iface_codec.IfaceFile(1, "stdlib.compiler.iface_codec",
+        Cons(iface_codec.NamedScheme("stdlib.compiler.iface_codec.encode_scheme", sample_io_scheme()), Nil))))
+
+    # --- Malformed input rejection ---
+    assert_true(state, "decode empty rejected",
+      match iface_codec.decode_iface_file("") with | Nothing -> true | _ -> false)
+    assert_true(state, "decode wrong-tag rejected",
+      match iface_codec.decode_iface_file("(NotAnIface 1 foo ())") with | Nothing -> true | _ -> false)
+    assert_true(state, "decode unsupported-version rejected",
+      match iface_codec.decode_iface_file("(IfaceFile 99 foo ())") with | Nothing -> true | _ -> false)
+    assert_true(state, "decode trailing chars rejected",
+      match iface_codec.decode_iface_file("(IfaceFile 1 foo ()) garbage") with | Nothing -> true | _ -> false)
+    assert_true(state, "decode well-formed accepted",
+      match iface_codec.decode_iface_file("(IfaceFile 1 foo ())") with | Just _ -> true | _ -> false)
+
+    summary(state)
