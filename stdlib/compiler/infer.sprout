@@ -2345,7 +2345,142 @@ export fn typecheck_decls(
     # is defined later in the same file).
     let scanned_env = pre_scan_fn_decls(decls, env, dict_empty())
     unifier.set_ctor_map(state, build_ctor_map(decls, dict_empty()))
-    typecheck_decls_inner(state, decls, scanned_env, subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
+    # Strict type-name validation: walk every TypeExpr in every type/alias/record
+    # declaration and error immediately if a referenced type name is not declared.
+    # Runs after pre_scan so mutually recursive ADTs are always in the declared set.
+    let declared_types = collect_declared_type_names(decls, builtin_type_names())
+    match validate_all_decls(decls, declared_types) with
+    | Just err_msg -> typed_ast.TypedErr(err_msg)
+    | Nothing ->
+        typecheck_decls_inner(state, decls, scanned_env, subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
+
+# ---------------------------------------------------------------------------
+# Strict type-name validation pass
+# ---------------------------------------------------------------------------
+#
+# After pre_scan_fn_decls registers all type constructors, this pass walks
+# every TypeExpr in TypeDecl constructor fields, RecordDecl field types, and
+# AliasDecl RHS expressions.  An uppercase TypeName that does not appear in
+# the declared-type set is reported as a hard error before unification runs.
+#
+# Forward references are safe: this pass runs after pre_scan_fn_decls has
+# already collected all type names for the entire module.
+#
+# Positions covered: TypeDecl constructor fields, RecordDecl fields, AliasDecl RHS.
+# ClassDecl/InstanceDecl/FnDecl signature positions are not yet covered (follow-up).
+#
+# Type parameters (always lowercase in Sprout, e.g. `a`, `b`) are detected by
+# is_lowercase_name and skipped without consulting the declared set.
+# Qualified names (e.g. `stdlib.compiler.ast.TypeExpr`) are stripped to their
+# short form before lookup, matching the strip_module_prefix convention used
+# throughout lookup_type_var.
+
+# O(1): built-in primitive type names always valid without a declaration.
+# primitive_type_names covers language-level primitives;
+# c_runtime_type_names covers opaque C-runtime types used in stdlib TypeDecl/AliasDecl:
+#   Vector   — backing store for Vec a and MutVec a (prelude.sprout)
+#   Map      — backing store for Dict v (prelude.sprout)
+#   NativeSet — backing store for Set (prelude.sprout)
+#   Ref      — mutable reference cell (test.sprout TestState, unifier.sprout InferState,
+#               lsp_driver.sprout LspState, analysis_service_driver.sprout StartupState,
+#               module_loader.sprout ModuleCache alias)
+fn builtin_type_names() -> List String =
+  append(primitive_type_names(), c_runtime_type_names())
+
+fn primitive_type_names() -> List String =
+  Cons("Int", Cons("Bool", Cons("String", Cons("Char",
+    Cons("Unit", Cons("Bytes", Cons("IntRange", Nil)))))))
+
+fn c_runtime_type_names() -> List String =
+  Cons("Vector", Cons("Map", Cons("NativeSet", Cons("Ref", Nil))))
+
+# O(n decls): collect short names (prefix-stripped) of all declared types.
+fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List String =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | ast.TypeDecl name _ _ _ _ ->
+          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+      | ast.RecordDecl name _ _ _ ->
+          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+      | ast.AliasDecl name _ _ _ ->
+          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+      | _ -> collect_declared_type_names(rest, acc)
+
+# O(depth): validate a single TypeExpr, returning the first error found.
+fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Maybe String =
+  match te with
+  | ast.TypeName name ->
+      if is_lowercase_name(name) then Nothing
+      else
+        if types.list_member(strip_module_prefix(name), declared) then Nothing
+        else Just("type-validation: unknown type name `" ++ strip_module_prefix(name) ++
+                  "` in declaration `" ++ strip_module_prefix(decl_name) ++ "`")
+  | ast.TypeApply left right ->
+      match validate_te(left, decl_name, declared) with
+      | Just e -> Just(e)
+      | Nothing -> validate_te(right, decl_name, declared)
+  | ast.TypeArrow param ret _ ->
+      match validate_te(param, decl_name, declared) with
+      | Just e -> Just(e)
+      | Nothing -> validate_te(ret, decl_name, declared)
+  | ast.TypeEffect inner _ -> validate_te(inner, decl_name, declared)
+  | ast.TupleType parts -> validate_te_list(parts, decl_name, declared)
+
+fn validate_te_list(parts: List ast.TypeExpr, decl_name: String, declared: List String) -> Maybe String =
+  match parts with
+  | Nil -> Nothing
+  | Cons h rest ->
+      match validate_te(h, decl_name, declared) with
+      | Just e -> Just(e)
+      | Nothing -> validate_te_list(rest, decl_name, declared)
+
+fn validate_ctors(
+  ctors: List ast.TypeConstructor,
+  decl_name: String,
+  declared: List String
+) -> Maybe String =
+  match ctors with
+  | Nil -> Nothing
+  | Cons ctor rest ->
+      match ctor with
+      | ast.TypeConstructor _ fields ->
+          match validate_te_list(fields, decl_name, declared) with
+          | Just e -> Just(e)
+          | Nothing -> validate_ctors(rest, decl_name, declared)
+
+fn validate_record_fields(
+  fields: List ast.RecordFieldDecl,
+  decl_name: String,
+  declared: List String
+) -> Maybe String =
+  match fields with
+  | Nil -> Nothing
+  | Cons field rest ->
+      match field with
+      | ast.RecordFieldDecl _ ftype ->
+          match validate_te(ftype, decl_name, declared) with
+          | Just e -> Just(e)
+          | Nothing -> validate_record_fields(rest, decl_name, declared)
+
+fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
+  match decl with
+  | ast.TypeDecl name _ ctors _ _ ->
+      validate_ctors(ctors, name, declared)
+  | ast.RecordDecl name _ fields _ ->
+      validate_record_fields(fields, name, declared)
+  | ast.AliasDecl name _ rhs _ ->
+      validate_te(rhs, name, declared)
+  | _ -> Nothing
+
+fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe String =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match validate_decl(decl, declared) with
+      | Just e -> Just(e)
+      | Nothing -> validate_all_decls(rest, declared)
 
 # Pre-scan pass: register FnDecl signatures, @constrained_N markers, and
 # TypeDecl constructors for all declarations without typechecking bodies.

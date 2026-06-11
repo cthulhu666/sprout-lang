@@ -83,4 +83,19 @@ fn main() -> Unit !{IO} =
     r16 <- run_check("type Color = Red | Green | Blue\nfn f(c: Color) -> Int = match c with | Red -> 1 | x -> 2")
     assert_true(state, "var-pattern arm makes match exhaustive", is_check_ok(r16))
 
+    # Strict type-name validation
+    r17 <- run_check("type Foo = | Bar Baz")
+    assert_true(state, "undeclared constructor field type fails", is_check_err(r17))
+    assert_true(state, "undeclared type error names the unknown type", str_find(check_err_msg(r17), "Baz") != -1)
+    assert_true(state, "undeclared type error names the enclosing decl", str_find(check_err_msg(r17), "Foo") != -1)
+
+    r18 <- run_check("type A = | MkA B\ntype B = | MkB A")
+    assert_true(state, "mutually recursive ADTs compile", is_check_ok(r18))
+
+    r19 <- run_check("fn id(x: a) -> a = x")
+    assert_true(state, "generic type param does not trigger unknown-type error", is_check_ok(r19))
+
+    r20 <- run_check("type Wrapper = | Wrap Int")
+    assert_true(state, "builtin Int as constructor field compiles", is_check_ok(r20))
+
     summary(state)

@@ -221,6 +221,31 @@ type Maybe a =
   | Nothing
 ```
 
+Every type name referenced in a constructor field, record field, or type alias
+RHS must be either:
+
+- A locally-declared type (in the same module bundle).
+- A built-in primitive type (`Int`, `Bool`, `String`, `Char`, `Unit`, `Bytes`,
+  `IntRange`).
+- A lowercase type variable (e.g. `a`, `b`) bound by the enclosing type
+  declaration's parameter list.
+
+Referencing an undeclared uppercase type name is a compile error at definition
+time:
+
+```
+type-validation: unknown type name `Baz` in declaration `Foo`
+```
+
+Forward references between mutually recursive ADTs within the same module are
+allowed — validation runs after all type names in the module have been
+registered.
+
+**Positions validated in this version:** `TypeDecl` constructor fields,
+`RecordDecl` field types, `AliasDecl` RHS.  `ClassDecl` method signatures,
+`InstanceDecl` constraint types, and `FnDecl` param/return type annotations
+are not yet validated (tracked in BACKLOG.md).
+
 ### 5.7 Template literals (Experimental)
 
 > **Experimental** — not part of normative v0 until Phase 5 of the string
