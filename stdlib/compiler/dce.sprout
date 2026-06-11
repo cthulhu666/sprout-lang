@@ -21,7 +21,7 @@ fn is_pure_callee_type(t: types.Type) -> Bool =
       | _ -> false
   | _ -> false
 
-export fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
+fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
   match e with
   | typed_ast.TVar _ _ _         -> true
   | typed_ast.TInt _ _ _         -> true
@@ -255,6 +255,8 @@ fn elim_decls(ds: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
   | Nil -> Nil
   | Cons d rest -> Cons(elim_decl(d), elim_decls(rest))
 
+# O(n) in the number of TypedExpr nodes; is_free_in_steps adds O(steps × expr_size)
+# per do-block, which is bounded in practice.
 export fn elim_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
   | typed_ast.TypedProgram(decls) -> typed_ast.TypedProgram(elim_decls(decls))

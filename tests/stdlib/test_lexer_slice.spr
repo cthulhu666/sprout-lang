@@ -26,7 +26,9 @@ fn main() -> Unit !{IO} =
     check("slice lparen", "("   , str_slice_bytes(src, 6, 1))
     check("slice x"    , "x"    , str_slice_bytes(src, 7, 1))
 
-    # Token near end of source — this is the position that caused O(n^2) before
+    # Token near end of source — this is the position that caused O(n^2) before.
+    # 26 letters each followed by one space = 26×2 = 52 bytes; "end_tok" starts at byte 52.
     let long_src = "a b c d e f g h i j k l m n o p q r s t u v w x y z end_tok"
-    # "end_tok" starts at byte 56 (26 single-char tokens + 26 spaces = 52, then "end_tok"@52)
     check("late token" , "end_tok", str_slice_bytes(long_src, 52, 7))
+    # Correctness of the full compilation pipeline implicitly exercises slice_between
+    # through tokenize; every test file in tests/stdlib/ is lexed via that path.
