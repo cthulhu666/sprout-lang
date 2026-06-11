@@ -23,13 +23,13 @@ fn is_pure_callee_type(t: types.Type) -> Bool =
 
 fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
   match e with
-  | typed_ast.TVar _ _ _         -> true
-  | typed_ast.TInt _ _ _         -> true
-  | typed_ast.TBool _ _ _        -> true
-  | typed_ast.TString _ _ _      -> true
-  | typed_ast.TChar _ _ _        -> true
-  | typed_ast.TUnit _ _          -> true
-  | typed_ast.TTuple items _ _   -> all_pure_list(items)
+  | typed_ast.TVar _ _ _ -> true
+  | typed_ast.TInt _ _ _ -> true
+  | typed_ast.TBool _ _ _ -> true
+  | typed_ast.TString _ _ _ -> true
+  | typed_ast.TChar _ _ _ -> true
+  | typed_ast.TUnit _ _ -> true
+  | typed_ast.TTuple items _ _ -> all_pure_list(items)
   | typed_ast.TIf cond thn els _ _ ->
       is_pure_expr(cond) && is_pure_expr(thn) && is_pure_expr(els)
   | typed_ast.TMatch scrut arms _ _ ->
@@ -37,12 +37,12 @@ fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TCall callee args _ _ ->
       is_pure_callee_type(typed_ast.typed_expr_type(callee)) &&
       is_pure_expr(callee) && all_pure_list(args)
-  | typed_ast.TDict _ _ _         -> true
-  | typed_ast.TLambda _ _ _ _     -> true
-  | typed_ast.TBinary _ l r _ _   -> is_pure_expr(l) && is_pure_expr(r)
+  | typed_ast.TDict _ _ _ -> true
+  | typed_ast.TLambda _ _ _ _ -> true
+  | typed_ast.TBinary _ l r _ _ -> is_pure_expr(l) && is_pure_expr(r)
   | typed_ast.TUnary _ operand _ _ -> is_pure_expr(operand)
-  | typed_ast.TRange l r _ _      -> is_pure_expr(l) && is_pure_expr(r)
-  | typed_ast.TDo _ _ _           -> false
+  | typed_ast.TRange l r _ _ -> is_pure_expr(l) && is_pure_expr(r)
+  | typed_ast.TDo _ _ _ -> false
   | typed_ast.TRecord _ fields _ _ -> all_pure_fields(fields)
   | typed_ast.TGetField obj _ _ _ -> is_pure_expr(obj)
 
@@ -80,14 +80,14 @@ fn params_bind(name: String, ps: List ast.Param) -> Bool =
 
 fn pat_binds(name: String, pat: ast.Pattern) -> Bool =
   match pat with
-  | ast.VarPattern n _         -> n == name
-  | ast.WildcardPattern _      -> false
-  | ast.IntPattern _ _         -> false
-  | ast.BoolPattern _ _        -> false
-  | ast.StringPattern _ _      -> false
-  | ast.CharPattern _ _        -> false
-  | ast.UnitPattern _          -> false
-  | ast.TuplePattern pats _    -> any_pat_binds(name, pats)
+  | ast.VarPattern n _ -> n == name
+  | ast.WildcardPattern _ -> false
+  | ast.IntPattern _ _ -> false
+  | ast.BoolPattern _ _ -> false
+  | ast.StringPattern _ _ -> false
+  | ast.CharPattern _ _ -> false
+  | ast.UnitPattern _ -> false
+  | ast.TuplePattern pats _ -> any_pat_binds(name, pats)
   | ast.ConstructorPattern _ pats _ -> any_pat_binds(name, pats)
 
 fn any_pat_binds(name: String, pats: List ast.Pattern) -> Bool =
@@ -97,12 +97,12 @@ fn any_pat_binds(name: String, pats: List ast.Pattern) -> Bool =
 
 fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
   match e with
-  | typed_ast.TVar n _ _     -> n == name
-  | typed_ast.TInt _ _ _     -> false
-  | typed_ast.TBool _ _ _    -> false
-  | typed_ast.TString _ _ _  -> false
-  | typed_ast.TChar _ _ _    -> false
-  | typed_ast.TUnit _ _      -> false
+  | typed_ast.TVar n _ _ -> n == name
+  | typed_ast.TInt _ _ _ -> false
+  | typed_ast.TBool _ _ _ -> false
+  | typed_ast.TString _ _ _ -> false
+  | typed_ast.TChar _ _ _ -> false
+  | typed_ast.TUnit _ _ -> false
   | typed_ast.TTuple items _ _ -> any_free_list(name, items)
   | typed_ast.TIf cond thn els _ _ ->
       is_free(name, cond) || is_free(name, thn) || is_free(name, els)
@@ -110,13 +110,13 @@ fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
       is_free(name, scrut) || any_free_arms(name, arms)
   | typed_ast.TCall callee args _ _ ->
       is_free(name, callee) || any_free_list(name, args)
-  | typed_ast.TDict _ _ _    -> false
+  | typed_ast.TDict _ _ _ -> false
   | typed_ast.TLambda params body _ _ ->
       if params_bind(name, params) then false else is_free(name, body)
   | typed_ast.TBinary _ l r _ _ -> is_free(name, l) || is_free(name, r)
   | typed_ast.TUnary _ operand _ _ -> is_free(name, operand)
-  | typed_ast.TRange l r _ _    -> is_free(name, l) || is_free(name, r)
-  | typed_ast.TDo steps _ _     -> is_free_in_steps(name, steps)
+  | typed_ast.TRange l r _ _ -> is_free(name, l) || is_free(name, r)
+  | typed_ast.TDo steps _ _ -> is_free_in_steps(name, steps)
   | typed_ast.TRecord _ fields _ _ -> any_free_fields(name, fields)
   | typed_ast.TGetField obj _ _ _ -> is_free(name, obj)
 
@@ -161,12 +161,12 @@ fn is_free_in_steps(name: String, steps: List typed_ast.TypedDoStep) -> Bool =
 
 fn elim_expr(e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   match e with
-  | typed_ast.TVar _ _ _    -> e
-  | typed_ast.TInt _ _ _    -> e
-  | typed_ast.TBool _ _ _   -> e
+  | typed_ast.TVar _ _ _ -> e
+  | typed_ast.TInt _ _ _ -> e
+  | typed_ast.TBool _ _ _ -> e
   | typed_ast.TString _ _ _ -> e
-  | typed_ast.TChar _ _ _   -> e
-  | typed_ast.TUnit _ _     -> e
+  | typed_ast.TChar _ _ _ -> e
+  | typed_ast.TUnit _ _ -> e
   | typed_ast.TTuple items t p ->
       typed_ast.TTuple(elim_list(items), t, p)
   | typed_ast.TIf cond thn els t p ->
@@ -175,7 +175,7 @@ fn elim_expr(e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
       typed_ast.TMatch(elim_expr(scrut), elim_arms(arms), t, p)
   | typed_ast.TCall callee args t p ->
       typed_ast.TCall(elim_expr(callee), elim_list(args), t, p)
-  | typed_ast.TDict _ _ _  -> e
+  | typed_ast.TDict _ _ _ -> e
   | typed_ast.TLambda params body t p ->
       typed_ast.TLambda(params, elim_expr(body), t, p)
   | typed_ast.TBinary op l r t p ->
@@ -259,4 +259,4 @@ fn elim_decls(ds: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
 # per do-block, which is bounded in practice.
 export fn elim_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
-  | typed_ast.TypedProgram(decls) -> typed_ast.TypedProgram(elim_decls(decls))
+  | typed_ast.TypedProgram (decls) -> typed_ast.TypedProgram(elim_decls(decls))

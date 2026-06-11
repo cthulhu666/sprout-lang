@@ -21,14 +21,14 @@ fn main() -> Unit !{IO} =
   do
     let src = "fn add(x: Int, y: Int) -> Int = x + y"
     # byte offsets: "fn"@0, "add"@3, "("@6, "x"@7
-    check("slice fn"   , "fn"   , str_slice_bytes(src, 0, 2))
-    check("slice add"  , "add"  , str_slice_bytes(src, 3, 3))
-    check("slice lparen", "("   , str_slice_bytes(src, 6, 1))
-    check("slice x"    , "x"    , str_slice_bytes(src, 7, 1))
+    check("slice fn", "fn", str_slice_bytes(src, 0, 2))
+    check("slice add", "add", str_slice_bytes(src, 3, 3))
+    check("slice lparen", "(", str_slice_bytes(src, 6, 1))
+    check("slice x", "x", str_slice_bytes(src, 7, 1))
 
     # Token near end of source — this is the position that caused O(n^2) before.
     # 26 letters each followed by one space = 26×2 = 52 bytes; "end_tok" starts at byte 52.
     let long_src = "a b c d e f g h i j k l m n o p q r s t u v w x y z end_tok"
-    check("late token" , "end_tok", str_slice_bytes(long_src, 52, 7))
+    check("late token", "end_tok", str_slice_bytes(long_src, 52, 7))
     # Correctness of the full compilation pipeline implicitly exercises slice_between
     # through tokenize; every test file in tests/stdlib/ is lexed via that path.
