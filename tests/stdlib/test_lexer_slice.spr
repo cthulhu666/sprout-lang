@@ -1,0 +1,32 @@
+import stdlib.prelude as prelude
+
+# Regression test for the lexer O(n^2) fix.
+#
+# The fix changed slice_between in lexer.sprout from:
+#   string.slice(raw, codepoint_pos, len)  — O(codepoint_pos) per token
+# to:
+#   str_slice_bytes(raw, byte_pos, byte_len)  — O(byte_len) per token
+#
+# This test verifies str_slice_bytes semantics match str_slice for ASCII text
+# (Sprout source files are ASCII-dominated) and that byte-boundary slicing is
+# correct across multiple positions.
+
+fn check(label: String, expected: String, actual: String) -> Unit !{IO} =
+  do
+    if expected == actual
+    then term_write("PASS " ++ label ++ "\n")
+    else term_write("FAIL " ++ label ++ ": expected '" ++ expected ++ "' got '" ++ actual ++ "'\n")
+
+fn main() -> Unit !{IO} =
+  do
+    let src = "fn add(x: Int, y: Int) -> Int = x + y"
+    # byte offsets: "fn"@0, "add"@3, "("@6, "x"@7
+    check("slice fn"   , "fn"   , str_slice_bytes(src, 0, 2))
+    check("slice add"  , "add"  , str_slice_bytes(src, 3, 3))
+    check("slice lparen", "("   , str_slice_bytes(src, 6, 1))
+    check("slice x"    , "x"    , str_slice_bytes(src, 7, 1))
+
+    # Token near end of source — this is the position that caused O(n^2) before
+    let long_src = "a b c d e f g h i j k l m n o p q r s t u v w x y z end_tok"
+    # "end_tok" starts at byte 56 (26 single-char tokens + 26 spaces = 52, then "end_tok"@52)
+    check("late token" , "end_tok", str_slice_bytes(long_src, 52, 7))

@@ -11,7 +11,7 @@ fn cursor_index(cursor: source.SourceCursor) -> Int =
   source.position_index(cursor_position(cursor))
 
 fn slice_between(raw: String, start: source.SourceCursor, end: source.SourceCursor) -> String =
-  string.slice(raw, cursor_index(start), cursor_index(end) - cursor_index(start))
+  str_slice_bytes(raw, source.cursor_byte_offset(start), source.cursor_byte_offset(end) - source.cursor_byte_offset(start))
 
 fn is_ident_continue(ch: Char) -> Bool =
   string.is_ident_continue(ch) || ch == '.'

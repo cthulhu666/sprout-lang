@@ -33,7 +33,7 @@ fn cursor_source(cursor: SourceCursor) -> String =
 # cursor_byte_offset: the SourceCursor's Int field is now a BYTE offset into the
 # raw source string.  SourcePos.index still tracks the codepoint index for
 # diagnostics (line/column info) — these two indices are intentionally separate.
-fn cursor_byte_offset(cursor: SourceCursor) -> Int =
+export fn cursor_byte_offset(cursor: SourceCursor) -> Int =
   match cursor with
   | SourceCursor _ byte_offset _ -> byte_offset
 
