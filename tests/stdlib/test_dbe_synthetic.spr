@@ -34,7 +34,7 @@ fn test_one_live_one_dead() -> Int !{IO} =
 # Case 5: dead lambda — closure allocation must be eliminated
 fn test_dead_lambda() -> Int !{IO} =
   do
-    let _f = \ x -> x + 1
+    let _f = \x -> x + 1
     0
 
 fn assert_eq_int(label: String, expected: Int, actual: Int) -> Unit !{IO} =
