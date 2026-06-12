@@ -32,10 +32,10 @@ S/D) was narrowed after design review.
 | Bundler integration | shipped | `validate_deriving_decls` runs first (eager errors), then `expand_deriving_decls`, before typecheck |
 | `Eq` emitter | shipped, full scope | nullary + field-bearing + parametric |
 | `ToString` emitter | shipped, full scope | nullary + field-bearing + parametric |
-| `Ord` emitter | shipped, **nullary-only** | field-bearing tracked as BACKLOG §5 |
+| `Ord` emitter | shipped, **full scope** | nullary + field-bearing + parametric; lexicographic chained compare |
 | `Serialize` emitter | **reverted** | conflated polymorphism with format choice; see Scope revision |
 | `Deserialize` emitter | **reverted** | same root cause; perf bug + dispatcher edge case were symptoms |
-| Eager errors at deriving site (F1) | shipped | unknown class + Ord-on-field-bearing produce errors at bundle time, not use site |
+| Eager errors at deriving site (F1) | shipped | unknown class produces error at bundle time, not use site |
 | Spec section in `docs/spec-v0.md` §8.6 | shipped | normative, 3 classes |
 
 ## Problem

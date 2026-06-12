@@ -6,9 +6,9 @@ import stdlib.compiler.source as source
 # Codegen for `deriving (...)` clauses on TypeDecls.
 #
 # v1 scope: synthesize ast.InstanceDecl nodes for each (class, type) pair in
-# a TypeDecl's deriving list. Implements Eq + ToString (all ADT shapes) and
-# Ord (nullary-only). Serialize/Deserialize were explored and reverted on
-# 2026-06-10; see docs/deriving-v1-draft.md "Scope revision" for the why.
+# a TypeDecl's deriving list. Implements Eq, ToString, and Ord for all ADT
+# shapes (nullary and field-bearing). Serialize/Deserialize were explored and
+# reverted on 2026-06-10; see docs/deriving-v1-draft.md "Scope revision" for why.
 #
 # Entry point is expand_deriving_decls, called by the bundler after
 # qualification: it walks a list of decls, finds TypeDecls with non-empty
@@ -218,29 +218,70 @@ fn emit_to_string_instance(name: String, type_params: List String, ctors: List a
        build_to_string_match_body(ctors, pos))],
     pos)
 
-# --- Ord emitter (nullary-only for v1; field-bearing Ord is a follow-up) ----
+# --- Ord emitter (all ADT shapes: nullary and field-bearing) -----------------
 
-# Returns true iff every constructor in the list takes zero fields.
-fn all_nullary(ctors: List ast.TypeConstructor) -> Bool =
-  match ctors with
-  | Nil -> true
-  | Cons c rest -> if ctor_arity(c) == 0 then all_nullary(rest) else false
+# Build `compare(__d_l_i, __d_r_i)` — one field-pair compare call.
+# O(1).
+fn build_ord_field_compare_call(i: Int, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("compare", pos),
+    [ast.VarExpr(deriv_field_name(DLeft, i), pos),
+     ast.VarExpr(deriv_field_name(DRight, i), pos)],
+    pos)
 
-# One inner-match branch: `| Ctor_j -> int_for(idx_j vs outer_idx)`.
+# Build the lexicographic chained compare body for a same-constructor branch.
+# Arity 0 → `0`. Arity 1 → `compare(l0, r0)`.
+# Arity N → `match compare(l0, r0) with | 0 -> <recurse(1)> | c -> c`.
+# Uses a fresh synthetic variable `__d_c_i` for the wildcard bind at each level.
+# O(arity).
+fn build_ord_compare_chain(i: Int, arity: Int, pos: source.SourcePos) -> ast.Expr =
+  if i >= arity then ast.IntExpr(0, pos)
+  else if i == arity - 1 then build_ord_field_compare_call(i, pos)
+  else
+    ast.MatchExpr(
+      build_ord_field_compare_call(i, pos),
+      [ast.MatchBranch(ast.IntPattern(0, pos), build_ord_compare_chain(i + 1, arity, pos)),
+       ast.MatchBranch(ast.VarPattern("__d_c_" ++ int_to_string(i), pos),
+                       ast.VarExpr("__d_c_" ++ int_to_string(i), pos))],
+      pos)
+
+# Body for the same-constructor case: chain compare over all field pairs.
+# O(arity).
+fn build_ord_same_ctor_body(arity: Int, pos: source.SourcePos) -> ast.Expr =
+  build_ord_compare_chain(0, arity, pos)
+
+# Build a wildcard-binding constructor pattern for the inner match (different-ctor
+# branches don't need field values; wildcards avoid introducing unused names).
+# O(arity).
+fn build_ctor_wildcard_pattern(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Pattern =
+  ast.ConstructorPattern(ctor_name, build_wildcard_field_patterns(0, arity, pos), pos)
+
+fn build_wildcard_field_patterns(i: Int, arity: Int, pos: source.SourcePos) -> List ast.Pattern =
+  if i >= arity then Nil
+  else Cons(ast.WildcardPattern(pos), build_wildcard_field_patterns(i + 1, arity, pos))
+
+# One inner-match branch: `| Ctor_j(...) -> result`.
+# When idx == outer_idx: bind right-side fields and return chained compare.
+# When idx < outer_idx: right ctor declared earlier than left → left is greater → 1.
+# When idx > outer_idx: right ctor declared later than left → left is smaller → -1.
 fn build_ord_inner_branch(c: ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> ast.MatchBranch =
   match c with
-  | ast.TypeConstructor name _ ->
-      ast.MatchBranch(
-        ast.ConstructorPattern(name, Nil, pos),
-        ast.IntExpr(if idx < outer_idx then 1 else 0, pos))
+  | ast.TypeConstructor name fields ->
+      if idx == outer_idx then
+        ast.MatchBranch(
+          build_ctor_var_pattern(name, DRight, list_length(fields), pos),
+          build_ord_same_ctor_body(list_length(fields), pos))
+      else
+        ast.MatchBranch(
+          build_ctor_wildcard_pattern(name, list_length(fields), pos),
+          ast.IntExpr(if idx < outer_idx then 1 else 0 - 1, pos))
 
 fn build_ord_inner_branches(remaining: List ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> List ast.MatchBranch =
   match remaining with
-  | Nil -> [ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos))]
+  | Nil -> Nil
   | Cons c rest ->
-      if idx > outer_idx then[ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0 - 1, pos))]
-      else Cons(build_ord_inner_branch(c, idx, outer_idx, pos),
-                build_ord_inner_branches(rest, idx + 1, outer_idx, pos))
+      Cons(build_ord_inner_branch(c, idx, outer_idx, pos),
+           build_ord_inner_branches(rest, idx + 1, outer_idx, pos))
 
 fn build_ord_inner_match(outer_idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
   ast.MatchExpr(
@@ -248,11 +289,13 @@ fn build_ord_inner_match(outer_idx: Int, all_ctors: List ast.TypeConstructor, po
     build_ord_inner_branches(all_ctors, 0, outer_idx, pos),
     pos)
 
+# Outer branch binds left-side fields for same-ctor comparison.
+# O(arity).
 fn build_ord_outer_branch(c: ast.TypeConstructor, idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
   match c with
-  | ast.TypeConstructor name _ ->
+  | ast.TypeConstructor name fields ->
       ast.MatchBranch(
-        ast.ConstructorPattern(name, Nil, pos),
+        build_ctor_var_pattern(name, DLeft, list_length(fields), pos),
         build_ord_inner_match(idx, all_ctors, pos))
 
 fn build_ord_outer_branches(remaining: List ast.TypeConstructor, idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
@@ -302,19 +345,17 @@ fn parse_derivable_class(name: String) -> Maybe DerivableClass =
   else Nothing
 
 # Given a parsed class and TypeDecl fields, synthesize the corresponding
-# InstanceDecl. v1 limitation: Ord requires all constructors to be nullary;
-# field-bearing Ord is tracked as a v1.x follow-up in BACKLOG.
+# InstanceDecl. Ord now supports all ADT shapes (nullary and field-bearing)
+# via lexicographic chained compare.
 fn derive_instance_for(dc: DerivableClass, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
   match dc with
   | DcEq -> Just(emit_eq_instance(name, type_params, ctors, pos))
   | DcToString -> Just(emit_to_string_instance(name, type_params, ctors, pos))
-  | DcOrd ->
-      if all_nullary(ctors) then Just(emit_ord_instance(name, type_params, ctors, pos)) else Nothing
+  | DcOrd -> Just(emit_ord_instance(name, type_params, ctors, pos))
 
 # Bridge from the string class name (as it appears in the source `deriving`
-# clause) to the typed dispatch. Returns Nothing if the class isn't derivable
-# at all, OR if it's a derivable class but the type doesn't satisfy the
-# emitter's v1 preconditions (e.g. Ord on a field-bearing type).
+# clause) to the typed dispatch. Returns Nothing only if the class isn't
+# derivable (validated up-front by validate_deriving_decls).
 fn derive_instance(class_name: String, name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> Maybe ast.Decl =
   match parse_derivable_class(class_name) with
   | Nothing -> Nothing
@@ -367,30 +408,20 @@ export fn validate_deriving_decls(decls: List ast.Decl) -> Maybe String =
 
 fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
   match d with
-  | ast.TypeDecl name _ ctors deriving_classes _ ->
-      validate_deriving_classes_list(name, ctors, deriving_classes)
+  | ast.TypeDecl name _ _ deriving_classes _ ->
+      validate_deriving_classes_list(name, deriving_classes)
   | _ -> Nothing
 
-fn validate_deriving_classes_list(name: String, ctors: List ast.TypeConstructor, classes: List String) -> Maybe String =
+fn validate_deriving_classes_list(name: String, classes: List String) -> Maybe String =
   match classes with
   | Nil -> Nothing
   | Cons class_name rest ->
-      match validate_one_deriving_class(name, ctors, class_name) with
+      match validate_one_deriving_class(name, class_name) with
       | Just err -> Just(err)
-      | Nothing -> validate_deriving_classes_list(name, ctors, rest)
+      | Nothing -> validate_deriving_classes_list(name, rest)
 
-fn validate_one_deriving_class(name: String, ctors: List ast.TypeConstructor, class_name: String) -> Maybe String =
+fn validate_one_deriving_class(name: String, class_name: String) -> Maybe String =
   match parse_derivable_class(class_name) with
   | Nothing ->
       Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (v1 supports Eq, Ord, ToString)")
-  | Just dc ->
-      if dc_requires_nullary(dc) then
-        if all_nullary(ctors) then Nothing
-        else Just("cannot derive `" ++ class_name ++ "` for `" ++ name ++ "`: v1 supports " ++ class_name ++ " only for types whose constructors take no fields")
-      else Nothing
-
-fn dc_requires_nullary(dc: DerivableClass) -> Bool =
-  match dc with
-  | DcOrd -> true
-  | DcEq -> false
-  | DcToString -> false
+  | Just _ -> Nothing

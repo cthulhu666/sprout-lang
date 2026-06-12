@@ -578,6 +578,11 @@ instance Eq String {
   fn eq(left: String, right: String) -> Bool = left == right
 }
 
+instance Eq Char {
+  # Char is a UTF-8 string pointer at runtime; == dispatches to str_eq.
+  fn eq(left: Char, right: Char) -> Bool = left == right
+}
+
 instance Eq (Maybe a) where Eq a {
   fn eq(left: Maybe a, right: Maybe a) -> Bool =
     match left with
@@ -656,6 +661,12 @@ instance ToString Bool {
 instance ToString String {
   fn to_string(value: String) -> String =
     value
+}
+
+instance ToString Char {
+  # O(1). Char is stored as a UTF-8 string pointer; return it directly.
+  fn to_string(value: Char) -> String =
+    char_to_string(value)
 }
 
 instance ToString IntRange {

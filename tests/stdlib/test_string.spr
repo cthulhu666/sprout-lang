@@ -75,4 +75,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "str != ne", "hello" != "world")
     assert_false(state, "str != eq", "hello" != "hello")
 
+    # Eq Char: instance Eq Char must dispatch through the typeclass path.
+    assert_true(state, "char eq same", eq('a', 'a'))
+    assert_true(state, "char eq diff", eq('a', 'b') == false)
+    assert_true(state, "char eq unicode same", eq('é', 'é'))
+    assert_true(state, "char eq unicode diff", eq('é', 'à') == false)
+
     summary(state)

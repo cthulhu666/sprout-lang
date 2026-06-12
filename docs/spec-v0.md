@@ -391,7 +391,7 @@ non-empty.  Whitespace and line breaks inside the parentheses are allowed.
 | Class | Scope | Synthesized method |
 |---|---|---|
 | `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false |
-| `Ord` | nullary-ctor ADTs only | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs return 0 |
+| `Ord` | all ADT shapes | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs compare fields lexicographically via `match compare(l0, r0) with \| 0 -> ... \| c -> c` chains |
 | `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field |
 
 For parametric types (e.g. `type Box a = | Hold a`), the synthesized instance
@@ -407,11 +407,6 @@ dicts.  Both are tracked in `BACKLOG.md`.
 
 ### Limitations (this version)
 
-- `deriving (Ord)` on a type with any field-bearing constructor produces an
-  eager error at the deriving site: `cannot derive 'Ord' for 'Foo': v1
-  supports Ord only for types whose constructors take no fields`. Lexicographic
-  compare for field-bearing types requires either lazy chaining via thunks or
-  per-arity helpers in prelude; tracked in BACKLOG.md.
 - Multiple `deriving (...)` clauses on the same type declaration are not
   supported (use one clause with all classes: `deriving (Eq, Ord, ToString)`).
 - Records (`record`) do not support `deriving`; v1 targets `type` declarations
