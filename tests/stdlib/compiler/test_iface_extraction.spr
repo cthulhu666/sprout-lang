@@ -1,0 +1,181 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.iface_codec as iface_codec
+
+# Tests for the three metadata-extraction helpers added in Phase 1 completion:
+#   extract_ctor_infos / extract_class_infos / extract_instance_infos
+#
+# Uses hand-built TypedDecl lists (TPassThrough + TInstanceDecl) so the test
+# runs without a full compile pipeline and is hermetic / fast.
+
+# ---------------------------------------------------------------------------
+# Sample AST nodes
+
+# `type Colour = Red | Green | Blue` in module "mymod"
+fn sample_type_decl_colour() -> ast.Decl =
+  ast.TypeDecl("mymod.Colour",
+    Nil,
+    Cons(ast.TypeConstructor("Red", Nil),
+      Cons(ast.TypeConstructor("Green", Nil),
+        Cons(ast.TypeConstructor("Blue", Nil), Nil))),
+    Nil,
+    source.SourcePos(0, 0, 0))
+
+# `type Maybe a = Just a | Nothing` in module "mymod"
+fn sample_type_decl_maybe() -> ast.Decl =
+  ast.TypeDecl("mymod.Maybe",
+    Cons("a", Nil),
+    Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil)),
+      Cons(ast.TypeConstructor("Nothing", Nil), Nil)),
+    Nil,
+    source.SourcePos(0, 0, 0))
+
+# `type OtherThing = Blah` in module "other.mod"
+fn sample_type_decl_other() -> ast.Decl =
+  ast.TypeDecl("other.mod.OtherThing",
+    Nil,
+    Cons(ast.TypeConstructor("Blah", Nil), Nil),
+    Nil,
+    source.SourcePos(0, 0, 0))
+
+# `class MyEq a { fn my_eq(a, a) -> Bool }` with no superclasses, in "mymod"
+fn sample_class_decl() -> ast.Decl =
+  ast.ClassDecl("mymod.MyEq",
+    Cons("a", Nil),
+    Cons(ast.ClassMethodSig("my_eq",
+      Cons(ast.Param("x", Just(ast.TypeName("a"))),
+        Cons(ast.Param("y", Just(ast.TypeName("a"))), Nil)),
+      ast.TypeName("Bool"),
+      Nothing), Nil),
+    Nil,
+    source.SourcePos(0, 0, 0))
+
+# `class OtherClass a` in "other.mod"
+fn sample_class_decl_other() -> ast.Decl =
+  ast.ClassDecl("other.mod.OtherClass",
+    Cons("a", Nil),
+    Nil,
+    Nil,
+    source.SourcePos(0, 0, 0))
+
+# `instance MyEq Int` in "mymod"
+fn sample_instance_decl_int() -> typed_ast.TypedDecl =
+  typed_ast.TInstanceDecl(
+    ast.TypeConstraint("mymod.MyEq", Cons(ast.TypeName("Int"), Nil)),
+    Nil,
+    Nil)
+
+# `instance MyEq Bool` in "mymod"
+fn sample_instance_decl_bool() -> typed_ast.TypedDecl =
+  typed_ast.TInstanceDecl(
+    ast.TypeConstraint("mymod.MyEq", Cons(ast.TypeName("Bool"), Nil)),
+    Nil,
+    Nil)
+
+# `instance OtherClass String` in "other.mod" — should be filtered out
+fn sample_instance_decl_other() -> typed_ast.TypedDecl =
+  typed_ast.TInstanceDecl(
+    ast.TypeConstraint("other.mod.OtherClass", Cons(ast.TypeName("String"), Nil)),
+    Nil,
+    Nil)
+
+# ---------------------------------------------------------------------------
+# Build typed programs for testing
+
+fn make_typed_prog(decls: List typed_ast.TypedDecl) -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram(decls)
+
+fn all_decls() -> List typed_ast.TypedDecl =
+  Cons(typed_ast.TPassThrough(sample_type_decl_colour()),
+    Cons(typed_ast.TPassThrough(sample_type_decl_maybe()),
+      Cons(typed_ast.TPassThrough(sample_type_decl_other()),
+        Cons(typed_ast.TPassThrough(sample_class_decl()),
+          Cons(typed_ast.TPassThrough(sample_class_decl_other()),
+            Cons(sample_instance_decl_int(),
+              Cons(sample_instance_decl_bool(),
+                Cons(sample_instance_decl_other(), Nil))))))))
+
+# ---------------------------------------------------------------------------
+# Tests
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let prog = make_typed_prog(all_decls())
+
+    # --- extract_ctor_infos ---
+
+    let ctors_mymod = iface_codec.extract_ctor_infos(prog, "mymod")
+
+    # Colour has 3 ctors + Maybe has 2 ctors = 5 total for mymod
+    assert_true(state, "extract_ctor_infos: mymod yields 5 ctors",
+      list_length(ctors_mymod) == 5)
+
+    # other.mod filter should yield 1 ctor (Blah)
+    let ctors_other = iface_codec.extract_ctor_infos(prog, "other.mod")
+    assert_true(state, "extract_ctor_infos: other.mod yields 1 ctor",
+      list_length(ctors_other) == 1)
+
+    # Empty module should yield nothing
+    let ctors_absent = iface_codec.extract_ctor_infos(prog, "no.such.mod")
+    assert_true(state, "extract_ctor_infos: absent module yields empty",
+      list_length(ctors_absent) == 0)
+
+    # Verify CtorInfo for Maybe round-trips: encode then decode succeeds
+    assert_true(state, "extract_ctor_infos: round-trips via iface encode/decode",
+      match iface_codec.decode_iface_file(
+        iface_codec.encode_iface_file(
+          iface_codec.IfaceFile(2, "mymod", Nil, ctors_mymod, Nil, Nil))) with
+      | Nothing -> false
+      | Just _ -> true)
+
+    # --- extract_class_infos ---
+
+    let classes_mymod = iface_codec.extract_class_infos(prog, "mymod")
+    assert_true(state, "extract_class_infos: mymod yields 1 class",
+      list_length(classes_mymod) == 1)
+
+    let classes_other = iface_codec.extract_class_infos(prog, "other.mod")
+    assert_true(state, "extract_class_infos: other.mod yields 1 class",
+      list_length(classes_other) == 1)
+
+    let classes_absent = iface_codec.extract_class_infos(prog, "no.such.mod")
+    assert_true(state, "extract_class_infos: absent module yields empty",
+      list_length(classes_absent) == 0)
+
+    # MyEq has 1 method (my_eq)
+    assert_true(state, "extract_class_infos: MyEq has 1 method",
+      match classes_mymod with
+      | Cons (iface_codec.ClassInfo _ _ _ methods) _ -> list_length(methods) == 1
+      | _ -> false)
+
+    # --- extract_instance_infos ---
+
+    # Both mymod instances have class "mymod.MyEq"
+    let insts_mymod = iface_codec.extract_instance_infos(prog, "mymod")
+    assert_true(state, "extract_instance_infos: mymod yields 2 instances",
+      list_length(insts_mymod) == 2)
+
+    let insts_other = iface_codec.extract_instance_infos(prog, "other.mod")
+    assert_true(state, "extract_instance_infos: other.mod yields 1 instance",
+      list_length(insts_other) == 1)
+
+    let insts_absent = iface_codec.extract_instance_infos(prog, "no.such.mod")
+    assert_true(state, "extract_instance_infos: absent module yields empty",
+      list_length(insts_absent) == 0)
+
+    # --- round-trip: full IfaceFile with populated tables ---
+
+    let full_iface = iface_codec.IfaceFile(2, "mymod", Nil,
+      iface_codec.extract_ctor_infos(prog, "mymod"),
+      iface_codec.extract_class_infos(prog, "mymod"),
+      iface_codec.extract_instance_infos(prog, "mymod"))
+    assert_true(state, "full iface with extracted metadata round-trips",
+      match iface_codec.decode_iface_file(iface_codec.encode_iface_file(full_iface)) with
+      | Nothing -> false
+      | Just _ -> true)
+
+    summary(state)

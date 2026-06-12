@@ -156,13 +156,13 @@ fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String) -
     result <- compiler.compile_phase_check(path, stdlib_root)
     match result with
     | typed_ast.TypedErr msg -> eprint("ERROR: " ++ msg)
-    | typed_ast.TypedOk _ env ->
+    | typed_ast.TypedOk typed_prog env ->
         do
           let schemes = iface_codec.extract_named_schemes(env, module_name)
-          # Ctor/class/instance metadata tables: schema is in place (v2 format)
-          # but extraction from the typed program is a Phase 1.x follow-up;
-          # for now emit empty Nil lists so the artifact is format-valid.
-          let iface = iface_codec.IfaceFile(2, module_name, schemes, Nil, Nil, Nil)
+          let ctors = iface_codec.extract_ctor_infos(typed_prog, module_name)
+          let classes = iface_codec.extract_class_infos(typed_prog, module_name)
+          let instances = iface_codec.extract_instance_infos(typed_prog, module_name)
+          let iface = iface_codec.IfaceFile(2, module_name, schemes, ctors, classes, instances)
           print(iface_codec.encode_iface_file(iface))
 
 # ---------------------------------------------------------------------------

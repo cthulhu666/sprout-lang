@@ -1,5 +1,7 @@
 module stdlib.compiler.iface_codec
 import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
 
 # ============================================================================
 # Iface codec — hand-written serialize/deserialize for types.Scheme and its
@@ -602,6 +604,247 @@ fn filter_dict_entries(entries: Vec (String, types.Scheme), i: Int, total: Int, 
             if str_starts_with(name, prefix) then
               filter_dict_entries(entries, i + 1, total, prefix, Cons (NamedScheme(name, scheme), acc))
             else filter_dict_entries(entries, i + 1, total, prefix, acc)
+
+# ============================================================================
+# Typed-program extraction — bridge between typed AST and IfaceFile metadata
+# ============================================================================
+#
+# Each helper walks typed_prog.decls (a List typed_ast.TypedDecl) and collects
+# metadata for decls whose qualified name starts with `module_name ++ "."`.
+#
+# Design notes:
+# - TypeDecl  → TPassThrough (infer preserves as-is, no typecheck needed)
+# - ClassDecl → TPassThrough (ditto)
+# - InstanceDecl → TInstanceDecl (infer replaces with typed version)
+#
+# These helpers do NOT import infer.sprout (avoids pulling in the large
+# inference engine).  Instead we duplicate two small local helpers:
+#   typeexpr_to_type  — ast.TypeExpr → types.Type (same logic as infer.type_from_ast
+#                       but without the Dict local_vars for TVar lookup)
+#   strip_mod_prefix  — drop everything up to and including the last dot
+
+# ---------------------------------------------------------------------------
+# Local helpers (no dependency on infer.sprout)
+# ---------------------------------------------------------------------------
+
+# O(n) where n = chars in name; strips all module qualification.
+fn strip_mod_prefix(name: String) -> String =
+  if dot < 0 then name
+  else strip_mod_prefix(str_slice(name, dot + 1, str_len(name)))
+  where dot = str_find(name, ".")
+
+# Convert a surface ast.TypeExpr to types.Type. TypeName looks up local_vars
+# (type parameters listed in the enclosing decl) and falls back to TConst.
+# O(n) in size of the type expression.
+fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
+  match te with
+  | ast.TypeName name ->
+      match dict_get(name, local_vars) with
+      | Just t -> t
+      | Nothing -> types.TConst(strip_mod_prefix(name))
+  | ast.TypeApply base arg ->
+      types.TApp(typeexpr_to_type_with_vars(base, local_vars),
+                 typeexpr_to_type_with_vars(arg, local_vars))
+  | ast.TypeArrow param ret _ ->
+      types.TFunc(typeexpr_to_type_with_vars(param, local_vars),
+                  typeexpr_to_type_with_vars(ret, local_vars),
+                  types.EffectPure)
+  | ast.TypeEffect inner _ -> typeexpr_to_type_with_vars(inner, local_vars)
+  | ast.TupleType parts ->
+      types.TTuple(typeexpr_list_to_types(parts, local_vars))
+
+fn typeexpr_list_to_types(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
+  match parts with
+  | Nil -> Nil
+  | Cons h t -> Cons(typeexpr_to_type_with_vars(h, local_vars),
+                     typeexpr_list_to_types(t, local_vars))
+
+# Build a Dict mapping each type-param name to TVar(name).
+# O(n) where n = number of type params.
+fn make_local_vars(type_params: List String) -> Dict types.Type =
+  match type_params with
+  | Nil -> dict_empty()
+  | Cons p rest -> dict_set(p, types.TVar(p), make_local_vars(rest))
+
+# Extract the outermost type-name from the first type-argument of a constraint.
+# Used to compute the canonical instance dispatch key.
+fn constraint_head(type_args: List ast.TypeExpr) -> String =
+  match type_args with
+  | Nil -> "Unknown"
+  | Cons te _ -> te_outermost_name(te)
+
+fn te_outermost_name(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName n -> strip_mod_prefix(n)
+  | ast.TypeApply base _ -> te_outermost_name(base)
+  | _ -> "Unknown"
+
+# Build a Scheme for a class method: forall type_params. params -> ret @ effect.
+# Effects come from the method's `effects` field (Nothing → EffectPure).
+# O(n) in number of params.
+fn method_scheme(type_params: List String, params: List ast.Param, ret: ast.TypeExpr, effects: Maybe (List String)) -> types.Scheme =
+  types.Scheme(type_params, Nil,
+    params_to_func_type(params, typeexpr_to_type_with_vars(ret, make_local_vars(type_params)), make_local_vars(type_params)),
+    effect_from_maybe_labels(effects))
+
+fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
+  match labels with
+  | Nothing -> types.EffectPure
+  | Just Nil -> types.EffectPure
+  | Just xs -> types.EffectRow(xs)
+
+# Build a right-associating TFunc chain from a list of Params.
+# Final return type is appended at the end with EffectPure between args;
+# the outermost effect comes from the method declaration itself.
+fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict types.Type) -> types.Type =
+  match params with
+  | Nil -> ret
+  | Cons (ast.Param _ maybe_te) rest ->
+      types.TFunc(param_type_from_maybe(maybe_te, local_vars),
+                  params_to_func_type(rest, ret, local_vars),
+                  types.EffectPure)
+
+fn param_type_from_maybe(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
+  match maybe_te with
+  | Nothing -> types.TVar("_")
+  | Just te -> typeexpr_to_type_with_vars(te, local_vars)
+
+# ---------------------------------------------------------------------------
+# CtorInfo extraction
+# ---------------------------------------------------------------------------
+#
+# Walks decls for TPassThrough(TypeDecl name type_params ctors ...) where
+# `name` starts with `module_name ++ "."`. Emits one CtorInfo per constructor.
+# Field types are converted from ast.TypeExpr using the decl's type_params as
+# local type variables.
+#
+# O(sum of ctor-count across all matching TypeDecls in the program).
+
+export fn extract_ctor_infos(prog: typed_ast.TypedProgram, module_name: String) -> List CtorInfo =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      collect_ctor_infos_from_decls(decls, module_name ++ ".", Nil)
+
+fn collect_ctor_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: String, acc: List CtorInfo) -> List CtorInfo =
+  match decls with
+  | Nil -> list_reverse(acc)
+  | Cons d rest ->
+      match d with
+      | typed_ast.TPassThrough inner_decl ->
+          match inner_decl with
+          | ast.TypeDecl name type_params ctors _ _ ->
+              if str_starts_with(name, prefix) then
+                collect_ctor_infos_from_decls(rest, prefix,
+                  collect_ctors_for_type(ctors, name, make_local_vars(type_params), acc))
+              else collect_ctor_infos_from_decls(rest, prefix, acc)
+          | _ -> collect_ctor_infos_from_decls(rest, prefix, acc)
+      | _ -> collect_ctor_infos_from_decls(rest, prefix, acc)
+
+fn collect_ctors_for_type(ctors: List ast.TypeConstructor, adt_name: String, local_vars: Dict types.Type, acc: List CtorInfo) -> List CtorInfo =
+  match ctors with
+  | Nil -> acc
+  | Cons (ast.TypeConstructor ctor_name field_exprs) rest ->
+      collect_ctors_for_type(rest, adt_name, local_vars,
+        Cons(CtorInfo(ctor_name, adt_name, typeexpr_list_to_types(field_exprs, local_vars)), acc))
+
+# ---------------------------------------------------------------------------
+# ClassInfo extraction
+# ---------------------------------------------------------------------------
+#
+# Walks decls for TPassThrough(ClassDecl name type_params methods superclasses)
+# where `name` starts with `module_name ++ "."`. Superclass names are extracted
+# from the TypeConstraint class_name field. Method schemes are built with
+# method_scheme.
+#
+# O(sum of method-count across all matching ClassDecls).
+
+export fn extract_class_infos(prog: typed_ast.TypedProgram, module_name: String) -> List ClassInfo =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      collect_class_infos_from_decls(decls, module_name ++ ".", Nil)
+
+fn collect_class_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: String, acc: List ClassInfo) -> List ClassInfo =
+  match decls with
+  | Nil -> list_reverse(acc)
+  | Cons d rest ->
+      match d with
+      | typed_ast.TPassThrough inner_decl ->
+          match inner_decl with
+          | ast.ClassDecl name type_params methods superclasses _ ->
+              if str_starts_with(name, prefix) then
+                collect_class_infos_from_decls(rest, prefix,
+                  Cons(build_class_info(name, type_params, methods, superclasses), acc))
+              else collect_class_infos_from_decls(rest, prefix, acc)
+          | _ -> collect_class_infos_from_decls(rest, prefix, acc)
+      | _ -> collect_class_infos_from_decls(rest, prefix, acc)
+
+fn build_class_info(name: String, type_params: List String, methods: List ast.ClassMethodSig, superclasses: List ast.TypeConstraint) -> ClassInfo =
+  ClassInfo(name, type_params,
+    extract_superclass_names(superclasses, Nil),
+    build_method_named_schemes(methods, type_params, Nil))
+
+fn extract_superclass_names(supers: List ast.TypeConstraint, acc: List String) -> List String =
+  match supers with
+  | Nil -> list_reverse(acc)
+  | Cons (ast.TypeConstraint class_name _) rest ->
+      extract_superclass_names(rest, Cons(class_name, acc))
+
+fn build_method_named_schemes(methods: List ast.ClassMethodSig, type_params: List String, acc: List NamedScheme) -> List NamedScheme =
+  match methods with
+  | Nil -> list_reverse(acc)
+  | Cons (ast.ClassMethodSig method_name params ret effects) rest ->
+      build_method_named_schemes(rest, type_params,
+        Cons(NamedScheme(method_name, method_scheme(type_params, params, ret, effects)), acc))
+
+# ---------------------------------------------------------------------------
+# InstanceInfo extraction
+# ---------------------------------------------------------------------------
+#
+# Walks decls for TInstanceDecl(constraint, _, _) where constraint is
+# TypeConstraint class_name type_args, and `class_name` starts with
+# `module_name ++ "."`.
+#
+# dict_name encoding: uses the same dispatch-key format as the typechecker
+# (infer.sprout:835 — `strip(class_name) ++ "_" ++ head`), which is the only
+# string with real provenance in this phase. A synthesised name
+# ("class_head") is stored rather than a real function name because there is
+# no single per-instance dict function in the current lowering scheme — each
+# method gets its own `__tc_{Class}_{mangled}_{method}` function.
+#
+# Phase-2 TODO: revisit dict_name when the bundler consumes InstanceInfo for
+# cross-module instance resolution; at that point the name should either be
+# clarified as a dispatch key or replaced with a method-name map.
+#
+# O(n) over all typed decls.
+
+export fn extract_instance_infos(prog: typed_ast.TypedProgram, module_name: String) -> List InstanceInfo =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      collect_instance_infos_from_decls(decls, module_name ++ ".", Nil)
+
+fn collect_instance_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: String, acc: List InstanceInfo) -> List InstanceInfo =
+  match decls with
+  | Nil -> list_reverse(acc)
+  | Cons d rest ->
+      match d with
+      | typed_ast.TInstanceDecl constraint _ _ ->
+          match constraint with
+          | ast.TypeConstraint class_name type_args ->
+              if str_starts_with(class_name, prefix) then
+                collect_instance_infos_from_decls(rest, prefix,
+                  Cons(build_instance_info(class_name, type_args), acc))
+              else collect_instance_infos_from_decls(rest, prefix, acc)
+      | _ -> collect_instance_infos_from_decls(rest, prefix, acc)
+
+fn build_instance_info(class_name: String, type_args: List ast.TypeExpr) -> InstanceInfo =
+  InstanceInfo(class_name,
+    head_type_from_args(type_args),
+    strip_mod_prefix(class_name) ++ "_" ++ constraint_head(type_args))
+
+fn head_type_from_args(type_args: List ast.TypeExpr) -> types.Type =
+  match type_args with
+  | Nil -> types.TConst("Unknown")
+  | Cons te _ -> typeexpr_to_type_with_vars(te, dict_empty())
 
 # ============================================================================
 # Decoders for CtorInfo / ClassInfo / InstanceInfo
