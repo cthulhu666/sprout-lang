@@ -61,16 +61,16 @@ fn slice_left(raw: String, count: Int) -> String =
 fn slice_right(raw: String, start: Int) -> String =
   string.drop(raw, start)
 
-fn insert_at(raw: String, index: Int, text: String) -> String =
+export fn insert_at(raw: String, index: Int, text: String) -> String =
   slice_left(raw, index) ++ text ++ slice_right(raw, index)
 
-fn delete_before(raw: String, index: Int) -> String =
+export fn delete_before(raw: String, index: Int) -> String =
   if index <= 0 then raw
   else slice_left(raw, index - 1) ++ slice_right(raw, index)
 
 fn redraw_input(prompt: String, current: String, cursor: Int) -> Unit !{IO} =
   do
-    term_write("\r" ++ prompt ++ current ++ " ")
+    term_write("\r" ++ prompt ++ current ++ char_to_str(27) ++ "[K")
     term_write("\r" ++ prompt ++ slice_left(current, cursor))
 
 fn ignore_key(value: String !{IO}) -> Unit !{IO} =
@@ -99,7 +99,7 @@ fn read_escape_token() -> String !{IO} =
 fn history_value(index: Int, fallback: String, history: Vec String) -> String =
   vec_get_or(index, fallback, history)
 
-fn history_prev(current: String, history: Vec String, browse_index: Int, draft: String) -> (String, Int, String) =
+export fn history_prev(current: String, history: Vec String, browse_index: Int, draft: String) -> (String, Int, String) =
   if vec_length(history) == 0 then (current, browse_index, draft)
   else if browse_index < 0 then
     (history_value(vec_length(history) - 1, current, history), vec_length(history) - 1, current)
@@ -108,7 +108,7 @@ fn history_prev(current: String, history: Vec String, browse_index: Int, draft: 
   else
     (history_value(browse_index - 1, current, history), browse_index - 1, draft)
 
-fn history_next(current: String, history: Vec String, browse_index: Int, draft: String) -> (String, Int, String) =
+export fn history_next(current: String, history: Vec String, browse_index: Int, draft: String) -> (String, Int, String) =
   if browse_index < 0 then (current, browse_index, draft)
   else if browse_index + 1 >= vec_length(history) then (draft, -1, draft)
   else (history_value(browse_index + 1, current, history), browse_index + 1, draft)
@@ -441,66 +441,82 @@ fn complete_current_line(prompt: String, history: Vec String, session: compiler.
           redraw_input(prompt, current, cursor)
           interactive_read_line_loop(prompt, history, session, current, cursor, -1, current)
 
-fn interactive_read_line_step(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
-  if key == "" then Nothing
-  else if key == "ctrl-d" then
-    if current == "" then
-      do
-        term_write("\r\n")
-        Nothing
-    else interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
-  else if key == "enter" then
-    do
-      term_write("\r\n")
-      Just(current)
-  else if key == "backspace" then
-    if cursor <= 0 then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
-    else
-      do
-        let next = delete_before(current, cursor)
-        redraw_input(prompt, next, cursor - 1)
-        interactive_read_line_loop(prompt, history, session, next, cursor - 1, -1, next)
-  else if key == "escape" then
-    interactive_read_line_step(prompt, history, session, current, cursor, browse_index, draft, read_escape_token())
-  else if key == "tab" then
-    complete_current_line(prompt, history, session, current, cursor)
-  else if key == "left" || key == "ctrl-b" then
-    if cursor <= 0 then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
-    else
-      do
-        redraw_input(prompt, current, cursor - 1)
-        interactive_read_line_loop(prompt, history, session, current, cursor - 1, browse_index, draft)
-  else if key == "right" || key == "ctrl-f" then
-    if cursor >= string.length(current) then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
-    else
-      do
-        redraw_input(prompt, current, cursor + 1)
-        interactive_read_line_loop(prompt, history, session, current, cursor + 1, browse_index, draft)
-  else if key == "ctrl-a" then
-    do
-      redraw_input(prompt, current, 0)
-      interactive_read_line_loop(prompt, history, session, current, 0, browse_index, draft)
-  else if key == "ctrl-e" then
-    do
-      redraw_input(prompt, current, string.length(current))
-      interactive_read_line_loop(prompt, history, session, current, string.length(current), browse_index, draft)
-  else if key == "up" then
-    match history_prev(current, history, browse_index, draft) with
-    | (next_current, next_index, next_draft) ->
-        do
-          redraw_input(prompt, next_current, string.length(next_current))
-          interactive_read_line_loop(prompt, history, session, next_current, string.length(next_current), next_index, next_draft)
-  else if key == "down" then
-    match history_next(current, history, browse_index, draft) with
-    | (next_current, next_index, next_draft) ->
-        do
-          redraw_input(prompt, next_current, string.length(next_current))
-          interactive_read_line_loop(prompt, history, session, next_current, string.length(next_current), next_index, next_draft)
+fn step_cursor_left(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+  if cursor <= 0 then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
   else
     do
-      let next = insert_at(current, cursor, key)
-      redraw_input(prompt, next, cursor + string.length(key))
-      interactive_read_line_loop(prompt, history, session, next, cursor + string.length(key), -1, next)
+      redraw_input(prompt, current, cursor - 1)
+      interactive_read_line_loop(prompt, history, session, current, cursor - 1, browse_index, draft)
+
+fn step_cursor_right(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+  if cursor >= string.length(current) then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
+  else
+    do
+      redraw_input(prompt, current, cursor + 1)
+      interactive_read_line_loop(prompt, history, session, current, cursor + 1, browse_index, draft)
+
+fn interactive_read_line_step(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
+  match key with
+  | "" -> Nothing
+  | "ctrl-d" ->
+      if current == "" then
+        do
+          term_write("\r\n")
+          Nothing
+      else interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
+  | "enter" ->
+      do
+        term_write("\r\n")
+        Just(current)
+  | "backspace" ->
+      if cursor <= 0 then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
+      else
+        do
+          let next = delete_before(current, cursor)
+          redraw_input(prompt, next, cursor - 1)
+          interactive_read_line_loop(prompt, history, session, next, cursor - 1, -1, next)
+  | "escape" ->
+      interactive_read_line_step(prompt, history, session, current, cursor, browse_index, draft, read_escape_token())
+  | "tab" ->
+      complete_current_line(prompt, history, session, current, cursor)
+  | "left" ->
+      step_cursor_left(prompt, history, session, current, cursor, browse_index, draft)
+  | "ctrl-b" ->
+      step_cursor_left(prompt, history, session, current, cursor, browse_index, draft)
+  | "right" ->
+      step_cursor_right(prompt, history, session, current, cursor, browse_index, draft)
+  | "ctrl-f" ->
+      step_cursor_right(prompt, history, session, current, cursor, browse_index, draft)
+  | "ctrl-a" ->
+      do
+        redraw_input(prompt, current, 0)
+        interactive_read_line_loop(prompt, history, session, current, 0, browse_index, draft)
+  | "ctrl-e" ->
+      do
+        redraw_input(prompt, current, string.length(current))
+        interactive_read_line_loop(prompt, history, session, current, string.length(current), browse_index, draft)
+  | "ctrl-l" ->
+      do
+        term_write(char_to_str(27) ++ "[2J" ++ char_to_str(27) ++ "[H")
+        redraw_input(prompt, current, cursor)
+        interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
+  | "up" ->
+      match history_prev(current, history, browse_index, draft) with
+      | (next_current, next_index, next_draft) ->
+          do
+            redraw_input(prompt, next_current, string.length(next_current))
+            interactive_read_line_loop(prompt, history, session, next_current, string.length(next_current), next_index, next_draft)
+  | "down" ->
+      match history_next(current, history, browse_index, draft) with
+      | (next_current, next_index, next_draft) ->
+          do
+            redraw_input(prompt, next_current, string.length(next_current))
+            interactive_read_line_loop(prompt, history, session, next_current, string.length(next_current), next_index, next_draft)
+  | _ ->
+      do
+        let next = insert_at(current, cursor, key)
+        redraw_input(prompt, next, cursor + string.length(key))
+        interactive_read_line_loop(prompt, history, session, next, cursor + string.length(key), -1, next)
 
 fn interactive_read_line_loop(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
   do

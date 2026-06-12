@@ -1,0 +1,59 @@
+# Coverage for repl line-editing and history navigation pure helpers.
+# Note: the redraw_input rendering bug (ESC[K fix) and the ctrl-L runtime key
+# mapping are IO-only and cannot be regression-tested in this framework.
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.repl (insert_at, delete_before, history_prev, history_next)
+import stdlib.collections (Vec, foldable_to_vec)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "insert at start", insert_at("hello", 0, "X"), "Xhello")
+    assert_eq(state, "insert at end", insert_at("hello", 5, "X"), "helloX")
+    assert_eq(state, "insert at middle", insert_at("hello", 2, "XY"), "heXYllo")
+
+    assert_eq(state, "delete before 0 (no-op)", delete_before("hello", 0), "hello")
+    assert_eq(state, "delete before 1", delete_before("hello", 1), "ello")
+    assert_eq(state, "delete before 3", delete_before("hello", 3), "helo")
+    assert_eq(state, "delete before end", delete_before("hello", 5), "hell")
+
+    let h = foldable_to_vec(["old", "mid", "new"])
+
+    match history_prev("", h, -1, "") with
+    | (txt, idx, _) ->
+        do
+          assert_eq(state, "up from -1 shows newest", txt, "new")
+          assert_eq(state, "up from -1 sets index", idx, 2)
+
+    match history_prev("new", h, 2, "") with
+    | (txt, idx, _) ->
+        do
+          assert_eq(state, "up from 2 shows mid", txt, "mid")
+          assert_eq(state, "up from 2 decrements index", idx, 1)
+
+    match history_prev("old", h, 0, "") with
+    | (txt, idx, _) ->
+        do
+          assert_eq(state, "up at 0 stays", txt, "old")
+          assert_eq(state, "up at 0 keeps index 0", idx, 0)
+
+    match history_next("new", h, 2, "my draft") with
+    | (txt, idx, _) ->
+        do
+          assert_eq(state, "down from top restores draft", txt, "my draft")
+          assert_eq(state, "down from top sets index -1", idx, -1)
+
+    match history_next("mid", h, 1, "") with
+    | (txt, idx, _) ->
+        do
+          assert_eq(state, "down from 1 shows new", txt, "new")
+          assert_eq(state, "down from 1 increments index", idx, 2)
+
+    match history_next("", h, -1, "") with
+    | (txt, idx, _) ->
+        do
+          assert_eq(state, "down at -1 is no-op (text)", txt, "")
+          assert_eq(state, "down at -1 is no-op (index)", idx, -1)
+
+    summary(state)

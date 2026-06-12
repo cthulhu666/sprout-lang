@@ -1713,6 +1713,7 @@ long long term_read_key(void) {
   static const char* token_ctrl_d = "ctrl-d";
   static const char* token_ctrl_e = "ctrl-e";
   static const char* token_ctrl_f = "ctrl-f";
+  static const char* token_ctrl_l = "ctrl-l";
   static const char* token_backspace = "backspace";
   static const char* token_down = "down";
   static const char* token_escape = "escape";
@@ -1773,6 +1774,7 @@ long long term_read_key(void) {
   if (ch == 4) return (long long)(uintptr_t)token_ctrl_d;
   if (ch == 5) return (long long)(uintptr_t)token_ctrl_e;
   if (ch == 6) return (long long)(uintptr_t)token_ctrl_f;
+  if (ch == 12) return (long long)(uintptr_t)token_ctrl_l;
   if (ch == 8 || ch == 127) return (long long)(uintptr_t)token_backspace;
   if (ch == 27) return (long long)(uintptr_t)token_escape;
   if (ch == '\n' || ch == '\r') return (long long)(uintptr_t)token_enter;
