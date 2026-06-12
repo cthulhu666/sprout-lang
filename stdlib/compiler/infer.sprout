@@ -2735,12 +2735,159 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
 # dispatch using s2 + the method's scheme, and rewrites only the TDict in
 # cases where the dispatch was wrong. Original TCall.t values are preserved
 # — only the TDict's TypeConstraint changes.
+#
+# Constrained-function calls (non-class-method calls to `fn f … where C a`)
+# are handled by maybe_rewrite_constrained_fn_call, which mirrors the same
+# post-pass pattern for the case where `a` appears only in the return type:
+# inject_constrained_fn_dicts runs before s2 (while `a` is still a free TVar),
+# so it may fail to find the dict.  The post-pass re-resolves using the now-
+# concrete return type `t`.
 
 fn strip_leading_tdicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
   | Cons (typed_ast.TDict _ _ _) rest -> strip_leading_tdicts(rest)
   | _ -> args
+
+# Collect ALL TDict nodes from an arg list, in the order they appear.
+# Used to preserve inference-time fwd-marker dicts at still-polymorphic call
+# sites (inside a constrained fn body) when the post-pass cannot improve them.
+fn collect_all_tdicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match args with
+  | Nil -> Nil
+  | Cons (typed_ast.TDict c t2 p) rest -> Cons(typed_ast.TDict(c, t2, p), collect_all_tdicts(rest))
+  | Cons _ rest -> collect_all_tdicts(rest)
+
+# Return the element at zero-based index `idx`, or Nothing.
+fn list_nth_maybe_tdict(xs: List typed_ast.TypedExpr, idx: Int) -> Maybe typed_ast.TypedExpr =
+  match xs with
+  | Nil -> Nothing
+  | Cons h rest -> if idx == 0 then Just(h) else list_nth_maybe_tdict(rest, idx - 1)
+
+# Post-pass rewrite for constrained regular-function calls.
+# Mirrors maybe_rewrite_class_method_call for functions declared with
+# `where C a` constraints.
+#
+# For each @constrained_N:fn_name marker:
+#   - If the inference-time pass already injected a dict, keep it unchanged.
+#     This covers input-position constraints (correct at inference time) and
+#     return-position constraints inside constrained fn bodies (@fwd forwarding).
+#   - If no dict was injected (missing), scan the concrete return type `t`
+#     (post-s2) for a matching @inst entry and inject the correct dict.
+#
+# Only called when @class:fn_name is absent (fn_ is not a class method).
+fn maybe_rewrite_constrained_fn_call(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  fn_: typed_ast.TypedExpr,
+  fn_name: String,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos
+) -> typed_ast.TypedExpr =
+  match dict_get("@constrained_0:" ++ fn_name, env) with
+  | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+  | Just _ ->
+      typed_ast.TCall(fn_,
+        list_append(
+          user_typed_args(args),
+          build_constrained_fn_dicts(fn_name, 0, env,
+            unifier.apply_subst(subst, t),
+            pos, collect_all_tdicts(args))),
+        t, pos)
+
+# Build the corrected dict list for a constrained function call (post-pass).
+# Iterates @constrained_N markers in order.  For each marker:
+#
+#   - If the inference-time pass already injected a dict at this index
+#     (list_nth_maybe_tdict succeeds), keep it unchanged.  This covers both:
+#       • Input-position constraints correctly resolved at inference time.
+#       • Return-position constraints inside a constrained fn body where the
+#         @fwd marker dict was already correctly injected.
+#
+#   - If no dict was injected (index ≥ len(existing_dicts)):
+#     try to add one by scanning concrete_ret for a @inst:class_name:X match
+#     (find_inst_in_return_type).  If the return type is still polymorphic
+#     (no matching instance found), NO dict is emitted for this constraint —
+#     the call is still-polymorphic and the lowering @fwd path must handle it.
+#
+# WHY skip dispatch_type_walk: after typecheck_decl's generalize(), the scheme
+# in env uses fresh TVar names (e.g. "t42"), while the @constrained_N marker
+# stores the ORIGINAL prog-var name (e.g. "a").  dispatch_type_walk compares
+# against the original prog var but finds only the fresh name → returns Nothing.
+# Scanning concrete_ret directly bypasses this name-mismatch entirely.
+fn build_constrained_fn_dicts(
+  fn_name: String,
+  idx: Int,
+  env: Dict types.Scheme,
+  concrete_ret: types.Type,
+  pos: source.SourcePos,
+  existing_dicts: List typed_ast.TypedExpr
+) -> List typed_ast.TypedExpr =
+  match dict_get("@constrained_" ++ int_to_string(idx) ++ ":" ++ fn_name, env) with
+  | Nothing -> Nil
+  | Just class_marker ->
+      match class_marker with
+      | types.Scheme _ _ (types.TApp(types.TConst class_name)(types.TConst _)) _ ->
+          match list_nth_maybe_tdict(existing_dicts, idx) with
+          | Just existing_d ->
+              # Inference-time dict already present — keep it
+              Cons(existing_d,
+                   build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
+          | Nothing ->
+              # No existing dict — try to add one from the concrete return type
+              match find_inst_in_return_type(class_name, concrete_ret, env, pos) with
+              | Just new_dict ->
+                  Cons(new_dict,
+                       build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
+              | Nothing ->
+                  # Still polymorphic — no dict for this constraint
+                  build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts)
+      | types.Scheme _ _ (types.TConst _) _ ->
+          # Marker without prog_var — keep existing dict or emit nothing
+          match list_nth_maybe_tdict(existing_dicts, idx) with
+          | Just existing_d ->
+              Cons(existing_d,
+                   build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
+          | Nothing ->
+              build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts)
+      | _ ->
+          build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts)
+
+# Scan a concrete return type for an inner component that has an @inst marker
+# for the given class.  Tries the type itself first (handles `a` in return
+# position directly), then recurses into TApp arguments and TTuple elements.
+# Returns the first matching TDict, or Nothing if the return type is still
+# polymorphic (contains only TVars with no matching @inst entry).
+fn find_inst_in_return_type(class_name: String, t: types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  match concrete_type_str(t) with
+  | Just head_str ->
+      match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+      | Just _ ->
+          Just(typed_ast.TDict(
+            ast.TypeConstraint(class_name, Cons(type_to_typeexpr(t), Nil)),
+            types.TConst(class_name), pos))
+      | Nothing ->
+          find_inst_in_return_type_children(class_name, t, env, pos)
+  | Nothing ->
+      Nothing
+
+fn find_inst_in_return_type_children(class_name: String, t: types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  match t with
+  | types.TApp base arg ->
+      match find_inst_in_return_type(class_name, arg, env, pos) with
+      | Just d -> Just(d)
+      | Nothing -> Nothing
+  | types.TTuple items -> find_inst_in_return_type_list(class_name, items, env, pos)
+  | _ -> Nothing
+
+fn find_inst_in_return_type_list(class_name: String, items: List types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  match items with
+  | Nil -> Nothing
+  | Cons h rest ->
+      match find_inst_in_return_type(class_name, h, env, pos) with
+      | Just d -> Just(d)
+      | Nothing -> find_inst_in_return_type_list(class_name, rest, env, pos)
 
 fn try_rewrite_for_return_dispatch(
   env: Dict types.Scheme,
@@ -2781,7 +2928,7 @@ fn maybe_rewrite_class_method_call(
   match fn_ with
   | typed_ast.TVar method_name _ _ ->
       match dict_get("@class:" ++ method_name, env) with
-      | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+      | Nothing -> maybe_rewrite_constrained_fn_call(env, subst, fn_, method_name, args, t, pos)
       | Just class_marker ->
           match class_marker with
           | types.Scheme class_vars _ class_type _ ->
