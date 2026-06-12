@@ -1,6 +1,7 @@
 # Coverage for repl line-editing and history navigation pure helpers.
-# Note: the redraw_input rendering bug (ESC[K fix) and the ctrl-L runtime key
-# mapping are IO-only and cannot be regression-tested in this framework.
+# Note: the redraw_input rendering bug (ESC[K fix), the ctrl-L runtime key
+# mapping, and the module-level `esc` constant are IO-only or cosmetic and
+# cannot be regression-tested in this framework.
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.repl (insert_at, delete_before, history_prev, history_next)
 import stdlib.collections (Vec, foldable_to_vec)

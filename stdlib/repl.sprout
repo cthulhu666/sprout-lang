@@ -3,6 +3,8 @@ import stdlib.compiler as compiler
 import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_line_once)
 import stdlib.string as string
 
+let esc = char_to_str(27)
+
 type SubmissionResult =
   | Continue (Vec String)(compiler.StatefulSession)
   | Exit
@@ -70,7 +72,7 @@ export fn delete_before(raw: String, index: Int) -> String =
 
 fn redraw_input(prompt: String, current: String, cursor: Int) -> Unit !{IO} =
   do
-    term_write("\r" ++ prompt ++ current ++ char_to_str(27) ++ "[K")
+    term_write("\r" ++ prompt ++ current ++ esc ++ "[K")
     term_write("\r" ++ prompt ++ slice_left(current, cursor))
 
 fn ignore_key(value: String !{IO}) -> Unit !{IO} =
@@ -479,11 +481,11 @@ fn interactive_read_line_step(prompt: String, history: Vec String, session: comp
       interactive_read_line_step(prompt, history, session, current, cursor, browse_index, draft, read_escape_token())
   | "tab" ->
       complete_current_line(prompt, history, session, current, cursor)
-  | "left" ->
+  | "left" ->  # ctrl-b is the readline alias
       step_cursor_left(prompt, history, session, current, cursor, browse_index, draft)
   | "ctrl-b" ->
       step_cursor_left(prompt, history, session, current, cursor, browse_index, draft)
-  | "right" ->
+  | "right" ->  # ctrl-f is the readline alias
       step_cursor_right(prompt, history, session, current, cursor, browse_index, draft)
   | "ctrl-f" ->
       step_cursor_right(prompt, history, session, current, cursor, browse_index, draft)
@@ -497,7 +499,7 @@ fn interactive_read_line_step(prompt: String, history: Vec String, session: comp
         interactive_read_line_loop(prompt, history, session, current, string.length(current), browse_index, draft)
   | "ctrl-l" ->
       do
-        term_write(char_to_str(27) ++ "[2J" ++ char_to_str(27) ++ "[H")
+        term_write(esc ++ "[2J" ++ esc ++ "[H")
         redraw_input(prompt, current, cursor)
         interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
   | "up" ->
