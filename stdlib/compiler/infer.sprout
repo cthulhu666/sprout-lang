@@ -1517,9 +1517,11 @@ fn infer_binary(
           match rr with
           | InferErr e -> InferErr(e)
           | InferOk typed_right s2 es2 r_eff ->
-              infer_binary_op(s2, es2, op, typed_left, typed_right, merge_effects(l_eff, r_eff), pos)
+              infer_binary_op(state, env, s2, es2, op, typed_left, typed_right, merge_effects(l_eff, r_eff), pos)
 
 fn infer_binary_op(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   op: String,
@@ -1533,7 +1535,7 @@ fn infer_binary_op(
   else if op == "<" || op == "<=" || op == ">" || op == ">=" then
     check_compare(subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else if op == "==" || op == "!=" then
-    check_eq(subst, eff_subst, op, typed_left, typed_right, eff, pos)
+    check_eq(state, env, subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else if op == "&&" || op == "||" then
     check_bool(subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else
@@ -1583,7 +1585,60 @@ fn check_compare(
               InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
                       s2, eff_subst, eff)
 
+fn is_primitive_eq_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name ->
+      name == "Int" || name == "Bool" || name == "Char" || name == "String"
+  | _ -> false
+
+fn eq_via_class_method(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  op: String,
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match dict_get("eq", env) with
+  | Nothing -> InferErr("internal: Eq.eq not in scope for " ++ op ++ " dispatch")
+  | Just eq_scheme ->
+      do
+        callee_t <- unifier.instantiate(state, eq_scheme)
+        let typed_callee = typed_ast.TVar("eq", callee_t, pos)
+        v <- unifier.fresh(state)
+        r <- infer_call_resolve(
+          subst, eff_subst,
+          callee_t,
+          Cons(typed_ast.typed_expr_type(typed_left),
+               Cons(typed_ast.typed_expr_type(typed_right), Nil)),
+          types.TVar(v),
+          eff,
+          "'eq'")
+        match r with
+        | CallErr e -> InferErr(op ++ " via Eq.eq: " ++ e)
+        | CallOk ret_t s3 es3 call_eff ->
+            do
+              call_result <- check_call_constraint(
+                ast.VarExpr("eq", pos),
+                typed_callee,
+                Cons(typed_left, Cons(typed_right, Nil)),
+                subst, env, ret_t, s3, es3, call_eff, pos,
+                dict_empty())
+              if op == "!=" then
+                match call_result with
+                | InferOk e s4 es4 e_eff ->
+                    InferOk(typed_ast.TUnary("!", e, types.type_bool(), pos),
+                            s4, es4, e_eff)
+                | InferErr e -> InferErr(e)
+              else
+                call_result
+
 fn check_eq(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   op: String,
@@ -1595,8 +1650,11 @@ fn check_eq(
   match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
   | Err e -> InferErr(op ++ " needs same types: " ++ e)
   | Ok s1 ->
-      InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-              s1, eff_subst, eff)
+      if is_primitive_eq_type(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_left))) then
+        InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
+                s1, eff_subst, eff)
+      else
+        eq_via_class_method(state, env, op, typed_left, typed_right, s1, eff_subst, eff, pos)
 
 fn check_bool(
   subst: Dict types.Type,

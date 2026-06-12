@@ -416,7 +416,7 @@ non-empty.  Whitespace and line breaks inside the parentheses are allowed.
 
 | Class | Scope | Synthesized method |
 |---|---|---|
-| `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false |
+| `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false.  The `==` and `!=` infix operators desugar to `Eq.eq` dispatch for all non-primitive types; `==` on `Int`, `Bool`, `Char`, and `String` uses the built-in comparison path. |
 | `Ord` | all ADT shapes | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs compare fields lexicographically via `match compare(l0, r0) with \| 0 -> ... \| c -> c` chains |
 | `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field |
 

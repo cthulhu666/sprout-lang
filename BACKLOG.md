@@ -181,7 +181,8 @@ Definition of done:
 - [x] `P1` Replace `++` special-case dispatch with proper infix operator machinery: `++` desugars to `append` in both Python and Sprout parsers; `__append` sentinel and `infer_semigroup_append` removed from `infer.sprout`; instance resolution uses head-constructor matching so `List Int` matches `instance Semigroup (List a)`; parser parity divergence eliminated.
 - [x] `P1` Add `Monoid` class with identity law documented.
 - [x] `P1` Add `Eq` class with `==`/`!=` constraint checking; superclass of `Ord`.
-- [x] `P1` Add `deriving Eq` (and similar) for ADT structural equality — currently ADT `==` uses runtime primitive without typeclass dispatch; tracked as known gap. (Shipped on `feat/deriving` 2026-06-10; v1 covers `Eq`, `Ord` nullary-only, `ToString`. See `docs/deriving-v1-draft.md`.)
+- [x] `P1` Add `deriving Eq` (and similar) for ADT structural equality. `deriving (Eq)` now fully works: the `==`/`!=` operators desugar to `Eq.eq` class dispatch at infer time for any non-primitive type (ADTs, `Maybe`, `List`, polymorphic). Shipped on `feat/deriving` 2026-06-10; `==` dispatch fix on `fix/eq-operator-adt-dispatch` 2026-06-12. v1 covers `Eq`, `Ord`, `ToString`. See `docs/deriving-v1-draft.md`.
+- [ ] `P2` Route `<`/`<=`/`>`/`>=` on ADTs through `Ord` class dispatch — currently `check_compare` only allows `Int`/`Char` and errors for ADT types; same shape of fix as the `==` ADT dispatch (infer.sprout:check_compare). Not in scope for current PR.
 - [x] `P1` Add pragmatic utility classes (`Eq`, `Ord`, `ToString`) for collection-focused workflows.
 - [x] `P1` Add law-oriented conformance tests (functor identity/composition, monoid identity/associativity): `tests/stdlib/test_typeclass_laws.spr` (30 assertions); added `instance Functor Maybe` to `stdlib/prelude.sprout`; uses concrete typed helpers `nil_int()`/`no_int()` to anchor `Eq` resolution (2026-05-25).
 - [ ] `P1` Add diagnostics for ambiguous/overlapping instance errors.
