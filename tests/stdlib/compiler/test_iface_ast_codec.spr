@@ -1,0 +1,372 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.iface_codec as iface_codec
+
+# Phase 2 iface codec round-trip: encode/decode for ast.Program and all
+# constituent ADTs.
+#
+# Format reference: stdlib/compiler/iface_codec.sprout §"AST codec" section.
+# Design ref: docs/iface-precompiled-modules-v1-draft.md §"What gets serialized".
+#
+# Tests use the text-identity pattern: encode(x) -> decode -> re-encode,
+# then assert the two encoded strings are byte-identical. This avoids the
+# ADT structural-eq problem (no Eq instance on AST) and catches any field
+# dropped during decode.
+
+# --- Positions and helpers ---
+
+fn pos0() -> source.SourcePos = source.SourcePos(0, 1, 1)
+fn pos1() -> source.SourcePos = source.SourcePos(5, 2, 3)
+
+fn rt_expr(e: ast.Expr) -> Bool =
+  match iface_codec.decode_ast_expr(iface_codec.encode_ast_expr(e)) with
+  | Nothing -> false
+  | Just e2 -> iface_codec.encode_ast_expr(e2) == iface_codec.encode_ast_expr(e)
+
+fn rt_pattern(p: ast.Pattern) -> Bool =
+  match iface_codec.decode_ast_pattern(iface_codec.encode_ast_pattern(p)) with
+  | Nothing -> false
+  | Just p2 -> iface_codec.encode_ast_pattern(p2) == iface_codec.encode_ast_pattern(p)
+
+fn rt_decl(d: ast.Decl) -> Bool =
+  match iface_codec.decode_ast_decl(iface_codec.encode_ast_decl(d)) with
+  | Nothing -> false
+  | Just d2 -> iface_codec.encode_ast_decl(d2) == iface_codec.encode_ast_decl(d)
+
+fn rt_program(prog: ast.Program) -> Bool =
+  match iface_codec.decode_ast_program(iface_codec.encode_ast_program(prog)) with
+  | Nothing -> false
+  | Just prog2 -> iface_codec.encode_ast_program(prog2) == iface_codec.encode_ast_program(prog)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # === Atomic Expr forms ===
+
+    assert_true(state, "VarExpr roundtrip",
+      rt_expr(ast.VarExpr("myVar", pos0())))
+
+    assert_true(state, "IntExpr roundtrip",
+      rt_expr(ast.IntExpr(42, pos0())))
+
+    assert_true(state, "IntExpr negative roundtrip",
+      rt_expr(ast.IntExpr(-7, pos1())))
+
+    assert_true(state, "BoolExpr true roundtrip",
+      rt_expr(ast.BoolExpr(true, pos0())))
+
+    assert_true(state, "BoolExpr false roundtrip",
+      rt_expr(ast.BoolExpr(false, pos1())))
+
+    assert_true(state, "StringExpr plain roundtrip",
+      rt_expr(ast.StringExpr("hello", pos0())))
+
+    assert_true(state, "StringExpr with escape chars roundtrip",
+      rt_expr(ast.StringExpr("hello\nworld", pos0())))
+
+    assert_true(state, "StringExpr with quotes roundtrip",
+      rt_expr(ast.StringExpr("say \"hi\"", pos0())))
+
+    assert_true(state, "StringExpr with backslash roundtrip",
+      rt_expr(ast.StringExpr("a\\b", pos0())))
+
+    assert_true(state, "CharExpr plain roundtrip",
+      rt_expr(ast.CharExpr('a', pos0())))
+
+    assert_true(state, "CharExpr newline roundtrip",
+      rt_expr(ast.CharExpr('\n', pos0())))
+
+    assert_true(state, "UnitExpr roundtrip",
+      rt_expr(ast.UnitExpr(pos0())))
+
+    # === SourcePos preservation ===
+
+    assert_true(state, "SourcePos round-trips faithfully",
+      match iface_codec.decode_ast_expr(iface_codec.encode_ast_expr(ast.VarExpr("x", pos1()))) with
+      | Nothing -> false
+      | Just e ->
+          match e with
+          | ast.VarExpr _ p ->
+              match p with
+              | source.SourcePos idx line col ->
+                  idx == 5 && line == 2 && col == 3
+          | _ -> false)
+
+    # === Compound Expr forms ===
+
+    assert_true(state, "TupleExpr roundtrip",
+      rt_expr(ast.TupleExpr(
+        Cons(ast.IntExpr(1, pos0()), Cons(ast.BoolExpr(true, pos0()), Nil)),
+        pos0())))
+
+    assert_true(state, "IfExpr roundtrip",
+      rt_expr(ast.IfExpr(
+        ast.BoolExpr(true, pos0()),
+        ast.IntExpr(1, pos0()),
+        ast.IntExpr(0, pos0()),
+        pos0())))
+
+    assert_true(state, "BinaryExpr roundtrip",
+      rt_expr(ast.BinaryExpr("+",
+        ast.IntExpr(1, pos0()),
+        ast.IntExpr(2, pos0()),
+        pos0())))
+
+    assert_true(state, "UnaryExpr roundtrip",
+      rt_expr(ast.UnaryExpr("-",
+        ast.IntExpr(5, pos0()),
+        pos0())))
+
+    assert_true(state, "CallExpr roundtrip",
+      rt_expr(ast.CallExpr(
+        ast.VarExpr("f", pos0()),
+        Cons(ast.IntExpr(1, pos0()), Cons(ast.IntExpr(2, pos0()), Nil)),
+        pos0())))
+
+    assert_true(state, "LambdaExpr roundtrip",
+      rt_expr(ast.LambdaExpr(
+        Cons(ast.Param("x", Nothing), Nil),
+        ast.VarExpr("x", pos0()),
+        pos0())))
+
+    assert_true(state, "LambdaExpr with type annotation roundtrip",
+      rt_expr(ast.LambdaExpr(
+        Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+        ast.BinaryExpr("+", ast.VarExpr("x", pos0()), ast.IntExpr(1, pos0()), pos0()),
+        pos0())))
+
+    assert_true(state, "MatchExpr roundtrip",
+      rt_expr(ast.MatchExpr(
+        ast.VarExpr("v", pos0()),
+        Cons(
+          ast.MatchBranch(ast.IntPattern(1, pos0()), ast.StringExpr("one", pos0())),
+          Cons(
+            ast.MatchBranch(ast.WildcardPattern(pos0()), ast.StringExpr("other", pos0())),
+            Nil)),
+        pos0())))
+
+    assert_true(state, "IntRangeExpr roundtrip",
+      rt_expr(ast.IntRangeExpr(
+        ast.IntExpr(1, pos0()),
+        ast.IntExpr(10, pos0()),
+        pos0())))
+
+    assert_true(state, "GetFieldExpr roundtrip",
+      rt_expr(ast.GetFieldExpr(
+        ast.VarExpr("r", pos0()),
+        "fieldName",
+        pos0())))
+
+    assert_true(state, "RecordExpr roundtrip",
+      rt_expr(ast.RecordExpr("Point",
+        Cons(ast.RecordField("x", ast.IntExpr(1, pos0())),
+          Cons(ast.RecordField("y", ast.IntExpr(2, pos0())), Nil)),
+        pos0())))
+
+    assert_true(state, "DoExpr with bind step roundtrip",
+      rt_expr(ast.DoExpr(
+        Cons(
+          ast.DoBindStep(ast.VarPattern("x", pos0()), ast.VarExpr("readLine", pos0())),
+          Cons(
+            ast.DoLetStep("y", ast.IntExpr(42, pos0())),
+            Cons(
+              ast.DoExprStep(ast.VarExpr("print", pos0())),
+              Nil))),
+        pos0())))
+
+    assert_true(state, "StringTemplateExpr roundtrip",
+      rt_expr(ast.StringTemplateExpr(
+        Cons(ast.LitPart("hello "), Cons(ast.InterpPart(ast.VarExpr("name", pos0())), Nil)),
+        pos0())))
+
+    # === Pattern coverage ===
+
+    assert_true(state, "WildcardPattern roundtrip",
+      rt_pattern(ast.WildcardPattern(pos0())))
+
+    assert_true(state, "VarPattern roundtrip",
+      rt_pattern(ast.VarPattern("x", pos0())))
+
+    assert_true(state, "IntPattern roundtrip",
+      rt_pattern(ast.IntPattern(42, pos0())))
+
+    assert_true(state, "IntPattern negative roundtrip",
+      rt_pattern(ast.IntPattern(-1, pos0())))
+
+    assert_true(state, "BoolPattern true roundtrip",
+      rt_pattern(ast.BoolPattern(true, pos0())))
+
+    assert_true(state, "StringPattern roundtrip",
+      rt_pattern(ast.StringPattern("hello", pos0())))
+
+    assert_true(state, "CharPattern roundtrip",
+      rt_pattern(ast.CharPattern('z', pos0())))
+
+    assert_true(state, "UnitPattern roundtrip",
+      rt_pattern(ast.UnitPattern(pos0())))
+
+    assert_true(state, "TuplePattern roundtrip",
+      rt_pattern(ast.TuplePattern(
+        Cons(ast.VarPattern("a", pos0()), Cons(ast.VarPattern("b", pos0()), Nil)),
+        pos0())))
+
+    assert_true(state, "ConstructorPattern no sub-patterns roundtrip",
+      rt_pattern(ast.ConstructorPattern("Nothing", Nil, pos0())))
+
+    assert_true(state, "ConstructorPattern with sub-patterns roundtrip",
+      rt_pattern(ast.ConstructorPattern("Just",
+        Cons(ast.VarPattern("x", pos0()), Nil),
+        pos0())))
+
+    assert_true(state, "nested ConstructorPattern roundtrip",
+      rt_pattern(ast.ConstructorPattern("Cons",
+        Cons(ast.VarPattern("h", pos0()),
+          Cons(ast.ConstructorPattern("Nil", Nil, pos0()), Nil)),
+        pos0())))
+
+    # === Decl coverage ===
+
+    assert_true(state, "FnDecl roundtrip",
+      rt_decl(ast.FnDecl("myFn",
+        Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+        Just(ast.TypeName("Int")),
+        Nothing,
+        Nil,
+        ast.BinaryExpr("+", ast.VarExpr("x", pos0()), ast.IntExpr(1, pos0()), pos0()),
+        pos0())))
+
+    assert_true(state, "FnDecl with effects roundtrip",
+      rt_decl(ast.FnDecl("printSomething",
+        Cons(ast.Param("s", Just(ast.TypeName("String"))), Nil),
+        Just(ast.TypeName("Unit")),
+        Just(Cons("IO", Nil)),
+        Nil,
+        ast.VarExpr("print", pos0()),
+        pos0())))
+
+    assert_true(state, "ExternFnDecl roundtrip",
+      rt_decl(ast.ExternFnDecl("myExtern",
+        Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+        Just(ast.TypeName("Int")),
+        Nothing,
+        pos0())))
+
+    assert_true(state, "TypeDecl roundtrip",
+      rt_decl(ast.TypeDecl("MyType",
+        Cons("a", Nil),
+        Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil)),
+          Cons(ast.TypeConstructor("Nothing", Nil), Nil)),
+        Cons("Eq", Cons("ToString", Nil)),
+        pos0())))
+
+    assert_true(state, "RecordDecl roundtrip",
+      rt_decl(ast.RecordDecl("Point",
+        Nil,
+        Cons(ast.RecordFieldDecl("x", ast.TypeName("Int")),
+          Cons(ast.RecordFieldDecl("y", ast.TypeName("Int")), Nil)),
+        pos0())))
+
+    assert_true(state, "LetDecl roundtrip",
+      rt_decl(ast.LetDecl("pi", ast.IntExpr(3, pos0()), pos0())))
+
+    assert_true(state, "ClassDecl roundtrip",
+      rt_decl(ast.ClassDecl("Eq",
+        Cons("a", Nil),
+        Cons(ast.ClassMethodSig("eq",
+          Cons(ast.Param("x", Just(ast.TypeName("a"))),
+            Cons(ast.Param("y", Just(ast.TypeName("a"))), Nil)),
+          ast.TypeName("Bool"),
+          Nothing), Nil),
+        Nil,
+        pos0())))
+
+    assert_true(state, "InstanceDecl roundtrip",
+      rt_decl(ast.InstanceDecl(
+        ast.TypeConstraint("Eq", Cons(ast.TypeName("Int"), Nil)),
+        Nil,
+        Cons(ast.InstanceMethodImpl("eq",
+          Cons(ast.Param("x", Nothing), Cons(ast.Param("y", Nothing), Nil)),
+          Nothing,
+          Nothing,
+          ast.BinaryExpr("==", ast.VarExpr("x", pos0()), ast.VarExpr("y", pos0()), pos0())),
+          Nil),
+        pos0())))
+
+    assert_true(state, "AliasDecl roundtrip",
+      rt_decl(ast.AliasDecl("Predicate",
+        Cons("a", Nil),
+        ast.TypeArrow(ast.TypeName("a"), ast.TypeName("Bool"), Nothing),
+        pos0())))
+
+    # === TypeExpr variants ===
+
+    assert_true(state, "TypeName roundtrip (via FnDecl)",
+      rt_decl(ast.FnDecl("f", Nil, Just(ast.TypeName("Int")), Nothing, Nil, ast.UnitExpr(pos0()), pos0())))
+
+    assert_true(state, "TypeApply roundtrip (via FnDecl)",
+      rt_decl(ast.FnDecl("f", Nil,
+        Just(ast.TypeApply(ast.TypeName("Maybe"), ast.TypeName("Int"))),
+        Nothing, Nil, ast.UnitExpr(pos0()), pos0())))
+
+    assert_true(state, "TypeArrow roundtrip (via FnDecl)",
+      rt_decl(ast.FnDecl("f", Nil,
+        Just(ast.TypeArrow(ast.TypeName("Int"), ast.TypeName("Bool"), Just (Cons("IO", Nil)))),
+        Nothing, Nil, ast.UnitExpr(pos0()), pos0())))
+
+    assert_true(state, "TypeEffect roundtrip (via FnDecl)",
+      rt_decl(ast.FnDecl("f", Nil,
+        Just(ast.TypeEffect(ast.TypeName("Unit"), Cons("IO", Nil))),
+        Nothing, Nil, ast.UnitExpr(pos0()), pos0())))
+
+    assert_true(state, "TupleType roundtrip (via FnDecl)",
+      rt_decl(ast.FnDecl("f", Nil,
+        Just(ast.TupleType(Cons(ast.TypeName("Int"), Cons(ast.TypeName("Bool"), Nil)))),
+        Nothing, Nil, ast.UnitExpr(pos0()), pos0())))
+
+    # === Full Program round-trip ===
+
+    let sample_prog = ast.Program(
+      Cons(
+        ast.LetDecl("answer", ast.IntExpr(42, pos0()), pos0()),
+        Cons(
+          ast.FnDecl("double",
+            Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+            Just(ast.TypeName("Int")),
+            Nothing,
+            Nil,
+            ast.BinaryExpr("*", ast.IntExpr(2, pos0()), ast.VarExpr("x", pos0()), pos0()),
+            pos0()),
+          Cons(
+            ast.TypeDecl("Color",
+              Nil,
+              Cons(ast.TypeConstructor("Red", Nil),
+                Cons(ast.TypeConstructor("Green", Nil),
+                  Cons(ast.TypeConstructor("Blue", Nil), Nil))),
+              Nil,
+              pos0()),
+            Nil))),
+      pos0())
+
+    assert_true(state, "full Program roundtrip",
+      rt_program(sample_prog))
+
+    # === Rejection tests ===
+
+    assert_true(state, "decode_ast_expr rejects empty",
+      match iface_codec.decode_ast_expr("") with | Nothing -> true | _ -> false)
+
+    assert_true(state, "decode_ast_expr rejects garbage",
+      match iface_codec.decode_ast_expr("not an expr") with | Nothing -> true | _ -> false)
+
+    assert_true(state, "decode_ast_pattern rejects empty",
+      match iface_codec.decode_ast_pattern("") with | Nothing -> true | _ -> false)
+
+    assert_true(state, "decode_ast_decl rejects empty",
+      match iface_codec.decode_ast_decl("") with | Nothing -> true | _ -> false)
+
+    assert_true(state, "decode_ast_program rejects empty",
+      match iface_codec.decode_ast_program("") with | Nothing -> true | _ -> false)
+
+    summary(state)

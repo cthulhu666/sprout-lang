@@ -165,6 +165,37 @@ For the very first iteration:
 This is independently committable, validates the textual format, and unblocks
 the rest of PR 1.
 
+## Phase 2 — AST codec (shipped on `feat/iface-ast-codec`)
+
+Phase 2 adds encode/decode for `ast.Program` and all constituent ADTs to
+`stdlib/compiler/iface_codec.sprout`.  The implementation is additive — no
+existing Scheme/IfaceFile encode/decode functions were modified.
+
+**New entry points:**
+- `encode_ast_expr` / `decode_ast_expr` — all 19 `ast.Expr` constructors
+- `encode_ast_pattern` / `decode_ast_pattern` — all 9 `ast.Pattern` constructors
+- `encode_ast_decl` / `decode_ast_decl` — all 8 `ast.Decl` constructors
+- `encode_ast_program` / `decode_ast_program` — top-level `ast.Program`
+- Supporting encoders/decoders for `TypeExpr`, `Param`, `MatchBranch`, `DoStep`,
+  `RecordField`, `TemplateExprPart`, `TypeConstraint`, `TypeConstructor`,
+  `RecordFieldDecl`, `ClassMethodSig`, `InstanceMethodImpl`, `SourcePos`
+
+**Format additions** (S-expression extensions to Phase 1 grammar):
+- `<quoted>` — `"..."` with `\\`, `\"`, `\n`, `\r`, `\t` escape sequences
+  for arbitrary string and char content
+- `<int>` — bare signed decimal atom (handles negative literals)
+- `<bool>` — `true` / `false` bare atoms
+- `<char>` — `(Char "<c>")` single codepoint as quoted string
+- `<pos>` — `(Pos <idx> <line> <col>)` for `source.SourcePos`
+- `<maybe X>` — `(Just X)` / `(Nothing)` for optional fields
+
+**SourcePos**: positions are encoded faithfully (not stripped) per the TASTy
+precedent, enabling downstream LSP go-to-definition through iface boundaries.
+
+**Tests:** `tests/stdlib/compiler/test_iface_ast_codec.spr` — 58 assertions
+covering all constructor variants, escape edge cases, SourcePos preservation,
+and decode-rejection for malformed input.  All pass; no suite regressions.
+
 ## References
 
 - Existing CI cache pattern: `.forgejo/workflows/ci.yml` `Cache stage-1 binary`

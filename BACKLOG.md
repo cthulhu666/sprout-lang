@@ -413,6 +413,9 @@ The next milestone after manual stage-2: have the stage-1 Sprout-native compiler
 - [x] ClassDecl/InstanceDecl: class methods registered globally as polymorphic schemes; instance method bodies checked against method annotations; checker corpus now 6/6.
 - [x] Pattern match exhaustiveness checking: non-exhaustive matches on user-defined ADTs now produce a compile-time `[DIAG]` error citing the missing constructor names; wildcard/variable patterns are treated as catch-alls.
 
+- [x] **Iface arc Phase 1** (shipped on `feat/iface-skeleton` / `feat/iface-ast-codec`): `encode_scheme`/`decode_scheme`; `IfaceFile` v2 wrapper with CtorInfo/ClassInfo/InstanceInfo tables; `extract_named_schemes`/`extract_ctor_infos`/`extract_class_infos`/`extract_instance_infos` from a typechecked program; round-trip tests in `test_scheme_roundtrip.spr`, `test_iface_file_roundtrip.spr`, `test_iface_extraction.spr`.
+- [x] **Iface arc Phase 2** (shipped on `feat/iface-ast-codec`): AST codec — `encode_ast_program`/`decode_ast_program` and all constituent ADTs (`Expr`, `Pattern`, `Decl`, `TypeExpr`, `Param`, `MatchBranch`, `DoStep`, `RecordField`, `TemplateExprPart`, `TypeConstraint`, `TypeConstructor`, `RecordFieldDecl`, `ClassMethodSig`, `InstanceMethodImpl`, `SourcePos`); 58 round-trip assertions in `test_iface_ast_codec.spr`. Positions preserved faithfully for LSP go-to-definition.
+
 ## Next Steps
 
 - Note: pure unifier (state-threading) was considered and decided against — keeping `Ref`-based mutable state in `InferState` for performance reasons.
