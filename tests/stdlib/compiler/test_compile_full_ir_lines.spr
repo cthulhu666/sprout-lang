@@ -39,6 +39,17 @@ fn def_lines_have_define(r: compiler.IrFullLinesResult) -> Bool =
   | compiler.IrFullLinesFail _ -> false
   | compiler.IrFullLinesOk _ _ def_lines _ -> has_define_line(def_lines)
 
+fn first_diag_msg(r: compiler.IrFullLinesResult) -> String =
+  match r with
+  | compiler.IrFullLinesOk _ _ _ _ -> ""
+  | compiler.IrFullLinesFail diags ->
+      match diags with
+      | Nil -> ""
+      | Cons d _ ->
+          match d with
+          | compiler.DiagError msg -> msg
+          | compiler.DiagWarning msg -> msg
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -59,4 +70,14 @@ fn main() -> Unit !{IO} =
           _ <- write_file(bad_path, "fn broken() -> Int = undefined_name_xyz_99887766\n")
           r_bad <- compiler.compile_full_ir_lines(bad_path, stdlib_root, false)
           assert_true(state, "compile_full_ir_lines returns Fail for invalid source", is_ir_fail(r_bad))
+          # Coverage: check-failure path — a file with a type error compiles and bundles
+          # successfully but fails typecheck.  The diagnostic must start with "check: "
+          # so the traced path's FAILED-at-check report continues to make sense after
+          # the refactor.  Pinned by refactor/trace-fork-unify.
+          let type_err_path = "/tmp/sprout_test_compile_full_ir_lines_type_err.sprout"
+          _ <- write_file(type_err_path, "fn bad_type() -> String = 42\n")
+          r_type_err <- compiler.compile_full_ir_lines(type_err_path, stdlib_root, false)
+          assert_true(state, "compile_full_ir_lines returns Fail for type error", is_ir_fail(r_type_err))
+          assert_true(state, "type-error failure diagnostic starts with 'check: '",
+            str_starts_with(first_diag_msg(r_type_err), "check: "))
     summary(state)
