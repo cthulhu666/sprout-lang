@@ -644,9 +644,15 @@ fn parse_composition_cont(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Re
   if tok_is_symbol(tok_at(tokens, i), "<<") || tok_is_symbol(tok_at(tokens, i), ">>") then
     do
       (right, i2) <- parse_composition(tokens, i + 1)
-      Ok((ast.BinaryExpr(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)), i2))
+      Ok((desugar_compose(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)), i2))
   else
     Ok((left, i))
+
+fn desugar_compose(op: String, left: ast.Expr, right: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr(if op == ">>" then "rcompose" else "lcompose", pos),
+    Cons(left, Cons(right, Nil)),
+    pos)
 
 fn parse_unary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   if tok_is_symbol(tok_at(tokens, i), "-") then

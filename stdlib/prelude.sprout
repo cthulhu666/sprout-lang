@@ -775,6 +775,14 @@ fn dict_from_list_loop(pairs: List (String, v), acc: Dict v) -> Dict v =
 export fn pipe_apply(f: a -> b, value: a) -> b =
   f(value)
 
+# f >> g desugars to rcompose(f, g): apply f first, then g.  O(1)
+export fn rcompose(f: a -> b, g: b -> c) =
+  \x -> g(f(x))
+
+# f << g desugars to lcompose(f, g): apply g first, then f.  O(1)
+export fn lcompose(f: b -> c, g: a -> b) =
+  \x -> f(g(x))
+
 export fn result_map(f: a -> b, r: Result e a) -> Result e b =
   match r with
   | Ok x -> Ok(f(x))

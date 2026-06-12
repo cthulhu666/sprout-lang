@@ -146,10 +146,17 @@ This file tracks open design, implementation, and tooling follow-up work.
    First milestone constraints: one-shot handlers only (no multi-shot resumption), no
    open effect row polymorphism, no constrained effect operations, backwards-compatible
    (old `TestState` API stays in `stdlib/test.sprout` alongside new `run_tests`).
-12. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
+12. Revisit `|>` multi-arg semantics.
+   Currently `x |> f(a, b)` desugars at parse time to `f(a, b, x)` (value appended as last
+   argument). This gives the operator two distinct modes (plain-identifier RHS vs. partial-call
+   RHS) that are not compositionally obvious. Options: drop the multi-arg form and require
+   explicit lambdas (`x |> fn(y) = f(a, y)`), adopt Elixir-style value-first (`f(x, a, b)`),
+   or keep as-is. First-class use is already covered by `pipe_apply` in the prelude.
+   Decision deferred; current behaviour unchanged.
+14. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
    Design doc: [observability-guard-rails.md](./observability-guard-rails.md).
    These features are not scheduled, but the design constraints in that doc must be respected in all Stage 2+ self-hosted compiler code so they remain practical to add. The six constraints — source locations first-class, explicit typed passes, explicit capability passing, no premature pass fusion, type survival into typed core, accurate effect annotations — are active guard rails, not future work items.
-13. Add a source-level debugger for compiled user programs (v1).
+14. Add a source-level debugger for compiled user programs (v1).
    Design doc: [debugger-v1-draft.md](./debugger-v1-draft.md).
    Approach: emit LLVM DWARF debug metadata from the codegen pass (opt-in via `--debug`
    flag), then use `lldb`/`gdb` as the debugger UI.  Every `TypedExpr` already carries

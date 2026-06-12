@@ -198,12 +198,13 @@ match pair with
 
 `()` is the unit pattern and matches only the `Unit` value.
 
-Composition operators are ordinary binary operators on functions:
+Composition operators desugar to `rcompose` and `lcompose` from the prelude:
 
-- `f >> g` means `\x -> g(f(x))`
-- `f << g` means `\x -> f(g(x))`
+- `f >> g` desugars to `rcompose(f, g)`, meaning `\x -> g(f(x))` — apply `f` first, then `g`
+- `f << g` desugars to `lcompose(f, g)`, meaning `\x -> f(g(x))` — apply `g` first, then `f`
 
 They associate to the right, so `f >> g >> h` means `\x -> h(g(f(x)))`.
+`rcompose` and `lcompose` are first-class functions and can be passed as values.
 
 The pipe operator is a binary operator that threads a value into the final
 argument position of the expression on its right:
