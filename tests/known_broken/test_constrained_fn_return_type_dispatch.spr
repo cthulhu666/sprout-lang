@@ -1,0 +1,86 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# KNOWN BROKEN — do NOT move to tests/stdlib/ until the bug is fixed.
+#
+# Bug: constrained-function calls where the constraint's type variable appears
+# ONLY in the return type (not the arguments) fail to inject the dict argument.
+#
+# Root cause (infer.sprout):
+#   - Class method calls have a post-pass walker `resolve_dispatch_typed_expr`
+#     (line ~2803) that rewrites the TDict after the body-vs-return-type
+#     unification (s2) makes the type concrete.
+#   - Constrained regular function calls go through `inject_constrained_fn_dicts`
+#     which runs inline during `infer_call_inner`, BEFORE return-type unification.
+#     At that point `s3` only reflects argument unification, so the constraint
+#     var `a` in `fn f(s: String) -> Maybe a where Deser a` is still a free TVar.
+#     `resolve_obligation` finds no concrete type and falls back to
+#     `resolve_one_constraint_tdict` → `first_concrete_typed_arg_str` →
+#     finds `String` from the input arg → tries `@inst:Deser:String` → fails →
+#     falls to fwd scan → no fwd markers (concrete caller) → no dict injected.
+#
+# Evidence: the IR for `get_int_a_worker` calls
+#   `@deser_outer_a_worker(i64 %s)` (arity 1) instead of
+#   `@deser_outer_a_worker(i64 %s, i64 %__tc_Deser_Int_deser)` (arity 2),
+#   causing a SIGSEGV (reading past end of dict arg list).
+#
+# Fix needed: a post-pass walker for constrained function calls (analogous to
+#   `resolve_dispatch_typed_expr` for class methods) that injects the missing
+#   dict after the outer return-type unification makes the constraint type concrete.
+#
+# Tracked in BACKLOG.md §5 P2.
+# Also see: prog-var-name mismatch is a secondary consequence of the same root
+# cause (when resolve_via_fwd_for_prog_var also fails due to name mismatch,
+# the symptom worsens).
+#
+# To reproduce the crash: uncomment the failing cases and run through just test.
+
+class Deser a {
+  fn deser(s: String) -> Maybe a
+}
+
+instance Deser Int {
+  fn deser(s: String) -> Maybe Int = Just(42)
+}
+
+instance Deser Bool {
+  fn deser(s: String) -> Maybe Bool = Just(true)
+}
+
+# Single-level return-type dispatch (WORKS: handled by resolve_dispatch_typed_expr post-pass):
+fn deser_direct_int(s: String) -> Maybe Int = deser(s)
+fn deser_direct_bool(s: String) -> Maybe Bool = deser(s)
+
+# 2-level consistent 'a' chain (BROKEN: inject_constrained_fn_dicts misses dict):
+fn deser_mid_a(s: String) -> Maybe a where Deser a = deser(s)
+fn deser_outer_a(s: String) -> Maybe a where Deser a = deser_mid_a(s)
+fn get_int_a(s: String) -> Maybe Int = deser_outer_a(s)
+fn get_bool_a(s: String) -> Maybe Bool = deser_outer_a(s)
+
+# 2-level name-mismatch chain (BROKEN — same root cause, additionally
+# resolve_via_fwd_for_prog_var fails due to 'a' vs 'v' name difference):
+fn deser_mid_v(s: String) -> Maybe a where Deser a = deser(s)
+fn deser_outer_v(s: String) -> Maybe v where Deser v = deser_mid_v(s)
+fn get_int_v(s: String) -> Maybe Int = deser_outer_v(s)
+fn get_bool_v(s: String) -> Maybe Bool = deser_outer_v(s)
+
+fn is_just_int_42(m: Maybe Int) -> Bool =
+  match m with | Just 42 -> true | _ -> false
+
+fn is_just_true(m: Maybe Bool) -> Bool =
+  match m with | Just b -> b | _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Single-level WORKS:
+    assert_eq(state, "direct Int works", is_just_int_42(deser_direct_int("x")), true)
+    assert_eq(state, "direct Bool works", is_just_true(deser_direct_bool("x")), true)
+
+    # Multi-level BROKEN (crashes with SIGSEGV — uncomment to repro):
+    # assert_eq(state, "2-level_a Int", is_just_int_42(get_int_a("x")), true)
+    # assert_eq(state, "2-level_a Bool", is_just_true(get_bool_a("x")), true)
+    # assert_eq(state, "2-level_v Int", is_just_int_42(get_int_v("x")), true)
+    # assert_eq(state, "2-level_v Bool", is_just_true(get_bool_v("x")), true)
+
+    summary(state)
