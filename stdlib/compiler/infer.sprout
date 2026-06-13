@@ -182,6 +182,14 @@ export fn register_type_decl(decl: ast.Decl, env: Dict types.Scheme) -> Dict typ
   match decl with
   | ast.TypeDecl name params ctors _ _ ->
       register_ctors_for_type(name, params, build_local_params(params, dict_empty()), ctors, env)
+  # WrapDecl: synthesize a single-constructor type with the same name as the
+  # wrap. The constructor's argument type is the wrap's inner type. This gives
+  # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
+  # for `match | Foo x ->`.  Zero type parameters by design (the inner type
+  # may itself be polymorphic, but Foo always has the same representation).
+  | ast.WrapDecl name inner _ ->
+      register_ctors_for_type(name, Nil, dict_empty(),
+        Cons(ast.TypeConstructor(name, Cons(inner, Nil)), Nil), env)
   | _ -> env
 
 fn build_local_params(params: List String, acc: Dict types.Type) -> Dict types.Type =
@@ -240,6 +248,9 @@ fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List S
       match decl with
       | ast.TypeDecl name _ ctors _ _ ->
           build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
+      # WrapDecl: a single synthetic constructor with the same name as the type.
+      | ast.WrapDecl name _ _ ->
+          build_ctor_map(rest, dict_set(name, Cons(name, Nil), acc))
       | _ -> build_ctor_map(rest, acc)
 
 fn collect_ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
@@ -2471,6 +2482,8 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
           collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
       | ast.AliasDecl name _ _ _ ->
           collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+      | ast.WrapDecl name _ _ ->
+          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
       | _ -> collect_declared_type_names(rest, acc)
 
 # O(depth): validate a single TypeExpr, returning the first error found.
@@ -2537,6 +2550,8 @@ fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
       validate_record_fields(fields, name, declared)
   | ast.AliasDecl name _ rhs _ ->
       validate_te(rhs, name, declared)
+  | ast.WrapDecl name inner _ ->
+      validate_te(inner, name, declared)
   | _ -> Nothing
 
 fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe String =
@@ -2588,6 +2603,8 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
           pre_scan_fn_decls(rest, env, register_single_param_alias(name, param, rhs_te, alias_env))
       | ast.TypeDecl _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl(decl, env), alias_env)
+      | ast.WrapDecl _ _ _ ->
+          pre_scan_fn_decls(rest, register_type_decl(decl, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 fn typecheck_decls_inner(
@@ -2635,6 +2652,9 @@ fn typecheck_decl(
 ) -> TypedDeclResult !{IO} =
   match decl with
   | ast.TypeDecl _ _ _ _ _ ->
+      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
+  | ast.WrapDecl _ _ _ ->
+      # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
       TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
   | ast.RecordDecl rec_name type_params fields _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), register_record_fields(rec_name, type_params, fields, env), env_ftv)

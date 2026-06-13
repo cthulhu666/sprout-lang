@@ -1,0 +1,67 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# Behavioral tests for the 'wrap' zero-cost distinct type feature.
+#
+# 'wrap Foo = T' declares a type Foo that:
+#   - is distinct from T (Foo ≠ T, Foo ≠ other wraps of T)
+#   - has a single constructor Foo(x: T) -> Foo
+#   - destructs via pattern match | Foo x ->
+#   - is zero-cost at runtime (no allocation, no heap indirection)
+#
+# This file currently fails to compile because 'wrap' is not yet a
+# keyword — that is the intended TDD failing state.
+
+wrap Age = Int
+wrap UserId = Int
+wrap Name = String
+wrap Score = (Int, Int)
+
+fn age_value(a: Age) -> Int =
+  match a with | Age n -> n
+
+fn userid_value(u: UserId) -> Int =
+  match u with | UserId n -> n
+
+fn name_value(n: Name) -> String =
+  match n with | Name s -> s
+
+fn score_value(s: Score) -> (Int, Int) =
+  match s with | Score p -> p
+
+fn add_ages(a: Age, b: Age) -> Age =
+  match a with
+  | Age x ->
+      match b with
+      | Age y -> Age(x + y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Basic construction and extraction
+    assert_eq(state, "Age wraps Int: extract 42",
+      age_value(Age(42)), 42)
+    assert_eq(state, "Age wraps Int: extract 0",
+      age_value(Age(0)), 0)
+    assert_eq(state, "Name wraps String",
+      name_value(Name("Alice")), "Alice")
+
+    # Two wrap types over the same underlying type are distinct;
+    # their values are independently tracked.
+    assert_eq(state, "Age and UserId are independent",
+      age_value(Age(10)) + userid_value(UserId(32)), 42)
+
+    # Operations on the inner type via wrap/unwrap roundtrip
+    assert_eq(state, "add_ages: 10 + 32 = 42",
+      age_value(add_ages(Age(10), Age(32))), 42)
+
+    # Wrap over a tuple type
+    let s = Score((3, 7))
+    match score_value(s) with
+    | (wins, losses) ->
+        do
+          assert_eq(state, "Score tuple: wins", wins, 3)
+          assert_eq(state, "Score tuple: losses", losses, 7)
+
+    summary(state)

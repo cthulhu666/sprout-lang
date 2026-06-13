@@ -174,7 +174,19 @@ This file tracks open design, implementation, and tooling follow-up work.
    unchanged; M1 scopes `!dbg` to user-module functions only (not stdlib/prelude) to
    avoid misleading source attribution in multi-file bundles; full multi-file DWARF is a
    post-M1 follow-up.
-15. Span `BundleErr`, `LowerErr`, and codegen errors (guideline #5 Phase 3).
+15. `wrap` ergonomics follow-ups (the v1 `wrap` keyword shipped 2026-06-13).
+   The zero-cost distinct-type feature `wrap Foo = T` is normative — see
+   `docs/spec-v0.md` §5.6.1.  These ergonomics improvements remain open:
+   - Parameter-level destructuring: `fn f(Foo x) -> ...` desugars to
+     `match arg with | Foo x ->`; useful for all single-constructor types,
+     not just wrap.
+   - Auto-generated zero-cost accessor: `wrap Foo = T` generates
+     `fn foo_inner(Foo x) -> T = x`.
+   - Named-field variant (longer-term): `wrap Foo { inner: T }` for named
+     accessor syntax.
+   - `opaque type` for Scala 3-style module-boundary transparency
+     (transparent within defining module, opaque to callers).
+16. Span `BundleErr`, `LowerErr`, and codegen errors (guideline #5 Phase 3).
    Phase 1+2 landed in `fix/span-error-types`: `Diagnostic`, `InferErr`, `TypedErr`,
    `CheckErr`, `BodyErr` all carry `SourcePos`; lex/parse/type errors now print
    `line:col: ERROR: msg`. Remaining gaps — every `no_pos()` and `dummy_pos()` call in

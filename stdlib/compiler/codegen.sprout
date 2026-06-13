@@ -337,6 +337,14 @@ fn ctor_type_params(c: CtorSig) -> List String =
 fn ctor_arity(c: CtorSig) -> Int =
   list_length(ctor_arg_lls(c))
 
+# Wrap ctors are stored with tag = wrap_tag() as a sentinel. They are never
+# registered via @sprout_register_ctor (no runtime tag exists), and their
+# construction/destruction are emitted as identity at the IR level.
+fn wrap_tag() -> Int = -1
+
+fn ctor_is_wrap(c: CtorSig) -> Bool =
+  ctor_tag(c) == wrap_tag()
+
 # FnSig accessors
 fn fn_name(f: FnSig) -> String =
   match f with | FnSig n _ _ _ -> n
@@ -1116,7 +1124,13 @@ fn emit_ctor_pattern_test(name: String, args: List ast.Pattern, scrut: Value, ct
       | Nothing ->
           val_make(ll_i1(), "0")  # unknown ctor — never matches
       | Just ctor ->
-          do
+          if ctor_is_wrap(ctor) then
+            # Wrap has no tag; the only test is whether the inner pattern matches
+            # the underlying value (scrut IS the inner value).
+            match args with
+            | Cons inner_pat Nil -> emit_pattern_test(inner_pat, scrut, ctx, em)
+            | _ -> val_make(ll_i1(), "1")
+          else do
             tag_t <- fresh_tmp(em)
             emit_template(em, `  ${tag_t} = call i64 @sprout_tag(i64 ${val_ir (scrut)})`)
             eq_t <- fresh_tmp(em)
@@ -1238,7 +1252,14 @@ fn emit_ctor_pattern_bind(name: String, args: List ast.Pattern, scrut: Value, sc
   match dict_get(name, ctx_ctor_sigs(ctx)) with
   | Nothing -> (Nil, 0)
   | Just ctor ->
-      do
+      # Wrap destructuring is identity: the scrut value IS the inner value,
+      # so we recurse into the inner pattern bind with scrut unchanged — no
+      # field read, no GC root.
+      if ctor_is_wrap(ctor) then
+        match args with
+        | Cons inner_pat Nil -> emit_pattern_bind(inner_pat, scrut, scrut_type, ctx, em)
+        | _ -> (Nil, 0)
+      else do
         let lls = match scrut_type with
                   | Nothing -> ctor_arg_lls(ctor)
                   | Just st -> instantiated_ctor_arg_lls(ctor, st)
@@ -1902,9 +1923,15 @@ fn emit_ctor_closure_wrapper(wrap_name: String, ctor: CtorSig, em: Emitter) -> U
     let params_str = build_wrapper_params(lls, 0)
     emit_template(em, `define i64 @${wrap_name}(ptr %env${params_str}) {`)
     emit_label(em, "entry")
-    let tag_str = int_to_string(ctor_tag(ctor))
-    let n = list_length(lls)
-    pack_and_call_ctor_wrapper(lls, n, tag_str, em)
+    # Wrap ctor used in value position: closure wrapper is identity.
+    # `wrap Age = Int` used as a function `Age :: Int -> Age` emits a wrapper
+    # that returns its argument unchanged.
+    if ctor_is_wrap(ctor) then
+      emit_line(em, "  ret i64 %a0")
+    else do
+      let tag_str = int_to_string(ctor_tag(ctor))
+      let n = list_length(lls)
+      pack_and_call_ctor_wrapper(lls, n, tag_str, em)
     emit_line(em, "}")
     fn_lines <- flush_body(em)
     emit_defs_list(fn_lines, em)
@@ -2592,7 +2619,14 @@ fn emit_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, t
         zero_val(type_to_ll(ty))
 
 fn emit_ctor_call_expr(ctor: CtorSig, args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
-  if n_arity == 0 then
+  if ctor_is_wrap(ctor) then
+    # Wrap construction is identity: emit the single arg expression and return
+    # its value directly.  No alloc, no rebox, no field packing — the wrap and
+    # the inner value share the same IR representation.
+    match args with
+    | Cons arg Nil -> emit_expr(ctx, locals, em, Nothing, arg)
+    | _ -> zero_val(ll_i64())  # wrap arity is always 1; defensive fallback
+  else if n_arity == 0 then
     do
       tmp <- fresh_tmp(em)
       let fn_name_ = if is_nothing_ctor(ctor_name(ctor)) then "@sprout_nothing" else "@sprout_make0"
@@ -3755,6 +3789,14 @@ fn build_ctor_sigs_acc(decls: List typed_ast.TypedDecl, next_tag: Int, sigs: Dic
           match register_ctors(ctors, next_tag, sigs, adts, type_name, type_params) with
           | (new_sigs, new_adts, new_tag) ->
               build_ctor_sigs_acc(rest, new_tag, new_sigs, new_adts)
+      # WrapDecl: register a single synthetic ctor with tag = wrap_tag() sentinel.
+      # No runtime tag is allocated (next_tag is not incremented).
+      | typed_ast.TPassThrough (ast.WrapDecl type_name inner _) ->
+          build_ctor_sigs_acc(rest, next_tag,
+            dict_set(type_name,
+              CtorSig(type_name, wrap_tag(), Cons(type_expr_to_ll(inner), Nil), Cons(inner, Nil), Nil),
+              sigs),
+            set_insert(type_name, adts))
       | _ ->
           build_ctor_sigs_acc(rest, next_tag, sigs, adts)
 
@@ -4040,7 +4082,11 @@ fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emit
         match dict_get(k, ctor_sigs_) with
         | Nothing -> build_ctor_reg_meta_keys(keys, ctor_sigs_, em, idx + 1, acc)
         | Just ctor ->
-            do
+            # Wrap ctors are not registered at runtime: they have no tag,
+            # no fields to introspect, and no constructor function exists.
+            if ctor_is_wrap(ctor) then
+              build_ctor_reg_meta_keys(keys, ctor_sigs_, em, idx + 1, acc)
+            else do
               (gname, gname_len) <- string_const(em, k)
               let fkinds = fk.ctor_field_kinds_string(ctor_type_exprs(ctor))
               aliases <- ctor_reg_aliases(k, strip_module_prefix(k), ctor_tag(ctor), ctor_arity(ctor), gname, gname_len, fkinds, em)

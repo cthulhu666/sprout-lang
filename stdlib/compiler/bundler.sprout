@@ -286,6 +286,12 @@ fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List S
     match read_ident_at(src, i + 13) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
+  # export wrap Foo = T — exports the type AND its synthetic constructor
+  # (which shares the type's name), so add to both exported and ctor_types.
+  else if str_starts_with_at_byte(src, i, "export wrap ") then
+    match read_ident_at(src, i + 12) with
+    | ("", _) -> (mod_name, exported, ctor_types)
+    | (name, _) -> (mod_name, Cons(name, exported), Cons(name, ctor_types))
   else
     (mod_name, exported, ctor_types)
 
@@ -557,6 +563,12 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   | ast.InstanceDecl _ _ _ _ -> acc
   | ast.AliasDecl name _ _ _ ->
       add_record_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+  # WrapDecl: register the type AND the synthetic constructor (same name) so
+  # callers can reference both Foo (as a type) and Foo(...) (as a constructor).
+  | ast.WrapDecl name inner _ ->
+      add_type_to_symbols(mod_name, name,
+        Cons(ast.TypeConstructor(name, Cons(inner, Nil)), Nil),
+        exported, ctor_types, acc)
   | ast.ExternFnDecl _ _ _ _ _ -> acc
 
 fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
@@ -1004,6 +1016,11 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
             pos)
   | ast.AliasDecl name type_params rhs pos ->
       ast.AliasDecl(dict_get_or(name, ctx_type_locals(ctx), name), type_params, qualify_type_expr(ctx, rhs), pos)
+  | ast.WrapDecl name inner pos ->
+      ast.WrapDecl(
+        dict_get_or(name, ctx_type_locals(ctx), name),
+        qualify_type_expr(ctx, inner),
+        pos)
   | ast.ExternFnDecl name params ret_type effects pos ->
       ast.ExternFnDecl(name, qualify_params(ctx, params), qualify_maybe_type(ctx, ret_type), effects, pos)
 
@@ -1045,6 +1062,9 @@ fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
       else Nothing
   | ast.ClassDecl name _ _ _ _ ->
       if str_starts_with(name, ".") then Just("ClassDecl name starts with '.': " ++ name)
+      else Nothing
+  | ast.WrapDecl name _ _ ->
+      if str_starts_with(name, ".") then Just("WrapDecl name starts with '.': " ++ name)
       else Nothing
   | _ -> Nothing
 
@@ -1088,6 +1108,7 @@ fn decl_orig_name(decl: ast.Decl) -> String =
       match constraint with
       | ast.TypeConstraint class_name _ -> "instance:" ++ class_name
   | ast.AliasDecl name _ _ _ -> name
+  | ast.WrapDecl name _ _ -> name
   | ast.ExternFnDecl name _ _ _ _ -> name
 
 fn ctx_status_line(path: String, all_symbols: Dict ModuleSymbols) -> String =

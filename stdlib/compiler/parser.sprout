@@ -1396,11 +1396,23 @@ fn parse_decl_body(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
   else if tok_is_keyword(tok_at(tokens, i), "class") then parse_class_decl(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "instance") then parse_instance_decl(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "type") then parse_type_decl_or_record(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "wrap") then parse_wrap_decl(tokens, i)
   else
     Err(ParseError(
       string.concat("Expected declaration at ", pos_str(cur_pos(tokens, i))),
       cur_pos(tokens, i)
     ))
+
+# wrap Name = TypeExpr
+# Zero-cost distinct type: single-constructor, single-field. The constructor
+# is named after the type and is implicit in the declaration syntax.
+fn parse_wrap_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  do
+    (_, i2) <- expected_keyword("wrap", tokens, i)
+    (name_tok, i3) <- expected_ident("wrap name", tokens, i2)
+    (_, i4) <- expected_symbol("=", tokens, i3)
+    (inner, i5) <- parse_type_expr(tokens, i4)
+    Ok((ast.WrapDecl(token.token_text(name_tok), inner, cur_pos(tokens, i)), i5))
 
 fn parse_type_decl_or_record(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   if is_alias_type_decl(tokens, i) then parse_alias_decl(tokens, i)

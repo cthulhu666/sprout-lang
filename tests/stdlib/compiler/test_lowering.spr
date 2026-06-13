@@ -324,7 +324,7 @@ fn main() -> Unit !{IO} =
     # Use a user-defined Box type (avoids Cons/Nil not being in scope in the isolated
     # typecheck env) with a concrete Box Int instance so the first-arg heuristic
     # resolves to Box (wrong) vs the prog_to_fresh scan which resolves to Int (correct).
-    r_dict_conc <- run_lower("class MyC a {\n  fn myop(x: a) -> String\n}\ninstance MyC Int {\n  fn myop(x: Int) -> String = \"int\"\n}\ntype Box a = Box a\ninstance MyC (Box Int) {\n  fn myop(xs: Box Int) -> String = \"boxint\"\n}\nfn wrap(xs: Box a) -> String where MyC a = \"ok\"\nfn main() -> String = wrap(Box(42))")
+    r_dict_conc <- run_lower("class MyC a {\n  fn myop(x: a) -> String\n}\ninstance MyC Int {\n  fn myop(x: Int) -> String = \"int\"\n}\ntype Box a = Box a\ninstance MyC (Box Int) {\n  fn myop(xs: Box Int) -> String = \"boxint\"\n}\nfn boxwrap(xs: Box a) -> String where MyC a = \"ok\"\nfn main() -> String = boxwrap(Box(42))")
     assert_true(state, "constrained dict injection (container arg) lowers ok", is_lower_ok(r_dict_conc))
     assert_true(state, "constrained dict injection uses Int dict not Box dict",
       str_starts_with(lowered_fn_body_dict_var_name(r_dict_conc, "main"), "__tc_MyC_Int_"))

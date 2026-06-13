@@ -30,7 +30,7 @@ Out of scope for v0:
 ## 2. Lexical Structure
 
 - Identifiers: `[a-zA-Z_][a-zA-Z0-9_]*`
-- Keywords: `fn`, `let`, `where`, `type`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
+- Keywords: `fn`, `let`, `where`, `type`, `wrap`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
 - Literals: integer, boolean, string, unit (`()`)
 - Comments: line comments start with `#` and continue to end of line
 
@@ -243,9 +243,50 @@ allowed — validation runs after all type names in the module have been
 registered.
 
 **Positions validated in this version:** `TypeDecl` constructor fields,
-`RecordDecl` field types, `AliasDecl` RHS.  `ClassDecl` method signatures,
-`InstanceDecl` constraint types, and `FnDecl` param/return type annotations
-are not yet validated (tracked in BACKLOG.md).
+`RecordDecl` field types, `AliasDecl` RHS, `WrapDecl` inner type.  `ClassDecl`
+method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return
+type annotations are not yet validated (tracked in BACKLOG.md).
+
+### 5.6.1 `wrap` declaration
+
+```sprout
+wrap Age = Int
+wrap UserId = Int
+wrap BodyEnv = Dict types.Scheme
+```
+
+A `wrap` declaration introduces a **zero-cost distinct type**. `wrap Foo = T`
+declares:
+
+- A type `Foo` that is distinct from `T` and from every other `wrap` over `T`.
+- A single constructor `Foo(x: T) -> Foo` named after the type.
+- A destructor pattern `Foo x` usable in `match` expressions.
+
+The runtime representation of `Foo` is identical to that of `T`. Construction
+`Foo(x)` and destruction `match v with | Foo inner -> ...` are identity at the
+LLVM IR level: no allocation, no field load, no tag check. The compiler emits
+no `@sprout_register_ctor` call for wrap constructors and no boxing call for
+construction. This guarantees that wrapping does not affect garbage-collection
+behavior of the underlying value — a `wrap` over a heap-typed value remains
+heap-typed at the same SSA register.
+
+Restrictions:
+
+- The right-hand side is a single type expression (no `|` alternatives).
+- No type parameters on the wrap itself in v0; the inner type may be
+  parameterized (`wrap MyDict a = Dict a`) but the wrap itself is monomorphic.
+- The constructor name and type name are identical and cannot be set separately.
+- A `wrap` cannot derive typeclasses; explicit `instance` declarations are
+  required for class membership.
+
+Wrap types primarily enable **mistake-prevention without runtime cost**: types
+like `Metres` vs `Seconds`, `UserId` vs `OrderId`, or the `BodyEnv` /
+`GlobalEnv` distinction in the self-hosted compiler can be enforced by the
+typechecker while sharing the underlying representation.
+
+`wrap` is distinct from `type alias`, which is transparent: `type alias Foo =
+Int` makes `Foo` interchangeable with `Int` everywhere. A `wrap` is opaque to
+callers and requires explicit construction or pattern matching.
 
 ### 5.7 Template literals (Experimental)
 

@@ -1,0 +1,97 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.compiler as compiler
+
+# IR-level tests for 'wrap' zero-cost guarantee.
+#
+# A wrap type must NOT emit a call to sprout_rebox on construction or
+# sprout_field on destruction.  Both must be identity at the LLVM IR level.
+#
+# Contrast with a regular single-constructor ADT which:
+#   - construction: emits  call i64 @sprout_rebox2(...)
+#   - extraction:   emits  call i64 @sprout_field(...)
+#
+# The wrap assertions currently fail because 'wrap' is not yet a keyword
+# and the compiler rejects wrap_src — that is the intended TDD state.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Both sources include a main that calls make/get so DCE cannot eliminate them.
+# fn main() -> Int is recognized as the Sprout entry point.
+
+let wrap_src =
+  "wrap Age = Int\n" ++
+  "fn make(n: Int) -> Age = Age(n)\n" ++
+  "fn get(a: Age) -> Int = match a with | Age n -> n\n" ++
+  "fn main() -> Int = get(make(42))\n"
+
+let regular_adt_src =
+  "type Age = Age Int\n" ++
+  "fn make(n: Int) -> Age = Age(n)\n" ++
+  "fn get(a: Age) -> Int = match a with | Age n -> n\n" ++
+  "fn main() -> Int = get(make(42))\n"
+
+fn ir_ok(r: compiler.IrFullResult) -> Bool =
+  match r with
+  | compiler.IrFullOk _ -> true
+  | compiler.IrFullFail _ -> false
+
+fn ir_text(r: compiler.IrFullResult) -> String =
+  match r with
+  | compiler.IrFullOk ir -> ir
+  | compiler.IrFullFail _ -> ""
+
+# Check for a CALL to sprout_rebox (not the always-present declare).
+# The declare line looks like: declare i64 @sprout_rebox2(...)
+# The call line looks like:    call i64 @sprout_rebox2(...)
+fn has_rebox_call(ir: String) -> Bool =
+  contains(ir, "call i64 @sprout_rebox")
+
+# Check for a CALL to sprout_field (extraction reads a field from the heap).
+fn has_field_call(ir: String) -> Bool =
+  contains(ir, "call i64 @sprout_field")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          let wrap_path = "/tmp/sprout_test_wrap_codegen_wrap.sprout"
+          let adt_path = "/tmp/sprout_test_wrap_codegen_adt.sprout"
+          _ <- write_file(wrap_path, wrap_src)
+          _ <- write_file(adt_path, regular_adt_src)
+
+          r_wrap <- compiler.compile_full_ir(wrap_path, stdlib_root)
+          r_adt <- compiler.compile_full_ir(adt_path, stdlib_root)
+
+          # The wrap source must compile successfully
+          assert_true(state, "wrap type compiles", ir_ok(r_wrap))
+
+          # The regular ADT source compiles (baseline)
+          assert_true(state, "regular ADT compiles (baseline)", ir_ok(r_adt))
+
+          let adt_ir = ir_text(r_adt)
+          let wrap_ir = ir_text(r_wrap)
+
+          # Baseline: regular ADT boxes values and reads via heap field access
+          assert_true(state, "regular ADT emits call to @sprout_rebox (baseline)",
+            has_rebox_call(adt_ir))
+          assert_true(state, "regular ADT emits call to @sprout_field (baseline)",
+            has_field_call(adt_ir))
+
+          # Structural sanity: if wrap_ir is empty (compilation failed above),
+          # the assert_false assertions below would trivially pass on "".
+          # This check ensures real IR exists before we trust the absence proofs.
+          assert_true(state, "wrap IR contains @make definition",
+            contains(wrap_ir, "define i64 @make"))
+
+          # Zero-cost guarantee: wrap emits neither
+          assert_false(state, "wrap construction emits no call to @sprout_rebox",
+            has_rebox_call(wrap_ir))
+          assert_false(state, "wrap extraction emits no call to @sprout_field",
+            has_field_call(wrap_ir))
+
+    summary(state)

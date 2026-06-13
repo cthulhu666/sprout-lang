@@ -101,11 +101,17 @@ export type InstanceMethodImpl (..) =
 # ClassDecl name type_params methods superclasses pos
 # InstanceDecl constraint instance_constraints methods pos
 # AliasDecl name type_params rhs pos
+# WrapDecl  name inner_type pos
 #
 # TypeDecl carries: name, type_params, constructors, deriving_classes, pos
 # deriving_classes is the (possibly empty) list of class names from a
 # `deriving (...)` clause; an empty list means no clause was present.
 # See docs/deriving-v1-draft.md (Phase 1).
+#
+# WrapDecl is a zero-cost distinct type. `wrap Foo = T` declares Foo with a
+# single constructor Foo(x: T) -> Foo. Construction Foo(x) and destruction
+# `match | Foo x ->` are identity at the LLVM IR level (no alloc, no field
+# read).
 
 export type Decl (..) =
   | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr source.SourcePos
@@ -116,6 +122,7 @@ export type Decl (..) =
   | ClassDecl String (List String) (List ClassMethodSig) (List TypeConstraint) source.SourcePos
   | InstanceDecl TypeConstraint (List TypeConstraint) (List InstanceMethodImpl) source.SourcePos
   | AliasDecl String (List String) TypeExpr source.SourcePos
+  | WrapDecl String TypeExpr source.SourcePos
 
 # --- Program ---
 
