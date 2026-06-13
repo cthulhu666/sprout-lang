@@ -11,6 +11,15 @@ import stdlib.compiler.compiler as compiler
 # still meaningful — it verifies that the operator dispatch correctly rejects
 # the missing instance. The positive (== with Eq compiles) case is covered
 # exhaustively by tests/stdlib/test_eq_operator_adt_dispatch.spr.
+#
+# Cross-PR regression marker (PR #34 + PR #29): this test exercises the
+# `CallErr → InferErr` path inside `eq_via_class_method` (infer.sprout line
+# ~1621). PR #34 (diagnostic spanning) changed both constructors to take
+# (source.SourcePos, String); PR #29's original eq_via_class_method body
+# was written against the old single-arg form. The post-rebase fix-up
+# threads `pos` into all three error-construction sites in that function.
+# If this test fails (no longer reports "fails compilation"), suspect that
+# fix-up regressed.
 
 fn is_fail(r: compiler.CompileResult) -> Bool =
   match r with

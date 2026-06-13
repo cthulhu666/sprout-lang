@@ -1603,7 +1603,7 @@ fn eq_via_class_method(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match dict_get("eq", env) with
-  | Nothing -> InferErr("internal: Eq.eq not in scope for " ++ op ++ " dispatch")
+  | Nothing -> InferErr(pos, "internal: Eq.eq not in scope for " ++ op ++ " dispatch")
   | Just eq_scheme ->
       do
         callee_t <- unifier.instantiate(state, eq_scheme)
@@ -1618,7 +1618,7 @@ fn eq_via_class_method(
           eff,
           "'eq'")
         match r with
-        | CallErr e -> InferErr(op ++ " via Eq.eq: " ++ e)
+        | CallErr pos e -> InferErr(pos, op ++ " via Eq.eq: " ++ e)
         | CallOk ret_t s3 es3 call_eff ->
             do
               # prog_to_fresh = dict_empty(): the resolve_dispatch_typed_expr
@@ -1635,7 +1635,7 @@ fn eq_via_class_method(
                 | InferOk e s4 es4 e_eff ->
                     InferOk(typed_ast.TUnary("!", e, types.type_bool(), pos),
                             s4, es4, e_eff)
-                | InferErr e -> InferErr(e)
+                | InferErr pos e -> InferErr(pos, e)
               else
                 call_result
 
