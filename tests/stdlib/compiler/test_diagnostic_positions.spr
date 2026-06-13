@@ -1,0 +1,75 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# Regression tests for guideline #5 (errors carry source location).
+#
+# Phase 1 goal: lex and parse errors surface the SourcePos that
+# TokenizeError / ParseError already carry.  The Diagnostic ADT is
+# changed to DiagError source.SourcePos String | DiagWarning source.SourcePos String.
+#
+# These tests will fail to compile against the OLD Diagnostic definition
+# (DiagError String) because the pattern `DiagError pos msg` does not match.
+# That compile failure is the intentional TDD failing state.
+
+fn first_diag(result: compiler.CompileResult) -> Maybe compiler.Diagnostic =
+  match result with
+  | compiler.CompileOk _ -> Nothing
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> Nothing
+      | Cons d _ -> Just(d)
+
+fn diag_line(d: compiler.Diagnostic) -> Int =
+  match d with
+  | compiler.DiagError pos _ -> source.position_line(pos)
+  | compiler.DiagWarning pos _ -> source.position_line(pos)
+
+fn diag_col(d: compiler.Diagnostic) -> Int =
+  match d with
+  | compiler.DiagError pos _ -> source.position_column(pos)
+  | compiler.DiagWarning pos _ -> source.position_column(pos)
+
+fn diag_msg(d: compiler.Diagnostic) -> String =
+  match d with
+  | compiler.DiagError _ msg -> msg
+  | compiler.DiagWarning _ msg -> msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          # --- lex error carries position ---
+          # "@" is not a valid token; the error must be at line 1.
+          r_lex <- compiler.compile_source_with_root("@illegal\n", stdlib_root)
+          assert_true(state, "lex error produces CompileFail",
+            match r_lex with | compiler.CompileFail _ -> true | _ -> false)
+          assert_true(state, "lex error diagnostic has line >= 1",
+            match first_diag(r_lex) with
+            | Nothing -> false
+            | Just d -> diag_line(d) >= 1)
+
+          # --- parse error carries position ---
+          # "fn broken ->" is syntactically invalid; error must be on line 1.
+          r_parse <- compiler.compile_source_with_root("fn broken ->\n", stdlib_root)
+          assert_true(state, "parse error produces CompileFail",
+            match r_parse with | compiler.CompileFail _ -> true | _ -> false)
+          assert_true(state, "parse error diagnostic has line >= 1",
+            match first_diag(r_parse) with
+            | Nothing -> false
+            | Just d -> diag_line(d) >= 1)
+
+          # --- lex error on a specific line ---
+          # The "@" is on line 3 (after two valid lines).
+          let src3 = "fn a() -> Int = 1\nfn b() -> Int = 2\n@bad\n"
+          r_line3 <- compiler.compile_source_with_root(src3, stdlib_root)
+          assert_true(state, "lex error on line 3 reports line 3",
+            match first_diag(r_line3) with
+            | Nothing -> false
+            | Just d -> diag_line(d) == 3)
+
+    summary(state)

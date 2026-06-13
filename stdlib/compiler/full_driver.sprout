@@ -1,6 +1,16 @@
 module main
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.source as source
+
+# ---------------------------------------------------------------------------
+# Diagnostic position formatting
+
+fn format_pos(pos: source.SourcePos) -> String =
+  match pos with
+  | source.SourcePos _ line col ->
+      if line == 0 then ""
+      else int_to_string(line) ++ ":" ++ int_to_string(col) ++ ": "
 
 # ---------------------------------------------------------------------------
 # Diagnostic printing
@@ -11,8 +21,8 @@ fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
   | Cons d rest ->
       do
         match d with
-        | compiler.DiagError msg -> print("ERROR: " ++ msg)
-        | compiler.DiagWarning msg -> print("WARNING: " ++ msg)
+        | compiler.DiagError pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
+        | compiler.DiagWarning pos msg -> print(format_pos(pos) ++ "WARNING: " ++ msg)
         print_diags(rest)
 
 # ---------------------------------------------------------------------------

@@ -333,7 +333,7 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
                             do
                               result <- checker.check_program_with_env(prog, base_pairs)
                               match result with
-                              | checker.CheckErr _ -> Nil
+                              | checker.CheckErr _ _ -> Nil
                               | checker.CheckOk env ->
                                   do
                                     let declared = program_declared_names(prog)

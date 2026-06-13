@@ -262,10 +262,14 @@ fn collect_diag_fields(
   | Nil -> (list_reverse(msgs), list_reverse(lines), list_reverse(cols))
   | Cons d rest ->
       match d with
-      | compiler.DiagError msg ->
-          collect_diag_fields(rest, Cons(msg, msgs), Cons(0, lines), Cons(0, cols))
-      | compiler.DiagWarning msg ->
-          collect_diag_fields(rest, Cons(msg, msgs), Cons(0, lines), Cons(0, cols))
+      | compiler.DiagError pos msg ->
+          match pos with
+          | source.SourcePos _ line col ->
+              collect_diag_fields(rest, Cons(msg, msgs), Cons(line, lines), Cons(col, cols))
+      | compiler.DiagWarning pos msg ->
+          match pos with
+          | source.SourcePos _ line col ->
+              collect_diag_fields(rest, Cons(msg, msgs), Cons(line, lines), Cons(col, cols))
 
 fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
   match collect_diag_fields(diags, Nil, Nil, Nil) with
@@ -289,8 +293,8 @@ fn op_check_source(src: String, state: StartupState) -> json.Json !{IO} =
         | Nil -> error_response("check failed")
         | Cons d _ ->
             match d with
-            | compiler.DiagError msg -> error_response(msg)
-            | compiler.DiagWarning msg -> error_response(msg)
+            | compiler.DiagError _ msg -> error_response(msg)
+            | compiler.DiagWarning _ msg -> error_response(msg)
 
 fn op_diagnostics_in_source(src: String, state: StartupState) -> json.Json !{IO} =
   do
@@ -345,8 +349,8 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
         | Nil -> error_response("type_of_in_source: typecheck failed")
         | Cons d _ ->
             match d with
-            | compiler.DiagError msg -> error_response(msg)
-            | compiler.DiagWarning msg -> error_response(msg)
+            | compiler.DiagError _ msg -> error_response(msg)
+            | compiler.DiagWarning _ msg -> error_response(msg)
     | compiler.CompileOk env ->
         match dict_get(sentinel_name(), env) with
         | Nothing -> error_response("type_of_in_source: could not infer type of expression")
@@ -485,8 +489,8 @@ fn darwin_frameworks_set() -> Bool !{IO} =
 
 fn diag_msg(d: compiler.Diagnostic) -> String =
   match d with
-  | compiler.DiagError msg -> msg
-  | compiler.DiagWarning msg -> msg
+  | compiler.DiagError _ msg -> msg
+  | compiler.DiagWarning _ msg -> msg
 
 fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> json.Json !{IO} =
   match ir_result with
@@ -548,8 +552,8 @@ fn eval_with_type_result(src: String, expr: String, state: StartupState, result:
       | Nil -> error_response("eval_expr_in_source: typecheck failed")
       | Cons d _ ->
           match d with
-          | compiler.DiagError msg -> error_response(msg)
-          | compiler.DiagWarning msg -> error_response(msg)
+          | compiler.DiagError _ msg -> error_response(msg)
+          | compiler.DiagWarning _ msg -> error_response(msg)
   | compiler.CompileOk env ->
       match dict_get(sentinel_name(), env) with
       | Nothing -> error_response("eval_expr_in_source: could not infer type of expression")
@@ -570,8 +574,8 @@ fn compile_fail_response(diags: List compiler.Diagnostic) -> json.Json =
   | Nil -> error_response("type check failed")
   | Cons d _ ->
       match d with
-      | compiler.DiagError msg -> error_response(msg)
-      | compiler.DiagWarning msg -> error_response(msg)
+      | compiler.DiagError _ msg -> error_response(msg)
+      | compiler.DiagWarning _ msg -> error_response(msg)
 
 fn op_session_create(state: StartupState) -> json.Json !{IO} =
   do

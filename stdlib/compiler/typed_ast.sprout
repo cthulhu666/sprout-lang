@@ -114,18 +114,18 @@ export type TypedProgram (..) = TypedProgram(List TypedDecl)
 
 export type TypedResult (..) =
   | TypedOk TypedProgram (Dict types.Scheme)
-  | TypedErr String
+  | TypedErr source.SourcePos String
 
 # Result of inferring a single function/method body.
 # BodyLenient: an unknown-variable error was silently accepted (builtin gap).
 export type BodyResult (..) =
   | BodyOk TypedExpr types.Type
   | BodyLenient
-  | BodyErr String
+  | BodyErr source.SourcePos String
 
 export type InstanceMethodsResult (..) =
   | InstanceMethodsOk (List TypedInstanceMethod)
-  | InstanceMethodsErr String
+  | InstanceMethodsErr source.SourcePos String
 
 # ---------------------------------------------------------------------------
 # Type → TypeExpr conversion (used when constructing TDict constraint nodes)

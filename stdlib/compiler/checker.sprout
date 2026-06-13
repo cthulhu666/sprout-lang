@@ -17,7 +17,7 @@ import stdlib.string as string
 
 export type CheckResult (..) =
   | CheckOk (Dict types.Scheme)
-  | CheckErr String
+  | CheckErr source.SourcePos String
 
 # ---------------------------------------------------------------------------
 # check_program — the integration seam entry point
@@ -54,7 +54,7 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
         do
           r <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
           match r with
-          | typed_ast.TypedErr msg -> CheckErr(msg)
+          | typed_ast.TypedErr pos msg -> CheckErr(pos, msg)
           | typed_ast.TypedOk _ env -> CheckOk(env)
 
 # Like check_program_with_env but returns the full TypedResult (TypedProgram + env).

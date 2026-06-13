@@ -1,7 +1,8 @@
 module stdlib.compiler.lsp_driver
 
 import stdlib.json as json
-import stdlib.compiler as compiler
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
 import stdlib.string as string
 
 extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
@@ -11,6 +12,9 @@ extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
 
 type LspState = LspState String (Ref (Dict String)) (Ref Bool)
   # stdlib_root, open_documents (uri -> source), shutdown_requested
+
+fn lsp_stdlib_root(state: LspState) -> String =
+  match state with | LspState r _ _ -> r
 
 fn lsp_documents(state: LspState) -> Ref (Dict String) =
   match state with | LspState _ d _ -> d
@@ -128,27 +132,44 @@ fn diag_range(line: Int, col: Int) -> json.Json =
         json.JsonObjectNil))),
     json.JsonObjectNil)))
 
+fn diag_severity(d: compiler.Diagnostic) -> Int =
+  match d with
+  | compiler.DiagError _ _ -> 1
+  | compiler.DiagWarning _ _ -> 2
+
 fn diag_to_lsp(d: compiler.Diagnostic) -> json.Json =
   match d with
-  | compiler.Diagnostic msg line col ->
-      json.JsonObject(
-        json.JsonObjectCons("range", diag_range(line, col),
-        json.JsonObjectCons("severity", json.JsonInt(1),
-        json.JsonObjectCons("message", json.JsonString(msg),
-        json.JsonObjectNil))))
+  | compiler.DiagError pos msg ->
+      match pos with
+      | source.SourcePos _ line col ->
+          json.JsonObject(
+            json.JsonObjectCons("range", diag_range(line - 1, col - 1),
+            json.JsonObjectCons("severity", json.JsonInt(1),
+            json.JsonObjectCons("message", json.JsonString(msg),
+            json.JsonObjectNil))))
+  | compiler.DiagWarning pos msg ->
+      match pos with
+      | source.SourcePos _ line col ->
+          json.JsonObject(
+            json.JsonObjectCons("range", diag_range(line - 1, col - 1),
+            json.JsonObjectCons("severity", json.JsonInt(2),
+            json.JsonObjectCons("message", json.JsonString(msg),
+            json.JsonObjectNil))))
 
-fn push_diagnostics(uri: String, diags: Vec compiler.Diagnostic, state: LspState) -> Unit !{IO} =
+fn push_diagnostics(uri: String, diags: List compiler.Diagnostic, state: LspState) -> Unit !{IO} =
   send_message(make_notification("textDocument/publishDiagnostics",
     json.JsonObject(
       json.JsonObjectCons("uri", json.JsonString(uri),
       json.JsonObjectCons("diagnostics",
-        json.array_from_list(vec_to_list(vec_map(diag_to_lsp, diags))),
+        json.array_from_list(list_map(diag_to_lsp, diags)),
       json.JsonObjectNil)))))
 
 fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit !{IO} =
   do
-    diags <- compiler.diagnostics_in_source(src)
-    push_diagnostics(uri, diags, state)
+    result <- compiler.compile_source_with_root(src, lsp_stdlib_root(state))
+    match result with
+    | compiler.CompileOk _ -> push_diagnostics(uri, Nil, state)
+    | compiler.CompileFail diags -> push_diagnostics(uri, diags, state)
 
 # ---------------------------------------------------------------------------
 # Hover — word extraction + type_of_in_source
@@ -198,10 +219,9 @@ fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
           json.JsonObjectNil))),
       json.JsonObjectNil)))
 
+# type_of_in_source is not yet implemented in compiler.sprout; hover returns null.
 fn do_hover(id: json.Json, src: String, word: String, state: LspState) -> Unit !{IO} =
-  match compiler.type_of_in_source(src, word) with
-  | Err _ -> send_message(make_result(id, json.JsonNull))
-  | Ok type_str -> send_message(make_hover_result(id, type_str))
+  send_message(make_result(id, json.JsonNull))
 
 type HoverParams = HoverParams String Int Int
 
@@ -308,7 +328,7 @@ fn handle_did_close(params: json.Json, state: LspState) -> Unit !{IO} =
           do
             docs <- ref_read(lsp_documents(state))
             ref_write(lsp_documents(state), dict_remove(uri, docs))
-            push_diagnostics(uri, vec_empty(), state)
+            push_diagnostics(uri, Nil, state)
 
 fn hover_for_line(id: json.Json, src: String, line_str: String, char_num: Int, state: LspState) -> Unit !{IO} =
   if string.is_empty(word) then send_message(make_result(id, json.JsonNull))

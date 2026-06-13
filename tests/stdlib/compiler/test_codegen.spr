@@ -18,7 +18,7 @@ fn run_codegen(src: String) -> codegen.IrResult !{IO} =
           do
             tc <- checker.typecheck_typed(prog, Nil)
             match tc with
-            | typed_ast.TypedErr msg -> codegen.IrErr("check: " ++ msg)
+            | typed_ast.TypedErr _ msg -> codegen.IrErr("check: " ++ msg)
             | typed_ast.TypedOk typed_prog env ->
                 match lowering.lower_program(typed_prog, env) with
                 | lowering.LowerErr msg -> codegen.IrErr("lower: " ++ msg)
@@ -52,7 +52,7 @@ fn run_codegen_lines(src: String) -> codegen.IrLinesResult !{IO} =
           do
             tc <- checker.typecheck_typed(prog, Nil)
             match tc with
-            | typed_ast.TypedErr msg -> codegen.IrLinesErr("check: " ++ msg)
+            | typed_ast.TypedErr _ msg -> codegen.IrLinesErr("check: " ++ msg)
             | typed_ast.TypedOk typed_prog env ->
                 match lowering.lower_program(typed_prog, env) with
                 | lowering.LowerErr msg -> codegen.IrLinesErr("lower: " ++ msg)

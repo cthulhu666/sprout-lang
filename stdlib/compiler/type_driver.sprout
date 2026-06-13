@@ -58,7 +58,7 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
                 do
                   result <- checker.check_program_with_env(prog, prelude_pairs ++ import_pairs)
                   match result with
-                  | checker.CheckErr msg -> print("ERROR: check: " ++ msg)
+                  | checker.CheckErr _ msg -> print("ERROR: check: " ++ msg)
                   | checker.CheckOk env ->
                       match prog with
                       | ast.Program decls _ -> checker.dump_typed_names(decls, env)

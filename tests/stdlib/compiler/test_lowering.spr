@@ -16,7 +16,7 @@ fn run_lower(src: String) -> lowering.LowerResult !{IO} =
           do
             tc <- checker.typecheck_typed(prog, Nil)
             match tc with
-            | typed_ast.TypedErr msg -> lowering.LowerErr("typecheck: " ++ msg)
+            | typed_ast.TypedErr _ msg -> lowering.LowerErr("typecheck: " ++ msg)
             | typed_ast.TypedOk typed_prog env -> lowering.lower_program(typed_prog, env)
 
 fn is_lower_ok(r: lowering.LowerResult) -> Bool =

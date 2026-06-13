@@ -47,8 +47,8 @@ fn first_diag_msg(r: compiler.IrFullLinesResult) -> String =
       | Nil -> ""
       | Cons d _ ->
           match d with
-          | compiler.DiagError msg -> msg
-          | compiler.DiagWarning msg -> msg
+          | compiler.DiagError _ msg -> msg
+          | compiler.DiagWarning _ msg -> msg
 
 fn main() -> Unit !{IO} =
   do

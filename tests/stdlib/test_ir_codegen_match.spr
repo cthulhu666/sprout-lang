@@ -58,7 +58,7 @@ fn translate_source(src: String) -> Result String String !{IO} =
           do
             tc <- checker.typecheck_typed(prog, Nil)
             match tc with
-            | typed_ast.TypedErr msg -> Err("check: " ++ msg)
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
             | typed_ast.TypedOk typed_prog env ->
                 match lowering.lower_program(typed_prog, env) with
                 | lowering.LowerErr msg -> Err("lower: " ++ msg)

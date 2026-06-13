@@ -2,28 +2,29 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, 
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.checker as checker
+import stdlib.compiler.source as source
 
 fn run_check(src: String) -> checker.CheckResult !{IO} =
   match lexer.tokenize(src) with
-  | Err _ -> checker.CheckErr("lex error")
+  | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "lex error")
   | Ok toks ->
       match parser.parse_program(toks) with
-      | Err _ -> checker.CheckErr("parse error")
+      | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "parse error")
       | Ok prog -> checker.check_program(prog)
 
 fn is_check_ok(r: checker.CheckResult) -> Bool =
   match r with
   | checker.CheckOk _ -> true
-  | checker.CheckErr _ -> false
+  | checker.CheckErr _ _ -> false
 
 fn is_check_err(r: checker.CheckResult) -> Bool =
   match r with
-  | checker.CheckErr _ -> true
+  | checker.CheckErr _ _ -> true
   | checker.CheckOk _ -> false
 
 fn check_err_msg(r: checker.CheckResult) -> String =
   match r with
-  | checker.CheckErr msg -> msg
+  | checker.CheckErr _ msg -> msg
   | checker.CheckOk _ -> ""
 
 fn main() -> Unit !{IO} =
