@@ -166,6 +166,12 @@ Tune `45` to ~30s for fast-feedback, up to ~120s to be polite. Typical
 CI wall time on this repo is **~40-50 min** (self-hosted runner: full
 bootstrap + verify-fixed-point + tests + examples).
 
+> Shell compat: the snippet uses `declare -A` (associative arrays),
+> which needs bash 4+ or zsh. macOS's stock `/bin/bash` is 3.2 — if
+> you must run this in stock bash, replace `prev[$pr]` / `final[$pr]`
+> with per-PR positional vars (`prev29` / `final29` / `prev32` / …)
+> and the corresponding `eval` indirection.
+
 ## Merge
 
 ### tea (default styles)
