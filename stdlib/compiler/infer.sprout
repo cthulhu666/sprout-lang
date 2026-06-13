@@ -1621,6 +1621,9 @@ fn eq_via_class_method(
         | CallErr e -> InferErr(op ++ " via Eq.eq: " ++ e)
         | CallOk ret_t s3 es3 call_eff ->
             do
+              # prog_to_fresh = dict_empty(): the resolve_dispatch_typed_expr
+              # post-pass concretizes the TDict evidence node after s2 makes the
+              # type var concrete (PR #18 mechanism).
               call_result <- check_call_constraint(
                 ast.VarExpr("eq", pos),
                 typed_callee,
@@ -1636,6 +1639,10 @@ fn eq_via_class_method(
               else
                 call_result
 
+# Inference for ==/!=. Primitive operands (Int, Bool, Char, String) lower to
+# direct TBinary so codegen emits icmp / str_eq; non-primitive types desugar
+# to Eq.eq class-method calls so typeclass dispatch fires (!= wraps the
+# resulting call in TUnary "!"). See BACKLOG line 184.
 fn check_eq(
   state: unifier.InferState,
   env: Dict types.Scheme,

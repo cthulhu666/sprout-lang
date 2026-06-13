@@ -1,0 +1,40 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+
+# Negative test: == / != on a type without an Eq instance must fail compilation
+# with a clear error (not silently fall through to pointer comparison, the
+# pre-0fb3699 broken behavior).
+#
+# Note: this uses compile_source_with_root (not the bundler-driven path), so
+# `deriving (Eq)` does NOT synthesize the instance here. The negative case is
+# still meaningful — it verifies that the operator dispatch correctly rejects
+# the missing instance. The positive (== with Eq compiles) case is covered
+# exhaustively by tests/stdlib/test_eq_operator_adt_dispatch.spr.
+
+fn is_fail(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileFail _ -> true
+  | compiler.CompileOk _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ADT with NO Eq instance — `==` on it must fail at infer.
+    r_no_eq <- compiler.compile_source_with_root(
+      "type Foo = A | B\nfn check() -> Bool = A == A",
+      "stdlib")
+    assert_true(state,
+      "== on ADT without Eq instance fails compilation",
+      is_fail(r_no_eq))
+
+    # Same for != .
+    r_no_eq_neq <- compiler.compile_source_with_root(
+      "type Foo = A | B\nfn check() -> Bool = A != A",
+      "stdlib")
+    assert_true(state,
+      "!= on ADT without Eq instance fails compilation",
+      is_fail(r_no_eq_neq))
+
+    summary(state)
