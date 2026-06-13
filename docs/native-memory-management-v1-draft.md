@@ -11,9 +11,8 @@ unless Sprout explicitly adopts visible resource or lifetime semantics.
 
 ## Problem Statement
 
-Interpreter execution inherits Python's memory management. Native execution
-does not. The current native runtime allocates Sprout values manually and keeps
-them for process lifetime in most language-level paths.
+The native runtime allocates Sprout values manually and keeps them for process
+lifetime in most language-level paths.
 
 Today this is acceptable for a small prototype backend, but it leaves several
 important gaps:
@@ -43,12 +42,6 @@ important gaps:
 
 ## Current State
 
-Interpreter mode:
-- Uses Python objects for ADTs, closures, vectors, maps, bytes, builders, and
-  tuples.
-- Reclamation is delegated to Python's runtime.
-
-Native mode:
 - ADTs are boxed into heap-allocated `SproutObj` values.
 - Closures and partial application environments allocate through the LLVM
   backend.
@@ -234,13 +227,23 @@ Current implementation status:
 - opt-in debug logging exists for validation and now reports the active
   threshold, live managed-node count, managed allocations since the previous
   cycle, and per-cycle elapsed time with each cycle,
-- debug allocation reporting now includes a `gc_swept` count.
+- debug allocation reporting now includes `gc_swept` and `gc_cycles` counts,
+- adaptive threshold growth is enabled by default: when the swept fraction of
+  the heap falls below `SPROUT_GC_ADAPT_RATIO` (default 0.2), the threshold is
+  multiplied by `SPROUT_GC_ADAPT_FACTOR` (default 2.0), optionally capped at
+  `SPROUT_GC_ADAPT_CAP` (uncapped by default),
+- livelock detection is active by default: `SPROUT_GC_LIVELOCK_RATIO` (default
+  0.05) and `SPROUT_GC_LIVELOCK_CYCLES` (default 1000) define consecutive
+  bad-cycle thresholds; `SPROUT_GC_LIVELOCK_ACTION` controls the response
+  (`off`, `warn` (default), or `abort`),
+- `ManagedNode` and `SproutObj` both maintain freelists to reduce malloc
+  pressure on the GC hot path,
+- `SPROUT_GC_STRESS=1` forces a collection on every allocation, for use in
+  stress-testing root coverage.
 
 Remaining work before this stage can be considered fully complete:
 - extend the current shadow-root strategy to all live mid-execution values that
   can survive allocations,
-- keep validating and tuning the current threshold-triggered mid-execution
-  policy,
 - add stronger reclamation-focused tests once collection can run mid-program.
 
 ## V2 Direction
@@ -287,22 +290,11 @@ Recommended debug-mode outputs:
 - collection count and sweep count,
 - optional maximum pause timing in debug builds.
 
-Current measurement workflow:
-
-- `mise exec -- just measure-gc-thresholds` runs the fast synthetic workload
-  set by default; this is now mainly a GC regression/stress loop rather than
-  the primary signal for choosing between production threshold values.
-- `mise exec -- just measure-gc-real` or
-  `python3 scripts/measure_gc_thresholds.py --workload aoc_day5 ...` opt into
-  heavier real workloads such as the medium-size `vector_build_medium`
-  benchmark, the current `day5input` file-processing case, and the generated
-  `aoc_day3` / `aoc_day4_small` example inputs; these real workloads are the
-  main input for default-threshold tuning.
-- The summary reports cycle counts, sweep totals, max live heap, max root-slot
-  count, max marked-node count, and total/max `elapsed_us`, along with
-  wall-clock time, so threshold tuning can stay measurement-driven instead of
-  guess-based; the raw GC logs also now expose `alloc_since_gc` for trigger
-  analysis on individual workloads.
+Measurement is done by setting `SPROUT_DEBUG_ALLOC=1` on programs of interest.
+The per-run summary reports allocation counts by kind alongside `gc_swept` and
+`gc_cycles`; the per-cycle log includes `alloc_since_gc` and `elapsed_us`,
+keeping threshold and adaptive-ratio tuning measurement-driven rather than
+guess-based.
 
 Current measured takeaway:
 
@@ -331,20 +323,6 @@ features.
    for low-latency server workloads.
 4. Representation work in closures and collections may need to move earlier
    than expected if traversal hooks are too ad hoc.
-
-## Recommended First Implementation Slice
-
-The next concrete slice should be:
-
-1. add allocation counters and debug accounting,
-2. centralize ADT allocation behind a managed runtime helper,
-3. centralize closure-environment allocation behind the same managed boundary
-   or a compatible companion boundary,
-4. add focused tests proving the managed-allocation path is exercised,
-5. measure before committing to the exact collector API.
-
-This keeps the first step vertical and useful without prematurely landing a
-half-designed collector.
 
 ## Summary Roadmap
 
