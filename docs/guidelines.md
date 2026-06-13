@@ -90,6 +90,35 @@ Avoid pipe for:
 
 The `>>` / `<<` composition operators exist in the language; this document neither promotes nor restricts them. Use them locally if a site is genuinely clearer composed than as a lambda.
 
+### 7. Use `wrap` for semantic distinctions on shared representations
+
+When two distinct semantic kinds share a primitive type (`String`, `Int`, `Dict T`) and confusing them would be a bug, declare each with `wrap` so the typechecker enforces the distinction. `wrap Foo = T` is zero-cost: construction and destruction are identity at the IR level, so the type-safety benefit costs no runtime.
+
+**Use when:**
+
+- Two functions accept the same primitive but with different meanings — `fn f(path: String, stdlib_root: String)` should become `fn f(path: FilePath, stdlib_root: StdlibRoot)`.
+- A value crosses a module boundary where callers might confuse it with a similarly-typed value (qualified vs raw names, body env vs global env).
+- A retro documents a bug caused by swapping two same-typed values — `wrap` makes the swap a compile error.
+
+**Do not use when:**
+
+- The inner type is the natural API surface (an `Int` width that callers do arithmetic on, a `String` message threaded directly to `print`).
+- The value lives inside one function and never crosses a function boundary — local naming is enough.
+- The cost of wrap/unwrap exceeds the bug-prevention value (wrapping every dict key would force ceremony at hundreds of access sites for one bug class).
+
+**Worked examples in this codebase:**
+
+- `wrap FilePath = String` / `wrap StdlibRoot = String` distinguish the two `String` parameters threaded through every compiler entry point.
+- `wrap BodyEnv = Dict types.Scheme` / `wrap GlobalEnv = Dict types.Scheme` enforce the `@fwd:` vs `@eta_fwd:` scope distinction documented in the constrained-dispatch retros.
+
+**Constraints (v1):**
+
+- Single-field only. Multi-field semantic structs use records or ADTs.
+- No type parameters on the wrap itself.
+- No constructor hiding. If invariants need a smart constructor, document the convention as a comment until private constructors land (see Deferred to v1 below).
+
+See `docs/spec-v0.md` §5.6.1 for the normative wrap declaration semantics.
+
 ## Process
 
 - Deviations from these guidelines require a justification in the PR description.
@@ -100,8 +129,7 @@ The `>>` / `<<` composition operators exist in the language; this document neith
 
 Each deferred item is annotated with the trigger condition that would prompt its inclusion.
 
-- **Newtype-style semantic distinctions** (`ModuleName`, `Symbol`, `FilePath` as distinct types). *Trigger:* a zero-cost wrapper language feature (Haskell-style `newtype`), or measured evidence that single-constructor ADT wrapping is acceptable in compiler hot paths.
-- **Smart constructors** (hiding raw constructors behind validating builders). *Trigger:* a private-constructor language feature (per-module export controls finer than per-symbol).
+- **Smart constructors** (hiding raw constructors behind validating builders). *Trigger:* a private-constructor language feature (per-module export controls finer than per-symbol). With `wrap` shipped, the type-safety half is now achievable; the *enforcement* half (preventing direct construction from outside the defining module) still requires private constructors.
 - **Error-accumulation strategy** (fail-fast vs accumulate across the compiler). *Trigger:* enough multi-error UX work to know whether the cost of accumulation pays off.
 - **Naming convention for partial wrappers** (`head_opt` vs `try_head` vs `head?`). *Trigger:* the first stdlib case where a partial and total sibling both exist and need to be distinguished by name. Currently unneeded under basic #2.
 - **Pipe-style as positive style guidance** (mandate, not permission). *Trigger:* enough new data-last code accumulating that the cost/benefit of `|>` is empirically clear.
