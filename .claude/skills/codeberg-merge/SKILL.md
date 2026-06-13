@@ -27,8 +27,15 @@ This skill is a thin orchestrator over the recipes there.
 open PRs:
 
 ```sh
-tea pr list --output simple 2>/dev/null | awk '/^[0-9]/ {print $1}'
+tea pr list --output simple 2>/dev/null | awk '/^[0-9]/' | cut -d' ' -f1
 ```
+
+> **Skill-template gotcha**: the harness substitutes any bare `$N` digit
+> token (`$1`, `$2`, …) in this skill body with the Nth token of
+> `$ARGUMENTS` when the skill is rendered. **Never write `$1` / `$2` /
+> etc. in this file** — not as a shell positional, not as `awk '{print
+> $1}'`, not as `${1}`. Use named variables, `$@`, `cut -d' ' -f1`, or
+> any other form without a bare digit.
 
 ## Setup (do this once; fail loud if it breaks)
 
@@ -130,7 +137,7 @@ The minimal command body (template — the agent fills in the PR list):
 source .codeberg.config
 TOKEN=$(grep -A2 'name: codeberg.org' "$TEA_CONFIG_PATH" | grep token | cut -d: -f2 | tr -d ' ')
 API="https://codeberg.org/api/v1/repos/$CODEBERG_OWNER/$CODEBERG_REPO"
-PRS="$1"  # space-separated, e.g. "29 32"
+PRS="29 32"  # REPLACE with your PR numbers, space-separated
 declare -A prev final
 while :; do
   done_count=0
@@ -217,11 +224,21 @@ while [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; do
 done
 [ "$NON_SEED_CONFLICT" = "1" ] && continue
 
-# Rebase succeeded — regenerate the seed against the rebased tree.
-rm -f build/compile_driver_bin_stage1
-if ! scripts/memwatch.sh 4096 1 -- mise exec -- just refresh-seed; then
-  git checkout "$ORIG_BRANCH"
-  echo "ESCALATION: PR#$PR seed regeneration failed (see memwatch output)"; continue
+# Rebase succeeded — decide whether seed regen is actually needed.
+# Only changes to compiler source (stdlib/compiler/** or stdlib/prelude.sprout)
+# affect the bootstrap seed. Tooling-only PRs (docs, .claude/, .gitignore,
+# example fixtures, runtime/* without ABI impact) can reuse master's
+# already-CI-validated seed, saving 30-60 min of unnecessary self-compile.
+COMPILER_DIFF=$(git diff --name-only origin/master HEAD -- \
+  stdlib/compiler/ stdlib/prelude.sprout)
+if [ -z "$COMPILER_DIFF" ]; then
+  echo "PR#$PR: rebase has no compiler-source diff vs master — skipping seed regen"
+else
+  rm -f build/compile_driver_bin_stage1
+  if ! scripts/memwatch.sh 4096 1 -- mise exec -- just refresh-seed; then
+    git checkout "$ORIG_BRANCH"
+    echo "ESCALATION: PR#$PR seed regeneration failed (see memwatch output)"; continue
+  fi
 fi
 
 if ! git diff-index --quiet HEAD -- bootstrap/compile_driver.ll; then
