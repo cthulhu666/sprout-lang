@@ -174,3 +174,10 @@ This file tracks open design, implementation, and tooling follow-up work.
    unchanged; M1 scopes `!dbg` to user-module functions only (not stdlib/prelude) to
    avoid misleading source attribution in multi-file bundles; full multi-file DWARF is a
    post-M1 follow-up.
+15. Span `BundleErr`, `LowerErr`, and codegen errors (guideline #5 Phase 3).
+   Phase 1+2 landed in `fix/span-error-types`: `Diagnostic`, `InferErr`, `TypedErr`,
+   `CheckErr`, `BodyErr` all carry `SourcePos`; lex/parse/type errors now print
+   `line:col: ERROR: msg`. Remaining gaps — every `no_pos()` and `dummy_pos()` call in
+   `compiler.sprout` that wraps a `BundleErr`/`LowerErr`/`IrLinesErr` — require adding
+   `SourcePos` to `BundleResult`, `LowerResult`, and `IrLinesResult`. Sequencing: land
+   after deriving-v1 to avoid compounding bootstrap cycles.
