@@ -193,3 +193,23 @@ This file tracks open design, implementation, and tooling follow-up work.
    `compiler.sprout` that wraps a `BundleErr`/`LowerErr`/`IrLinesErr` — require adding
    `SourcePos` to `BundleResult`, `LowerResult`, and `IrLinesResult`. Sequencing: land
    after deriving-v1 to avoid compounding bootstrap cycles.
+17. Add `stdlib.path` as the canonical Path API (v1).
+   Design doc: [stdlib-path-v1-draft.md](./stdlib-path-v1-draft.md).
+   Motivation: PR #40 introduced `wrap FilePath`/`wrap StdlibRoot` for the
+   compiler's swap-bug class, but the underlying path-construction is still naive
+   `str_concat` joins in `module_loader.module_name_to_path` and
+   `bundler.prelude_path` (latent trailing-slash and empty-root bugs). There is no
+   stdlib Path surface today, so any future user program that touches the
+   filesystem will re-invent join/parent/extension logic by hand. Designing
+   `stdlib.path` now is cheaper than retrofitting after users depend on raw
+   `String` paths.
+   Initial scope: two zero-cost wraps `File` and `Dir` (extending PR #36's `wrap`
+   philosophy to the stdlib boundary), pure ops `dir_file` / `dir_sub` / `*_parent`
+   / `*_basename` / `file_extension` / `file_with_extension` / `*_normalize`,
+   smart constructors `file_checked` / `dir_checked` rejecting empty + NUL, and
+   migration of `read_file` / `write_file` / `*_exists` / `dir_list` to take
+   `File` / `Dir`. Compiler-internal `FilePath` / `StdlibRoot` retire to
+   `path.File` / `path.Dir`.
+   First milestone constraints: POSIX-only (no Windows separator/drive-letter
+   abstraction), no absolute-vs-relative type distinction, no eager
+   normalization, no symlink resolution, no byte-level (OsString-style) paths.
