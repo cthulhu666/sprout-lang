@@ -6,6 +6,35 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
+# Env wraps — GlobalEnv vs raw body-scope Dict types.Scheme
+# ---------------------------------------------------------------------------
+#
+# GlobalEnv is the environment that flows BETWEEN declarations: it accumulates
+# scheme entries for declared values, plus @eta_fwd:* markers folded in at
+# the end of each constrained FnDecl (see fold_fwd_markers).
+#
+# A raw Dict types.Scheme is used for body-scope environments that may also
+# carry @fwd:* markers (added by seed_forward_markers inside check_fn_body).
+# These markers are scoped to a single function body — they MUST NEVER flow
+# back into the GlobalEnv. The wrap encodes this invariant at the type
+# level: any value typed GlobalEnv is guaranteed to be a between-decl env,
+# and converting a body-scope Dict into a GlobalEnv requires an explicit
+# constructor call.
+#
+# Background: retros/2026-05-30-0037.md documents a bug caused by folding
+# @fwd: entries directly into the global env. With GlobalEnv distinct from
+# raw Dict, the same code pattern requires an explicit `GlobalEnv(body_dict)`
+# conversion, which is loud and reviewable.
+
+wrap GlobalEnv = Dict types.Scheme
+
+# Unwrap GlobalEnv to its underlying Dict.  Used at the boundary to call
+# raw-Dict helpers (dict_get / dict_set / etc.); the result must be wrapped
+# back as GlobalEnv if it flows between decls.
+fn global_env_dict(env: GlobalEnv) -> Dict types.Scheme =
+  match env with | GlobalEnv d -> d
+
+# ---------------------------------------------------------------------------
 # Inference result types
 # ---------------------------------------------------------------------------
 
@@ -22,8 +51,10 @@ type CallResult =
   | CallErr source.SourcePos String
 
 # Internal per-decl result (not exported; callers see TypedResult).
+# The env field is GlobalEnv because each typecheck_decl produces the
+# between-decl environment that the next decl will see.
 type TypedDeclResult =
-  | TypedDeclOk typed_ast.TypedDecl (Dict types.Scheme) (List String)
+  | TypedDeclOk typed_ast.TypedDecl GlobalEnv (List String)
   | TypedDeclErr source.SourcePos String
 
 # Internal single-method result.
@@ -178,7 +209,12 @@ fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
 # Constructor registration
 # ---------------------------------------------------------------------------
 
-export fn register_type_decl(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.Scheme =
+export fn register_type_decl(decl: ast.Decl, env: GlobalEnv) -> GlobalEnv =
+  GlobalEnv(register_type_decl_raw(decl, global_env_dict(env)))
+
+# Raw variant operating on Dict, used internally where the env is still
+# unwrapped (e.g. inside check_fn_body for body-scope auxiliaries).
+fn register_type_decl_raw(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
   | ast.TypeDecl name params ctors _ _ ->
       register_ctors_for_type(name, params, build_local_params(params, dict_empty()), ctors, env)
@@ -2428,7 +2464,10 @@ export fn typecheck_decls(
     match validate_all_decls(decls, declared_types) with
     | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
     | Nothing ->
-        typecheck_decls_inner(state, decls, scanned_env, subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
+        # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
+        # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
+        # the env flows between decls as the wrap-protected GlobalEnv.
+        typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
 
 # ---------------------------------------------------------------------------
 # Strict type-name validation pass
@@ -2602,15 +2641,15 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       | ast.AliasDecl name (Cons param Nil) rhs_te _ ->
           pre_scan_fn_decls(rest, env, register_single_param_alias(name, param, rhs_te, alias_env))
       | ast.TypeDecl _ _ _ _ _ ->
-          pre_scan_fn_decls(rest, register_type_decl(decl, env), alias_env)
+          pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
       | ast.WrapDecl _ _ _ ->
-          pre_scan_fn_decls(rest, register_type_decl(decl, env), alias_env)
+          pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 fn typecheck_decls_inner(
   state: unifier.InferState,
   decls: List ast.Decl,
-  env: Dict types.Scheme,
+  env: GlobalEnv,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
@@ -2619,9 +2658,11 @@ fn typecheck_decls_inner(
 ) -> typed_ast.TypedResult !{IO} =
   match decls with
   | Nil ->
+      # Unwrap GlobalEnv for the public TypedResult API, which still uses
+      # raw Dict types.Scheme.  The wrap discipline is internal to infer.
       typed_ast.TypedOk(
         typed_ast.TypedProgram(typed_decl_list_reverse(acc)),
-        env)
+        global_env_dict(env))
   | Cons decl rest ->
       match decl with
       | ast.AliasDecl name Nil rhs_te _ ->
@@ -2644,12 +2685,15 @@ fn typecheck_decls_inner(
 fn typecheck_decl(
   state: unifier.InferState,
   decl: ast.Decl,
-  env: Dict types.Scheme,
+  env: GlobalEnv,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   env_ftv: List String
 ) -> TypedDeclResult !{IO} =
+  # Unwrap once at the top — internal helpers (check_fn_body, register_*,
+  # dict_get/set) all work on raw Dict.  GlobalEnv is reconstructed at the
+  # TypedDeclOk boundary.
   match decl with
   | ast.TypeDecl _ _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
@@ -2657,10 +2701,12 @@ fn typecheck_decl(
       # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
       TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
   | ast.RecordDecl rec_name type_params fields _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl), register_record_fields(rec_name, type_params, fields, env), env_ftv)
+      TypedDeclOk(typed_ast.TPassThrough(decl),
+        GlobalEnv(register_record_fields(rec_name, type_params, fields, global_env_dict(env))),
+        env_ftv)
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
       do
-        (r, fwd_markers) <- check_fn_body(state, decl, env, subst, eff_subst, alias_env)
+        (r, fwd_markers) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env)
         # WHY: @eta_fwd markers added here have free type variables that must be
         # included in env_ftv so subsequent declarations don't incorrectly generalize
         # over them.  Computed once per declaration (not per env entry) → stays O(n).
@@ -2680,50 +2726,50 @@ fn typecheck_decl(
               # to avoid polluting the per-function @fwd: namespace scanned by
               # resolve_via_fwd_for_prog_var. Keys are globally unique (one InferState).
               fold_fwd_markers(fwd_markers,
-                dict_set(name,
+                GlobalEnv(dict_set(name,
                   unifier.generalize(env_ftv, dict_empty(), dict_empty(),
                     inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
-                  env)),
+                  global_env_dict(env)))),
               new_env_ftv)
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
-      match dict_get(name, env) with
+      match dict_get(name, global_env_dict(env)) with
       | Just _ ->
           TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv)
       | Nothing ->
           TypedDeclOk(
             typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
-            dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env),
+            GlobalEnv(dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
             env_ftv)
   | ast.LetDecl name expr _ ->
       do
-        r <- typecheck_expr(state, env, subst, eff_subst, expr)
+        r <- typecheck_expr(state, global_env_dict(env), subst, eff_subst, expr)
         match r with
         | InferErr pos e -> TypedDeclErr(pos, e)
         | InferOk typed_expr s1 _ _ ->
             TypedDeclOk(
               typed_ast.TLetDecl(name, typed_expr),
-              dict_set(name,
+              GlobalEnv(dict_set(name,
                 unifier.generalize(env_ftv, s1, eff_subst,
                   typed_ast.typed_expr_type(typed_expr), types.EffectPure),
-                env),
+                global_env_dict(env))),
               env_ftv)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        register_class_methods(type_params, methods,
+        GlobalEnv(register_class_methods(type_params, methods,
           register_class_method_markers(class_name, type_params, methods,
-            register_superclass_markers(class_name, superclasses, env))),
+            register_superclass_markers(class_name, superclasses, global_env_dict(env))))),
         env_ftv)
   | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
-        r <- check_instance_methods(state, inst_constraints, methods, env, subst, eff_subst)
+        r <- check_instance_methods(state, inst_constraints, methods, global_env_dict(env), subst, eff_subst)
         match r with
         | typed_ast.InstanceMethodsErr pos e -> TypedDeclErr(pos, e)
         | typed_ast.InstanceMethodsOk typed_methods ->
             TypedDeclOk(
               typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods),
-              register_instance_marker(constraint, env),
+              GlobalEnv(register_instance_marker(constraint, global_env_dict(env))),
               env_ftv)
 
 # ---------------------------------------------------------------------------
@@ -3204,8 +3250,14 @@ fn assert_resolved_typed_record_fields(fn_name: String, fields: List typed_ast.T
 # FnDecl body inference
 # ---------------------------------------------------------------------------
 
-fn fold_fwd_markers(markers: Dict types.Scheme, env: Dict types.Scheme) -> Dict types.Scheme =
-  fold_fwd_entries(vec_to_list(dict_entries(markers)), env)
+# fold_fwd_markers takes the @eta_fwd:* markers computed for a constrained
+# FnDecl's body and folds them into the GlobalEnv that will flow to the
+# next decl.  The env parameter is typed GlobalEnv (not raw Dict) so the
+# caller must explicitly construct a global env at the call site — preventing
+# the retro bug where a body-scope env (containing @fwd:* markers) was
+# accidentally fed in.
+fn fold_fwd_markers(markers: Dict types.Scheme, env: GlobalEnv) -> GlobalEnv =
+  GlobalEnv(fold_fwd_entries(vec_to_list(dict_entries(markers)), global_env_dict(env)))
 
 fn fold_fwd_entries(entries: List (String, types.Scheme), env: Dict types.Scheme) -> Dict types.Scheme =
   match entries with

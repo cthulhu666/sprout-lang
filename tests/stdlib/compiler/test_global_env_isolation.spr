@@ -1,0 +1,63 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.source as source
+
+# Regression test: the global env that flows between declarations must not
+# carry @fwd: markers from a previous decl's body.
+#
+# retros/2026-05-30-0037.md documented a bug where folding @fwd: entries
+# into the global env caused stale markers from earlier function bodies to
+# be found by resolve_via_fwd_for_prog_var inside later function bodies.
+# The downstream symptom was incorrect dict injection at constrained call
+# sites in the later decls.
+#
+# This test exercises the boundary directly: declare a constrained fn, then
+# a SECOND constrained fn whose constraint variable shares a name with the
+# first. If @fwd: markers leak, the second fn's constraint resolution will
+# find the wrong marker.
+#
+# The wrap GlobalEnv refactor encodes this invariant at the type level:
+# any value typed GlobalEnv is guaranteed to NOT carry @fwd: entries from
+# a body scope.
+
+fn run_check(src: String) -> typed_ast.TypedResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> typed_ast.TypedErr(source.SourcePos(0, 0, 0), "lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> typed_ast.TypedErr(source.SourcePos(0, 0, 0), "parse error")
+      | Ok prog -> checker.typecheck_typed(prog, Nil)
+
+fn is_typed_ok(r: typed_ast.TypedResult) -> Bool =
+  match r with
+  | typed_ast.TypedOk _ _ -> true
+  | typed_ast.TypedErr _ _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Scenario 1: two constrained fns in sequence sharing the constraint
+    # variable name "a". Without env isolation, the second fn would see
+    # @fwd:fresh_a:MyShow markers seeded by the first fn body, producing
+    # wrong dict injection at the second fn's call sites.
+    let src1 = "class MyShow a {\n  fn myshow(x: a) -> String\n}\n" ++
+               "fn first(x: a) -> String where MyShow a = myshow(x)\n" ++
+               "fn second(x: a) -> String where MyShow a = myshow(x)\n"
+    r1 <- run_check(src1)
+    assert_true(state, "two constrained fns with shared var name typecheck", is_typed_ok(r1))
+
+    # Scenario 2: constrained fn followed by a NON-constrained fn that uses
+    # the same variable name "a" as a type parameter. The non-constrained
+    # fn must not have @fwd:a:MyShow available — it has no MyShow constraint.
+    let src2 = "class MyShow a {\n  fn myshow(x: a) -> String\n}\n" ++
+               "fn first(x: a) -> String where MyShow a = myshow(x)\n" ++
+               "fn passthrough(x: a) -> a = x\n"
+    r2 <- run_check(src2)
+    assert_true(state, "non-constrained fn after constrained fn typechecks", is_typed_ok(r2))
+
+    summary(state)
