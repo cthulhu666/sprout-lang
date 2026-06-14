@@ -20,7 +20,7 @@ fn contains(haystack: String, needle: String) -> Bool =
 #   ret i64 %t1
 fn add1_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("add1", Cons("x", Nil), "i64", Cons(
+    sprout_ir.IRFunction("add1", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 1),
         Cons(sprout_ir.IRIAdd("%t1", "%x", "%t0"),
@@ -31,7 +31,7 @@ fn add1_program() -> sprout_ir.IRProgram =
 # Build `fn sub1(x: Int) -> Int = x - 1` as IR.
 fn sub1_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("sub1", Cons("x", Nil), "i64", Cons(
+    sprout_ir.IRFunction("sub1", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 1),
         Cons(sprout_ir.IRISub("%t1", "%x", "%t0"),
@@ -42,7 +42,7 @@ fn sub1_program() -> sprout_ir.IRProgram =
 # Build `fn mul2(x: Int) -> Int = x * 2` as IR.
 fn mul2_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("mul2", Cons("x", Nil), "i64", Cons(
+    sprout_ir.IRFunction("mul2", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 2),
         Cons(sprout_ir.IRIMul("%t1", "%x", "%t0"),
@@ -53,7 +53,7 @@ fn mul2_program() -> sprout_ir.IRProgram =
 # Build `fn is_zero(x: Int) -> Bool = x == 0` as IR — returns i1.
 fn is_zero_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("is_zero", Cons("x", Nil), "i1", Cons(
+    sprout_ir.IRFunction("is_zero", Cons(("x", sprout_ir.IRTHeap), Nil), "i1", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 0),
         Cons(sprout_ir.IRICmp("%t1", "eq", "%x", "%t0"),

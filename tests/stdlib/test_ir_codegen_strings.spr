@@ -43,7 +43,7 @@ fn concat_program() -> sprout_ir.IRProgram =
 # fn take(s: Int) -> String = str_slice("hello", 0, s)
 fn slice_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("take", Cons("s", Nil), "i64", Cons(
+    sprout_ir.IRFunction("take", Cons(("s", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRStrConst("%t1", "%t0", "hello"),
         Cons(sprout_ir.IRConst("%t2", 0),
@@ -55,7 +55,7 @@ fn slice_program() -> sprout_ir.IRProgram =
 # fn show(n: Int) -> String = int_to_string(n)
 fn from_int_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("show", Cons("n", Nil), "i64", Cons(
+    sprout_ir.IRFunction("show", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRStrFromInt("%t0", "%n"),
         Cons(sprout_ir.IRRet("%t0"), Nil))),

@@ -4,6 +4,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.field_kinds as fk
+import stdlib.compiler.type_kind as type_kind
 
 # ---------------------------------------------------------------------------
 # Free-variable computation helpers (mirrored from codegen.sprout — not
@@ -264,24 +265,50 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
       build_lifted_captures_go(rest, base_idx, i + 1,
         dict_set(v, "%t$" ++ int_to_string(base_idx + i), acc))
 
-# Determine the IRLoadEnvSlot kind for a single captured variable: "scalar" if
-# Int or Char (no GC root needed); "heap" for everything else.
-# FIX R4#7.
+# Determine the IRLoadEnvSlot kind for a single captured variable:
+#   IRTScalar  — Int or Char (no GC root needed)
+#   IRTHeap    — everything else with a known type
+#   IRTUnknown — type lookup failed (conservative; ir_rooting treats as heap)
+# FIX R4#7 (kind=String); migrated to IRType in BACKLOG.md:367 follow-up.
 # O(n) where n = body size (scans body for the TVar occurrence).
-fn capture_kind(v: String, body: typed_ast.TypedExpr) -> String =
+fn capture_kind(v: String, body: typed_ast.TypedExpr) -> sprout_ir.IRType =
   match find_capture_type(body, v) with
-  | Nothing -> "heap"
+  | Nothing -> sprout_ir.IRTUnknown
   | Just t ->
       if is_int_type(t) || is_char_type(t)
-      then "scalar"
-      else "heap"
+      then sprout_ir.IRTScalar
+      else sprout_ir.IRTHeap
 
 # Build a parallel list of kinds for each name in `frees`, given the lambda body.
 # O(n * m) where n = frees length, m = body size.
-fn build_capture_kinds(frees: List String, body: typed_ast.TypedExpr) -> List String =
+fn build_capture_kinds(frees: List String, body: typed_ast.TypedExpr) -> List sprout_ir.IRType =
   match frees with
   | Nil -> Nil
   | Cons v rest -> Cons(capture_kind(v, body), build_capture_kinds(rest, body))
+
+# Map a source-level TypeExpr annotation (or its absence) to an IRType used as
+# the IRFunction param kind.  Known-scalar annotations → IRTScalar, other
+# explicit annotations → IRTHeap, missing annotation → IRTUnknown.  All three
+# enter heap_origin EXCEPT IRTScalar, so the IRTUnknown fallback is correctness-
+# safe (over-roots) while preserving the "we didn't have type info" signal.
+fn ann_to_irtype(ann: Maybe ast.TypeExpr) -> sprout_ir.IRType =
+  match ann with
+  | Just te ->
+      if type_kind.type_expr_is_non_heap_scalar(te)
+      then sprout_ir.IRTScalar
+      else sprout_ir.IRTHeap
+  | Nothing -> sprout_ir.IRTUnknown
+
+# Zip ast.Param list with a parallel name list to produce IRFunction's params
+# field shape.  Used at both IRFunction construction sites (lifted lambda and
+# top-level fn).  Both list arguments are expected to be the same length; the
+# function tolerates mismatch by truncating to the shorter (defensive).
+fn ast_params_to_irtype_pairs(params: List ast.Param, names: List String) -> List (String, sprout_ir.IRType) =
+  match (params, names) with
+  | (Nil, _) -> Nil
+  | (_, Nil) -> Nil
+  | (Cons(ast.Param _ ann) rest_p, Cons n rest_n) ->
+      Cons((n, ann_to_irtype(ann)), ast_params_to_irtype_pairs(rest_p, rest_n))
 
 # Build the IRLoadEnvSlot ops for the lifted lambda entry block.
 # Each free var at index i gets: IRLoadEnvSlot("%t$<base+i>", "%env$", i+1, kind).
@@ -290,19 +317,19 @@ fn build_capture_kinds(frees: List String, body: typed_ast.TypedExpr) -> List St
 # so lifted-body SSA names are guaranteed disjoint from any user-written
 # lambda param name (e.g. "t0").
 # "%env$" is likewise '$'-safe; disjoint from any user-written lambda param.
-# FIX R4#7: now accepts a `kinds` list (parallel to frees) for scalar vs heap.
+# FIX R4#7: accepts a `kinds` list (parallel to frees) for scalar vs heap.
 # O(n).
-fn build_load_env_ops(frees: List String, kinds: List String, base_idx: Int) -> List sprout_ir.IROp =
+fn build_load_env_ops(frees: List String, kinds: List sprout_ir.IRType, base_idx: Int) -> List sprout_ir.IROp =
   build_load_env_ops_go(frees, kinds, base_idx, 0)
 
-fn build_load_env_ops_go(frees: List String, kinds: List String, base_idx: Int, i: Int) -> List sprout_ir.IROp =
+fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_idx: Int, i: Int) -> List sprout_ir.IROp =
   match frees with
   | Nil -> Nil
   | Cons _ rest_frees ->
       match kinds with
       | Nil ->
           # Defensive: more frees than kinds (should not happen); treat as heap.
-          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1, "heap"),
+          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1, sprout_ir.IRTHeap),
                build_load_env_ops_go(rest_frees, Nil, base_idx, i + 1))
       | Cons k rest_kinds ->
           Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1, k),
@@ -414,7 +441,7 @@ fn build_load_env_ops_go(frees: List String, kinds: List String, base_idx: Int, 
 # (List IRBlock).  Sub-expressions never emit IRRet.
 
 # field_kinds helpers (ctor_field_kind, ctor_field_kinds_string,
-# field_kind_char_to_kind, fk_at) and their leaf utilities moved to
+# field_kind_char_to_irtype, fk_at) and their leaf utilities moved to
 # stdlib.compiler.field_kinds (/code-review fix #10). Call sites below
 # use fk.* prefix.
 
@@ -982,8 +1009,13 @@ fn translate_lambda_lifted(lparams: List ast.Param, body: typed_ast.TypedExpr,
               let lifted_blocks = list_append(body_blocks, Cons(ret_block, Nil))
               # Lifted fn receives "env$" as first param ("$" rejected by source),
               # then lambda's own params.
+              # Derive per-param IRType so ir_rooting can skip seeding scalar
+              # params into heap_origin.  "env$" is always heap (closure env
+              # pointer); lambda params come from lparams' type annotations
+              # via type_kind.type_expr_is_non_heap_scalar.
+              let lam_params_with_kinds = ast_params_to_irtype_pairs(lparams, lam_param_names)
               let lifted_fn = sprout_ir.IRFunction(lam_fn_name,
-                                Cons("env$", lam_param_names), "i64", lifted_blocks)
+                                Cons(("env$", sprout_ir.IRTHeap), lam_params_with_kinds), "i64", lifted_blocks)
               new_lifted <- ref_read(lifted_ref)
               ref_write(lifted_ref, Cons(lifted_fn, new_lifted))
               # Record the lifted fn's next-free idx so the rooting pass picks
@@ -1257,8 +1289,8 @@ fn has_ctor_pattern_arm(arms: List typed_ast.TypedMatchBranch) -> Bool =
           | ast.ConstructorPattern _ _ _ -> true
           | _ -> has_ctor_pattern_arm(rest)
 
-# field_kind_char_to_kind and fk_at moved to stdlib.compiler.field_kinds
-# (/code-review fix #10). Call sites below use fk.field_kind_char_to_kind /
+# field_kind_char_to_irtype and fk_at moved to stdlib.compiler.field_kinds
+# (/code-review fix #10). Call sites below use fk.field_kind_char_to_irtype /
 # fk.fk_at.
 
 # Emit IRGetField ops for each VarPattern arg in a ConstructorPattern.
@@ -2231,12 +2263,14 @@ fn param_names(params: List ast.Param) -> List String =
       match p with
       | ast.Param n _ -> Cons(n, param_names(rest))
 
-# Build an IRFunction from a (name, param-names, ret-type, blocks) tuple.
-# `blocks` is already a fully-assembled List IRBlock — typically starting
-# with an "entry" block — produced by translate_body.
-fn build_fn(name: String, pnames: List String, ret_ty: String,
+# Build an IRFunction from a (name, params, ret-type, blocks) tuple.
+# `params` carries per-param IRType for ir_rooting's heap-origin seeding
+# (closes BACKLOG.md:367 over-rooting bug).  `blocks` is already a fully-
+# assembled List IRBlock — typically starting with an "entry" block —
+# produced by translate_body.
+fn build_fn(name: String, params: List (String, sprout_ir.IRType), ret_ty: String,
             blocks: List sprout_ir.IRBlock) -> sprout_ir.IRFunction =
-  sprout_ir.IRFunction(name, pnames, ret_ty, blocks)
+  sprout_ir.IRFunction(name, params, ret_ty, blocks)
 
 # Accept `main` without translating it: the synthetic LLVM shim in
 # ir_lowering handles main regardless of its body.  Only TUnit bodies
@@ -2259,7 +2293,7 @@ fn validate_main_body(body: typed_ast.TypedExpr) -> Result String (Maybe sprout_
 # The third field is the flat list of lambda IRFunctions lifted during this fn.
 # lambda_ctr_ref is shared across all user fns (lives at translate_program scope)
 # so that lifted lambda names are unique program-wide (__sprout_ir_lambda_0, __sprout_ir_lambda_1, …).
-fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExpr,
+fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
                      ctors: Dict (Int, Int, Int, String), top_level: Set,
                      lambda_ctr_ref: Ref Int,
                      lifted_idx_ref: Ref (Dict Int)) ->
@@ -2275,8 +2309,10 @@ fn translate_user_fn(name: String, pnames: List String, body: typed_ast.TypedExp
         | (blocks, next_idx) ->
             do
               lifted <- ref_read(lifted_ref)
-              Ok(Just((build_fn(name, pnames, ret_ty, blocks), next_idx, list_reverse(lifted))))
+              Ok(Just((build_fn(name, params_with_kinds, ret_ty, blocks), next_idx, list_reverse(lifted))))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
+        pnames = param_names(params)
+        params_with_kinds = ast_params_to_irtype_pairs(params, pnames)
 
 # Validate that no TInstanceDecl method name starts with "__sprout_".
 # TInstanceDecl carries a List TypedInstanceMethod; each method's first field
@@ -2340,7 +2376,7 @@ fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, S
         | Err msg -> Err(msg)
         | Ok Nothing -> Ok(Nothing)
         | Ok (Just _) -> Err("ast_to_ir: validate_main_body unexpectedly returned a function")
-      else translate_user_fn(name, param_names(params), body, ctors, top_level, lambda_ctr_ref, lifted_idx_ref)
+      else translate_user_fn(name, params, body, ctors, top_level, lambda_ctr_ref, lifted_idx_ref)
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(Nothing)
   | typed_ast.TLetDecl _ _ -> Ok(Nothing)
   | typed_ast.TInstanceDecl _ _ _ -> Ok(Nothing)

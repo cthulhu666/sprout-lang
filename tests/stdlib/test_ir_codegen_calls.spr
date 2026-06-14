@@ -41,7 +41,7 @@ fn contains(haystack: String, needle: String) -> Bool =
 #   ret %t10
 fn fact_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("fact", Cons("n", Nil), "i64", Cons(
+    sprout_ir.IRFunction("fact", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 0),
         Cons(sprout_ir.IRICmp("%t1", "eq", "%n", "%t0"),
@@ -85,7 +85,7 @@ fn fact_program() -> sprout_ir.IRProgram =
 #   ret %t12
 fn fib_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("fib", Cons("n", Nil), "i64", Cons(
+    sprout_ir.IRFunction("fib", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 2),
         Cons(sprout_ir.IRICmp("%t1", "slt", "%n", "%t0"),
@@ -114,12 +114,12 @@ fn fib_program() -> sprout_ir.IRProgram =
 #   fn add4(n: Int) -> Int = twice(n) + twice(n)
 fn twice_and_add4_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("twice", Cons("n", Nil), "i64", Cons(
+    sprout_ir.IRFunction("twice", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRIAdd("%t0", "%n", "%n"),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
-    Cons(sprout_ir.IRFunction("add4", Cons("n", Nil), "i64", Cons(
+    Cons(sprout_ir.IRFunction("add4", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRCall("%t0", "i64", "twice", Cons("%n", Nil)),
         Cons(sprout_ir.IRCall("%t1", "i64", "twice", Cons("%n", Nil)),

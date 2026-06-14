@@ -205,11 +205,13 @@ fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (Str
   | Cons b rest -> lower_block(b, ret_ty, str_table) ++ lower_blocks(rest, ret_ty, str_table)
 
 # Build the comma-separated "i64 %a, i64 %b, ..." parameter list.
-fn lower_params(params: List String) -> String =
+# Param kinds (IRType) are intentionally ignored at lowering — they only
+# affect rooting decisions upstream of this pass; every param lowers to i64.
+fn lower_params(params: List (String, sprout_ir.IRType)) -> String =
   match params with
   | Nil -> ""
-  | [p] -> "i64 %" ++ p
-  | Cons p rest -> "i64 %" ++ p ++ ", " ++ lower_params(rest)
+  | [(p, _)] -> "i64 %" ++ p
+  | Cons (p, _) rest -> "i64 %" ++ p ++ ", " ++ lower_params(rest)
 
 fn lower_fn(f: sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
   match f with

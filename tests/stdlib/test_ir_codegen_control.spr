@@ -33,7 +33,7 @@ fn contains(haystack: String, needle: String) -> Bool =
 #   ret %t7
 fn abs_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("abs", Cons("x", Nil), "i64", Cons(
+    sprout_ir.IRFunction("abs", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 0),
         Cons(sprout_ir.IRICmp("%t1", "slt", "%x", "%t0"),
@@ -85,7 +85,7 @@ fn abs_program() -> sprout_ir.IRProgram =
 #     ret %t16
 fn sign_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("sign", Cons("x", Nil), "i64", Cons(
+    sprout_ir.IRFunction("sign", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 0),
         Cons(sprout_ir.IRICmp("%t1", "eq", "%x", "%t0"),

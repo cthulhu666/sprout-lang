@@ -1,0 +1,40 @@
+module stdlib.compiler.type_kind
+
+# Single source of truth for "is this source-level type a known non-heap
+# scalar?".  Used by both backend paths to decide whether a value needs
+# GC rooting:
+#   - stdlib.compiler.codegen (direct AST→LLVM): elides push_temp_root_typed
+#     for scalar-typed values.
+#   - stdlib.compiler.ast_to_ir (Sprout-IR path): tags IRFunction params,
+#     IRLoadEnvSlot, and IRGetField with kind=IRTScalar so ir_rooting's
+#     params_heap_origin / op_produces_simple_heap skip them.
+#
+# Prior to centralisation the predicate lived only in codegen.sprout; the
+# IR path conservatively over-rooted every param.  See BACKLOG.md:367 for
+# the bug this module exists to fix structurally.
+
+import stdlib.compiler.ast as ast
+
+# --- Private leaf helpers (mirror codegen.sprout's same-named local fns;
+#     local copies kept so this module has no dep on codegen). ---
+
+fn string_ends_with(raw: String, suffix: String) -> Bool =
+  str_len(raw) >= str_len(suffix) &&
+  str_slice(raw, str_len(raw) - str_len(suffix), str_len(raw)) == suffix
+
+fn type_name_leaf_is(name: String, leaf: String) -> Bool =
+  name == leaf || string_ends_with(name, "." ++ leaf)
+
+# --- Public predicate ---
+
+# Returns true when an ast.TypeExpr annotation declares a known non-heap
+# scalar (Int, Bool, Char).  Returns false for everything else, including
+# TVars and polymorphic positions, which may resolve to heap objects at
+# runtime and must be rooted conservatively.
+export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName name ->
+      type_name_leaf_is(name, "Int") ||
+      type_name_leaf_is(name, "Bool") ||
+      type_name_leaf_is(name, "Char")
+  | _ -> false

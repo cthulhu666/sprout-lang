@@ -70,18 +70,22 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRMkClosure r _ _ -> Just(r)
   # Closure-application result is conservatively heap-typed (M2: all results are i64).
   | sprout_ir.IRApplyClosure r _ _ -> Just(r)
-  # FIX R4#7: honour the kind field. "scalar" slots (Int, Char) are NOT heap;
-  # "heap" slots (String, ADT, closure) are. This avoids over-rooting scalar
-  # captures in deep-recursive closures with many Int/Char captures.
+  # FIX R4#7: honour the kind field. IRTScalar slots (Int, Bool, Char) are
+  # not heap; IRTHeap slots (String, ADT, closure) are; IRTUnknown is
+  # treated as heap (conservative). This avoids over-rooting scalar captures
+  # in deep-recursive closures with many Int/Char captures.
   | sprout_ir.IRLoadEnvSlot r _ _ kind ->
-      if kind == "scalar" then Nothing else Just(r)
-  # PR 2.5: IRGetField result is heap-typed iff its kind is "heap"
-  # (the kind is decoded by translate_match from the ctors-dict
-  # field_kinds_string; 's' and 'p' → "heap", 'i' and 'b' → "scalar"
-  # per the /code-review fix #1 conservative classification).
+      match kind with
+      | sprout_ir.IRTScalar -> Nothing
+      | _ -> Just(r)
+  # PR 2.5: IRGetField result is heap-typed iff its kind is IRTHeap or
+  # IRTUnknown (the kind is decoded by translate_match from the ctors-dict
+  # field_kinds_string via field_kinds.field_kind_char_to_irtype).
   # IRGetTag returns an i64 tag, not a heap handle — never heap.
   | sprout_ir.IRGetField r _ _ kind ->
-      if kind == "heap" then Just(r) else Nothing
+      match kind with
+      | sprout_ir.IRTScalar -> Nothing
+      | _ -> Just(r)
   | sprout_ir.IRGetTag _ _ -> Nothing
   # IRAbortMatch defines no value (/code-review fix #15: void noreturn).
   | sprout_ir.IRAbortMatch -> Nothing
@@ -516,15 +520,21 @@ fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, prefix: String) -> sprout
 # ---------------------------------------------------------------------------
 # Seed heap_origin from function parameters.
 #
-# Conservative: IRFunction lacks per-param type info as of PR 2.3; over-roots
-# all params.  Parameters carry no '%' prefix in the IRFunction param list, so
-# we prepend '%' here to match the naming convention used throughout the pass.
-fn params_heap_origin_loop(params: List String, acc: Set) -> Set =
+# Filters by per-param IRType (added in BACKLOG.md:367 follow-up to close
+# the PR 2.3 "over-roots all params" gap noted previously in this comment).
+# IRTScalar params are skipped (Int/Bool/Char — never heap pointers);
+# IRTHeap and IRTUnknown params are seeded (heap or conservative).
+# Parameters carry no '%' prefix in the IRFunction param list, so we prepend
+# '%' here to match the naming convention used throughout the pass.
+fn params_heap_origin_loop(params: List (String, sprout_ir.IRType), acc: Set) -> Set =
   match params with
   | Nil -> acc
-  | Cons p rest -> params_heap_origin_loop(rest, set_insert("%" ++ p, acc))
+  | Cons (p, kind) rest ->
+      match kind with
+      | sprout_ir.IRTScalar -> params_heap_origin_loop(rest, acc)
+      | _ -> params_heap_origin_loop(rest, set_insert("%" ++ p, acc))
 
-fn params_heap_origin(params: List String) -> Set =
+fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
   params_heap_origin_loop(params, set_empty())
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.field_kinds as fk
+import stdlib.compiler.type_kind as type_kind
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -850,16 +851,10 @@ fn type_is_non_heap_scalar(t: types.Type) -> Bool =
       type_name_leaf_is(name, "Char")
   | _ -> false
 
-# Returns true when an ast.TypeExpr annotation declares a non-heap scalar.
-# Used only when we have the annotation from ast.Param; returns false when
-# uncertain (Nothing annotation or non-scalar type).
-fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
-  match te with
-  | ast.TypeName name ->
-      type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool") ||
-      type_name_leaf_is(name, "Char")
-  | _ -> false
+# NB: type_expr_is_non_heap_scalar has been hoisted to stdlib.compiler.type_kind
+# so the IR-codegen path (stdlib.compiler.ast_to_ir) can use the same predicate
+# without code duplication.  Call sites in this file now use
+# `type_kind.type_expr_is_non_heap_scalar(...)`.
 
 # Push a temporary GC root for `v`.  Returns the number of roots pushed (0 or 1).
 # We skip pushing for Bool (i1) — it is never a heap pointer.
@@ -1579,7 +1574,7 @@ fn load_lambda_params(params: List ast.Param, wire_lls: List String, logical_lls
         let raw_v = val_for_ll(wire, ir)
         v <- coerce_value(raw_v, logical, em)
         let skip = match ann with
-                   | Just te -> type_expr_is_non_heap_scalar(te)
+                   | Just te -> type_kind.type_expr_is_non_heap_scalar(te)
                    | Nothing -> false
         rooted <- if skip then 0 else push_temp_root(v, em)
         (rest_binds, rest_rooted) <- load_lambda_params(rest_params, rest_wires, rest_logicals, em, idx + 1)
@@ -3141,7 +3136,7 @@ fn build_param_locals_and_push_roots_acc(params: List ast.Param, lls: List Strin
           do
             let v = val_for_ll(ll, "%" ++ name)
             let skip = match ann with
-                       | Just te -> type_expr_is_non_heap_scalar(te)
+                       | Just te -> type_kind.type_expr_is_non_heap_scalar(te)
                        | Nothing -> false
             n <- if skip then 0 else push_temp_root(v, em)
             build_param_locals_and_push_roots_acc(rest_params, rest_lls, em, dict_set(name, v, acc), rooted + n)
@@ -3238,7 +3233,7 @@ fn allocate_tco_slots_acc(params: List ast.Param, lls: List String, em: Emitter,
             emit_template(em, `  ${slot} = alloca ${ll}`)
             emit_template(em, `  store ${ll} %${name}, ptr ${slot}`)
             let scalar_ann = match ann with
-                             | Just te -> type_expr_is_non_heap_scalar(te)
+                             | Just te -> type_kind.type_expr_is_non_heap_scalar(te)
                              | Nothing -> false
             r <- if scalar_ann then 0
                  else if ll == ll_i64() then

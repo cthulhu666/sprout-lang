@@ -19,6 +19,7 @@ module stdlib.compiler.field_kinds
 # with drift risk. Centralising them here closes the surface.
 
 import stdlib.compiler.ast as ast
+import stdlib.compiler.sprout_ir as sprout_ir
 
 # --- Private leaf helpers (mirror codegen.sprout's same-named local fns;
 #     local copies kept so this module has no dep on codegen). ---
@@ -68,23 +69,26 @@ export fn ctor_field_kinds_string(exprs: List ast.TypeExpr) -> String =
 
 # --- Decoder ---
 
-# Decode a single field-kind byte to the rooting-classification string
-# expected by ir_rooting's op_produces_simple_heap. 'i' / 'b' are scalar;
-# 's' / 'p' / '_' are heap (the conservative choice for type-vars and
-# the String/Char-collapsed 's' case per /code-review fix #1).
-export fn field_kind_char_to_kind(ch: Char) -> String =
-  if ch == 'i' || ch == 'b'
-  then "scalar"
-  else "heap"
+# Decode a single field-kind byte to the rooting-classification IRType
+# expected by ir_rooting's op_produces_simple_heap.
+#   'i' / 'b'    → IRTScalar
+#   's' / 'p'    → IRTHeap   (conservative for String/Char-collapsed 's'
+#                              per /code-review fix #1)
+#   '_'          → IRTUnknown (type-variable; treated as heap by rooting)
+#   anything else→ IRTUnknown (defensive fallback)
+export fn field_kind_char_to_irtype(ch: Char) -> sprout_ir.IRType =
+  if ch == 'i' || ch == 'b' then sprout_ir.IRTScalar
+  else if ch == 's' || ch == 'p' then sprout_ir.IRTHeap
+  else sprout_ir.IRTUnknown
 
-# Look up the field kind string at index i in the field-kinds-string.
+# Look up the field kind IRType at index i in the field-kinds-string.
 # In correct compiler operation `i` is always in range (fks length is one
 # byte per ctor arg). The Nothing branch is a defensive fallback for
 # internal-compiler-bug paths only; callers (bind_ctor_field_args) guard
 # the bounds explicitly so this branch is unreachable when the upstream
-# invariant holds. Conservative "heap" is correctness-safe — at worst
+# invariant holds. Conservative IRTUnknown is correctness-safe — at worst
 # over-roots.
-export fn fk_at(fks: String, i: Int) -> String =
+export fn fk_at(fks: String, i: Int) -> sprout_ir.IRType =
   match str_char_at(fks, i) with
-  | Nothing -> "heap"
-  | Just ch -> field_kind_char_to_kind(ch)
+  | Nothing -> sprout_ir.IRTUnknown
+  | Just ch -> field_kind_char_to_irtype(ch)

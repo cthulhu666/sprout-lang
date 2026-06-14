@@ -113,7 +113,7 @@ fn test3_program() -> sprout_ir.IRProgram =
 
 fn test4_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("phi_heap", Cons("cond", Nil), "i64", Cons(
+    sprout_ir.IRFunction("phi_heap", Cons(("cond", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRCondBr("%cond", "then", "else"), Nil)),
       Cons(sprout_ir.IRBlock("then", Cons(
@@ -149,7 +149,7 @@ fn test4_program() -> sprout_ir.IRProgram =
 
 fn test5_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("f_heap_param", Cons("s", Nil), "i64", Cons(
+    sprout_ir.IRFunction("f_heap_param", Cons(("s", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRConst("%z0", 0),
         Cons(sprout_ir.IRCall("%r0", "i64", "bar", Cons("%s", Nil)),

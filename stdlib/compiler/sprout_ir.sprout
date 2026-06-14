@@ -55,6 +55,30 @@ module stdlib.compiler.sprout_ir
 # print_ir_program is a debugging helper used by tests and tooling.  It does
 # NOT produce LLVM — that is ir_lowering.lower_program's job.
 
+# ---------------------------------------------------------------------------
+# IRType — coarse classification of an SSA value for GC rooting.
+# ---------------------------------------------------------------------------
+#
+# Sprout-IR is a typed IR; this is the minimal-viable type system needed by
+# the rooting pass.  Three nullary tags:
+#
+#   IRTHeap     — known heap pointer (String, ADT handle, closure, tuple).
+#                 Must be rooted across GC triggers.
+#   IRTScalar   — known non-heap scalar (Int, Bool, Char codepoint).
+#                 Never a heap pointer; safe to skip rooting.
+#   IRTUnknown  — type unknown to the IR builder (TVar, polymorphic position,
+#                 unresolved annotation).  Treated AS IF heap by the rooting
+#                 pass (conservative — over-rooting is correctness-safe).
+#
+# All three tags are nullary so they CPR-unbox to a single i64 in the runtime
+# representation; pattern-matching them lowers to a single `icmp` (vs `str_eq`
+# for the previous string-based kind convention).  See runtime/sprout_runtime.c
+# `sprout_make0` singleton cache for the per-tag pointer reuse.
+export type IRType (..) =
+  | IRTHeap
+  | IRTScalar
+  | IRTUnknown
+
 export type IROp (..) =
   | IRConst String Int
   | IRRet String
@@ -107,12 +131,13 @@ export type IROp (..) =
   #   - result: '%t<N>' for the loaded i64 value.
   #   - env-val: '%'-prefixed env handle (typically a parameter of a lifted lambda).
   #   - slot-idx: 1-based; slot 0 is the code pointer, slots 1..N are captures.
-  #   - kind: "heap" | "scalar".  "scalar" captures (Int, Char) are not rooted
-  #     by ir_rooting; "heap" captures (String, ADT, closure) are rooted.
+  #   - kind: IRType.  IRTScalar captures (Int, Bool, Char) are not rooted
+  #     by ir_rooting; IRTHeap captures (String, ADT, closure) are rooted.
+  #     IRTUnknown is treated as heap (conservative).
   #   Lowering: GEP + load i64 (kind is ignored at lowering; always emits load i64).
   #   Pure load — does NOT trigger GC.
-  #   FIX R4#7.
-  | IRLoadEnvSlot String String Int String
+  #   FIX R4#7 (kind=String); migrated to IRType in BACKLOG.md:367 follow-up.
+  | IRLoadEnvSlot String String Int IRType
   # IRRoot <slot-name> <value-being-rooted> <discard-reg-for-push-call>
   # All names carry their '%' prefix already.
   #
@@ -132,22 +157,22 @@ export type IROp (..) =
   # @sprout_tag reads ctor metadata; no allocation. NOT a GC trigger.
   | IRGetTag String String
   # IRGetField <result> <scrut-handle> <field-idx> <field-kind>
-  # field-kind: "heap" | "scalar" (mirrors IRLoadEnvSlot's kind arg).
+  # field-kind: IRType (mirrors IRLoadEnvSlot's kind arg).
   # Encoding source: ctors-dict value tuple
   #   Dict String (Int, Int, Int, String)  # (tag, arity, max_arity, field_kinds_string)
   # `field_kinds_string` is computed by build_ctor_table and passed to
   # CtorReg; the same value is threaded into the dict. translate_match
-  # decodes per-byte via stdlib.compiler.field_kinds.field_kind_char_to_kind:
-  #   'i' (Int)              -> "scalar"
-  #   'b' (Bool)             -> "scalar"
-  #   's' (String AND Char)  -> "heap"   (/code-review fix #1: String must
-  #                                       be rooted; Char over-rooted)
-  #   'p' (ADT|closure|tuple) -> "heap"
-  #   '_' (type-var)         -> "heap"   (conservative — avoid missed roots)
+  # decodes per-byte via stdlib.compiler.field_kinds.field_kind_char_to_irtype:
+  #   'i' (Int)              -> IRTScalar
+  #   'b' (Bool)             -> IRTScalar
+  #   's' (String AND Char)  -> IRTHeap   (/code-review fix #1: String must
+  #                                        be rooted; Char over-rooted)
+  #   'p' (ADT|closure|tuple) -> IRTHeap
+  #   '_' (type-var)         -> IRTUnknown   (conservative — avoid missed roots)
   # Lowers to: %result = call i64 @sprout_field(i64 %scrut-handle, i64 <idx>)
   # @sprout_field is a pure read; no allocation. NOT a GC trigger.
   # field-kind drives ir_rooting heap-vs-scalar classification of <result>.
-  | IRGetField String String Int String
+  | IRGetField String String Int IRType
   # IRAbortMatch
   # Lowers to:
   #   call void @sprout_abort_match()
@@ -171,10 +196,17 @@ export type IROp (..) =
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
-# IRFunction <name> <param-names> <llvm-return-type> <blocks>
+# IRFunction <name> <params> <llvm-return-type> <blocks>
+# params is List (String, IRType) — each entry is (param-name, kind).
+# kind comes from the source-level type annotation: IRTScalar for known
+# scalar params (Int/Bool/Char), IRTHeap for known heap params, IRTUnknown
+# for unannotated or polymorphic positions.  The rooting pass seeds only
+# IRTHeap params into the root pool; scalars pass through trigger ops
+# without an IRRoot.  Closes BACKLOG.md:367.
+#
 # The return-type field is the LLVM type string ("i64" or "i1").  It is
 # determined by the AST→IR translator from the function body's inferred type.
-export type IRFunction (..) = IRFunction String (List String) String (List IRBlock)
+export type IRFunction (..) = IRFunction String (List (String, IRType)) String (List IRBlock)
 
 # CtorReg carries the metadata emitted as @sprout_register_ctor calls in @main.
 # Fields: name (source-level, possibly qualified), tag, arity, field_kinds.
@@ -210,6 +242,12 @@ fn print_call_args(args: List String) -> String =
   | [a] -> a
   | Cons a rest -> a ++ ", " ++ print_call_args(rest)
 
+export fn print_ir_type(t: IRType) -> String =
+  match t with
+  | IRTHeap -> "heap"
+  | IRTScalar -> "scalar"
+  | IRTUnknown -> "unknown"
+
 fn print_op(op: IROp) -> String =
   match op with
   | IRConst name n -> "    " ++ name ++ " = const " ++ int_to_string(n)
@@ -238,7 +276,7 @@ fn print_op(op: IROp) -> String =
   | IRApplyClosure r callee args ->
       "    " ++ r ++ " = apply_closure " ++ callee ++ "(" ++ print_call_args(args) ++ ")"
   | IRLoadEnvSlot r env slot kind ->
-      "    " ++ r ++ " = load_env_slot " ++ env ++ "[" ++ int_to_string(slot) ++ "](" ++ kind ++ ")"
+      "    " ++ r ++ " = load_env_slot " ++ env ++ "[" ++ int_to_string(slot) ++ "](" ++ print_ir_type(kind) ++ ")"
   | IRRoot slot v discard ->
       "    " ++ discard ++ " = root " ++ slot ++ ", " ++ v
   | IRUnroot n discard ->
@@ -246,7 +284,7 @@ fn print_op(op: IROp) -> String =
   | IRGetTag r s ->
       "    " ++ r ++ " = get_tag " ++ s
   | IRGetField r s i k ->
-      "    " ++ r ++ " = get_field " ++ s ++ ", " ++ int_to_string(i) ++ " [" ++ k ++ "]"
+      "    " ++ r ++ " = get_field " ++ s ++ ", " ++ int_to_string(i) ++ " [" ++ print_ir_type(k) ++ "]"
   | IRAbortMatch ->
       "    abort_match; unreachable"
   | IRZextI1ToI64 r s ->
@@ -268,11 +306,15 @@ fn print_blocks(bs: List IRBlock) -> String =
   | Nil -> ""
   | Cons b rest -> print_block(b) ++ print_blocks(rest)
 
-fn print_params(ps: List String) -> String =
+fn print_param_with_kind(p: (String, IRType)) -> String =
+  match p with
+  | (name, kind) -> name ++ ": " ++ print_ir_type(kind)
+
+fn print_params(ps: List (String, IRType)) -> String =
   match ps with
   | Nil -> ""
-  | [p] -> p
-  | Cons p rest -> p ++ ", " ++ print_params(rest)
+  | [p] -> print_param_with_kind(p)
+  | Cons p rest -> print_param_with_kind(p) ++ ", " ++ print_params(rest)
 
 fn print_fn(f: IRFunction) -> String =
   match f with

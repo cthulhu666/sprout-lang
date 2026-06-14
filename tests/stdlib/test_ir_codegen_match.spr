@@ -137,7 +137,7 @@ fn clang_verifies_ir(ir: String) -> Bool !{IO} =
 # Tests bare lowering of IRGetTag.
 fn tag_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("get_tag_demo", Cons("h", Nil), "i64", Cons(
+    sprout_ir.IRFunction("get_tag_demo", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRGetTag("%t0", "%h"),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
@@ -147,9 +147,9 @@ fn tag_program() -> sprout_ir.IRProgram =
 # field_program_scalar: IRGetField with "scalar" kind — result is not heap.
 fn field_program_scalar() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("get_field_scalar", Cons("h", Nil), "i64", Cons(
+    sprout_ir.IRFunction("get_field_scalar", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRGetField("%t0", "%h", 0, "scalar"),
+        sprout_ir.IRGetField("%t0", "%h", 0, sprout_ir.IRTScalar),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
     Nil), Nil)
@@ -163,9 +163,9 @@ fn field_program_scalar() -> sprout_ir.IRProgram =
 # intermediate allocations.
 fn field_program_heap() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("get_field_heap", Cons("h", Nil), "i64", Cons(
+    sprout_ir.IRFunction("get_field_heap", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRGetField("%f", "%h", 0, "heap"),
+        sprout_ir.IRGetField("%f", "%h", 0, sprout_ir.IRTHeap),
         Cons(sprout_ir.IRMakeCtor("%marker", "Marker", 50, Nil),
         Cons(sprout_ir.IRMakeCtor("%r", "WrapBoxed", 99,
                                   Cons("%f", Cons("%marker", Nil))),
@@ -178,9 +178,9 @@ fn field_program_heap() -> sprout_ir.IRProgram =
 # push a root — scalars are not GC handles.  Negative control.
 fn field_program_scalar_across_trigger() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("get_field_scalar_across", Cons("h", Nil), "i64", Cons(
+    sprout_ir.IRFunction("get_field_scalar_across", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRGetField("%n", "%h", 0, "scalar"),
+        sprout_ir.IRGetField("%n", "%h", 0, sprout_ir.IRTScalar),
         Cons(sprout_ir.IRMakeCtor("%marker", "Marker", 50, Nil),
         Cons(sprout_ir.IRMakeCtor("%r", "WrapInt", 51,
                                   Cons("%n", Cons("%marker", Nil))),

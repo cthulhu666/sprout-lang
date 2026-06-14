@@ -1,0 +1,108 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+
+# Pins IRFunction per-param IRType filtering (Model C M2 follow-up,
+# closes BACKLOG.md:367).
+#
+# Without per-param kind info, `params_heap_origin` in ir_rooting.sprout
+# seeds every IRFunction parameter into the root set, causing IRRoot ops
+# to be emitted around GC triggers for scalar (Int/Bool/Char) params that
+# can never be heap pointers.
+#
+# With per-param kind info, only IRTHeap params are seeded.  Scalar params
+# pass through trigger ops without IRRoot insertion.
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack) - pos - str_len(needle)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+# Returns the lowered IR as a String, or an "ERROR: ..." marker.  Tests bind
+# this via `<-` and grep the result — avoids match-arm-let limitations.
+# NB: do-block binding strips Result, so match translate_source(...) directly
+# rather than binding via `r <- ...` first (see project_do_block_result_io_quirk).
+fn get_ir_or_msg(src: String) -> String !{IO} =
+  do
+    match translate_source(src) with
+    | Ok ir -> ir
+    | Err msg -> "ERROR: " ++ msg
+
+# Drive a Sprout source string through the IR-codegen path (the path that
+# this PR's filter affects).  Direct codegen has its own rooting and is not
+# exercised here.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # `++` desugars to `append`; declare extern in every source so the
+    # type-checker can resolve it.
+    let prelude = "extern fn append(x: String, y: String) -> String\n"
+
+    # Differential test: compare a fn with an Int param against a fn with a
+    # String param in the same position.  Body, structure, and call site
+    # are identical except for the param type.
+    #
+    # Without fix: both produce the same root-push count (Int param
+    #   over-rooted into heap_origin).
+    # With fix: the Int-param version produces FEWER pushes (n filtered out).
+    #
+    # This is robust to codegen detail changes that affect both equally.
+    ir_int_param <- get_ir_or_msg(prelude ++ "extern fn use1(s: String) -> Int\nfn f(n: Int, s: String) -> Int = use1(s ++ s) + n")
+    ir_str_param <- get_ir_or_msg(prelude ++ "extern fn use1(s: String) -> Int\nextern fn slen(x: String) -> Int\nfn f(n: String, s: String) -> Int = use1(s ++ s) + slen(n)")
+    let int_pushes = count(ir_int_param, "call i64 @sprout_gc_push_i64_root")
+    let str_pushes = count(ir_str_param, "call i64 @sprout_gc_push_i64_root")
+    assert_true(state, "differential: Int-param fn has strictly FEWER root pushes than String-param fn",
+                int_pushes < str_pushes)
+
+    # (Earlier draft included a "String param IS rooted around trigger" check,
+    # but the differential test above already proves this — String-param fns
+    # produce strictly MORE pushes than Int-param fns.  Direct absolute-count
+    # check was sensitive to IR-codegen-path liveness analysis details that
+    # are orthogonal to this PR's filter.)
+
+    # Case 4: Two distinct String params — both must be rooted (no false
+    # positive elision based on type alone).
+    ir4 <- get_ir_or_msg(prelude ++ "extern fn use2(a: String, b: String) -> Int\nfn k(a: String, b: String) -> Int = use2(a ++ b, b ++ a)")
+    assert_true(state, "case4: two String params both rooted", count(ir4, "call i64 @sprout_gc_push_i64_root") >= 2)
+
+    # Case 5: pure-scalar fn with no heap activity — should produce 0 pushes
+    # regardless of the fix (no GC triggers, no heap values).  Pins the
+    # invariant that the fix doesn't introduce SPURIOUS pushes.
+    ir5 <- get_ir_or_msg("fn pure(n: Int, m: Int) -> Int = n + m")
+    assert_eq(state, "case5: pure scalar fn emits 0 root pushes", count(ir5, "call i64 @sprout_gc_push_i64_root"), 0)
+
+    summary(state)

@@ -139,6 +139,14 @@ static InternBucket* g_intern_table[65537];
 static RootNode* g_root_nodes = NULL;
 static RootNode* g_temp_root_nodes = NULL;
 static SproutObj* g_nothing_singleton = NULL;
+/* IRType (stdlib.compiler.sprout_ir) nullary-ctor singletons.  Without this,
+ * every IRType construction in the IR-codegen path allocates 16 bytes — and
+ * IRType values flow through every IRFunction param, every IRLoadEnvSlot,
+ * every IRGetField.  Caching keeps the ADT as cheap as the string-based kind
+ * convention it replaced (closes BACKLOG.md:367 perf concern). */
+static SproutObj* g_irtheap_singleton = NULL;
+static SproutObj* g_irtscalar_singleton = NULL;
+static SproutObj* g_irtunknown_singleton = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
 static int g_listener_fd[2048];
@@ -1086,6 +1094,9 @@ static void sprout_gc_sweep(void) {
     ManagedNode* next = node->next;
     if (!node->marked) {
       if (node->ptr == g_nothing_singleton) g_nothing_singleton = NULL;
+      if (node->ptr == g_irtheap_singleton) g_irtheap_singleton = NULL;
+      if (node->ptr == g_irtscalar_singleton) g_irtscalar_singleton = NULL;
+      if (node->ptr == g_irtunknown_singleton) g_irtunknown_singleton = NULL;
       sprout_managed_index_remove(node);
       sprout_gc_free_payload(node);
       if (prev == NULL) {
@@ -3179,14 +3190,35 @@ void sprout_debug_adt(long long val) {
   fprintf(stderr, "\n");
 }
 
+/* Helper: lazily allocate or return the cached nullary-ctor singleton. */
+static long long get_or_make_singleton(SproutObj** slot, long long tag) {
+  if (*slot == NULL) {
+    *slot = sprout_init_obj(sprout_alloc_obj_raw("sprout_make0: out of memory"), tag, 0, 0, 0);
+    register_obj(*slot);
+  }
+  return box_ptr(*slot);
+}
+
 long long sprout_make0(long long tag) {
   CtorMeta* meta = find_ctor(tag);
-  if (meta != NULL && strcmp(meta->name, "Nothing") == 0) {
-    if (g_nothing_singleton == NULL) {
-      g_nothing_singleton = sprout_init_obj(sprout_alloc_obj_raw("sprout_make0: out of memory"), tag, 0, 0, 0);
-      register_obj(g_nothing_singleton);
-    }
-    return box_ptr(g_nothing_singleton);
+  if (meta != NULL) {
+    /* Singleton-eligible nullary ctors.  Each name-match avoids one
+     * allocation per construction site; the IRType cluster (IRTHeap,
+     * IRTScalar, IRTUnknown) is constructed *frequently* during IR-codegen
+     * (every IRFunction param, every IRLoadEnvSlot, every IRGetField). */
+    const char* name = meta->name;
+    /* meta->name carries the fully-qualified ctor name; the find here uses
+     * the bare suffix after the last '.' (sprout_register_ctor records the
+     * source-form name).  For "Nothing" the name is bare; IRType ctors are
+     * qualified under stdlib.compiler.sprout_ir. */
+    if (strcmp(name, "Nothing") == 0)
+      return get_or_make_singleton(&g_nothing_singleton, tag);
+    if (strcmp(name, "stdlib.compiler.sprout_ir.IRTHeap") == 0)
+      return get_or_make_singleton(&g_irtheap_singleton, tag);
+    if (strcmp(name, "stdlib.compiler.sprout_ir.IRTScalar") == 0)
+      return get_or_make_singleton(&g_irtscalar_singleton, tag);
+    if (strcmp(name, "stdlib.compiler.sprout_ir.IRTUnknown") == 0)
+      return get_or_make_singleton(&g_irtunknown_singleton, tag);
   }
   return sprout_make_registered_obj(tag, 0, 0, 0, "sprout_make0: out of memory");
 }
