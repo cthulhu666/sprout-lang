@@ -149,8 +149,11 @@ fn empty_resolve_ctx() -> ResolveCtx =
 
 fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
-fn qualified_name(module_name: String, name: String) -> String =
-  if module_name == "" then name else module_name ++ "." ++ name
+fn qualified_name(module_name: source.ModuleName, name: source.RawName) -> source.QualifiedName =
+  source.QualifiedName(
+    if mn == "" then rn else mn ++ "." ++ rn)
+  where mn = source.module_name_str(module_name)
+        rn = source.raw_name_str(name)
 
 fn str_list_member(name: String, lst: List String) -> Bool =
   match lst with
@@ -347,8 +350,8 @@ type WorkItem =
 
 fn spec_to_path(spec: module_loader.ImportSpec, stdlib_root: String) -> Maybe String =
   match spec with
-  | module_loader.ImportAlias mod_name _ -> module_loader.module_name_to_path(mod_name, stdlib_root)
-  | module_loader.ImportSelective mod_name _ -> module_loader.module_name_to_path(mod_name, stdlib_root)
+  | module_loader.ImportAlias mod_name _ -> module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root)
+  | module_loader.ImportSelective mod_name _ -> module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root)
 
 fn specs_to_paths(specs: List module_loader.ImportSpec, stdlib_root: String) -> List String =
   match specs with
@@ -577,7 +580,7 @@ fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: 
       ModuleSymbols(dict_set(name, canonical, vl), tl, cl,
                     if is_exported then dict_set(name, canonical, ev) else ev,
                     et, ec, mn, ce)
-  where canonical = qualified_name(mod_name, name)
+  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
 fn add_record_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -585,7 +588,7 @@ fn add_record_to_symbols(mod_name: String, name: String, is_exported: Bool, acc:
       ModuleSymbols(vl, dict_set(name, canonical, tl), cl, ev,
                     if is_exported then dict_set(name, canonical, et) else et,
                     ec, mn, ce)
-  where canonical = qualified_name(mod_name, name)
+  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
 fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassMethodSig, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -593,7 +596,7 @@ fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassM
       ModuleSymbols(vl, tl, dict_set(name, canonical, cl), ev, et,
                     if is_exported then dict_set(name, canonical, ec) else ec,
                     list_append(mn, extract_method_names(methods)), ce)
-  where canonical = qualified_name(mod_name, name)
+  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
 fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
   match methods with
@@ -614,7 +617,7 @@ fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.Type
                         if is_type_exported then dict_set(type_name, canonical, et) else et,
                         ec, mn,
                         if export_ctors then dict_set(type_name, ctor_map, ce) else ce)
-  where canonical = qualified_name(mod_name, type_name)
+  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(type_name)))
         is_type_exported = str_list_member(type_name, exported)
         export_ctors = str_list_member(type_name, ctor_types)
 
@@ -625,9 +628,9 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
       match ctor with
       | ast.TypeConstructor ctor_name _ ->
           add_ctors(mod_name, rest, export_ctors,
-            dict_set(ctor_name, qualified_name(mod_name, ctor_name), vl),
-            if export_ctors then dict_set(ctor_name, qualified_name(mod_name, ctor_name), ev) else ev,
-            if export_ctors then dict_set(ctor_name, qualified_name(mod_name, ctor_name), ctor_map) else ctor_map)
+            dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), vl),
+            if export_ctors then dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), ev) else ev,
+            if export_ctors then dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), ctor_map) else ctor_map)
 
 # ---------------------------------------------------------------------------
 # Resolution context from imports
@@ -657,7 +660,7 @@ fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict 
 fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, ctx: ResolveCtx) -> ResolveCtx =
   match spec with
   | module_loader.ImportAlias mod_name alias ->
-      match module_loader.module_name_to_path(mod_name, stdlib_root) with
+      match module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root) with
       | Nothing -> ctx
       | Just mod_path ->
           match dict_get(mod_path, all_symbols) with
@@ -669,7 +672,7 @@ fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymb
                   alias, merge_type_exports(symbols)),
                 sym_method_names(symbols))
   | module_loader.ImportSelective mod_name names ->
-      match module_loader.module_name_to_path(mod_name, stdlib_root) with
+      match module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root) with
       | Nothing -> ctx
       | Just mod_path ->
           match dict_get(mod_path, all_symbols) with

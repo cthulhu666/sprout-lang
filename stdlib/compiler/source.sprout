@@ -21,6 +21,25 @@ export fn filepath_str(p: FilePath) -> String =
 export fn stdlib_root_str(r: StdlibRoot) -> String =
   match r with | StdlibRoot s -> s
 
+# ModuleName is a dotted module identifier (e.g. "stdlib.compiler.ast").
+# RawName is a single unqualified identifier as written in source (e.g. "FnDecl").
+# QualifiedName is the result of joining a ModuleName and a RawName with "."
+# (e.g. "stdlib.compiler.ast.FnDecl"); env dicts are keyed by QualifiedName.
+# Mixing the three is a dict-miss bug — wraps make the swap a compile error.
+
+export wrap ModuleName = String
+export wrap RawName = String
+export wrap QualifiedName = String
+
+export fn module_name_str(m: ModuleName) -> String =
+  match m with | ModuleName s -> s
+
+export fn raw_name_str(r: RawName) -> String =
+  match r with | RawName s -> s
+
+export fn qualified_name_str(q: QualifiedName) -> String =
+  match q with | QualifiedName s -> s
+
 export fn cursor_from_string(raw: String) -> SourceCursor =
   SourceCursor(raw, 0, SourcePos(0, 1, 1))
 

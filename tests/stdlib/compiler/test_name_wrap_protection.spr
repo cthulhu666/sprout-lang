@@ -1,0 +1,38 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.source as source
+
+# QualifiedName, RawName, and ModuleName exist as distinct wraps and
+# roundtrip through their inner accessors.  If any is removed or renamed,
+# this file fails to compile.
+
+fn make_qualified() -> source.QualifiedName =
+  source.QualifiedName("stdlib.compiler.ast.FnDecl")
+
+fn make_raw() -> source.RawName = source.RawName("FnDecl")
+
+fn make_module() -> source.ModuleName = source.ModuleName("stdlib.compiler.ast")
+
+fn qualified_inner(q: source.QualifiedName) -> String =
+  match q with | source.QualifiedName s -> s
+
+fn raw_inner(r: source.RawName) -> String =
+  match r with | source.RawName s -> s
+
+fn module_inner(m: source.ModuleName) -> String =
+  match m with | source.ModuleName s -> s
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(state, "QualifiedName roundtrips through inner",
+      qualified_inner(make_qualified()) == "stdlib.compiler.ast.FnDecl")
+
+    assert_true(state, "RawName roundtrips through inner",
+      raw_inner(make_raw()) == "FnDecl")
+
+    assert_true(state, "ModuleName roundtrips through inner",
+      module_inner(make_module()) == "stdlib.compiler.ast")
+
+    summary(state)

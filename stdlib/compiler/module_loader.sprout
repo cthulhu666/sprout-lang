@@ -4,6 +4,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.checker as checker
+import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
 # ImportSpec — parsed representation of one import line
@@ -144,12 +145,13 @@ fn replace_dots_with_slash(s: String, i: Int, acc: String) -> String =
         if ch == '.' then replace_dots_with_slash(s, i + 1, str_concat(acc, "/"))
         else replace_dots_with_slash(s, i + 1, str_concat(acc, char_to_string(ch)))
 
-export fn module_name_to_path(name: String, stdlib_root: String) -> Maybe String =
-  if str_starts_with(name, "stdlib.") then
-    Just(str_concat(stdlib_root, str_concat("/", str_concat(replace_dots_with_slash(str_slice(name, 7, str_len(name)), 0, ""), ".sprout"))))
-  else if str_find(name, ".") == -1 then
-    Just(str_concat(stdlib_root, str_concat("/", str_concat(name, ".sprout"))))
+export fn module_name_to_path(name: source.ModuleName, stdlib_root: String) -> Maybe String =
+  if str_starts_with(n, "stdlib.") then
+    Just(str_concat(stdlib_root, str_concat("/", str_concat(replace_dots_with_slash(str_slice(n, 7, str_len(n)), 0, ""), ".sprout"))))
+  else if str_find(n, ".") == -1 then
+    Just(str_concat(stdlib_root, str_concat("/", str_concat(n, ".sprout"))))
   else Nothing
+  where n = source.module_name_str(name)
 
 # ---------------------------------------------------------------------------
 # Dict → pairs list (needed to extract env after checking)
@@ -316,7 +318,7 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
     | Nothing ->
         do
           cache_put(cache, name, Nil)
-          match module_name_to_path(name, stdlib_root) with
+          match module_name_to_path(source.ModuleName(name), stdlib_root) with
           | Nothing -> Nil
           | Just path ->
               match read_file(path) with
