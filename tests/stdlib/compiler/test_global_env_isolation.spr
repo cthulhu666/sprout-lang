@@ -60,4 +60,19 @@ fn main() -> Unit !{IO} =
     r2 <- run_check(src2)
     assert_true(state, "non-constrained fn after constrained fn typechecks", is_typed_ok(r2))
 
+    # Scenario 3: cascade resolution with prog_var/fresh_name distinction.
+    # The @fwd:* markers are keyed by fresh_name (compiler-generated, like
+    # "a42"); resolve_via_fwd_for_prog_var looks up by prog_var (user name
+    # like "a"). The translation goes through prog_to_fresh. If the refactor
+    # accidentally swaps these — e.g. using prog_var as a key prefix where
+    # fresh_name was expected — dispatch would fail at the inner call site.
+    # This source exercises the cascade through a constrained fn that calls
+    # a class method on its own constraint variable.
+    let src3 = "class MyShow a {\n  fn myshow(x: a) -> String\n}\n" ++
+               "instance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\n" ++
+               "fn show_via_constraint(x: a) -> String where MyShow a = myshow(x)\n" ++
+               "fn main() -> String = show_via_constraint(42)\n"
+    r3 <- run_check(src3)
+    assert_true(state, "cascade resolution through @fwd marker typechecks", is_typed_ok(r3))
+
     summary(state)
