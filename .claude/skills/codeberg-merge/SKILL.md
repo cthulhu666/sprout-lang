@@ -117,54 +117,22 @@ state does not persist across invocations. Use the `Monitor` tool with
 `persistent: true` and let each state change arrive as a conversation
 event you react to in normal turn cycles.
 
-Launch the monitor with the file-mediated jq pattern from
-`docs/codeberg-pr-workflow.md` §"Monitor CI to completion", adapted to
-your `$ARGUMENTS`. The monitor must:
+The polling logic lives in `scripts/codeberg/pr-monitor.sh`. Launch it
+through the Monitor tool:
 
-- Emit one line per state change per PR, in the form
-  `PR#<N>: state=<X> merged=<Y> ci=<Z> sha=<S>`.
-- Exit on its own once every PR has reached a terminal state (merged /
-  closed / ci=failure), so the monitor naturally ends.
-- Use `sleep 60` between polls — never below 30s (rate-limit risk).
-- Source `.codeberg.config` and extract `$TOKEN` inside the monitor
-  script (the Monitor command runs in a fresh shell).
-- Use `set -u` carefully — associative arrays with `${var:-}` defaults
-  to avoid "unbound" exits mid-loop.
-
-The minimal command body (template — the agent fills in the PR list):
-
-```sh
-source .codeberg.config
-TOKEN=$(grep -A2 'name: codeberg.org' "$TEA_CONFIG_PATH" | grep token | cut -d: -f2 | tr -d ' ')
-API="https://codeberg.org/api/v1/repos/$CODEBERG_OWNER/$CODEBERG_REPO"
-PRS="29 32"  # REPLACE with your PR numbers, space-separated
-declare -A prev final
-while :; do
-  done_count=0
-  for pr in $PRS; do
-    [ -n "${final[$pr]:-}" ] && { done_count=$((done_count + 1)); continue; }
-    tmp=/tmp/cm_mon_${pr}.json
-    curl -sf -H "Authorization: token $TOKEN" "$API/pulls/$pr" > "$tmp" 2>/dev/null || continue
-    pr_state=$(jq -r '.state // "?"' "$tmp")
-    merged=$(jq -r '.merged // false' "$tmp")
-    sha=$(jq -r '.head.sha // "none"' "$tmp")
-    [ "$sha" = "none" ] && continue
-    ci=$(curl -sf -H "Authorization: token $TOKEN" "$API/commits/$sha/status" | jq -r '.state // "no-status"')
-    cur="PR#$pr: state=$pr_state merged=$merged ci=$ci sha=${sha:0:7}"
-    if [ "$cur" != "${prev[$pr]:-}" ]; then
-      echo "$cur"
-      prev[$pr]="$cur"
-    fi
-    if [ "$merged" = "true" ] || [ "$pr_state" = "closed" ] || [ "$ci" = "failure" ]; then
-      final[$pr]="$cur"
-      done_count=$((done_count + 1))
-    fi
-  done
-  set -- $PRS
-  [ "$done_count" -eq "$#" ] && break
-  sleep 60
-done
 ```
+Monitor:
+  description: "PR #<N>[, #<M>...] — wait for terminal state"
+  persistent: true
+  timeout_ms: 3600000
+  command: scripts/codeberg/pr-monitor.sh <N> [<M> ...]
+```
+
+The script emits one line per state change in the form
+`PR#<N>: state=<X> merged=<Y> ci=<Z> sha=<S>`, polls every 60s, and
+exits when every PR has reached a terminal state. Source is the
+authoritative reference for the polling shape; don't reinvent it
+inline.
 
 For each event line you receive, decide:
 
@@ -184,82 +152,39 @@ escalate any still-open PRs with
 
 ### Step 4 — Rebase + regenerate seed + requeue
 
-Autonomous-handling path for the master-moved race. Refuse to start if
-the working tree is dirty.
+Autonomous-handling path for the master-moved race. The full Step 4
+algorithm lives in `scripts/codeberg/pr-rebase.sh`:
 
 ```sh
-if ! git diff-index --quiet HEAD --; then
-  echo "ESCALATION: PR#$PR rebase blocked — working tree dirty"; continue
-fi
-ORIG_BRANCH=$(git branch --show-current)
-git fetch origin master "$HEAD_REF" 2>&1 | tail -5
-git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
-
-REBASE_OUT=$(git rebase origin/master 2>&1)
-echo "$REBASE_OUT" | tail -10
-NON_SEED_CONFLICT=0
-while [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; do
-  CONFLICTS=$(git diff --name-only --diff-filter=U)
-  if [ -z "$CONFLICTS" ]; then
-    # Stuck mid-rebase with no conflicting files — hook failure,
-    # lock contention, or git-internal error. Not the case we handle.
-    git rebase --abort 2>/dev/null
-    git checkout "$ORIG_BRANCH"
-    echo "ESCALATION: PR#$PR rebase stuck without conflicts — see git output above"
-    NON_SEED_CONFLICT=1
-    break
-  fi
-  if [ "$CONFLICTS" = "bootstrap/compile_driver.ll" ]; then
-    git checkout --theirs bootstrap/compile_driver.ll
-    git add bootstrap/compile_driver.ll
-    git rebase --continue 2>&1 | tail -5
-  else
-    git rebase --abort
-    git checkout "$ORIG_BRANCH"
-    echo "ESCALATION: PR#$PR rebase has non-seed conflicts:"
-    echo "$CONFLICTS"
-    NON_SEED_CONFLICT=1
-    break
-  fi
-done
-[ "$NON_SEED_CONFLICT" = "1" ] && continue
-
-# Rebase succeeded — decide whether seed regen is actually needed.
-# Only changes to compiler source (stdlib/compiler/** or stdlib/prelude.sprout)
-# affect the bootstrap seed. Tooling-only PRs (docs, .claude/, .gitignore,
-# example fixtures, runtime/* without ABI impact) can reuse master's
-# already-CI-validated seed, saving 30-60 min of unnecessary self-compile.
-COMPILER_DIFF=$(git diff --name-only origin/master HEAD -- \
-  stdlib/compiler/ stdlib/prelude.sprout)
-if [ -z "$COMPILER_DIFF" ]; then
-  echo "PR#$PR: rebase has no compiler-source diff vs master — skipping seed regen"
-else
-  rm -f build/compile_driver_bin_stage1
-  if ! scripts/memwatch.sh 4096 1 -- mise exec -- just refresh-seed; then
-    git checkout "$ORIG_BRANCH"
-    echo "ESCALATION: PR#$PR seed regeneration failed (see memwatch output)"; continue
-  fi
-fi
-
-if ! git diff-index --quiet HEAD -- bootstrap/compile_driver.ll; then
-  git add bootstrap/compile_driver.ll
-  git commit -m "chore(bootstrap): refresh seed after rebase onto master"
-fi
-
-if ! git push --force-with-lease origin "$HEAD_REF" 2>&1 | tail -5; then
-  git checkout "$ORIG_BRANCH"
-  echo "ESCALATION: PR#$PR force-push-with-lease rejected — remote moved"; continue
-fi
-
-git checkout "$ORIG_BRANCH"
-
-# Fetch new head sha, return to Step 2 to requeue.
-curl -sf -H "Authorization: token $TOKEN" "$API/pulls/$PR" > "$tmp"
-HEAD_SHA=$(jq -r '.head.sha' "$tmp")
-echo "PR#$PR: rebased + seed-refreshed, new head=${HEAD_SHA:0:7}, requeueing"
+scripts/codeberg/pr-rebase.sh <PR-number>
 ```
 
-After requeue, relaunch the Monitor for any PRs not yet in a done state.
+The script handles, in order:
+1. Snapshot the PR + WIP/draft/merged/closed gates (re-checks Step 1's gates so the script is callable standalone).
+2. Working-tree clean check (refuses to start if dirty).
+3. Worktree-collision detection — if `$HEAD_REF` is checked out elsewhere via `git worktree`, work on a temp local branch and force-push via explicit refspec (`<temp>:<canonical>`).
+4. `git fetch origin master <head-ref>` then `git checkout -B <local> origin/<head-ref>`.
+5. `git rebase origin/master`, with a loop that takes `--theirs` on `bootstrap/compile_driver.ll` conflicts and escalates on any other conflict (or on stuck-with-no-conflict).
+6. **Bug-#3 heuristic**: `git diff --name-only origin/master HEAD -- stdlib/compiler/ stdlib/prelude.sprout`. If empty → skip seed regen (saves 30-60 min on tooling-only PRs). Otherwise → `scripts/memwatch.sh 4096 1 -- mise exec -- just refresh-seed`.
+7. `just fmt` if compiler source was touched.
+8. Commit the regenerated seed iff it actually differs from HEAD.
+9. `git push --force-with-lease origin <push-refspec>`.
+10. Restore the original working branch.
+11. Refetch the new head SHA and POST the auto-merge requeue with `merge_when_checks_succeed: true`.
+
+The script's exit code tells you everything:
+- **0** → success. PR is force-pushed and auto-merge requeued. Resume monitoring.
+- **1** → escalation. The script prints `ESCALATION: PR#<N> <reason>` to stdout before exiting. Stop work on this PR; surface to the human/supervisor.
+- **2** → usage error (wrong arg count).
+
+Run the script via Bash with `run_in_background: true` if the seed regen
+path is going to be hit (it can take 30-60 min for compiler-source PRs).
+For tooling-only PRs, the run completes in well under a minute and can
+be run foreground.
+
+After a successful `pr-rebase.sh`, relaunch the Monitor on any PRs not
+yet in a done state — the requeue is in place but you still need to
+watch for terminal state.
 
 ## Bounds
 

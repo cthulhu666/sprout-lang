@@ -20,5 +20,15 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(scripts/codeberg/_lib.sh)",
+      "Bash(scripts/codeberg/_lib.sh:*)",
+      "Bash(scripts/codeberg/pr-monitor.sh)",
+      "Bash(scripts/codeberg/pr-monitor.sh:*)",
+      "Bash(scripts/codeberg/pr-rebase.sh)",
+      "Bash(scripts/codeberg/pr-rebase.sh:*)"
+    ]
   }
 }
