@@ -94,22 +94,27 @@ The `>>` / `<<` composition operators exist in the language; this document neith
 
 When two distinct semantic kinds share a primitive type (`String`, `Int`, `Dict T`) and confusing them would be a bug, declare each with `wrap` so the typechecker enforces the distinction. `wrap Foo = T` is zero-cost: construction and destruction are identity at the IR level, so the type-safety benefit costs no runtime.
 
-**Use when:**
+**Apply `wrap` whenever any of the following holds** (any single bullet is sufficient — these are independent reasons, not a checklist):
 
-- Two functions accept the same primitive but with different meanings — `fn f(path: String, stdlib_root: String)` should become `fn f(path: FilePath, stdlib_root: StdlibRoot)`.
+- Two functions accept the same primitive but with different semantic meanings — `fn f(path: String, stdlib_root: String)` should become `fn f(path: FilePath, stdlib_root: StdlibRoot)`.
 - A value crosses a module boundary where callers might confuse it with a similarly-typed value (qualified vs raw names, body env vs global env).
-- A retro documents a bug caused by swapping two same-typed values — `wrap` makes the swap a compile error.
+- A retro documents a bug caused by swapping two same-typed values — `wrap` makes the same bug class a compile error.
+
+**Retro evidence is a *priority signal*, not a *requirement*.** Cases where a swap bug has already cost session time are higher priority because the bug class is proven real, but **preventative application is encouraged**. Don't wait for the bug to happen first. The cost of catching a swap statically is negligible; the cost of the bug — silent dispatch errors, leaked markers, corrupted GC roots — is hours of investigation per recurrence.
 
 **Do not use when:**
 
 - The inner type is the natural API surface (an `Int` width that callers do arithmetic on, a `String` message threaded directly to `print`).
 - The value lives inside one function and never crosses a function boundary — local naming is enough.
-- The cost of wrap/unwrap exceeds the bug-prevention value (wrapping every dict key would force ceremony at hundreds of access sites for one bug class).
+- The cost of wrap/unwrap ceremony at the call sites genuinely exceeds the bug-prevention value (wrapping every dict key would force ceremony at hundreds of access sites for one bug class).
+
+The middle bullet of "do not use" is doing the real work — it's a *cost-benefit* judgment, not a *necessity* test. The "preventative is encouraged" rule above means the burden is on "this is too expensive to wrap" rather than "this isn't proven dangerous enough to wrap."
 
 **Worked examples in this codebase:**
 
-- `wrap FilePath = String` / `wrap StdlibRoot = String` distinguish the two `String` parameters threaded through every compiler entry point.
-- `wrap BodyEnv = Dict types.Scheme` / `wrap GlobalEnv = Dict types.Scheme` enforce the `@fwd:` vs `@eta_fwd:` scope distinction documented in the constrained-dispatch retros.
+- `wrap FilePath = String` / `wrap StdlibRoot = String` distinguish the two `String` parameters threaded through every compiler entry point. No retro evidence, but two semantically-different strings that are adjacent at every call site — applied preventatively.
+- `wrap BodyEnv = Dict types.Scheme` / `wrap GlobalEnv = Dict types.Scheme` enforce the `@fwd:` vs `@eta_fwd:` scope distinction. Retro-anchored: prior sessions debugged the silent marker leak that this prevents.
+- `wrap ProgVarName = String` / `wrap FreshTVarName = String` distinguish user-written type-variable names ("a") from compiler-generated fresh names ("a42") at the cascade boundary. Retro-anchored.
 
 **Constraints (v1):**
 
