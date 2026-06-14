@@ -285,7 +285,7 @@ fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
 
 fn op_check_source(src: String, state: StartupState) -> json.Json !{IO} =
   do
-    result <- compiler.compile_source_with_cache(src, state_stdlib_root(state), state_cache(state))
+    result <- compiler.compile_source_with_cache(src, source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
     match result with
     | compiler.CompileOk _ -> ok_response(json.JsonNull)
     | compiler.CompileFail diags ->
@@ -298,7 +298,7 @@ fn op_check_source(src: String, state: StartupState) -> json.Json !{IO} =
 
 fn op_diagnostics_in_source(src: String, state: StartupState) -> json.Json !{IO} =
   do
-    result <- compiler.compile_source_with_cache(src, state_stdlib_root(state), state_cache(state))
+    result <- compiler.compile_source_with_cache(src, source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
     match result with
     | compiler.CompileOk _ -> empty_diags_response()
     | compiler.CompileFail diags -> diags_to_json(diags)
@@ -342,7 +342,7 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
   if str_find(src, "let " ++ sentinel_name()) != -1 then
     error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot infer type")
   else do
-    result <- compiler.compile_source_with_cache(augment_source(src, expr), state_stdlib_root(state), state_cache(state))
+    result <- compiler.compile_source_with_cache(augment_source(src, expr), source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
     match result with
     | compiler.CompileFail diags ->
         match diags with
@@ -515,7 +515,7 @@ fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
   | Err msg -> panic("write_file: eval_source: " ++ msg)
   | Ok _ ->
       do
-        ir_result <- compiler.compile_full_ir_with_cache(eval_source_path(), state_stdlib_root(state), state_cache(state))
+        ir_result <- compiler.compile_full_ir_with_cache(source.FilePath(eval_source_path()), source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
         link_and_run_eval(ir_result, state)
 
 export fn is_function_scheme(s: types.Scheme) -> Bool =
@@ -563,7 +563,7 @@ fn op_eval_expr_in_source(src: String, expr: String, state: StartupState) -> jso
   if str_find(src, "let " ++ sentinel_name()) != -1 then
     error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot eval")
   else do
-    type_result <- compiler.compile_source_with_cache(augment_source(src, expr), state_stdlib_root(state), state_cache(state))
+    type_result <- compiler.compile_source_with_cache(augment_source(src, expr), source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
     eval_with_type_result(src, expr, state, type_result)
 
 # ---------------------------------------------------------------------------
@@ -612,7 +612,7 @@ fn op_session_update(req: json.Json, state: StartupState) -> json.Json !{IO} =
                     do
                       let new_sess = session_add_line(sess, kind, line)
                       let check_src = rebuild_session_source(new_sess)
-                      check_result <- compiler.compile_source_with_cache(check_src, state_stdlib_root(state), state_cache(state))
+                      check_result <- compiler.compile_source_with_cache(check_src, source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
                       match check_result with
                       | compiler.CompileFail diags -> compile_fail_response(diags)
                       | compiler.CompileOk _ ->

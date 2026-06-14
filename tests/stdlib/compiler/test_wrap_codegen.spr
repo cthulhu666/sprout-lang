@@ -1,6 +1,7 @@
 module main
 import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
 
 # IR-level tests for 'wrap' zero-cost guarantee.
 #
@@ -64,8 +65,8 @@ fn main() -> Unit !{IO} =
           _ <- write_file(wrap_path, wrap_src)
           _ <- write_file(adt_path, regular_adt_src)
 
-          r_wrap <- compiler.compile_full_ir(wrap_path, stdlib_root)
-          r_adt <- compiler.compile_full_ir(adt_path, stdlib_root)
+          r_wrap <- compiler.compile_full_ir(source.FilePath(wrap_path), source.StdlibRoot(stdlib_root))
+          r_adt <- compiler.compile_full_ir(source.FilePath(adt_path), source.StdlibRoot(stdlib_root))
 
           # The wrap source must compile successfully
           assert_true(state, "wrap type compiles", ir_ok(r_wrap))

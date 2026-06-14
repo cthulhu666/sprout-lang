@@ -1,6 +1,7 @@
 module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
 
 # Negative test: == / != on a type without an Eq instance must fail compilation
 # with a clear error (not silently fall through to pointer comparison, the
@@ -33,7 +34,7 @@ fn main() -> Unit !{IO} =
     # ADT with NO Eq instance — `==` on it must fail at infer.
     r_no_eq <- compiler.compile_source_with_root(
       "type Foo = A | B\nfn check() -> Bool = A == A",
-      "stdlib")
+      source.StdlibRoot("stdlib"))
     assert_true(state,
       "== on ADT without Eq instance fails compilation",
       is_fail(r_no_eq))
@@ -41,7 +42,7 @@ fn main() -> Unit !{IO} =
     # Same for != .
     r_no_eq_neq <- compiler.compile_source_with_root(
       "type Foo = A | B\nfn check() -> Bool = A != A",
-      "stdlib")
+      source.StdlibRoot("stdlib"))
     assert_true(state,
       "!= on ADT without Eq instance fails compilation",
       is_fail(r_no_eq_neq))

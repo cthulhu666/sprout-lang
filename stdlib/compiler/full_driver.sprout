@@ -38,7 +38,7 @@ fn count_typed_decls(decls: List typed_ast.TypedDecl) -> Int =
 
 fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
   do
-    result <- compiler.compile_full(path, stdlib_root)
+    result <- compiler.compile_full(source.FilePath(path), source.StdlibRoot(stdlib_root))
     match result with
     | compiler.FullFail diags -> print_diags(diags)
     | compiler.FullOk lowered _ ->

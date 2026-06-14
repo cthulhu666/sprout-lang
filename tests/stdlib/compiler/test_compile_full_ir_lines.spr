@@ -1,6 +1,7 @@
 module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
 
 # Regression test for `compile_full_ir_lines` after adding SPROUT_TIME_PHASES
 # env-gated stderr timing output.
@@ -59,7 +60,7 @@ fn main() -> Unit !{IO} =
         do
           let tmp_path = "/tmp/sprout_test_compile_full_ir_lines_fixture.sprout"
           _ <- write_file(tmp_path, "fn answer() -> Int = 42\n")
-          r <- compiler.compile_full_ir_lines(tmp_path, stdlib_root, false)
+          r <- compiler.compile_full_ir_lines(source.FilePath(tmp_path), source.StdlibRoot(stdlib_root), false)
           assert_true(state, "compile_full_ir_lines returns Ok for trivial input", is_ir_ok(r))
           assert_true(state, "compile_full_ir_lines emits a `define ` block", def_lines_have_define(r))
           # Coverage: failure branch.  Guards the fine-grained phase-timing refactor —
@@ -68,7 +69,7 @@ fn main() -> Unit !{IO} =
           # in the future (SPROUT_TIME_PHASES env var).
           let bad_path = "/tmp/sprout_test_compile_full_ir_lines_bad.sprout"
           _ <- write_file(bad_path, "fn broken() -> Int = undefined_name_xyz_99887766\n")
-          r_bad <- compiler.compile_full_ir_lines(bad_path, stdlib_root, false)
+          r_bad <- compiler.compile_full_ir_lines(source.FilePath(bad_path), source.StdlibRoot(stdlib_root), false)
           assert_true(state, "compile_full_ir_lines returns Fail for invalid source", is_ir_fail(r_bad))
           # Coverage: check-failure path — a file with a type error compiles and bundles
           # successfully but fails typecheck.  The diagnostic must start with "check: "
@@ -76,7 +77,7 @@ fn main() -> Unit !{IO} =
           # the refactor.  Pinned by refactor/trace-fork-unify.
           let type_err_path = "/tmp/sprout_test_compile_full_ir_lines_type_err.sprout"
           _ <- write_file(type_err_path, "fn bad_type() -> String = 42\n")
-          r_type_err <- compiler.compile_full_ir_lines(type_err_path, stdlib_root, false)
+          r_type_err <- compiler.compile_full_ir_lines(source.FilePath(type_err_path), source.StdlibRoot(stdlib_root), false)
           assert_true(state, "compile_full_ir_lines returns Fail for type error", is_ir_fail(r_type_err))
           assert_true(state, "type-error failure diagnostic starts with 'check: '",
             str_starts_with(first_diag_msg(r_type_err), "check: "))

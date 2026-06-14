@@ -1085,12 +1085,12 @@ fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String) -> Bundle
       | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), dummy_pos()))
   where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root)
 
-export fn bundle_file(path: String, stdlib_root: String) -> BundleResult !{IO} =
+export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
   do
-    (err, modules) <- collect_modules(path, stdlib_root)
+    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root))
     match err with
     | Just msg -> BundleErr(msg)
-    | Nothing -> make_bundle_or_err(modules, stdlib_root)
+    | Nothing -> make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root))
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module
@@ -1142,10 +1142,10 @@ fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict Module
       list_append(dump_qualify_module(mod, all_symbols, stdlib_root),
                   dump_qualify_modules_acc(rest, all_symbols, stdlib_root))
 
-export fn dump_qualify_file(path: String, stdlib_root: String) -> List String !{IO} =
+export fn dump_qualify_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> List String !{IO} =
   do
-    (err, modules) <- collect_modules(path, stdlib_root)
+    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root))
     match err with
     | Just msg -> Cons("ERROR: " ++ msg, Nil)
-    | Nothing -> dump_qualify_modules_acc(modules, build_all_symbols(modules), stdlib_root)
+    | Nothing -> dump_qualify_modules_acc(modules, build_all_symbols(modules), source.stdlib_root_str(stdlib_root))
 

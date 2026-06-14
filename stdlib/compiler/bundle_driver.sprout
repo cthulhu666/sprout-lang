@@ -1,6 +1,7 @@
 module main
 import stdlib.compiler.ast as ast
 import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
 # Print top-level FnDecl names from a bundled ast.Program
@@ -20,7 +21,7 @@ fn print_fn_names(decls: List ast.Decl) -> Unit !{IO} =
 
 fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
   do
-    result <- bundler.bundle_file(path, stdlib_root)
+    result <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
     match result with
     | bundler.BundleErr msg -> print("ERROR: " ++ msg)
     | bundler.BundleOk prog ->

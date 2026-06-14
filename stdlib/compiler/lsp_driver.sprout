@@ -166,7 +166,7 @@ fn push_diagnostics(uri: String, diags: List compiler.Diagnostic, state: LspStat
 
 fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit !{IO} =
   do
-    result <- compiler.compile_source_with_root(src, lsp_stdlib_root(state))
+    result <- compiler.compile_source_with_root(src, source.StdlibRoot(lsp_stdlib_root(state)))
     match result with
     | compiler.CompileOk _ -> push_diagnostics(uri, Nil, state)
     | compiler.CompileFail diags -> push_diagnostics(uri, diags, state)

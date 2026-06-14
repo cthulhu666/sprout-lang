@@ -45,7 +45,7 @@ fn main() -> Unit !{IO} =
         do
           # --- lex error carries position ---
           # "@" is not a valid token; the error must be at line 1.
-          r_lex <- compiler.compile_source_with_root("@illegal\n", stdlib_root)
+          r_lex <- compiler.compile_source_with_root("@illegal\n", source.StdlibRoot(stdlib_root))
           assert_true(state, "lex error produces CompileFail",
             match r_lex with | compiler.CompileFail _ -> true | _ -> false)
           assert_true(state, "lex error diagnostic has line >= 1",
@@ -55,7 +55,7 @@ fn main() -> Unit !{IO} =
 
           # --- parse error carries position ---
           # "fn broken ->" is syntactically invalid; error must be on line 1.
-          r_parse <- compiler.compile_source_with_root("fn broken ->\n", stdlib_root)
+          r_parse <- compiler.compile_source_with_root("fn broken ->\n", source.StdlibRoot(stdlib_root))
           assert_true(state, "parse error produces CompileFail",
             match r_parse with | compiler.CompileFail _ -> true | _ -> false)
           assert_true(state, "parse error diagnostic has line >= 1",
@@ -66,7 +66,7 @@ fn main() -> Unit !{IO} =
           # --- lex error on a specific line ---
           # The "@" is on line 3 (after two valid lines).
           let src3 = "fn a() -> Int = 1\nfn b() -> Int = 2\n@bad\n"
-          r_line3 <- compiler.compile_source_with_root(src3, stdlib_root)
+          r_line3 <- compiler.compile_source_with_root(src3, source.StdlibRoot(stdlib_root))
           assert_true(state, "lex error on line 3 reports line 3",
             match first_diag(r_line3) with
             | Nothing -> false

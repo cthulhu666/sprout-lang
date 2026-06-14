@@ -7,6 +7,20 @@ export type SourcePos (..) =
 export type SourceCursor (..) =
   | SourceCursor String Int SourcePos
 
+# FilePath is the path to a single source file (e.g. "main.sprout").
+# StdlibRoot is the directory from which `stdlib.*` imports resolve.
+# Distinct types so they can't be swapped at the (path, stdlib_root)
+# call-site pattern threaded through every compiler entry point.
+
+export wrap FilePath = String
+export wrap StdlibRoot = String
+
+export fn filepath_str(p: FilePath) -> String =
+  match p with | FilePath s -> s
+
+export fn stdlib_root_str(r: StdlibRoot) -> String =
+  match r with | StdlibRoot s -> s
+
 export fn cursor_from_string(raw: String) -> SourceCursor =
   SourceCursor(raw, 0, SourcePos(0, 1, 1))
 

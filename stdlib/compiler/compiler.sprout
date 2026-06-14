@@ -102,11 +102,12 @@ export fn compile_source(src: String) -> CompileResult !{IO} =
 # Accepts raw source (with module/import header); strips headers internally
 # before parsing so the bootstrap parser only sees declaration bodies.
 # stdlib_root is the filesystem root for stdlib.* module resolution.
-export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileResult !{IO} =
+export fn compile_source_with_root(src: String, stdlib_root: source.StdlibRoot) -> CompileResult !{IO} =
   do
     cache <- module_loader.new_cache()
-    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
-    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
+    let sr = source.stdlib_root_str(stdlib_root)
+    prelude_pairs <- module_loader.load_prelude_pairs(sr, cache)
+    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), sr, cache)
     match lex_parse(strip_headers(src, 0)) with
     | LexParseFail diags -> CompileFail(diags)
     | LexParseOk prog ->
@@ -119,10 +120,11 @@ export fn compile_source_with_root(src: String, stdlib_root: String) -> CompileR
 # compile_source_with_cache: like compile_source_with_root but uses a caller-provided cache.
 # The cache is NOT recreated — the caller is responsible for its lifecycle.
 # cache param is unannotated: its type is constrained by the module_loader callees.
-export fn compile_source_with_cache(src: String, stdlib_root: String, cache) -> CompileResult !{IO} =
+export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot, cache) -> CompileResult !{IO} =
   do
-    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
-    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
+    let sr = source.stdlib_root_str(stdlib_root)
+    prelude_pairs <- module_loader.load_prelude_pairs(sr, cache)
+    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), sr, cache)
     match lex_parse(strip_headers(src, 0)) with
     | LexParseFail diags -> CompileFail(diags)
     | LexParseOk prog ->
@@ -133,9 +135,9 @@ export fn compile_source_with_cache(src: String, stdlib_root: String, cache) -> 
           | checker.CheckOk env -> CompileOk(env)
 
 # compile_file: read a file, strip headers, then call compile_source.
-export fn compile_file(path: String) -> CompileResult !{IO} =
-  match read_file(path) with
-  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =
+  match read_file(source.filepath_str(path)) with
+  | Err msg -> panic("read_file: " ++ source.filepath_str(path) ++ ": " ++ msg)
   | Ok src -> compile_source(strip_headers(src, 0))
 
 # ---------------------------------------------------------------------------
@@ -156,7 +158,7 @@ export type FullResult (..) =
   | FullOk typed_ast.TypedProgram (Dict types.Scheme)
   | FullFail (List Diagnostic)
 
-export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
+export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) -> FullResult !{IO} =
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
@@ -164,7 +166,7 @@ export fn compile_full(path: String, stdlib_root: String) -> FullResult !{IO} =
     | bundler.BundleOk prog ->
         do
           cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
           tc_result <- checker.typecheck_typed(prog, prelude_pairs)
           match tc_result with
           | typed_ast.TypedErr pos msg -> FullFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
@@ -209,10 +211,10 @@ export type IrFullLinesResult (..) =
 # Lowering now preserves types (lower_program threads the scheme env and returns
 # TypedProgram), so compile_phase_recheck is a plain alias.
 
-export fn compile_phase_bundle(path: String, stdlib_root: String) -> bundler.BundleResult !{IO} =
+export fn compile_phase_bundle(path: source.FilePath, stdlib_root: source.StdlibRoot) -> bundler.BundleResult !{IO} =
   bundler.bundle_file(path, stdlib_root)
 
-export fn compile_phase_check(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
+export fn compile_phase_check(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
@@ -220,13 +222,13 @@ export fn compile_phase_check(path: String, stdlib_root: String) -> typed_ast.Ty
     | bundler.BundleOk prog ->
         do
           cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
           result <- checker.typecheck_typed(prog, prelude_pairs)
           match result with
           | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
           | ok -> ok
 
-export fn compile_phase_lower(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
+export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   do
     check_result <- compile_phase_check(path, stdlib_root)
     match check_result with
@@ -236,10 +238,10 @@ export fn compile_phase_lower(path: String, stdlib_root: String) -> typed_ast.Ty
         | lowering.LowerErr msg -> typed_ast.TypedErr(no_pos(), "lower: " ++ msg)
         | lowering.LowerOk lowered -> typed_ast.TypedOk(dce.elim_program(lowered), env)
 
-export fn compile_phase_recheck(path: String, stdlib_root: String) -> typed_ast.TypedResult !{IO} =
+export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower(path, stdlib_root)
 
-export fn compile_full_ir(path: String, stdlib_root: String) -> IrFullResult !{IO} =
+export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot) -> IrFullResult !{IO} =
   do
     lines_result <- compile_full_ir_lines(path, stdlib_root, false)
     match lines_result with
@@ -314,7 +316,7 @@ fn format_phase_success(ts: PhaseTimes, codegen_us: Int, path: String) -> String
 #
 # Both the fast path (timing_on=false) and the traced path (timing_on=true)
 # call this function, so any future change to pipeline order touches one place.
-fn compile_phase_recheck_timed(path: String, stdlib_root: String, t_ref: Ref PhaseTimes) -> typed_ast.TypedResult !{IO} =
+fn compile_phase_recheck_timed(path: source.FilePath, stdlib_root: source.StdlibRoot, t_ref: Ref PhaseTimes) -> typed_ast.TypedResult !{IO} =
   do
     t0 <- time_now_micros()
     bundle_result <- bundler.bundle_file(path, stdlib_root)
@@ -327,7 +329,7 @@ fn compile_phase_recheck_timed(path: String, stdlib_root: String, t_ref: Ref Pha
     | bundler.BundleOk prog ->
         do
           cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
           t2 <- time_now_micros()
           check_result <- checker.typecheck_typed(prog, prelude_pairs)
           t3 <- time_now_micros()
@@ -353,29 +355,30 @@ fn compile_phase_recheck_timed(path: String, stdlib_root: String, t_ref: Ref Pha
 # compile_phase_recheck_timed (the canonical pipeline body) then runs codegen.
 # When SPROUT_TIME_PHASES is set, emits one [phase] timing line to stderr.
 # debug_mode_: when true, emits DWARF metadata in the 4th IR section (--debug flag).
-export fn compile_full_ir_lines(path: String, stdlib_root: String, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
+export fn compile_full_ir_lines(path: source.FilePath, stdlib_root: source.StdlibRoot, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
   do
     timing_on <- timing_enabled()
     t_ref <- ref_new(phase_times_zero())
     recheck_result <- compile_phase_recheck_timed(path, stdlib_root, t_ref)
+    let path_str = source.filepath_str(path)
     match recheck_result with
     | typed_ast.TypedErr pos msg ->
         do
           if timing_on then
             do
               ts <- ref_read(t_ref)
-              eprint(format_phase_failed(msg, ts, path))
+              eprint(format_phase_failed(msg, ts, path_str))
           else ()
           IrFullLinesFail(Cons (DiagError(pos, msg), Nil))
     | typed_ast.TypedOk typed_lowered env ->
         do
           cg_t0 <- time_now_micros()
-          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, debug_mode_, path)
+          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, debug_mode_, path_str)
           cg_t1 <- time_now_micros()
           if timing_on then
             do
               ts <- ref_read(t_ref)
-              eprint(format_phase_success(ts, cg_t1 - cg_t0, path))
+              eprint(format_phase_success(ts, cg_t1 - cg_t0, path_str))
           else ()
           match ir_result with
           | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
@@ -386,14 +389,14 @@ export fn compile_full_ir_lines(path: String, stdlib_root: String, debug_mode_: 
 
 # compile_full_ir_with_cache: like compile_full_ir but uses a caller-provided module cache.
 # Avoids recreating the cache on every eval when called from the analysis service daemon.
-export fn compile_full_ir_with_cache(path: String, stdlib_root: String, cache) -> IrFullResult !{IO} =
+export fn compile_full_ir_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> IrFullResult !{IO} =
   do
     recheck_result <- compile_phase_recheck_with_cache(path, stdlib_root, cache)
     match recheck_result with
     | typed_ast.TypedErr pos msg -> IrFullFail(Cons (DiagError(pos, msg), Nil))
     | typed_ast.TypedOk typed_lowered env ->
         do
-          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, false, path)
+          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, false, source.filepath_str(path))
           match ir_result with
           | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
               do
@@ -401,20 +404,20 @@ export fn compile_full_ir_with_cache(path: String, stdlib_root: String, cache) -
                 IrFullOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
           | codegen.IrLinesErr msg -> IrFullFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))
 
-fn compile_phase_check_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
+fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
     | bundler.BundleErr msg -> typed_ast.TypedErr(no_pos(), "bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
-          prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
           result <- checker.typecheck_typed(prog, prelude_pairs)
           match result with
           | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
           | ok -> ok
 
-fn compile_phase_lower_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
+fn compile_phase_lower_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   do
     check_result <- compile_phase_check_with_cache(path, stdlib_root, cache)
     match check_result with
@@ -424,12 +427,12 @@ fn compile_phase_lower_with_cache(path: String, stdlib_root: String, cache) -> t
         | lowering.LowerErr msg -> typed_ast.TypedErr(no_pos(), "lower: " ++ msg)
         | lowering.LowerOk lowered -> typed_ast.TypedOk(dce.elim_program(lowered), env)
 
-fn compile_phase_recheck_with_cache(path: String, stdlib_root: String, cache) -> typed_ast.TypedResult !{IO} =
+fn compile_phase_recheck_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower_with_cache(path, stdlib_root, cache)
 
 # compile_one_fn_ir_lines: like compile_full_ir_lines but only emits codegen for
 # the function(s) whose qualified name contains fn_name as a substring.
-export fn compile_one_fn_ir_lines(fn_name: String, path: String, stdlib_root: String) -> IrFullLinesResult !{IO} =
+export fn compile_one_fn_ir_lines(fn_name: String, path: source.FilePath, stdlib_root: source.StdlibRoot) -> IrFullLinesResult !{IO} =
   do
     recheck_result <- compile_phase_recheck(path, stdlib_root)
     match recheck_result with
