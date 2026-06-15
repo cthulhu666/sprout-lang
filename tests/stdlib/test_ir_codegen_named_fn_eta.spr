@@ -1,0 +1,44 @@
+# Verifies bare TVar reference to a top-level fn lowers via --use-ir-codegen
+# (M3 PR 6).  Closes the dominant blocker exposed by PR 5: 72 of 85
+# remaining IR_XFAIL entries fail with `unbound variable '<name>'` because
+# top-level fns (and externs declared in prelude) referenced as VALUES
+# (passed as HOF arguments, not called) hit the catch-all "unbound"
+# branch in ast_to_ir.sprout's TVar resolution.
+#
+# Real-world example from prelude.sprout:107:
+#   list_map_go(parse_int, split_words(s))
+# where parse_int is `extern fn parse_int(s: String) -> Int` — an extern
+# fn passed by name as the first argument to list_map_go.
+#
+# Implementation: M3 PR 6 mirrors direct codegen's emit_named_fn_wrapper_lines
+# (codegen.sprout:1434-1444).  At TVar resolution, if the name is a top-
+# level fn (in fn_arities Dict, with known arity), the translator:
+#   1. synthesizes a wrapper IRFunction
+#        @__sprout_ir_eta_<name>_<N>(i64 %env, i64 %a0, ..., i64 %a(N-1))
+#        which forwards to the original @<name>(i64 %a0, ...).
+#   2. pushes the wrapper into the lifted_ref (same mechanism as lifted
+#      lambdas — appears in the emitted IR alongside user fns).
+#   3. emits IRMkClosure(%result, wrapper_name, Nil) at the use site.
+#
+# This matches direct codegen's call-boundary shape exactly, so the
+# differential framework (PR 1.5) reports 0 divergence on shared-OK files.
+
+fn square(n: Int) -> Int = n * n
+
+fn double(n: Int) -> Int = n + n
+
+# `square` and `double` are passed as VALUES (bare TVar references) to
+# `apply`.  Pre-PR-6: each call fails with `unbound variable 'square'`
+# (then 'double').  Post-PR-6: each emits a wrapper IRFunction +
+# IRMkClosure at the call site.
+fn apply(f: Int -> Int, x: Int) -> Int = f(x)
+
+fn squared_of_5() -> Int = apply(square, 5)
+fn doubled_of_7() -> Int = apply(double, 7)
+
+# Reference to the same fn twice in one expression — verifies that
+# wrapper synthesis is per-reference (no dedup), or deduplicated cleanly.
+fn pair_of_squares(a: Int, b: Int) -> Int = apply(square, a) + apply(square, b)
+
+# Trivial main — IR path requires `() : Unit` until PR 7 lands do/IO.
+fn main() -> Unit !{IO} = ()

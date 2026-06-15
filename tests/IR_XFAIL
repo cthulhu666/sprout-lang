@@ -15,104 +15,102 @@
 #   PR 2 — CPR ctor lowering (boxed)              ✓ #47
 #   PR 3 — TUnary `!` + `-`, binary `/`           ✓ #48
 #   PR 4 — short-circuit `&&` / `||`              ✓ #49
-#   PR 5 — top-level let bindings (module-init)   ✓ this PR
+#   PR 5 — top-level let bindings (module-init)   ✓ #50
+#   PR 6 — top-level fn eta wrappers              ✓ this PR
 #
-# Bucket breakdown after PR 5 closes (re-probed):
-#   72 entries — bare top-level FN reference / extern as HOF arg
-#                (eta-expansion deferred — different gap from PR 5's top-level
-#                let work; this is the `list_map_go(parse_int, ...)` shape
-#                where parse_int is an extern fn passed as a value).
+# Bucket breakdown after PR 6 closes (re-probed):
+#   72 entries — Tuple not yet supported (now the dominant blocker)
 #   10 entries — do-block + IO + main body
 #    1 entry  — TuplePattern in match
 #    2 entries — pre-existing direct-codegen xfails (unresolved names in source)
 
 # === examples/ ===
-examples/aoc_2025_day_1.sprout                 # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/aoc_2025_day_2.sprout                 # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/aoc_2025_day_3.sprout                 # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/aoc_2025_day_4.sprout                 # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/aoc_2025_day_5.sprout                 # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/astar.sprout                          # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/collections_demo.sprout               # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/do_notation_demo.sprout               # top-level fn ref (eta-deferred): unbound 'parse_int'
+examples/aoc_2025_day_1.sprout                 # Tuple not yet supported
+examples/aoc_2025_day_2.sprout                 # Tuple not yet supported
+examples/aoc_2025_day_3.sprout                 # Tuple not yet supported
+examples/aoc_2025_day_4.sprout                 # Tuple not yet supported
+examples/aoc_2025_day_5.sprout                 # Tuple not yet supported
+examples/astar.sprout                          # Tuple not yet supported
+examples/collections_demo.sprout               # Tuple not yet supported
+examples/do_notation_demo.sprout               # Tuple not yet supported
 examples/factorial.sprout                      # do-block + IO + main body
 examples/fizzbuzz.sprout                       # do-block + IO + main body
-examples/foldable_demo.sprout                  # top-level fn ref (eta-deferred): unbound 'parse_int'
+examples/foldable_demo.sprout                  # Tuple not yet supported
 examples/hello.sprout                          # do-block + IO + main body
-examples/http_echo_server.sprout               # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/http_get_cli.sprout                   # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/int_range_demo.sprout                 # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/io_do_demo.sprout                     # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/io_result_do_demo.sprout              # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/json_demo.sprout                      # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/list_pattern_demo.sprout              # top-level fn ref (eta-deferred): unbound 'parse_int'
+examples/http_echo_server.sprout               # Tuple not yet supported
+examples/http_get_cli.sprout                   # Tuple not yet supported
+examples/int_range_demo.sprout                 # Tuple not yet supported
+examples/io_do_demo.sprout                     # Tuple not yet supported
+examples/io_result_do_demo.sprout              # Tuple not yet supported
+examples/json_demo.sprout                      # Tuple not yet supported
+examples/list_pattern_demo.sprout              # Tuple not yet supported
 examples/maybe_map.sprout                      # do-block + IO + main body
-examples/modules_demo.sprout                   # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/nqueens.sprout                        # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/process_demo.sprout                   # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/ref_tutorial.sprout                   # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/ref_union_find.sprout                 # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/regex_demo.sprout                     # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/repl_hosted.sprout                    # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/result_demo.sprout                    # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/sentry_api.sprout                     # top-level fn ref (eta-deferred): unbound 'parse_int'
+examples/modules_demo.sprout                   # Tuple not yet supported
+examples/nqueens.sprout                        # Tuple not yet supported
+examples/process_demo.sprout                   # Tuple not yet supported
+examples/ref_tutorial.sprout                   # Tuple not yet supported
+examples/ref_union_find.sprout                 # Tuple not yet supported
+examples/regex_demo.sprout                     # Tuple not yet supported
+examples/repl_hosted.sprout                    # Tuple not yet supported
+examples/result_demo.sprout                    # Tuple not yet supported
+examples/sentry_api.sprout                     # Tuple not yet supported
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/tcp_echo_once.sprout                  # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/tcp_echo_server.sprout                # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/text_demo.sprout                      # top-level fn ref (eta-deferred): unbound 'parse_int'
+examples/string_templates.sprout               # Tuple not yet supported
+examples/tcp_echo_once.sprout                  # Tuple not yet supported
+examples/tcp_echo_server.sprout                # Tuple not yet supported
+examples/text_demo.sprout                      # Tuple not yet supported
 examples/tuples.sprout                         # TuplePattern in match
-examples/typeclass_collections_demo.sprout     # top-level fn ref (eta-deferred): unbound 'parse_int'
-examples/typeclass_functor_foldable_demo.sprout  # top-level fn ref (eta-deferred): unbound 'parse_int'
+examples/typeclass_collections_demo.sprout     # Tuple not yet supported
+examples/typeclass_functor_foldable_demo.sprout  # Tuple not yet supported
 
 # === tests/smoke_shapes/ ===
 tests/smoke_shapes/01_noparam.spr              # do-block + IO + main body
 tests/smoke_shapes/02_adtmatch.spr             # do-block + IO + main body
 tests/smoke_shapes/03_strconcat.spr            # do-block + IO + main body
-tests/smoke_shapes/04_generic.spr              # top-level fn ref (eta-deferred): unbound 'parse_int'
+tests/smoke_shapes/04_generic.spr              # Tuple not yet supported
 tests/smoke_shapes/05_lambdaparams.spr         # do-block + IO + main body
-tests/smoke_shapes/06_tuple_param.spr          # top-level fn ref (eta-deferred): unbound 'parse_int'
+tests/smoke_shapes/06_tuple_param.spr          # Tuple not yet supported
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_compute_eta_fwd_markers.spr  # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_constrained_container_dispatch.spr  # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_constrained_eta_codegen.spr  # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_dbe_synthetic.spr            # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_deriving_eq.spr              # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_deriving_eq_parametric.spr   # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_deriving_ord.spr             # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_deriving_to_string.spr       # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_eq_operator_adt_dispatch.spr # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_fn_compose.spr               # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_instance_method_subst.spr    # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_arith.spr         # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_basic.spr         # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_calls.spr         # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_closures.spr      # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_control.spr       # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_ctors.spr         # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_match.spr         # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_codegen_strings.spr       # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_ir_rooting.spr               # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_json.spr                     # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_lexer_slice.spr              # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_list_pattern_runtime.spr     # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_math.spr                     # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_mutvec.spr                   # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_native_constrained_maybe_helper.spr  # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_native_fold_indexed.spr      # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_process.spr                  # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_regex.spr                    # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_repl_navigation.spr          # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_return_type_dispatch.spr     # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_set.spr                      # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_str_slice_bytes.spr          # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_string.spr                   # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_time.spr                     # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_to_string.spr                # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_toplevel_let_closure.spr     # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_tuple_tostring.spr           # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_typeclass_laws.spr           # top-level fn ref (eta-deferred): unbound 'parse_int'
-tests/stdlib/test_wrap_type.spr                # top-level fn ref (eta-deferred): unbound 'parse_int'
+tests/stdlib/test_collections.spr              # Tuple not yet supported
+tests/stdlib/test_compute_eta_fwd_markers.spr  # Tuple not yet supported
+tests/stdlib/test_constrained_container_dispatch.spr  # Tuple not yet supported
+tests/stdlib/test_constrained_eta_codegen.spr  # Tuple not yet supported
+tests/stdlib/test_dbe_synthetic.spr            # Tuple not yet supported
+tests/stdlib/test_deriving_eq.spr              # Tuple not yet supported
+tests/stdlib/test_deriving_eq_parametric.spr   # Tuple not yet supported
+tests/stdlib/test_deriving_ord.spr             # Tuple not yet supported
+tests/stdlib/test_deriving_to_string.spr       # Tuple not yet supported
+tests/stdlib/test_eq_operator_adt_dispatch.spr # Tuple not yet supported
+tests/stdlib/test_fn_compose.spr               # Tuple not yet supported
+tests/stdlib/test_instance_method_subst.spr    # Tuple not yet supported
+tests/stdlib/test_ir_codegen_arith.spr         # Tuple not yet supported
+tests/stdlib/test_ir_codegen_basic.spr         # Tuple not yet supported
+tests/stdlib/test_ir_codegen_calls.spr         # Tuple not yet supported
+tests/stdlib/test_ir_codegen_closures.spr      # Tuple not yet supported
+tests/stdlib/test_ir_codegen_control.spr       # Tuple not yet supported
+tests/stdlib/test_ir_codegen_ctors.spr         # Tuple not yet supported
+tests/stdlib/test_ir_codegen_match.spr         # Tuple not yet supported
+tests/stdlib/test_ir_codegen_strings.spr       # Tuple not yet supported
+tests/stdlib/test_ir_rooting.spr               # Tuple not yet supported
+tests/stdlib/test_json.spr                     # Tuple not yet supported
+tests/stdlib/test_lexer_slice.spr              # Tuple not yet supported
+tests/stdlib/test_list_pattern_runtime.spr     # Tuple not yet supported
+tests/stdlib/test_math.spr                     # Tuple not yet supported
+tests/stdlib/test_mutvec.spr                   # Tuple not yet supported
+tests/stdlib/test_native_constrained_maybe_helper.spr  # Tuple not yet supported
+tests/stdlib/test_native_fold_indexed.spr      # Tuple not yet supported
+tests/stdlib/test_process.spr                  # Tuple not yet supported
+tests/stdlib/test_regex.spr                    # Tuple not yet supported
+tests/stdlib/test_repl_navigation.spr          # Tuple not yet supported
+tests/stdlib/test_return_type_dispatch.spr     # Tuple not yet supported
+tests/stdlib/test_set.spr                      # Tuple not yet supported
+tests/stdlib/test_str_slice_bytes.spr          # Tuple not yet supported
+tests/stdlib/test_string.spr                   # Tuple not yet supported
+tests/stdlib/test_time.spr                     # Tuple not yet supported
+tests/stdlib/test_to_string.spr                # Tuple not yet supported
+tests/stdlib/test_toplevel_let_closure.spr     # Tuple not yet supported
+tests/stdlib/test_tuple_tostring.spr           # Tuple not yet supported
+tests/stdlib/test_typeclass_laws.spr           # Tuple not yet supported
+tests/stdlib/test_wrap_type.spr                # Tuple not yet supported
