@@ -785,6 +785,110 @@ run-example-canary: bootstrap-from-seed
   fi
   echo "==> run-example-canary ✓"
 
+# ── IR Codegen Dual-Path (M3 Milestone) ──────────────────────────────────────
+#
+# These recipes mirror compile-examples-stage1, test-stdlib-stage1, smoke-shapes,
+# and run-example-canary but route through --use-ir-codegen (the typed Sprout-IR
+# path) instead of --emit-ir (direct codegen).  Intentionally non-blocking in
+# CI during the M3 milestone — the IR path is missing parity features (CPR
+# ctors, do-blocks, TCO, etc.) that direct codegen has.  tests/IR_XFAIL lists
+# known-failing files; each M3 PR shrinks that list by closing a parity gap.
+#
+# When tests/IR_XFAIL is empty AND every IR-mirror recipe passes, M3 PR 10
+# flips the test-ir CI job to blocking, and PR 11 makes the IR path default.
+# See /Users/cthulhu/.claude/plans/witty-brewing-wolf.md for the full roadmap.
+
+# Validate tests/IR_XFAIL format + content (no stale entries, no duplicates).
+[group('ir-codegen')]
+check-ir-xfail-format:
+  bash scripts/check_ir_xfail.sh
+
+# Internal helper: run --use-ir-codegen + opt verify on each file matching
+# `files` (space-separated paths or a single glob string). Reports OK / xfail /
+# UNEXPECTED OK / FAILED counts. Reads xfail set from tests/IR_XFAIL. Exits 1
+# only on real failures (failed file not in IR_XFAIL, or xfail file that
+# unexpectedly succeeded).
+[private]
+_run-ir-files files name: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  STAGE="{{build_dir}}/compile_driver_bin_stage1"
+  XFAIL=tests/IR_XFAIL
+  NAME="{{name}}"
+  if [[ ! -x "$STAGE" ]]; then
+    echo "ERROR: $STAGE not found" >&2; exit 1
+  fi
+  if [[ ! -f "$XFAIL" ]]; then
+    echo "ERROR: $XFAIL not found" >&2; exit 1
+  fi
+  xfail_set=$(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' "$XFAIL" | grep -v '^$' | awk '{print $1}')
+  TMPD=$(mktemp -d "/tmp/sprout_ir_$$_XXXXXX")
+  trap 'rm -rf "$TMPD"' EXIT
+  total=0; ok=0; xfail=0; failed=0; unexpected_ok=0
+  for f in {{files}}; do
+    [ -f "$f" ] || continue
+    total=$((total + 1))
+    is_xfail=0
+    for xf in $xfail_set; do [[ "$f" == "$xf" ]] && is_xfail=1 && break; done
+    base=$(basename "$f")
+    ll="$TMPD/$base.ll"
+    err="$TMPD/$base.err"
+    "$STAGE" --use-ir-codegen "{{stdlib_root}}" "$f" > "$ll" 2>"$err"
+    rc=$?
+    compile_ok=1; reason=""
+    if [[ $rc -ne 0 ]]; then
+      compile_ok=0; reason="exit $rc"
+    elif grep -qE '(^|: )ERROR:' "$ll"; then
+      compile_ok=0; reason=$(grep -E '(^|: )ERROR:' "$ll" | head -1)
+    elif [[ ! -s "$ll" ]]; then
+      compile_ok=0; reason="empty output"
+    elif ! opt --passes=verify "$ll" -o /dev/null 2>"$err"; then
+      compile_ok=0; reason="IR INVALID ($(head -1 "$err" 2>/dev/null || echo unknown))"
+    fi
+    if (( compile_ok == 1 )); then
+      if (( is_xfail == 1 )); then
+        unexpected_ok=$((unexpected_ok + 1))
+        printf '  UNEXPECTED OK (remove from IR_XFAIL): %s\n' "$f"
+      else
+        ok=$((ok + 1))
+      fi
+    else
+      if (( is_xfail == 1 )); then
+        xfail=$((xfail + 1))
+      else
+        failed=$((failed + 1))
+        printf '  FAIL: %s — %s\n' "$f" "$reason"
+      fi
+    fi
+  done
+  echo ""
+  printf '==> %s: %d total, %d OK, %d xfail, %d UNEXPECTED OK, %d FAILED\n' \
+    "$NAME" "$total" "$ok" "$xfail" "$unexpected_ok" "$failed"
+  if (( failed > 0 || unexpected_ok > 0 )); then
+    exit 1
+  fi
+
+# Mirror of compile-examples-stage1 routed via --use-ir-codegen.
+[group('ir-codegen')]
+compile-examples-stage1-ir: (_run-ir-files "examples/*.sprout" "compile-examples-stage1-ir")
+
+# Mirror of test-stdlib-stage1 routed via --use-ir-codegen.
+# NOTE: PR-1-shape is "compile + opt verify" only; the full link+run semantics
+# return when PR 4 lands do-block/IO support in the IR path.
+[group('ir-codegen')]
+test-stdlib-stage1-ir: (_run-ir-files "tests/stdlib/*.spr" "test-stdlib-stage1-ir")
+
+# Mirror of smoke-shapes routed via --use-ir-codegen.
+[group('ir-codegen')]
+smoke-shapes-ir: (_run-ir-files "tests/smoke_shapes/*.spr" "smoke-shapes-ir")
+
+# Mirror of run-example-canary routed via --use-ir-codegen.
+# NOTE: link+run is not done — current IR path cannot produce linkable output
+# for the canary set (do-block/IO and CPR are missing).  Degrades to
+# compile + opt verify until PR 4 + PR 2 land.
+[group('ir-codegen')]
+run-example-canary-ir: (_run-ir-files "examples/tuples.sprout examples/factorial.sprout examples/maybe_map.sprout examples/typeclass_collections_demo.sprout examples/fizzbuzz.sprout" "run-example-canary-ir")
+
 # ── REPL ──────────────────────────────────────────────────────────────────────
 
 # Build sproutd — combined REPL + analysis service binary (self-configuring).
