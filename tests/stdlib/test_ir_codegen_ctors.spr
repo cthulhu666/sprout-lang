@@ -13,9 +13,9 @@ import stdlib.compiler.typed_ast as typed_ast
 # See docs/gc-rooting-model-c-plan-2026-06-02.md.
 #
 # Hand-built IRPrograms exercise IRMakeCtor (boxed sprout_makeN lowering).
-# Ctor names used here are fresh placeholders that do NOT match Maybe/List;
-# those are CPR-eligible and would be rejected at translate_program.  Hand-
-# built IR bypasses the translator and lowers any tag/name pair as boxed.
+# M3 PR 2: CPR-eligible ctors (max_arity = 1 or 2) ALSO lower through
+# IRMakeCtor / @sprout_makeN; the unboxing sret optimization lands in PR 2b.
+# Hand-built IR bypasses the translator and lowers any tag/name pair as boxed.
 
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
@@ -226,28 +226,35 @@ fn main() -> Unit !{IO} =
     # These exercise build_ctor_table, the threaded ctors parameter, and the
     # TVar / TCall ctor dispatch.
     #
-    # CPR-eligible ADTs are rejected here at translate time (PR 2.3 scope is
-    # boxed only).  Boxed ADTs (max_arity >= 3) lower to @sprout_makeN.
+    # M3 PR 2: CPR-eligible ctors lower through the same boxed allocation
+    # path as non-CPR ctors (@sprout_makeN).  The unboxing sret optimization
+    # lands in PR 2b; this milestone verifies the boxed path works for
+    # CPR-eligible ADTs.
 
-    # CPR rejection - 0-arity ctor of a CPR ADT (max_arity = 1 -> CPR).
-    cpr_a <- translated_err_contains("type X = A | B Int\nfn make() -> X = A",
-                                     "CPR ctor lowering deferred")
+    # CPR-eligible 0-arity ctor (A of `X = A | B Int`, max_arity = 1).
+    # Lowers via translate_zero_arity_ctor -> @sprout_make0.
+    cpr_a <- translated_ok_ir_contains("type X = A | B Int\nfn make() -> X = A",
+                                       "call i64 @sprout_make0(i64 0)")
     assert_true(state,
-                "translate_program: 0-arity CPR ctor (A of `X = A | B Int`) rejected",
+                "translate_program: 0-arity CPR ctor (A of `X = A | B Int`) lowers to @sprout_make0",
                 cpr_a)
 
-    # CPR rejection - n-arity ctor of a CPR ADT.
-    cpr_b <- translated_err_contains("type X = A | B Int\nfn make() -> X = B(7)",
-                                     "CPR ctor lowering deferred")
+    # CPR-eligible n-arity ctor (B of `X = A | B Int`, max_arity = 1).
+    # Lowers via translate_boxed_ctor_call -> @sprout_make1.  Tag = 1 (B is
+    # the second ctor in source order).
+    cpr_b <- translated_ok_ir_contains("type X = A | B Int\nfn make() -> X = B(7)",
+                                       "call i64 @sprout_make1(i64 1")
     assert_true(state,
-                "translate_program: 1-arity CPR ctor (B(7)) rejected",
+                "translate_program: 1-arity CPR ctor (B(7)) lowers to @sprout_make1",
                 cpr_b)
 
-    # CPR rejection - max_arity = 2 is also CPR (a Pair-shaped ADT).
-    cpr_p <- translated_err_contains("type P = P Int Int\nfn mk() -> P = P(1, 2)",
-                                     "CPR ctor lowering deferred")
+    # CPR-eligible max_arity = 2 (a Pair-shaped ADT).  Lowers via
+    # translate_boxed_ctor_call -> @sprout_make2.  Tag = 0 (P is the only
+    # ctor in source order).
+    cpr_p <- translated_ok_ir_contains("type P = P Int Int\nfn mk() -> P = P(1, 2)",
+                                       "call i64 @sprout_make2(i64 0")
     assert_true(state,
-                "translate_program: 2-arity CPR ctor (P(1, 2)) rejected",
+                "translate_program: 2-arity CPR ctor (P(1, 2)) lowers to @sprout_make2",
                 cpr_p)
 
     # Boxed lowering - max_arity = 3 makes the ADT boxed; ctor goes through

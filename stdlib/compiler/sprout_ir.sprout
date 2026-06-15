@@ -103,10 +103,10 @@ export type IROp (..) =
   #     mirrors codegen.sprout's `build_ctor_sigs_from_decls` numbering.
   #   - args: list of '%'-prefixed value-names, one per ctor field, in source
   #     order.  Arity = length args; length determines which `@sprout_makeN`
-  #     is called.  PR 2.3 scope: ast_to_ir rejects CPR-eligible types before
-  #     construction (see ctor_is_cpr_eligible). ir_lowering does NOT enforce
-  #     this invariant — future IR passes that synthesize IRMakeCtor for CPR
-  #     types must either lower differently or pre-check at the source.
+  #     is called.  M3 PR 2: CPR-eligible ctors are ALSO lowered through this
+  #     op (boxed allocation, no sret).  PR 2b will introduce IRMakeCprCtor
+  #     for the actual CPR optimization (struct return + sret) while keeping
+  #     this op for non-CPR ctors only.
   | IRMakeCtor String String Int (List String)
   # IRMkClosure <result> <code-fn-name> <captures>
   #   - result: '%t<N>' for the i64 closure handle.

@@ -1,0 +1,54 @@
+# Verifies CPR-eligible ctor APPLICATION compiles via --use-ir-codegen
+# under boxed lowering (M3 PR 2).
+#
+# Sprout's direct codegen has a CPR (Constructed Product Result) optimization:
+# ctors with max-arity 1 or 2 (e.g. Just/Nothing, Cons/Nil, Wrap/Empty) get
+# unboxed struct returns + sret ABI for width=3.  The IR-typed codegen path
+# does NOT yet have this optimization — but PR 2 routes CPR-eligible ctors
+# through the same boxed allocation path as non-CPR ctors (`@sprout_makeN`).
+# Programs compile correctly; the unboxing perf win lands in PR 2b.
+#
+# This file uses CPR-eligible ctors without IO or do-blocks, so it can be
+# compiled via --use-ir-codegen end-to-end.  Before the PR 2 fix it fails
+# with `ERROR: ast_to_ir: CPR ctor lowering deferred to follow-up PR`.
+# After: lowers cleanly to LLVM IR with @sprout_make2 / @sprout_make1 calls.
+#
+# Direct codegen has always handled this; this file is the IR-path coverage.
+
+type Box a =
+  | Wrap a
+  | Empty
+
+# CPR-eligible ctor APPLICATION sites: Wrap(x) at line 27, Empty at line 28.
+# Both currently trip `ast_to_ir.sprout:1882` ("CPR ctor lowering deferred").
+fn make_wrap(x: Int) -> Box Int = Wrap(x)
+fn make_empty() -> Box Int = Empty
+
+# Match destructuring on a CPR-eligible ADT — uses IRGetTag / IRGetField,
+# which the IR path already supports for boxed values.
+fn unwrap_or(b: Box Int, default: Int) -> Int =
+  match b with
+  | Wrap k -> k
+  | Empty -> default
+
+# Round-trip: construct, then destructure.  Result must equal the input
+# for any Int (boxed allocation is transparent to the value).
+fn round_trip(x: Int) -> Int = unwrap_or(make_wrap(x), 0)
+
+# A second CPR-eligible ADT (max-arity 2 — width-3 ctor in direct codegen)
+# also exercised through the boxed path.
+type Pair a b =
+  | MkPair a b
+
+fn make_pair(a: Int, b: Int) -> Pair Int Int = MkPair(a, b)
+
+fn fst_int(p: Pair Int Int) -> Int =
+  match p with
+  | MkPair a _ -> a
+
+fn snd_int(p: Pair Int Int) -> Int =
+  match p with
+  | MkPair _ b -> b
+
+# Trivial main — IR path requires `() : Unit` until PR 4 lands do/IO.
+fn main() -> Unit !{IO} = ()

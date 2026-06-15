@@ -351,11 +351,9 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # `max_arity_of_owning_ADT` is the largest field-count among the ADT's
 # constructors.  `cpr_width_for_type_expr` in codegen.sprout classifies an
 # ADT as CPR-eligible when this is 1 or 2 (yielding unboxed widths 2 and 3
-# respectively).  Storing it inline makes `ctor_is_cpr_eligible` a single
-# Dict lookup without re-walking type decls.
-#
-# PR 2.3 covers BOXED ADTs only.  CPR-eligible ctors are rejected at
-# translate time with a clear Err (see translate_expr).
+# respectively).  Currently unused by ast_to_ir (M3 PR 2 routes CPR-eligible
+# ctors through the boxed path); reserved for PR 2b which will use it to
+# choose between boxed and sret lowering at the IRMakeCprCtor site.
 
 # ---------------------------------------------------------------------------
 # AST → Sprout-IR translator.
@@ -505,11 +503,6 @@ fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr,
                         Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs))
   where arity = list_length(ctor_args)
         fks = fk.ctor_field_kinds_string(ctor_args)
-
-# True when an ADT with this max-arity is CPR-eligible (unboxed widths 2 or 3).
-# Mirrors `unboxed_width_for_arity` in codegen.sprout.
-fn ctor_is_cpr_eligible(max_arity: Int) -> Bool =
-  max_arity == 1 || max_arity == 2
 
 # Fresh-name counter threaded through the translator.
 # User fns use prefix "%t" → %t0, %t1, …
@@ -664,10 +657,11 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
             match dict_get(name, ctors) with
             | Just entry ->
                 match entry with
-                | (tag, actual_ar, max_ar, _fks) ->
-                    if ctor_is_cpr_eligible(max_ar)
-                    then Err("ast_to_ir: CPR ctor lowering deferred to follow-up PR")
-                    else if actual_ar == 0
+                | (tag, actual_ar, _max_ar, _fks) ->
+                    # M3 PR 2: CPR-eligible ctors route through the same boxed
+                    # allocation path as non-CPR ctors (@sprout_makeN).
+                    # The unboxing sret optimization lands in PR 2b.
+                    if actual_ar == 0
                     then translate_zero_arity_ctor(name, tag, idx, cur_label, cur_ops, name_prefix)
                     else Err("ast_to_ir: bare reference to non-zero-arity ctor '" ++ name ++ "' (eta/partial application) deferred to follow-up PR")
             | Nothing -> Err("ast_to_ir: unbound variable '" ++ name ++ "'")
@@ -1905,19 +1899,20 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else
             # Constructor application takes precedence over named-call dispatch
-            # because a ctor name is never simultaneously a function.  CPR-
-            # eligible ADTs are rejected at this milestone (boxed only).
+            # because a ctor name is never simultaneously a function.  M3 PR 2:
+            # CPR-eligible ctors are routed through the same boxed allocation
+            # path as non-CPR ctors; the unboxing sret optimization lands in
+            # PR 2b alongside the IRMakeCprCtor op and the bulletproofing
+            # layers (CprAbi ADT, single-source ABI, post-codegen lint).
             match dict_get(fname, ctors) with
             | Just entry ->
                 match entry with
-                | (tag, actual_ar, max_ar, _fks) ->
-                    if ctor_is_cpr_eligible(max_ar)
-                    then Err("ast_to_ir: CPR ctor lowering deferred to follow-up PR")
-                    else translate_boxed_ctor_call(fname, tag, actual_ar, args, params,
-                                                   ctors, idx, cur_label, cur_ops,
-                                                   captures, lifted_ref, top_level,
-                                                   lambda_ctr_ref, lifted_idx_ref,
-                                                   name_prefix)
+                | (tag, actual_ar, _max_ar, _fks) ->
+                    translate_boxed_ctor_call(fname, tag, actual_ar, args, params,
+                                              ctors, idx, cur_label, cur_ops,
+                                              captures, lifted_ref, top_level,
+                                              lambda_ctr_ref, lifted_idx_ref,
+                                              name_prefix)
             | Nothing ->
                 translate_direct_call(fname, args, call_ty, params, ctors, idx,
                                       cur_label, cur_ops, captures, lifted_ref, top_level,
