@@ -23,6 +23,9 @@
 # compile+opt-verify path checks both ops in isolation and composition.
 # Runtime-level correctness is covered by the stdlib test suite
 # (direct-codegen path: `just test`).
+#
+# Note: StringPattern-in-match (| "let" -> ...) is a separate IR parity
+# gap; those cases are intentionally absent here, not forgotten.
 
 # String == in isolation.
 fn str_eq_fn(a: String, b: String) -> Bool = a == b
