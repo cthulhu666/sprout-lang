@@ -1058,8 +1058,30 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                     lifted_idx_ref: Ref (Dict Int),
                     name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
-  if op == "++" && is_string_type(typed_ast.typed_expr_type(left))
-                && is_string_type(typed_ast.typed_expr_type(right))
+  # M3 PR 4: `&&` and `||` are short-circuit operators.  Desugar into the
+  # equivalent TIf and reuse translate_if, which produces the canonical
+  # `br i1 + label + phi` LLVM pattern.  This mirrors direct codegen's
+  # emit_short_circuit (codegen.sprout:2046+) structurally; the differential
+  # framework (PR 1.5) reports 0 divergence on shared-OK files.
+  #   a && b  ≡  if a then b else false
+  #   a || b  ≡  if a then true else b
+  # Synthetic TBool literal carries the LHS position (used only for diagnostics).
+  if op == "&&"
+  then translate_if(left, right,
+                    typed_ast.TBool(false, types.type_bool(), typed_ast.typed_expr_pos(left)),
+                    types.type_bool(),
+                    params, ctors, idx, cur_label, cur_ops,
+                    captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                    name_prefix)
+  else if op == "||"
+  then translate_if(left,
+                    typed_ast.TBool(true, types.type_bool(), typed_ast.typed_expr_pos(left)),
+                    right, types.type_bool(),
+                    params, ctors, idx, cur_label, cur_ops,
+                    captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                    name_prefix)
+  else if op == "++" && is_string_type(typed_ast.typed_expr_type(left))
+                     && is_string_type(typed_ast.typed_expr_type(right))
   then
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
                          captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,

@@ -11,108 +11,106 @@
 #
 # Validate this file with: bash scripts/check_ir_xfail.sh
 #
-# PR-assignment legend (see /Users/cthulhu/.claude/plans/witty-brewing-wolf.md):
-#   PR 2  — CPR ctor lowering (boxed)              — CLOSED
-#   PR 3  — TUnary `!` + `-`, binary `/`           — CLOSED (this PR)
-#   PR 3b — Bool zext, top-level let (residual)
-#   PR 4  — Tuple literals + TuplePattern
-#   PR 5  — do-block + IO effects + main body lowering
+# Closed gates (M3 milestone, in order):
+#   PR 2 — CPR ctor lowering (boxed)              ✓ #47
+#   PR 3 — TUnary `!` + `-`, binary `/`           ✓ #48
+#   PR 4 — short-circuit `&&` / `||`              ✓ this PR
 #
-# Bucket breakdown after PR 3 closes (re-probed):
-#   72 entries — short-circuit `&&` / `||` (next dominant blocker; needs
-#                separate scope decision — eager or short-circuit lowering)
-#    8 entries — PR 5 do-block / IO / main body
-#    2 entries — PR 3b top-level let (unbound 'r1' surfaces after `/` cleared)
-#    1 entry  — PR 4 TuplePattern in match
+# Bucket breakdown after PR 4 closes (re-probed):
+#   74 entries — top-level let resolution (unbound 'parse_int' / 'r1' / etc.)
+#                Now the dominant blocker.  Needs design decision per
+#                BACKLOG.md line 372 (options a/b/c).
+#    8 entries — do-block + IO + main body
+#    1 entry  — TuplePattern in match
 #    2 entries — pre-existing direct-codegen xfails (unresolved names in source)
 
 # === examples/ ===
-examples/aoc_2025_day_1.sprout                 # PR 3b: top-level let (unbound 'r1')
-examples/aoc_2025_day_2.sprout                 # PR 3b: top-level let (unbound 'r1')
-examples/aoc_2025_day_3.sprout                 # short-circuit `&&` / `||` (next blocker — needs scope decision)
-examples/aoc_2025_day_4.sprout                 # short-circuit `&&` / `||` (next blocker)
-examples/aoc_2025_day_5.sprout                 # short-circuit `&&` / `||` (next blocker)
-examples/astar.sprout                          # short-circuit `&&` / `||` (next blocker)
-examples/collections_demo.sprout               # short-circuit `&&` / `||` (next blocker)
-examples/do_notation_demo.sprout               # short-circuit `&&` / `||` (next blocker)
-examples/factorial.sprout                      # PR 5: do-block + IO + main body
-examples/fizzbuzz.sprout                       # PR 5: do-block + IO + main body (was PR 8 div; / cleared)
-examples/foldable_demo.sprout                  # short-circuit `&&` / `||` (next blocker)
-examples/hello.sprout                          # PR 5: do-block + IO + main body
-examples/http_echo_server.sprout               # short-circuit `&&` / `||` (next blocker)
-examples/http_get_cli.sprout                   # short-circuit `&&` / `||` (next blocker)
-examples/int_range_demo.sprout                 # short-circuit `&&` / `||` (next blocker)
-examples/io_do_demo.sprout                     # short-circuit `&&` / `||` (next blocker)
-examples/io_result_do_demo.sprout              # short-circuit `&&` / `||` (next blocker)
-examples/json_demo.sprout                      # short-circuit `&&` / `||` (next blocker)
-examples/list_pattern_demo.sprout              # short-circuit `&&` / `||` (next blocker)
-examples/maybe_map.sprout                      # PR 5: do-block + IO + main body
-examples/modules_demo.sprout                   # short-circuit `&&` / `||` (next blocker)
-examples/nqueens.sprout                        # short-circuit `&&` / `||` (next blocker)
-examples/process_demo.sprout                   # short-circuit `&&` / `||` (next blocker)
-examples/ref_tutorial.sprout                   # short-circuit `&&` / `||` (next blocker)
-examples/ref_union_find.sprout                 # short-circuit `&&` / `||` (next blocker)
-examples/regex_demo.sprout                     # short-circuit `&&` / `||` (next blocker)
-examples/repl_hosted.sprout                    # short-circuit `&&` / `||` (next blocker)
-examples/result_demo.sprout                    # short-circuit `&&` / `||` (next blocker)
-examples/sentry_api.sprout                     # short-circuit `&&` / `||` (next blocker)
+examples/aoc_2025_day_1.sprout                 # top-level let (unbound 'r1')
+examples/aoc_2025_day_2.sprout                 # top-level let (unbound 'r1')
+examples/aoc_2025_day_3.sprout                 # top-level let (unbound 'parse_int')
+examples/aoc_2025_day_4.sprout                 # top-level let (unbound 'parse_int')
+examples/aoc_2025_day_5.sprout                 # top-level let (unbound 'parse_int')
+examples/astar.sprout                          # top-level let (unbound 'parse_int')
+examples/collections_demo.sprout               # top-level let (unbound 'parse_int')
+examples/do_notation_demo.sprout               # top-level let (unbound 'parse_int')
+examples/factorial.sprout                      # do-block + IO + main body
+examples/fizzbuzz.sprout                       # do-block + IO + main body
+examples/foldable_demo.sprout                  # top-level let (unbound 'parse_int')
+examples/hello.sprout                          # do-block + IO + main body
+examples/http_echo_server.sprout               # top-level let (unbound 'parse_int')
+examples/http_get_cli.sprout                   # top-level let (unbound 'parse_int')
+examples/int_range_demo.sprout                 # top-level let (unbound 'parse_int')
+examples/io_do_demo.sprout                     # top-level let (unbound 'parse_int')
+examples/io_result_do_demo.sprout              # top-level let (unbound 'parse_int')
+examples/json_demo.sprout                      # top-level let (unbound 'parse_int')
+examples/list_pattern_demo.sprout              # top-level let (unbound 'parse_int')
+examples/maybe_map.sprout                      # do-block + IO + main body
+examples/modules_demo.sprout                   # top-level let (unbound 'parse_int')
+examples/nqueens.sprout                        # top-level let (unbound 'parse_int')
+examples/process_demo.sprout                   # top-level let (unbound 'parse_int')
+examples/ref_tutorial.sprout                   # top-level let (unbound 'parse_int')
+examples/ref_union_find.sprout                 # top-level let (unbound 'parse_int')
+examples/regex_demo.sprout                     # top-level let (unbound 'parse_int')
+examples/repl_hosted.sprout                    # top-level let (unbound 'parse_int')
+examples/result_demo.sprout                    # top-level let (unbound 'parse_int')
+examples/sentry_api.sprout                     # top-level let (unbound 'parse_int')
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # short-circuit `&&` / `||` (next blocker)
-examples/tcp_echo_once.sprout                  # short-circuit `&&` / `||` (next blocker)
-examples/tcp_echo_server.sprout                # short-circuit `&&` / `||` (next blocker)
-examples/text_demo.sprout                      # short-circuit `&&` / `||` (next blocker)
-examples/tuples.sprout                         # PR 4: TuplePattern in match
-examples/typeclass_collections_demo.sprout     # short-circuit `&&` / `||` (next blocker)
-examples/typeclass_functor_foldable_demo.sprout  # short-circuit `&&` / `||` (next blocker)
+examples/string_templates.sprout               # top-level let (unbound 'parse_int')
+examples/tcp_echo_once.sprout                  # top-level let (unbound 'parse_int')
+examples/tcp_echo_server.sprout                # top-level let (unbound 'parse_int')
+examples/text_demo.sprout                      # top-level let (unbound 'parse_int')
+examples/tuples.sprout                         # TuplePattern in match
+examples/typeclass_collections_demo.sprout     # top-level let (unbound 'parse_int')
+examples/typeclass_functor_foldable_demo.sprout  # top-level let (unbound 'parse_int')
 
 # === tests/smoke_shapes/ ===
-tests/smoke_shapes/01_noparam.spr              # PR 5: do-block + IO + main body
-tests/smoke_shapes/02_adtmatch.spr             # PR 5: do-block + IO + main body
-tests/smoke_shapes/03_strconcat.spr            # PR 5: do-block + IO + main body
-tests/smoke_shapes/04_generic.spr              # short-circuit `&&` / `||` (next blocker)
-tests/smoke_shapes/05_lambdaparams.spr         # PR 5: do-block + IO + main body
-tests/smoke_shapes/06_tuple_param.spr          # short-circuit `&&` / `||` (next blocker)
+tests/smoke_shapes/01_noparam.spr              # do-block + IO + main body
+tests/smoke_shapes/02_adtmatch.spr             # do-block + IO + main body
+tests/smoke_shapes/03_strconcat.spr            # do-block + IO + main body
+tests/smoke_shapes/04_generic.spr              # top-level let (unbound 'parse_int')
+tests/smoke_shapes/05_lambdaparams.spr         # do-block + IO + main body
+tests/smoke_shapes/06_tuple_param.spr          # top-level let (unbound 'parse_int')
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_compute_eta_fwd_markers.spr  # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_constrained_container_dispatch.spr  # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_constrained_eta_codegen.spr  # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_dbe_synthetic.spr            # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_deriving_eq.spr              # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_deriving_eq_parametric.spr   # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_deriving_ord.spr             # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_deriving_to_string.spr       # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_eq_operator_adt_dispatch.spr # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_fn_compose.spr               # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_instance_method_subst.spr    # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_arith.spr         # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_basic.spr         # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_calls.spr         # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_closures.spr      # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_control.spr       # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_ctors.spr         # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_match.spr         # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_codegen_strings.spr       # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_ir_rooting.spr               # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_json.spr                     # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_lexer_slice.spr              # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_list_pattern_runtime.spr     # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_math.spr                     # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_mutvec.spr                   # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_native_constrained_maybe_helper.spr  # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_native_fold_indexed.spr      # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_process.spr                  # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_regex.spr                    # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_repl_navigation.spr          # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_return_type_dispatch.spr     # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_set.spr                      # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_str_slice_bytes.spr          # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_string.spr                   # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_time.spr                     # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_to_string.spr                # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_toplevel_let_closure.spr     # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_tuple_tostring.spr           # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_typeclass_laws.spr           # short-circuit `&&` / `||` (next blocker)
-tests/stdlib/test_wrap_type.spr                # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_collections.spr              # top-level let (unbound 'parse_int')
+tests/stdlib/test_compute_eta_fwd_markers.spr  # top-level let (unbound 'parse_int')
+tests/stdlib/test_constrained_container_dispatch.spr  # top-level let (unbound 'parse_int')
+tests/stdlib/test_constrained_eta_codegen.spr  # top-level let (unbound 'parse_int')
+tests/stdlib/test_dbe_synthetic.spr            # top-level let (unbound 'parse_int')
+tests/stdlib/test_deriving_eq.spr              # top-level let (unbound 'parse_int')
+tests/stdlib/test_deriving_eq_parametric.spr   # top-level let (unbound 'parse_int')
+tests/stdlib/test_deriving_ord.spr             # top-level let (unbound 'parse_int')
+tests/stdlib/test_deriving_to_string.spr       # top-level let (unbound 'parse_int')
+tests/stdlib/test_eq_operator_adt_dispatch.spr # top-level let (unbound 'parse_int')
+tests/stdlib/test_fn_compose.spr               # top-level let (unbound 'parse_int')
+tests/stdlib/test_instance_method_subst.spr    # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_arith.spr         # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_basic.spr         # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_calls.spr         # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_closures.spr      # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_control.spr       # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_ctors.spr         # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_match.spr         # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_codegen_strings.spr       # top-level let (unbound 'parse_int')
+tests/stdlib/test_ir_rooting.spr               # top-level let (unbound 'parse_int')
+tests/stdlib/test_json.spr                     # top-level let (unbound 'parse_int')
+tests/stdlib/test_lexer_slice.spr              # top-level let (unbound 'parse_int')
+tests/stdlib/test_list_pattern_runtime.spr     # top-level let (unbound 'parse_int')
+tests/stdlib/test_math.spr                     # top-level let (unbound 'parse_int')
+tests/stdlib/test_mutvec.spr                   # top-level let (unbound 'parse_int')
+tests/stdlib/test_native_constrained_maybe_helper.spr  # top-level let (unbound 'parse_int')
+tests/stdlib/test_native_fold_indexed.spr      # top-level let (unbound 'parse_int')
+tests/stdlib/test_process.spr                  # top-level let (unbound 'parse_int')
+tests/stdlib/test_regex.spr                    # top-level let (unbound 'parse_int')
+tests/stdlib/test_repl_navigation.spr          # top-level let (unbound 'parse_int')
+tests/stdlib/test_return_type_dispatch.spr     # top-level let (unbound 'parse_int')
+tests/stdlib/test_set.spr                      # top-level let (unbound 'parse_int')
+tests/stdlib/test_str_slice_bytes.spr          # top-level let (unbound 'parse_int')
+tests/stdlib/test_string.spr                   # top-level let (unbound 'parse_int')
+tests/stdlib/test_time.spr                     # top-level let (unbound 'parse_int')
+tests/stdlib/test_to_string.spr                # top-level let (unbound 'parse_int')
+tests/stdlib/test_toplevel_let_closure.spr     # top-level let (unbound 'parse_int')
+tests/stdlib/test_tuple_tostring.spr           # top-level let (unbound 'parse_int')
+tests/stdlib/test_typeclass_laws.spr           # top-level let (unbound 'parse_int')
+tests/stdlib/test_wrap_type.spr                # top-level let (unbound 'parse_int')

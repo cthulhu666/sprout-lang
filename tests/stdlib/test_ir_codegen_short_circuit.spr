@@ -1,0 +1,54 @@
+# Verifies short-circuit `&&` and `||` lower correctly via --use-ir-codegen
+# (M3 PR 4 — promoted ahead of the original PR 4 because PR 3's probe
+# showed `&&` blocks 72 of 85 remaining IR_XFAIL entries).
+#
+# Implementation: TBinary `&&`/`||` are desugared at translate_binary time
+# into the equivalent TIf:
+#   a && b  ≡  if a then b else false
+#   a || b  ≡  if a then true else b
+# translate_if produces the canonical `br i1 + label + phi` LLVM pattern
+# that direct codegen emits via emit_short_circuit (codegen.sprout:2046+).
+# Reusing translate_if rather than introducing new IR ops means the
+# differential framework (PR 1.5) will report 0 divergence for any
+# shared-OK file that uses && or ||.
+#
+# Before PR 4: --use-ir-codegen errors with
+#   ERROR: ast_to_ir: binary op '&&' requires Int operands
+# After PR 4: emits LLVM with br i1 + phi pattern matching direct codegen.
+
+# Simple `&&`.
+fn both(a: Bool, b: Bool) -> Bool = a && b
+
+# Simple `||`.
+fn either(a: Bool, b: Bool) -> Bool = a || b
+
+# Mixed: short-circuits at the OR level if `a` is true; otherwise drops to
+# `b && c`. Tests that the if-tree nests correctly.
+fn mixed(a: Bool, b: Bool, c: Bool) -> Bool = a || (b && c)
+
+# `&&` with a comparison on each side — exercises the i1→i64 zext path
+# (comparisons produce i1, get widened) feeding into the short-circuit
+# truncate at the next operator.
+fn in_range(n: Int, lo: Int, hi: Int) -> Bool = (n >= lo) && (n <= hi)
+
+# `&&` composed with negation (PR 3's IRBoolNot).
+fn safely_positive(n: Int) -> Bool = ! (n == 0) && (n > 0)
+
+# `||` returning through a CPR-eligible ctor field — combines PR 2's boxed
+# CPR routing with PR 4's short-circuit lowering.
+type Maybe a =
+  | Just a
+  | Nothing
+
+fn first_some(a: Maybe Int, b: Maybe Int) -> Bool =
+  match a with
+  | Just _ -> true
+  | Nothing -> match b with
+               | Just _ -> true
+               | Nothing -> false
+
+fn has_any(a: Bool, b: Bool, m: Maybe Int) -> Bool =
+  a || b || first_some(m, Nothing)
+
+# Trivial main — IR path requires `() : Unit` until PR 5 lands do/IO.
+fn main() -> Unit !{IO} = ()
