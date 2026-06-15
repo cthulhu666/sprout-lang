@@ -114,6 +114,9 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRIAdd r a b -> "  " ++ r ++ " = add i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRISub r a b -> "  " ++ r ++ " = sub i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIMul r a b -> "  " ++ r ++ " = mul i64 " ++ a ++ ", " ++ b
+  | sprout_ir.IRIDiv r a b -> "  " ++ r ++ " = sdiv i64 " ++ a ++ ", " ++ b
+  | sprout_ir.IRBoolNot r a -> "  " ++ r ++ " = xor i64 " ++ a ++ ", 1"
+  | sprout_ir.IRINeg r a -> "  " ++ r ++ " = sub i64 0, " ++ a
   | sprout_ir.IRICmp r pred a b -> "  " ++ r ++ " = icmp " ++ pred ++ " i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRBr lbl -> "  br label %" ++ lbl
   | sprout_ir.IRCondBr cond t e -> "  br i1 " ++ cond ++ ", label %" ++ t ++ ", label %" ++ e

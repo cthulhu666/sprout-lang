@@ -703,7 +703,29 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       translate_lambda(lparams, body, lam_ty, params, ctors, idx, cur_label, cur_ops,
                        captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix)
-  | typed_ast.TUnary _ _ _ _ -> Err("ast_to_ir: unary op not yet supported")
+  | typed_ast.TUnary op operand _ _ ->
+      # Parser produces TUnary "!" (boolean negation, parser.sprout:665) and
+      # TUnary "-" (integer negation, parser.sprout:661).  No other unary ops.
+      # !x lowers to IRBoolNot (`xor i64 %x, 1`); -x lowers to IRINeg
+      # (`sub i64 0, %x`).
+      match translate_expr(operand, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                           name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok or_ ->
+          match or_ with
+          | (oblocks, ocur_lbl, ocur_ops, o_name, idx1) ->
+              if op == "!"
+              then Ok((oblocks, ocur_lbl,
+                        list_append(ocur_ops,
+                          Cons(sprout_ir.IRBoolNot(fresh_name(name_prefix, idx1), o_name), Nil)),
+                        fresh_name(name_prefix, idx1), idx1 + 1))
+              else if op == "-"
+              then Ok((oblocks, ocur_lbl,
+                        list_append(ocur_ops,
+                          Cons(sprout_ir.IRINeg(fresh_name(name_prefix, idx1), o_name), Nil)),
+                        fresh_name(name_prefix, idx1), idx1 + 1))
+              else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
   | typed_ast.TRange _ _ _ _ -> Err("ast_to_ir: range not yet supported")
   | typed_ast.TDo _ _ _ -> Err("ast_to_ir: do-block not yet supported")
   | typed_ast.TRecord _ _ _ _ -> Err("ast_to_ir: record not yet supported")
@@ -1111,6 +1133,7 @@ fn arith_op(op: String, result: String, lhs: String, rhs: String) -> Maybe sprou
   if op == "+" then Just(sprout_ir.IRIAdd(result, lhs, rhs))
   else if op == "-" then Just(sprout_ir.IRISub(result, lhs, rhs))
   else if op == "*" then Just(sprout_ir.IRIMul(result, lhs, rhs))
+  else if op == "/" then Just(sprout_ir.IRIDiv(result, lhs, rhs))
   else Nothing
 
 # Translate an if-then-else.

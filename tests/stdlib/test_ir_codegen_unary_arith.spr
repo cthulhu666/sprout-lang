@@ -1,0 +1,56 @@
+# Verifies TUnary `!` (boolean negation) and TBinary `/` (integer division)
+# lower correctly via --use-ir-codegen (M3 PR 3, promoted from old PR 8).
+#
+# Promoted to right-after-PR-2 because the post-PR-2 IR_XFAIL probe revealed
+# that unary op blocks 72 of 85 remaining IR_XFAIL entries — the single
+# biggest gate to unblocking the IR-typed codegen path corpus.
+#
+# Before PR 3: --use-ir-codegen errors with
+#   ERROR: ast_to_ir: unary op not yet supported
+#   ERROR: ast_to_ir: binary op '/' not yet supported
+#
+# After PR 3: lowers to LLVM with
+#   xor i64 %x, 1     (boolean negation: flip 0↔1)
+#   sdiv i64          (signed integer division)
+#
+# Direct codegen already handles both; this is the IR-path coverage.
+# Snapshot test compiled via --emit-ir (TestState/Maybe usage is fine on
+# the direct path).  Each assertion greps the IR emitted by --use-ir-codegen
+# from a stage-1 subprocess — but invoking stage-1 from within a stage-1-
+# generated binary needs process.proc_run.  Until that machinery is in
+# place, the test relies on the IR_XFAIL bucket movement as the regression
+# signal (file removed from XFAIL = test passes; file in XFAIL with
+# unexpected OK = explicit fail).
+
+# Boolean negation through TUnary `!`.
+fn negate_bool(b: Bool) -> Bool = ! b
+
+# Repeated negation (catches incorrect xor mask).
+fn double_negate(b: Bool) -> Bool = ! (! b)
+
+# Boolean negation composed with comparison (the comparison itself emits
+# IRZextI1ToI64 to widen i1 → i64, then negation xor-flips the i64 bit).
+fn is_negative(n: Int) -> Bool = ! (n >= 0)
+
+# Integer division.
+fn div_simple(a: Int, b: Int) -> Int = a / b
+
+# Division mixed with other arithmetic (verifies precedence stays correct).
+fn average(a: Int, b: Int) -> Int = (a + b) / 2
+
+# Division through a CPR-eligible ctor field — exercises PR 2's boxed CPR
+# routing in combination with PR 3's IRIDiv.
+type Maybe a =
+  | Just a
+  | Nothing
+
+fn safe_div(a: Int, b: Int) -> Maybe Int =
+  if b == 0 then Nothing else Just(a / b)
+
+fn unwrap_or_zero(m: Maybe Int) -> Int =
+  match m with
+  | Just k -> k
+  | Nothing -> 0
+
+# Trivial main — IR path requires `() : Unit` until PR 5 lands do/IO.
+fn main() -> Unit !{IO} = ()

@@ -12,105 +12,107 @@
 # Validate this file with: bash scripts/check_ir_xfail.sh
 #
 # PR-assignment legend (see /Users/cthulhu/.claude/plans/witty-brewing-wolf.md):
-#   PR 2  — CPR ctor lowering (boxed) — CLOSED in this PR
-#   PR 3  — Tuple literals + TuplePattern
-#   PR 4  — do-block + IO effects + main body lowering
-#   PR 8  — residual small gaps (Bool zext, top-level let, TUnary, division)
+#   PR 2  — CPR ctor lowering (boxed)              — CLOSED
+#   PR 3  — TUnary `!` + `-`, binary `/`           — CLOSED (this PR)
+#   PR 3b — Bool zext, top-level let (residual)
+#   PR 4  — Tuple literals + TuplePattern
+#   PR 5  — do-block + IO effects + main body lowering
 #
-# Bucket breakdown after PR 2 closes:
-#   72 entries — PR 8 unary op (was hidden by CPR pre-PR-2)
-#    7 entries — PR 4 do-block / IO / main body
-#    3 entries — PR 8 binary op '/' (division)
-#    1 entry  — PR 3 TuplePattern in match
+# Bucket breakdown after PR 3 closes (re-probed):
+#   72 entries — short-circuit `&&` / `||` (next dominant blocker; needs
+#                separate scope decision — eager or short-circuit lowering)
+#    8 entries — PR 5 do-block / IO / main body
+#    2 entries — PR 3b top-level let (unbound 'r1' surfaces after `/` cleared)
+#    1 entry  — PR 4 TuplePattern in match
 #    2 entries — pre-existing direct-codegen xfails (unresolved names in source)
 
 # === examples/ ===
-examples/aoc_2025_day_1.sprout                 # PR 8: binary op '/' division
-examples/aoc_2025_day_2.sprout                 # PR 8: binary op '/' division
-examples/aoc_2025_day_3.sprout                 # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/aoc_2025_day_4.sprout                 # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/aoc_2025_day_5.sprout                 # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/astar.sprout                          # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/collections_demo.sprout               # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/do_notation_demo.sprout               # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/factorial.sprout                      # PR 4: do-block + IO + main body
-examples/fizzbuzz.sprout                       # PR 8: binary op '/' division
-examples/foldable_demo.sprout                  # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/hello.sprout                          # PR 4: do-block + IO + main body
-examples/http_echo_server.sprout               # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/http_get_cli.sprout                   # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/int_range_demo.sprout                 # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/io_do_demo.sprout                     # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/io_result_do_demo.sprout              # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/json_demo.sprout                      # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/list_pattern_demo.sprout              # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/maybe_map.sprout                      # PR 4: do-block + IO + main body
-examples/modules_demo.sprout                   # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/nqueens.sprout                        # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/process_demo.sprout                   # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/ref_tutorial.sprout                   # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/ref_union_find.sprout                 # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/regex_demo.sprout                     # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/repl_hosted.sprout                    # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/result_demo.sprout                    # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/sentry_api.sprout                     # PR 8: unary op (was hidden by CPR pre-PR-2)
+examples/aoc_2025_day_1.sprout                 # PR 3b: top-level let (unbound 'r1')
+examples/aoc_2025_day_2.sprout                 # PR 3b: top-level let (unbound 'r1')
+examples/aoc_2025_day_3.sprout                 # short-circuit `&&` / `||` (next blocker — needs scope decision)
+examples/aoc_2025_day_4.sprout                 # short-circuit `&&` / `||` (next blocker)
+examples/aoc_2025_day_5.sprout                 # short-circuit `&&` / `||` (next blocker)
+examples/astar.sprout                          # short-circuit `&&` / `||` (next blocker)
+examples/collections_demo.sprout               # short-circuit `&&` / `||` (next blocker)
+examples/do_notation_demo.sprout               # short-circuit `&&` / `||` (next blocker)
+examples/factorial.sprout                      # PR 5: do-block + IO + main body
+examples/fizzbuzz.sprout                       # PR 5: do-block + IO + main body (was PR 8 div; / cleared)
+examples/foldable_demo.sprout                  # short-circuit `&&` / `||` (next blocker)
+examples/hello.sprout                          # PR 5: do-block + IO + main body
+examples/http_echo_server.sprout               # short-circuit `&&` / `||` (next blocker)
+examples/http_get_cli.sprout                   # short-circuit `&&` / `||` (next blocker)
+examples/int_range_demo.sprout                 # short-circuit `&&` / `||` (next blocker)
+examples/io_do_demo.sprout                     # short-circuit `&&` / `||` (next blocker)
+examples/io_result_do_demo.sprout              # short-circuit `&&` / `||` (next blocker)
+examples/json_demo.sprout                      # short-circuit `&&` / `||` (next blocker)
+examples/list_pattern_demo.sprout              # short-circuit `&&` / `||` (next blocker)
+examples/maybe_map.sprout                      # PR 5: do-block + IO + main body
+examples/modules_demo.sprout                   # short-circuit `&&` / `||` (next blocker)
+examples/nqueens.sprout                        # short-circuit `&&` / `||` (next blocker)
+examples/process_demo.sprout                   # short-circuit `&&` / `||` (next blocker)
+examples/ref_tutorial.sprout                   # short-circuit `&&` / `||` (next blocker)
+examples/ref_union_find.sprout                 # short-circuit `&&` / `||` (next blocker)
+examples/regex_demo.sprout                     # short-circuit `&&` / `||` (next blocker)
+examples/repl_hosted.sprout                    # short-circuit `&&` / `||` (next blocker)
+examples/result_demo.sprout                    # short-circuit `&&` / `||` (next blocker)
+examples/sentry_api.sprout                     # short-circuit `&&` / `||` (next blocker)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/tcp_echo_once.sprout                  # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/tcp_echo_server.sprout                # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/text_demo.sprout                      # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/tuples.sprout                         # PR 3: TuplePattern in match
-examples/typeclass_collections_demo.sprout     # PR 8: unary op (was hidden by CPR pre-PR-2)
-examples/typeclass_functor_foldable_demo.sprout  # PR 8: unary op (was hidden by CPR pre-PR-2)
+examples/string_templates.sprout               # short-circuit `&&` / `||` (next blocker)
+examples/tcp_echo_once.sprout                  # short-circuit `&&` / `||` (next blocker)
+examples/tcp_echo_server.sprout                # short-circuit `&&` / `||` (next blocker)
+examples/text_demo.sprout                      # short-circuit `&&` / `||` (next blocker)
+examples/tuples.sprout                         # PR 4: TuplePattern in match
+examples/typeclass_collections_demo.sprout     # short-circuit `&&` / `||` (next blocker)
+examples/typeclass_functor_foldable_demo.sprout  # short-circuit `&&` / `||` (next blocker)
 
 # === tests/smoke_shapes/ ===
-tests/smoke_shapes/01_noparam.spr              # PR 4: do-block + IO + main body
-tests/smoke_shapes/02_adtmatch.spr             # PR 4: do-block + IO + main body
-tests/smoke_shapes/03_strconcat.spr            # PR 4: do-block + IO + main body
-tests/smoke_shapes/04_generic.spr              # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/smoke_shapes/05_lambdaparams.spr         # PR 4: do-block + IO + main body
-tests/smoke_shapes/06_tuple_param.spr          # PR 8: unary op (was hidden by CPR pre-PR-2)
+tests/smoke_shapes/01_noparam.spr              # PR 5: do-block + IO + main body
+tests/smoke_shapes/02_adtmatch.spr             # PR 5: do-block + IO + main body
+tests/smoke_shapes/03_strconcat.spr            # PR 5: do-block + IO + main body
+tests/smoke_shapes/04_generic.spr              # short-circuit `&&` / `||` (next blocker)
+tests/smoke_shapes/05_lambdaparams.spr         # PR 5: do-block + IO + main body
+tests/smoke_shapes/06_tuple_param.spr          # short-circuit `&&` / `||` (next blocker)
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_compute_eta_fwd_markers.spr  # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_constrained_container_dispatch.spr  # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_constrained_eta_codegen.spr  # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_dbe_synthetic.spr            # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_deriving_eq.spr              # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_deriving_eq_parametric.spr   # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_deriving_ord.spr             # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_deriving_to_string.spr       # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_eq_operator_adt_dispatch.spr # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_fn_compose.spr               # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_instance_method_subst.spr    # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_arith.spr         # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_basic.spr         # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_calls.spr         # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_closures.spr      # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_control.spr       # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_ctors.spr         # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_match.spr         # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_codegen_strings.spr       # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_ir_rooting.spr               # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_json.spr                     # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_lexer_slice.spr              # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_list_pattern_runtime.spr     # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_math.spr                     # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_mutvec.spr                   # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_native_constrained_maybe_helper.spr  # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_native_fold_indexed.spr      # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_process.spr                  # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_regex.spr                    # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_repl_navigation.spr          # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_return_type_dispatch.spr     # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_set.spr                      # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_str_slice_bytes.spr          # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_string.spr                   # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_time.spr                     # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_to_string.spr                # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_toplevel_let_closure.spr     # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_tuple_tostring.spr           # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_typeclass_laws.spr           # PR 8: unary op (was hidden by CPR pre-PR-2)
-tests/stdlib/test_wrap_type.spr                # PR 8: unary op (was hidden by CPR pre-PR-2)
+tests/stdlib/test_collections.spr              # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_compute_eta_fwd_markers.spr  # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_constrained_container_dispatch.spr  # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_constrained_eta_codegen.spr  # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_dbe_synthetic.spr            # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_deriving_eq.spr              # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_deriving_eq_parametric.spr   # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_deriving_ord.spr             # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_deriving_to_string.spr       # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_eq_operator_adt_dispatch.spr # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_fn_compose.spr               # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_instance_method_subst.spr    # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_arith.spr         # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_basic.spr         # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_calls.spr         # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_closures.spr      # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_control.spr       # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_ctors.spr         # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_match.spr         # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_codegen_strings.spr       # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_ir_rooting.spr               # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_json.spr                     # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_lexer_slice.spr              # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_list_pattern_runtime.spr     # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_math.spr                     # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_mutvec.spr                   # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_native_constrained_maybe_helper.spr  # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_native_fold_indexed.spr      # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_process.spr                  # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_regex.spr                    # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_repl_navigation.spr          # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_return_type_dispatch.spr     # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_set.spr                      # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_str_slice_bytes.spr          # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_string.spr                   # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_time.spr                     # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_to_string.spr                # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_toplevel_let_closure.spr     # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_tuple_tostring.spr           # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_typeclass_laws.spr           # short-circuit `&&` / `||` (next blocker)
+tests/stdlib/test_wrap_type.spr                # short-circuit `&&` / `||` (next blocker)

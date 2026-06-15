@@ -85,6 +85,19 @@ export type IROp (..) =
   | IRIAdd String String String
   | IRISub String String String
   | IRIMul String String String
+  # IRIDiv <result> <lhs> <rhs>  — signed integer division (lowers to `sdiv i64`).
+  # Sprout's `/` operator on Int operands.  The runtime contract for division by
+  # zero matches LLVM's: undefined behaviour.  Source-level division-by-zero
+  # guards must be inserted by the user (or by a later pass) before the IRIDiv.
+  | IRIDiv String String String
+  # IRBoolNot <result> <operand>  — boolean negation (lowers to `xor i64 %x, 1`).
+  # Sprout's `!` operator.  Both operand and result are the i64-uniform Bool
+  # representation (0 = false, 1 = true).  Xor with 1 flips the low bit.
+  | IRBoolNot String String
+  # IRINeg <result> <operand>  — integer arithmetic negation (lowers to
+  # `sub i64 0, %x`).  Sprout's unary `-` operator.  Distinct from IRISub
+  # because the LHS is the literal 0, not an SSA name.
+  | IRINeg String String
   | IRICmp String String String String
   | IRBr String
   | IRCondBr String String String
@@ -255,6 +268,9 @@ fn print_op(op: IROp) -> String =
   | IRIAdd r a b -> "    " ++ r ++ " = iadd " ++ a ++ ", " ++ b
   | IRISub r a b -> "    " ++ r ++ " = isub " ++ a ++ ", " ++ b
   | IRIMul r a b -> "    " ++ r ++ " = imul " ++ a ++ ", " ++ b
+  | IRIDiv r a b -> "    " ++ r ++ " = idiv " ++ a ++ ", " ++ b
+  | IRBoolNot r a -> "    " ++ r ++ " = bnot " ++ a
+  | IRINeg r a -> "    " ++ r ++ " = ineg " ++ a
   | IRICmp r pred a b -> "    " ++ r ++ " = icmp " ++ pred ++ " " ++ a ++ ", " ++ b
   | IRBr lbl -> "    br " ++ lbl
   | IRCondBr cond t e -> "    condbr " ++ cond ++ ", " ++ t ++ ", " ++ e
