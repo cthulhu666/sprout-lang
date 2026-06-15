@@ -1,3 +1,8 @@
+# Rebase-merge regression marker: synthesize_eta_wrapper must build IRFunction
+# with List (String, IRType) params, not List String. PR #44 (IRType ADT) changed
+# the IRFunction constructor; PR #51 must use build_wrapper_arg_params (not
+# build_wrapper_arg_names) so env$ and args carry IRTHeap type annotations.
+#
 # Verifies bare TVar reference to a top-level fn lowers via --use-ir-codegen
 # (M3 PR 6).  Closes the dominant blocker exposed by PR 5: 72 of 85
 # remaining IR_XFAIL entries fail with `unbound variable '<name>'` because

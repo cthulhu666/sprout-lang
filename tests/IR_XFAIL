@@ -16,101 +16,103 @@
 #   PR 3 — TUnary `!` + `-`, binary `/`           ✓ #48
 #   PR 4 — short-circuit `&&` / `||`              ✓ #49
 #   PR 5 — top-level let bindings (module-init)   ✓ #50
-#   PR 6 — top-level fn eta wrappers              ✓ this PR
+#   PR 6 — top-level fn eta wrappers              ✓ #51
+#   PR 7 — tuple expressions + TuplePattern       ✓ this PR
 #
-# Bucket breakdown after PR 6 closes (re-probed):
-#   72 entries — Tuple not yet supported (now the dominant blocker)
-#   10 entries — do-block + IO + main body
-#    1 entry  — TuplePattern in match
+# Bucket breakdown after PR 7 closes (re-probed):
+#   72 entries — nested non-Var/Wildcard constructor pattern not yet supported
+#                (TTuple blocker cleared; ctor nested-pattern now dominates)
+#   10 entries — do-block + IO + main body (milestone-level blocker)
+#    1 entry  — nested TuplePattern inside TuplePattern (out of scope PR 7)
 #    2 entries — pre-existing direct-codegen xfails (unresolved names in source)
 
 # === examples/ ===
-examples/aoc_2025_day_1.sprout                 # Tuple not yet supported
-examples/aoc_2025_day_2.sprout                 # Tuple not yet supported
-examples/aoc_2025_day_3.sprout                 # Tuple not yet supported
-examples/aoc_2025_day_4.sprout                 # Tuple not yet supported
-examples/aoc_2025_day_5.sprout                 # Tuple not yet supported
-examples/astar.sprout                          # Tuple not yet supported
-examples/collections_demo.sprout               # Tuple not yet supported
-examples/do_notation_demo.sprout               # Tuple not yet supported
+examples/aoc_2025_day_1.sprout                 # do-block + IO + main body
+examples/aoc_2025_day_2.sprout                 # do-block + IO + main body
+examples/aoc_2025_day_3.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
+examples/aoc_2025_day_4.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
+examples/aoc_2025_day_5.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
+examples/astar.sprout                          # nested non-Var/Wildcard constructor pattern not yet supported
+examples/collections_demo.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
+examples/do_notation_demo.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
 examples/factorial.sprout                      # do-block + IO + main body
 examples/fizzbuzz.sprout                       # do-block + IO + main body
-examples/foldable_demo.sprout                  # Tuple not yet supported
+examples/foldable_demo.sprout                  # nested non-Var/Wildcard constructor pattern not yet supported
 examples/hello.sprout                          # do-block + IO + main body
-examples/http_echo_server.sprout               # Tuple not yet supported
-examples/http_get_cli.sprout                   # Tuple not yet supported
-examples/int_range_demo.sprout                 # Tuple not yet supported
-examples/io_do_demo.sprout                     # Tuple not yet supported
-examples/io_result_do_demo.sprout              # Tuple not yet supported
-examples/json_demo.sprout                      # Tuple not yet supported
-examples/list_pattern_demo.sprout              # Tuple not yet supported
+examples/http_echo_server.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
+examples/http_get_cli.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
+examples/int_range_demo.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
+examples/io_do_demo.sprout                     # nested non-Var/Wildcard constructor pattern not yet supported
+examples/io_result_do_demo.sprout              # nested non-Var/Wildcard constructor pattern not yet supported
+examples/json_demo.sprout                      # nested non-Var/Wildcard constructor pattern not yet supported
+examples/list_pattern_demo.sprout              # nested non-Var/Wildcard constructor pattern not yet supported
 examples/maybe_map.sprout                      # do-block + IO + main body
-examples/modules_demo.sprout                   # Tuple not yet supported
-examples/nqueens.sprout                        # Tuple not yet supported
-examples/process_demo.sprout                   # Tuple not yet supported
-examples/ref_tutorial.sprout                   # Tuple not yet supported
-examples/ref_union_find.sprout                 # Tuple not yet supported
-examples/regex_demo.sprout                     # Tuple not yet supported
-examples/repl_hosted.sprout                    # Tuple not yet supported
-examples/result_demo.sprout                    # Tuple not yet supported
-examples/sentry_api.sprout                     # Tuple not yet supported
+examples/modules_demo.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
+examples/nqueens.sprout                        # nested non-Var/Wildcard constructor pattern not yet supported
+examples/process_demo.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
+examples/ref_tutorial.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
+examples/ref_union_find.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
+examples/regex_demo.sprout                     # nested non-Var/Wildcard constructor pattern not yet supported
+examples/repl_hosted.sprout                    # nested non-Var/Wildcard constructor pattern not yet supported
+examples/result_demo.sprout                    # nested non-Var/Wildcard constructor pattern not yet supported
+examples/sentry_api.sprout                     # nested non-Var/Wildcard constructor pattern not yet supported
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # Tuple not yet supported
-examples/tcp_echo_once.sprout                  # Tuple not yet supported
-examples/tcp_echo_server.sprout                # Tuple not yet supported
-examples/text_demo.sprout                      # Tuple not yet supported
-examples/tuples.sprout                         # TuplePattern in match
-examples/typeclass_collections_demo.sprout     # Tuple not yet supported
-examples/typeclass_functor_foldable_demo.sprout  # Tuple not yet supported
+examples/string_templates.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
+examples/tcp_echo_once.sprout                  # nested non-Var/Wildcard constructor pattern not yet supported
+examples/tcp_echo_server.sprout                # nested non-Var/Wildcard constructor pattern not yet supported
+examples/text_demo.sprout                      # nested non-Var/Wildcard constructor pattern not yet supported
+examples/tuples.sprout                         # nested TuplePattern inside TuplePattern (out of scope PR 7)
+examples/typeclass_collections_demo.sprout     # nested non-Var/Wildcard constructor pattern not yet supported
+examples/typeclass_functor_foldable_demo.sprout  # nested non-Var/Wildcard constructor pattern not yet supported
 
 # === tests/smoke_shapes/ ===
 tests/smoke_shapes/01_noparam.spr              # do-block + IO + main body
 tests/smoke_shapes/02_adtmatch.spr             # do-block + IO + main body
 tests/smoke_shapes/03_strconcat.spr            # do-block + IO + main body
-tests/smoke_shapes/04_generic.spr              # Tuple not yet supported
+tests/smoke_shapes/04_generic.spr              # nested non-Var/Wildcard constructor pattern not yet supported
 tests/smoke_shapes/05_lambdaparams.spr         # do-block + IO + main body
-tests/smoke_shapes/06_tuple_param.spr          # Tuple not yet supported
+tests/smoke_shapes/06_tuple_param.spr          # nested non-Var/Wildcard constructor pattern not yet supported
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # Tuple not yet supported
-tests/stdlib/test_compute_eta_fwd_markers.spr  # Tuple not yet supported
-tests/stdlib/test_constrained_container_dispatch.spr  # Tuple not yet supported
-tests/stdlib/test_constrained_eta_codegen.spr  # Tuple not yet supported
-tests/stdlib/test_dbe_synthetic.spr            # Tuple not yet supported
-tests/stdlib/test_deriving_eq.spr              # Tuple not yet supported
-tests/stdlib/test_deriving_eq_parametric.spr   # Tuple not yet supported
-tests/stdlib/test_deriving_ord.spr             # Tuple not yet supported
-tests/stdlib/test_deriving_to_string.spr       # Tuple not yet supported
-tests/stdlib/test_eq_operator_adt_dispatch.spr # Tuple not yet supported
-tests/stdlib/test_fn_compose.spr               # Tuple not yet supported
-tests/stdlib/test_instance_method_subst.spr    # Tuple not yet supported
-tests/stdlib/test_ir_codegen_arith.spr         # Tuple not yet supported
-tests/stdlib/test_ir_codegen_basic.spr         # Tuple not yet supported
-tests/stdlib/test_ir_codegen_calls.spr         # Tuple not yet supported
-tests/stdlib/test_ir_codegen_closures.spr      # Tuple not yet supported
-tests/stdlib/test_ir_codegen_control.spr       # Tuple not yet supported
-tests/stdlib/test_ir_codegen_ctors.spr         # Tuple not yet supported
-tests/stdlib/test_ir_codegen_match.spr         # Tuple not yet supported
-tests/stdlib/test_ir_codegen_strings.spr       # Tuple not yet supported
-tests/stdlib/test_ir_rooting.spr               # Tuple not yet supported
-tests/stdlib/test_json.spr                     # Tuple not yet supported
-tests/stdlib/test_lexer_slice.spr              # Tuple not yet supported
-tests/stdlib/test_list_pattern_runtime.spr     # Tuple not yet supported
-tests/stdlib/test_math.spr                     # Tuple not yet supported
-tests/stdlib/test_mutvec.spr                   # Tuple not yet supported
-tests/stdlib/test_native_constrained_maybe_helper.spr  # Tuple not yet supported
-tests/stdlib/test_native_fold_indexed.spr      # Tuple not yet supported
-tests/stdlib/test_process.spr                  # Tuple not yet supported
-tests/stdlib/test_regex.spr                    # Tuple not yet supported
-tests/stdlib/test_repl_navigation.spr          # Tuple not yet supported
-tests/stdlib/test_return_type_dispatch.spr     # Tuple not yet supported
-tests/stdlib/test_set.spr                      # Tuple not yet supported
-tests/stdlib/test_str_slice_bytes.spr          # Tuple not yet supported
-tests/stdlib/test_string.spr                   # Tuple not yet supported
-tests/stdlib/test_time.spr                     # Tuple not yet supported
-tests/stdlib/test_to_string.spr                # Tuple not yet supported
-tests/stdlib/test_toplevel_let_closure.spr     # Tuple not yet supported
-tests/stdlib/test_tuple_tostring.spr           # Tuple not yet supported
-tests/stdlib/test_typeclass_laws.spr           # Tuple not yet supported
-tests/stdlib/test_wrap_type.spr                # Tuple not yet supported
+tests/stdlib/test_collections.spr              # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_compute_eta_fwd_markers.spr  # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_constrained_container_dispatch.spr  # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_constrained_eta_codegen.spr  # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_dbe_synthetic.spr            # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_deriving_eq.spr              # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_deriving_eq_parametric.spr   # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_deriving_ord.spr             # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_deriving_to_string.spr       # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_eq_operator_adt_dispatch.spr # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_fn_compose.spr               # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_instance_method_subst.spr    # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_arith.spr         # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_basic.spr         # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_calls.spr         # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_closures.spr      # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_control.spr       # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_ctors.spr         # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_match.spr         # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_codegen_strings.spr       # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_ir_rooting.spr               # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_json.spr                     # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_lexer_slice.spr              # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_list_pattern_runtime.spr     # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_math.spr                     # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_mutvec.spr                   # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_native_constrained_maybe_helper.spr  # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_native_fold_indexed.spr      # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_process.spr                  # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_regex.spr                    # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_repl_navigation.spr          # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_return_type_dispatch.spr     # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_set.spr                      # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_str_slice_bytes.spr          # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_string.spr                   # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_time.spr                     # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_to_string.spr                # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_toplevel_let_closure.spr     # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_tuple_tostring.spr           # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_typeclass_laws.spr           # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_wrap_type.spr                # nested non-Var/Wildcard constructor pattern not yet supported

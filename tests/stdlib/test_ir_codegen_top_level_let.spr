@@ -1,5 +1,10 @@
 # Verifies top-level `let` binding resolution via --use-ir-codegen (M3 PR 5).
 #
+# Rebase-merge regression marker: translate_user_fn takes `params: List ast.Param`
+# (not `param_names(params): List String`). The call site at translate_decl_with_idx
+# must pass `params` directly; param_names() is called internally. If this regresses,
+# the stage-1 type checker will report "Param vs String" in translate_decl_with_idx.
+#
 # Closes the dominant blocker exposed by PR 4: 74 of 85 remaining IR_XFAIL
 # entries fail with `unbound variable '<name>'` because the IR path
 # (ast_to_ir.sprout:646) catch-all fires for any name that is in the

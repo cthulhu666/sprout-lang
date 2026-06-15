@@ -120,6 +120,15 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRINeg r a -> "  " ++ r ++ " = sub i64 0, " ++ a
   | sprout_ir.IRLoadGlobal r name -> "  " ++ r ++ " = load i64, ptr @" ++ name
   | sprout_ir.IRStoreGlobal name v -> "  store i64 " ++ v ++ ", ptr @" ++ name
+  | sprout_ir.IRMakeTuple r args ->
+      "  " ++ r ++ " = call i64 @sprout_alloc_tuple_blob(i64 " ++
+        int_to_string(list_length(args) * 8) ++ ")\n" ++
+      "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
+      lower_tuple_stores(r, args, 0)
+  | sprout_ir.IRGetTupleField r t idx ->
+      "  " ++ r ++ "$ptr = inttoptr i64 " ++ t ++ " to ptr\n" ++
+      "  " ++ r ++ "$gep = getelementptr i64, ptr " ++ r ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
+      "  " ++ r ++ " = load i64, ptr " ++ r ++ "$gep"
   | sprout_ir.IRICmp r pred a b -> "  " ++ r ++ " = icmp " ++ pred ++ " i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRBr lbl -> "  br label %" ++ lbl
   | sprout_ir.IRCondBr cond t e -> "  br i1 " ++ cond ++ ", label %" ++ t ++ ", label %" ++ e
@@ -210,6 +219,16 @@ fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (Str
   | Nil -> ""
   | Cons b rest -> lower_block(b, ret_ty, str_table) ++ lower_blocks(rest, ret_ty, str_table)
 
+# Emit per-element store instructions for an IRMakeTuple expansion.
+fn lower_tuple_stores(blob_result: String, args: List String, idx: Int) -> String =
+  match args with
+  | Nil -> ""
+  | Cons a rest ->
+      "  " ++ blob_result ++ "$s" ++ int_to_string(idx) ++ " = getelementptr i64, ptr " ++ blob_result ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
+      "  store i64 " ++ a ++ ", ptr " ++ blob_result ++ "$s" ++ int_to_string(idx) ++
+      (if rest == Nil then "" else "\n") ++
+      lower_tuple_stores(blob_result, rest, idx + 1)
+
 # Build the comma-separated "i64 %a, i64 %b, ..." parameter list.
 # Param kinds (IRType) are intentionally ignored at lowering — they only
 # affect rooting decisions upstream of this pass; every param lowers to i64.
@@ -247,6 +266,9 @@ fn ir_header() -> String =
   "declare i64 @sprout_gc_push_i64_root(ptr)\n" ++
   "declare i64 @sprout_gc_pop_roots(i64)\n" ++
   "declare i64 @sprout_alloc_closure_env(i64)\n" ++
+  # Heap-allocate a raw i64-array blob for tuple storage (N * 8 bytes).
+  # Called by IRMakeTuple lowering; one declaration covers all arities.
+  "declare i64 @sprout_alloc_tuple_blob(i64)\n" ++
   # @sprout_register_ctor populates g_ctor_meta[] in the runtime so find_ctor(tag)
   # returns metadata and sprout_heap_child_count traces heap-typed fields during GC.
   # Called once per constructor in @main's entry block before any user code runs.

@@ -1,0 +1,49 @@
+# Verifies tuple expressions and tuple patterns lower via --use-ir-codegen
+# (M3 PR 7).  Closes the dominant blocker exposed by PR 6: 72 of 85
+# remaining IR_XFAIL entries fail at `ast_to_ir.sprout:699` with
+# `Tuple not yet supported` because TTuple expression case currently
+# returns Err.  Once that clears, the 1 remaining `tuples.sprout` example
+# additionally needs TuplePattern in match arms (ast_to_ir.sprout:1600).
+#
+# This PR implements both:
+#
+#   IRMakeTuple <result> <element-ssas>
+#     →  %r    = call i64 @sprout_alloc_tuple_blob(i64 <N*8>)
+#        %r$ptr = inttoptr i64 %r to ptr
+#        %r$s0  = getelementptr i64, ptr %r$ptr, i64 0
+#        store i64 %a0, ptr %r$s0
+#        ... per element
+#
+#   IRGetTupleField <result> <tuple-ssa> <field-idx>
+#     →  %r$ptr = inttoptr i64 %t to ptr
+#        %r$gep = getelementptr i64, ptr %r$ptr, i64 <idx>
+#        %r     = load i64, ptr %r$gep
+#
+# Mirrors codegen.sprout's tuple-as-blob lowering (lines 940-968, 1197-1219).
+
+# Pair construction.
+fn make_pair(a: Int, b: Int) -> (Int, Int) = (a, b)
+
+# Triple construction.
+fn make_triple(a: Int, b: Int, c: Int) -> (Int, Int, Int) = (a, b, c)
+
+# Match destructuring on a 2-tuple.
+fn fst(p: (Int, Int)) -> Int =
+  match p with
+  | (a, _) -> a
+
+fn snd(p: (Int, Int)) -> Int =
+  match p with
+  | (_, b) -> b
+
+# Match on a 3-tuple — exercises N=3 element binding.
+fn mid_of_triple(t: (Int, Int, Int)) -> Int =
+  match t with
+  | (_, m, _) -> m
+
+# Compose: construct then destructure.
+fn round_trip(a: Int, b: Int) -> Int =
+  fst(make_pair(a, b)) + snd(make_pair(a, b))
+
+# Trivial main — IR path requires `() : Unit` until PR 8 lands do/IO.
+fn main() -> Unit !{IO} = ()
