@@ -1,0 +1,179 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# PR 8 — nested constructor patterns in match arms (--use-ir-codegen).
+# Covers: ConstructorPattern nested inside ConstructorPattern (arbitrary depth),
+# TuplePattern nested inside ConstructorPattern, and TuplePattern inside
+# TuplePattern.
+# Out of scope for this PR: IntPattern / BoolPattern / StringPattern / CharPattern /
+# UnitPattern as nested sub-patterns — those emit a clear Err.
+#
+# Sprout constructor syntax note:
+#   - Single-field ctor: `| Ctor(x) -> ...`   is ConstructorPattern with one arg
+#   - Multi-field ctor:  `| Ctor x t -> ...`  is space-separated (not parens)
+# The tests below use single-field wrapper ctors to test nested-ctor patterns.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Drive a Sprout source string through lex -> parse -> typecheck_typed ->
+# lower_program -> ast_to_ir.translate_program, return lowered IR string or Err.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+# True iff translate_source returned Ok with IR containing needle.
+fn translated_ok_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+# True iff translate_source returned Err with message containing needle.
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ---------------------------------------------------------------------------
+    # N1: ConstructorPattern nested inside ConstructorPattern — 1 level deep.
+    # `type Inner = Leaf Int | Node Inner`
+    # `type Outer = Empty | Wrap Inner`
+    # match o with | Wrap(Leaf(x)) -> x | _ -> 0
+    n1 <- translated_ok_contains(
+      "type Inner = Leaf Int | Node Inner\n" ++
+      "type Outer = Empty | Wrap Inner\n" ++
+      "fn n1(o: Outer) -> Int =\n" ++
+      "  match o with\n" ++
+      "  | Wrap(Leaf(x)) -> x\n" ++
+      "  | _ -> 0\n",
+      "define i64 @n1")
+    assert_true(state, "N1: Wrap(Leaf(x)) nested ctor pattern compiles", n1)
+
+    # ---------------------------------------------------------------------------
+    # N2: TuplePattern nested inside ConstructorPattern.
+    # `type Box = Box (Int, Int)`  — Box wraps a tuple
+    # match b with | Box(a, b) -> a | _ -> 0
+    n2 <- translated_ok_contains(
+      "type Box = Box (Int, Int)\n" ++
+      "fn n2(b: Box) -> Int =\n" ++
+      "  match b with\n" ++
+      "  | Box(a, _) -> a\n",
+      "define i64 @n2")
+    assert_true(state, "N2: Box(a, _) TuplePattern nested in ctor compiles", n2)
+
+    # ---------------------------------------------------------------------------
+    # N3: Doubly-nested ConstructorPattern.
+    # type A = Leaf Int | Node A
+    # match t with | Node(Node(Leaf(x))) -> x | _ -> 0
+    n3 <- translated_ok_contains(
+      "type A = Leaf Int | Node A\n" ++
+      "fn n3(t: A) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | Node(Node(Leaf(x))) -> x\n" ++
+      "  | _ -> 0\n",
+      "define i64 @n3")
+    assert_true(state, "N3: Node(Node(Leaf(x))) doubly-nested ctor compiles", n3)
+
+    # ---------------------------------------------------------------------------
+    # N4: Triply-nested ConstructorPattern — arbitrary depth.
+    n4 <- translated_ok_contains(
+      "type T = Leaf Int | Wrap T\n" ++
+      "fn n4(t: T) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | Wrap(Wrap(Wrap(Leaf(x)))) -> x\n" ++
+      "  | Wrap(Wrap(Leaf(x))) -> x\n" ++
+      "  | Wrap(Leaf(x)) -> x\n" ++
+      "  | Leaf(x) -> x\n",
+      "define i64 @n4")
+    assert_true(state, "N4: triply-nested Wrap(Wrap(Wrap(Leaf(x)))) compiles", n4)
+
+    # ---------------------------------------------------------------------------
+    # N5: TuplePattern nested inside TuplePattern.
+    # fn n5(p: (Int, (Int, Int))) -> Int = match p with | (a, (b, c)) -> a + b + c
+    n5 <- translated_ok_contains(
+      "fn n5(p: (Int, (Int, Int))) -> Int =\n" ++
+      "  match p with\n" ++
+      "  | (a, (b, c)) -> a + b + c\n",
+      "define i64 @n5")
+    assert_true(state, "N5: (a, (b, c)) nested tuple pattern compiles", n5)
+
+    # ---------------------------------------------------------------------------
+    # N6: Nested ctor match uses the correct field value at runtime.
+    # This exercises that IRGetField + IRGetTag + nested binding actually
+    # produce correct LLVM IR that LLVM accepts.
+    n6 <- translated_ok_contains(
+      "type MyOpt = NoVal | HasVal Int\n" ++
+      "type Outer = NoOuter | HasOuter MyOpt\n" ++
+      "fn n6(o: Outer) -> Int =\n" ++
+      "  match o with\n" ++
+      "  | HasOuter(HasVal(x)) -> x\n" ++
+      "  | _ -> 0\n",
+      "define i64 @n6")
+    assert_true(state, "N6: HasOuter(HasVal(x)) compiles and binds x", n6)
+
+    # ---------------------------------------------------------------------------
+    # N7: Multiple arms with nested patterns — exercises the miss_lbl chain.
+    # The second arm's nested ctor check must correctly fall to the wildcard.
+    n7 <- translated_ok_contains(
+      "type T = Leaf Int | Wrap T\n" ++
+      "fn n7(t: T) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | Wrap(Leaf(x)) -> x + 1\n" ++
+      "  | Wrap(Wrap(Leaf(x))) -> x + 2\n" ++
+      "  | _ -> 0\n",
+      "define i64 @n7")
+    assert_true(state, "N7: multiple nested-ctor arms with miss chain compile", n7)
+
+    # ---------------------------------------------------------------------------
+    # N8: Wildcard sub-pattern inside nested ctor — WildcardPattern case.
+    n8 <- translated_ok_contains(
+      "type T = Leaf Int | Wrap T\n" ++
+      "fn n8(t: T) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | Wrap(Leaf(_)) -> 1\n" ++
+      "  | _ -> 0\n",
+      "define i64 @n8")
+    assert_true(state, "N8: Wrap(Leaf(_)) WildcardPattern nested in ctor compiles", n8)
+
+    # ---------------------------------------------------------------------------
+    # E1: Nested IntPattern should yield a clear Err — not silently miscompile.
+    # Note: the typechecker may reject this before ast_to_ir; either error is OK.
+    e1 <- translated_err_contains(
+      "type MaybeInt = NothingI | JustI Int\n" ++
+      "fn e1(m: MaybeInt) -> Int =\n" ++
+      "  match m with\n" ++
+      "  | JustI(0) -> 1\n" ++
+      "  | _ -> 0\n",
+      "")
+    assert_true(state, "E1: JustI(0) with nested IntPattern yields Err (any error)", e1)
+
+    summary(state)

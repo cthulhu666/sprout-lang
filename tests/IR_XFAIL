@@ -18,101 +18,102 @@
 #   PR 5 — top-level let bindings (module-init)   ✓ #50
 #   PR 6 — top-level fn eta wrappers              ✓ #51
 #   PR 7 — tuple expressions + TuplePattern       ✓ this PR
+#   PR 8 — nested constructor patterns            ✓ this PR
 #
-# Bucket breakdown after PR 7 closes (re-probed):
-#   72 entries — nested non-Var/Wildcard constructor pattern not yet supported
-#                (TTuple blocker cleared; ctor nested-pattern now dominates)
+# Bucket breakdown after PR 8 closes (re-probed):
+#   72 entries — binary op '==' requires Int operands
+#                (nested-pattern blocker cleared; String equality now dominates)
 #   10 entries — do-block + IO + main body (milestone-level blocker)
-#    1 entry  — nested TuplePattern inside TuplePattern (out of scope PR 7)
 #    2 entries — pre-existing direct-codegen xfails (unresolved names in source)
 
 # === examples/ ===
 examples/aoc_2025_day_1.sprout                 # do-block + IO + main body
 examples/aoc_2025_day_2.sprout                 # do-block + IO + main body
-examples/aoc_2025_day_3.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
-examples/aoc_2025_day_4.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
-examples/aoc_2025_day_5.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
-examples/astar.sprout                          # nested non-Var/Wildcard constructor pattern not yet supported
-examples/collections_demo.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
-examples/do_notation_demo.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
+examples/aoc_2025_day_3.sprout                 # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/aoc_2025_day_4.sprout                 # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/aoc_2025_day_5.sprout                 # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/astar.sprout                          # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/collections_demo.sprout               # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/do_notation_demo.sprout               # binary op '==' requires Int operands (String equality not yet in IR path)
 examples/factorial.sprout                      # do-block + IO + main body
 examples/fizzbuzz.sprout                       # do-block + IO + main body
-examples/foldable_demo.sprout                  # nested non-Var/Wildcard constructor pattern not yet supported
+examples/foldable_demo.sprout                  # binary op '==' requires Int operands (String equality not yet in IR path)
 examples/hello.sprout                          # do-block + IO + main body
-examples/http_echo_server.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
-examples/http_get_cli.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
-examples/int_range_demo.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
-examples/io_do_demo.sprout                     # nested non-Var/Wildcard constructor pattern not yet supported
-examples/io_result_do_demo.sprout              # nested non-Var/Wildcard constructor pattern not yet supported
-examples/json_demo.sprout                      # nested non-Var/Wildcard constructor pattern not yet supported
-examples/list_pattern_demo.sprout              # nested non-Var/Wildcard constructor pattern not yet supported
+examples/http_echo_server.sprout               # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/http_get_cli.sprout                   # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/int_range_demo.sprout                 # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/io_do_demo.sprout                     # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/io_result_do_demo.sprout              # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/json_demo.sprout                      # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/list_pattern_demo.sprout              # binary op '==' requires Int operands (String equality not yet in IR path)
 examples/maybe_map.sprout                      # do-block + IO + main body
-examples/modules_demo.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
-examples/nqueens.sprout                        # nested non-Var/Wildcard constructor pattern not yet supported
-examples/process_demo.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
-examples/ref_tutorial.sprout                   # nested non-Var/Wildcard constructor pattern not yet supported
-examples/ref_union_find.sprout                 # nested non-Var/Wildcard constructor pattern not yet supported
-examples/regex_demo.sprout                     # nested non-Var/Wildcard constructor pattern not yet supported
-examples/repl_hosted.sprout                    # nested non-Var/Wildcard constructor pattern not yet supported
-examples/result_demo.sprout                    # nested non-Var/Wildcard constructor pattern not yet supported
-examples/sentry_api.sprout                     # nested non-Var/Wildcard constructor pattern not yet supported
+examples/modules_demo.sprout                   # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/nqueens.sprout                        # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/process_demo.sprout                   # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/ref_tutorial.sprout                   # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/ref_union_find.sprout                 # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/regex_demo.sprout                     # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/repl_hosted.sprout                    # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/result_demo.sprout                    # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/sentry_api.sprout                     # binary op '==' requires Int operands (String equality not yet in IR path)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # nested non-Var/Wildcard constructor pattern not yet supported
-examples/tcp_echo_once.sprout                  # nested non-Var/Wildcard constructor pattern not yet supported
-examples/tcp_echo_server.sprout                # nested non-Var/Wildcard constructor pattern not yet supported
-examples/text_demo.sprout                      # nested non-Var/Wildcard constructor pattern not yet supported
-examples/tuples.sprout                         # nested TuplePattern inside TuplePattern (out of scope PR 7)
-examples/typeclass_collections_demo.sprout     # nested non-Var/Wildcard constructor pattern not yet supported
-examples/typeclass_functor_foldable_demo.sprout  # nested non-Var/Wildcard constructor pattern not yet supported
+examples/string_templates.sprout               # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/tcp_echo_once.sprout                  # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/tcp_echo_server.sprout                # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/text_demo.sprout                      # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/tuples.sprout                         # do-block + IO + main body
+examples/typeclass_collections_demo.sprout     # binary op '==' requires Int operands (String equality not yet in IR path)
+examples/typeclass_functor_foldable_demo.sprout  # binary op '==' requires Int operands (String equality not yet in IR path)
 
 # === tests/smoke_shapes/ ===
 tests/smoke_shapes/01_noparam.spr              # do-block + IO + main body
 tests/smoke_shapes/02_adtmatch.spr             # do-block + IO + main body
 tests/smoke_shapes/03_strconcat.spr            # do-block + IO + main body
-tests/smoke_shapes/04_generic.spr              # nested non-Var/Wildcard constructor pattern not yet supported
+tests/smoke_shapes/04_generic.spr              # binary op '==' requires Int operands (String equality not yet in IR path)
 tests/smoke_shapes/05_lambdaparams.spr         # do-block + IO + main body
-tests/smoke_shapes/06_tuple_param.spr          # nested non-Var/Wildcard constructor pattern not yet supported
+tests/smoke_shapes/06_tuple_param.spr          # binary op '==' requires Int operands (String equality not yet in IR path)
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_compute_eta_fwd_markers.spr  # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_constrained_container_dispatch.spr  # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_constrained_eta_codegen.spr  # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_dbe_synthetic.spr            # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_deriving_eq.spr              # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_deriving_eq_parametric.spr   # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_deriving_ord.spr             # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_deriving_to_string.spr       # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_eq_operator_adt_dispatch.spr # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_fn_compose.spr               # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_instance_method_subst.spr    # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_arith.spr         # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_basic.spr         # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_calls.spr         # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_closures.spr      # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_control.spr       # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_ctors.spr         # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_match.spr         # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_codegen_strings.spr       # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_ir_rooting.spr               # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_json.spr                     # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_lexer_slice.spr              # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_list_pattern_runtime.spr     # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_math.spr                     # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_mutvec.spr                   # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_native_constrained_maybe_helper.spr  # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_native_fold_indexed.spr      # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_process.spr                  # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_regex.spr                    # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_repl_navigation.spr          # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_return_type_dispatch.spr     # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_set.spr                      # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_str_slice_bytes.spr          # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_string.spr                   # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_time.spr                     # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_to_string.spr                # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_toplevel_let_closure.spr     # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_tuple_tostring.spr           # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_typeclass_laws.spr           # nested non-Var/Wildcard constructor pattern not yet supported
-tests/stdlib/test_wrap_type.spr                # nested non-Var/Wildcard constructor pattern not yet supported
+tests/stdlib/test_collections.spr              # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_compute_eta_fwd_markers.spr  # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_constrained_container_dispatch.spr  # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_constrained_eta_codegen.spr  # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_dbe_synthetic.spr            # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_deriving_eq.spr              # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_deriving_eq_parametric.spr   # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_deriving_ord.spr             # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_deriving_to_string.spr       # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_eq_operator_adt_dispatch.spr # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_fn_compose.spr               # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_instance_method_subst.spr    # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_arith.spr         # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_basic.spr         # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_calls.spr         # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_closures.spr      # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_control.spr       # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_ctors.spr         # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_match.spr         # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # binary op '==' requires Int operands (imported modules use String equality)
+tests/stdlib/test_ir_codegen_strings.spr       # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_ir_rooting.spr               # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_json.spr                     # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_lexer_slice.spr              # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_list_pattern_runtime.spr     # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_math.spr                     # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_mutvec.spr                   # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_native_constrained_maybe_helper.spr  # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_native_fold_indexed.spr      # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_process.spr                  # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_regex.spr                    # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_repl_navigation.spr          # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_return_type_dispatch.spr     # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_set.spr                      # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_str_slice_bytes.spr          # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_string.spr                   # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_time.spr                     # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_to_string.spr                # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_toplevel_let_closure.spr     # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_tuple_tostring.spr           # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_typeclass_laws.spr           # binary op '==' requires Int operands (String equality not yet in IR path)
+tests/stdlib/test_wrap_type.spr                # binary op '==' requires Int operands (String equality not yet in IR path)
