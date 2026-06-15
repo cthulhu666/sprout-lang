@@ -889,6 +889,19 @@ smoke-shapes-ir: (_run-ir-files "tests/smoke_shapes/*.spr" "smoke-shapes-ir")
 [group('ir-codegen')]
 run-example-canary-ir: (_run-ir-files "examples/tuples.sprout examples/factorial.sprout examples/maybe_map.sprout examples/typeclass_collections_demo.sprout examples/fizzbuzz.sprout" "run-example-canary-ir")
 
+# CPR differential parity check.  Emits each shared-OK corpus file via both
+# --emit-ir (direct codegen) and --use-ir-codegen, extracts external function
+# signatures, compares the INTERSECTION.  Divergence in the intersection =
+# candidate CPR/ABI parity bug — fail unless allowlisted in
+# tests/CPR_DIFF_ALLOWLIST with justification.
+#
+# Catches what `opt --passes=verify` cannot: structural drift between codegen
+# paths where each side is internally consistent but the two disagree.  This
+# is the silent-runtime-crash class — exactly what CPR ABI bugs look like.
+[group('ir-codegen')]
+cpr-differential-check: bootstrap-from-seed
+  bash scripts/cpr_differential_check.sh
+
 # ── REPL ──────────────────────────────────────────────────────────────────────
 
 # Build sproutd — combined REPL + analysis service binary (self-configuring).

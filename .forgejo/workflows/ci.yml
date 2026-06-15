@@ -131,3 +131,9 @@ jobs:
 
       - name: Example canary via --use-ir-codegen
         run: just run-example-canary-ir
+
+      - name: CPR differential check (--emit-ir vs --use-ir-codegen)
+        # Compares external function signatures emitted by both codegen paths
+        # on the shared-OK corpus.  Intersection-side divergence = candidate
+        # CPR/ABI parity bug.  Allowlist: tests/CPR_DIFF_ALLOWLIST.
+        run: just cpr-differential-check

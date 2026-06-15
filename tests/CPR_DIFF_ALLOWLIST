@@ -1,0 +1,19 @@
+# tests/CPR_DIFF_ALLOWLIST — Known signature parity divergences between
+# --emit-ir (direct codegen) and --use-ir-codegen (typed Sprout-IR).
+#
+# Each entry is a function name (with leading `@`) whose intersection-side
+# signatures are PERMITTED to differ between the two codegen paths. The
+# scripts/cpr_differential_check.sh framework reports allowlisted divergences
+# as warnings but does not fail.
+#
+# Format: one `@<name>` per line, optional `# justification` after the name.
+# Lines starting with `#` are comments. Blank lines ignored.
+#
+# Adding an entry MUST include a clear justification:
+#   - WHY the divergence is benign for the calling convention
+#   - WHAT it would take to close the gap (so a future PR can clear it)
+#
+# When a divergence is closed (both paths emit the same signature), remove
+# the entry. CI will fail with "unexpected closure" so removal cannot drift.
+
+@sprout_abort_match  # noreturn attribute drift: typed path declares with `noreturn`, direct path without. Benign for ABI (calling convention is `void()` either way; noreturn is an optimization hint). Closing needs FnSig type to carry attributes — ~50-line codegen.sprout refactor; out of scope for the differential framework PR.
