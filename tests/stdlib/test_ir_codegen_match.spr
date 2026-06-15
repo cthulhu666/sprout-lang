@@ -142,7 +142,7 @@ fn tag_program() -> sprout_ir.IRProgram =
         sprout_ir.IRGetTag("%t0", "%h"),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # field_program_scalar: IRGetField with "scalar" kind — result is not heap.
 fn field_program_scalar() -> sprout_ir.IRProgram =
@@ -152,7 +152,7 @@ fn field_program_scalar() -> sprout_ir.IRProgram =
         sprout_ir.IRGetField("%t0", "%h", 0, sprout_ir.IRTScalar),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # field_program_heap: IRGetField with "heap" kind whose result lives
 # across a *non-consuming* trigger.  The first IRMakeCtor ("Marker", 0
@@ -171,7 +171,7 @@ fn field_program_heap() -> sprout_ir.IRProgram =
                                   Cons("%f", Cons("%marker", Nil))),
         Cons(sprout_ir.IRRet("%r"), Nil))))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # field_program_scalar_across_trigger: IRGetField with "scalar" kind
 # (Int field) whose result lives across an allocation.  Rooter must NOT
@@ -186,7 +186,7 @@ fn field_program_scalar_across_trigger() -> sprout_ir.IRProgram =
                                   Cons("%n", Cons("%marker", Nil))),
         Cons(sprout_ir.IRRet("%r"), Nil))))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # abort_program: IRAbortMatch produces the abort+unreachable terminator pair.
 # Post /code-review fix #15: IRAbortMatch is field-less (declared void noreturn).
@@ -196,7 +196,7 @@ fn abort_program() -> sprout_ir.IRProgram =
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRAbortMatch, Nil)),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 fn main() -> Unit !{IO} =
   do

@@ -1,0 +1,53 @@
+# Verifies top-level `let` binding resolution via --use-ir-codegen (M3 PR 5).
+#
+# Closes the dominant blocker exposed by PR 4: 74 of 85 remaining IR_XFAIL
+# entries fail with `unbound variable '<name>'` because the IR path
+# (ast_to_ir.sprout:646) catch-all fires for any name that is in the
+# `top_level` set but isn't matched as a fn/ctor/param/capture.
+#
+# Implementation: PR 5 mirrors direct codegen's mechanism exactly
+# (codegen.sprout:3276-3313):
+#
+#   1. classify_let_decls splits top-level lets into two buckets:
+#      - const-eligible (TInt / TBool / TUnit literals) → `@name = private
+#        constant T value` emitted in the module header.
+#      - runtime-computed (everything else) → `@name = global T zeroinit`
+#        emitted in the module header + initialized in a synthetic
+#        `@__sprout_init_globals()` function.
+#   2. `@__sprout_init_globals()` is called once at C-main entry, before
+#      the user's `main` body runs.
+#   3. Each runtime-let global is GC-rooted after init via
+#      sprout_gc_register_{i64,ptr,scan}_root.
+#   4. References to top-level let names emit IRLoadGlobal at the use
+#      site (becomes `load i64, ptr @<name>` in LLVM).
+#
+# This matches direct codegen byte-for-byte at the call-boundary level
+# → the differential framework (PR 1.5) reports 0 divergence on any
+# file that uses top-level lets.
+
+# Const-eligible Int let.  Lowers to `@answer = private constant i64 42`
+# in the module header — no init-function entry needed.
+let answer = 42
+
+# Runtime-computed Int let.  Lowers to `@computed = global i64 zeroinit`
+# in the header + `store i64 %v, ptr @computed` in __sprout_init_globals.
+# 100 + 200 is TBinary, not a TInt literal — fails eval_const_expr → runtime.
+let computed = 100 + 200
+
+# Const-eligible Bool.
+let is_ready = true
+
+# Runtime-computed Bool (TBinary comparison, not a literal).
+let exceeds_threshold = 99 > 50
+
+# Reference sites: each fn body reads from a let-bound global.
+fn get_answer() -> Int = answer
+fn get_computed() -> Int = computed
+fn get_ready() -> Bool = is_ready
+fn exceeds() -> Bool = exceeds_threshold
+
+# Composition: read multiple lets in one expression.
+fn answer_plus_computed() -> Int = answer + computed
+
+# Trivial main — IR path requires `() : Unit` until PR 6 lands do/IO.
+fn main() -> Unit !{IO} = ()

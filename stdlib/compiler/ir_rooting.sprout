@@ -146,12 +146,15 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   match op with
   | sprout_ir.IRConst _ _ -> Nil
   | sprout_ir.IRRet name -> Cons(name, Nil)
+  | sprout_ir.IRRetVoid -> Nil
   | sprout_ir.IRIAdd _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRISub _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRIMul _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRIDiv _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRBoolNot _ a -> Cons(a, Nil)
   | sprout_ir.IRINeg _ a -> Cons(a, Nil)
+  | sprout_ir.IRLoadGlobal _ _ -> Nil
+  | sprout_ir.IRStoreGlobal _ v -> Cons(v, Nil)
   | sprout_ir.IRICmp _ _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRBr _ -> Nil
   | sprout_ir.IRCondBr cond _ _ -> Cons(cond, Nil)
@@ -188,6 +191,7 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRIDiv r _ _ -> Just(r)
   | sprout_ir.IRBoolNot r _ -> Just(r)
   | sprout_ir.IRINeg r _ -> Just(r)
+  | sprout_ir.IRLoadGlobal r _ -> Just(r)
   | sprout_ir.IRICmp r _ _ _ -> Just(r)
   | sprout_ir.IRPhi r _ _ -> Just(r)
   | sprout_ir.IRCall r _ _ _ -> Just(r)
@@ -574,4 +578,4 @@ fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int,
 # ast_to_ir.translate_program.  Unmapped functions default to 0.
 export fn insert_roots(prog: sprout_ir.IRProgram, idx_map: Dict Int) -> sprout_ir.IRProgram =
   match prog with
-  | sprout_ir.IRProgram fns ctors -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil), ctors)
+  | sprout_ir.IRProgram fns globals ctors -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil), globals, ctors)

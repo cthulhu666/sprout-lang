@@ -17,7 +17,7 @@ fn answer_program() -> sprout_ir.IRProgram =
         sprout_ir.IRConst("%t0", 42),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # Build the IR equivalent of `fn id(x: Int) -> Int = x`.
 fn identity_program() -> sprout_ir.IRProgram =
@@ -27,7 +27,7 @@ fn identity_program() -> sprout_ir.IRProgram =
         sprout_ir.IRRet("%x"),
         Nil)),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 fn main() -> Unit !{IO} =
   do
@@ -36,7 +36,7 @@ fn main() -> Unit !{IO} =
     # print_ir_program: pretty-printer marks a populated program with a
     # non-empty header line.
     assert_eq(state, "print_ir_program empty",
-              sprout_ir.print_ir_program(sprout_ir.IRProgram(Nil, Nil)),
+              sprout_ir.print_ir_program(sprout_ir.IRProgram(Nil, Nil, Nil)),
               "; sprout-ir: empty")
     assert_true(state, "print_ir_program contains fn header",
                 contains(sprout_ir.print_ir_program(answer_program()), "fn answer"))

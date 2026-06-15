@@ -60,7 +60,7 @@ fn fact_program() -> sprout_ir.IRProgram =
           Cons(("%t5", "then_2"), Cons(("%t9", "else_3"), Nil))),
         Cons(sprout_ir.IRRet("%t10"), Nil))),
       Nil))))),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # Build the IR equivalent of:
 #   fn fib(n: Int) -> Int = if n < 2 then n else fib(n - 1) + fib(n - 2)
@@ -106,7 +106,7 @@ fn fib_program() -> sprout_ir.IRProgram =
           Cons(("%n", "then_2"), Cons(("%t11", "else_3"), Nil))),
         Cons(sprout_ir.IRRet("%t12"), Nil))),
       Nil))))),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # Build a tiny non-recursive caller/callee pair to prove sequencing of
 # multiple call sites in a single block:
@@ -126,7 +126,7 @@ fn twice_and_add4_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRIAdd("%t2", "%t0", "%t1"),
         Cons(sprout_ir.IRRet("%t2"), Nil))))),
       Nil)),
-    Nil)), Nil)
+    Nil)), Nil, Nil)
 
 fn main() -> Unit !{IO} =
   do

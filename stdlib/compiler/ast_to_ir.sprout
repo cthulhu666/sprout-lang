@@ -633,6 +633,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                   captures: Dict String,
                   lifted_ref: Ref (List sprout_ir.IRFunction),
                   top_level: Set,
+                let_names: Set,
                   lambda_ctr_ref: Ref Int,
                   lifted_idx_ref: Ref (Dict Int),
                   name_prefix: String) ->
@@ -664,18 +665,27 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                     if actual_ar == 0
                     then translate_zero_arity_ctor(name, tag, idx, cur_label, cur_ops, name_prefix)
                     else Err("ast_to_ir: bare reference to non-zero-arity ctor '" ++ name ++ "' (eta/partial application) deferred to follow-up PR")
-            | Nothing -> Err("ast_to_ir: unbound variable '" ++ name ++ "'")
+            | Nothing ->
+                # M3 PR 5: top-level `let x = expr` declarations are stored in
+                # LLVM globals; TVar references load from the global slot.
+                # Mirrors codegen.sprout's `load i64, ptr @<name>` emission.
+                if set_member(name, let_names)
+                then Ok((Nil, cur_label,
+                          list_append(cur_ops,
+                            Cons(sprout_ir.IRLoadGlobal(fresh_name(name_prefix, idx), name), Nil)),
+                          fresh_name(name_prefix, idx), idx + 1))
+                else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
   | typed_ast.TBinary op left right _ _ ->
       translate_binary(op, left, right, params, ctors, idx, cur_label, cur_ops,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix)
   | typed_ast.TIf cond t e ty _ ->
       translate_if(cond, t, e, ty, params, ctors, idx, cur_label, cur_ops,
-                   captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                   captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                    name_prefix)
   | typed_ast.TCall callee args ty _ ->
       translate_call(callee, args, ty, params, ctors, idx, cur_label, cur_ops,
-                     captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                     captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                      name_prefix)
   | typed_ast.TBool b _ _ ->
       # /code-review fix #2: Bool uses i64 encoding uniformly through the
@@ -696,12 +706,12 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
   | typed_ast.TTuple _ _ _ -> Err("ast_to_ir: Tuple not yet supported")
   | typed_ast.TMatch scrut arms match_ty _ ->
       translate_match(scrut, arms, match_ty, params, ctors, idx, cur_label, cur_ops,
-                      captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                      captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                       name_prefix)
   | typed_ast.TDict _ _ _ -> Err("ast_to_ir: TDict not yet supported")
   | typed_ast.TLambda lparams body lam_ty _ ->
       translate_lambda(lparams, body, lam_ty, params, ctors, idx, cur_label, cur_ops,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix)
   | typed_ast.TUnary op operand _ _ ->
       # Parser produces TUnary "!" (boolean negation, parser.sprout:665) and
@@ -709,7 +719,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       # !x lowers to IRBoolNot (`xor i64 %x, 1`); -x lowers to IRINeg
       # (`sub i64 0, %x`).
       match translate_expr(operand, params, ctors, idx, cur_label, cur_ops,
-                           captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                           captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                            name_prefix) with
       | Err msg -> Err(msg)
       | Ok or_ ->
@@ -905,6 +915,7 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
                     captures: Dict String,
                     lifted_ref: Ref (List sprout_ir.IRFunction),
                     top_level: Set,
+                let_names: Set,
                     lambda_ctr_ref: Ref Int,
                     lifted_idx_ref: Ref (Dict Int),
                     name_prefix: String) ->
@@ -917,7 +928,7 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
   # IRRet needed.
   translate_lambda_after_ret_check(lparams, body, lam_ty, params, ctors, idx,
                                    cur_label, cur_ops, captures, lifted_ref,
-                                   top_level, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+                                   top_level, let_names, lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Continues translate_lambda after the Bool-return guard has passed.
 # Splitting avoids `else let` inside a do block (not valid Sprout).
@@ -928,6 +939,7 @@ fn translate_lambda_after_ret_check(lparams: List ast.Param, body: typed_ast.Typ
                                     captures: Dict String,
                                     lifted_ref: Ref (List sprout_ir.IRFunction),
                                     top_level: Set,
+                let_names: Set,
                                     lambda_ctr_ref: Ref Int,
                                     lifted_idx_ref: Ref (Dict Int),
                                     name_prefix: String) ->
@@ -950,7 +962,7 @@ fn translate_lambda_after_ret_check(lparams: List ast.Param, body: typed_ast.Typ
     # in the env. Internally consistent.
     translate_lambda_emit(lparams, body, capturable, lam_param_names,
                           params, ctors, idx, cur_label, cur_ops, captures,
-                          lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+                          lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Final emission stage of translate_lambda after both Bool checks pass.
 # Extracted so each match arm in the parent can return a single expression
@@ -963,6 +975,7 @@ fn translate_lambda_emit(lparams: List ast.Param, body: typed_ast.TypedExpr,
                          captures: Dict String,
                          lifted_ref: Ref (List sprout_ir.IRFunction),
                          top_level: Set,
+                let_names: Set,
                          lambda_ctr_ref: Ref Int,
                          lifted_idx_ref: Ref (Dict Int),
                          name_prefix: String) ->
@@ -984,7 +997,7 @@ fn translate_lambda_emit(lparams: List ast.Param, body: typed_ast.TypedExpr,
     | Ok cap_ssas ->
         translate_lambda_lifted(lparams, body, capturable, lam_param_names, cap_ssas,
                                 lam_fn_name, params, ctors, idx, cur_label, cur_ops,
-                                captures, lifted_ref, top_level, lambda_ctr_ref,
+                                captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                                 lifted_idx_ref, name_prefix)
 
 # Translates the lifted body, registers the IRFunction, and emits IRMkClosure.
@@ -996,6 +1009,7 @@ fn translate_lambda_lifted(lparams: List ast.Param, body: typed_ast.TypedExpr,
                            captures: Dict String,
                            lifted_ref: Ref (List sprout_ir.IRFunction),
                            top_level: Set,
+                let_names: Set,
                            lambda_ctr_ref: Ref Int,
                            lifted_idx_ref: Ref (Dict Int),
                            name_prefix: String) ->
@@ -1012,7 +1026,7 @@ fn translate_lambda_lifted(lparams: List ast.Param, body: typed_ast.TypedExpr,
     # Lifted body uses "%t$" prefix to avoid colliding with user lambda params
     # like "t0" (which produce "%t0" in LLVM). FIX #4.
     match translate_expr(body, lam_param_names, ctors, n_caps,
-                         "entry", load_ops, lifted_captures, lifted_ref, top_level,
+                         "entry", load_ops, lifted_captures, lifted_ref, top_level, let_names,
                          lambda_ctr_ref, lifted_idx_ref, "%t$") with
     | Err msg -> Err(msg)
     | Ok br ->
@@ -1054,6 +1068,7 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                     captures: Dict String,
                     lifted_ref: Ref (List sprout_ir.IRFunction),
                     top_level: Set,
+                let_names: Set,
                     lambda_ctr_ref: Ref Int,
                     lifted_idx_ref: Ref (Dict Int),
                     name_prefix: String) ->
@@ -1071,27 +1086,27 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                     typed_ast.TBool(false, types.type_bool(), typed_ast.typed_expr_pos(left)),
                     types.type_bool(),
                     params, ctors, idx, cur_label, cur_ops,
-                    captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                    captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                     name_prefix)
   else if op == "||"
   then translate_if(left,
                     typed_ast.TBool(true, types.type_bool(), typed_ast.typed_expr_pos(left)),
                     right, types.type_bool(),
                     params, ctors, idx, cur_label, cur_ops,
-                    captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                    captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                     name_prefix)
   else if op == "++" && is_string_type(typed_ast.typed_expr_type(left))
                      && is_string_type(typed_ast.typed_expr_type(right))
   then
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
-                         captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                         captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                          name_prefix) with
     | Err msg -> Err(msg)
     | Ok lr ->
         match lr with
         | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
             match translate_expr(right, params, ctors, idx1, lcur_lbl, lcur_ops,
-                                 captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                                 captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                                  name_prefix) with
             | Err msg -> Err(msg)
             | Ok rr ->
@@ -1105,14 +1120,14 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int operands")
   else
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
-                         captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                         captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                          name_prefix) with
     | Err msg -> Err(msg)
     | Ok lr ->
         match lr with
         | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
             match translate_expr(right, params, ctors, idx1, lcur_lbl, lcur_ops,
-                                 captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                                 captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                                  name_prefix) with
             | Err msg -> Err(msg)
             | Ok rr ->
@@ -1187,12 +1202,13 @@ fn translate_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.
                 captures: Dict String,
                 lifted_ref: Ref (List sprout_ir.IRFunction),
                 top_level: Set,
+                let_names: Set,
                 lambda_ctr_ref: Ref Int,
                 lifted_idx_ref: Ref (Dict Int),
                 name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match translate_expr(cond, params, ctors, idx, cur_label, cur_ops,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix) with
   | Err msg -> Err(msg)
   | Ok cr ->
@@ -1200,7 +1216,7 @@ fn translate_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.
       | (cblocks, ccur_lbl, ccur_ops, c_name, idx1) ->
           translate_if_after_cond(t, e, if_ty, params, ctors,
                                   cblocks, ccur_lbl, ccur_ops, c_name, idx1,
-                                  captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                                  captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                                   name_prefix)
 
 fn translate_if_after_cond(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
@@ -1212,6 +1228,7 @@ fn translate_if_after_cond(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
                            captures: Dict String,
                            lifted_ref: Ref (List sprout_ir.IRFunction),
                            top_level: Set,
+                let_names: Set,
                            lambda_ctr_ref: Ref Int,
                            lifted_idx_ref: Ref (Dict Int),
                            name_prefix: String) ->
@@ -1221,14 +1238,14 @@ fn translate_if_after_cond(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
   # Then consume idx+1 for the phi result-name.  Sub-translation continues
   # from idx+2.
   match translate_expr(t, params, ctors, idx + 2, then_lbl, Nil,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix) with
   | Err msg -> Err(msg)
   | Ok tr ->
       match tr with
       | (tblocks, tcur_lbl, tcur_ops, t_name, idx2) ->
           match translate_expr(e, params, ctors, idx2, else_lbl, Nil,
-                               captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                               captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                                name_prefix) with
           | Err msg -> Err(msg)
           | Ok er ->
@@ -1390,19 +1407,20 @@ fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBr
                    captures: Dict String,
                    lifted_ref: Ref (List sprout_ir.IRFunction),
                    top_level: Set,
+                let_names: Set,
                    lambda_ctr_ref: Ref Int,
                    lifted_idx_ref: Ref (Dict Int),
                    name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match translate_expr(scrut, params, ctors, idx, cur_label, cur_ops,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix) with
   | Err msg -> Err(msg)
   | Ok sr ->
       match sr with
       | (s_blocks, s_cur_lbl, s_ops, s_name, idx1) ->
           translate_match_after_scrut(arms, match_ty, params, ctors, s_blocks, s_cur_lbl,
-                                      s_ops, s_name, idx1, captures, lifted_ref, top_level,
+                                      s_ops, s_name, idx1, captures, lifted_ref, top_level, let_names,
                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Continues after the scrutinee is translated.
@@ -1416,6 +1434,7 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
                                 captures: Dict String,
                                 lifted_ref: Ref (List sprout_ir.IRFunction),
                                 top_level: Set,
+                let_names: Set,
                                 lambda_ctr_ref: Ref Int,
                                 lifted_idx_ref: Ref (Dict Int),
                                 name_prefix: String) ->
@@ -1437,11 +1456,11 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
                              list_append(s_ops,
                                Cons(sprout_ir.IRGetTag(fresh_name(name_prefix, idx), s_name), Nil)),
                              s_name, fresh_name(name_prefix, idx), idx + 1,
-                             captures, lifted_ref, top_level,
+                             captures, lifted_ref, top_level, let_names,
                              lambda_ctr_ref, lifted_idx_ref, name_prefix)
   else
     translate_match_dispatch(arms, match_ty, params, ctors, s_blocks, s_cur_lbl,
-                             s_ops, s_name, "", idx, captures, lifted_ref, top_level,
+                             s_ops, s_name, "", idx, captures, lifted_ref, top_level, let_names,
                              lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Sets up join/phi labels and kicks off arm translation.
@@ -1455,6 +1474,7 @@ fn translate_match_dispatch(arms: List typed_ast.TypedMatchBranch,
                              captures: Dict String,
                              lifted_ref: Ref (List sprout_ir.IRFunction),
                              top_level: Set,
+                let_names: Set,
                              lambda_ctr_ref: Ref Int,
                              lifted_idx_ref: Ref (Dict Int),
                              name_prefix: String) ->
@@ -1464,7 +1484,7 @@ fn translate_match_dispatch(arms: List typed_ast.TypedMatchBranch,
   # Seal scrutinee block: br → first arm's dispatch label.
   match translate_match_arms(arms, 0, idx, fresh_join_label(idx), match_ty,
                               s_name, tag_name, params, ctors, idx + 2, Nil, Nil,
-                              captures, lifted_ref, top_level, lambda_ctr_ref,
+                              captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                               lifted_idx_ref, name_prefix) with
   | Err msg -> Err(msg)
   | Ok ar ->
@@ -1493,6 +1513,7 @@ fn translate_match_arms(arms: List typed_ast.TypedMatchBranch,
                          captures: Dict String,
                          lifted_ref: Ref (List sprout_ir.IRFunction),
                          top_level: Set,
+                let_names: Set,
                          lambda_ctr_ref: Ref Int,
                          lifted_idx_ref: Ref (Dict Int),
                          name_prefix: String) ->
@@ -1517,7 +1538,7 @@ fn translate_match_arms(arms: List typed_ast.TypedMatchBranch,
                                   fresh_arm_label(branch_idx, base_idx),
                                   join_lbl, match_ty, s_name, tag_name,
                                   params, ctors, idx, acc_blocks, acc_phi,
-                                  captures, lifted_ref, top_level, lambda_ctr_ref,
+                                  captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                                   lifted_idx_ref, name_prefix)
 
 # Translate a single match arm, then recurse into translate_match_arms.
@@ -1533,6 +1554,7 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                             captures: Dict String,
                             lifted_ref: Ref (List sprout_ir.IRFunction),
                             top_level: Set,
+                let_names: Set,
                             lambda_ctr_ref: Ref Int,
                             lifted_idx_ref: Ref (Dict Int),
                             name_prefix: String) ->
@@ -1545,7 +1567,7 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                                       dispatch_lbl, join_lbl, match_ty,
                                       s_name, tag_name,
                                       params, ctors, idx, acc_blocks, acc_phi,
-                                      captures, captures, lifted_ref, top_level,
+                                      captures, captures, lifted_ref, top_level, let_names,
                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.VarPattern v _ ->
       # Always-match with one binding: bind v → s_name in captures for the body;
@@ -1555,25 +1577,25 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                                       s_name, tag_name,
                                       params, ctors, idx, acc_blocks, acc_phi,
                                       dict_set(v, s_name, captures), captures,
-                                      lifted_ref, top_level,
+                                      lifted_ref, top_level, let_names,
                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.IntPattern n _ ->
       translate_match_arm_int(n, body, rest_arms, branch_idx, base_idx,
                               dispatch_lbl, join_lbl, match_ty, s_name, tag_name,
                               params, ctors, idx, acc_blocks, acc_phi,
-                              captures, lifted_ref, top_level, lambda_ctr_ref,
+                              captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                               lifted_idx_ref, name_prefix)
   | ast.BoolPattern b _ ->
       translate_match_arm_bool(b, body, rest_arms, branch_idx, base_idx,
                                dispatch_lbl, join_lbl, match_ty, s_name, tag_name,
                                params, ctors, idx, acc_blocks, acc_phi,
-                               captures, lifted_ref, top_level, lambda_ctr_ref,
+                               captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                                lifted_idx_ref, name_prefix)
   | ast.ConstructorPattern ctor_name ctor_args _ ->
       translate_match_arm_ctor(ctor_name, ctor_args, body, rest_arms,
                                branch_idx, base_idx, dispatch_lbl, join_lbl,
                                match_ty, s_name, tag_name, params, ctors, idx,
-                               acc_blocks, acc_phi, captures, lifted_ref, top_level,
+                               acc_blocks, acc_phi, captures, lifted_ref, top_level, let_names,
                                lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.TuplePattern _ _ -> Err("ast_to_ir: TuplePattern in match not yet supported")
   | ast.StringPattern _ _ -> Err("ast_to_ir: StringPattern in match not yet supported")
@@ -1614,6 +1636,7 @@ fn translate_match_arm_body_always(body: typed_ast.TypedExpr,
                                     outer_captures: Dict String,
                                     lifted_ref: Ref (List sprout_ir.IRFunction),
                                     top_level: Set,
+                let_names: Set,
                                     lambda_ctr_ref: Ref Int,
                                     lifted_idx_ref: Ref (Dict Int),
                                     name_prefix: String) ->
@@ -1622,7 +1645,7 @@ fn translate_match_arm_body_always(body: typed_ast.TypedExpr,
   # `outer_captures` is forwarded to rest_arms — it is the unextended dict,
   # preventing VarPattern bindings from leaking into sibling arms.
   match translate_expr(body, params, ctors, idx, body_lbl, Nil,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix) with
   | Err msg -> Err(msg)
   | Ok br ->
@@ -1640,7 +1663,7 @@ fn translate_match_arm_body_always(body: typed_ast.TypedExpr,
                                     list_append(list_reverse(body_blocks),
                                                 acc_blocks)),
                                Cons((body_val, body_cur_lbl), acc_phi),
-                               outer_captures, lifted_ref, top_level, lambda_ctr_ref,
+                               outer_captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                                lifted_idx_ref, name_prefix)
 
 # Translate an IntPattern arm.
@@ -1657,6 +1680,7 @@ fn translate_match_arm_int(n: Int, body: typed_ast.TypedExpr,
                             captures: Dict String,
                             lifted_ref: Ref (List sprout_ir.IRFunction),
                             top_level: Set,
+                let_names: Set,
                             lambda_ctr_ref: Ref Int,
                             lifted_idx_ref: Ref (Dict Int),
                             name_prefix: String) ->
@@ -1676,7 +1700,7 @@ fn translate_match_arm_int(n: Int, body: typed_ast.TypedExpr,
     fresh_arm_label(branch_idx + 1, base_idx),
     join_lbl, match_ty, s_name, tag_name, params, ctors,
     idx + 2, acc_blocks, acc_phi, captures,
-    lifted_ref, top_level, lambda_ctr_ref,
+    lifted_ref, top_level, let_names, lambda_ctr_ref,
     lifted_idx_ref, name_prefix)
 
 # Translate a BoolPattern arm.
@@ -1693,6 +1717,7 @@ fn translate_match_arm_bool(b: Bool, body: typed_ast.TypedExpr,
                              captures: Dict String,
                              lifted_ref: Ref (List sprout_ir.IRFunction),
                              top_level: Set,
+                let_names: Set,
                              lambda_ctr_ref: Ref Int,
                              lifted_idx_ref: Ref (Dict Int),
                              name_prefix: String) ->
@@ -1716,7 +1741,7 @@ fn translate_match_arm_bool(b: Bool, body: typed_ast.TypedExpr,
     fresh_arm_label(branch_idx + 1, base_idx),
     join_lbl, match_ty, s_name, tag_name, params, ctors,
     idx + 2, acc_blocks, acc_phi, captures,
-    lifted_ref, top_level, lambda_ctr_ref,
+    lifted_ref, top_level, let_names, lambda_ctr_ref,
     lifted_idx_ref, name_prefix)
 
 # Translate a ConstructorPattern arm.
@@ -1734,6 +1759,7 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
                              captures: Dict String,
                              lifted_ref: Ref (List sprout_ir.IRFunction),
                              top_level: Set,
+                let_names: Set,
                              lambda_ctr_ref: Ref Int,
                              lifted_idx_ref: Ref (Dict Int),
                              name_prefix: String) ->
@@ -1770,7 +1796,7 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
                     params, ctors, idx3, acc_blocks,
                     acc_phi, arm_captures, captures,
                     lifted_ref,
-                    top_level, lambda_ctr_ref,
+                    top_level, let_names, lambda_ctr_ref,
                     lifted_idx_ref, name_prefix)
 
 # Translate body after test block is sealed, no extra preamble ops.
@@ -1793,6 +1819,7 @@ fn translate_match_arm_body_with_test(body: typed_ast.TypedExpr,
                                        captures: Dict String,
                                        lifted_ref: Ref (List sprout_ir.IRFunction),
                                        top_level: Set,
+                let_names: Set,
                                        lambda_ctr_ref: Ref Int,
                                        lifted_idx_ref: Ref (Dict Int),
                                        name_prefix: String) ->
@@ -1801,7 +1828,7 @@ fn translate_match_arm_body_with_test(body: typed_ast.TypedExpr,
                                              test_block, body_lbl, Nil, miss_lbl, join_lbl,
                                              match_ty, s_name, tag_name, params, ctors, idx,
                                              acc_blocks, acc_phi, captures, captures,
-                                             lifted_ref, top_level,
+                                             lifted_ref, top_level, let_names,
                                              lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Translate body after test block is sealed, with optional preamble ops (field binds).
@@ -1833,12 +1860,13 @@ fn translate_match_arm_body_with_test_and_ops(body: typed_ast.TypedExpr,
                                                outer_captures: Dict String,
                                                lifted_ref: Ref (List sprout_ir.IRFunction),
                                                top_level: Set,
+                let_names: Set,
                                                lambda_ctr_ref: Ref Int,
                                                lifted_idx_ref: Ref (Dict Int),
                                                name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, List (String, String), Int) !{IO} =
   match translate_expr(body, params, ctors, idx, body_lbl, preamble_ops,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix) with
   | Err msg -> Err(msg)
   | Ok br ->
@@ -1860,7 +1888,7 @@ fn translate_match_arm_body_with_test_and_ops(body: typed_ast.TypedExpr,
                                     list_append(list_reverse(body_blocks),
                                                 Cons(test_block, acc_blocks))),
                                Cons((body_val, body_cur_lbl), acc_phi),
-                               outer_captures, lifted_ref, top_level,
+                               outer_captures, lifted_ref, top_level, let_names,
                                lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Seal the join block with a phi (or no phi if no incoming edges).
@@ -1918,6 +1946,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   captures: Dict String,
                   lifted_ref: Ref (List sprout_ir.IRFunction),
                   top_level: Set,
+                let_names: Set,
                   lambda_ctr_ref: Ref Int,
                   lifted_idx_ref: Ref (Dict Int),
                   name_prefix: String) ->
@@ -1930,7 +1959,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
       | Just cap_ssa ->
           # captured free var — must be a closure; emit IRApplyClosure.
           translate_closure_call(cap_ssa, args, params, ctors, idx, cur_label, cur_ops,
-                                 captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                                 captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                                  name_prefix)
       | Nothing ->
           if param_known(fname, params)
@@ -1940,7 +1969,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             # contradict the is_supported_arg_type trust contract and create an
             # asymmetry with the captures branch above.
             translate_closure_call("%" ++ fname, args, params, ctors, idx,
-                                   cur_label, cur_ops, captures, lifted_ref, top_level,
+                                   cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else
             # Constructor application takes precedence over named-call dispatch
@@ -1955,12 +1984,12 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                 | (tag, actual_ar, _max_ar, _fks) ->
                     translate_boxed_ctor_call(fname, tag, actual_ar, args, params,
                                               ctors, idx, cur_label, cur_ops,
-                                              captures, lifted_ref, top_level,
+                                              captures, lifted_ref, top_level, let_names,
                                               lambda_ctr_ref, lifted_idx_ref,
                                               name_prefix)
             | Nothing ->
                 translate_direct_call(fname, args, call_ty, params, ctors, idx,
-                                      cur_label, cur_ops, captures, lifted_ref, top_level,
+                                      cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | typed_ast.TLambda lparams lbody lam_ty _ ->
       # Directly-applied lambda (IIFE): (\x -> body)(arg).
@@ -1973,7 +2002,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
       else
       # Translate the lambda to get a closure value at the call site, then apply.
       match translate_lambda(lparams, lbody, lam_ty, params, ctors, idx, cur_label, cur_ops,
-                             captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                             captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                              name_prefix) with
       | Err msg -> Err(msg)
       | Ok lr ->
@@ -1981,7 +2010,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
           | (lam_blocks, lam_cur_lbl, lam_cur_ops, closure_ssa, idx1) ->
               match translate_closure_call(closure_ssa, args, params, ctors, idx1,
                                            lam_cur_lbl, lam_cur_ops,
-                                           captures, lifted_ref, top_level, lambda_ctr_ref,
+                                           captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                                            lifted_idx_ref, name_prefix) with
               | Err msg -> Err(msg)
               | Ok cr ->
@@ -1994,7 +2023,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
       # Translate the inner call to get the closure SSA value, then apply it
       # to the outer args via IRApplyClosure.
       match translate_call(inner_callee, inner_args, inner_ty, params, ctors, idx,
-                           cur_label, cur_ops, captures, lifted_ref, top_level,
+                           cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                            lambda_ctr_ref, lifted_idx_ref, name_prefix) with
       | Err msg -> Err(msg)
       | Ok ir ->
@@ -2002,7 +2031,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
           | (inner_blocks, inner_lbl, inner_ops, inner_result, idx1) ->
               match translate_closure_call(inner_result, args, params, ctors, idx1,
                                            inner_lbl, inner_ops,
-                                           captures, lifted_ref, top_level,
+                                           captures, lifted_ref, top_level, let_names,
                                            lambda_ctr_ref, lifted_idx_ref, name_prefix) with
               | Err msg -> Err(msg)
               | Ok cr ->
@@ -2025,12 +2054,13 @@ fn translate_closure_call(callee_ssa: String, args: List typed_ast.TypedExpr,
                           captures: Dict String,
                           lifted_ref: Ref (List sprout_ir.IRFunction),
                           top_level: Set,
+                let_names: Set,
                           lambda_ctr_ref: Ref Int,
                           lifted_idx_ref: Ref (Dict Int),
                           name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
-                              captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                              captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                               name_prefix) with
   | Err msg -> Err(msg)
   | Ok r ->
@@ -2057,6 +2087,7 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
                              captures: Dict String,
                              lifted_ref: Ref (List sprout_ir.IRFunction),
                              top_level: Set,
+                let_names: Set,
                              lambda_ctr_ref: Ref Int,
                              lifted_idx_ref: Ref (Dict Int),
                              name_prefix: String) ->
@@ -2070,7 +2101,7 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
   then Err("ast_to_ir: ctor application has wrong arity (got " ++ int_to_string(list_length(args)) ++ ", expected " ++ int_to_string(actual_ar) ++ ")")
   else
     match translate_args_ctor(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
-                              captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                              captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                               name_prefix) with
     | Err msg -> Err(msg)
     | Ok r ->
@@ -2099,20 +2130,21 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                          captures: Dict String,
                          lifted_ref: Ref (List sprout_ir.IRFunction),
                          top_level: Set,
+                let_names: Set,
                          lambda_ctr_ref: Ref Int,
                          lifted_idx_ref: Ref (Dict Int),
                          name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match recognize_string_builtin(fname) with
   | Just kind -> translate_string_builtin(kind, fname, args, params, ctors, idx,
-                                          cur_label, cur_ops, captures, lifted_ref, top_level,
+                                          cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                                           lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | Nothing ->
       # FIX R4#3: removed the is_string_type(call_ty) rejection that was here.
       # All IR values are i64 — String-returning user fns are i64 just like Int.
       # The check was a placeholder from PR 1.5 that blocked capturing-IIFE-returning-String.
       match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
-                                  captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                                  captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                                   name_prefix) with
       | Err msg -> Err(msg)
       | Ok r ->
@@ -2129,12 +2161,13 @@ fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             captures: Dict String,
                             lifted_ref: Ref (List sprout_ir.IRFunction),
                             top_level: Set,
+                let_names: Set,
                             lambda_ctr_ref: Ref Int,
                             lifted_idx_ref: Ref (Dict Int),
                             name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
-                              captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                              captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                               name_prefix) with
   | Err msg -> Err(msg)
   | Ok r ->
@@ -2206,12 +2239,13 @@ fn translate_args_scalar(args: List typed_ast.TypedExpr, params: List String,
                          captures: Dict String,
                          lifted_ref: Ref (List sprout_ir.IRFunction),
                          top_level: Set,
+                let_names: Set,
                          lambda_ctr_ref: Ref Int,
                          lifted_idx_ref: Ref (Dict Int),
                          name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, List String, Int) !{IO} =
   translate_args_core(args, params, ctors, idx, cur_label, cur_ops, acc_blocks, acc_names,
-                      true, captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                      true, captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                       name_prefix)
 
 fn translate_args_ctor(args: List typed_ast.TypedExpr, params: List String,
@@ -2221,12 +2255,13 @@ fn translate_args_ctor(args: List typed_ast.TypedExpr, params: List String,
                        captures: Dict String,
                        lifted_ref: Ref (List sprout_ir.IRFunction),
                        top_level: Set,
+                let_names: Set,
                        lambda_ctr_ref: Ref Int,
                        lifted_idx_ref: Ref (Dict Int),
                        name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, List String, Int) !{IO} =
   translate_args_core(args, params, ctors, idx, cur_label, cur_ops, acc_blocks, acc_names,
-                      false, captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                      false, captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                       name_prefix)
 
 fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
@@ -2237,6 +2272,7 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
                        captures: Dict String,
                        lifted_ref: Ref (List sprout_ir.IRFunction),
                        top_level: Set,
+                let_names: Set,
                        lambda_ctr_ref: Ref Int,
                        lifted_idx_ref: Ref (Dict Int),
                        name_prefix: String) ->
@@ -2252,7 +2288,7 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
       then Err("ast_to_ir: Unit ctor field not supported (Unit has no LLVM value to pass)")
       else
         match translate_expr(a, params, ctors, idx, cur_label, cur_ops,
-                             captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                             captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                              name_prefix) with
         | Err msg -> Err(msg)
         | Ok ar ->
@@ -2261,7 +2297,7 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
                 translate_args_core(rest, params, ctors, idx1, acur_lbl, acur_ops,
                                     list_append(acc_blocks, ablocks),
                                     Cons(a_name, acc_names), scalar_only,
-                                    captures, lifted_ref, top_level, lambda_ctr_ref,
+                                    captures, lifted_ref, top_level, let_names, lambda_ctr_ref,
                                     lifted_idx_ref, name_prefix)
 
 # Translate a function body into a complete List IRBlock.  The body always
@@ -2274,12 +2310,13 @@ fn translate_body(body: typed_ast.TypedExpr, params: List String,
                   captures: Dict String,
                   lifted_ref: Ref (List sprout_ir.IRFunction),
                   top_level: Set,
+                let_names: Set,
                   lambda_ctr_ref: Ref Int,
                   lifted_idx_ref: Ref (Dict Int),
                   name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, Int) !{IO} =
   match translate_expr(body, params, ctors, idx, "entry", Nil,
-                       captures, lifted_ref, top_level, lambda_ctr_ref, lifted_idx_ref,
+                       captures, lifted_ref, top_level, let_names, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix) with
   | Err msg -> Err(msg)
   | Ok r ->
@@ -2335,13 +2372,14 @@ fn validate_main_body(body: typed_ast.TypedExpr) -> Result String (Maybe sprout_
 # so that lifted lambda names are unique program-wide (__sprout_ir_lambda_0, __sprout_ir_lambda_1, …).
 fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
                      ctors: Dict (Int, Int, Int, String), top_level: Set,
+                     let_names: Set,
                      lambda_ctr_ref: Ref Int,
                      lifted_idx_ref: Ref (Dict Int)) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
     # User functions use "%t" prefix; lifted lambda bodies use "%t$" (see translate_lambda).
-    match translate_body(body, pnames, ctors, 0, dict_empty(), lifted_ref, top_level,
+    match translate_body(body, pnames, ctors, 0, dict_empty(), lifted_ref, top_level, let_names,
                          lambda_ctr_ref, lifted_idx_ref, "%t") with
     | Err msg -> Err(msg)
     | Ok pair ->
@@ -2403,7 +2441,8 @@ fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result String
       | _ -> validate_reserved_namespace(rest)
 
 fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String),
-                           top_level: Set, lambda_ctr_ref: Ref Int,
+                           top_level: Set,
+                let_names: Set, lambda_ctr_ref: Ref Int,
                            lifted_idx_ref: Ref (Dict Int)) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   match d with
@@ -2416,7 +2455,7 @@ fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, S
         | Err msg -> Err(msg)
         | Ok Nothing -> Ok(Nothing)
         | Ok (Just _) -> Err("ast_to_ir: validate_main_body unexpectedly returned a function")
-      else translate_user_fn(name, params, body, ctors, top_level, lambda_ctr_ref, lifted_idx_ref)
+      else translate_user_fn(name, param_names(params), body, ctors, top_level, let_names, lambda_ctr_ref, lifted_idx_ref)
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(Nothing)
   | typed_ast.TLetDecl _ _ -> Ok(Nothing)
   | typed_ast.TInstanceDecl _ _ _ -> Ok(Nothing)
@@ -2424,17 +2463,17 @@ fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, S
 
 fn translate_decls(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String),
                    acc_fns: List sprout_ir.IRFunction,
-                   acc_idx: Dict Int, top_level: Set, lambda_ctr_ref: Ref Int,
+                   acc_idx: Dict Int, top_level: Set, let_names: Set, lambda_ctr_ref: Ref Int,
                    lifted_idx_ref: Ref (Dict Int)) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
   match decls with
   | Nil -> Ok((list_reverse(acc_fns), acc_idx))
   | Cons d rest ->
-      match translate_decl_with_idx(d, ctors, top_level, lambda_ctr_ref, lifted_idx_ref) with
+      match translate_decl_with_idx(d, ctors, top_level, let_names, lambda_ctr_ref, lifted_idx_ref) with
       | Err msg -> Err(msg)
       | Ok maybe_f ->
           match maybe_f with
-          | Nothing -> translate_decls(rest, ctors, acc_fns, acc_idx, top_level, lambda_ctr_ref, lifted_idx_ref)
+          | Nothing -> translate_decls(rest, ctors, acc_fns, acc_idx, top_level, let_names, lambda_ctr_ref, lifted_idx_ref)
           | Just triple ->
               match triple with
               | (f, idx, lifted) ->
@@ -2449,7 +2488,7 @@ fn translate_decls(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, 
                       translate_decls(rest, ctors,
                                       Cons(f, cons_list(lifted, acc_fns)),
                                       dict_set(fname, idx, acc_idx),
-                                      top_level, lambda_ctr_ref, lifted_idx_ref)
+                                      top_level, let_names, lambda_ctr_ref, lifted_idx_ref)
 
 # Prepend a list (in order) onto an accumulator list.
 # cons_list([a,b,c], rest) = Cons(c, Cons(b, Cons(a, rest)))
@@ -2478,6 +2517,115 @@ fn merge_idx_dicts_keys(acc: Dict Int, keys: List String, src: Dict Int) -> Resu
       | Nothing -> Err("merge_idx_dicts: dict_keys/dict_get inconsistency for key '" ++ k ++ "' — this is unreachable")
       | Just v -> merge_idx_dicts_keys(dict_set(k, v, acc), rest, src)
 
+# M3 PR 5: top-level let binding helpers.
+#
+# Sprout's top-level `let x = expr` declarations lower to LLVM globals,
+# matching direct codegen's mechanism exactly (codegen.sprout:3895-3917).
+#
+# - eval_const_expr_ir(e) classifies an expression as compile-time-evaluable.
+#   Only TInt / TBool / TUnit literals qualify — anything else (binary ops,
+#   string concat, fn calls, …) is runtime-computed.
+# - build_top_level_let_names(decls) collects let names into a Set, used by
+#   the TVar resolution branch in translate_expr to detect a global load.
+# - classify_let_decls_ir(decls) splits TLetDecls into two buckets:
+#     (1) const-eligible → IRGlobalDecl with GlobalConst (emitted as
+#         `@name = private constant T <literal>` by ir_lowering).
+#     (2) runtime-computed → IRGlobalDecl with GlobalZeroInit + a pending
+#         (name, body) pair that becomes a store in @__sprout_init_globals.
+
+fn eval_const_expr_ir(e: typed_ast.TypedExpr) -> Maybe String =
+  match e with
+  | typed_ast.TInt n _ _ -> Just(int_to_string(n))
+  | typed_ast.TBool b _ _ -> Just(if b then "1" else "0")
+  | typed_ast.TUnit _ _ -> Just("0")
+  | _ -> Nothing
+
+fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
+  match decls with
+  | Nil -> set_empty()
+  | Cons d rest ->
+      match d with
+      | typed_ast.TLetDecl name _ -> set_insert(name, build_top_level_let_names(rest))
+      | _ -> build_top_level_let_names(rest)
+
+fn classify_let_decls_ir(decls: List typed_ast.TypedDecl) ->
+    (List sprout_ir.IRGlobalDecl, List (String, typed_ast.TypedExpr)) =
+  classify_let_decls_ir_acc(decls, Nil, Nil)
+
+fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
+                              globals_acc: List sprout_ir.IRGlobalDecl,
+                              runtime_acc: List (String, typed_ast.TypedExpr)) ->
+    (List sprout_ir.IRGlobalDecl, List (String, typed_ast.TypedExpr)) =
+  match decls with
+  | Nil -> (list_reverse(globals_acc), list_reverse(runtime_acc))
+  | Cons d rest ->
+      match d with
+      | typed_ast.TLetDecl name body ->
+          match eval_const_expr_ir(body) with
+          | Just ir_literal ->
+              classify_let_decls_ir_acc(rest,
+                Cons(sprout_ir.IRGlobalDecl(name, "i64", sprout_ir.GlobalConst(ir_literal)), globals_acc),
+                runtime_acc)
+          | Nothing ->
+              classify_let_decls_ir_acc(rest,
+                Cons(sprout_ir.IRGlobalDecl(name, "i64", sprout_ir.GlobalZeroInit), globals_acc),
+                Cons((name, body), runtime_acc))
+      | _ -> classify_let_decls_ir_acc(rest, globals_acc, runtime_acc)
+
+# Synthesize @__sprout_init_globals: evaluate each runtime-let body in
+# sequence, IRStoreGlobal the result into the corresponding @name slot,
+# end with `ret void`.  Mirrors codegen.sprout:3276-3297.
+fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.TypedExpr),
+                               ctors: Dict (Int, Int, Int, String),
+                               top_level: Set, let_names: Set,
+                               lambda_ctr_ref: Ref Int,
+                               lifted_idx_ref: Ref (Dict Int)) ->
+    Result String sprout_ir.IRFunction !{IO} =
+  do
+    lifted_ref <- ref_new(Nil)
+    match synthesize_init_body_loop(runtime_lets, ctors, "entry", Nil, Nil, 0,
+                                     lifted_ref, top_level, let_names,
+                                     lambda_ctr_ref, lifted_idx_ref) with
+    | Err msg -> Err(msg)
+    | Ok pair ->
+        match pair with
+        | (blocks, cur_lbl, cur_ops, _next_idx) ->
+            Ok(sprout_ir.IRFunction("__sprout_init_globals", Nil, "void",
+                                    list_append(blocks,
+                                      Cons(sprout_ir.IRBlock(cur_lbl,
+                                             list_append(cur_ops,
+                                               Cons(sprout_ir.IRRetVoid, Nil))),
+                                      Nil))))
+
+fn synthesize_init_body_loop(runtime_lets: List (String, typed_ast.TypedExpr),
+                              ctors: Dict (Int, Int, Int, String),
+                              cur_label: String,
+                              cur_ops: List sprout_ir.IROp,
+                              blocks: List sprout_ir.IRBlock,
+                              idx: Int,
+                              lifted_ref: Ref (List sprout_ir.IRFunction),
+                              top_level: Set, let_names: Set,
+                              lambda_ctr_ref: Ref Int,
+                              lifted_idx_ref: Ref (Dict Int)) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, Int) !{IO} =
+  match runtime_lets with
+  | Nil -> Ok((blocks, cur_label, cur_ops, idx))
+  | Cons head rest ->
+      match head with
+      | (name, body) ->
+          match translate_expr(body, Nil, ctors, idx, cur_label, cur_ops,
+                                dict_empty(), lifted_ref, top_level, let_names,
+                                lambda_ctr_ref, lifted_idx_ref, "%t") with
+          | Err msg -> Err(msg)
+          | Ok body_r ->
+              match body_r with
+              | (body_blocks, body_lbl, body_ops, body_result, next_idx) ->
+                  synthesize_init_body_loop(rest, ctors, body_lbl,
+                    list_append(body_ops, Cons(sprout_ir.IRStoreGlobal(name, body_result), Nil)),
+                    list_append(blocks, body_blocks), next_idx,
+                    lifted_ref, top_level, let_names,
+                    lambda_ctr_ref, lifted_idx_ref)
+
 # translate_program: top-level entry.  Accepts a TypedProgram (the output of
 # compile_phase_recheck) and returns either (IRProgram, next-idx-per-fn) or an
 # Err describing the first unsupported AST node encountered.
@@ -2499,18 +2647,45 @@ export fn translate_program(prog: typed_ast.TypedProgram) ->
             lambda_ctr_ref <- ref_new(0)
             # Accumulates lifted-lambda name → next-free-idx for the rooting pass.
             lifted_idx_ref <- ref_new(dict_empty())
-            match translate_decls(decls, ctor_dict, Nil, dict_empty(),
-                                  build_top_level_set(decls, ctor_dict),
-                                  lambda_ctr_ref, lifted_idx_ref) with
-            | Err msg -> Err(msg)
-            | Ok pair ->
-                match pair with
-                | (fns, idx_map) ->
-                    do
-                      lifted_idx <- ref_read(lifted_idx_ref)
-                      # Merge lifted-lambda indices into idx_map so the rooting
-                      # pass picks fresh names that don't collide with
-                      # %t$0..%t$(n_caps-1) already used by IRLoadEnvSlot.
-                      match merge_idx_dicts(idx_map, lifted_idx) with
-                      | Err msg -> Err(msg)
-                      | Ok merged -> Ok((sprout_ir.IRProgram(fns, ctor_regs), merged))
+            # M3 PR 5: top-level let bindings.
+            let let_names = build_top_level_let_names(decls)
+            let top_level_set = build_top_level_set(decls, ctor_dict)
+            let classified = classify_let_decls_ir(decls)
+            translate_program_after_classify(decls, ctor_dict, ctor_regs,
+                                              classified, top_level_set, let_names,
+                                              lambda_ctr_ref, lifted_idx_ref)
+
+# Helper for translate_program's post-classify pipeline.  Extracted so the
+# match nesting stays linear and avoids deep do-block indentation.
+fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
+                                    ctors: Dict (Int, Int, Int, String),
+                                    ctor_regs: List sprout_ir.CtorReg,
+                                    classified: (List sprout_ir.IRGlobalDecl, List (String, typed_ast.TypedExpr)),
+                                    top_level_set: Set, let_names: Set,
+                                    lambda_ctr_ref: Ref Int,
+                                    lifted_idx_ref: Ref (Dict Int)) ->
+    Result String (sprout_ir.IRProgram, Dict Int) !{IO} =
+  match classified with
+  | (let_globals, runtime_lets) ->
+      match translate_decls(decls, ctors, Nil, dict_empty(),
+                             top_level_set, let_names,
+                             lambda_ctr_ref, lifted_idx_ref) with
+      | Err msg -> Err(msg)
+      | Ok pair ->
+          match pair with
+          | (fns, idx_map) ->
+              do
+                lifted_idx <- ref_read(lifted_idx_ref)
+                match merge_idx_dicts(idx_map, lifted_idx) with
+                | Err msg -> Err(msg)
+                | Ok merged ->
+                    match runtime_lets with
+                    | Nil -> Ok((sprout_ir.IRProgram(fns, let_globals, ctor_regs), merged))
+                    | _ ->
+                        match synthesize_init_globals_fn(runtime_lets, ctors,
+                                                          top_level_set, let_names,
+                                                          lambda_ctr_ref, lifted_idx_ref) with
+                        | Err msg -> Err(msg)
+                        | Ok init_fn ->
+                            Ok((sprout_ir.IRProgram(list_append(fns, Cons(init_fn, Nil)),
+                                                    let_globals, ctor_regs), merged))

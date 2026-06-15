@@ -46,7 +46,7 @@ fn test1_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%t4", "%t1", "%t3"),
         Cons(sprout_ir.IRRet("%t4"), Nil))))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # ---------------------------------------------------------------------------
 # Test 2: %ab live across the second concat (which is a trigger).
@@ -69,7 +69,7 @@ fn test2_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%r", "%ab", "%cd"),
         Cons(sprout_ir.IRRet("%r"), Nil))))))))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # ---------------------------------------------------------------------------
 # Test 3: two heap values live across a trigger, plus a 1-root and another
@@ -97,7 +97,7 @@ fn test3_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%r", "%t1", "%ef"),
         Cons(sprout_ir.IRRet("%r"), Nil))))))))))))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # ---------------------------------------------------------------------------
 # Test 4: phi-of-heap with a trigger AFTER the join — validates the load-
@@ -131,7 +131,7 @@ fn test4_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRStrConcat("%r", "%phi", "%zw"),
         Cons(sprout_ir.IRRet("%r"), Nil))))))),
       Nil))))),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 # ---------------------------------------------------------------------------
 # Test 5: heap param live across a trigger (bug S2 regression).
@@ -156,7 +156,7 @@ fn test5_program() -> sprout_ir.IRProgram =
         Cons(sprout_ir.IRMakeCtor("%ctor", "T3", 0, Cons("%s", Cons("%z0", Cons("%z0", Nil)))),
         Cons(sprout_ir.IRRet("%ctor"), Nil))))),
       Nil)),
-    Nil), Nil)
+    Nil), Nil, Nil)
 
 fn main() -> Unit !{IO} =
   do

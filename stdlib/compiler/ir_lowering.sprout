@@ -111,12 +111,15 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   match op with
   | sprout_ir.IRConst name n -> "  " ++ name ++ " = add i64 0, " ++ int_to_string(n)
   | sprout_ir.IRRet name -> "  ret " ++ ret_ty ++ " " ++ name
+  | sprout_ir.IRRetVoid -> "  ret void"
   | sprout_ir.IRIAdd r a b -> "  " ++ r ++ " = add i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRISub r a b -> "  " ++ r ++ " = sub i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIMul r a b -> "  " ++ r ++ " = mul i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIDiv r a b -> "  " ++ r ++ " = sdiv i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRBoolNot r a -> "  " ++ r ++ " = xor i64 " ++ a ++ ", 1"
   | sprout_ir.IRINeg r a -> "  " ++ r ++ " = sub i64 0, " ++ a
+  | sprout_ir.IRLoadGlobal r name -> "  " ++ r ++ " = load i64, ptr @" ++ name
+  | sprout_ir.IRStoreGlobal name v -> "  store i64 " ++ v ++ ", ptr @" ++ name
   | sprout_ir.IRICmp r pred a b -> "  " ++ r ++ " = icmp " ++ pred ++ " i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRBr lbl -> "  br label %" ++ lbl
   | sprout_ir.IRCondBr cond t e -> "  br i1 " ++ cond ++ ", label %" ++ t ++ ", label %" ++ e
@@ -343,10 +346,48 @@ fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg) -> String =
 # @main.  When validate_main_body is lifted, keep these calls at the start
 # of entry so the runtime's g_ctor_meta[] table is populated before any
 # heap allocation or GC tracing can occur.
-fn main_shim(regs: List sprout_ir.CtorReg) -> String =
+fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool) -> String =
   "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n" ++
     emit_ctor_reg_calls(regs) ++
+    init_call(has_init) ++
     "  ret i32 0\n}\n"
+
+# Emit the @__sprout_init_globals() call after ctor registration, if there
+# are any runtime-computed top-level lets to initialize.  M3 PR 5; mirrors
+# codegen.sprout:3093-3095.
+fn init_call(has_init: Bool) -> String =
+  if has_init then "  call void @__sprout_init_globals()\n"
+  else ""
+
+# Emit the module-header global declarations for top-level lets.
+# Each IRGlobalDecl produces ONE LLVM `@name = ...` line.  Const-eligible
+# lets become `private constant`; runtime-computed lets become `global`
+# with zeroinit and are populated by @__sprout_init_globals at startup.
+# M3 PR 5; mirrors codegen.sprout:3950-3966.
+fn lower_globals(globals: List sprout_ir.IRGlobalDecl) -> String =
+  match globals with
+  | Nil -> ""
+  | Cons g rest ->
+      match g with
+      | sprout_ir.IRGlobalDecl name lltype init_form ->
+          (match init_form with
+           | sprout_ir.GlobalConst ir_literal ->
+               "@" ++ name ++ " = private constant " ++ lltype ++ " " ++ ir_literal ++ "\n"
+           | sprout_ir.GlobalZeroInit ->
+               "@" ++ name ++ " = global " ++ lltype ++ " zeroinitializer\n")
+          ++ lower_globals(rest)
+
+# True if any IRGlobalDecl in the list uses GlobalZeroInit (a runtime-let).
+# Used by main_shim to decide whether to emit the init-fn call.
+fn any_runtime_global(globals: List sprout_ir.IRGlobalDecl) -> Bool =
+  match globals with
+  | Nil -> false
+  | Cons g rest ->
+      match g with
+      | sprout_ir.IRGlobalDecl _ _ init_form ->
+          (match init_form with
+           | sprout_ir.GlobalZeroInit -> true
+           | _ -> any_runtime_global(rest))
 
 # String-constant collection pre-pass.  Walks every IRStrConst in document
 # order, allocates @.str.K names, and produces:
@@ -407,14 +448,18 @@ fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
 # lower_program: top-level entry.  Returns the complete LLVM IR text.
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =
   match prog with
-  | sprout_ir.IRProgram fns ctor_regs ->
+  | sprout_ir.IRProgram fns globals ctor_regs ->
       match collect_str_consts(fns) with
-      | (globals_text, fn_tables, _) ->
-          lower_program_body(fns, ctor_regs, globals_text, fn_tables)
+      | (str_globals_text, fn_tables, _) ->
+          lower_program_body(fns, globals, ctor_regs, str_globals_text, fn_tables)
 
-fn lower_program_body(fns: List sprout_ir.IRFunction, ctor_regs: List sprout_ir.CtorReg,
-                      globals_text: String, fn_tables: Dict (Dict (String, Int))) -> String =
-  ir_header() ++ globals_text ++ ctor_globals ++
-    (if globals_text == "" && ctor_globals == "" then "" else "\n") ++
-    lower_fns(fns, fn_tables) ++ main_shim(ctor_regs)
+fn lower_program_body(fns: List sprout_ir.IRFunction,
+                      let_globals: List sprout_ir.IRGlobalDecl,
+                      ctor_regs: List sprout_ir.CtorReg,
+                      str_globals_text: String,
+                      fn_tables: Dict (Dict (String, Int))) -> String =
+  ir_header() ++ str_globals_text ++ ctor_globals ++ let_globals_text ++
+    (if str_globals_text == "" && ctor_globals == "" && let_globals_text == "" then "" else "\n") ++
+    lower_fns(fns, fn_tables) ++ main_shim(ctor_regs, any_runtime_global(let_globals))
   where ctor_globals = collect_ctor_globals(ctor_regs)
+        let_globals_text = lower_globals(let_globals)
