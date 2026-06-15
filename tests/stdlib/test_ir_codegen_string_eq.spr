@@ -1,0 +1,54 @@
+# Verifies that String equality (`==` / `!=`) lowers correctly via
+# --use-ir-codegen (M3 PR 9).
+#
+# Before PR 9: --use-ir-codegen errors with
+#   ERROR: ast_to_ir: binary op '==' requires Int operands
+# for any source that compares two String values.  The binary-op handler
+# had a monomorphic int-type guard that rejected all other operand types.
+#
+# After PR 9: a special-case sits before the int-type guard in
+# translate_binary.  When both operands are String-typed and op is `==`
+# or `!=`, it emits IRStrEq (a new IR op):
+#
+#   IRStrEq <result> <lhs-i64> <rhs-i64>
+#     →  %result$lptr = inttoptr i64 %lhs to ptr
+#        %result$rptr = inttoptr i64 %rhs to ptr
+#        %result$i1   = call i1 @str_eq(ptr %result$lptr, ptr %result$rptr)
+#        %result      = zext i1 %result$i1 to i64
+#
+# For `!=`, an IRBoolNot (`xor i64 %r, 1`) follows IRStrEq.
+# Mirrors direct codegen's emit_ptr_comparison (codegen.sprout ~2094).
+#
+# This file defines representative functions so the --use-ir-codegen
+# compile+opt-verify path checks both ops in isolation and composition.
+# Runtime-level correctness is covered by the stdlib test suite
+# (direct-codegen path: `just test`).
+
+# String == in isolation.
+fn str_eq_fn(a: String, b: String) -> Bool = a == b
+
+# String != in isolation.
+fn str_neq_fn(a: String, b: String) -> Bool = a != b
+
+# String == as an if-condition — exercises the IRStrEq → IRTruncI64ToI1
+# path (the zext'd i64 Bool is re-narrowed before the br i1).
+fn classify(s: String) -> String =
+  if s == "yes" then "positive" else "other"
+
+# String != as an if-condition.
+fn non_empty(s: String) -> Bool =
+  s != ""
+
+# Both ops composed in the same function — tests that successive IRStrEq
+# ops in one block don't clobber each other's SSA names.
+fn same_or_empty(a: String, b: String) -> Bool =
+  (a == b) || (b == "")
+
+# String == chained — exercises multiple IRStrEq in the same function,
+# covering the common real-world pattern of keyword checking.
+fn is_keyword(s: String) -> Bool =
+  s == "let" || s == "fn" || s == "if" || s == "then" || s == "else"
+
+# Trivial main — required by the compiler; no IO until do-block support
+# lands in the IR path.
+fn main() -> Unit !{IO} = ()

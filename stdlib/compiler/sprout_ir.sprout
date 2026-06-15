@@ -135,6 +135,14 @@ export type IROp (..) =
   | IRStrConst String String String
   | IRStrSlice String String String String
   | IRStrConcat String String String
+  # IRStrEq <result> <lhs> <rhs>  — String equality (lowers to @str_eq).
+  # Both operands are i64-uniform String handles.  Lowering coerces each
+  # to ptr (inttoptr), calls `i1 @str_eq(ptr, ptr)`, then zexts the i1
+  # result to i64 so that downstream consumers see the Bool i64 encoding.
+  # This op is emitted by translate_binary for `==` / `!=` on String operands;
+  # `!=` appends IRBoolNot on the i64 result.
+  # Mirrors direct codegen's emit_ptr_comparison (codegen.sprout ~2094).
+  | IRStrEq String String String
   # IRStrFromInt's IR-op name diverges from the runtime name; it lowers to @int_to_string.
   | IRStrFromInt String String
   # IRMakeCtor <result> <ctor-name> <tag> <args>
@@ -340,6 +348,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = str_slice " ++ s ++ ", " ++ start ++ ", " ++ len
   | IRStrConcat r a b ->
       "    " ++ r ++ " = str_concat " ++ a ++ ", " ++ b
+  | IRStrEq r a b ->
+      "    " ++ r ++ " = str_eq " ++ a ++ ", " ++ b
   | IRStrFromInt r n ->
       "    " ++ r ++ " = int_to_string " ++ n
   | IRMakeCtor r name tag args ->

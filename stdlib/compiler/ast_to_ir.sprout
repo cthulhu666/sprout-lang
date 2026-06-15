@@ -1153,6 +1153,40 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                          list_append(rcur_ops,
                            Cons(sprout_ir.IRStrConcat(fresh_name(name_prefix, idx2), l_name, r_name), Nil)),
                          fresh_name(name_prefix, idx2), idx2 + 1))
+  # M3 PR 9: `==` and `!=` on String operands lower to @str_eq (i1 result,
+  # zext'd to i64 for Bool ABI).  Must be before the Int-type guard below.
+  # Direct codegen's equivalent: emit_ptr_comparison (codegen.sprout ~2094).
+  # `!=` is `==` followed by IRBoolNot (xor i64 %r, 1) — same as other Bool
+  # negation in the IR pipeline (PR 3's IRBoolNot op).
+  else if (op == "==" || op == "!=")
+       && is_string_type(typed_ast.typed_expr_type(left))
+       && is_string_type(typed_ast.typed_expr_type(right))
+  then
+    match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
+                         captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                         name_prefix) with
+    | Err msg -> Err(msg)
+    | Ok lr ->
+        match lr with
+        | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
+            match translate_expr(right, params, ctors, idx1, lcur_lbl, lcur_ops,
+                                 captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                                 name_prefix) with
+            | Err msg -> Err(msg)
+            | Ok rr ->
+                match rr with
+                | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
+                    if op == "=="
+                    then Ok((list_append(lblocks, rblocks), rcur_lbl,
+                              list_append(rcur_ops,
+                                Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx2), l_name, r_name), Nil)),
+                              fresh_name(name_prefix, idx2), idx2 + 1))
+                    else Ok((list_append(lblocks, rblocks), rcur_lbl,
+                              list_append(rcur_ops,
+                                Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx2), l_name, r_name),
+                                Cons(sprout_ir.IRBoolNot(fresh_name(name_prefix, idx2 + 1),
+                                                         fresh_name(name_prefix, idx2)), Nil))),
+                              fresh_name(name_prefix, idx2 + 1), idx2 + 2))
   else if ! (is_int_type(typed_ast.typed_expr_type(left)) && is_int_type(typed_ast.typed_expr_type(right)))
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int operands")
   else
