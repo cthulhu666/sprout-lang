@@ -107,7 +107,13 @@ for f in "${CORPUS[@]}"; do
   file_warnings=0
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    esc=$(printf '%s\n' "$name" | sed -E 's/[.\\^$*+?()[\]{}|]/\\&/g')
+    # POSIX-portable bracket ordering: `]` immediately after `[` is literal,
+    # and trailing `[` is literal too.  The previous pattern `[.\\^$*+?()[\]{}|]`
+    # parsed correctly on BSD sed (macOS) but GNU sed (Linux/CI) interpreted
+    # the inner `\]` as terminating the class, leaving `{}` outside as an
+    # empty quantifier → "sed: Invalid content of \{\}" error.  Reproduced
+    # via the dev box (Debian + LLVM-16); fix verified there.
+    esc=$(printf '%s\n' "$name" | sed -E 's/[].\\^$*+?(){}|[]/\\&/g')
     direct_lines=$(grep -E "(^| )${esc}( |\\(|$)" "$direct_sig" | LC_ALL=C sort)
     typed_lines=$(grep -E "(^| )${esc}( |\\(|$)" "$typed_sig" | LC_ALL=C sort)
     if [[ "$direct_lines" != "$typed_lines" ]]; then
