@@ -570,13 +570,20 @@ fn is_unit_type(t: types.Type) -> Bool =
 
 # Scalar argument types accepted by IRCall / IRApplyClosure (direct and
 # closure call sites).  All IR values are i64; the typechecker is the source
-# of truth for type compatibility.  Unit is rejected (no LLVM value).  Bool
-# is rejected pending end-to-end validation of Bool-flowing-as-i64 through
-# call sites (post /code-review fix #2 the IR shape is internally consistent,
-# but the comparison-result-into-call path needs the IRZext insertion tracked
-# at /code-review-v2 finding #3 before the rejection can be lifted).
-fn is_supported_arg_type(t: types.Type) -> Bool =
-  ! is_bool_type (t) && ! is_unit_type (t)
+# of truth for type compatibility.
+#
+# Bool: accepted.  TBool emits IRConst (i64 0/1) — the i64-uniform encoding
+# validated by /code-review fix #2.  Comparison results are widened to i64
+# by IRZextI1ToI64 before reaching a call site, so all Bool-valued args
+# arrive as i64.  (M3 PR 10)
+#
+# Unit: accepted.  TUnit emits IRConst(name, 0) — the i64 0 sentinel used by
+# direct codegen (codegen.sprout val_make(ll_i64(), "0")).  Every parameter
+# slot is filled; the callee convention is unchanged.  (M3 PR 10)
+#
+# Ctor field args use the separate is_supported_ctor_arg_type guard below,
+# which keeps its own deferred restrictions on Bool and Unit.
+fn is_supported_arg_type(_t: types.Type) -> Bool = true
 
 # Ctor field argument types accepted by translate_args_ctor.
 #
@@ -727,7 +734,13 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
            list_append(cur_ops, Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), s), Nil)),
            fresh_name(name_prefix, idx + 1), idx + 2))
   | typed_ast.TChar _ _ _ -> Err("ast_to_ir: Char literal not yet supported")
-  | typed_ast.TUnit _ _ -> Err("ast_to_ir: Unit literal not yet supported")
+  | typed_ast.TUnit _ _ ->
+      # Direct codegen convention: Unit has no meaningful value; emit i64 0
+      # sentinel (mirrors codegen.sprout val_make(ll_i64(), "0")).  The
+      # callee's parameter slot is filled; the value is never observed.
+      Ok((Nil, cur_label,
+           list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
+           fresh_name(name_prefix, idx), idx + 1))
   | typed_ast.TTuple items _ _ ->
       # M3 PR 7: tuple construction.  Translate each element in left-to-right
       # order, then emit IRMakeTuple which lowers to sprout_alloc_tuple_blob

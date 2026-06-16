@@ -1,0 +1,33 @@
+# Verifies that Bool and Unit values lower correctly as call arguments
+# via --use-ir-codegen (M3 PR 10).
+#
+# Before PR 10: --use-ir-codegen errors with
+#   ERROR: ast_to_ir: call argument type not supported (Bool and Unit cannot be passed as i64)
+# whenever a call site passes a Bool or Unit-typed expression.
+# This blocked the entire stdlib test harness because assert_true(state, msg, cond)
+# passes a Bool as its third argument.
+#
+# After PR 10:
+# - Bool: is_supported_arg_type accepts Bool; TBool already emits IRConst (i64 0/1)
+#   via the /code-review fix #2 path, so Bool call args flow as i64 with no new IR ops.
+# - Unit: is_supported_arg_type accepts Unit; TUnit now emits IRConst(name, 0)
+#   (i64 0 sentinel), mirroring direct codegen's val_make(ll_i64(), "0") convention
+#   (codegen.sprout line 1776-1777).
+
+# Bool passed as a call argument.
+fn negate(b: Bool) -> Bool = if b then false else true
+
+# Unit passed as a call argument.
+fn drop_unit(_u: Unit) -> Int = 42
+
+# Calls both — exercises Bool and Unit arg paths in the same function.
+fn caller() -> Int =
+  if negate(true) then drop_unit(()) else 0
+
+# Bool arg from a comparison result (not just a literal) — tests that the
+# i64-valued zext path flows into call args correctly.
+fn negate_cmp(x: Int, y: Int) -> Bool = negate(x == y)
+
+# Trivial main — required by the compiler; no IO until do-block support
+# lands in the IR path.
+fn main() -> Unit !{IO} = ()

@@ -20,101 +20,101 @@
 #   PR 7 — tuple expressions + TuplePattern       ✓ this PR
 #   PR 8 — nested constructor patterns            ✓ this PR
 #   PR 9 — String equality `==` / `!=`            ✓ this PR
+#   PR 10 — Bool and Unit as i64 call args        ✓ this PR
 #
-# Bucket breakdown after PR 9 closes (re-probed):
-#   74 entries — Bool and Unit cannot be passed as i64
-#                (String eq cleared; Bool/Unit call-arg ABI now dominates)
-#   10 entries — do-block + IO + main body (milestone-level blocker)
+# Bucket breakdown after PR 10 closes (re-probed):
+#   84 entries — do-block not yet supported
+#                (Bool/Unit arg ABI cleared; do-block now dominates)
 #    2 entries — pre-existing direct-codegen xfails (unresolved names in source)
 
 # === examples/ ===
-examples/aoc_2025_day_1.sprout                 # do-block + IO + main body
-examples/aoc_2025_day_2.sprout                 # do-block + IO + main body
-examples/aoc_2025_day_3.sprout                 # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/aoc_2025_day_4.sprout                 # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/aoc_2025_day_5.sprout                 # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/astar.sprout                          # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/collections_demo.sprout               # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/do_notation_demo.sprout               # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/factorial.sprout                      # do-block + IO + main body
-examples/fizzbuzz.sprout                       # do-block + IO + main body
-examples/foldable_demo.sprout                  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/hello.sprout                          # do-block + IO + main body
-examples/http_echo_server.sprout               # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/http_get_cli.sprout                   # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/int_range_demo.sprout                 # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/io_do_demo.sprout                     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/io_result_do_demo.sprout              # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/json_demo.sprout                      # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/list_pattern_demo.sprout              # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/maybe_map.sprout                      # do-block + IO + main body
-examples/modules_demo.sprout                   # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/nqueens.sprout                        # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/process_demo.sprout                   # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/ref_tutorial.sprout                   # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/ref_union_find.sprout                 # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/regex_demo.sprout                     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/repl_hosted.sprout                    # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/result_demo.sprout                    # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/sentry_api.sprout                     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
+examples/aoc_2025_day_1.sprout                 # do-block not yet supported
+examples/aoc_2025_day_2.sprout                 # do-block not yet supported
+examples/aoc_2025_day_3.sprout                 # do-block not yet supported
+examples/aoc_2025_day_4.sprout                 # do-block not yet supported
+examples/aoc_2025_day_5.sprout                 # do-block not yet supported
+examples/astar.sprout                          # do-block not yet supported
+examples/collections_demo.sprout               # do-block not yet supported
+examples/do_notation_demo.sprout               # do-block not yet supported
+examples/factorial.sprout                      # do-block not yet supported
+examples/fizzbuzz.sprout                       # do-block not yet supported
+examples/foldable_demo.sprout                  # do-block not yet supported
+examples/hello.sprout                          # do-block not yet supported
+examples/http_echo_server.sprout               # do-block not yet supported
+examples/http_get_cli.sprout                   # do-block not yet supported
+examples/int_range_demo.sprout                 # do-block not yet supported
+examples/io_do_demo.sprout                     # do-block not yet supported
+examples/io_result_do_demo.sprout              # do-block not yet supported
+examples/json_demo.sprout                      # do-block not yet supported
+examples/list_pattern_demo.sprout              # do-block not yet supported
+examples/maybe_map.sprout                      # do-block not yet supported
+examples/modules_demo.sprout                   # do-block not yet supported
+examples/nqueens.sprout                        # do-block not yet supported
+examples/process_demo.sprout                   # do-block not yet supported
+examples/ref_tutorial.sprout                   # do-block not yet supported
+examples/ref_union_find.sprout                 # do-block not yet supported
+examples/regex_demo.sprout                     # do-block not yet supported
+examples/repl_hosted.sprout                    # do-block not yet supported
+examples/result_demo.sprout                    # do-block not yet supported
+examples/sentry_api.sprout                     # do-block not yet supported
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/tcp_echo_once.sprout                  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/tcp_echo_server.sprout                # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/text_demo.sprout                      # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/tuples.sprout                         # do-block + IO + main body
-examples/typeclass_collections_demo.sprout     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-examples/typeclass_functor_foldable_demo.sprout  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
+examples/string_templates.sprout               # do-block not yet supported
+examples/tcp_echo_once.sprout                  # do-block not yet supported
+examples/tcp_echo_server.sprout                # do-block not yet supported
+examples/text_demo.sprout                      # do-block not yet supported
+examples/tuples.sprout                         # do-block not yet supported
+examples/typeclass_collections_demo.sprout     # do-block not yet supported
+examples/typeclass_functor_foldable_demo.sprout  # do-block not yet supported
 
 # === tests/smoke_shapes/ ===
-tests/smoke_shapes/01_noparam.spr              # do-block + IO + main body
-tests/smoke_shapes/02_adtmatch.spr             # do-block + IO + main body
-tests/smoke_shapes/03_strconcat.spr            # do-block + IO + main body
-tests/smoke_shapes/04_generic.spr              # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/smoke_shapes/05_lambdaparams.spr         # do-block + IO + main body
-tests/smoke_shapes/06_tuple_param.spr          # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
+tests/smoke_shapes/01_noparam.spr              # do-block not yet supported
+tests/smoke_shapes/02_adtmatch.spr             # do-block not yet supported
+tests/smoke_shapes/03_strconcat.spr            # do-block not yet supported
+tests/smoke_shapes/04_generic.spr              # do-block not yet supported
+tests/smoke_shapes/05_lambdaparams.spr         # do-block not yet supported
+tests/smoke_shapes/06_tuple_param.spr          # do-block not yet supported
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_compute_eta_fwd_markers.spr  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_constrained_container_dispatch.spr  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_constrained_eta_codegen.spr  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_dbe_synthetic.spr            # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_deriving_eq.spr              # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_deriving_eq_parametric.spr   # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_deriving_ord.spr             # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_deriving_to_string.spr       # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_eq_operator_adt_dispatch.spr # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_fn_compose.spr               # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_instance_method_subst.spr    # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_arith.spr         # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_basic.spr         # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_calls.spr         # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_closures.spr      # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_control.spr       # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_ctors.spr         # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_match.spr         # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_codegen_strings.spr       # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_ir_rooting.spr               # Bool and Unit cannot be passed as i64 (assert_true passes Bool; do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_json.spr                     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_lexer_slice.spr              # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_list_pattern_runtime.spr     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_math.spr                     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_mutvec.spr                   # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_native_constrained_maybe_helper.spr  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_native_fold_indexed.spr      # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_process.spr                  # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_regex.spr                    # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_repl_navigation.spr          # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_return_type_dispatch.spr     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_set.spr                      # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_str_slice_bytes.spr          # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_string.spr                   # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_time.spr                     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_to_string.spr                # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_toplevel_let_closure.spr     # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_tuple_tostring.spr           # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_typeclass_laws.spr           # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
-tests/stdlib/test_wrap_type.spr                # Bool and Unit cannot be passed as i64 (do-block / Bool arg ABI not yet in IR path)
+tests/stdlib/test_collections.spr              # do-block not yet supported
+tests/stdlib/test_compute_eta_fwd_markers.spr  # do-block not yet supported
+tests/stdlib/test_constrained_container_dispatch.spr  # do-block not yet supported
+tests/stdlib/test_constrained_eta_codegen.spr  # do-block not yet supported
+tests/stdlib/test_dbe_synthetic.spr            # do-block not yet supported
+tests/stdlib/test_deriving_eq.spr              # do-block not yet supported
+tests/stdlib/test_deriving_eq_parametric.spr   # do-block not yet supported
+tests/stdlib/test_deriving_ord.spr             # do-block not yet supported
+tests/stdlib/test_deriving_to_string.spr       # do-block not yet supported
+tests/stdlib/test_eq_operator_adt_dispatch.spr # do-block not yet supported
+tests/stdlib/test_fn_compose.spr               # do-block not yet supported
+tests/stdlib/test_instance_method_subst.spr    # do-block not yet supported
+tests/stdlib/test_ir_codegen_arith.spr         # do-block not yet supported
+tests/stdlib/test_ir_codegen_basic.spr         # do-block not yet supported
+tests/stdlib/test_ir_codegen_calls.spr         # do-block not yet supported
+tests/stdlib/test_ir_codegen_closures.spr      # do-block not yet supported
+tests/stdlib/test_ir_codegen_control.spr       # do-block not yet supported
+tests/stdlib/test_ir_codegen_ctors.spr         # do-block not yet supported
+tests/stdlib/test_ir_codegen_match.spr         # do-block not yet supported
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # do-block not yet supported
+tests/stdlib/test_ir_codegen_strings.spr       # do-block not yet supported
+tests/stdlib/test_ir_rooting.spr               # do-block not yet supported
+tests/stdlib/test_json.spr                     # do-block not yet supported
+tests/stdlib/test_lexer_slice.spr              # do-block not yet supported
+tests/stdlib/test_list_pattern_runtime.spr     # do-block not yet supported
+tests/stdlib/test_math.spr                     # do-block not yet supported
+tests/stdlib/test_mutvec.spr                   # do-block not yet supported
+tests/stdlib/test_native_constrained_maybe_helper.spr  # do-block not yet supported
+tests/stdlib/test_native_fold_indexed.spr      # do-block not yet supported
+tests/stdlib/test_process.spr                  # do-block not yet supported
+tests/stdlib/test_regex.spr                    # do-block not yet supported
+tests/stdlib/test_repl_navigation.spr          # do-block not yet supported
+tests/stdlib/test_return_type_dispatch.spr     # do-block not yet supported
+tests/stdlib/test_set.spr                      # do-block not yet supported
+tests/stdlib/test_str_slice_bytes.spr          # do-block not yet supported
+tests/stdlib/test_string.spr                   # do-block not yet supported
+tests/stdlib/test_time.spr                     # do-block not yet supported
+tests/stdlib/test_to_string.spr                # do-block not yet supported
+tests/stdlib/test_toplevel_let_closure.spr     # do-block not yet supported
+tests/stdlib/test_tuple_tostring.spr           # do-block not yet supported
+tests/stdlib/test_typeclass_laws.spr           # do-block not yet supported
+tests/stdlib/test_wrap_type.spr                # do-block not yet supported
