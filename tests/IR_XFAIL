@@ -21,100 +21,99 @@
 #   PR 8 — nested constructor patterns            ✓ this PR
 #   PR 9 — String equality `==` / `!=`            ✓ this PR
 #   PR 10 — Bool and Unit as i64 call args        ✓ this PR
+#   PR 11 — do-block + IO + main body + Bool/Char ==  ✓ this PR — M3 corpus milestone closer
+#            Cleared: hello, factorial, fizzbuzz, maybe_map, tuples, smoke_shapes 01/02/05
 #
-# Bucket breakdown after PR 10 closes (re-probed):
-#   84 entries — do-block not yet supported
-#                (Bool/Unit arg ABI cleared; do-block now dominates)
-#    2 entries — pre-existing direct-codegen xfails (unresolved names in source)
+# Bucket breakdown after PR 11 closes (re-probed):
+#   ~36 entries — @append undefined (typeclass Semigroup dispatch gap; pre-existing)
+#   ~20 entries — @char_to_string undefined (Char literal / Char type ops not yet lowered)
+#    ~7 entries — do-block Maybe/Result bind not yet supported
+#    ~6 entries — Char literal not yet supported (ast_to_ir TChar case)
+#    ~2 entries — multiple definition of local 't0' (codegen dup-block bug; pre-existing)
+#    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
+#
+# Dominant new blocker: @char_to_string / Char literal (TChar lowering) + @append (typeclass)
 
 # === examples/ ===
-examples/aoc_2025_day_1.sprout                 # do-block not yet supported
-examples/aoc_2025_day_2.sprout                 # do-block not yet supported
-examples/aoc_2025_day_3.sprout                 # do-block not yet supported
-examples/aoc_2025_day_4.sprout                 # do-block not yet supported
-examples/aoc_2025_day_5.sprout                 # do-block not yet supported
-examples/astar.sprout                          # do-block not yet supported
-examples/collections_demo.sprout               # do-block not yet supported
-examples/do_notation_demo.sprout               # do-block not yet supported
-examples/factorial.sprout                      # do-block not yet supported
-examples/fizzbuzz.sprout                       # do-block not yet supported
-examples/foldable_demo.sprout                  # do-block not yet supported
-examples/hello.sprout                          # do-block not yet supported
-examples/http_echo_server.sprout               # do-block not yet supported
-examples/http_get_cli.sprout                   # do-block not yet supported
-examples/int_range_demo.sprout                 # do-block not yet supported
-examples/io_do_demo.sprout                     # do-block not yet supported
-examples/io_result_do_demo.sprout              # do-block not yet supported
-examples/json_demo.sprout                      # do-block not yet supported
-examples/list_pattern_demo.sprout              # do-block not yet supported
-examples/maybe_map.sprout                      # do-block not yet supported
-examples/modules_demo.sprout                   # do-block not yet supported
-examples/nqueens.sprout                        # do-block not yet supported
-examples/process_demo.sprout                   # do-block not yet supported
-examples/ref_tutorial.sprout                   # do-block not yet supported
-examples/ref_union_find.sprout                 # do-block not yet supported
-examples/regex_demo.sprout                     # do-block not yet supported
-examples/repl_hosted.sprout                    # do-block not yet supported
-examples/result_demo.sprout                    # do-block not yet supported
-examples/sentry_api.sprout                     # do-block not yet supported
+examples/aoc_2025_day_1.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
+examples/aoc_2025_day_2.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
+examples/aoc_2025_day_3.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
+examples/aoc_2025_day_4.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
+examples/aoc_2025_day_5.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
+examples/astar.sprout                          # @append undefined (typeclass Semigroup dispatch gap)
+examples/collections_demo.sprout               # Char literal not yet supported
+examples/do_notation_demo.sprout               # do-block Maybe/Result bind not yet supported
+examples/foldable_demo.sprout                  # @char_to_string undefined
+examples/http_echo_server.sprout               # do-block Maybe/Result bind not yet supported
+examples/http_get_cli.sprout                   # do-block Maybe/Result bind not yet supported
+examples/int_range_demo.sprout                 # @char_to_string undefined
+examples/io_do_demo.sprout                     # @char_to_string undefined
+examples/io_result_do_demo.sprout              # do-block Maybe/Result bind not yet supported
+examples/json_demo.sprout                      # @char_to_string undefined
+examples/list_pattern_demo.sprout              # @char_to_string undefined
+examples/modules_demo.sprout                   # @append undefined (typeclass Semigroup dispatch gap)
+examples/nqueens.sprout                        # @append undefined (typeclass Semigroup dispatch gap)
+examples/process_demo.sprout                   # @append undefined (typeclass Semigroup dispatch gap)
+examples/ref_tutorial.sprout                   # @char_to_string undefined
+examples/ref_union_find.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
+examples/regex_demo.sprout                     # @char_to_string undefined
+examples/repl_hosted.sprout                    # @char_to_string undefined
+examples/result_demo.sprout                    # @char_to_string undefined
+examples/sentry_api.sprout                     # @append undefined (typeclass Semigroup dispatch gap)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # do-block not yet supported
-examples/tcp_echo_once.sprout                  # do-block not yet supported
-examples/tcp_echo_server.sprout                # do-block not yet supported
-examples/text_demo.sprout                      # do-block not yet supported
-examples/tuples.sprout                         # do-block not yet supported
-examples/typeclass_collections_demo.sprout     # do-block not yet supported
-examples/typeclass_functor_foldable_demo.sprout  # do-block not yet supported
+examples/string_templates.sprout               # @append undefined (typeclass Semigroup dispatch gap)
+examples/tcp_echo_once.sprout                  # @append undefined (typeclass Semigroup dispatch gap)
+examples/tcp_echo_server.sprout                # @append undefined (typeclass Semigroup dispatch gap)
+examples/text_demo.sprout                      # @char_to_string undefined
+examples/typeclass_collections_demo.sprout     # @append undefined (typeclass Semigroup dispatch gap)
+examples/typeclass_functor_foldable_demo.sprout  # @append undefined (typeclass Semigroup dispatch gap)
 
 # === tests/smoke_shapes/ ===
-tests/smoke_shapes/01_noparam.spr              # do-block not yet supported
-tests/smoke_shapes/02_adtmatch.spr             # do-block not yet supported
-tests/smoke_shapes/03_strconcat.spr            # do-block not yet supported
-tests/smoke_shapes/04_generic.spr              # do-block not yet supported
-tests/smoke_shapes/05_lambdaparams.spr         # do-block not yet supported
-tests/smoke_shapes/06_tuple_param.spr          # do-block not yet supported
+tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Semigroup dispatch gap)
+tests/smoke_shapes/04_generic.spr              # @char_to_string undefined
+tests/smoke_shapes/06_tuple_param.spr          # @char_to_string undefined
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # do-block not yet supported
-tests/stdlib/test_compute_eta_fwd_markers.spr  # do-block not yet supported
-tests/stdlib/test_constrained_container_dispatch.spr  # do-block not yet supported
-tests/stdlib/test_constrained_eta_codegen.spr  # do-block not yet supported
-tests/stdlib/test_dbe_synthetic.spr            # do-block not yet supported
-tests/stdlib/test_deriving_eq.spr              # do-block not yet supported
-tests/stdlib/test_deriving_eq_parametric.spr   # do-block not yet supported
-tests/stdlib/test_deriving_ord.spr             # do-block not yet supported
-tests/stdlib/test_deriving_to_string.spr       # do-block not yet supported
-tests/stdlib/test_eq_operator_adt_dispatch.spr # do-block not yet supported
-tests/stdlib/test_fn_compose.spr               # do-block not yet supported
-tests/stdlib/test_instance_method_subst.spr    # do-block not yet supported
-tests/stdlib/test_ir_codegen_arith.spr         # do-block not yet supported
-tests/stdlib/test_ir_codegen_basic.spr         # do-block not yet supported
-tests/stdlib/test_ir_codegen_calls.spr         # do-block not yet supported
-tests/stdlib/test_ir_codegen_closures.spr      # do-block not yet supported
-tests/stdlib/test_ir_codegen_control.spr       # do-block not yet supported
-tests/stdlib/test_ir_codegen_ctors.spr         # do-block not yet supported
-tests/stdlib/test_ir_codegen_match.spr         # do-block not yet supported
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # do-block not yet supported
-tests/stdlib/test_ir_codegen_strings.spr       # do-block not yet supported
-tests/stdlib/test_ir_rooting.spr               # do-block not yet supported
-tests/stdlib/test_json.spr                     # do-block not yet supported
-tests/stdlib/test_lexer_slice.spr              # do-block not yet supported
-tests/stdlib/test_list_pattern_runtime.spr     # do-block not yet supported
-tests/stdlib/test_math.spr                     # do-block not yet supported
-tests/stdlib/test_mutvec.spr                   # do-block not yet supported
-tests/stdlib/test_native_constrained_maybe_helper.spr  # do-block not yet supported
-tests/stdlib/test_native_fold_indexed.spr      # do-block not yet supported
-tests/stdlib/test_process.spr                  # do-block not yet supported
-tests/stdlib/test_regex.spr                    # do-block not yet supported
-tests/stdlib/test_repl_navigation.spr          # do-block not yet supported
-tests/stdlib/test_return_type_dispatch.spr     # do-block not yet supported
-tests/stdlib/test_set.spr                      # do-block not yet supported
-tests/stdlib/test_str_slice_bytes.spr          # do-block not yet supported
-tests/stdlib/test_string.spr                   # do-block not yet supported
-tests/stdlib/test_time.spr                     # do-block not yet supported
-tests/stdlib/test_to_string.spr                # do-block not yet supported
-tests/stdlib/test_toplevel_let_closure.spr     # do-block not yet supported
-tests/stdlib/test_tuple_tostring.spr           # do-block not yet supported
-tests/stdlib/test_typeclass_laws.spr           # do-block not yet supported
-tests/stdlib/test_wrap_type.spr                # do-block not yet supported
+tests/stdlib/test_collections.spr              # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_compute_eta_fwd_markers.spr  # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_constrained_container_dispatch.spr  # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_constrained_eta_codegen.spr  # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_dbe_synthetic.spr            # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_deriving_eq.spr              # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_deriving_eq_parametric.spr   # @char_to_string undefined
+tests/stdlib/test_deriving_ord.spr             # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_deriving_to_string.spr       # @char_to_string undefined
+tests/stdlib/test_eq_operator_adt_dispatch.spr # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_fn_compose.spr               # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_instance_method_subst.spr    # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_ir_codegen_arith.spr         # @char_to_string undefined (via prelude ToString Char)
+tests/stdlib/test_ir_codegen_basic.spr         # @char_to_string undefined (via prelude ToString Char)
+tests/stdlib/test_ir_codegen_calls.spr         # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_ir_codegen_closures.spr      # @char_to_string undefined
+tests/stdlib/test_ir_codegen_control.spr       # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_ir_codegen_ctors.spr         # Char literal not yet supported (lexer import)
+tests/stdlib/test_ir_codegen_match.spr         # Char literal not yet supported (lexer import)
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # Char literal not yet supported (lexer import)
+tests/stdlib/test_ir_codegen_strings.spr       # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_ir_rooting.spr               # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_json.spr                     # @char_to_string undefined
+tests/stdlib/test_lexer_slice.spr              # Char literal not yet supported (lexer import)
+tests/stdlib/test_list_pattern_runtime.spr     # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_math.spr                     # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_mutvec.spr                   # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_native_constrained_maybe_helper.spr  # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_native_fold_indexed.spr      # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_process.spr                  # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_regex.spr                    # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_repl_navigation.spr          # @char_to_string undefined
+tests/stdlib/test_return_type_dispatch.spr     # @char_to_string undefined
+tests/stdlib/test_set.spr                      # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_str_slice_bytes.spr          # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_string.spr                   # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_time.spr                     # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_to_string.spr                # @char_to_string undefined
+tests/stdlib/test_toplevel_let_closure.spr     # @char_to_string undefined
+tests/stdlib/test_tuple_tostring.spr           # @char_to_string undefined
+tests/stdlib/test_typeclass_laws.spr           # @append undefined (typeclass Semigroup dispatch gap)
+tests/stdlib/test_wrap_type.spr                # @char_to_string undefined

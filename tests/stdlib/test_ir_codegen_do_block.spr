@@ -1,0 +1,70 @@
+# M3 PR 11 — do-block + IO effects + main body lowering.
+#
+# No imports: self-contained Sprout functions with do-blocks that use only
+# pure arithmetic steps.  This keeps the emitted IR free of undeclared
+# extern references so `opt --passes=verify` passes.
+#
+# Do-blocks here are IO-typed functions (fn f() -> T !{IO}) but the steps
+# contain only let-bindings and pure arithmetic expressions.  The IO effect
+# annotation is an upper bound in Sprout — pure-body do-blocks are valid.
+#
+# The IR runner checks: compile exit-0 AND `opt --passes=verify` passes.
+# Behavioral correctness for do-blocks with real IO effects is exercised by
+# the broader stdlib test suite (test_ir_codegen_basic.spr, etc.) which now
+# compile successfully after this PR's TDo translation lands.
+
+# TDoExprStep (last-step value):
+# A do-block whose only step is an expression returns that expression's value.
+fn do_single_expr() -> Int !{IO} =
+  do
+    42
+
+# TDoLetStep: let binding inside a do-block.
+# `let x = N` binds `x` for subsequent steps; final step is the value.
+fn do_let_bind(n: Int) -> Int !{IO} =
+  do
+    let x = n + n
+    x + 1
+
+# TDoExprStep (non-last) + TDoExprStep (last):
+# Non-last TDoExprStep results are discarded; last step value returned.
+fn do_two_exprs(a: Int, b: Int) -> Int !{IO} =
+  do
+    a + b
+    a * b
+
+# TDoBindStep (plain IO) using a helper that returns Int !{IO}.
+# Verifies `name <- fn_call()` binds the i64 result correctly.
+fn identity_io(n: Int) -> Int !{IO} = n
+
+fn do_bind_plain_io(x: Int) -> Int !{IO} =
+  do
+    y <- identity_io(x)
+    y + y
+
+# Nested binds: multiple TDoBindStep steps, each result used in the next.
+fn do_nested_binds(a: Int, b: Int) -> Int !{IO} =
+  do
+    x <- identity_io(a)
+    y <- identity_io(b)
+    x + y
+
+# Mixed: TDoLetStep + TDoBindStep + TDoExprStep.
+fn do_mixed(n: Int) -> Int !{IO} =
+  do
+    let base = n + 10
+    v <- identity_io(base)
+    v + v
+    v * 3
+
+# main with a TDo body: proves validate_main_body accepts TDo.
+# Uses a TUnit-returning do-block (all effects discarded).
+fn main() -> Unit !{IO} =
+  do
+    do_single_expr()
+    do_let_bind(3)
+    do_two_exprs(2, 5)
+    do_bind_plain_io(7)
+    do_nested_binds(4, 6)
+    _ <- do_mixed(2)
+    ()

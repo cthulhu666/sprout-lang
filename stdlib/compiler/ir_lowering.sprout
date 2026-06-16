@@ -301,7 +301,19 @@ fn ir_header() -> String =
   "declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n\n"
+  "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
+  # IO builtins used by programs after M3 PR 11 (do-block support) lands.
+  # @print is the polymorphic print builtin (i64 value → unit sentinel i64 0).
+  # @argv_get is declared in prelude (extern fn argv_get(idx: Int) -> Maybe String !{IO})
+  # and called by argv_get_loop; it is always reachable via prelude.
+  # Both signatures are i64-in / i64-out per the uniform i64 ABI.
+  # NOTE: @append is intentionally NOT declared here — it is a Semigroup typeclass
+  # method that gets DEFINED (not declared) in user programs via instance resolution;
+  # a blanket declare would conflict with the define in files that include Semigroup
+  # instances (produces "invalid redefinition" in LLVM). Files that call @append
+  # without a definition are a pre-existing typeclass dispatch gap (tracked in xfail).
+  "declare i64 @print(i64)\n" ++
+  "declare i64 @argv_get(i64)\n\n"
 
 # ---------------------------------------------------------------------------
 # Ctor-registration global-string collection pre-pass.
@@ -369,21 +381,41 @@ fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg) -> String =
   | Cons reg rest ->
       emit_ctor_reg_call(reg) ++ emit_ctor_reg_calls(rest)
 
-# Synthetic C-ABI main shim.  PR 1.5 still cannot lower the user's `main`
-# body in general (anything beyond `()` requires heap/IO ops that don't
-# arrive until M2), so we emit a minimal `int main(int, char**) { return
-# 0; }`.  The AST→IR translator rejects non-trivial `main` bodies so the
-# user gets a clean Err rather than a silently no-op binary.
+# Synthetic C-ABI main shim.  Emits ctor registrations + optional init
+# call + optional call to @__sprout_user_main (produced by ast_to_ir when
+# the user's `fn main` body is non-trivial).
 #
 # IMPORTANT: @sprout_register_ctor calls must run BEFORE any user code in
-# @main.  When validate_main_body is lifted, keep these calls at the start
-# of entry so the runtime's g_ctor_meta[] table is populated before any
-# heap allocation or GC tracing can occur.
-fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool) -> String =
+# @main so the runtime's g_ctor_meta[] table is populated before any heap
+# allocation or GC tracing can occur.
+#
+# M3 PR 11: has_user_main signals that ast_to_ir translated the user's
+# `fn main` body into @__sprout_user_main.  The shim calls it after the
+# ctor/init preamble.  A forward declare is emitted so the call type-checks
+# even when @__sprout_user_main appears later in the output.
+fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool, has_user_main: Bool) -> String =
   "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n" ++
     emit_ctor_reg_calls(regs) ++
     init_call(has_init) ++
+    user_main_call(has_user_main) ++
     "  ret i32 0\n}\n"
+
+# Emit the call to @__sprout_user_main() when the user's fn main has a body.
+# The call is i64 (all Sprout fns return i64); result is discarded.
+fn user_main_call(has_user_main: Bool) -> String =
+  if has_user_main then "  call i64 @__sprout_user_main()\n"
+  else ""
+
+# True if any IRFunction in the list has the given name.
+# Used to detect whether ast_to_ir produced @__sprout_user_main.
+# O(n) where n = number of functions.
+fn has_fn_named(name: String, fns: List sprout_ir.IRFunction) -> Bool =
+  match fns with
+  | Nil -> false
+  | Cons f rest ->
+      match f with
+      | sprout_ir.IRFunction fname _ _ _ ->
+          if fname == name then true else has_fn_named(name, rest)
 
 # Emit the @__sprout_init_globals() call after ctor registration, if there
 # are any runtime-computed top-level lets to initialize.  M3 PR 5; mirrors
@@ -493,6 +525,7 @@ fn lower_program_body(fns: List sprout_ir.IRFunction,
                       fn_tables: Dict (Dict (String, Int))) -> String =
   ir_header() ++ str_globals_text ++ ctor_globals ++ let_globals_text ++
     (if str_globals_text == "" && ctor_globals == "" && let_globals_text == "" then "" else "\n") ++
-    lower_fns(fns, fn_tables) ++ main_shim(ctor_regs, any_runtime_global(let_globals))
+    lower_fns(fns, fn_tables) ++ main_shim(ctor_regs, any_runtime_global(let_globals),
+                                            has_fn_named("__sprout_user_main", fns))
   where ctor_globals = collect_ctor_globals(ctor_regs)
         let_globals_text = lower_globals(let_globals)

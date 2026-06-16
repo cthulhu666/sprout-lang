@@ -568,6 +568,21 @@ fn is_unit_type(t: types.Type) -> Bool =
   | types.TConst name -> name == "Unit"
   | _ -> false
 
+# True iff t is a Maybe type (TApp (TConst "Maybe") _).
+# Mirrors codegen.sprout:is_maybe_type; duplicated here because codegen
+# does not export it.
+fn is_maybe_type(t: types.Type) -> Bool =
+  match t with
+  | types.TApp (types.TConst "Maybe") _ -> true
+  | _ -> false
+
+# True iff t is a Result type (TApp (TApp (TConst "Result") _) _).
+# Mirrors codegen.sprout:is_result_type.
+fn is_result_type(t: types.Type) -> Bool =
+  match t with
+  | types.TApp (types.TApp(types.TConst "Result") _) _ -> true
+  | _ -> false
+
 # Scalar argument types accepted by IRCall / IRApplyClosure (direct and
 # closure call sites).  All IR values are i64; the typechecker is the source
 # of truth for type compatibility.
@@ -782,7 +797,10 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                         fresh_name(name_prefix, idx1), idx1 + 1))
               else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
   | typed_ast.TRange _ _ _ _ -> Err("ast_to_ir: range not yet supported")
-  | typed_ast.TDo _ _ _ -> Err("ast_to_ir: do-block not yet supported")
+  | typed_ast.TDo steps _ _ ->
+      translate_do(steps, params, ctors, idx, cur_label, cur_ops,
+                   captures, lifted_ref, top_level, let_names, fn_arities,
+                   lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | typed_ast.TRecord _ _ _ _ -> Err("ast_to_ir: record not yet supported")
   | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: field access not yet supported")
 
@@ -797,6 +815,118 @@ fn translate_zero_arity_ctor(name: String, tag: Int, idx: Int,
   Ok((Nil, cur_label,
        list_append(cur_ops, Cons(sprout_ir.IRMakeCtor(fresh_name(prefix, idx), name, tag, Nil), Nil)),
        fresh_name(prefix, idx), idx + 1))
+
+# ---------------------------------------------------------------------------
+# translate_do — M3 PR 11
+# ---------------------------------------------------------------------------
+#
+# Lower a TDo step list into the flat SSA / block stream used throughout
+# this translator.  Mirrors codegen.sprout's emit_do for the three pure-IO
+# step kinds.  Maybe/Result bind is deferred (it requires multi-block phi
+# merge; those arms are guarded by a clear Err for now).
+#
+# Signature matches translate_expr: returns
+#   (completed_blocks, cur_label, cur_ops, result_ssa, next_idx)
+#
+# Step semantics (mirrors codegen.sprout:emit_do):
+#   TDoExprStep e      — emit e for side-effects; if last step the result IS
+#                        the do-block value; otherwise discard result.
+#   TDoLetStep name e  — emit e, bind name → SSA in captures; recurse; rest
+#                        provides the do-block value.
+#   TDoBindStep pat e  — emit e (plain IO: T !{IO}); bind VarPattern/Wildcard
+#                        directly to the i64 SSA result; recurse.  Maybe/Result
+#                        wrapping is detected and returns Err to keep parity
+#                        visible in the xfail list.
+#   Nil                — emit IRConst 0 (unit sentinel; mirrors codegen
+#                        zero_val / val_make(ll_i64(), "0")).
+#
+# O(n * k) where n = step count, k = per-step translate_expr cost.
+fn translate_do(steps: List typed_ast.TypedDoStep,
+                params: List String, ctors: Dict (Int, Int, Int, String),
+                idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
+                captures: Dict String,
+                lifted_ref: Ref (List sprout_ir.IRFunction),
+                top_level: Set, let_names: Set, fn_arities: Dict Int,
+                lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match steps with
+  | Nil ->
+      # Empty do-block: return unit sentinel (i64 0).
+      Ok((Nil, cur_label,
+           list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
+           fresh_name(name_prefix, idx), idx + 1))
+  | Cons step rest ->
+      match step with
+      | typed_ast.TDoExprStep e ->
+          match rest with
+          | Nil ->
+              # Last step: its value IS the do-block value.
+              translate_expr(e, params, ctors, idx, cur_label, cur_ops,
+                             captures, lifted_ref, top_level, let_names, fn_arities,
+                             lambda_ctr_ref, lifted_idx_ref, name_prefix)
+          | _ ->
+              # Non-last step: emit for side-effects, discard result SSA.
+              match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
+                                   captures, lifted_ref, top_level, let_names, fn_arities,
+                                   lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+              | Err msg -> Err(msg)
+              | Ok r ->
+                  match r with
+                  | (eblocks, elabel, eops, _discard, eidx) ->
+                      translate_do(rest, params, ctors, eidx, elabel, eops,
+                                   captures, lifted_ref, top_level, let_names, fn_arities,
+                                   lambda_ctr_ref, lifted_idx_ref, name_prefix)
+      | typed_ast.TDoLetStep name e ->
+          # Evaluate e; bind `name` to the result SSA in captures; continue.
+          match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
+                               captures, lifted_ref, top_level, let_names, fn_arities,
+                               lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+          | Err msg -> Err(msg)
+          | Ok r ->
+              match r with
+              | (eblocks, elabel, eops, ename, eidx) ->
+                  translate_do(rest, params, ctors, eidx, elabel, eops,
+                               dict_set(name, ename, captures),
+                               lifted_ref, top_level, let_names, fn_arities,
+                               lambda_ctr_ref, lifted_idx_ref, name_prefix)
+      | typed_ast.TDoBindStep pat e ->
+          # Plain IO bind: evaluate e and bind the i64 result to the pattern.
+          # Maybe/Result wrapping is unsupported — return Err to surface the gap.
+          if is_maybe_type(typed_ast.typed_expr_type(e)) || is_result_type(typed_ast.typed_expr_type(e))
+          then Err("ast_to_ir: do-block Maybe/Result bind not yet supported in IR codegen")
+          else
+            match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
+                                 captures, lifted_ref, top_level, let_names, fn_arities,
+                                 lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+            | Err msg -> Err(msg)
+            | Ok r ->
+                match r with
+                | (eblocks, elabel, eops, ename, eidx) ->
+                    match do_bind_captures(pat, ename, captures) with
+                    | Err msg -> Err(msg)
+                    | Ok new_captures ->
+                        translate_do(rest, params, ctors, eidx, elabel, eops,
+                                     new_captures, lifted_ref, top_level, let_names, fn_arities,
+                                     lambda_ctr_ref, lifted_idx_ref, name_prefix)
+
+# Extend the captures dict for a plain-IO TDoBindStep pattern.
+# VarPattern binds the SSA name directly.  WildcardPattern discards it.
+# Complex patterns (Tuple, Constructor, literal) are not yet supported;
+# return Err to surface the gap rather than silently producing wrong code.
+# O(n) where n = number of VarPattern leaves in pat.
+fn do_bind_captures(pat: ast.Pattern, ssa: String,
+                    captures: Dict String) -> Result String (Dict String) =
+  match pat with
+  | ast.VarPattern name _ -> Ok(dict_set(name, ssa, captures))
+  | ast.WildcardPattern _ -> Ok(captures)
+  | ast.TuplePattern _ _ -> Err("ast_to_ir: do-block bind to tuple pattern not yet supported")
+  | ast.ConstructorPattern _ _ _ -> Err("ast_to_ir: do-block bind to constructor pattern not yet supported")
+  | ast.IntPattern _ _ -> Err("ast_to_ir: do-block bind to int pattern not yet supported")
+  | ast.BoolPattern _ _ -> Err("ast_to_ir: do-block bind to bool pattern not yet supported")
+  | ast.StringPattern _ _ -> Err("ast_to_ir: do-block bind to string pattern not yet supported")
+  | ast.CharPattern _ _ -> Err("ast_to_ir: do-block bind to char pattern not yet supported")
+  | ast.UnitPattern _ -> Ok(captures)
 
 # Find the type of the first TVar with the given name inside expr.
 # Used by translate_lambda to check whether a captured variable is Bool-typed.
@@ -1166,14 +1296,17 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                          list_append(rcur_ops,
                            Cons(sprout_ir.IRStrConcat(fresh_name(name_prefix, idx2), l_name, r_name), Nil)),
                          fresh_name(name_prefix, idx2), idx2 + 1))
-  # M3 PR 9: `==` and `!=` on String operands lower to @str_eq (i1 result,
-  # zext'd to i64 for Bool ABI).  Must be before the Int-type guard below.
-  # Direct codegen's equivalent: emit_ptr_comparison (codegen.sprout ~2094).
+  # M3 PR 9: `==` and `!=` on String (and Char) operands lower to @str_eq
+  # (i1 result, zext'd to i64 for Bool ABI).  Must be before the Int-type
+  # guard below.  Direct codegen's equivalent: emit_ptr_comparison
+  # (codegen.sprout ~2094).  Char uses the same string-pointer representation
+  # at runtime as String (`Char is a UTF-8 string pointer at runtime` per
+  # prelude Eq Char instance comment), so it routes through the same arm.
   # `!=` is `==` followed by IRBoolNot (xor i64 %r, 1) — same as other Bool
   # negation in the IR pipeline (PR 3's IRBoolNot op).
   else if (op == "==" || op == "!=")
-       && is_string_type(typed_ast.typed_expr_type(left))
-       && is_string_type(typed_ast.typed_expr_type(right))
+       && (is_string_type(typed_ast.typed_expr_type(left)) || is_char_type(typed_ast.typed_expr_type(left)))
+       && (is_string_type(typed_ast.typed_expr_type(right)) || is_char_type(typed_ast.typed_expr_type(right)))
   then
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
                          captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
@@ -1200,6 +1333,30 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                                 Cons(sprout_ir.IRBoolNot(fresh_name(name_prefix, idx2 + 1),
                                                          fresh_name(name_prefix, idx2)), Nil))),
                               fresh_name(name_prefix, idx2 + 1), idx2 + 2))
+  # Bool equality: Bool is i64 in the IR (0 or 1), so `==` / `!=` lower
+  # to the same `icmp eq i64` path as Int.  This covers `condition == false`
+  # in stdlib/test.sprout (assert_false) and any user-written Bool == / !=.
+  # Must appear before the Int-only guard below to avoid a false rejection.
+  else if (op == "==" || op == "!=")
+       && is_bool_type(typed_ast.typed_expr_type(left))
+       && is_bool_type(typed_ast.typed_expr_type(right))
+  then
+    match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
+                         captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                         name_prefix) with
+    | Err msg -> Err(msg)
+    | Ok lr ->
+        match lr with
+        | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
+            match translate_expr(right, params, ctors, idx1, lcur_lbl, lcur_ops,
+                                 captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                                 name_prefix) with
+            | Err msg -> Err(msg)
+            | Ok rr ->
+                match rr with
+                | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
+                    finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops,
+                                  l_name, r_name, idx2, name_prefix)
   else if ! (is_int_type(typed_ast.typed_expr_type(left)) && is_int_type(typed_ast.typed_expr_type(right)))
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int operands")
   else
@@ -2782,20 +2939,6 @@ fn build_fn(name: String, params: List (String, sprout_ir.IRType), ret_ty: Strin
             blocks: List sprout_ir.IRBlock) -> sprout_ir.IRFunction =
   sprout_ir.IRFunction(name, params, ret_ty, blocks)
 
-# Accept `main` without translating it: the synthetic LLVM shim in
-# ir_lowering handles main regardless of its body.  Only TUnit bodies
-# are accepted at this milestone — IR codegen does not yet lower the
-# IO/print/do machinery that user mains typically need.  Tests that
-# need to drive translate_program for IR-shape assertions write their
-# subjects as bare top-level functions and omit `fn main` entirely
-# (see test_ir_codegen_match.spr translate_source helper).
-# /code-review fix #11: removed stale "TDo: relaxed in PR 2.5" comment
-# that referred to a change earlier reverted in this branch.
-fn validate_main_body(body: typed_ast.TypedExpr) -> Result String (Maybe sprout_ir.IRFunction) =
-  match body with
-  | typed_ast.TUnit _ _ -> Ok(Nothing)
-  | _ -> Err("ast_to_ir: main body must be () at this milestone — IR codegen does not yet lower IO/print")
-
 # translate_user_fn: returns (IRFunction, next-free-temp-index, lifted-lambdas).
 # The next-free index is the smallest idx never used as %tN/then_N/else_N/join_N
 # during body translation; the rooting pass (M2 PR 2.2) consumes it to allocate
@@ -2886,10 +3029,13 @@ fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, S
       # validate_reserved_namespace; no per-arm check needed here.
       if name == "main"
       then
-        match validate_main_body(body) with
-        | Err msg -> Err(msg)
-        | Ok Nothing -> Ok(Nothing)
-        | Ok (Just _) -> Err("ast_to_ir: validate_main_body unexpectedly returned a function")
+        # M3 PR 11: accept any main body.  A trivial TUnit body needs no IR
+        # (the C-ABI shim in ir_lowering handles @main); a non-trivial body
+        # (TCall, TDo, …) is translated as @__sprout_user_main with no params
+        # and called by the shim.  See ir_lowering.main_shim.
+        match body with
+        | typed_ast.TUnit _ _ -> Ok(Nothing)
+        | _ -> translate_user_fn("__sprout_user_main", params, body, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
       else translate_user_fn(name, params, body, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(Nothing)
   | typed_ast.TLetDecl _ _ -> Ok(Nothing)
