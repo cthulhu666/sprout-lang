@@ -748,7 +748,13 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       Ok((Nil, cur_label,
            list_append(cur_ops, Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), s), Nil)),
            fresh_name(name_prefix, idx + 1), idx + 2))
-  | typed_ast.TChar _ _ _ -> Err("ast_to_ir: Char literal not yet supported")
+  | typed_ast.TChar ch _ _ ->
+      # Char is stored as a UTF-8 string pointer (same ABI as String).
+      # Lower to IRStrConst with char_to_string(ch) as the value.
+      # Mirrors codegen.sprout TChar arm: emit_str_ptr(em, char_to_string(ch)).
+      Ok((Nil, cur_label,
+           list_append(cur_ops, Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_string(ch)), Nil)),
+           fresh_name(name_prefix, idx + 1), idx + 2))
   | typed_ast.TUnit _ _ ->
       # Direct codegen convention: Unit has no meaningful value; emit i64 0
       # sentinel (mirrors codegen.sprout val_make(ll_i64(), "0")).  The
@@ -2131,7 +2137,12 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                                 acc_blocks, acc_phi, captures, lifted_ref, top_level, let_names, fn_arities,
                                 lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.StringPattern _ _ -> Err("ast_to_ir: StringPattern in match not yet supported")
-  | ast.CharPattern _ _ -> Err("ast_to_ir: CharPattern in match not yet supported")
+  | ast.CharPattern ch _ ->
+      translate_match_arm_char(ch, body, rest_arms, branch_idx, base_idx,
+                               dispatch_lbl, join_lbl, match_ty, s_name, tag_name,
+                               params, ctors, idx, acc_blocks, acc_phi,
+                               captures, lifted_ref, top_level, let_names, fn_arities,
+                               lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.UnitPattern _ -> Err("ast_to_ir: UnitPattern in match not yet supported")
 
 # Translate body for an always-match arm (Wildcard or Var-after-binding).
@@ -2276,6 +2287,57 @@ fn translate_match_arm_bool(b: Bool, body: typed_ast.TypedExpr,
     fresh_arm_label(branch_idx + 1, base_idx),
     join_lbl, match_ty, s_name, tag_name, params, ctors,
     idx + 2, acc_blocks, acc_phi, captures,
+    lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
+    lifted_idx_ref, name_prefix)
+
+# Translate a CharPattern arm.
+# Char has the same runtime representation as String (UTF-8 string pointer i64).
+# Emit: IRStrConst for the char literal, IRStrEq (i64 Bool result), IRConst(1),
+# IRICmp eq i64 to convert the Bool i64 back to i1 for IRCondBr.
+# IRStrEq emits `zext i1 ... to i64`; IRCondBr requires i1; the extra
+# IRConst(1) + IRICmp pair converts the i64 Bool back to i1 for the branch.
+# Fresh name slots:
+#   idx   = raw GEP ptr (IRStrConst raw name)
+#   idx+1 = i64 ptrtoint result (IRStrConst result)
+#   idx+2 = IRStrEq i64 Bool result
+#   idx+3 = IRConst 1 (the true sentinel for comparison)
+#   idx+4 = IRICmp i1 result (used in IRCondBr)
+fn translate_match_arm_char(ch: Char, body: typed_ast.TypedExpr,
+                             rest_arms: List typed_ast.TypedMatchBranch,
+                             branch_idx: Int, base_idx: Int,
+                             dispatch_lbl: String, join_lbl: String,
+                             match_ty: types.Type, s_name: String, tag_name: String,
+                             params: List String, ctors: Dict (Int, Int, Int, String),
+                             idx: Int,
+                             acc_blocks: List sprout_ir.IRBlock,
+                             acc_phi: List (String, String),
+                             captures: Dict String,
+                             lifted_ref: Ref (List sprout_ir.IRFunction),
+                             top_level: Set,
+                             let_names: Set,
+                             fn_arities: Dict Int,
+                             lambda_ctr_ref: Ref Int,
+                             lifted_idx_ref: Ref (Dict Int),
+                             name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, List (String, String), Int) !{IO} =
+  translate_match_arm_body_with_test(body, rest_arms, branch_idx, base_idx,
+    sprout_ir.IRBlock(dispatch_lbl,
+      list_append(
+        Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_string(ch)),
+        Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx + 2), s_name,
+                               fresh_name(name_prefix, idx + 1)),
+        Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 3), 1),
+        Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 4), "eq",
+                              fresh_name(name_prefix, idx + 2),
+                              fresh_name(name_prefix, idx + 3)),
+        Nil)))),
+        Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 4),
+                                fresh_body_label(branch_idx, base_idx),
+                                fresh_arm_label(branch_idx + 1, base_idx)), Nil))),
+    fresh_body_label(branch_idx, base_idx),
+    fresh_arm_label(branch_idx + 1, base_idx),
+    join_lbl, match_ty, s_name, tag_name, params, ctors,
+    idx + 5, acc_blocks, acc_phi, captures,
     lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
     lifted_idx_ref, name_prefix)
 

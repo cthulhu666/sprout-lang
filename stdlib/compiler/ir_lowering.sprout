@@ -274,6 +274,9 @@ fn ir_header() -> String =
   "declare i1 @str_eq(ptr, ptr)\n" ++
   "declare i64 @str_slice(i64, i64, i64)\n" ++
   "declare i64 @int_to_string(i64)\n" ++
+  # char_to_string: Char → String identity at the ABI level (both are UTF-8 string pointers).
+  # Declared here so callers compiled via the IR path (e.g. prelude ToString Char) link.
+  "declare i64 @char_to_string(i64)\n" ++
   "declare i64 @sprout_gc_push_i64_root(ptr)\n" ++
   "declare i64 @sprout_gc_pop_roots(i64)\n" ++
   "declare i64 @sprout_alloc_closure_env(i64)\n" ++

@@ -1,0 +1,33 @@
+# M3 PR 12 — Char literal + char_to_string + CharPattern lowering.
+#
+# Self-contained Sprout functions exercising the three Char sub-tasks:
+#   1. TChar literal  — 'a' lowers to IRStrConst (mirrors TString).
+#   2. char_to_string — explicit call to the extern; the IR header must declare it.
+#   3. CharPattern    — match on a Char literal lowers to IRStrEq + IRCondBr.
+#
+# No imports: this keeps emitted IR free of undeclared extern references so
+# `opt --passes=verify` passes.  char_to_string is the only extern needed and
+# it is declared in ir_header() after this PR.
+
+# 1. TChar literal: returns the char value as a String via char_to_string.
+fn char_as_string(c: Char) -> String =
+  char_to_string(c)
+
+# 2. Char literal: produce the 'a' constant directly.
+fn get_a() -> Char = 'a'
+
+# 3. CharPattern in match: single-char dispatch.
+fn is_a(c: Char) -> Bool =
+  match c with
+  | 'a' -> true
+  | _ -> false
+
+# 4. multi-arm CharPattern: returns an Int for each recognised char.
+fn char_rank(c: Char) -> Int =
+  match c with
+  | 'a' -> 1
+  | 'b' -> 2
+  | 'c' -> 3
+  | _ -> 0
+
+fn main() -> Unit !{IO} = ()
