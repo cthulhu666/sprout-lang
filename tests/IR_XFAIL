@@ -23,14 +23,25 @@
 #   PR 10 — Bool and Unit as i64 call args        ✓ this PR
 #   PR 11 — do-block + IO + main body + Bool/Char ==  ✓ this PR — M3 corpus milestone closer
 #            Cleared: hello, factorial, fizzbuzz, maybe_map, tuples, smoke_shapes 01/02/05
+#   PR 13 — do-block Maybe wrapper-strip binding (Result deferred)  ✓ this PR
+#            ast_to_ir now lowers `x <- f()` when f returns Maybe a !{IO} into a
+#            sprout_tag → icmp → br i1 → (short Nothing / cont payload-extract) → phi
+#            shape mirroring codegen.sprout's emit_do_maybe_bind.  Re-probe of the
+#            4 example XFAILs (do_notation_demo, http_echo_server, http_get_cli,
+#            io_result_do_demo) shows ast_to_ir now passes cleanly — all 4 now hit
+#            the next-dominant blocker: extern-fn declarations not flowing into
+#            the LLVM declare list (see ~4 entries below).
 #
-# Bucket breakdown after PR 11 closes (re-probed):
+# Bucket breakdown after PR 13 closes (re-probed):
 #   ~36 entries — @append undefined (typeclass Semigroup dispatch gap; pre-existing)
 #   ~20 entries — @char_to_string undefined (Char literal / Char type ops not yet lowered)
-#    ~7 entries — do-block Maybe/Result bind not yet supported
 #    ~6 entries — Char literal not yet supported (ast_to_ir TChar case)
+#    ~4 entries — user `extern fn` declarations not emitted as LLVM `declare`
+#                 (was masked by do-block Maybe/Result XFAIL until PR 13)
 #    ~2 entries — multiple definition of local 't0' (codegen dup-block bug; pre-existing)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
+#    Result wrapper-strip — separate follow-up, needs TCall ctor-name routing fix
+#                 (Err/Ok ctors in helper bodies currently lower as `call @Err`).
 #
 # Dominant new blocker: @char_to_string / Char literal (TChar lowering) + @append (typeclass)
 
@@ -42,13 +53,13 @@ examples/aoc_2025_day_4.sprout                 # @append undefined (typeclass Se
 examples/aoc_2025_day_5.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
 examples/astar.sprout                          # @append undefined (typeclass Semigroup dispatch gap)
 examples/collections_demo.sprout               # Char literal not yet supported
-examples/do_notation_demo.sprout               # do-block Maybe/Result bind not yet supported
+examples/do_notation_demo.sprout               # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
 examples/foldable_demo.sprout                  # @char_to_string undefined
-examples/http_echo_server.sprout               # do-block Maybe/Result bind not yet supported
-examples/http_get_cli.sprout                   # do-block Maybe/Result bind not yet supported
+examples/http_echo_server.sprout               # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
+examples/http_get_cli.sprout                   # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
 examples/int_range_demo.sprout                 # @char_to_string undefined
 examples/io_do_demo.sprout                     # @char_to_string undefined
-examples/io_result_do_demo.sprout              # do-block Maybe/Result bind not yet supported
+examples/io_result_do_demo.sprout              # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
 examples/json_demo.sprout                      # @char_to_string undefined
 examples/list_pattern_demo.sprout              # @char_to_string undefined
 examples/modules_demo.sprout                   # @append undefined (typeclass Semigroup dispatch gap)

@@ -1,0 +1,75 @@
+# Verifies do-block Maybe wrapper-strip binding lowers via
+# --use-ir-codegen (M3 PR 13).  Closes the Maybe slice of the 8-entry IR_XFAIL
+# gap left by PR 11's do-block implementation.
+#
+# Semantics per memory project_do_block_result_io_quirk:
+#
+#   x <- f() where f returns Maybe a !{IO} gives `x : a` (both layers
+#   stripped: IO and Maybe wrapper).  Nothing propagates as the do-block's
+#   overall result, mirroring Haskell-style monadic short-circuit.
+#
+# Implementation in ast_to_ir.sprout's translate_do_bind_maybe helper:
+#   - emit IRCall to sprout_tag(scrut) → tag
+#   - icmp eq tag, <nothing-tag> → is_nothing
+#   - br i1 → short branch (build Nothing of result-ty via sprout_make0)
+#   - cont: IRGetField(scrut, 0) → payload, bind, recurse
+#   - phi the two branches into final do result
+#
+# Mirrors codegen.sprout's emit_do_maybe_bind (lines 2913-2956).
+#
+# Test convention (matches test_ir_codegen_short_circuit.spr and
+# test_ir_codegen_unary_arith.spr): redeclare `type Maybe a` locally so
+# `Just`/`Nothing` resolve as user-defined ctors and the ctor-routing path
+# stays inside the supported IR-codegen surface.  Bare prelude-imported
+# ctor names (`Just`/`Nothing` without local shadowing) currently hit a
+# separate TCall ctor-name routing gap — planned for the next PR.
+#
+# Result wrapper-strip is NOT covered in this PR — that path will land
+# once the same ctor-routing gap closes (the IR codegen helpers were
+# scaffolded then removed to avoid shipping untested dead code).
+
+# Local Maybe redefinition — see file-level comment for why.
+type Maybe a =
+  | Just a
+  | Nothing
+
+# A Maybe-returning IO helper.  Exercises the wrapper-strip without needing
+# us to write a bind on a prelude-imported Maybe value (separate gap).  The
+# helper returns Just(n) so the cont-branch is non-trivially exercised;
+# Nothing forms a short-circuit when the param signals it.
+fn maybe_id(n: Int) -> Maybe Int !{IO} =
+  do
+    if n < 0 then Nothing else Just(n)
+
+# Test 1 — single bind, named pattern, payload threaded into cont branch.
+# After PR 13: `n <- maybe_id(5)` binds `n : Int` and the next step observes
+# it as a plain Int, not a Maybe-wrapped value.
+fn bind_one_named() -> Maybe Int !{IO} =
+  do
+    n <- maybe_id(5)
+    maybe_id(n + 1)
+
+# Test 2 — two stacked binds.  Each bind compounds the short-circuit ladder.
+# Result: nested CFG of (br i1 short / cont) ⤳ (br i1 short / cont) ⤳ phi ⤳ phi.
+fn bind_two_named() -> Maybe Int !{IO} =
+  do
+    a <- maybe_id(2)
+    b <- maybe_id(a)
+    maybe_id(a + b)
+
+# Test 3 — wildcard bind.  Exercises the WildcardPattern arm of
+# do_bind_captures (no name added to captures).
+fn bind_wildcard() -> Maybe Int !{IO} =
+  do
+    _ <- maybe_id(0)
+    maybe_id(7)
+
+# Test 4 — mixed: wildcard bind followed by named bind that uses its payload.
+fn bind_mixed() -> Maybe Int !{IO} =
+  do
+    _ <- maybe_id(0)
+    n <- maybe_id(1)
+    maybe_id(n + n)
+
+# Trivial main — IR path requires `()` until further milestones.
+fn main() -> Unit !{IO} = ()

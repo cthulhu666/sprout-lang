@@ -576,12 +576,6 @@ fn is_maybe_type(t: types.Type) -> Bool =
   | types.TApp (types.TConst "Maybe") _ -> true
   | _ -> false
 
-# True iff t is a Result type (TApp (TApp (TConst "Result") _) _).
-# Mirrors codegen.sprout:is_result_type.
-fn is_result_type(t: types.Type) -> Bool =
-  match t with
-  | types.TApp (types.TApp(types.TConst "Result") _) _ -> true
-  | _ -> false
 
 # Scalar argument types accepted by IRCall / IRApplyClosure (direct and
 # closure call sites).  All IR values are i64; the typechecker is the source
@@ -897,10 +891,17 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
                                lifted_ref, top_level, let_names, fn_arities,
                                lambda_ctr_ref, lifted_idx_ref, name_prefix)
       | typed_ast.TDoBindStep pat e ->
-          # Plain IO bind: evaluate e and bind the i64 result to the pattern.
-          # Maybe/Result wrapping is unsupported — return Err to surface the gap.
-          if is_maybe_type(typed_ast.typed_expr_type(e)) || is_result_type(typed_ast.typed_expr_type(e))
-          then Err("ast_to_ir: do-block Maybe/Result bind not yet supported in IR codegen")
+          # M3 PR 13: Maybe wrapper-strip binds short-circuit on Nothing using
+          # a CFG-branching + phi pattern, mirroring codegen.sprout's
+          # emit_do_maybe_bind.  Plain IO bind (no wrapper) falls through to
+          # the simple path.  Result wrapper-strip is deferred to a follow-up
+          # PR — it needs the TCall ctor-name routing fix first (Err/Ok ctors
+          # in helper bodies currently lower as `call @Err(...)`).
+          if is_maybe_type(typed_ast.typed_expr_type(e))
+          then translate_do_bind_maybe(pat, e, rest, params, ctors, idx,
+                                       cur_label, cur_ops, captures,
+                                       lifted_ref, top_level, let_names, fn_arities,
+                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else
             match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
                                  captures, lifted_ref, top_level, let_names, fn_arities,
@@ -933,6 +934,131 @@ fn do_bind_captures(pat: ast.Pattern, ssa: String,
   | ast.StringPattern _ _ -> Err("ast_to_ir: do-block bind to string pattern not yet supported")
   | ast.CharPattern _ _ -> Err("ast_to_ir: do-block bind to char pattern not yet supported")
   | ast.UnitPattern _ -> Ok(captures)
+
+# M3 PR 13: ctor-tag lookup helper for the Maybe do-bind short-circuit.
+# Mirrors codegen.sprout's find_nothing_tag — checks both the bare name (when
+# prelude is imported unqualified) and the prelude-qualified form.  Defensive
+# fallback (0) matches direct codegen; a do-block bind on Maybe whose ctor
+# table is missing the names shouldn't typecheck in the first place.
+fn find_nothing_tag_ir(ctors: Dict (Int, Int, Int, String)) -> Int =
+  match dict_get("Nothing", ctors) with
+  | Just entry ->
+      match entry with
+      | (tag, _, _, _) -> tag
+  | Nothing ->
+      match dict_get("stdlib.prelude.Nothing", ctors) with
+      | Just entry ->
+          match entry with
+          | (tag, _, _, _) -> tag
+      | Nothing -> 0
+
+# M3 PR 13: lower `x <- f()` where f returns `Maybe a !{IO}`.
+#
+# Per memory project_do_block_result_io_quirk: both layers (IO and Maybe)
+# strip; `x` is bound to the inner `a`.  Nothing short-circuits as the do
+# block's overall result, mirroring Haskell-style monadic propagation.
+#
+# Block layout (mirrors codegen.sprout's emit_do_maybe_bind, lines 2913-2956):
+#
+#   <cur_lbl>:
+#     ... cur_ops ...
+#     %e = <translate e>           ← may emit blocks of its own (eblocks)
+#     %tag = call i64 @sprout_tag(i64 %e)
+#     %nt = const <nothing_tag>
+#     %is_n = icmp eq i64 %tag, i64 %nt
+#     br i1 %is_n, label %do_short_K, label %do_cont_K
+#   do_short_K:
+#     %nc = const <nothing_tag>
+#     %nv = call i64 @sprout_make0(i64 %nc)
+#     br label %do_done_K
+#   do_cont_K:
+#     %p = call i64 @sprout_field(i64 %e, i64 0)
+#     ... bind pat to %p via do_bind_captures ...
+#     ... translate rest of do-block ...
+#     <rest_final_lbl>: br label %do_done_K
+#   do_done_K:
+#     %result = phi i64 [%nv, %do_short_K], [%rest_name, %rest_final_lbl]
+fn translate_do_bind_maybe(pat: ast.Pattern, e: typed_ast.TypedExpr,
+                            rest: List typed_ast.TypedDoStep,
+                            params: List String, ctors: Dict (Int, Int, Int, String),
+                            idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
+                            captures: Dict String,
+                            lifted_ref: Ref (List sprout_ir.IRFunction),
+                            top_level: Set, let_names: Set, fn_arities: Dict Int,
+                            lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                            name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
+                       captures, lifted_ref, top_level, let_names, fn_arities,
+                       lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+  | Err msg -> Err(msg)
+  | Ok er ->
+      match er with
+      | (eblocks, elbl, eops, ename, eidx) ->
+          translate_do_bind_maybe_finish(pat, rest, eblocks, elbl, eops, ename, eidx,
+                                          params, ctors, captures, lifted_ref,
+                                          top_level, let_names, fn_arities,
+                                          lambda_ctr_ref, lifted_idx_ref, name_prefix)
+
+fn translate_do_bind_maybe_finish(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
+                                   eblocks: List sprout_ir.IRBlock,
+                                   elbl: String, eops: List sprout_ir.IROp,
+                                   ename: String, eidx: Int,
+                                   params: List String,
+                                   ctors: Dict (Int, Int, Int, String),
+                                   captures: Dict String,
+                                   lifted_ref: Ref (List sprout_ir.IRFunction),
+                                   top_level: Set, let_names: Set, fn_arities: Dict Int,
+                                   lambda_ctr_ref: Ref Int,
+                                   lifted_idx_ref: Ref (Dict Int),
+                                   name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match do_bind_captures(pat, payload_name, captures) with
+  | Err msg -> Err(msg)
+  | Ok new_captures ->
+      match translate_do(rest, params, ctors, eidx + 6, cont_lbl,
+                         Cons(payload_op, Nil),
+                         new_captures, lifted_ref, top_level, let_names, fn_arities,
+                         lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok rr ->
+          match rr with
+          | (rblocks, rfinal_lbl, rfinal_ops, rname, ridx) ->
+              Ok((list_append(eblocks,
+                    Cons(test_block,
+                    Cons(short_block,
+                    list_append(rblocks,
+                      Cons(sprout_ir.IRBlock(rfinal_lbl,
+                             list_append(rfinal_ops,
+                               Cons(sprout_ir.IRBr(done_lbl), Nil))),
+                      Nil))))),
+                   done_lbl,
+                   Cons(sprout_ir.IRPhi(fresh_name(name_prefix, ridx), "i64",
+                          Cons((nothing_val_name, short_lbl),
+                          Cons((rname, rfinal_lbl), Nil))), Nil),
+                   fresh_name(name_prefix, ridx), ridx + 1))
+  where nothing_tag = find_nothing_tag_ir(ctors)
+        tag_name = fresh_name(name_prefix, eidx)
+        const_name = fresh_name(name_prefix, eidx + 1)
+        cmp_name = fresh_name(name_prefix, eidx + 2)
+        short_lbl = "do_short_" ++ int_to_string(eidx)
+        cont_lbl = "do_cont_" ++ int_to_string(eidx)
+        done_lbl = "do_done_" ++ int_to_string(eidx)
+        test_block = sprout_ir.IRBlock(elbl,
+                       list_append(eops,
+                         Cons(sprout_ir.IRGetTag(tag_name, ename),
+                         Cons(sprout_ir.IRConst(const_name, nothing_tag),
+                         Cons(sprout_ir.IRICmp(cmp_name, "eq", tag_name, const_name),
+                         Cons(sprout_ir.IRCondBr(cmp_name, short_lbl, cont_lbl), Nil))))))
+        nothing_const_name = fresh_name(name_prefix, eidx + 3)
+        nothing_val_name = fresh_name(name_prefix, eidx + 4)
+        short_block = sprout_ir.IRBlock(short_lbl,
+                        Cons(sprout_ir.IRConst(nothing_const_name, nothing_tag),
+                        Cons(sprout_ir.IRCall(nothing_val_name, "i64", "sprout_make0",
+                                              Cons(nothing_const_name, Nil)),
+                        Cons(sprout_ir.IRBr(done_lbl), Nil))))
+        payload_name = fresh_name(name_prefix, eidx + 5)
+        payload_op = sprout_ir.IRGetField(payload_name, ename, 0, sprout_ir.IRTUnknown)
 
 # Find the type of the first TVar with the given name inside expr.
 # Used by translate_lambda to check whether a captured variable is Bool-typed.
