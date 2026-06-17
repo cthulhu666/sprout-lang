@@ -913,30 +913,90 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
             | Ok r ->
                 match r with
                 | (eblocks, elabel, eops, ename, eidx) ->
-                    match do_bind_captures(pat, ename, captures) with
+                    match do_bind_captures(pat, ename, captures, eidx, name_prefix) with
                     | Err msg -> Err(msg)
-                    | Ok new_captures ->
-                        translate_do(rest, params, ctors, eidx, elabel, eops,
-                                     new_captures, lifted_ref, top_level, let_names, fn_arities,
-                                     lambda_ctr_ref, lifted_idx_ref, name_prefix)
+                    | Ok bind_result ->
+                        match bind_result with
+                        | (bind_ops, new_captures, bind_idx) ->
+                            translate_do(rest, params, ctors, bind_idx, elabel,
+                                         list_append(eops, bind_ops),
+                                         new_captures, lifted_ref, top_level, let_names, fn_arities,
+                                         lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
-# Extend the captures dict for a plain-IO TDoBindStep pattern.
-# VarPattern binds the SSA name directly.  WildcardPattern discards it.
-# Complex patterns (Tuple, Constructor, literal) are not yet supported;
-# return Err to surface the gap rather than silently producing wrong code.
-# O(n) where n = number of VarPattern leaves in pat.
+# Extend the captures dict (and emit field-extraction ops) for a TDoBindStep pattern.
+# VarPattern binds the SSA name directly; WildcardPattern/UnitPattern discard it.
+# TuplePattern emits IRGetTupleField ops and recurses into nested TuplePatterns.
+# Constructor and literal patterns are not yet supported.
+# Returns (emitted_ops, new_captures, new_idx).
+# O(n) where n = total pattern nodes in pat (recursively).
 fn do_bind_captures(pat: ast.Pattern, ssa: String,
-                    captures: Dict String) -> Result String (Dict String) =
+                    captures: Dict String,
+                    idx: Int, name_prefix: String) -> Result String (List sprout_ir.IROp, Dict String, Int) =
   match pat with
-  | ast.VarPattern name _ -> Ok(dict_set(name, ssa, captures))
-  | ast.WildcardPattern _ -> Ok(captures)
-  | ast.TuplePattern _ _ -> Err("ast_to_ir: do-block bind to tuple pattern not yet supported")
+  | ast.VarPattern name _ -> Ok((Nil, dict_set(name, ssa, captures), idx))
+  | ast.WildcardPattern _ -> Ok((Nil, captures, idx))
+  | ast.UnitPattern _ -> Ok((Nil, captures, idx))
+  | ast.TuplePattern items _ ->
+      do_bind_tuple_items(items, ssa, idx, 0, name_prefix, Nil, captures)
   | ast.ConstructorPattern _ _ _ -> Err("ast_to_ir: do-block bind to constructor pattern not yet supported")
   | ast.IntPattern _ _ -> Err("ast_to_ir: do-block bind to int pattern not yet supported")
   | ast.BoolPattern _ _ -> Err("ast_to_ir: do-block bind to bool pattern not yet supported")
   | ast.StringPattern _ _ -> Err("ast_to_ir: do-block bind to string pattern not yet supported")
   | ast.CharPattern _ _ -> Err("ast_to_ir: do-block bind to char pattern not yet supported")
-  | ast.UnitPattern _ -> Ok(captures)
+
+# Emit IRGetTupleField binds for each item in a do-bind TuplePattern.
+# Handles VarPattern (bind), WildcardPattern/UnitPattern (skip), and nested
+# TuplePattern (fetch element + recurse).  No tag tests; tuples always match.
+# acc_ops accumulates ops in reverse; result reverses before returning.
+# O(n) where n = total pattern nodes in items (recursively).
+fn do_bind_tuple_items(items: List ast.Pattern, scrut_name: String,
+                       idx: Int, field_idx: Int,
+                       name_prefix: String,
+                       acc_ops: List sprout_ir.IROp,
+                       acc_captures: Dict String) ->
+    Result String (List sprout_ir.IROp, Dict String, Int) =
+  match items with
+  | Nil -> Ok((list_reverse(acc_ops), acc_captures, idx))
+  | Cons pat rest_items ->
+      match pat with
+      | ast.WildcardPattern _ ->
+          do_bind_tuple_items(rest_items, scrut_name, idx, field_idx + 1,
+                              name_prefix, acc_ops, acc_captures)
+      | ast.UnitPattern _ ->
+          do_bind_tuple_items(rest_items, scrut_name, idx, field_idx + 1,
+                              name_prefix, acc_ops, acc_captures)
+      | ast.VarPattern v _ ->
+          do_bind_tuple_items(rest_items, scrut_name, idx + 1, field_idx + 1,
+                              name_prefix,
+                              Cons(sprout_ir.IRGetTupleField(fresh_name(name_prefix, idx),
+                                                             scrut_name, field_idx),
+                                   acc_ops),
+                              dict_set(v, fresh_name(name_prefix, idx), acc_captures))
+      | ast.TuplePattern inner_items _ ->
+          match fresh_name(name_prefix, idx) with
+          | field_ssa ->
+              match do_bind_tuple_items(inner_items, field_ssa, idx + 1, 0,
+                                        name_prefix,
+                                        Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                                             acc_ops),
+                                        acc_captures) with
+              | Err msg -> Err(msg)
+              | Ok inner_result ->
+                  match inner_result with
+                  | (inner_ops_rev, inner_captures, idx2) ->
+                      do_bind_tuple_items(rest_items, scrut_name, idx2, field_idx + 1,
+                                          name_prefix, list_reverse(inner_ops_rev),
+                                          inner_captures)
+      | ast.ConstructorPattern _ _ _ ->
+          Err("ast_to_ir: nested constructor pattern in do-bind tuple not yet supported")
+      | ast.IntPattern _ _ ->
+          Err("ast_to_ir: nested int pattern in do-bind tuple not yet supported")
+      | ast.BoolPattern _ _ ->
+          Err("ast_to_ir: nested bool pattern in do-bind tuple not yet supported")
+      | ast.StringPattern _ _ ->
+          Err("ast_to_ir: nested string pattern in do-bind tuple not yet supported")
+      | ast.CharPattern _ _ ->
+          Err("ast_to_ir: nested char pattern in do-bind tuple not yet supported")
 
 # M3 PR 13: ctor-tag lookup helper for the Maybe do-bind short-circuit.
 # Mirrors codegen.sprout's find_nothing_tag — checks both the bare name (when
@@ -1016,30 +1076,32 @@ fn translate_do_bind_maybe_finish(pat: ast.Pattern, rest: List typed_ast.TypedDo
                                    lifted_idx_ref: Ref (Dict Int),
                                    name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
-  match do_bind_captures(pat, payload_name, captures) with
+  match do_bind_captures(pat, payload_name, captures, eidx + 6, name_prefix) with
   | Err msg -> Err(msg)
-  | Ok new_captures ->
-      match translate_do(rest, params, ctors, eidx + 6, cont_lbl,
-                         Cons(payload_op, Nil),
-                         new_captures, lifted_ref, top_level, let_names, fn_arities,
-                         lambda_ctr_ref, lifted_idx_ref, name_prefix) with
-      | Err msg -> Err(msg)
-      | Ok rr ->
-          match rr with
-          | (rblocks, rfinal_lbl, rfinal_ops, rname, ridx) ->
-              Ok((list_append(eblocks,
-                    Cons(test_block,
-                    Cons(short_block,
-                    list_append(rblocks,
-                      Cons(sprout_ir.IRBlock(rfinal_lbl,
-                             list_append(rfinal_ops,
-                               Cons(sprout_ir.IRBr(done_lbl), Nil))),
-                      Nil))))),
-                   done_lbl,
-                   Cons(sprout_ir.IRPhi(fresh_name(name_prefix, ridx), "i64",
-                          Cons((nothing_val_name, short_lbl),
-                          Cons((rname, rfinal_lbl), Nil))), Nil),
-                   fresh_name(name_prefix, ridx), ridx + 1))
+  | Ok bind_result ->
+      match bind_result with
+      | (bind_ops, new_captures, bind_idx) ->
+          match translate_do(rest, params, ctors, bind_idx, cont_lbl,
+                             list_append(Cons(payload_op, Nil), bind_ops),
+                             new_captures, lifted_ref, top_level, let_names, fn_arities,
+                             lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+          | Err msg -> Err(msg)
+          | Ok rr ->
+              match rr with
+              | (rblocks, rfinal_lbl, rfinal_ops, rname, ridx) ->
+                  Ok((list_append(eblocks,
+                        Cons(test_block,
+                        Cons(short_block,
+                        list_append(rblocks,
+                          Cons(sprout_ir.IRBlock(rfinal_lbl,
+                                 list_append(rfinal_ops,
+                                   Cons(sprout_ir.IRBr(done_lbl), Nil))),
+                          Nil))))),
+                       done_lbl,
+                       Cons(sprout_ir.IRPhi(fresh_name(name_prefix, ridx), "i64",
+                              Cons((nothing_val_name, short_lbl),
+                              Cons((rname, rfinal_lbl), Nil))), Nil),
+                       fresh_name(name_prefix, ridx), ridx + 1))
   where nothing_tag = find_nothing_tag_ir(ctors)
         tag_name = fresh_name(name_prefix, eidx)
         const_name = fresh_name(name_prefix, eidx + 1)

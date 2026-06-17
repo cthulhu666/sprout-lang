@@ -40,9 +40,15 @@
 #               test_wrap_type      → translate_do drops sealed blocks from non-last
 #                                     do steps (IR invalid: undefined arm_0_N predecessor)
 #               test_ir_codegen_*x4 → do-block bind to tuple pattern not yet supported
+#   PR 15c — do-block bind to TuplePattern  ✓ this PR
+#             4 entries shifted to new blocker:
+#               test_ir_codegen_*x4 → nested StringPattern in constructor match
+#                                     (these tests compile stdlib.compiler which contains
+#                                     StringPattern in ctor matches via bundler/iface_codec)
 #
-# Bucket breakdown after PR 15b closes (re-probed):
-#    ~4 entries — do-block bind to tuple pattern not yet supported
+# Bucket breakdown after PR 15c closes (re-probed):
+#    ~4 entries — nested StringPattern in constructor match not yet supported
+#                 (test_ir_codegen_*: compile stdlib.compiler which uses StringPattern)
 #    ~1 entry   — translate_do drops match blocks in non-last do steps
 #                 (IR invalid: use of undefined value '%arm_0_N')
 #    ~3 entries — StringPattern in match not yet supported (repl_hosted,
@@ -53,7 +59,7 @@
 #                 (typeclass dispatch gap — same family as @append)
 #    ~1 entry  — @append undefined (Semigroup dispatch; same family as above)
 #    ~1 entry  — `range not yet supported` (ast_to_ir TRange case)
-#    ~2 entries — nested StringPattern/IntPattern in ctor match (PR 8 follow-up)
+#    ~2 entries — nested IntPattern in ctor match (PR 8 follow-up)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
 #    ~1 entry  — use of undefined value '%body_*' (match-arm label/scope gap; test_json)
 
@@ -76,10 +82,10 @@ tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Se
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
 tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
 tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
-tests/stdlib/test_ir_codegen_closures.spr      # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
-tests/stdlib/test_ir_codegen_ctors.spr         # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
-tests/stdlib/test_ir_codegen_match.spr         # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
+tests/stdlib/test_ir_codegen_closures.spr      # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_ctors.spr         # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_match.spr         # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
 tests/stdlib/test_json.spr                     # use of undefined value '%body_*' (match-arm label/scope gap)
 tests/stdlib/test_repl_navigation.spr          # StringPattern in match not yet supported
 tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported

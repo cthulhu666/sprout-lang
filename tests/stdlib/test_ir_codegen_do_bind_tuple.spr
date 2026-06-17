@@ -1,0 +1,52 @@
+# M3 PR 15c — do-block bind to TuplePattern (--use-ir-codegen path).
+#
+# Exercises `(a, b) <- f()` and `((a, b), c) <- g()` where f/g return
+# tuple values inside an IO-typed do-block.  All helpers are pure Sprout
+# functions — no externs — so `opt --passes=verify` passes without linking.
+#
+# Test shapes:
+#   T1: flat tuple bind  (a, b) <- pair_io()
+#   T2: nested tuple bind  ((a, b), c) <- nested_io()
+#   T3: wildcard element  (_, b) <- pair_io()
+#   T4: multiple consecutive tuple binds
+
+fn pair_io() -> (Int, Int) !{IO} = (3, 7)
+
+fn nested_io() -> ((Int, Int), Int) !{IO} = ((2, 4), 6)
+
+# T1: flat tuple bind.
+# O(1).
+fn do_bind_tuple_flat() -> Int !{IO} =
+  do
+    (a, b) <- pair_io()
+    a + b
+
+# T2: nested tuple bind ((a, b), c).
+# O(1).
+fn do_bind_tuple_nested() -> Int !{IO} =
+  do
+    ((a, b), c) <- nested_io()
+    a + b + c
+
+# T3: wildcard in tuple bind — second element discarded.
+# O(1).
+fn do_bind_tuple_wildcard() -> Int !{IO} =
+  do
+    (_, b) <- pair_io()
+    b
+
+# T4: multiple consecutive tuple binds, each using results of the previous.
+# O(1).
+fn do_bind_tuple_chain() -> Int !{IO} =
+  do
+    (x, y) <- pair_io()
+    (p, q) <- pair_io()
+    x + y + p + q
+
+fn main() -> Unit !{IO} =
+  do
+    r1 <- do_bind_tuple_flat()
+    r2 <- do_bind_tuple_nested()
+    r3 <- do_bind_tuple_wildcard()
+    r4 <- do_bind_tuple_chain()
+    ()
