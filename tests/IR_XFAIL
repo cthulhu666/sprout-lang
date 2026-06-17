@@ -45,33 +45,39 @@
 #               test_ir_codegen_*x4 → nested StringPattern in constructor match
 #                                     (these tests compile stdlib.compiler which contains
 #                                     StringPattern in ctor matches via bundler/iface_codec)
+#   PR 15d — StringPattern in match arms (top-level + nested ctor + nested tuple)  ✓ this PR
+#             Cleared 2 top-level StringPattern entries (repl_hosted, repl_navigation)
+#             — both shifted to new blockers (see below).
+#             5 nested-StringPattern entries shifted to Unit ctor field blocker.
+#             1 new xfail added: test_ir_codegen_string_pattern.spr (same Unit ctor
+#             field blocker as the other test_ir_codegen_* files).
+#             list_pattern_demo shifted to nested BoolPattern (StringPattern cleared).
 #
-# Bucket breakdown after PR 15c closes (re-probed):
-#    ~4 entries — nested StringPattern in constructor match not yet supported
-#                 (test_ir_codegen_*: compile stdlib.compiler which uses StringPattern)
+# Bucket breakdown after PR 15d closes (re-probed):
+#    ~5 entries — Unit ctor field not supported (test_ir_codegen_*x5: compile
+#                 stdlib.compiler which has Unit ctor fields; was StringPattern blocker)
 #    ~1 entry   — translate_do drops match blocks in non-last do steps
-#                 (IR invalid: use of undefined value '%arm_0_N')
-#    ~3 entries — StringPattern in match not yet supported (repl_hosted,
-#                 repl_navigation, and related)
-#    ~2 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing,
-#                 was masked behind @time_now_micros label)
+#                 (IR invalid: use of undefined value '%arm_0_N'; test_repl_navigation)
+#    ~1 entry   — @analysis_check_source undefined (repl_hosted; unresolved extern)
+#    ~1 entry   — nested BoolPattern in constructor match (list_pattern_demo)
+#    ~2 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing)
 #    ~3 entries — typeclass `__unresolved_Eq__` / `__unresolved_ToString__`
 #                 (typeclass dispatch gap — same family as @append)
 #    ~1 entry  — @append undefined (Semigroup dispatch; same family as above)
 #    ~1 entry  — `range not yet supported` (ast_to_ir TRange case)
 #    ~2 entries — nested IntPattern in ctor match (PR 8 follow-up)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
-#    ~1 entry  — use of undefined value '%body_*' (match-arm label/scope gap; test_json)
+#    ~2 entries — use of undefined value '%body_*' (match-arm label/scope gap)
 
 # === examples/ ===
 examples/aoc_2025_day_1.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/aoc_2025_day_2.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/astar.sprout                          # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/int_range_demo.sprout                 # range not yet supported (ast_to_ir TRange)
-examples/list_pattern_demo.sprout              # nested StringPattern in constructor match not yet supported
+examples/list_pattern_demo.sprout              # nested BoolPattern in constructor match not yet supported (StringPattern cleared by PR 15d)
 examples/nqueens.sprout                        # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/ref_tutorial.sprout                   # use of undefined value '%body_1_*' (match-arm label/scope gap)
-examples/repl_hosted.sprout                    # StringPattern in match not yet supported
+examples/repl_hosted.sprout                    # @analysis_check_source undefined (StringPattern cleared by PR 15d; new blocker: unresolved extern)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
 
@@ -82,12 +88,13 @@ tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Se
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
 tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
 tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
-tests/stdlib/test_ir_codegen_closures.spr      # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
-tests/stdlib/test_ir_codegen_ctors.spr         # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
-tests/stdlib/test_ir_codegen_match.spr         # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # nested StringPattern in constructor match not yet supported (shifted from tuple do-bind; these tests compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_closures.spr      # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_ctors.spr         # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_match.spr         # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
+tests/stdlib/test_ir_codegen_string_pattern.spr   # Unit ctor field not supported (new test file; compile stdlib.compiler; same blocker as above)
 tests/stdlib/test_json.spr                     # use of undefined value '%body_*' (match-arm label/scope gap)
-tests/stdlib/test_repl_navigation.spr          # StringPattern in match not yet supported
+tests/stdlib/test_repl_navigation.spr          # use of undefined value '%arm_0_*' in phi (translate_do drops match blocks in non-last steps; StringPattern cleared by PR 15d)
 tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported
 tests/stdlib/test_set.spr                      # use of undefined value '%body_*' (match-arm label/scope gap)
 tests/stdlib/test_string.spr                   # multiple definition of local 't0' (pre-existing codegen dup-block)

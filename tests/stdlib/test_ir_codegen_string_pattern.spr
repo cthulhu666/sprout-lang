@@ -1,0 +1,107 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# M3 PR 15d — StringPattern in match arms via --use-ir-codegen.
+# Covers:
+#   S1: top-level StringPattern in match arm
+#   S2: StringPattern nested inside ConstructorPattern field
+#   S3: StringPattern nested inside TuplePattern field
+#
+# No externs that require link-time resolution: all tests compile to IR only
+# (translate_source returns the IR string; no link step).
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Drive a Sprout source string through lex -> parse -> typecheck_typed ->
+# lower_program -> ast_to_ir.translate_program, return IR string or Err.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn translated_ok_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ---------------------------------------------------------------------------
+    # S1: Top-level StringPattern in a match arm.
+    # fn f(s: String) -> Int = match s with | "hello" -> 1 | _ -> 0
+    s1 <- translated_ok_contains(
+      "fn s1(s: String) -> Int =\n" ++
+      "  match s with\n" ++
+      "  | \"hello\" -> 1\n" ++
+      "  | _ -> 0\n",
+      "define i64 @s1")
+    assert_true(state, "S1: top-level StringPattern compiles", s1)
+
+    # ---------------------------------------------------------------------------
+    # S2: StringPattern nested inside ConstructorPattern field.
+    # type Labeled = Labeled String
+    # fn s2(x: Labeled) -> Int = match x with | Labeled("x") -> 1 | _ -> 0
+    s2 <- translated_ok_contains(
+      "type Labeled = Labeled String\n" ++
+      "fn s2(x: Labeled) -> Int =\n" ++
+      "  match x with\n" ++
+      "  | Labeled(\"x\") -> 1\n" ++
+      "  | _ -> 0\n",
+      "define i64 @s2")
+    assert_true(state, "S2: StringPattern nested in ConstructorPattern compiles", s2)
+
+    # ---------------------------------------------------------------------------
+    # S3: StringPattern nested inside TuplePattern field.
+    # fn s3(p: (String, Int)) -> Int = match p with | ("a", n) -> n | _ -> 0
+    s3 <- translated_ok_contains(
+      "fn s3(p: (String, Int)) -> Int =\n" ++
+      "  match p with\n" ++
+      "  | (\"a\", n) -> n\n" ++
+      "  | _ -> 0\n",
+      "define i64 @s3")
+    assert_true(state, "S3: StringPattern nested in TuplePattern compiles", s3)
+
+    # ---------------------------------------------------------------------------
+    # S4: Multiple top-level string arms — miss-chain exercises arm_1, arm_2 labels.
+    s4 <- translated_ok_contains(
+      "fn s4(s: String) -> Int =\n" ++
+      "  match s with\n" ++
+      "  | \"a\" -> 1\n" ++
+      "  | \"b\" -> 2\n" ++
+      "  | _ -> 0\n",
+      "define i64 @s4")
+    assert_true(state, "S4: multiple top-level string arms compile", s4)
+
+    summary(state)

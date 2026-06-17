@@ -1910,8 +1910,42 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
             Err("ast_to_ir: nested IntPattern in constructor match not yet supported")
         | ast.BoolPattern _ _ ->
             Err("ast_to_ir: nested BoolPattern in constructor match not yet supported")
-        | ast.StringPattern _ _ ->
-            Err("ast_to_ir: nested StringPattern in constructor match not yet supported")
+        | ast.StringPattern s _ ->
+            # Fetch the constructor field; seal cur_lbl with a string equality test;
+            # open inner_lbl and continue binding remaining args.
+            # Fresh name slots:
+            #   idx   = field SSA (IRGetField)
+            #   idx+1 = raw GEP ptr (IRStrConst raw name)
+            #   idx+2 = i64 ptrtoint result (IRStrConst result)
+            #   idx+3 = IRStrEq i64 Bool result
+            #   idx+4 = IRConst 1
+            #   idx+5 = IRICmp i1 result (used in IRCondBr)
+            match fresh_name(name_prefix, idx) with
+            | field_ssa ->
+                match fresh_nested_test_label(idx) with
+                | inner_lbl ->
+                    match list_append(
+                      list_reverse(cur_ops),
+                      Cons(sprout_ir.IRGetField(field_ssa, scrut_name, field_idx,
+                                                fk.fk_at(fks, field_idx)),
+                      Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 2),
+                                                fresh_name(name_prefix, idx + 1), s),
+                      Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx + 3),
+                                             field_ssa,
+                                             fresh_name(name_prefix, idx + 2)),
+                      Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 4), 1),
+                      Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 5), "eq",
+                                            fresh_name(name_prefix, idx + 3),
+                                            fresh_name(name_prefix, idx + 4)),
+                      Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 5),
+                                              inner_lbl, miss_lbl),
+                      Nil))))))) with
+                    | sealed_ops ->
+                        bind_ctor_field_args(rest_args, scrut_name, fks,
+                                             idx + 6, field_idx + 1, name_prefix, Nil,
+                                             acc_captures, inner_lbl, miss_lbl, ctors,
+                                             Cons(sprout_ir.IRBlock(cur_lbl, sealed_ops),
+                                                  acc_extra))
         | ast.CharPattern _ _ ->
             Err("ast_to_ir: nested CharPattern in constructor match not yet supported")
         | ast.UnitPattern _ ->
@@ -2022,8 +2056,41 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           Err("ast_to_ir: nested IntPattern in tuple match not yet supported")
       | ast.BoolPattern _ _ ->
           Err("ast_to_ir: nested BoolPattern in tuple match not yet supported")
-      | ast.StringPattern _ _ ->
-          Err("ast_to_ir: nested StringPattern in tuple match not yet supported")
+      | ast.StringPattern s _ ->
+          # Fetch the tuple field; seal cur_lbl with a string equality test;
+          # open inner_lbl and continue binding remaining tuple items.
+          # Fresh name slots:
+          #   idx   = field SSA (IRGetTupleField)
+          #   idx+1 = raw GEP ptr (IRStrConst raw name)
+          #   idx+2 = i64 ptrtoint result (IRStrConst result)
+          #   idx+3 = IRStrEq i64 Bool result
+          #   idx+4 = IRConst 1
+          #   idx+5 = IRICmp i1 result (used in IRCondBr)
+          match fresh_name(name_prefix, idx) with
+          | field_ssa ->
+              match fresh_nested_test_label(idx) with
+              | inner_lbl ->
+                  match list_append(
+                    list_reverse(cur_ops),
+                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                    Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 2),
+                                              fresh_name(name_prefix, idx + 1), s),
+                    Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx + 3),
+                                           field_ssa,
+                                           fresh_name(name_prefix, idx + 2)),
+                    Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 4), 1),
+                    Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 5), "eq",
+                                          fresh_name(name_prefix, idx + 3),
+                                          fresh_name(name_prefix, idx + 4)),
+                    Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 5),
+                                            inner_lbl, miss_lbl),
+                    Nil))))))) with
+                  | sealed_ops ->
+                      bind_tuple_items(rest_items, scrut_name, idx + 6, field_idx + 1,
+                                       name_prefix, Nil, acc_captures,
+                                       inner_lbl, miss_lbl, ctors,
+                                       Cons(sprout_ir.IRBlock(cur_lbl, sealed_ops),
+                                            acc_extra))
       | ast.CharPattern _ _ ->
           Err("ast_to_ir: nested CharPattern in tuple match not yet supported")
       | ast.UnitPattern _ ->
@@ -2341,7 +2408,12 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                                 match_ty, s_name, tag_name, params, ctors, idx,
                                 acc_blocks, acc_phi, captures, lifted_ref, top_level, let_names, fn_arities,
                                 lambda_ctr_ref, lifted_idx_ref, name_prefix)
-  | ast.StringPattern _ _ -> Err("ast_to_ir: StringPattern in match not yet supported")
+  | ast.StringPattern s _ ->
+      translate_match_arm_string(s, body, rest_arms, branch_idx, base_idx,
+                                 dispatch_lbl, join_lbl, match_ty, s_name, tag_name,
+                                 params, ctors, idx, acc_blocks, acc_phi,
+                                 captures, lifted_ref, top_level, let_names, fn_arities,
+                                 lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | ast.CharPattern ch _ ->
       translate_match_arm_char(ch, body, rest_arms, branch_idx, base_idx,
                                dispatch_lbl, join_lbl, match_ty, s_name, tag_name,
@@ -2492,6 +2564,55 @@ fn translate_match_arm_bool(b: Bool, body: typed_ast.TypedExpr,
     fresh_arm_label(branch_idx + 1, base_idx),
     join_lbl, match_ty, s_name, tag_name, params, ctors,
     idx + 2, acc_blocks, acc_phi, captures,
+    lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
+    lifted_idx_ref, name_prefix)
+
+# Translate a StringPattern arm.
+# Emit: IRStrConst for the literal, IRStrEq (i64 Bool result), IRConst(1),
+# IRICmp eq i64→i1 for IRCondBr. Identical structure to CharPattern except
+# the literal is used directly (no char_to_string conversion needed).
+# Fresh name slots:
+#   idx   = raw GEP ptr (IRStrConst raw name)
+#   idx+1 = i64 ptrtoint result (IRStrConst result)
+#   idx+2 = IRStrEq i64 Bool result
+#   idx+3 = IRConst 1 (the true sentinel for comparison)
+#   idx+4 = IRICmp i1 result (used in IRCondBr)
+fn translate_match_arm_string(s: String, body: typed_ast.TypedExpr,
+                               rest_arms: List typed_ast.TypedMatchBranch,
+                               branch_idx: Int, base_idx: Int,
+                               dispatch_lbl: String, join_lbl: String,
+                               match_ty: types.Type, s_name: String, tag_name: String,
+                               params: List String, ctors: Dict (Int, Int, Int, String),
+                               idx: Int,
+                               acc_blocks: List sprout_ir.IRBlock,
+                               acc_phi: List (String, String),
+                               captures: Dict String,
+                               lifted_ref: Ref (List sprout_ir.IRFunction),
+                               top_level: Set,
+                               let_names: Set,
+                               fn_arities: Dict Int,
+                               lambda_ctr_ref: Ref Int,
+                               lifted_idx_ref: Ref (Dict Int),
+                               name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, List (String, String), Int) !{IO} =
+  translate_match_arm_body_with_test(body, rest_arms, branch_idx, base_idx,
+    sprout_ir.IRBlock(dispatch_lbl,
+      list_append(
+        Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), s),
+        Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx + 2), s_name,
+                               fresh_name(name_prefix, idx + 1)),
+        Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 3), 1),
+        Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 4), "eq",
+                              fresh_name(name_prefix, idx + 2),
+                              fresh_name(name_prefix, idx + 3)),
+        Nil)))),
+        Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 4),
+                                fresh_body_label(branch_idx, base_idx),
+                                fresh_arm_label(branch_idx + 1, base_idx)), Nil))),
+    fresh_body_label(branch_idx, base_idx),
+    fresh_arm_label(branch_idx + 1, base_idx),
+    join_lbl, match_ty, s_name, tag_name, params, ctors,
+    idx + 5, acc_blocks, acc_phi, captures,
     lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
     lifted_idx_ref, name_prefix)
 
