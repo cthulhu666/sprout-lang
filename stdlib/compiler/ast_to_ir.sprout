@@ -878,9 +878,14 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
               | Ok r ->
                   match r with
                   | (eblocks, elabel, eops, _discard, eidx) ->
-                      translate_do(rest, params, ctors, eidx, elabel, eops,
-                                   captures, lifted_ref, top_level, let_names, fn_arities,
-                                   lambda_ctr_ref, lifted_idx_ref, name_prefix)
+                      match translate_do(rest, params, ctors, eidx, elabel, eops,
+                                         captures, lifted_ref, top_level, let_names, fn_arities,
+                                         lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+                      | Err msg -> Err(msg)
+                      | Ok rr ->
+                          match rr with
+                          | (rblocks, rlabel, rops, rname, ridx) ->
+                              Ok((list_append(eblocks, rblocks), rlabel, rops, rname, ridx))
       | typed_ast.TDoLetStep name e ->
           # Evaluate e; bind `name` to the result SSA in captures; continue.
           match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
@@ -890,10 +895,15 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
           | Ok r ->
               match r with
               | (eblocks, elabel, eops, ename, eidx) ->
-                  translate_do(rest, params, ctors, eidx, elabel, eops,
-                               dict_set(name, ename, captures),
-                               lifted_ref, top_level, let_names, fn_arities,
-                               lambda_ctr_ref, lifted_idx_ref, name_prefix)
+                  match translate_do(rest, params, ctors, eidx, elabel, eops,
+                                     dict_set(name, ename, captures),
+                                     lifted_ref, top_level, let_names, fn_arities,
+                                     lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+                  | Err msg -> Err(msg)
+                  | Ok rr ->
+                      match rr with
+                      | (rblocks, rlabel, rops, rname, ridx) ->
+                          Ok((list_append(eblocks, rblocks), rlabel, rops, rname, ridx))
       | typed_ast.TDoBindStep pat e ->
           # M3 PR 13: Maybe wrapper-strip binds short-circuit on Nothing using
           # a CFG-branching + phi pattern, mirroring codegen.sprout's
@@ -919,10 +929,15 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
                     | Ok bind_result ->
                         match bind_result with
                         | (bind_ops, new_captures, bind_idx) ->
-                            translate_do(rest, params, ctors, bind_idx, elabel,
-                                         list_append(eops, bind_ops),
-                                         new_captures, lifted_ref, top_level, let_names, fn_arities,
-                                         lambda_ctr_ref, lifted_idx_ref, name_prefix)
+                            match translate_do(rest, params, ctors, bind_idx, elabel,
+                                               list_append(eops, bind_ops),
+                                               new_captures, lifted_ref, top_level, let_names, fn_arities,
+                                               lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+                            | Err msg -> Err(msg)
+                            | Ok rr ->
+                                match rr with
+                                | (rblocks, rlabel, rops, rname, ridx) ->
+                                    Ok((list_append(eblocks, rblocks), rlabel, rops, rname, ridx))
 
 # Extend the captures dict (and emit field-extraction ops) for a TDoBindStep pattern.
 # VarPattern binds the SSA name directly; WildcardPattern/UnitPattern discard it.

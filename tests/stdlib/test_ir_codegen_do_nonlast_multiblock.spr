@@ -1,0 +1,38 @@
+# M3 PR 15f — thread eblocks through translate_do's three non-last-step branches.
+#
+# Each branch (TDoExprStep non-last, TDoLetStep, TDoBindStep plain-IO) previously
+# discarded the completed_blocks returned by translate_expr.  When the RHS is a
+# multi-block form (match, if, &&/||) the sealed sub-blocks were dropped while
+# the phi node still referenced their labels → use of undefined value errors.
+#
+# No imports: self-contained Sprout.  IR verified by opt --passes=verify.
+
+# T1: TDoExprStep non-last — match-expression as a discarded non-last step.
+# The match emits two sealed arm blocks + a phi in the continuation; dropping
+# those blocks produces 'use of undefined value %arm_*' / '%body_*'.
+fn t1() -> Int !{IO} =
+  do
+    match 1 with
+    | 0 -> 1
+    | _ -> 2
+    3
+
+# T2: TDoLetStep — if-expression on the let RHS.
+# The if emits a 'then' block + 'else' block + phi; dropping them produces
+# 'use of undefined value %else_*'.
+fn t2(b: Bool) -> Int !{IO} =
+  do
+    let x = if b then 10 else 20
+    x + 1
+
+# T3: TDoBindStep plain-IO — if-expression as the bound RHS (not Maybe-wrapped,
+# not a simple call).  The if emits sealed then/else blocks; dropping them
+# produces 'use of undefined value %else_*'.
+fn helper_io() -> Int !{IO} = 42
+
+fn t3(b: Bool) -> Int !{IO} =
+  do
+    x <- if b then helper_io() else helper_io()
+    x + 1
+
+fn main() -> Unit !{IO} = ()
