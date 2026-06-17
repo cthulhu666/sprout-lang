@@ -604,21 +604,22 @@ fn is_supported_arg_type(_t: types.Type) -> Bool = true
 # Ctor field argument types accepted by translate_args_ctor.
 #
 # IRMakeCtor lowering (ir_lowering.sprout `lower_op` / `lower_call_args`)
-# hardcodes `i64 %argN` for every argument slot.  Int, String, Bool, and
-# heap-typed ADT values all produce i64 in LLVM IR.
+# hardcodes `i64 %argN` for every argument slot.  Int, String, Bool, Unit,
+# and heap-typed ADT values all produce i64 in LLVM IR.
 #
 # Bool is ACCEPTED: all Bool-valued translate_expr results are i64-uniform.
 # TBool literals emit IRConst (i64 0/1); comparison results go through
 # IRICmp (i1) + IRZextI1ToI64 (i64) in finish_binary, so the value
 # reaching the ctor field slot is always i64.  (M3 PR 15a)
 #
-# Unit is REJECTED: Unit produces no LLVM value; there is no valid `i64` to
-# pass.
+# Unit is ACCEPTED: translate_expr's TUnit arm emits IRConst(name, 0) —
+# the i64 0 sentinel (mirrors codegen.sprout val_make(ll_i64(), "0")).
+# The field slot is filled with i64 0; the callee convention is unchanged.
+# (M3 PR 15e)
 #
 # All other types (including TVar, TApp, TypeArrow, ADT names) are accepted;
 # they all produce i64 in the IR path.
-fn is_supported_ctor_arg_type(t: types.Type) -> Bool =
-  ! is_unit_type (t)
+fn is_supported_ctor_arg_type(_t: types.Type) -> Bool = true
 
 # Map an inferred return type to the LLVM type used for `define`/`ret`.
 # PR 1.3 only emits i64 (Int) and i1 (Bool); anything else falls back to i64
@@ -3208,8 +3209,8 @@ fn finish_direct_call(fname: String, call_ty: types.Type,
 # translate_args_scalar — for IRCall / direct-call paths.  Rejects any arg
 # whose type is not Int or String (scalar-only milestone constraint).
 #
-# translate_args_ctor — for IRMakeCtor paths.  Accepts Int, String, Bool, and
-# any heap-typed value (ADT, TVar, TApp, etc.); rejects only Unit — see
+# translate_args_ctor — for IRMakeCtor paths.  Accepts all types including
+# Unit (i64 0 sentinel), Bool, Int, String, and heap-typed ADT values — see
 # is_supported_ctor_arg_type for the full rationale.
 #
 # Both delegate to translate_args_core with a type-filter flag.
@@ -3303,8 +3304,6 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
   | Cons a rest ->
       if scalar_only && ! is_supported_arg_type (typed_ast.typed_expr_type(a))
       then Err("ast_to_ir: call argument type not supported (Bool and Unit cannot be passed as i64)")
-      else if ! scalar_only && is_unit_type(typed_ast.typed_expr_type(a))
-      then Err("ast_to_ir: Unit ctor field not supported (Unit has no LLVM value to pass)")
       else
         match translate_expr(a, params, ctors, idx, cur_label, cur_ops,
                              captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,

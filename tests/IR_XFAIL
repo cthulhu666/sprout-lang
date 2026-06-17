@@ -52,9 +52,14 @@
 #             1 new xfail added: test_ir_codegen_string_pattern.spr (same Unit ctor
 #             field blocker as the other test_ir_codegen_* files).
 #             list_pattern_demo shifted to nested BoolPattern (StringPattern cleared).
+#   PR 15e — Unit ctor field as i64 0 sentinel  ✓ this PR
+#             5 test_ir_codegen_* entries unblocked from Unit ctor field error.
+#             All 5 + 1 new test (test_ir_codegen_unit_ctor_field) shifted to
+#             pre-existing '%else_27' undefined-value bug (match-arm label/scope gap
+#             in stdlib.compiler IR; same family as '%body_*' gap).
 #
-# Bucket breakdown after PR 15d closes (re-probed):
-#    ~5 entries — IR codegen OOM on CI (>2 GB peak RSS).  The 5 test_ir_codegen_*
+# Bucket breakdown after PR 15e closes (re-probed):
+#    ~6 entries — IR codegen OOM on CI (>2 GB peak RSS).  The 6 test_ir_codegen_*
 #                 tests below construct hand-built IRPrograms, which forces them
 #                 to `import stdlib.compiler` — pulling the entire self-hosted
 #                 compiler into the compile unit.  --use-ir-codegen keeps the
@@ -68,6 +73,10 @@
 #                 IRProgram)" — P1 M5 prep work.  All new tests that import
 #                 stdlib.compiler MUST be added here with this OOM reason until
 #                 the streaming fix lands; they cannot be probed on CI.
+#                 Logical-blocker underneath: PR 15e cleared the Unit ctor field
+#                 error; the next probe would surface '%else_27' (match-arm
+#                 label/scope gap in translate_do — fixed in PR 15f) — but on
+#                 CI the OOM trips first regardless of logical state.
 #    ~1 entry   — translate_do drops match blocks in non-last do steps
 #                 (IR invalid: use of undefined value '%arm_0_N'; test_repl_navigation)
 #    ~1 entry   — @analysis_check_source undefined (repl_hosted; unresolved extern)
@@ -105,6 +114,7 @@ tests/stdlib/test_ir_codegen_ctors.spr         # IR codegen OOM on CI (>2 GB pea
 tests/stdlib/test_ir_codegen_match.spr         # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
 tests/stdlib/test_ir_codegen_nested_patterns.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
 tests/stdlib/test_ir_codegen_string_pattern.spr   # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
+tests/stdlib/test_ir_codegen_unit_ctor_field.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix; new test for PR 15e)
 tests/stdlib/test_json.spr                     # use of undefined value '%body_*' (match-arm label/scope gap)
 tests/stdlib/test_repl_navigation.spr          # use of undefined value '%arm_0_*' in phi (translate_do drops match blocks in non-last steps; StringPattern cleared by PR 15d)
 tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported

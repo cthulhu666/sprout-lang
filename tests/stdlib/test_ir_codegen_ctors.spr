@@ -391,13 +391,13 @@ fn main() -> Unit !{IO} =
                 "Regression: Bool expr result (x==0) as ctor field yields Err (i1/i64 mismatch)",
                 bool_expr_ctor)
 
-    # Case 3: Unit ctor field still surfaces a Unit-specific error — Unit
-    # has no LLVM value at all; it cannot be stored in a ctor field slot.
-    unit_field_ctor <- translated_err_contains(
+    # Case 3: Unit ctor field emits i64 0 sentinel — translate_expr's TUnit
+    # arm produces IRConst(name, 0); no Err is raised.  (M3 PR 15e)
+    unit_field_ctor <- translated_ok_ir_contains(
       "type WU = WU Unit Int Int\nfn f() -> WU = WU((), 0, 0)",
-      "Unit ctor field not supported")
+      "sprout_make3")
     assert_true(state,
-                "Unit ctor field yields a Unit-specific Err (not the Bool/zext message)",
+                "Unit ctor field emits @sprout_make3 with i64 0 sentinel (M3 PR 15e)",
                 unit_field_ctor)
 
     summary(state)

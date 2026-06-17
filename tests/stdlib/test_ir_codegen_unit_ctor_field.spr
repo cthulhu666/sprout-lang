@@ -1,0 +1,117 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# M3 PR 15e — Unit ctor field as i64 0 sentinel via --use-ir-codegen.
+#
+# Unit fields in ADT constructors must emit IRConst(name, 0) — the i64 0
+# sentinel — rather than rejecting with an Err.  The fix removes the
+# is_unit_type guard in translate_args_core and lets translate_expr's
+# existing TUnit arm produce the i64 0.
+#
+# Covers:
+#   U1: ADT with a Unit field ctor — WUnit(()) compiles to valid IR
+#   U2: match on an ADT with a Unit field ctor — pattern succeeds
+#   U3: guard was enforced before fix — Err contained "Unit ctor field"
+#       (this test verifies the OLD error NO LONGER fires; i.e. Ok is returned)
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# Drive a Sprout source string through lex -> parse -> typecheck_typed ->
+# lower_program -> ast_to_ir.translate_program, return IR string or Err.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn translated_ok_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+fn translated_is_ok(src: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # -------------------------------------------------------------------------
+    # U1: ADT with a Unit-field constructor.  WUnit(()) must translate to
+    # valid IR with @sprout_make1 and the i64 0 sentinel argument.
+    # make_unit calls WUnit(()), so the Unit ctor field path is exercised.
+    u1_ok <- translated_is_ok(
+      "type Wrap = | WUnit Unit | WInt Int\n" ++
+      "fn make_unit() -> Wrap = WUnit(())\n" ++
+      "fn main() -> Unit !{IO} = ()\n")
+    assert_true(state, "U1: ADT Unit ctor field compiles to Ok", u1_ok)
+
+    u1_ir <- translated_ok_contains(
+      "type Wrap = | WUnit Unit | WInt Int\n" ++
+      "fn make_unit() -> Wrap = WUnit(())\n" ++
+      "fn main() -> Unit !{IO} = ()\n",
+      "define i64 @make_unit")
+    assert_true(state, "U1: make_unit define block present", u1_ir)
+
+    u1_sentinel <- translated_ok_contains(
+      "type Wrap = | WUnit Unit | WInt Int\n" ++
+      "fn make_unit() -> Wrap = WUnit(())\n" ++
+      "fn main() -> Unit !{IO} = ()\n",
+      "sprout_make1")
+    assert_true(state, "U1: IRMakeCtor emits @sprout_make1", u1_sentinel)
+
+    # -------------------------------------------------------------------------
+    # U2: Match on an ADT with a Unit-field constructor.
+    # The Unit field value is bound (or ignored) in the pattern.
+    u2_ok <- translated_is_ok(
+      "type Wrap = | WUnit Unit | WInt Int\n" ++
+      "fn is_unit_wrap(w: Wrap) -> Bool =\n" ++
+      "  match w with\n" ++
+      "  | WUnit _ -> true\n" ++
+      "  | WInt _ -> false\n" ++
+      "fn main() -> Unit !{IO} = ()\n")
+    assert_true(state, "U2: match on Unit-field ctor compiles to Ok", u2_ok)
+
+    # -------------------------------------------------------------------------
+    # U3: Before the fix, translate_args_core returned
+    #     Err "ast_to_ir: Unit ctor field not supported (Unit has no LLVM value to pass)".
+    # After the fix, WUnit(()) must return Ok — the old error must NOT appear.
+    u3_no_err <- translated_err_contains(
+      "type Wrap = | WUnit Unit | WInt Int\n" ++
+      "fn make_unit() -> Wrap = WUnit(())\n" ++
+      "fn main() -> Unit !{IO} = ()\n",
+      "Unit ctor field not supported")
+    assert_false(state, "U3: old Unit ctor field error no longer fires", u3_no_err)
+
+    summary(state)
