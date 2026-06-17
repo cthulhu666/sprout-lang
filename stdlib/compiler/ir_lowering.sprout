@@ -316,7 +316,29 @@ fn ir_header() -> String =
   # instances (produces "invalid redefinition" in LLVM). Files that call @append
   # without a definition are a pre-existing typeclass dispatch gap (tracked in xfail).
   "declare i64 @print(i64)\n" ++
-  "declare i64 @argv_get(i64)\n\n"
+  "declare i64 @argv_get(i64)\n" ++
+  # int_range is declared as extern fn in prelude.sprout; the declare is also
+  # hardcoded here so files that call the range syntax (1..N) without importing
+  # prelude explicitly still link.  Listed in is_hardcoded_intrinsic to suppress
+  # the duplicate emit from lower_extern_decls.
+  "declare i64 @int_range(i64, i64)\n" ++
+  # analysis_* intrinsics are runtime-implemented compiler bridge functions
+  # (sprout_runtime.c).  They are NOT represented as TExternFnDecl in any user
+  # source file — they are registered only via checker.sprout's analysis_entries()
+  # and synthesised directly into call sites.  Without these declares the emitted
+  # IR fails opt --passes=verify.  All args are i64 per the uniform i64 ABI
+  # (Sprout passes string handles as opaque i64 values; the C side receives them
+  # as long long and casts to ptr internally).
+  "declare i64 @analysis_check_source(i64)\n" ++
+  "declare i64 @analysis_declared_names_in_source(i64)\n" ++
+  "declare i64 @analysis_exported_names_in_source(i64)\n" ++
+  "declare i64 @analysis_symbol_inventory_in_source(i64)\n" ++
+  "declare i64 @analysis_diagnostics_in_source(i64)\n" ++
+  "declare i64 @analysis_symbol_locations_in_source(i64)\n" ++
+  "declare i64 @analysis_type_of_in_source(i64, i64)\n" ++
+  "declare i64 @analysis_eval_expr_in_source(i64, i64)\n" ++
+  "declare i64 @analysis_instances_in_source(i64, i64)\n" ++
+  "declare i64 @analysis_complete_in_state(i64, i64, i64)\n\n"
 
 # M3 PR 14: emit `declare i64 @<name>(i64, …)` for each user `extern fn`,
 # skipping any name that is already in the hardcoded ir_header list (LLVM
@@ -362,7 +384,15 @@ fn is_hardcoded_intrinsic(name: String) -> Bool =
   name == "sprout_make6" || name == "sprout_make7" || name == "sprout_make8" ||
   name == "sprout_make9" ||
   name == "print" || name == "argv_get" ||
-  name == "append"
+  name == "append" ||
+  name == "int_range" ||
+  name == "analysis_check_source" || name == "analysis_declared_names_in_source" ||
+  name == "analysis_exported_names_in_source" ||
+  name == "analysis_symbol_inventory_in_source" ||
+  name == "analysis_diagnostics_in_source" ||
+  name == "analysis_symbol_locations_in_source" ||
+  name == "analysis_type_of_in_source" || name == "analysis_eval_expr_in_source" ||
+  name == "analysis_instances_in_source" || name == "analysis_complete_in_state"
 
 fn i64_params(arity: Int) -> String =
   if arity == 0 then "" else i64_params_loop(arity - 1, "i64")

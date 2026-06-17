@@ -800,7 +800,29 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                           Cons(sprout_ir.IRINeg(fresh_name(name_prefix, idx1), o_name), Nil)),
                         fresh_name(name_prefix, idx1), idx1 + 1))
               else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
-  | typed_ast.TRange _ _ _ _ -> Err("ast_to_ir: range not yet supported")
+  | typed_ast.TRange start end_ _ _ ->
+      # Mirrors direct codegen's emit_range: call @int_range(start, end_)
+      # returning the IntRange handle.  int_range is declared as extern fn in
+      # prelude.sprout so it flows through collect_extern_decls automatically.
+      match translate_expr(start, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities,
+                           lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok sr ->
+          match sr with
+          | (sblocks, scur_lbl, scur_ops, s_name, idx1) ->
+              match translate_expr(end_, params, ctors, idx1, scur_lbl, scur_ops,
+                                   captures, lifted_ref, top_level, let_names, fn_arities,
+                                   lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+              | Err msg -> Err(msg)
+              | Ok er ->
+                  match er with
+                  | (eblocks, ecur_lbl, ecur_ops, e_name, idx2) ->
+                      Ok((list_append(sblocks, eblocks), ecur_lbl,
+                           list_append(ecur_ops,
+                             Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx2), "i64",
+                                                   "int_range", Cons(s_name, Cons(e_name, Nil))), Nil)),
+                           fresh_name(name_prefix, idx2), idx2 + 1))
   | typed_ast.TDo steps _ _ ->
       translate_do(steps, params, ctors, idx, cur_label, cur_ops,
                    captures, lifted_ref, top_level, let_names, fn_arities,

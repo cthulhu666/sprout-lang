@@ -1,0 +1,129 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.sprout_ir as sprout_ir
+
+# M3 PR 15h — TRange expression lowering + compiler-intrinsic LLVM declares.
+#
+# Gap 1: `1..5` (TRange) was unconditionally rejected with
+#   "ast_to_ir: range not yet supported".
+#   Fix: translate start + end_, emit IRCall "int_range".
+#
+# Gap 2: analysis_* intrinsics (used by the REPL) were not declared in the
+#   emitted LLVM; the runtime implements them but ir_lowering's header omitted
+#   their declares.  Fix: add all 10 analysis_* + int_range to ir_header and
+#   is_hardcoded_intrinsic (skipping duplicate emit from prelude's extern fn).
+
+# Drive a Sprout source string through lex -> parse -> typecheck_typed ->
+# lower_program -> ast_to_ir.translate_program, return IR string or Err.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn translated_ok_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ---------------------------------------------------------------------------
+    # T1: TRange — `1..5` translates without error and emits a call to
+    # @int_range.  Mirrors direct codegen's emit_range which calls
+    # `call i64 @int_range(i64 <start>, i64 <end>)`.
+    #
+    # Source: `fn r() -> IntRange = 1..5`
+    # Expected IR: `call i64 @int_range(i64 %t0, i64 %t1)` (or similar SSA names)
+    t1_no_err <- translated_ok_contains(
+      "fn r() -> IntRange =\n  1..5\n",
+      "define i64 @r")
+    assert_true(state, "T1a: TRange — `1..5` compiles (no error)", t1_no_err)
+
+    t1_calls_int_range <- translated_ok_contains(
+      "fn r() -> IntRange =\n  1..5\n",
+      "@int_range")
+    assert_true(state, "T1b: TRange — `1..5` emits call to @int_range", t1_calls_int_range)
+
+    # T1c: TRange with variable endpoints.
+    # `fn r2(lo: Int, hi: Int) -> IntRange = lo .. hi`
+    # Spaces around `..` are required when endpoints are identifiers; the lexer
+    # would otherwise scan `lo..hi` as a single token and fail to parse TRange.
+    t1c <- translated_ok_contains(
+      "fn r2(lo: Int, hi: Int) -> IntRange =\n  lo .. hi\n",
+      "@int_range")
+    assert_true(state, "T1c: TRange with variable endpoints emits @int_range call", t1c)
+
+    # ---------------------------------------------------------------------------
+    # T2: analysis_* intrinsics — ir_lowering header declares them so that
+    # files calling analysis_check_source etc. pass opt --passes=verify.
+    #
+    # Strategy: verify that ir_lowering.lower_program of a trivial program
+    # (the header is emitted unconditionally) contains the declare lines.
+    # An empty IRProgram: no functions, no globals, no ctor regs, no externs.
+    # lower_program always emits the hardcoded ir_header first, so checking
+    # the output of an empty program tests header content exactly.
+    let trivial_ir = ir_lowering.lower_program(
+      sprout_ir.IRProgram(Nil, Nil, Nil, Nil))
+
+    t2a <- str_find(trivial_ir, "declare i64 @analysis_check_source") != -1
+    assert_true(state, "T2a: ir_header declares @analysis_check_source", t2a)
+
+    t2b <- str_find(trivial_ir, "declare i64 @analysis_declared_names_in_source") != -1
+    assert_true(state, "T2b: ir_header declares @analysis_declared_names_in_source", t2b)
+
+    t2c <- str_find(trivial_ir, "declare i64 @analysis_exported_names_in_source") != -1
+    assert_true(state, "T2c: ir_header declares @analysis_exported_names_in_source", t2c)
+
+    t2d <- str_find(trivial_ir, "declare i64 @analysis_symbol_inventory_in_source") != -1
+    assert_true(state, "T2d: ir_header declares @analysis_symbol_inventory_in_source", t2d)
+
+    t2e <- str_find(trivial_ir, "declare i64 @analysis_diagnostics_in_source") != -1
+    assert_true(state, "T2e: ir_header declares @analysis_diagnostics_in_source", t2e)
+
+    t2f <- str_find(trivial_ir, "declare i64 @analysis_symbol_locations_in_source") != -1
+    assert_true(state, "T2f: ir_header declares @analysis_symbol_locations_in_source", t2f)
+
+    t2g <- str_find(trivial_ir, "declare i64 @analysis_type_of_in_source") != -1
+    assert_true(state, "T2g: ir_header declares @analysis_type_of_in_source", t2g)
+
+    t2h <- str_find(trivial_ir, "declare i64 @analysis_eval_expr_in_source") != -1
+    assert_true(state, "T2h: ir_header declares @analysis_eval_expr_in_source", t2h)
+
+    t2i <- str_find(trivial_ir, "declare i64 @analysis_instances_in_source") != -1
+    assert_true(state, "T2i: ir_header declares @analysis_instances_in_source", t2i)
+
+    t2j <- str_find(trivial_ir, "declare i64 @analysis_complete_in_state") != -1
+    assert_true(state, "T2j: ir_header declares @analysis_complete_in_state", t2j)
+
+    summary(state)
