@@ -73,18 +73,24 @@
 #               int_range_demo       → TRange not yet supported (ast_to_ir)
 #               repl_hosted          → @analysis_check_source undefined
 #               test_repl_navigation → @analysis_check_source undefined
+#   PR 16  — @append Semigroup parity (ast_to_ir translate_direct_call)  ✓ this PR
+#             1 entry cleared:
+#               tests/smoke_shapes/03_strconcat.spr → @append undefined
+#             M3 IR-codegen feature parity COMPLETE after this PR.
+#             All remaining xfail entries are pre-existing direct-codegen bugs
+#             (dup-block 't0') or pre-existing inference/lowering correctness
+#             defects (__unresolved_Eq__/__unresolved_ToString__) — outside the
+#             M3 IR-codegen feature-parity scope.
 #
-# Bucket breakdown after PR 15h closes (re-probed):
+# Bucket breakdown after PR 16 closes (re-probed):
 #    ~8 entries — IR codegen OOM on CI (>2 GB peak RSS).  The 8 test_ir_codegen_*
 #                 tests below construct hand-built IRPrograms, which forces them
 #                 to `import stdlib.compiler` — pulling the entire self-hosted
 #                 compiler into the compile unit.  Tracked as BACKLOG §1
 #                 "stream IR codegen output per-function" — P1 M5 prep work.
-#                 +1 new test added by this PR: test_ir_codegen_range_and_intrinsics.
 #    ~4 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing)
 #    ~3 entries — typeclass `__unresolved_Eq__` / `__unresolved_ToString__`
-#                 (typeclass dispatch gap — same family as @append)
-#    ~1 entry   — @append undefined (Semigroup dispatch; same family as above)
+#                 (typeclass dispatch gap — out of M3 IR-codegen scope)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
 
 # === examples/ ===
@@ -94,9 +100,6 @@ examples/astar.sprout                          # multiple definition of local 't
 examples/nqueens.sprout                        # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-
-# === tests/smoke_shapes/ ===
-tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Semigroup dispatch gap)
 
 # === tests/stdlib/ ===
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)

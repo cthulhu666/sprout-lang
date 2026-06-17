@@ -1,0 +1,28 @@
+# Verifies that `++` (Semigroup `append`) lowers correctly via --use-ir-codegen
+# (M3 PR 16 — last IR-codegen parity gap).
+#
+# Before PR 16: the parser desugars `a ++ b` into CallExpr("append", [a, b]).
+# When no imports are in scope the typeclass lowering pass emits no dict witness,
+# so the call reaches translate_direct_call as TCall(TVar "append", [a, b]).
+# translate_direct_call had no special case for "append", so it fell through to
+# finish_direct_call which emitted `call i64 @append(i64 %a, i64 %b)` — and
+# @append is never defined, causing `opt --passes=verify` to error.
+#
+# After PR 16: translate_direct_call recognises fname == "append", peels the
+# optional TDict witness arg, inspects the operand types, and routes to either
+# IRStrConcat (String) or IRCall "list_append" (List), mirroring the special
+# case in codegen.sprout emit_append_call / emit_append_operands.
+
+# T1: String ++ String — the primary gap (tests/smoke_shapes/03_strconcat.spr).
+fn t1() -> String = "hello" ++ " " ++ "world"
+
+# T2: String ++ in a more complex expression — multiple appends in one fn.
+fn t2(a: String, b: String, c: String) -> String = a ++ b ++ c
+
+# T3: empty string operand.
+fn t3() -> String = "" ++ "world"
+
+# T4: String ++ with a function argument.
+fn t4(s: String) -> String = "prefix_" ++ s
+
+fn main() -> Unit !{IO} = ()

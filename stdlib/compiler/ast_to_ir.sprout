@@ -583,6 +583,14 @@ fn is_maybe_type(t: types.Type) -> Bool =
   | types.TApp (types.TConst "Maybe") _ -> true
   | _ -> false
 
+# True iff t is a List type (TApp (TConst "List") _).
+# Mirrors codegen.sprout:is_list_type; duplicated here because codegen
+# does not export it.
+fn is_list_type(t: types.Type) -> Bool =
+  match t with
+  | types.TApp (types.TConst "List") _ -> true
+  | _ -> false
+
 
 # Scalar argument types accepted by IRCall / IRApplyClosure (direct and
 # closure call sites).  All IR values are i64; the typechecker is the source
@@ -3245,6 +3253,99 @@ fn recognize_string_builtin(fname: String) -> Maybe StringBuiltin =
   else if fname == "int_to_string" then Just(SBIntToString)
   else Nothing
 
+# Handle the `append` / `++` Semigroup method.
+#
+# The parser desugars `a ++ b` to CallExpr("append", [a, b]).  When no import
+# brings the Semigroup class into scope, the typeclass lowering emits no dict
+# witness and the call reaches translate_direct_call as TCall(TVar "append",
+# [a, b]).  When a dict witness is present the arg list has 3 elements:
+# [TDict ..., left, right].  Both shapes are accepted here; the dict arg is
+# skipped if present.
+#
+# Mirrors codegen.sprout emit_append_call / emit_append_operands (~2591).
+fn translate_append_call(args: List typed_ast.TypedExpr, call_ty: types.Type,
+                         params: List String,
+                         ctors: Dict (Int, Int, Int, String), idx: Int,
+                         cur_label: String, cur_ops: List sprout_ir.IROp,
+                         captures: Dict String,
+                         lifted_ref: Ref (List sprout_ir.IRFunction),
+                         top_level: Set,
+                         let_names: Set,
+                         fn_arities: Dict Int,
+                         lambda_ctr_ref: Ref Int,
+                         lifted_idx_ref: Ref (Dict Int),
+                         name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match args with
+  | [typed_ast.TDict _ _ _, left, right | _] ->
+      translate_append_operands(left, right, call_ty, params, ctors, idx,
+                                cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
+                                fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  | [left, right | _] ->
+      translate_append_operands(left, right, call_ty, params, ctors, idx,
+                                cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
+                                fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  | _ -> Err("ast_to_ir: append expects 2 or 3 arguments")
+
+fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
+                              call_ty: types.Type,
+                              params: List String,
+                              ctors: Dict (Int, Int, Int, String), idx: Int,
+                              cur_label: String, cur_ops: List sprout_ir.IROp,
+                              captures: Dict String,
+                              lifted_ref: Ref (List sprout_ir.IRFunction),
+                              top_level: Set,
+                              let_names: Set,
+                              fn_arities: Dict Int,
+                              lambda_ctr_ref: Ref Int,
+                              lifted_idx_ref: Ref (Dict Int),
+                              name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  if is_string_type(typed_ast.typed_expr_type(left)) || is_string_type(call_ty) then
+    # String ++ String → IRStrConcat.  Mirrors the translate_binary "++" path
+    # at ~line 1513 and codegen.sprout emit_append_operands (~2600).
+    match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
+                         captures, lifted_ref, top_level, let_names, fn_arities,
+                         lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+    | Err msg -> Err(msg)
+    | Ok lr ->
+        match lr with
+        | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
+            match translate_expr(right, params, ctors, idx1, lcur_lbl, lcur_ops,
+                                 captures, lifted_ref, top_level, let_names, fn_arities,
+                                 lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+            | Err msg -> Err(msg)
+            | Ok rr ->
+                match rr with
+                | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
+                    Ok((list_append(lblocks, rblocks), rcur_lbl,
+                         list_append(rcur_ops,
+                           Cons(sprout_ir.IRStrConcat(fresh_name(name_prefix, idx2), l_name, r_name), Nil)),
+                         fresh_name(name_prefix, idx2), idx2 + 1))
+  else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(call_ty) then
+    # List ++ List → call @list_append.  Mirrors codegen.sprout (~2611).
+    match translate_args_scalar(Cons(left, Cons(right, Nil)), params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+                                captures, lifted_ref, top_level, let_names, fn_arities,
+                                lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+    | Err msg -> Err(msg)
+    | Ok r ->
+        match r with
+        | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
+            match arg_names with
+            | [l_name, r_name] ->
+                Ok((arg_blocks, arg_cur_lbl,
+                     list_append(arg_cur_ops,
+                       Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), "i64", "list_append", Cons(l_name, Cons(r_name, Nil))), Nil)),
+                     fresh_name(name_prefix, idx1), idx1 + 1))
+            | _ -> Err("ast_to_ir: append (list): expected exactly 2 translated args")
+  else
+    # Polymorphic append site (e.g. the `a` in `mconcat`'s body) — type is a
+    # TVar or other non-concrete form.  Emit i64 0 as a placeholder, matching
+    # direct codegen's zero_val(type_to_ll(ty)) for the same case.
+    Ok((Nil, cur_label,
+         list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
+         fresh_name(name_prefix, idx), idx + 1))
+
 fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                          call_ty: types.Type, params: List String,
                          ctors: Dict (Int, Int, Int, String), idx: Int,
@@ -3258,6 +3359,11 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                          lifted_idx_ref: Ref (Dict Int),
                          name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  if fname == "append" then
+    translate_append_call(args, call_ty, params, ctors, idx, cur_label, cur_ops,
+                          captures, lifted_ref, top_level, let_names, fn_arities,
+                          lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  else
   match recognize_string_builtin(fname) with
   | Just kind -> translate_string_builtin(kind, fname, args, params, ctors, idx,
                                           cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
