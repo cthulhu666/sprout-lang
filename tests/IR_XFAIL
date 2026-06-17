@@ -63,27 +63,26 @@
 #             ref_tutorial.
 #             test_repl_navigation shifted to @analysis_check_source undefined
 #             (same blocker as repl_hosted; translate_do eblocks gap cleared).
+#   PR 15g — nested IntPattern + BoolPattern in ctor + tuple match  ✓ this PR
+#             2 entries cleared:
+#               list_pattern_demo    → nested BoolPattern in ctor (StringPattern was PR 15d)
+#               test_return_type_dispatch → nested IntPattern in ctor match
+#             test_ir_codegen_nested_int_bool passes IR verification (no new xfail needed).
 #
-# Bucket breakdown after PR 15f closes (re-probed):
+# Bucket breakdown after PR 15g closes (re-probed):
 #    ~6 entries — IR codegen OOM on CI (>2 GB peak RSS).  The 6 test_ir_codegen_*
 #                 tests below construct hand-built IRPrograms, which forces them
 #                 to `import stdlib.compiler` — pulling the entire self-hosted
-#                 compiler into the compile unit.  --use-ir-codegen keeps the
-#                 full IRBlock/IROp graph in memory before lowering (vs. direct
-#                 codegen's streaming Emitter at ~160 MB/file), so per-file peak
-#                 RSS is 2-2.6 GB and CI runners OOM.  Tracked as BACKLOG §1
+#                 compiler into the compile unit.  Tracked as BACKLOG §1
 #                 "stream IR codegen output per-function" — P1 M5 prep work.
-#                 Logical blocker underneath cleared by PR 15f (translate_do
-#                 eblocks fix); OOM remains until the streaming fix lands.
+#                 +1 new test added by this PR: test_ir_codegen_nested_int_bool.
 #    ~2 entries — @analysis_check_source undefined (repl_hosted, test_repl_navigation;
-#                 unresolved extern; translate_do eblocks gap cleared by PR 15f)
-#    ~1 entry   — nested BoolPattern in constructor match (list_pattern_demo)
+#                 unresolved extern)
 #    ~4 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing)
 #    ~3 entries — typeclass `__unresolved_Eq__` / `__unresolved_ToString__`
 #                 (typeclass dispatch gap — same family as @append)
 #    ~1 entry   — @append undefined (Semigroup dispatch; same family as above)
 #    ~1 entry   — `range not yet supported` (ast_to_ir TRange case)
-#    ~2 entries — nested IntPattern in ctor match (PR 8 follow-up)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
 
 # === examples/ ===
@@ -91,7 +90,6 @@ examples/aoc_2025_day_1.sprout                 # multiple definition of local 't
 examples/aoc_2025_day_2.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/astar.sprout                          # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/int_range_demo.sprout                 # range not yet supported (ast_to_ir TRange)
-examples/list_pattern_demo.sprout              # nested BoolPattern in constructor match not yet supported (StringPattern cleared by PR 15d)
 examples/nqueens.sprout                        # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/repl_hosted.sprout                    # @analysis_check_source undefined (StringPattern cleared by PR 15d; new blocker: unresolved extern)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
@@ -107,10 +105,10 @@ tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass di
 tests/stdlib/test_ir_codegen_closures.spr      # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
 tests/stdlib/test_ir_codegen_ctors.spr         # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
 tests/stdlib/test_ir_codegen_match.spr         # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
+tests/stdlib/test_ir_codegen_nested_int_bool.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix; new test for PR 15g)
 tests/stdlib/test_ir_codegen_nested_patterns.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
 tests/stdlib/test_ir_codegen_string_pattern.spr   # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
 tests/stdlib/test_ir_codegen_unit_ctor_field.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix; new test for PR 15e)
 tests/stdlib/test_repl_navigation.spr          # @analysis_check_source undefined (translate_do eblocks cleared by PR 15f; new blocker: unresolved extern)
-tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported
 tests/stdlib/test_string.spr                   # multiple definition of local 't0' (pre-existing codegen dup-block)
 tests/stdlib/test_to_string.spr                # multiple definition of local 't0' (pre-existing codegen dup-block)

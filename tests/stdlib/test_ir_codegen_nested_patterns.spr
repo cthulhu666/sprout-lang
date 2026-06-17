@@ -165,15 +165,16 @@ fn main() -> Unit !{IO} =
     assert_true(state, "N8: Wrap(Leaf(_)) WildcardPattern nested in ctor compiles", n8)
 
     # ---------------------------------------------------------------------------
-    # E1: Nested IntPattern should yield a clear Err — not silently miscompile.
-    # Note: the typechecker may reject this before ast_to_ir; either error is OK.
-    e1 <- translated_err_contains(
+    # E1: Nested IntPattern in single-field ctor — closed by M3 PR 15g.
+    # JustI(0) parses as ConstructorPattern with a single IntPattern arg.
+    # Before PR 15g this yielded a clear Err; after PR 15g it compiles to Ok.
+    e1 <- translated_ok_contains(
       "type MaybeInt = NothingI | JustI Int\n" ++
       "fn e1(m: MaybeInt) -> Int =\n" ++
       "  match m with\n" ++
       "  | JustI(0) -> 1\n" ++
       "  | _ -> 0\n",
-      "")
-    assert_true(state, "E1: JustI(0) with nested IntPattern yields Err (any error)", e1)
+      "define i64 @e1")
+    assert_true(state, "E1: JustI(0) with nested IntPattern compiles (PR 15g)", e1)
 
     summary(state)

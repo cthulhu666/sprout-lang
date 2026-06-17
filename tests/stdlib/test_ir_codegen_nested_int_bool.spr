@@ -1,0 +1,107 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# M3 PR 15g — nested IntPattern and BoolPattern in constructor and tuple match arms.
+# Covers:
+#   N1: IntPattern nested inside ConstructorPattern field
+#   N2: BoolPattern nested inside ConstructorPattern field
+#   N3: IntPattern nested inside TuplePattern element
+#   N4: BoolPattern nested inside TuplePattern element
+#
+# Multi-field constructor pattern syntax: `| P x y ->` (space-separated, not parens).
+# Single-field wrapper ctor syntax: `| Ctor(x) ->` (parens — standard single-arg form).
+
+# Drive a Sprout source string through lex -> parse -> typecheck_typed ->
+# lower_program -> ast_to_ir.translate_program, return IR string or Err.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn translated_ok_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ---------------------------------------------------------------------------
+    # N1: IntPattern nested inside ConstructorPattern field.
+    # type P = | P Int Bool
+    # fn n1(x: P) -> Int = match x with | P 0 _ -> 1 | P _ _ -> 2
+    n1 <- translated_ok_contains(
+      "type P = | P Int Bool\n" ++
+      "fn n1(x: P) -> Int =\n" ++
+      "  match x with\n" ++
+      "  | P 0 _ -> 1\n" ++
+      "  | P _ _ -> 2\n",
+      "define i64 @n1")
+    assert_true(state, "N1: IntPattern nested in ConstructorPattern compiles", n1)
+
+    # ---------------------------------------------------------------------------
+    # N2: BoolPattern nested inside ConstructorPattern field.
+    # type P = | P Int Bool
+    # fn n2(x: P) -> Int = match x with | P _ true -> 1 | P _ false -> 2
+    n2 <- translated_ok_contains(
+      "type P = | P Int Bool\n" ++
+      "fn n2(x: P) -> Int =\n" ++
+      "  match x with\n" ++
+      "  | P _ true -> 1\n" ++
+      "  | P _ false -> 2\n",
+      "define i64 @n2")
+    assert_true(state, "N2: BoolPattern nested in ConstructorPattern compiles", n2)
+
+    # ---------------------------------------------------------------------------
+    # N3: IntPattern nested inside TuplePattern element.
+    # fn n3(t: (Int, Int)) -> Int = match t with | (0, _) -> 1 | (_, _) -> 2
+    n3 <- translated_ok_contains(
+      "fn n3(t: (Int, Int)) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | (0, _) -> 1\n" ++
+      "  | (_, _) -> 2\n",
+      "define i64 @n3")
+    assert_true(state, "N3: IntPattern nested in TuplePattern compiles", n3)
+
+    # ---------------------------------------------------------------------------
+    # N4: BoolPattern nested inside TuplePattern element.
+    # fn n4(t: (Bool, Int)) -> Int = match t with | (true, n) -> n | (false, _) -> 0
+    n4 <- translated_ok_contains(
+      "fn n4(t: (Bool, Int)) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | (true, n) -> n\n" ++
+      "  | (false, _) -> 0\n",
+      "define i64 @n4")
+    assert_true(state, "N4: BoolPattern nested in TuplePattern compiles", n4)
+
+    summary(state)

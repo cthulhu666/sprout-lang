@@ -1922,10 +1922,63 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
                                             list_reverse(cont_ops_src), captures2,
                                             cont_lbl, miss_lbl, ctors,
                                             list_reverse(extra2))
-        | ast.IntPattern _ _ ->
-            Err("ast_to_ir: nested IntPattern in constructor match not yet supported")
-        | ast.BoolPattern _ _ ->
-            Err("ast_to_ir: nested BoolPattern in constructor match not yet supported")
+        | ast.IntPattern n _ ->
+            # Fetch the constructor field; seal cur_lbl with an integer equality test;
+            # open inner_lbl and continue binding remaining args.
+            # Fresh name slots:
+            #   idx   = field SSA (IRGetField)
+            #   idx+1 = IRConst i64 literal value
+            #   idx+2 = IRICmp i1 result (used directly in IRCondBr)
+            match fresh_name(name_prefix, idx) with
+            | field_ssa ->
+                match fresh_nested_test_label(idx) with
+                | inner_lbl ->
+                    match list_append(
+                      list_reverse(cur_ops),
+                      Cons(sprout_ir.IRGetField(field_ssa, scrut_name, field_idx,
+                                                fk.fk_at(fks, field_idx)),
+                      Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 1), n),
+                      Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 2), "eq",
+                                            field_ssa,
+                                            fresh_name(name_prefix, idx + 1)),
+                      Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 2),
+                                              inner_lbl, miss_lbl),
+                      Nil))))) with
+                    | sealed_ops ->
+                        bind_ctor_field_args(rest_args, scrut_name, fks,
+                                             idx + 3, field_idx + 1, name_prefix, Nil,
+                                             acc_captures, inner_lbl, miss_lbl, ctors,
+                                             Cons(sprout_ir.IRBlock(cur_lbl, sealed_ops),
+                                                  acc_extra))
+        | ast.BoolPattern b _ ->
+            # Fetch the constructor field; seal cur_lbl with a Bool equality test.
+            # Bool fields flow as i64 (0 = false, 1 = true) per the zext convention.
+            # Fresh name slots:
+            #   idx   = field SSA (IRGetField)
+            #   idx+1 = IRConst i64 0 or 1 (the bool literal)
+            #   idx+2 = IRICmp i1 result (used directly in IRCondBr)
+            match fresh_name(name_prefix, idx) with
+            | field_ssa ->
+                match fresh_nested_test_label(idx) with
+                | inner_lbl ->
+                    match list_append(
+                      list_reverse(cur_ops),
+                      Cons(sprout_ir.IRGetField(field_ssa, scrut_name, field_idx,
+                                                fk.fk_at(fks, field_idx)),
+                      Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 1),
+                                             if b then 1 else 0),
+                      Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 2), "eq",
+                                            field_ssa,
+                                            fresh_name(name_prefix, idx + 1)),
+                      Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 2),
+                                              inner_lbl, miss_lbl),
+                      Nil))))) with
+                    | sealed_ops ->
+                        bind_ctor_field_args(rest_args, scrut_name, fks,
+                                             idx + 3, field_idx + 1, name_prefix, Nil,
+                                             acc_captures, inner_lbl, miss_lbl, ctors,
+                                             Cons(sprout_ir.IRBlock(cur_lbl, sealed_ops),
+                                                  acc_extra))
         | ast.StringPattern s _ ->
             # Fetch the constructor field; seal cur_lbl with a string equality test;
             # open inner_lbl and continue binding remaining args.
@@ -2068,10 +2121,61 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
                                                                    name_prefix, list_reverse(cont_ops_src),
                                                                    captures2, cont_lbl, miss_lbl, ctors,
                                                                    list_reverse(extra2))
-      | ast.IntPattern _ _ ->
-          Err("ast_to_ir: nested IntPattern in tuple match not yet supported")
-      | ast.BoolPattern _ _ ->
-          Err("ast_to_ir: nested BoolPattern in tuple match not yet supported")
+      | ast.IntPattern n _ ->
+          # Fetch the tuple element; seal cur_lbl with an integer equality test;
+          # open inner_lbl and continue binding remaining tuple items.
+          # Fresh name slots:
+          #   idx   = field SSA (IRGetTupleField)
+          #   idx+1 = IRConst i64 literal value
+          #   idx+2 = IRICmp i1 result (used directly in IRCondBr)
+          match fresh_name(name_prefix, idx) with
+          | field_ssa ->
+              match fresh_nested_test_label(idx) with
+              | inner_lbl ->
+                  match list_append(
+                    list_reverse(cur_ops),
+                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                    Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 1), n),
+                    Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 2), "eq",
+                                          field_ssa,
+                                          fresh_name(name_prefix, idx + 1)),
+                    Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 2),
+                                            inner_lbl, miss_lbl),
+                    Nil))))) with
+                  | sealed_ops ->
+                      bind_tuple_items(rest_items, scrut_name, idx + 3, field_idx + 1,
+                                       name_prefix, Nil, acc_captures,
+                                       inner_lbl, miss_lbl, ctors,
+                                       Cons(sprout_ir.IRBlock(cur_lbl, sealed_ops),
+                                            acc_extra))
+      | ast.BoolPattern b _ ->
+          # Fetch the tuple element; seal cur_lbl with a Bool equality test.
+          # Bool values flow as i64 (0 = false, 1 = true) throughout.
+          # Fresh name slots:
+          #   idx   = field SSA (IRGetTupleField)
+          #   idx+1 = IRConst i64 0 or 1 (the bool literal)
+          #   idx+2 = IRICmp i1 result (used directly in IRCondBr)
+          match fresh_name(name_prefix, idx) with
+          | field_ssa ->
+              match fresh_nested_test_label(idx) with
+              | inner_lbl ->
+                  match list_append(
+                    list_reverse(cur_ops),
+                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                    Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 1),
+                                           if b then 1 else 0),
+                    Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 2), "eq",
+                                          field_ssa,
+                                          fresh_name(name_prefix, idx + 1)),
+                    Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 2),
+                                            inner_lbl, miss_lbl),
+                    Nil))))) with
+                  | sealed_ops ->
+                      bind_tuple_items(rest_items, scrut_name, idx + 3, field_idx + 1,
+                                       name_prefix, Nil, acc_captures,
+                                       inner_lbl, miss_lbl, ctors,
+                                       Cons(sprout_ir.IRBlock(cur_lbl, sealed_ops),
+                                            acc_extra))
       | ast.StringPattern s _ ->
           # Fetch the tuple field; seal cur_lbl with a string equality test;
           # open inner_lbl and continue binding remaining tuple items.
