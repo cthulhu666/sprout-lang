@@ -17,114 +17,66 @@
 #   PR 4 — short-circuit `&&` / `||`              ✓ #49
 #   PR 5 — top-level let bindings (module-init)   ✓ #50
 #   PR 6 — top-level fn eta wrappers              ✓ #51
-#   PR 7 — tuple expressions + TuplePattern       ✓ this PR
-#   PR 8 — nested constructor patterns            ✓ this PR
-#   PR 9 — String equality `==` / `!=`            ✓ this PR
-#   PR 10 — Bool and Unit as i64 call args        ✓ this PR
-#   PR 11 — do-block + IO + main body + Bool/Char ==  ✓ this PR — M3 corpus milestone closer
+#   PR 7 — tuple expressions + TuplePattern       ✓
+#   PR 8 — nested constructor patterns            ✓
+#   PR 9 — String equality `==` / `!=`            ✓
+#   PR 10 — Bool and Unit as i64 call args        ✓
+#   PR 11 — do-block + IO + main body + Bool/Char ==  ✓ M3 corpus milestone closer
 #            Cleared: hello, factorial, fizzbuzz, maybe_map, tuples, smoke_shapes 01/02/05
-#   PR 13 — do-block Maybe wrapper-strip binding (Result deferred)  ✓ this PR
-#            ast_to_ir now lowers `x <- f()` when f returns Maybe a !{IO} into a
-#            sprout_tag → icmp → br i1 → (short Nothing / cont payload-extract) → phi
-#            shape mirroring codegen.sprout's emit_do_maybe_bind.  Re-probe of the
-#            4 example XFAILs (do_notation_demo, http_echo_server, http_get_cli,
-#            io_result_do_demo) shows ast_to_ir now passes cleanly — all 4 now hit
-#            the next-dominant blocker: extern-fn declarations not flowing into
-#            the LLVM declare list (see ~4 entries below).
+#   PR 12 — Char literal + char_to_string + CharPattern  ✓
+#   PR 13 — do-block Maybe wrapper-strip binding (Result deferred)  ✓
+#   PR 14 — user `extern fn` declarations emitted as LLVM declare  ✓ this PR
+#            Cleared 56 entries: many were stale-labelled "@char_to_string"
+#            or "@append" but actually stopped at the extern-declare gap.
+#            Now: bytes / regex / time / process / int_range / env_get /
+#            term_read_line / http_* / typeclass_*  all flow through.
 #
-# Bucket breakdown after PR 13 closes (re-probed):
-#   ~36 entries — @append undefined (typeclass Semigroup dispatch gap; pre-existing)
-#   ~20 entries — @char_to_string undefined (Char literal / Char type ops not yet lowered)
-#    ~6 entries — Char literal not yet supported (ast_to_ir TChar case)
-#    ~4 entries — user `extern fn` declarations not emitted as LLVM `declare`
-#                 (was masked by do-block Maybe/Result XFAIL until PR 13)
-#    ~2 entries — multiple definition of local 't0' (codegen dup-block bug; pre-existing)
+# Bucket breakdown after PR 14 closes (re-probed):
+#    ~6 entries — Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+#    ~5 entries — unknown constructor in match pattern (qualified-name lookup gap
+#                 in ast_to_ir's ConstructorPattern resolution)
+#    ~2 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing,
+#                 was masked behind @time_now_micros label)
+#    ~3 entries — typeclass `__unresolved_Eq__` / `__unresolved_ToString__`
+#                 (typeclass dispatch gap — same family as @append)
+#    ~1 entry  — @append undefined (Semigroup dispatch; same family as above)
+#    ~1 entry  — `range not yet supported` (ast_to_ir TRange case)
+#    ~2 entries — nested StringPattern/IntPattern in ctor match (PR 8 follow-up)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
-#    Result wrapper-strip — separate follow-up, needs TCall ctor-name routing fix
-#                 (Err/Ok ctors in helper bodies currently lower as `call @Err`).
 #
-# Dominant new blocker: @char_to_string / Char literal (TChar lowering) + @append (typeclass)
+# Dominant new blocker: typeclass dispatch (4 entries combined: __unresolved_*
+# + @append) — same architectural piece across multiple symptoms.
 
 # === examples/ ===
 examples/aoc_2025_day_1.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
-examples/aoc_2025_day_2.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
-examples/aoc_2025_day_3.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
-examples/aoc_2025_day_4.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
-examples/aoc_2025_day_5.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
-examples/astar.sprout                          # @append undefined (typeclass Semigroup dispatch gap)
-examples/collections_demo.sprout               # Char literal not yet supported
-examples/do_notation_demo.sprout               # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
-examples/foldable_demo.sprout                  # @char_to_string undefined
-examples/http_echo_server.sprout               # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
-examples/http_get_cli.sprout                   # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
-examples/int_range_demo.sprout                 # @char_to_string undefined
-examples/io_do_demo.sprout                     # @char_to_string undefined
-examples/io_result_do_demo.sprout              # extern fn declarations not emitted as LLVM declare (PR 13 cleared the do-block bind)
-examples/json_demo.sprout                      # @char_to_string undefined
-examples/list_pattern_demo.sprout              # @char_to_string undefined
-examples/modules_demo.sprout                   # @append undefined (typeclass Semigroup dispatch gap)
-examples/nqueens.sprout                        # @append undefined (typeclass Semigroup dispatch gap)
-examples/process_demo.sprout                   # @append undefined (typeclass Semigroup dispatch gap)
-examples/ref_tutorial.sprout                   # @char_to_string undefined
-examples/ref_union_find.sprout                 # @append undefined (typeclass Semigroup dispatch gap)
-examples/regex_demo.sprout                     # @char_to_string undefined
-examples/repl_hosted.sprout                    # @char_to_string undefined
-examples/result_demo.sprout                    # @char_to_string undefined
-examples/sentry_api.sprout                     # @append undefined (typeclass Semigroup dispatch gap)
+examples/aoc_2025_day_2.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
+examples/astar.sprout                          # multiple definition of local 't0' (pre-existing codegen dup-block)
+examples/int_range_demo.sprout                 # range not yet supported (ast_to_ir TRange)
+examples/json_demo.sprout                      # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+examples/list_pattern_demo.sprout              # nested StringPattern in constructor match not yet supported
+examples/nqueens.sprout                        # multiple definition of local 't0' (pre-existing codegen dup-block)
+examples/ref_tutorial.sprout                   # use of undefined value '%body_1_*' (match-arm label/scope gap)
+examples/repl_hosted.sprout                    # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+examples/sentry_api.sprout                     # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
-examples/string_templates.sprout               # @append undefined (typeclass Semigroup dispatch gap)
-examples/tcp_echo_once.sprout                  # @append undefined (typeclass Semigroup dispatch gap)
-examples/tcp_echo_server.sprout                # @append undefined (typeclass Semigroup dispatch gap)
-examples/text_demo.sprout                      # @char_to_string undefined
-examples/typeclass_collections_demo.sprout     # @append undefined (typeclass Semigroup dispatch gap)
-examples/typeclass_functor_foldable_demo.sprout  # @append undefined (typeclass Semigroup dispatch gap)
 
 # === tests/smoke_shapes/ ===
 tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Semigroup dispatch gap)
-tests/smoke_shapes/04_generic.spr              # @char_to_string undefined
-tests/smoke_shapes/06_tuple_param.spr          # @char_to_string undefined
 
 # === tests/stdlib/ ===
-tests/stdlib/test_collections.spr              # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_compute_eta_fwd_markers.spr  # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_constrained_container_dispatch.spr  # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_constrained_eta_codegen.spr  # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_dbe_synthetic.spr            # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_deriving_eq.spr              # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_deriving_eq_parametric.spr   # @char_to_string undefined
-tests/stdlib/test_deriving_ord.spr             # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_deriving_to_string.spr       # @char_to_string undefined
-tests/stdlib/test_eq_operator_adt_dispatch.spr # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_fn_compose.spr               # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_instance_method_subst.spr    # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_ir_codegen_arith.spr         # @char_to_string undefined (via prelude ToString Char)
-tests/stdlib/test_ir_codegen_basic.spr         # @char_to_string undefined (via prelude ToString Char)
-tests/stdlib/test_ir_codegen_calls.spr         # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_ir_codegen_closures.spr      # @char_to_string undefined
-tests/stdlib/test_ir_codegen_control.spr       # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_ir_codegen_ctors.spr         # Char literal not yet supported (lexer import)
-tests/stdlib/test_ir_codegen_match.spr         # Char literal not yet supported (lexer import)
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # Char literal not yet supported (lexer import)
-tests/stdlib/test_ir_codegen_strings.spr       # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_ir_rooting.spr               # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_json.spr                     # @char_to_string undefined
-tests/stdlib/test_lexer_slice.spr              # Char literal not yet supported (lexer import)
-tests/stdlib/test_list_pattern_runtime.spr     # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_math.spr                     # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_mutvec.spr                   # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_native_constrained_maybe_helper.spr  # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_native_fold_indexed.spr      # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_process.spr                  # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_regex.spr                    # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_repl_navigation.spr          # @char_to_string undefined
-tests/stdlib/test_return_type_dispatch.spr     # @char_to_string undefined
-tests/stdlib/test_set.spr                      # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_str_slice_bytes.spr          # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_string.spr                   # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_time.spr                     # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_to_string.spr                # @char_to_string undefined
-tests/stdlib/test_toplevel_let_closure.spr     # @char_to_string undefined
-tests/stdlib/test_tuple_tostring.spr           # @char_to_string undefined
-tests/stdlib/test_typeclass_laws.spr           # @append undefined (typeclass Semigroup dispatch gap)
-tests/stdlib/test_wrap_type.spr                # @char_to_string undefined
+tests/stdlib/test_constrained_container_dispatch.spr  # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
+tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
+tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
+tests/stdlib/test_ir_codegen_closures.spr      # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
+tests/stdlib/test_ir_codegen_ctors.spr         # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
+tests/stdlib/test_ir_codegen_match.spr         # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
+tests/stdlib/test_json.spr                     # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+tests/stdlib/test_repl_navigation.spr          # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported
+tests/stdlib/test_set.spr                      # use of undefined value '%body_*' (match-arm label/scope gap)
+tests/stdlib/test_string.spr                   # multiple definition of local 't0' (pre-existing codegen dup-block)
+tests/stdlib/test_to_string.spr                # multiple definition of local 't0' (pre-existing codegen dup-block)
+tests/stdlib/test_wrap_type.spr                # unknown constructor 'main.Age' in match pattern (wrap ADT lookup gap)

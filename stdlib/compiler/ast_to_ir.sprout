@@ -3327,6 +3327,19 @@ fn build_fn_arities(decls: List typed_ast.TypedDecl) -> Dict Int =
           dict_set(name, list_length(params), build_fn_arities(rest))
       | _ -> build_fn_arities(rest)
 
+# M3 PR 14: collect user `extern fn` declarations as (name, arity) pairs so
+# ir_lowering can emit a `declare i64 @<name>(i64, …)` line for each.  The
+# i64-uniform encoding means we only need the arity — parameter and return
+# types are all i64 in the IR codegen path.
+fn collect_extern_decls(decls: List typed_ast.TypedDecl) -> List (String, Int) =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      match d with
+      | typed_ast.TExternFnDecl name params _ _ ->
+          Cons((name, list_length(params)), collect_extern_decls(rest))
+      | _ -> collect_extern_decls(rest)
+
 # M3 PR 6: synthesize the wrapper IRFunction for an eta-expanded named-fn
 # reference.  Mirrors codegen.sprout:1434-1444's emit_named_fn_wrapper_lines.
 # Shape (arity N):
@@ -3500,7 +3513,7 @@ fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
                 | Err msg -> Err(msg)
                 | Ok merged ->
                     match runtime_lets with
-                    | Nil -> Ok((sprout_ir.IRProgram(fns, let_globals, ctor_regs), merged))
+                    | Nil -> Ok((sprout_ir.IRProgram(fns, let_globals, ctor_regs, externs), merged))
                     | _ ->
                         match synthesize_init_globals_fn(runtime_lets, ctors,
                                                           top_level_set, let_names, fn_arities,
@@ -3508,4 +3521,5 @@ fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
                         | Err msg -> Err(msg)
                         | Ok init_fn ->
                             Ok((sprout_ir.IRProgram(list_append(fns, Cons(init_fn, Nil)),
-                                                    let_globals, ctor_regs), merged))
+                                                    let_globals, ctor_regs, externs), merged))
+  where externs = collect_extern_decls(decls)

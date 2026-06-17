@@ -588,4 +588,4 @@ fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int,
 # ast_to_ir.translate_program.  Unmapped functions default to 0.
 export fn insert_roots(prog: sprout_ir.IRProgram, idx_map: Dict Int) -> sprout_ir.IRProgram =
   match prog with
-  | sprout_ir.IRProgram fns globals ctors -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil), globals, ctors)
+  | sprout_ir.IRProgram fns globals ctors externs -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil), globals, ctors, externs)

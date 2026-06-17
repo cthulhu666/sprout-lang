@@ -1,0 +1,36 @@
+# Verifies user `extern fn` declarations lower to LLVM `declare` lines via
+# --use-ir-codegen (M3 PR 14).
+#
+# Before this PR, ast_to_ir.sprout's translate_decl mapped TExternFnDecl to
+# Ok(Nothing) — externs were silently dropped — and ir_lowering.sprout had a
+# hardcoded `declare` block for the runtime intrinsics only.  Any call to a
+# user-declared extern emitted `call i64 @<name>(...)` against an undeclared
+# global, breaking `opt --passes=verify`.
+#
+# After PR 14:
+# - ast_to_ir collects each TExternFnDecl as (name, arity) into IRProgram's
+#   new fourth field.
+# - ir_lowering emits `declare i64 @<name>(i64, …)` for each, using the
+#   i64-uniform encoding established by earlier M3 PRs.  Names already in
+#   the hardcoded intrinsic list or shadowed by a user define are skipped;
+#   the same extern appearing in multiple imported modules is deduped.
+#
+# Convention: this is a declare-only test — we don't CALL the externs.  The
+# test harness compiles, runs opt verify, links against the runtime and
+# executes the binary; fictional `pr14_probe_*` symbols would fail linking.
+# The declare-emission path is independent of call sites (collect_extern_decls
+# walks TExternFnDecl unconditionally), so declare-only is enough to exercise
+# the machinery.  Call/declare consistency is exercised end-to-end by the
+# IR_XFAIL re-probe which now flows http_echo_server, foldable_demo, etc.
+# through clean — those have real extern calls.
+
+# Custom extern names guaranteed to be outside the hardcoded ir_lowering
+# declare list — proves the PR's machinery, not the hardcoded list.
+extern fn pr14_probe_extern(n: Int) -> Int !{IO}
+
+# Variadic-arity probes to verify the declare line is parameterized by arity.
+extern fn pr14_probe_zero() -> Int !{IO}
+extern fn pr14_probe_two(a: Int, b: Int) -> Int !{IO}
+
+# Trivial main — IR path requires `()` until further milestones.
+fn main() -> Unit !{IO} = ()

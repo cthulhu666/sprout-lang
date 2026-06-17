@@ -318,6 +318,58 @@ fn ir_header() -> String =
   "declare i64 @print(i64)\n" ++
   "declare i64 @argv_get(i64)\n\n"
 
+# M3 PR 14: emit `declare i64 @<name>(i64, …)` for each user `extern fn`,
+# skipping any name that is already in the hardcoded ir_header list (LLVM
+# rejects duplicate declarations) or defined as a user fn (an `extern fn`
+# shadowed by a real define is a typeclass-instance pattern — let the define
+# win).  Also skips `append` since it is a typeclass method (see ir_header
+# comment).  Sprout's i64-uniform encoding means we emit i64 for every
+# parameter regardless of source type.
+fn lower_extern_decls(externs: List (String, Int),
+                      fns: List sprout_ir.IRFunction) -> String =
+  lower_extern_decls_loop(externs, fns, set_empty(), "")
+
+fn lower_extern_decls_loop(externs: List (String, Int),
+                           fns: List sprout_ir.IRFunction,
+                           seen: Set, acc: String) -> String =
+  match externs with
+  | Nil -> acc
+  | Cons p rest ->
+      match p with
+      | (name, arity) ->
+          if extern_already_declared(name, fns, seen) then
+            lower_extern_decls_loop(rest, fns, seen, acc)
+          else
+            lower_extern_decls_loop(rest, fns, set_insert(name, seen),
+              acc ++ "declare i64 @" ++ name ++ "(" ++ i64_params(arity) ++ ")\n")
+
+# Skip an extern decl if: it's already in the hardcoded ir_header list, it's
+# defined as a user IRFunction in the same module (the define wins), or this
+# specific decl name was already emitted (the bundled module loader can
+# include the same `extern fn` line via multiple importers).
+fn extern_already_declared(name: String, fns: List sprout_ir.IRFunction, seen: Set) -> Bool =
+  is_hardcoded_intrinsic(name) || has_fn_named(name, fns) || set_member(name, seen)
+
+fn is_hardcoded_intrinsic(name: String) -> Bool =
+  name == "str_concat" || name == "str_eq" || name == "str_slice" ||
+  name == "int_to_string" || name == "char_to_string" ||
+  name == "sprout_gc_push_i64_root" || name == "sprout_gc_pop_roots" ||
+  name == "sprout_alloc_closure_env" || name == "sprout_alloc_tuple_blob" ||
+  name == "sprout_register_ctor" || name == "sprout_tag" || name == "sprout_field" ||
+  name == "sprout_abort_match" ||
+  name == "sprout_make0" || name == "sprout_make1" || name == "sprout_make2" ||
+  name == "sprout_make3" || name == "sprout_make4" || name == "sprout_make5" ||
+  name == "sprout_make6" || name == "sprout_make7" || name == "sprout_make8" ||
+  name == "sprout_make9" ||
+  name == "print" || name == "argv_get" ||
+  name == "append"
+
+fn i64_params(arity: Int) -> String =
+  if arity == 0 then "" else i64_params_loop(arity - 1, "i64")
+
+fn i64_params_loop(remaining: Int, acc: String) -> String =
+  if remaining == 0 then acc else i64_params_loop(remaining - 1, acc ++ ", i64")
+
 # ---------------------------------------------------------------------------
 # Ctor-registration global-string collection pre-pass.
 #
@@ -516,19 +568,21 @@ fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
 # lower_program: top-level entry.  Returns the complete LLVM IR text.
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =
   match prog with
-  | sprout_ir.IRProgram fns globals ctor_regs ->
+  | sprout_ir.IRProgram fns globals ctor_regs externs ->
       match collect_str_consts(fns) with
       | (str_globals_text, fn_tables, _) ->
-          lower_program_body(fns, globals, ctor_regs, str_globals_text, fn_tables)
+          lower_program_body(fns, globals, ctor_regs, externs, str_globals_text, fn_tables)
 
 fn lower_program_body(fns: List sprout_ir.IRFunction,
                       let_globals: List sprout_ir.IRGlobalDecl,
                       ctor_regs: List sprout_ir.CtorReg,
+                      externs: List (String, Int),
                       str_globals_text: String,
                       fn_tables: Dict (Dict (String, Int))) -> String =
-  ir_header() ++ str_globals_text ++ ctor_globals ++ let_globals_text ++
-    (if str_globals_text == "" && ctor_globals == "" && let_globals_text == "" then "" else "\n") ++
+  ir_header() ++ extern_decls_text ++ str_globals_text ++ ctor_globals ++ let_globals_text ++
+    (if str_globals_text == "" && ctor_globals == "" && let_globals_text == "" && extern_decls_text == "" then "" else "\n") ++
     lower_fns(fns, fn_tables) ++ main_shim(ctor_regs, any_runtime_global(let_globals),
                                             has_fn_named("__sprout_user_main", fns))
   where ctor_globals = collect_ctor_globals(ctor_regs)
         let_globals_text = lower_globals(let_globals)
+        extern_decls_text = lower_extern_decls(externs, fns)

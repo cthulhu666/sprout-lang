@@ -83,7 +83,7 @@ fn t1_program() -> sprout_ir.IRProgram =
         sprout_ir.IRMakeCtor("%t0", "NilLike", 0, Nil),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
-    Nil), Nil, Nil)
+    Nil), Nil, Nil, Nil)
 
 # T2: 2-arity boxed ctor with two scalar Int args, no rooting expected.
 fn t2_program() -> sprout_ir.IRProgram =
@@ -96,7 +96,7 @@ fn t2_program() -> sprout_ir.IRProgram =
                                   Cons("%t0", Cons("%t1", Nil))),
         Cons(sprout_ir.IRRet("%t2"), Nil))))),
       Nil)),
-    Nil), Nil, Nil)
+    Nil), Nil, Nil, Nil)
 
 # T3: 2-arity boxed ctor with two heap-typed String args.  Operands of the
 # trigger op are NOT live across it (the use kills them), so no rooting is
@@ -111,7 +111,7 @@ fn t3_program() -> sprout_ir.IRProgram =
                                   Cons("%sa", Cons("%sb", Nil))),
         Cons(sprout_ir.IRRet("%r"), Nil))))),
       Nil)),
-    Nil), Nil, Nil)
+    Nil), Nil, Nil, Nil)
 
 # T4: Two boxed ctors back-to-back; first ctor result lives across second.
 fn t4_program() -> sprout_ir.IRProgram =
@@ -126,7 +126,7 @@ fn t4_program() -> sprout_ir.IRProgram =
                                   Cons("%first", Cons("%second", Nil))),
         Cons(sprout_ir.IRRet("%r"), Nil))))))),
       Nil)),
-    Nil), Nil, Nil)
+    Nil), Nil, Nil, Nil)
 
 # T5: Ctor-of-ctor composition.  Inner ctor result feeds directly into outer.
 fn t5_program() -> sprout_ir.IRProgram =
@@ -140,7 +140,7 @@ fn t5_program() -> sprout_ir.IRProgram =
                                   Cons("%sy", Cons("%i", Nil))),
         Cons(sprout_ir.IRRet("%o"), Nil)))))),
       Nil)),
-    Nil), Nil, Nil)
+    Nil), Nil, Nil, Nil)
 
 # M test 1 helper: hand-built IRProgram with one CtorReg (NilLike, tag=0, arity=0, fkinds="").
 # Wraps lower_program + insert_roots so it can be called from inside main's do-block.
@@ -154,7 +154,8 @@ fn m1_lowered() -> String =
             Cons(sprout_ir.IRRet("%t0"), Nil))),
           Nil)), Nil),
         Nil,
-        Cons(sprout_ir.CtorReg("NilLike", 0, 0, ""), Nil)),
+        Cons(sprout_ir.CtorReg("NilLike", 0, 0, ""), Nil),
+        Nil),
       dict_empty()))
 
 fn main() -> Unit !{IO} =

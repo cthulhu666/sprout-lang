@@ -286,14 +286,17 @@ export type GlobalInit (..) =
 # Sprout's value encoding is i64-uniform (Bool/Int/String/heap-ptr all i64).
 export type IRGlobalDecl (..) = IRGlobalDecl String String GlobalInit
 
-# IRProgram <functions> <globals> <ctor-registrations>
+# IRProgram <functions> <globals> <ctor-registrations> <externs>
 # - functions: user fns + any synthesized fns (e.g. __sprout_init_globals).
 # - globals: top-level let declarations (PR 5).  Emitted to the module header
 #   before any function.  ir_lowering uses this list to decide whether to
 #   emit a `call void @__sprout_init_globals()` at the C-main entry.
 # - ctor-registrations: consumed by ir_lowering.lower_program to emit
 #   @sprout_register_ctor calls at the top of @main, before any user code runs.
-export type IRProgram (..) = IRProgram(List IRFunction) (List IRGlobalDecl) (List CtorReg)
+# - externs: list of (name, arity) for user `extern fn` decls (PR 14).
+#   Emitted as `declare i64 @<name>(i64, …)` in the module header.  Sprout's
+#   i64-uniform encoding means we only need the arity.
+export type IRProgram (..) = IRProgram(List IRFunction) (List IRGlobalDecl) (List CtorReg) (List (String, Int))
 
 # ---------------------------------------------------------------------------
 # Pretty printer (for diagnostics / tests).
@@ -411,7 +414,7 @@ fn print_fns(fs: List IRFunction) -> String =
 
 export fn print_ir_program(prog: IRProgram) -> String =
   match prog with
-  | IRProgram fns _ _ ->
+  | IRProgram fns _ _ _ ->
       match fns with
       | Nil -> "; sprout-ir: empty"
       | _ -> "; sprout-ir\n" ++ print_fns(fns)
