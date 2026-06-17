@@ -54,8 +54,20 @@
 #             list_pattern_demo shifted to nested BoolPattern (StringPattern cleared).
 #
 # Bucket breakdown after PR 15d closes (re-probed):
-#    ~5 entries — Unit ctor field not supported (test_ir_codegen_*x5: compile
-#                 stdlib.compiler which has Unit ctor fields; was StringPattern blocker)
+#    ~5 entries — IR codegen OOM on CI (>2 GB peak RSS).  The 5 test_ir_codegen_*
+#                 tests below construct hand-built IRPrograms, which forces them
+#                 to `import stdlib.compiler` — pulling the entire self-hosted
+#                 compiler into the compile unit.  --use-ir-codegen keeps the
+#                 full IRBlock/IROp graph in memory before lowering (vs. direct
+#                 codegen's streaming Emitter at ~160 MB/file), so per-file peak
+#                 RSS is 2-2.6 GB and CI runners OOM.  This is an *architectural*
+#                 cost of the typed IR design, not a per-file defect — the tests
+#                 pass under direct codegen and would clear their logical XFAIL
+#                 reason if probed on a beefier host.  Tracked as BACKLOG §1
+#                 "stream IR codegen output per-function (don't materialize full
+#                 IRProgram)" — P1 M5 prep work.  All new tests that import
+#                 stdlib.compiler MUST be added here with this OOM reason until
+#                 the streaming fix lands; they cannot be probed on CI.
 #    ~1 entry   — translate_do drops match blocks in non-last do steps
 #                 (IR invalid: use of undefined value '%arm_0_N'; test_repl_navigation)
 #    ~1 entry   — @analysis_check_source undefined (repl_hosted; unresolved extern)
@@ -88,11 +100,11 @@ tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Se
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
 tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
 tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
-tests/stdlib/test_ir_codegen_closures.spr      # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
-tests/stdlib/test_ir_codegen_ctors.spr         # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
-tests/stdlib/test_ir_codegen_match.spr         # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # Unit ctor field not supported (StringPattern cleared by PR 15d; compile stdlib.compiler)
-tests/stdlib/test_ir_codegen_string_pattern.spr   # Unit ctor field not supported (new test file; compile stdlib.compiler; same blocker as above)
+tests/stdlib/test_ir_codegen_closures.spr      # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
+tests/stdlib/test_ir_codegen_ctors.spr         # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
+tests/stdlib/test_ir_codegen_match.spr         # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
+tests/stdlib/test_ir_codegen_string_pattern.spr   # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
 tests/stdlib/test_json.spr                     # use of undefined value '%body_*' (match-arm label/scope gap)
 tests/stdlib/test_repl_navigation.spr          # use of undefined value '%arm_0_*' in phi (translate_do drops match blocks in non-last steps; StringPattern cleared by PR 15d)
 tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported
