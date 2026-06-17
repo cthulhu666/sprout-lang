@@ -34,10 +34,17 @@
 #             Cleared 3 entries: json_demo, sentry_api,
 #             test_constrained_container_dispatch.
 #             2 entries shifted to new blockers (see below).
+#   PR 15b — WrapDecl ctor registration in ast_to_ir (build_ctor_table_acc,
+#             translate_match_arm_ctor, translate_boxed_ctor_call)  ✓ this PR
+#             0 entries fully cleared; 5 entries shifted to new blockers:
+#               test_wrap_type      → translate_do drops sealed blocks from non-last
+#                                     do steps (IR invalid: undefined arm_0_N predecessor)
+#               test_ir_codegen_*x4 → do-block bind to tuple pattern not yet supported
 #
-# Bucket breakdown after PR 15a closes (re-probed):
-#    ~5 entries — unknown constructor in match pattern (qualified-name lookup gap
-#                 in ast_to_ir's ConstructorPattern resolution)
+# Bucket breakdown after PR 15b closes (re-probed):
+#    ~4 entries — do-block bind to tuple pattern not yet supported
+#    ~1 entry   — translate_do drops match blocks in non-last do steps
+#                 (IR invalid: use of undefined value '%arm_0_N')
 #    ~3 entries — StringPattern in match not yet supported (repl_hosted,
 #                 repl_navigation, and related)
 #    ~2 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing,
@@ -49,9 +56,6 @@
 #    ~2 entries — nested StringPattern/IntPattern in ctor match (PR 8 follow-up)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
 #    ~1 entry  — use of undefined value '%body_*' (match-arm label/scope gap; test_json)
-#
-# Dominant new blocker: unknown constructor in match pattern + StringPattern
-# (8 entries combined).
 
 # === examples/ ===
 examples/aoc_2025_day_1.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
@@ -72,14 +76,14 @@ tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Se
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
 tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
 tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
-tests/stdlib/test_ir_codegen_closures.spr      # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
-tests/stdlib/test_ir_codegen_ctors.spr         # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
-tests/stdlib/test_ir_codegen_match.spr         # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
+tests/stdlib/test_ir_codegen_closures.spr      # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
+tests/stdlib/test_ir_codegen_ctors.spr         # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
+tests/stdlib/test_ir_codegen_match.spr         # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
+tests/stdlib/test_ir_codegen_nested_patterns.spr  # do-block bind to tuple pattern not yet supported (shifted from FilePath wrap lookup)
 tests/stdlib/test_json.spr                     # use of undefined value '%body_*' (match-arm label/scope gap)
 tests/stdlib/test_repl_navigation.spr          # StringPattern in match not yet supported
 tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported
 tests/stdlib/test_set.spr                      # use of undefined value '%body_*' (match-arm label/scope gap)
 tests/stdlib/test_string.spr                   # multiple definition of local 't0' (pre-existing codegen dup-block)
 tests/stdlib/test_to_string.spr                # multiple definition of local 't0' (pre-existing codegen dup-block)
-tests/stdlib/test_wrap_type.spr                # unknown constructor 'main.Age' in match pattern (wrap ADT lookup gap)
+tests/stdlib/test_wrap_type.spr                # translate_do drops sealed blocks from non-last do steps (IR invalid: undefined arm_0_N predecessor; shifted from wrap ADT lookup gap)

@@ -1,0 +1,37 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# TDD regression test for M3 PR 15b: WrapDecl ctor registration in
+# ast_to_ir's build_ctor_table.
+#
+# Before the fix, --use-ir-codegen would fail with:
+#   ERROR: ast_to_ir: unknown constructor 'main.Cents' in match pattern
+# because build_ctor_table_acc ignored WrapDecl nodes.
+#
+# This test also exercises wrap ctor construction (Age(42)) and wrap
+# identity semantics in the IR path, mirroring what codegen.sprout
+# handles via ctor_is_wrap checks.
+
+wrap Cents = Int
+
+fn cents_value(c: Cents) -> Int =
+  match c with | Cents n -> n
+
+fn double_cents(c: Cents) -> Cents =
+  match c with
+  | Cents n -> Cents(n * 2)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "wrap construction and extraction: 42",
+      cents_value(Cents(42)), 42)
+
+    assert_eq(state, "wrap construction and extraction: 0",
+      cents_value(Cents(0)), 0)
+
+    assert_eq(state, "wrap double: 10 -> 20",
+      cents_value(double_cents(Cents(10))), 20)
+
+    summary(state)
