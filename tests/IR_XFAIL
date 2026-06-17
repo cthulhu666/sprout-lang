@@ -30,11 +30,16 @@
 #            or "@append" but actually stopped at the extern-declare gap.
 #            Now: bytes / regex / time / process / int_range / env_get /
 #            term_read_line / http_* / typeclass_*  all flow through.
+#   PR 15a — Bool ctor field zext wiring (IRZextI1ToI64)  ✓ this PR
+#             Cleared 3 entries: json_demo, sentry_api,
+#             test_constrained_container_dispatch.
+#             2 entries shifted to new blockers (see below).
 #
-# Bucket breakdown after PR 14 closes (re-probed):
-#    ~6 entries — Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+# Bucket breakdown after PR 15a closes (re-probed):
 #    ~5 entries — unknown constructor in match pattern (qualified-name lookup gap
 #                 in ast_to_ir's ConstructorPattern resolution)
+#    ~3 entries — StringPattern in match not yet supported (repl_hosted,
+#                 repl_navigation, and related)
 #    ~2 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing,
 #                 was masked behind @time_now_micros label)
 #    ~3 entries — typeclass `__unresolved_Eq__` / `__unresolved_ToString__`
@@ -43,21 +48,20 @@
 #    ~1 entry  — `range not yet supported` (ast_to_ir TRange case)
 #    ~2 entries — nested StringPattern/IntPattern in ctor match (PR 8 follow-up)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
+#    ~1 entry  — use of undefined value '%body_*' (match-arm label/scope gap; test_json)
 #
-# Dominant new blocker: typeclass dispatch (4 entries combined: __unresolved_*
-# + @append) — same architectural piece across multiple symptoms.
+# Dominant new blocker: unknown constructor in match pattern + StringPattern
+# (8 entries combined).
 
 # === examples/ ===
 examples/aoc_2025_day_1.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/aoc_2025_day_2.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/astar.sprout                          # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/int_range_demo.sprout                 # range not yet supported (ast_to_ir TRange)
-examples/json_demo.sprout                      # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
 examples/list_pattern_demo.sprout              # nested StringPattern in constructor match not yet supported
 examples/nqueens.sprout                        # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/ref_tutorial.sprout                   # use of undefined value '%body_1_*' (match-arm label/scope gap)
-examples/repl_hosted.sprout                    # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
-examples/sentry_api.sprout                     # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+examples/repl_hosted.sprout                    # StringPattern in match not yet supported
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
 
@@ -65,7 +69,6 @@ examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfa
 tests/smoke_shapes/03_strconcat.spr            # @append undefined (typeclass Semigroup dispatch gap)
 
 # === tests/stdlib/ ===
-tests/stdlib/test_constrained_container_dispatch.spr  # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
 tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
 tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
@@ -73,8 +76,8 @@ tests/stdlib/test_ir_codegen_closures.spr      # unknown constructor 'stdlib.com
 tests/stdlib/test_ir_codegen_ctors.spr         # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
 tests/stdlib/test_ir_codegen_match.spr         # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
 tests/stdlib/test_ir_codegen_nested_patterns.spr  # unknown constructor 'stdlib.compiler.source.FilePath' in match pattern
-tests/stdlib/test_json.spr                     # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
-tests/stdlib/test_repl_navigation.spr          # Bool ctor field zext (IRZextI1ToI64 wiring; BACKLOG P1)
+tests/stdlib/test_json.spr                     # use of undefined value '%body_*' (match-arm label/scope gap)
+tests/stdlib/test_repl_navigation.spr          # StringPattern in match not yet supported
 tests/stdlib/test_return_type_dispatch.spr     # nested IntPattern in constructor match not yet supported
 tests/stdlib/test_set.spr                      # use of undefined value '%body_*' (match-arm label/scope gap)
 tests/stdlib/test_string.spr                   # multiple definition of local 't0' (pre-existing codegen dup-block)

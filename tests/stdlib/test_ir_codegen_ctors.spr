@@ -364,41 +364,35 @@ fn main() -> Unit !{IO} =
                 s3)
 
     # ---------------------------------------------------------------------------
-    # Regression: Bool ctor field must be rejected (not silently accepted).
+    # M3 PR 15a: Bool ctor fields are now accepted (IRZextI1ToI64 wiring done).
     #
-    # IRMakeCtor lowering hardcodes `i64 %argN` for every field.  A Bool
-    # expression produces `i1` in LLVM IR (e.g. `%r = call i1 @helper(...)`),
-    # so emitting `i64 %r` is an LLVM ABI mismatch that either crashes the
-    # verifier or produces silent miscompilation.  Legacy codegen.sprout handles
-    # Bool ctor fields via `pack_to_i64` (codegen.sprout ~line 960) which emits
-    # `zext i1 ... to i64`; the IR path has no equivalent zext step, so Bool
-    # must be rejected until IRZextI1ToI64 is added (deferred PR).
+    # All Bool-valued translate_expr results are i64-uniform:
+    #   - TBool literals → IRConst (i64 0/1)
+    #   - Bool params   → %param is i64 in the function signature
+    #   - Comparisons   → IRICmp (i1) + IRZextI1ToI64 (i64) in finish_binary
+    # So Bool ctor fields fall through to the normal translate_expr path;
+    # no extra zext step is needed at the ctor-field level.
     #
     # Case 1: Bool **parameter** passed directly as a ctor field.
     # `type W2 = W2 Bool Int Int; fn f(b: Bool) -> W2 = W2(b, 0, 0)`
-    # This is the canonical regression scenario from commit 3b92d2c.
-    bool_param_ctor <- translated_err_contains(
+    bool_param_ctor <- translated_ok_ir_contains(
       "type W2 = W2 Bool Int Int\nfn f(b: Bool) -> W2 = W2(b, 0, 0)",
-      "Bool ctor field not yet supported")
+      "sprout_make3")
     assert_true(state,
                 "Regression 3b92d2c: Bool param as ctor field yields Err (not silent ABI mismatch)",
                 bool_param_ctor)
 
     # Case 2: Bool **expression result** (comparison) used as a ctor field.
-    # This is the verifier-breaking scenario: `icmp eq` produces `i1`, and
-    # IRMakeCtor would emit `i64 %i1_val` — type mismatch in LLVM IR.
-    bool_expr_ctor <- translated_err_contains(
+    # Comparison path: IRICmp (i1) + IRZextI1ToI64 (i64) before the ctor call.
+    bool_expr_ctor <- translated_ok_ir_contains(
       "type W2 = W2 Bool Int Int\nfn f(x: Int) -> W2 = W2(x == 0, 0, 0)",
-      "Bool ctor field not yet supported")
+      "zext i1")
     assert_true(state,
                 "Regression: Bool expr result (x==0) as ctor field yields Err (i1/i64 mismatch)",
                 bool_expr_ctor)
 
-    # Case 3: Unit ctor field must surface a Unit-specific message — NOT the
-    # Bool/zext one.  is_supported_ctor_arg_type rejects both Bool and Unit,
-    # but the two rejections have different reasons (Bool needs zext i1→i64;
-    # Unit has no LLVM value at all), and conflating them sends users chasing
-    # a fix that doesn't apply.
+    # Case 3: Unit ctor field still surfaces a Unit-specific error — Unit
+    # has no LLVM value at all; it cannot be stored in a ctor field slot.
     unit_field_ctor <- translated_err_contains(
       "type WU = WU Unit Int Int\nfn f() -> WU = WU((), 0, 0)",
       "Unit ctor field not supported")

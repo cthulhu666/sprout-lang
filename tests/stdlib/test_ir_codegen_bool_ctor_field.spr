@@ -1,0 +1,43 @@
+# Verifies that Bool-typed constructor field arguments are correctly handled
+# by --use-ir-codegen (M3 PR 15a — Bool ctor field zext wiring).
+#
+# Before PR 15a: --use-ir-codegen errors with
+#   ERROR: ast_to_ir: Bool ctor field not yet supported (requires zext i1 to i64 — deferred to follow-up PR)
+# After PR 15a: emits LLVM with `zext i1 %tN to i64` in the ctor field path.
+#
+# Locally-defined types only (no fictional externs — link-time safe).
+
+# A simple ADT carrying a Bool field.
+type Wrap =
+  | W Bool
+
+# Constructs W from a Bool parameter — exercises the Bool ctor field path.
+fn make(b: Bool) -> Wrap = W(b)
+
+# Extract the Bool field back out via pattern match.
+fn unwrap(w: Wrap) -> Bool =
+  match w with
+  | W b -> b
+
+# A negated variant — exercises Bool computed from a comparison feeding ctor.
+fn make_gt(x: Int, y: Int) -> Wrap = W(x > y)
+
+# Roundtrip: construct then unwrap.
+fn roundtrip(b: Bool) -> Bool = unwrap(make(b))
+
+# Multiple Bool fields.
+type Pair =
+  | P Bool Bool
+
+fn make_pair(a: Bool, b: Bool) -> Pair = P(a, b)
+
+fn fst_pair(p: Pair) -> Bool =
+  match p with
+  | P a _ -> a
+
+fn snd_pair(p: Pair) -> Bool =
+  match p with
+  | P _ b -> b
+
+# Trivial main.
+fn main() -> Unit !{IO} = ()
