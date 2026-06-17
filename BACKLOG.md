@@ -91,6 +91,7 @@ Definition of done:
 - [x] `P0` Implement real module namespaces (remove flattened global import model).
 - [x] `P1` Move global string helpers into namespaced stdlib module(s).
 - [ ] `P1` Define package/dependency conventions for third-party modules.
+- [ ] `P2` Dedup `extern fn` declarations in the bundler (root-cause fix for PR 14's lowering-side workaround): the typed AST that reaches `ast_to_ir.translate_program` currently contains the same `TExternFnDecl` once per importing module — e.g. `bytes_empty` appears in every importer of `stdlib.bytes`. The IR codegen path (M3 PR 14, perf/ir-extern-fn-declares) deduplicates via a `seen: Set String` in `lower_extern_decls_loop`, but direct codegen has its own `build_extern_sigs_from_decls` that also has to defend against duplicates (`dict_set` semantics make this implicit but identical-signature). The right fix is in `bundler.sprout` (or wherever the bundled `ast.Program` is assembled): collapse same-name `ExternFnDecl` nodes into one canonical decl, with a check that signatures match across importers. Saves work in both codegen paths and is the kind of representation invariant that pays back as more passes get added.
 
 ### 6.5) OS and Process Primitives
 
