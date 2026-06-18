@@ -81,6 +81,11 @@
 #             (dup-block 't0') or pre-existing inference/lowering correctness
 #             defects (__unresolved_Eq__/__unresolved_ToString__) — outside the
 #             M3 IR-codegen feature-parity scope.
+#   PR 16.1 — analysis_* declare ABI fix (regression caught by PR 1.5
+#             differential).  PR 15h declared analysis_* with i64 args but the
+#             C runtime takes const char* (= ptr) and direct codegen's intrinsic
+#             table uses ll_ptr().  Fixed to ptr; differential check on PR 70
+#             now reports 0 unallowed divergences.
 #
 # Bucket breakdown after PR 16 closes (re-probed):
 #    ~8 entries — IR codegen OOM on CI (>2 GB peak RSS).  The 8 test_ir_codegen_*

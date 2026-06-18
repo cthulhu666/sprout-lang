@@ -326,19 +326,19 @@ fn ir_header() -> String =
   # (sprout_runtime.c).  They are NOT represented as TExternFnDecl in any user
   # source file — they are registered only via checker.sprout's analysis_entries()
   # and synthesised directly into call sites.  Without these declares the emitted
-  # IR fails opt --passes=verify.  All args are i64 per the uniform i64 ABI
-  # (Sprout passes string handles as opaque i64 values; the C side receives them
-  # as long long and casts to ptr internally).
-  "declare i64 @analysis_check_source(i64)\n" ++
-  "declare i64 @analysis_declared_names_in_source(i64)\n" ++
-  "declare i64 @analysis_exported_names_in_source(i64)\n" ++
-  "declare i64 @analysis_symbol_inventory_in_source(i64)\n" ++
-  "declare i64 @analysis_diagnostics_in_source(i64)\n" ++
-  "declare i64 @analysis_symbol_locations_in_source(i64)\n" ++
-  "declare i64 @analysis_type_of_in_source(i64, i64)\n" ++
-  "declare i64 @analysis_eval_expr_in_source(i64, i64)\n" ++
-  "declare i64 @analysis_instances_in_source(i64, i64)\n" ++
-  "declare i64 @analysis_complete_in_state(i64, i64, i64)\n\n"
+  # IR fails opt --passes=verify.  String args use `ptr` to match the C signature
+  # (`const char*`) and the direct codegen declares in codegen.sprout's intrinsic
+  # table — keeping the two paths ABI-identical (enforced by cpr_differential_check).
+  "declare i64 @analysis_check_source(ptr)\n" ++
+  "declare i64 @analysis_declared_names_in_source(ptr)\n" ++
+  "declare i64 @analysis_exported_names_in_source(ptr)\n" ++
+  "declare i64 @analysis_symbol_inventory_in_source(ptr)\n" ++
+  "declare i64 @analysis_diagnostics_in_source(ptr)\n" ++
+  "declare i64 @analysis_symbol_locations_in_source(ptr)\n" ++
+  "declare i64 @analysis_type_of_in_source(ptr, ptr)\n" ++
+  "declare i64 @analysis_eval_expr_in_source(ptr, ptr)\n" ++
+  "declare i64 @analysis_instances_in_source(ptr, ptr)\n" ++
+  "declare i64 @analysis_complete_in_state(ptr, ptr, ptr)\n\n"
 
 # M3 PR 14: emit `declare i64 @<name>(i64, …)` for each user `extern fn`,
 # skipping any name that is already in the hardcoded ir_header list (LLVM
