@@ -560,7 +560,7 @@ fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
 # ---------------------------------------------------------------------------
 # Per-program driver.
 
-fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
+export fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name _ _ _ ->
       # Lifted lambda bodies use "%t$" as the fresh-name prefix to avoid colliding

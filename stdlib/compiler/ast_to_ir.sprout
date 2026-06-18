@@ -175,7 +175,7 @@ fn compute_free_vars_record_fields(fields: List typed_ast.TypedRecordField,
 # Build the top-level name Set from decl list + ctor dict.
 # Includes user fn names, extern fn names, and ctor names.
 # O(n * log(n)).
-fn build_top_level_set(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String)) -> Set =
+export fn build_top_level_set(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String)) -> Set =
   set_union(build_top_level_fn_set(decls),
             set_from_list(vec_to_list(dict_keys(ctors))))
 
@@ -452,7 +452,7 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # and the flat CtorReg list (with field_kinds) used by ir_lowering for
 # @sprout_register_ctor emission.  Every ctor is registered — both boxed and
 # CPR-eligible — so the runtime's find_ctor(tag) never returns NULL.
-fn build_ctor_table(decls: List typed_ast.TypedDecl) -> (Dict (Int, Int, Int, String), List sprout_ir.CtorReg) =
+export fn build_ctor_table(decls: List typed_ast.TypedDecl) -> (Dict (Int, Int, Int, String), List sprout_ir.CtorReg) =
   build_ctor_table_acc(decls, 0, dict_empty(), Nil)
 
 fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
@@ -3668,7 +3668,7 @@ fn validate_instance_methods(methods: List typed_ast.TypedInstanceMethod) -> Res
 # is skipped. TPassThrough contains type declarations, not fn names — skipped.
 # Returns Ok(()) on success; Err describing the first violating name on failure.
 # O(n) where n = number of declarations.
-fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result String Unit =
+export fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result String Unit =
   match decls with
   | Nil -> Ok(())
   | Cons d rest ->
@@ -3693,11 +3693,11 @@ fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result String
           | Ok _ -> validate_reserved_namespace(rest)
       | _ -> validate_reserved_namespace(rest)
 
-fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String),
-                           top_level: Set,
-                let_names: Set,
-                fn_arities: Dict Int, lambda_ctr_ref: Ref Int,
-                           lifted_idx_ref: Ref (Dict Int)) ->
+export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String),
+                                  top_level: Set,
+                         let_names: Set,
+                         fn_arities: Dict Int, lambda_ctr_ref: Ref Int,
+                                  lifted_idx_ref: Ref (Dict Int)) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   match d with
   | typed_ast.TFnDecl name params _ _ _ body ->
@@ -3760,7 +3760,7 @@ fn cons_list(xs: List sprout_ir.IRFunction,
 # Merge two fn-name → idx dicts, with d2 entries taking precedence.
 # Used to fold lifted-lambda idx entries into the main idx_map.
 # O(n * log(n)) where n = |d2|.
-fn merge_idx_dicts(d1: Dict Int, d2: Dict Int) -> Result String (Dict Int) =
+export fn merge_idx_dicts(d1: Dict Int, d2: Dict Int) -> Result String (Dict Int) =
   merge_idx_dicts_keys(d1, vec_to_list(dict_keys(d2)), d2)
 
 # O(n * log(n)).
@@ -3804,7 +3804,7 @@ fn eval_const_expr_ir(e: typed_ast.TypedExpr) -> Maybe String =
 # not called need a wrapper because Sprout's closure ABI requires the
 # code-ptr fn to take `i64 %env` as its first argument — the original
 # fn has no such param.
-fn build_fn_arities(decls: List typed_ast.TypedDecl) -> Dict Int =
+export fn build_fn_arities(decls: List typed_ast.TypedDecl) -> Dict Int =
   match decls with
   | Nil -> dict_empty()
   | Cons d rest ->
@@ -3819,7 +3819,7 @@ fn build_fn_arities(decls: List typed_ast.TypedDecl) -> Dict Int =
 # ir_lowering can emit a `declare i64 @<name>(i64, …)` line for each.  The
 # i64-uniform encoding means we only need the arity — parameter and return
 # types are all i64 in the IR codegen path.
-fn collect_extern_decls(decls: List typed_ast.TypedDecl) -> List (String, Int) =
+export fn collect_extern_decls(decls: List typed_ast.TypedDecl) -> List (String, Int) =
   match decls with
   | Nil -> Nil
   | Cons d rest ->
@@ -3855,7 +3855,7 @@ fn build_wrapper_arg_ssas(idx: Int, arity: Int) -> List String =
   if idx >= arity then Nil
   else Cons("%a" ++ int_to_string(idx), build_wrapper_arg_ssas(idx + 1, arity))
 
-fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
+export fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
   match decls with
   | Nil -> set_empty()
   | Cons d rest ->
@@ -3863,7 +3863,7 @@ fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
       | typed_ast.TLetDecl name _ -> set_insert(name, build_top_level_let_names(rest))
       | _ -> build_top_level_let_names(rest)
 
-fn classify_let_decls_ir(decls: List typed_ast.TypedDecl) ->
+export fn classify_let_decls_ir(decls: List typed_ast.TypedDecl) ->
     (List sprout_ir.IRGlobalDecl, List (String, typed_ast.TypedExpr)) =
   classify_let_decls_ir_acc(decls, Nil, Nil)
 
@@ -3890,12 +3890,12 @@ fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
 # Synthesize @__sprout_init_globals: evaluate each runtime-let body in
 # sequence, IRStoreGlobal the result into the corresponding @name slot,
 # end with `ret void`.  Mirrors codegen.sprout:3276-3297.
-fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.TypedExpr),
-                               ctors: Dict (Int, Int, Int, String),
-                               top_level: Set, let_names: Set,
-                               fn_arities: Dict Int,
-                               lambda_ctr_ref: Ref Int,
-                               lifted_idx_ref: Ref (Dict Int)) ->
+export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.TypedExpr),
+                                     ctors: Dict (Int, Int, Int, String),
+                                     top_level: Set, let_names: Set,
+                                     fn_arities: Dict Int,
+                                     lambda_ctr_ref: Ref Int,
+                                     lifted_idx_ref: Ref (Dict Int)) ->
     Result String sprout_ir.IRFunction !{IO} =
   do
     lifted_ref <- ref_new(Nil)
