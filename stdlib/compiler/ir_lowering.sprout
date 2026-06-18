@@ -167,6 +167,12 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ "$cmp = call i64 @str_compare(i64 " ++ a ++ ", i64 " ++ b ++ ")\n" ++
       "  " ++ r ++ "$i1 = icmp " ++ pred ++ " i64 " ++ r ++ "$cmp, 0\n" ++
       "  " ++ r ++ " = zext i1 " ++ r ++ "$i1 to i64"
+  | sprout_ir.IRPrintStr r callee arg ->
+      # print_str / eprint_str take `const char*`; coerce the i64 String/Char
+      # handle to ptr (inttoptr) before the call.  Mirrors direct codegen's
+      # emit_print_call / emit_eprint_call (codegen.sprout ~2484).
+      "  " ++ r ++ "$ptr = inttoptr i64 " ++ arg ++ " to ptr\n" ++
+      "  " ++ r ++ " = call i64 @" ++ callee ++ "(ptr " ++ r ++ "$ptr)"
   | sprout_ir.IRStrFromInt r n ->
       "  " ++ r ++ " = call i64 @int_to_string(i64 " ++ n ++ ")"
   | sprout_ir.IRMakeCtor r _ tag args ->
@@ -325,16 +331,22 @@ export fn ir_header() -> String =
   "declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   # IO builtins used by programs after M3 PR 11 (do-block support) lands.
-  # @print is the polymorphic print builtin (i64 value → unit sentinel i64 0).
+  # print() dispatches by argument type (mirrors direct codegen's emit_print_call):
+  #   String/Char -> @print_str(ptr) via IRPrintStr;  Int/Bool -> @print_value(i64)
+  #   via a plain IRCall.  eprint() -> @eprint_str(ptr).  There is intentionally NO
+  #   `@print` symbol — the prelude `extern fn print` is suppressed in
+  #   is_hardcoded_intrinsic so lower_extern_decls does not emit a (runtime-absent)
+  #   @print declare.  All three take the C signatures literally (ptr for const char*).
   # @argv_get is declared in prelude (extern fn argv_get(idx: Int) -> Maybe String !{IO})
   # and called by argv_get_loop; it is always reachable via prelude.
-  # Both signatures are i64-in / i64-out per the uniform i64 ABI.
   # NOTE: @append is intentionally NOT declared here — it is a Semigroup typeclass
   # method that gets DEFINED (not declared) in user programs via instance resolution;
   # a blanket declare would conflict with the define in files that include Semigroup
   # instances (produces "invalid redefinition" in LLVM). Files that call @append
   # without a definition are a pre-existing typeclass dispatch gap (tracked in xfail).
-  "declare i64 @print(i64)\n" ++
+  "declare i64 @print_str(ptr)\n" ++
+  "declare i64 @print_value(i64)\n" ++
+  "declare i64 @eprint_str(ptr)\n" ++
   "declare i64 @argv_get(i64)\n" ++
   # int_range is declared as extern fn in prelude.sprout; the declare is also
   # hardcoded here so files that call the range syntax (1..N) without importing
@@ -403,7 +415,8 @@ fn is_hardcoded_intrinsic(name: String) -> Bool =
   name == "sprout_make3" || name == "sprout_make4" || name == "sprout_make5" ||
   name == "sprout_make6" || name == "sprout_make7" || name == "sprout_make8" ||
   name == "sprout_make9" ||
-  name == "print" || name == "argv_get" ||
+  name == "print" || name == "eprint" || name == "argv_get" ||
+  name == "print_str" || name == "print_value" || name == "eprint_str" ||
   name == "append" ||
   name == "int_range" ||
   name == "analysis_check_source" || name == "analysis_declared_names_in_source" ||

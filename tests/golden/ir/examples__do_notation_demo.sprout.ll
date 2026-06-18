@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -5041,18 +5042,21 @@ define i64 @examples.do_notation_demo.main() {
 entry:
   %t0 = getelementptr inbounds [16 x i8], ptr @.str.14, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = add i64 0, 8
   %t4 = add i64 0, 10
   %t5 = call i64 @examples.do_notation_demo.maybe_sum(i64 %t3, i64 %t4)
   %t6 = call i64 @examples.do_notation_demo.render_maybe(i64 %t5)
-  %t7 = call i64 @print(i64 %t6)
+  %t7$ptr = inttoptr i64 %t6 to ptr
+  %t7 = call i64 @print_str(ptr %t7$ptr)
   %t8 = add i64 0, 4
   %t9 = add i64 0, 1
   %t10 = sub i64 0, %t9
   %t11 = call i64 @examples.do_notation_demo.result_sum(i64 %t8, i64 %t10)
   %t12 = call i64 @examples.do_notation_demo.render_result(i64 %t11)
-  %t13 = call i64 @print(i64 %t12)
+  %t13$ptr = inttoptr i64 %t12 to ptr
+  %t13 = call i64 @print_str(ptr %t13$ptr)
   ret i64 %t13
 }
 

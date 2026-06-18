@@ -1,0 +1,21 @@
+# Verifies that print() dispatches by argument type in the typed-IR path.
+#
+# Before this change: --use-ir-codegen emitted `call i64 @print(i64 %x)` for
+# every print, but @print is not defined in the runtime, so any program calling
+# print FAILED TO LINK (Undefined symbols: _print).
+#
+# After: print(String/Char) lowers to @print_str(ptr) (via IRPrintStr) and
+# print(Int/Bool) lowers to @print_value(i64) (via a plain IRCall), mirroring
+# direct codegen's emit_print_call. Both runtime functions exist, so the program
+# links and runs.
+#
+# This file is run two ways in verification: via --emit-ir (direct codegen) and
+# via --use-ir-codegen; their stdout must be byte-identical. Under `just test`
+# it runs via direct codegen and must complete without crashing.
+
+fn main() -> Unit !{IO} =
+  do
+    print("hello")     # String  -> @print_str
+    print(42)          # Int     -> @print_value
+    print(true)        # Bool    -> @print_value
+    print('z')         # Char    -> @print_str

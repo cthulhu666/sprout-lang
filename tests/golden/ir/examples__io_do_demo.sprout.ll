@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -6125,10 +6126,12 @@ define i64 @examples.io_do_demo.configured_name() {
 entry:
   %t0 = getelementptr inbounds [12 x i8], ptr @.str.26, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = getelementptr inbounds [20 x i8], ptr @.str.27, i64 0, i64 0
   %t4 = ptrtoint ptr %t3 to i64
-  %t5 = call i64 @print(i64 %t4)
+  %t5$ptr = inttoptr i64 %t4 to ptr
+  %t5 = call i64 @print_str(ptr %t5$ptr)
   %t6 = getelementptr inbounds [12 x i8], ptr @.str.28, i64 0, i64 0
   %t7 = ptrtoint ptr %t6 to i64
   %t8 = call i64 @env_get(i64 %t7)
@@ -6164,7 +6167,8 @@ body_0_2:
   %t7 = getelementptr inbounds [12 x i8], ptr @.str.29, i64 0, i64 0
   %t8 = ptrtoint ptr %t7 to i64
   %t9 = call i64 @stdlib.string.concat(i64 %t8, i64 %t6)
-  %t10 = call i64 @print(i64 %t9)
+  %t10$ptr = inttoptr i64 %t9 to ptr
+  %t10 = call i64 @print_str(ptr %t10$ptr)
   br label %join_2
 arm_1_2:
   %t11 = add i64 0, 1
@@ -6173,7 +6177,8 @@ arm_1_2:
 body_1_2:
   %t13 = getelementptr inbounds [21 x i8], ptr @.str.30, i64 0, i64 0
   %t14 = ptrtoint ptr %t13 to i64
-  %t15 = call i64 @print(i64 %t14)
+  %t15$ptr = inttoptr i64 %t14 to ptr
+  %t15 = call i64 @print_str(ptr %t15$ptr)
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()

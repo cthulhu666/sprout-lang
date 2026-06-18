@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -4849,19 +4850,20 @@ define i64 @examples.ref_tutorial.part1() {
 entry:
   %t0 = getelementptr inbounds [35 x i8], ptr @.str.9, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = add i64 0, 0
   %t4 = call i64 @ref_new(i64 %t3)
   %t5 = add i64 0, 1
   %t6 = call i64 @ref_write(i64 %t4, i64 %t5)
   %t7 = call i64 @ref_read(i64 %t4)
-  %t8 = call i64 @print(i64 %t7)
+  %t8 = call i64 @print_value(i64 %t7)
   %t9 = call i64 @ref_read(i64 %t4)
   %t10 = add i64 0, 41
   %t11 = add i64 %t9, %t10
   %t12 = call i64 @ref_write(i64 %t4, i64 %t11)
   %t13 = call i64 @ref_read(i64 %t4)
-  %t14 = call i64 @print(i64 %t13)
+  %t14 = call i64 @print_value(i64 %t13)
   ret i64 %t14
 }
 
@@ -4917,7 +4919,8 @@ define i64 @examples.ref_tutorial.part2() {
 entry:
   %t0 = getelementptr inbounds [45 x i8], ptr @.str.10, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = add i64 0, 0
   %t4 = call i64 @ref_new(i64 %t3)
   %t5 = add i64 0, 10
@@ -4929,7 +4932,7 @@ entry:
   %t11 = call i64 @sprout_make2(i64 5, i64 %t5, i64 %t10)
   %t12 = call i64 @examples.ref_tutorial.sum_ref(i64 %t11, i64 %t4)
   %t13 = call i64 @ref_read(i64 %t4)
-  %t14 = call i64 @print(i64 %t13)
+  %t14 = call i64 @print_value(i64 %t13)
   ret i64 %t14
 }
 
@@ -5030,7 +5033,8 @@ define i64 @examples.ref_tutorial.part3() {
 entry:
   %t0 = getelementptr inbounds [41 x i8], ptr @.str.11, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = add i64 0, 0
   %t4 = call i64 @ref_new(i64 %t3)
   %t5 = add i64 0, 0
@@ -5049,8 +5053,8 @@ entry:
   %t18 = call i64 @examples.ref_tutorial.track_list(i64 %t17, i64 %t4, i64 %t6)
   %t19 = call i64 @ref_read(i64 %t4)
   %t20 = call i64 @ref_read(i64 %t6)
-  %t21 = call i64 @print(i64 %t19)
-  %t22 = call i64 @print(i64 %t20)
+  %t21 = call i64 @print_value(i64 %t19)
+  %t22 = call i64 @print_value(i64 %t20)
   ret i64 %t22
 }
 
@@ -5108,7 +5112,8 @@ define i64 @examples.ref_tutorial.part4() {
 entry:
   %t0 = getelementptr inbounds [50 x i8], ptr @.str.12, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = call i64 @sprout_make0(i64 6)
   %t4 = call i64 @ref_new(i64 %t3)
   %t5 = add i64 0, 10
@@ -5123,10 +5128,10 @@ entry:
   %t14 = call i64 @examples.ref_tutorial.stack_push(i64 %t4, i64 %t13)
   %t15 = call i64 @examples.ref_tutorial.stack_pop(i64 %t4)
   %t16 = call i64 @examples.ref_tutorial.stack_pop(i64 %t4)
-  %t17 = call i64 @print(i64 %t11)
-  %t18 = call i64 @print(i64 %t12)
-  %t19 = call i64 @print(i64 %t15)
-  %t20 = call i64 @print(i64 %t16)
+  %t17 = call i64 @print_value(i64 %t11)
+  %t18 = call i64 @print_value(i64 %t12)
+  %t19 = call i64 @print_value(i64 %t15)
+  %t20 = call i64 @print_value(i64 %t16)
   ret i64 %t20
 }
 
@@ -5299,7 +5304,8 @@ define i64 @examples.ref_tutorial.part5() {
 entry:
   %t0 = getelementptr inbounds [39 x i8], ptr @.str.13, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = add i64 0, 3
   %t4 = add i64 0, 0
   %t5 = call i64 @vec_empty()
@@ -5307,7 +5313,7 @@ entry:
   %t7 = add i64 0, 0
   %t8 = add i64 0, 1
   %t9 = call i64 @examples.ref_tutorial.same_var(i64 %t6, i64 %t7, i64 %t8)
-  %t10 = call i64 @print(i64 %t9)
+  %t10 = call i64 @print_value(i64 %t9)
   %t11 = add i64 0, 0
   %t12 = add i64 0, 1
   %t13 = call i64 @examples.ref_tutorial.unify_vars(i64 %t6, i64 %t11, i64 %t12)
@@ -5323,9 +5329,9 @@ entry:
   %t23 = add i64 0, 1
   %t24 = add i64 0, 2
   %t25 = call i64 @examples.ref_tutorial.same_var(i64 %t6, i64 %t23, i64 %t24)
-  %t26 = call i64 @print(i64 %t19)
-  %t27 = call i64 @print(i64 %t22)
-  %t28 = call i64 @print(i64 %t25)
+  %t26 = call i64 @print_value(i64 %t19)
+  %t27 = call i64 @print_value(i64 %t22)
+  %t28 = call i64 @print_value(i64 %t25)
   ret i64 %t28
 }
 

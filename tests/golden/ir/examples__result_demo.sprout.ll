@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -4882,7 +4883,8 @@ arm_0_3:
 body_0_3:
   %t7 = getelementptr inbounds [52 x i8], ptr @.str.10, i64 0, i64 0
   %t8 = ptrtoint ptr %t7 to i64
-  %t9 = call i64 @print(i64 %t8)
+  %t9$ptr = inttoptr i64 %t8 to ptr
+  %t9 = call i64 @print_str(ptr %t9$ptr)
   br label %join_3
 arm_1_3:
   %t10 = add i64 0, 0
@@ -4900,7 +4902,7 @@ arm_0_16:
   br i1 %t19, label %body_0_16, label %arm_1_16
 body_0_16:
   %t20 = call i64 @sprout_field(i64 %t14, i64 0)
-  %t21 = call i64 @print(i64 %t20)
+  %t21 = call i64 @print_value(i64 %t20)
   br label %join_16
 arm_1_16:
   %t22 = add i64 0, 8
@@ -4908,7 +4910,8 @@ arm_1_16:
   br i1 %t23, label %body_1_16, label %arm_2_16
 body_1_16:
   %t24 = call i64 @sprout_field(i64 %t14, i64 0)
-  %t25 = call i64 @print(i64 %t24)
+  %t25$ptr = inttoptr i64 %t24 to ptr
+  %t25 = call i64 @print_str(ptr %t25$ptr)
   br label %join_16
 arm_2_16:
   call void @sprout_abort_match()

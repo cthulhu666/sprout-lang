@@ -154,6 +154,13 @@ export type IROp (..) =
   # (which currently accepts only Int/Char); the is_string_type routing arm here is a
   # forward-compatibility hook for when that restriction is lifted.
   | IRStrCompare String String String String
+  # IRPrintStr <result> <callee> <arg>  — print a String/Char to stdout/stderr.
+  # <callee> is "print_str" (stdout) or "eprint_str" (stderr); both take a
+  # `const char*` in the C runtime, so lowering coerces the i64-uniform String
+  # handle to ptr (inttoptr) before the call.  Mirrors direct codegen's
+  # emit_print_call / emit_eprint_call (codegen.sprout ~2474).  Int/Bool prints
+  # do NOT use this op — they route through a plain IRCall to @print_value(i64).
+  | IRPrintStr String String String
   # IRStrFromInt's IR-op name diverges from the runtime name; it lowers to @int_to_string.
   | IRStrFromInt String String
   # IRMakeCtor <result> <ctor-name> <tag> <args>
@@ -366,6 +373,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = str_eq " ++ a ++ ", " ++ b
   | IRStrCompare r pred a b ->
       "    " ++ r ++ " = str_compare[" ++ pred ++ "] " ++ a ++ ", " ++ b
+  | IRPrintStr r callee arg ->
+      "    " ++ r ++ " = " ++ callee ++ " " ++ arg
   | IRStrFromInt r n ->
       "    " ++ r ++ " = int_to_string " ++ n
   | IRMakeCtor r name tag args ->

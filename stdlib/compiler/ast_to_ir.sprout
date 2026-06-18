@@ -3081,6 +3081,51 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
 # (the TCall node's own inferred type), mapped via llvm_ret_type, which
 # returns "i64" for every type post /code-review fix #2 (Bool flows as
 # i64 too — 0 or 1 encoded in an i64 register).
+# print / eprint dispatch by argument type, mirroring direct codegen's
+# emit_print_call / emit_eprint_call (codegen.sprout ~2474):
+#   eprint(_)        -> IRPrintStr "eprint_str"  (always String)
+#   print(String)    -> IRPrintStr "print_str"   (i64 handle coerced to ptr in lowering)
+#   print(Char)      -> IRPrintStr "print_str"   (Char is a String pointer at runtime)
+#   print(Int/Bool)  -> IRCall @print_value(i64)  (value already i64-uniform)
+# There is no @print symbol in the runtime; a generic call would fail to link.
+fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
+                        params: List String, ctors: Dict (Int, Int, Int, String), idx: Int,
+                        cur_label: String, cur_ops: List sprout_ir.IROp,
+                        captures: Dict String,
+                        lifted_ref: Ref (List sprout_ir.IRFunction),
+                        top_level: Set, let_names: Set, fn_arities: Dict Int,
+                        lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                        name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match args with
+  | Nil ->
+      # print() with no args — emit the unit sentinel 0 (mirrors emit_print_call Nil).
+      Ok((Nil, cur_label,
+           list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
+           fresh_name(name_prefix, idx), idx + 1))
+  | Cons arg _ ->
+      match translate_expr(arg, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                           name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok ar ->
+          match ar with
+          | (ablocks, acur_lbl, acur_ops, a_name, idx1) ->
+              if fname == "eprint"
+              then Ok((ablocks, acur_lbl,
+                        list_append(acur_ops,
+                          Cons(sprout_ir.IRPrintStr(fresh_name(name_prefix, idx1), "eprint_str", a_name), Nil)),
+                        fresh_name(name_prefix, idx1), idx1 + 1))
+              else if is_string_type(typed_ast.typed_expr_type(arg)) || is_char_type(typed_ast.typed_expr_type(arg))
+              then Ok((ablocks, acur_lbl,
+                        list_append(acur_ops,
+                          Cons(sprout_ir.IRPrintStr(fresh_name(name_prefix, idx1), "print_str", a_name), Nil)),
+                        fresh_name(name_prefix, idx1), idx1 + 1))
+              else Ok((ablocks, acur_lbl,
+                        list_append(acur_ops,
+                          Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), "i64", "print_value", Cons(a_name, Nil)), Nil)),
+                        fresh_name(name_prefix, idx1), idx1 + 1))
+
 fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   call_ty: types.Type, params: List String,
                   ctors: Dict (Int, Int, Int, String), idx: Int,
@@ -3105,7 +3150,15 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                                  captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                                  name_prefix)
       | Nothing ->
-          if param_known(fname, params)
+          # print / eprint are builtins that dispatch by argument type, mirroring
+          # direct codegen's emit_print_call (codegen.sprout ~2474): String/Char ->
+          # @print_str(ptr), Int/Bool -> @print_value(i64), eprint -> @eprint_str(ptr).
+          # There is no @print symbol in the runtime, so a generic call would not link.
+          if fname == "print" || fname == "eprint"
+          then translate_print_call(fname, args, params, ctors, idx,
+                                    cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
+          else if param_known(fname, params)
           then
             # Trust the typechecker: any param reached here was accepted as
             # callable at the call site. No defensive type check — that would

@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -5227,7 +5228,8 @@ entry:
   %t0 = call i64 @sprout_make0(i64 6)
   %t1 = call i64 @examples.list_pattern_demo.parse_args(i64 %t0)
   %t2 = call i64 @examples.list_pattern_demo.describe_command(i64 %t1)
-  %t3 = call i64 @print(i64 %t2)
+  %t3$ptr = inttoptr i64 %t2 to ptr
+  %t3 = call i64 @print_str(ptr %t3$ptr)
   %t4 = getelementptr inbounds [6 x i8], ptr @.str.24, i64 0, i64 0
   %t5 = ptrtoint ptr %t4 to i64
   %t6 = getelementptr inbounds [6 x i8], ptr @.str.25, i64 0, i64 0
@@ -5248,7 +5250,8 @@ entry:
   %t10 = call i64 @sprout_make2(i64 5, i64 %t5, i64 %t9)
   %t11 = call i64 @examples.list_pattern_demo.parse_args(i64 %t10)
   %t12 = call i64 @examples.list_pattern_demo.describe_command(i64 %t11)
-  %t13 = call i64 @print(i64 %t12)
+  %t13$ptr = inttoptr i64 %t12 to ptr
+  %t13 = call i64 @print_str(ptr %t13$ptr)
   %t14 = getelementptr inbounds [5 x i8], ptr @.str.26, i64 0, i64 0
   %t15 = ptrtoint ptr %t14 to i64
   %t16 = getelementptr inbounds [5 x i8], ptr @.str.27, i64 0, i64 0
@@ -5282,7 +5285,8 @@ entry:
   %t23 = call i64 @sprout_make2(i64 5, i64 %t15, i64 %t22)
   %t24 = call i64 @examples.list_pattern_demo.parse_args(i64 %t23)
   %t25 = call i64 @examples.list_pattern_demo.describe_command(i64 %t24)
-  %t26 = call i64 @print(i64 %t25)
+  %t26$ptr = inttoptr i64 %t25 to ptr
+  %t26 = call i64 @print_str(ptr %t26$ptr)
   %t27 = getelementptr inbounds [8 x i8], ptr @.str.29, i64 0, i64 0
   %t28 = ptrtoint ptr %t27 to i64
   %t29 = getelementptr inbounds [6 x i8], ptr @.str.30, i64 0, i64 0
@@ -5332,7 +5336,8 @@ entry:
   %t39 = call i64 @sprout_make2(i64 5, i64 %t28, i64 %t38)
   %t40 = call i64 @examples.list_pattern_demo.parse_args(i64 %t39)
   %t41 = call i64 @examples.list_pattern_demo.describe_command(i64 %t40)
-  %t42 = call i64 @print(i64 %t41)
+  %t42$ptr = inttoptr i64 %t41 to ptr
+  %t42 = call i64 @print_str(ptr %t42$ptr)
   %t43 = getelementptr inbounds [8 x i8], ptr @.str.33, i64 0, i64 0
   %t44 = ptrtoint ptr %t43 to i64
   %t45 = getelementptr inbounds [6 x i8], ptr @.str.34, i64 0, i64 0
@@ -5366,7 +5371,8 @@ entry:
   %t52 = call i64 @sprout_make2(i64 5, i64 %t44, i64 %t51)
   %t53 = call i64 @examples.list_pattern_demo.parse_args(i64 %t52)
   %t54 = call i64 @examples.list_pattern_demo.describe_command(i64 %t53)
-  %t55 = call i64 @print(i64 %t54)
+  %t55$ptr = inttoptr i64 %t54 to ptr
+  %t55 = call i64 @print_str(ptr %t55$ptr)
   %t56 = add i64 0, 1
   %t57 = add i64 0, 2
   %t58 = add i64 0, 3
@@ -5378,7 +5384,8 @@ entry:
   %t64 = call i64 @sprout_make2(i64 5, i64 %t56, i64 %t63)
   %t65 = call i64 @examples.list_pattern_demo.sum_ints(i64 %t64)
   %t66 = call i64 @int_to_string(i64 %t65)
-  %t67 = call i64 @print(i64 %t66)
+  %t67$ptr = inttoptr i64 %t66 to ptr
+  %t67 = call i64 @print_str(ptr %t67$ptr)
   ret i64 %t67
 }
 

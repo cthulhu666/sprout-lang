@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -6550,10 +6551,12 @@ define i64 @examples.io_result_do_demo.random_payload_size() {
 entry:
   %t0 = getelementptr inbounds [13 x i8], ptr @.str.26, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
-  %t2 = call i64 @print(i64 %t1)
+  %t2$ptr = inttoptr i64 %t1 to ptr
+  %t2 = call i64 @print_str(ptr %t2$ptr)
   %t3 = getelementptr inbounds [23 x i8], ptr @.str.27, i64 0, i64 0
   %t4 = ptrtoint ptr %t3 to i64
-  %t5 = call i64 @print(i64 %t4)
+  %t5$ptr = inttoptr i64 %t4 to ptr
+  %t5 = call i64 @print_str(ptr %t5$ptr)
   %t6 = add i64 0, 8
   %t7 = call i64 @stdlib.crypto.random_bytes(i64 %t6)
   %t8 = call i64 @stdlib.bytes.length(i64 %t7)
@@ -6596,7 +6599,8 @@ body_0_2:
   %t10 = call i64 @to_string(i64 %t6, i64 %t9)
   %t26 = call i64 @sprout_gc_pop_roots(i64 1)
   %t11 = call i64 @stdlib.string.concat(i64 %t8, i64 %t10)
-  %t12 = call i64 @print(i64 %t11)
+  %t12$ptr = inttoptr i64 %t11 to ptr
+  %t12 = call i64 @print_str(ptr %t12$ptr)
   br label %join_2
 arm_1_2:
   %t13 = add i64 0, 8
@@ -6606,7 +6610,8 @@ body_1_2:
   %t15 = call i64 @sprout_field(i64 %t0, i64 0)
   %t16 = getelementptr inbounds [19 x i8], ptr @.str.29, i64 0, i64 0
   %t17 = ptrtoint ptr %t16 to i64
-  %t18 = call i64 @print(i64 %t17)
+  %t18$ptr = inttoptr i64 %t17 to ptr
+  %t18 = call i64 @print_str(ptr %t18$ptr)
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()

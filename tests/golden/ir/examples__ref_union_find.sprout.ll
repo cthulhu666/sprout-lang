@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -5003,16 +5004,16 @@ entry:
   %t22 = add i64 0, 4
   %t23 = add i64 0, 5
   %t24 = call i64 @examples.ref_union_find.connected(i64 %t3, i64 %t22, i64 %t23)
-  %t25 = call i64 @print(i64 %t18)
-  %t26 = call i64 @print(i64 %t21)
-  %t27 = call i64 @print(i64 %t24)
+  %t25 = call i64 @print_value(i64 %t18)
+  %t26 = call i64 @print_value(i64 %t21)
+  %t27 = call i64 @print_value(i64 %t24)
   %t28 = add i64 0, 0
   %t29 = call i64 @examples.ref_union_find.find(i64 %t3, i64 %t28)
   %t30 = add i64 0, 3
   %t31 = call i64 @examples.ref_union_find.find(i64 %t3, i64 %t30)
   %t32 = icmp eq i64 %t29, %t31
   %t33 = zext i1 %t32 to i64
-  %t34 = call i64 @print(i64 %t33)
+  %t34 = call i64 @print_value(i64 %t33)
   ret i64 %t34
 }
 

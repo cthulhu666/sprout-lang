@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -5029,20 +5030,18 @@ entry:
   %t54 = call i64 @sprout_gc_push_i64_root(ptr %t53)
   %t12 = call i64 @str_concat(i64 %t8, i64 %t11)
   %t55 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t56 = alloca i64
-  store i64 %r, ptr %t56
-  %t57 = call i64 @sprout_gc_push_i64_root(ptr %t56)
-  %t13 = call i64 @print(i64 %t12)
-  %t58 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t13$ptr = inttoptr i64 %t12 to ptr
+  %t13 = call i64 @print_str(ptr %t13$ptr)
   %t14 = getelementptr inbounds [11 x i8], ptr @.str.13, i64 0, i64 0
   %t15 = ptrtoint ptr %t14 to i64
-  %t59 = alloca i64
-  store i64 %t15, ptr %t59
-  %t60 = call i64 @sprout_gc_push_i64_root(ptr %t59)
+  %t56 = alloca i64
+  store i64 %t15, ptr %t56
+  %t57 = call i64 @sprout_gc_push_i64_root(ptr %t56)
   %t16 = call i64 @stdlib.process.proc_stdout(i64 %r)
-  %t61 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t58 = call i64 @sprout_gc_pop_roots(i64 1)
   %t17 = call i64 @str_concat(i64 %t15, i64 %t16)
-  %t18 = call i64 @print(i64 %t17)
+  %t18$ptr = inttoptr i64 %t17 to ptr
+  %t18 = call i64 @print_str(ptr %t18$ptr)
   ret i64 %t18
 }
 

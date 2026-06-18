@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -5071,7 +5072,8 @@ entry:
 define i64 @examples.string_templates.emit_buffered(i64 %line) {
 entry:
   %t0 = call i64 @template_to_string(i64 %line)
-  %t1 = call i64 @print(i64 %t0)
+  %t1$ptr = inttoptr i64 %t0 to ptr
+  %t1 = call i64 @print_str(ptr %t1$ptr)
   ret i64 %t1
 }
 
@@ -5154,7 +5156,8 @@ entry:
   %t78 = call i64 @sprout_gc_pop_roots(i64 1)
   %t20 = call i64 @sprout_make2(i64 5, i64 %t12, i64 %t19)
   %t21 = call i64 @string_concat_many(i64 %t20)
-  %t22 = call i64 @print(i64 %t21)
+  %t22$ptr = inttoptr i64 %t21 to ptr
+  %t22 = call i64 @print_str(ptr %t22$ptr)
   %t23 = getelementptr inbounds [18 x i8], ptr @.str.19, i64 0, i64 0
   %t24 = ptrtoint ptr %t23 to i64
   %t79 = alloca i64
@@ -5181,7 +5184,8 @@ entry:
   %t90 = call i64 @sprout_gc_pop_roots(i64 1)
   %t29 = call i64 @sprout_make2(i64 5, i64 %t24, i64 %t28)
   %t30 = call i64 @string_concat_many(i64 %t29)
-  %t31 = call i64 @print(i64 %t30)
+  %t31$ptr = inttoptr i64 %t30 to ptr
+  %t31 = call i64 @print_str(ptr %t31$ptr)
   %t32 = getelementptr inbounds [20 x i8], ptr @.str.20, i64 0, i64 0
   %t33 = ptrtoint ptr %t32 to i64
   %t91 = alloca i64
@@ -5208,7 +5212,8 @@ entry:
   %t102 = call i64 @sprout_gc_pop_roots(i64 1)
   %t38 = call i64 @sprout_make2(i64 5, i64 %t33, i64 %t37)
   %t39 = call i64 @string_concat_many(i64 %t38)
-  %t40 = call i64 @print(i64 %t39)
+  %t40$ptr = inttoptr i64 %t39 to ptr
+  %t40 = call i64 @print_str(ptr %t40$ptr)
   %t41 = getelementptr inbounds [31 x i8], ptr @.str.21, i64 0, i64 0
   %t42 = ptrtoint ptr %t41 to i64
   %t43 = call i64 @sprout_make1(i64 2, i64 %t42)

@@ -24,7 +24,9 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @print(i64)
+declare i64 @print_str(ptr)
+declare i64 @print_value(i64)
+declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
@@ -38,7 +40,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @eprint(i64)
 declare i64 @print_int(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
@@ -5591,7 +5592,8 @@ entry:
   %t0 = getelementptr inbounds [13 x i8], ptr @.str.62, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
   %t2 = call i64 @stdlib.http.http_ok(i64 %t1)
-  %t3 = call i64 @print(i64 %t2)
+  %t3$ptr = inttoptr i64 %t2 to ptr
+  %t3 = call i64 @print_str(ptr %t3$ptr)
   ret i64 %t3
 }
 
