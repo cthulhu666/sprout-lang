@@ -822,28 +822,11 @@ _run-ir-files files name: bootstrap-from-seed
     echo "ERROR: $XFAIL not found" >&2; exit 1
   fi
   xfail_set=$(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' "$XFAIL" | grep -v '^$' | awk '{print $1}')
-  # Skip-set: files tagged with an "IR codegen OOM" reason in IR_XFAIL.
-  # These tests import stdlib.compiler and hit 2-2.6 GB peak RSS under
-  # --use-ir-codegen; CI runners OOM-kill mid-probe (runner step cancels,
-  # not just an XFAIL category change).  Skip probing entirely until the
-  # streaming IR codegen fix lands (BACKLOG §1 P1).  Reason-based marker
-  # keeps a single source of truth in IR_XFAIL — no separate skip-list file.
-  skip_set=$(grep -E '#.*IR codegen OOM' "$XFAIL" 2>/dev/null \
-              | sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' \
-              | grep -v '^$' \
-              | awk '{print $1}' || true)
   TMPD=$(mktemp -d "/tmp/sprout_ir_$$_XXXXXX")
   trap 'rm -rf "$TMPD"' EXIT
   total=0; ok=0; xfail=0; failed=0; unexpected_ok=0; skipped=0
   for f in {{files}}; do
     [ -f "$f" ] || continue
-    is_skip=0
-    for sk in $skip_set; do [[ "$f" == "$sk" ]] && is_skip=1 && break; done
-    if (( is_skip == 1 )); then
-      skipped=$((skipped + 1))
-      printf '  SKIP (OOM on CI; tracked in IR_XFAIL): %s\n' "$f"
-      continue
-    fi
     total=$((total + 1))
     is_xfail=0
     for xf in $xfail_set; do [[ "$f" == "$xf" ]] && is_xfail=1 && break; done

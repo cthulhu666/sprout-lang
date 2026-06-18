@@ -86,13 +86,15 @@
 #             C runtime takes const char* (= ptr) and direct codegen's intrinsic
 #             table uses ll_ptr().  Fixed to ptr; differential check on PR 70
 #             now reports 0 unallowed divergences.
+#   C      — streaming per-function IR codegen  ✓  (BACKLOG §1)
+#            8 test_ir_codegen_* un-skipped: peak RSS ~2 GB → ~240 MB.
 #
-# Bucket breakdown after PR 16 closes (re-probed):
-#    ~8 entries — IR codegen OOM on CI (>2 GB peak RSS).  The 8 test_ir_codegen_*
-#                 tests below construct hand-built IRPrograms, which forces them
-#                 to `import stdlib.compiler` — pulling the entire self-hosted
-#                 compiler into the compile unit.  Tracked as BACKLOG §1
-#                 "stream IR codegen output per-function" — P1 M5 prep work.
+# Bucket breakdown after streaming IR codegen fix (BACKLOG §1):
+#    ~8 entries — IR codegen OOM — RESOLVED.  The 8 test_ir_codegen_* tests
+#                 that previously peaked at 2–2.6 GB under --use-ir-codegen now
+#                 compile at ~240 MB via the streaming ir_pipeline.sprout
+#                 orchestrator (translate→root→lower per-function, no full
+#                 IRProgram materialized).  Removed from this list.
 #    ~4 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing)
 #    ~3 entries — typeclass `__unresolved_Eq__` / `__unresolved_ToString__`
 #                 (typeclass dispatch gap — out of M3 IR-codegen scope)
@@ -110,13 +112,5 @@ examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfa
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
 tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
 tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
-tests/stdlib/test_ir_codegen_closures.spr      # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
-tests/stdlib/test_ir_codegen_ctors.spr         # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
-tests/stdlib/test_ir_codegen_match.spr         # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
-tests/stdlib/test_ir_codegen_nested_int_bool.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix; new test for PR 15g)
-tests/stdlib/test_ir_codegen_nested_patterns.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
-tests/stdlib/test_ir_codegen_range_and_intrinsics.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix; new test for PR 15h)
-tests/stdlib/test_ir_codegen_string_pattern.spr   # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix)
-tests/stdlib/test_ir_codegen_unit_ctor_field.spr  # IR codegen OOM on CI (>2 GB peak RSS — imports stdlib.compiler; BACKLOG §1 streaming fix; new test for PR 15e)
 tests/stdlib/test_string.spr                   # multiple definition of local 't0' (pre-existing codegen dup-block)
 tests/stdlib/test_to_string.spr                # multiple definition of local 't0' (pre-existing codegen dup-block)
