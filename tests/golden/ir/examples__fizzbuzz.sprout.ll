@@ -2,6 +2,7 @@
 target triple = "unknown-unknown-unknown"
 declare i64 @str_concat(i64, i64)
 declare i1 @str_eq(ptr, ptr)
+declare i64 @str_compare(i64, i64)
 declare i64 @str_slice(i64, i64, i64)
 declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)

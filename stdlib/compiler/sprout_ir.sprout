@@ -143,6 +143,17 @@ export type IROp (..) =
   # `!=` appends IRBoolNot on the i64 result.
   # Mirrors direct codegen's emit_ptr_comparison (codegen.sprout ~2094).
   | IRStrEq String String String
+  # IRStrCompare <result> <pred> <lhs> <rhs>  — String/Char ordering (lowers to @str_compare).
+  # Both operands are i64-uniform String/Char handles (the ABI treats Char as a
+  # single-codepoint String).  Lowering calls `i64 @str_compare(i64, i64)` (which
+  # returns -1/0/1 per the C signature), then `icmp <pred> i64 <result>, 0`, then
+  # zexts the i1 to i64 (Bool ABI).
+  # pred is one of: "slt" / "sle" / "sgt" / "sge".
+  # Emitted by translate_binop for `<` / `<=` / `>` / `>=` on String/Char operands.
+  # Note: String literal ordering is additionally gated by infer.sprout's check_compare
+  # (which currently accepts only Int/Char); the is_string_type routing arm here is a
+  # forward-compatibility hook for when that restriction is lifted.
+  | IRStrCompare String String String String
   # IRStrFromInt's IR-op name diverges from the runtime name; it lowers to @int_to_string.
   | IRStrFromInt String String
   # IRMakeCtor <result> <ctor-name> <tag> <args>
@@ -353,6 +364,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = str_concat " ++ a ++ ", " ++ b
   | IRStrEq r a b ->
       "    " ++ r ++ " = str_eq " ++ a ++ ", " ++ b
+  | IRStrCompare r pred a b ->
+      "    " ++ r ++ " = str_compare[" ++ pred ++ "] " ++ a ++ ", " ++ b
   | IRStrFromInt r n ->
       "    " ++ r ++ " = int_to_string " ++ n
   | IRMakeCtor r name tag args ->

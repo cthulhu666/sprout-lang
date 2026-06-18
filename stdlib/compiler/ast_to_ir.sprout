@@ -1576,6 +1576,38 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                                 Cons(sprout_ir.IRBoolNot(fresh_name(name_prefix, idx2 + 1),
                                                          fresh_name(name_prefix, idx2)), Nil))),
                               fresh_name(name_prefix, idx2 + 1), idx2 + 2))
+  # String/Char ordering: `<` / `<=` / `>` / `>=` on String or Char operands.
+  # Emits IRStrCompare which lowers to @str_compare(i64,i64) + icmp <pred> i64 _,0 + zext.
+  # @str_compare takes i64 handles directly (C: long long str_compare(long long, long long)).
+  # Must appear before the Int-only guard below.
+  # Note: String literal ordering is currently also gated at the type-checker level
+  # (infer.sprout check_compare accepts only Int/Char); the is_string_type arm here
+  # is a forward-compatibility hook for when that restriction is lifted.
+  else if (op == "<" || op == "<=" || op == ">" || op == ">=")
+       && (is_string_type(typed_ast.typed_expr_type(left)) || is_char_type(typed_ast.typed_expr_type(left)))
+       && (is_string_type(typed_ast.typed_expr_type(right)) || is_char_type(typed_ast.typed_expr_type(right)))
+  then
+    match cmp_predicate(op) with
+    | Nothing -> Err("ast_to_ir: unexpected ordering op: " ++ op)
+    | Just pred ->
+        match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
+                             captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                             name_prefix) with
+        | Err msg -> Err(msg)
+        | Ok lr ->
+            match lr with
+            | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
+                match translate_expr(right, params, ctors, idx1, lcur_lbl, lcur_ops,
+                                     captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                                     name_prefix) with
+                | Err msg -> Err(msg)
+                | Ok rr ->
+                    match rr with
+                    | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
+                        Ok((list_append(lblocks, rblocks), rcur_lbl,
+                            list_append(rcur_ops,
+                              Cons(sprout_ir.IRStrCompare(fresh_name(name_prefix, idx2), pred, l_name, r_name), Nil)),
+                            fresh_name(name_prefix, idx2), idx2 + 1))
   # Bool equality: Bool is i64 in the IR (0 or 1), so `==` / `!=` lower
   # to the same `icmp eq i64` path as Int.  This covers `condition == false`
   # in stdlib/test.sprout (assert_false) and any user-written Bool == / !=.

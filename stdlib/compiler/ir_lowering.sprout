@@ -158,6 +158,15 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ "$rptr = inttoptr i64 " ++ b ++ " to ptr\n" ++
       "  " ++ r ++ "$i1 = call i1 @str_eq(ptr " ++ r ++ "$lptr, ptr " ++ r ++ "$rptr)\n" ++
       "  " ++ r ++ " = zext i1 " ++ r ++ "$i1 to i64"
+  | sprout_ir.IRStrCompare r pred a b ->
+      # str_compare takes i64/i64 per the C signature (long long str_compare(long long, long long)).
+      # Operands are already i64 String/Char handles — NO inttoptr needed.
+      # Declare: `declare i64 @str_compare(i64, i64)` in ir_header().
+      # The runtime returns -1/0/1; icmp <pred> against 0 gives the Bool i1;
+      # zext to i64 produces the Bool ABI value.
+      "  " ++ r ++ "$cmp = call i64 @str_compare(i64 " ++ a ++ ", i64 " ++ b ++ ")\n" ++
+      "  " ++ r ++ "$i1 = icmp " ++ pred ++ " i64 " ++ r ++ "$cmp, 0\n" ++
+      "  " ++ r ++ " = zext i1 " ++ r ++ "$i1 to i64"
   | sprout_ir.IRStrFromInt r n ->
       "  " ++ r ++ " = call i64 @int_to_string(i64 " ++ n ++ ")"
   | sprout_ir.IRMakeCtor r _ tag args ->
@@ -277,6 +286,11 @@ export fn ir_header() -> String =
   # str_eq takes ptr/ptr and returns i1 (C: _Bool str_eq(const char*, const char*)).
   # Strings are passed as i64 in the uniform ABI; IRStrEq lowering coerces with inttoptr.
   "declare i1 @str_eq(ptr, ptr)\n" ++
+  # str_compare takes i64/i64 and returns i64 (C: long long str_compare(long long, long long)).
+  # Operands are already i64 String/Char handles — no inttoptr needed.
+  # Returns -1/0/1; IRStrCompare lowering compares result to 0 with icmp <pred>.
+  # Note: codegen.sprout's @str_compare(ptr,ptr) is a separate latent ABI bug (BACKLOG §1).
+  "declare i64 @str_compare(i64, i64)\n" ++
   "declare i64 @str_slice(i64, i64, i64)\n" ++
   "declare i64 @int_to_string(i64)\n" ++
   # char_to_string: Char → String identity at the ABI level (both are UTF-8 string pointers).
@@ -378,7 +392,8 @@ fn extern_already_declared(name: String, fns: List sprout_ir.IRFunction, seen: S
   is_hardcoded_intrinsic(name) || has_fn_named(name, fns) || set_member(name, seen)
 
 fn is_hardcoded_intrinsic(name: String) -> Bool =
-  name == "str_concat" || name == "str_eq" || name == "str_slice" ||
+  name == "str_concat" || name == "str_eq" || name == "str_compare" ||
+  name == "str_slice" ||
   name == "int_to_string" || name == "char_to_string" ||
   name == "sprout_gc_push_i64_root" || name == "sprout_gc_pop_roots" ||
   name == "sprout_alloc_closure_env" || name == "sprout_alloc_tuple_blob" ||

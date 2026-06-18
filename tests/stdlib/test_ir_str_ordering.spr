@@ -1,0 +1,63 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+
+# Verifies that Char ordering comparisons (<, <=, >, >=) lower correctly via
+# --use-ir-codegen (PR 11 prep / IRStrCompare op).
+#
+# Before this PR: --use-ir-codegen errors with
+#   ERROR: ast_to_ir: binary op '>=' requires Int operands
+# for any source that compares two Char values with an ordering operator.
+# The binary-op handler had a monomorphic int-type guard that rejected all
+# ordering ops on non-Int operands.  Char passes the type-checker (infer.sprout
+# accepts Char in check_compare) but failed at the ast_to_ir translation step.
+#
+# After this PR: a special-case for Char (and String) ordering sits before the
+# Int-only guard in translate_binop.  It emits IRStrCompare (a new IR op):
+#
+#   IRStrCompare <result> <pred> <lhs-i64> <rhs-i64>
+#     ->  %result$cmp = call i64 @str_compare(i64 %lhs, i64 %rhs)
+#         %result$i1  = icmp <pred> i64 %result$cmp, 0
+#         %result     = zext i1 %result$i1 to i64
+#
+# @str_compare takes i64 handles per the C signature
+# (long long str_compare(long long, long long)) and returns -1/0/1.
+# The icmp compares the integer result to 0 using the requested predicate
+# (slt/sle/sgt/sge).
+#
+# The '>=' case specifically is what blocked compile_driver.sprout from compiling
+# via --use-ir-codegen (bundler.sprout uses Char >= in character class checks).
+#
+# Note: String literal ordering (e.g. "apple" < "banana") is additionally blocked
+# at the type-checker level (infer.sprout check_compare only accepts Int or Char).
+# The IRStrCompare routing in ast_to_ir includes is_string_type for completeness
+# when that type-checker restriction is lifted.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Char ordering — strict less than
+    assert_true(state, "char lt a b", 'a' < 'b')
+    assert_false(state, "char lt b a", 'b' < 'a')
+    assert_false(state, "char lt same", 'a' < 'a')
+
+    # Char ordering — less than or equal
+    assert_true(state, "char le a b", 'a' <= 'b')
+    assert_true(state, "char le same", 'a' <= 'a')
+    assert_false(state, "char le b a", 'b' <= 'a')
+
+    # Char ordering — strict greater than
+    assert_true(state, "char gt b a", 'b' > 'a')
+    assert_false(state, "char gt a b", 'a' > 'b')
+    assert_false(state, "char gt same", 'a' > 'a')
+
+    # Char ordering — greater than or equal (the exact compile_driver blocker)
+    assert_true(state, "char ge b a", 'b' >= 'a')
+    assert_true(state, "char ge same", 'a' >= 'a')
+    assert_false(state, "char ge a b", 'a' >= 'b')
+
+    # ASCII ordering edge cases
+    assert_true(state, "char lt 0 a", '0' < 'a')
+    assert_true(state, "char lt A a", 'A' < 'a')
+    assert_true(state, "char ge z A", 'z' >= 'A')
+
+    summary(state)
