@@ -32,15 +32,26 @@ if [[ ! -x "$EXTRACT" ]]; then
 fi
 
 # Corpus: files that compile cleanly under BOTH --emit-ir AND
-# --use-ir-codegen. Files added here MUST currently round-trip clean.
-# Start small; grows as each M3 PR closes parity gaps.
+# --use-ir-codegen and produce zero real divergences (the allowlisted
+# sprout_abort_match `noreturn` warning is expected).  Files added here MUST
+# currently round-trip with no unallowed divergence; otherwise CI fails.
 #
-# To add a file: confirm both
-#   stage1 --emit-ir          $f produces valid IR
-#   stage1 --use-ir-codegen   $f produces valid IR
-# then append below.  CI will compare signatures on every PR.
+# Tiny single-purpose files only. Anything that meaningfully imports
+# stdlib triggers the typed-IR vs direct codegen architectural ABI gap
+# (typed-IR boxes tuples and closure envs as i64 handles; direct codegen
+# uses LLVM struct types `{ i64, i64 }` for tuples and `ptr` for closure
+# envs — both representations are internally consistent within each path
+# but not interchangeable).  Those files generate 60+ false-positive
+# divergences each.  Adding them is deferred until PR 11 (dispatcher
+# rewire) eliminates direct codegen.
+#
+# To add a file: confirm both paths emit valid IR and that the
+# differential reports 0 unallowed divergences.
 CORPUS=(
   examples/scalar_arithmetic_demo.sprout
+  examples/hello.sprout
+  examples/factorial.sprout
+  examples/fizzbuzz.sprout
 )
 
 TMPD=$(mktemp -d "/tmp/sprout_cpr_diff_$$_XXXXXX")
