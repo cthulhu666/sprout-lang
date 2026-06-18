@@ -1,0 +1,59 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+# Build a minimal no_pos helper.
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+
+# Build a trivial TypedProgram: a single fn main() = 42
+fn trivial_program() -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram(
+    Cons(
+      typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
+        typed_ast.TInt(42, types.TConst("Int"), no_pos())),
+      Nil
+    )
+  )
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # compile_program_streaming should succeed on trivial program.
+    match ir_pipeline.compile_program_streaming(trivial_program()) with
+    | Err msg ->
+        do
+          assert_true(state, "streaming compile should succeed (got Err: " ++ msg ++ ")", false)
+          summary(state)
+    | Ok streaming_ir ->
+
+        # Batch path result for comparison.
+        match ast_to_ir.translate_program(trivial_program()) with
+        | Err msg2 ->
+            do
+              assert_true(state, "batch compile should succeed (got Err: " ++ msg2 ++ ")", false)
+              summary(state)
+        | Ok pair ->
+            match pair with
+            | (ir_prog, idx_map) ->
+                do
+                  let batch_ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+                  # Both paths must produce output containing "define" blocks.
+                  assert_true(state, "streaming IR contains define",
+                    str_find(streaming_ir, "define ") >= 0)
+                  assert_true(state, "batch IR contains define",
+                    str_find(batch_ir, "define ") >= 0)
+
+                  # Both paths must produce byte-identical IR.
+                  assert_eq(state, "streaming IR matches batch IR",
+                    streaming_ir, batch_ir)
+
+                  summary(state)

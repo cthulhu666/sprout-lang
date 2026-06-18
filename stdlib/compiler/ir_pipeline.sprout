@@ -1,0 +1,226 @@
+module stdlib.compiler.ir_pipeline
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.typed_ast as typed_ast
+
+# ---------------------------------------------------------------------------
+# Streaming IR-codegen pipeline (T2).
+#
+# translate -> root -> lower is performed per-declaration so that at most one
+# function's IRFunction graph is live at a time.  The batch path
+# (ast_to_ir.translate_program -> ir_rooting.insert_roots ->
+# ir_lowering.lower_program) materialises the whole IRProgram across three
+# whole-program passes, peaking at ~2 GB on large input.
+#
+# Memory discipline:
+#   - Two Ref (List String) accumulators: str_globals_acc (one chunk per fn)
+#     and bodies_acc (lower_fn_with_table(f,t) ++ "\n" per fn).
+#   - Chunks are PREPENDED (O(1)); a single list_reverse + string_concat_many
+#     at the end produces the final strings (O(total)).  Never ++ inside the
+#     loop.
+#   - next_str_idx is threaded in function-emission order so @.str.K numbering
+#     is identical to the batch path.
+#   - defined_names (Set) accumulates emitted fn names for lower_extern_decls_by_names.
+#   - has_user_main is tracked as a Bool.
+#
+# Emission order (must match translate_decls + lower_program_body exactly):
+#   For each decl in source order:
+#     translate_decl_with_idx → Just(f, idx, lifted):
+#       emit each fn in lifted (in list order), THEN f.
+#   AFTER all decls: if runtime_lets non-empty, emit the init fn LAST.
+# ---------------------------------------------------------------------------
+
+# State carried through the streaming loop.
+# Fields: next_str_idx, str_globals_acc, bodies_acc, defined_names, has_user_main.
+# All accumulator lists are in reverse emission order; reversed at assembly.
+# O(1) prepend per fn; single list_reverse + string_concat_many at the end.
+type StreamState (..) =
+  StreamState Int (Ref (List String)) (Ref (List String)) Set Bool
+
+# Emit one IRFunction: root it, collect string constants, lower to text.
+# Prepends one chunk to each accumulator; threads next_str_idx.
+# Returns Ok(new_state) always (rooting and lowering are infallible).
+fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
+               state: StreamState) -> Result String StreamState !{IO} =
+  match state with
+  | StreamState next_idx str_acc bodies_acc defined has_user_main ->
+      emit_one_fn_rooted(ir_rooting.rewrite_one_fn(f, idx_map),
+                         next_idx, str_acc, bodies_acc, defined, has_user_main)
+
+# Helper: emit a pre-rooted IRFunction.  Separated so we name the rooted fn
+# once and pass it to both walk_blocks_for_strs and lower_fn_with_table.
+fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
+                      str_acc: Ref (List String), bodies_acc: Ref (List String),
+                      defined: Set, has_user_main: Bool) ->
+    Result String StreamState !{IO} =
+  match rooted with
+  | sprout_ir.IRFunction fname _ _ rblocks ->
+      # Walk blocks for string constants (pass "" as globals_acc to get
+      # only this fn's chunk — O(1) prepend to str_acc later).
+      match ir_lowering.walk_blocks_for_strs(rblocks, next_idx, "", dict_empty()) with
+      | (fn_str_chunk, next_idx2, fn_table) ->
+          do
+            str_old <- ref_read(str_acc)
+            ref_write(str_acc, Cons(fn_str_chunk, str_old))
+            bodies_old <- ref_read(bodies_acc)
+            let body_text = ir_lowering.lower_fn_with_table(rooted, fn_table) ++ "\n"
+            ref_write(bodies_acc, Cons(body_text, bodies_old))
+            let new_defined = set_insert(fname, defined)
+            let new_has_user_main = has_user_main || (fname == "__sprout_user_main")
+            Ok(StreamState(next_idx2, str_acc, bodies_acc, new_defined, new_has_user_main))
+
+# Emit all lifted lambdas (in list order) then the main fn for one decl.
+# lifted list is [lambda0, lambda1, ..., lambdaN]; emit in that order then f.
+fn emit_lifted_then_fn(lifted: List sprout_ir.IRFunction,
+                       f: sprout_ir.IRFunction,
+                       idx_map: Dict Int,
+                       state: StreamState) -> Result String StreamState !{IO} =
+  match lifted with
+  | Nil ->
+      match emit_one_fn(f, idx_map, state) with
+      | Err msg -> Err(msg)
+      | Ok s2 -> Ok(s2)
+  | Cons lf rest ->
+      match emit_one_fn(lf, idx_map, state) with
+      | Err msg -> Err(msg)
+      | Ok s2 -> emit_lifted_then_fn(rest, f, idx_map, s2)
+
+# Main streaming loop over all decls.
+fn stream_decls(decls: List typed_ast.TypedDecl,
+                ctors: Dict (Int, Int, Int, String),
+                top_level: Set, let_names: Set, fn_arities: Dict Int,
+                lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                state: StreamState) ->
+    Result String StreamState !{IO} =
+  match decls with
+  | Nil -> Ok(state)
+  | Cons d rest ->
+      match ast_to_ir.translate_decl_with_idx(d, ctors, top_level, let_names, fn_arities,
+                                              lambda_ctr_ref, lifted_idx_ref) with
+      | Err msg -> Err(msg)
+      | Ok maybe_f ->
+          match maybe_f with
+          | Nothing ->
+              stream_decls(rest, ctors, top_level, let_names, fn_arities,
+                           lambda_ctr_ref, lifted_idx_ref, state)
+          | Just triple ->
+              match triple with
+              | (f, idx, lifted) ->
+                  match f with
+                  | sprout_ir.IRFunction fname _ _ _ ->
+                      # Build per-decl idx_map: f's idx plus all lifted-lambda indices
+                      # accumulated in lifted_idx_ref during this translate call.
+                      do
+                        lifted_idx <- ref_read(lifted_idx_ref)
+                        let idx_map_for_decl = dict_set(fname, idx, lifted_idx)
+                        match emit_lifted_then_fn(lifted, f, idx_map_for_decl, state) with
+                        | Err msg -> Err(msg)
+                        | Ok s2 ->
+                            stream_decls(rest, ctors, top_level, let_names, fn_arities,
+                                         lambda_ctr_ref, lifted_idx_ref, s2)
+
+# ---------------------------------------------------------------------------
+# Entry point: compile_program_streaming
+#
+# Mirrors translate_program's setup exactly, then streams each decl through
+# root+walk_strs+lower, and assembles the final LLVM IR text.
+# ---------------------------------------------------------------------------
+
+export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
+    Result String String !{IO} =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      match ast_to_ir.validate_reserved_namespace(decls) with
+      | Err msg -> Err(msg)
+      | Ok _ ->
+          match ast_to_ir.build_ctor_table(decls) with
+          | (ctors, ctor_regs) ->
+              do
+                lambda_ctr_ref <- ref_new(0)
+                lifted_idx_ref <- ref_new(dict_empty())
+                let let_names = ast_to_ir.build_top_level_let_names(decls)
+                let top_level_set = ast_to_ir.build_top_level_set(decls, ctors)
+                let fn_arities = ast_to_ir.build_fn_arities(decls)
+                let classified = ast_to_ir.classify_let_decls_ir(decls)
+                let externs = ast_to_ir.collect_extern_decls(decls)
+                match classified with
+                | (let_globals, runtime_lets) ->
+                    do
+                      str_acc_ref <- ref_new(Nil)
+                      bodies_acc_ref <- ref_new(Nil)
+                      let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false)
+                      match stream_decls(decls, ctors, top_level_set, let_names, fn_arities,
+                                         lambda_ctr_ref, lifted_idx_ref, init_state) with
+                      | Err msg -> Err(msg)
+                      | Ok after_decls ->
+                          match after_decls with
+                          | StreamState next_idx2 str_acc bodies_acc defined has_user_main ->
+                              # Emit init fn last if there are runtime lets.
+                              match runtime_lets with
+                              | Nil ->
+                                  assemble_result(str_acc, bodies_acc, defined, has_user_main,
+                                                  let_globals, ctor_regs, externs)
+                              | _ ->
+                                  match ast_to_ir.synthesize_init_globals_fn(
+                                    runtime_lets, ctors, top_level_set, let_names, fn_arities,
+                                    lambda_ctr_ref, lifted_idx_ref) with
+                                  | Err msg -> Err(msg)
+                                  | Ok init_fn ->
+                                      # Root init fn with an empty map (name absent → default 0,
+                                      # matching batch path where init fn is absent from merged map).
+                                      match emit_one_fn(init_fn, dict_empty(),
+                                                        StreamState(next_idx2, str_acc, bodies_acc,
+                                                                    defined, has_user_main)) with
+                                      | Err msg -> Err(msg)
+                                      | Ok final_state ->
+                                          match final_state with
+                                          | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 ->
+                                              assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2,
+                                                              let_globals, ctor_regs, externs)
+
+# Assemble the final LLVM IR text from accumulators.
+# Mirrors lower_program_body exactly.
+#
+# For extern-decl filtering we call lower_extern_decls(externs, filtered_fns)
+# where filtered_fns is a minimal stub list of IRFunction values — one per
+# name in defined_names.  lower_extern_decls_loop calls has_fn_named(name, fns)
+# which checks fn names; the stub functions have the right names and dummy
+# bodies, so the filter logic is identical to the batch path without any new
+# string literals in ir_lowering.sprout (which would shift @.str.K indices).
+fn assemble_result(str_acc: Ref (List String), bodies_acc: Ref (List String),
+                   defined_names: Set, has_user_main: Bool,
+                   let_globals: List sprout_ir.IRGlobalDecl,
+                   ctor_regs: List sprout_ir.CtorReg,
+                   externs: List (String, Int)) ->
+    Result String String !{IO} =
+  do
+    str_chunks <- ref_read(str_acc)
+    body_chunks <- ref_read(bodies_acc)
+    let str_globals_text = string_concat_many(list_reverse(str_chunks))
+    let bodies_text = string_concat_many(list_reverse(body_chunks))
+    let ctor_globals = ir_lowering.collect_ctor_globals(ctor_regs)
+    let let_globals_text = ir_lowering.lower_globals(let_globals)
+    let stub_fns = set_names_to_stub_fns(set_to_list(defined_names))
+    let extern_decls_text = ir_lowering.lower_extern_decls(externs, stub_fns)
+    let separator = if str_globals_text == "" && ctor_globals == "" &&
+                       let_globals_text == "" && extern_decls_text == ""
+                    then "" else "\n"
+    let full_ir = ir_lowering.ir_header() ++ extern_decls_text ++ str_globals_text ++
+                  ctor_globals ++ let_globals_text ++ separator ++
+                  bodies_text ++
+                  ir_lowering.main_shim(ctor_regs,
+                                        ir_lowering.any_runtime_global(let_globals),
+                                        has_user_main)
+    Ok(full_ir)
+
+# Build a list of IRFunction stubs with the given names and empty bodies.
+# Used to pass to lower_extern_decls so it can filter out names that are
+# already defined, without adding any new string literals to ir_lowering.
+fn set_names_to_stub_fns(names: List String) -> List sprout_ir.IRFunction =
+  match names with
+  | Nil -> Nil
+  | Cons name rest ->
+      Cons(sprout_ir.IRFunction(name, Nil, "i64", Nil),
+           set_names_to_stub_fns(rest))

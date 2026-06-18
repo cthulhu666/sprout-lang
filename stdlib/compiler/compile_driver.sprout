@@ -13,6 +13,7 @@ import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.iface_codec as iface_codec
 import stdlib.compiler.source as source
 
@@ -254,12 +255,9 @@ fn run_file_use_ir_codegen(path: String, stdlib_root: String) -> Unit !{IO} =
     match recheck_result with
     | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog _ ->
-        match ast_to_ir.translate_program(typed_prog) with
+        match ir_pipeline.compile_program_streaming(typed_prog) with
         | Err msg -> print("ERROR: " ++ msg)
-        | Ok pair ->
-            match pair with
-            | (ir_prog, idx_map) ->
-                print(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+        | Ok ir_text -> print(ir_text)
 
 # ---------------------------------------------------------------------------
 # Phase: scan-info — call scan_source_info and print mod_name + exports.
