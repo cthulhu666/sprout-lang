@@ -15,7 +15,7 @@
 
 fn main() -> Unit !{IO} =
   do
-    print("hello")     # String  -> @print_str
-    print(42)          # Int     -> @print_value
-    print(true)        # Bool    -> @print_value
-    print('z')         # Char    -> @print_str
+    print("hello")  # String  -> @print_str
+    print(42)  # Int     -> @print_value
+    print(true)  # Bool    -> @print_value
+    print('z')  # Char    -> @print_str
