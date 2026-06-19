@@ -3167,6 +3167,20 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             translate_closure_call("%" ++ fname, args, params, ctors, idx,
                                    cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
+          else if set_member(fname, let_names)
+          then
+            # Top-level `let` bound to a closure value: load the global slot,
+            # then apply via IRApplyClosure.  Mirrors the bare-TVar IRLoadGlobal
+            # path (translate_expr ~706) followed by translate_closure_call.  A
+            # direct `call @<name>` here would jump into the global's data slot
+            # (SIGSEGV).  fresh_name is deterministic, so the load result and the
+            # closure-call callee SSA agree; arg evaluation advances from idx + 1.
+            translate_closure_call(fresh_name(name_prefix, idx), args, params, ctors,
+                                   idx + 1, cur_label,
+                                   list_append(cur_ops,
+                                     Cons(sprout_ir.IRLoadGlobal(fresh_name(name_prefix, idx), fname), Nil)),
+                                   captures, lifted_ref, top_level, let_names, fn_arities,
+                                   lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else
             # Constructor application takes precedence over named-call dispatch
             # because a ctor name is never simultaneously a function.  M3 PR 2:
@@ -3464,8 +3478,39 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
       | Ok r ->
           match r with
           | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
-              finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                 arg_cur_ops, arg_names, idx1, name_prefix)
+              match dict_get(fname, fn_arities) with
+              | Just arity ->
+                  if arity > list_length(arg_names)
+                  then translate_partial_application(fname, arity, arg_blocks, arg_cur_lbl,
+                                                     arg_cur_ops, arg_names, idx1,
+                                                     lifted_ref, lambda_ctr_ref, name_prefix)
+                  else finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                          arg_cur_ops, arg_names, idx1, name_prefix)
+              | Nothing ->
+                  finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                     arg_cur_ops, arg_names, idx1, name_prefix)
+
+# Partial application of a direct fn (arg count < arity): synthesize a
+# @__sprout_partial_N wrapper capturing the supplied args, then emit IRMkClosure.
+# Mirrors codegen.sprout emit_direct_fn_call's n_args < n_params branch (:2719).
+fn translate_partial_application(fname: String, arity: Int,
+                                 arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                                 cur_ops: List sprout_ir.IROp, arg_names: List String,
+                                 idx: Int,
+                                 lifted_ref: Ref (List sprout_ir.IRFunction),
+                                 lambda_ctr_ref: Ref Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  do
+    ctr <- ref_read(lambda_ctr_ref)
+    ref_write(lambda_ctr_ref, ctr + 1)
+    let wrapper_name = "__sprout_partial_" ++ int_to_string(ctr)
+    let wrapper_fn = synthesize_partial_wrapper(fname, arity, list_length(arg_names), wrapper_name)
+    existing_lifted <- ref_read(lifted_ref)
+    ref_write(lifted_ref, Cons(wrapper_fn, existing_lifted))
+    Ok((arg_blocks, cur_lbl,
+         list_append(cur_ops,
+           Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), wrapper_name, arg_names), Nil)),
+         fresh_name(name_prefix, idx), idx + 1))
 
 fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             args: List typed_ast.TypedExpr,
@@ -3952,6 +3997,37 @@ fn build_wrapper_arg_ssas(idx: Int, arity: Int) -> List String =
   if idx >= arity then Nil
   else Cons("%a" ++ int_to_string(idx), build_wrapper_arg_ssas(idx + 1, arity))
 
+# Synthesize @__sprout_partial_N for a partial application of a direct fn:
+# `f(applied_args…)` where the call site supplies fewer args than `f`'s arity.
+# The wrapper takes (env$, remaining params), loads the captured `applied`
+# args from env slots 1..applied, then calls the real fn with all args.
+# Mirrors codegen.sprout's emit_partial_direct_wrapper_lines (codegen.sprout:1453);
+# simpler here because the typed ABI is uniform-i64 (only arity matters).
+fn synthesize_partial_wrapper(fn_name: String, arity: Int, applied: Int,
+                              wrapper_name: String) -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(wrapper_name,
+                        Cons(("env$", sprout_ir.IRTHeap),
+                             build_wrapper_arg_params(0, arity - applied)),
+                        "i64",
+                        Cons(sprout_ir.IRBlock("entry",
+                              list_append(build_partial_capture_loads(0, applied),
+                              Cons(sprout_ir.IRCall("%ret", "i64", fn_name,
+                                     list_append(build_partial_capture_ssas(0, applied),
+                                                 build_wrapper_arg_ssas(0, arity - applied))),
+                              Cons(sprout_ir.IRRet("%ret"), Nil)))),
+                        Nil))
+
+# IRLoadEnvSlot for each of the `applied` captured args (env slots 1..applied;
+# slot 0 holds the code ptr).  Captured value i lands in SSA %cap<i>.
+fn build_partial_capture_loads(i: Int, applied: Int) -> List sprout_ir.IROp =
+  if i >= applied then Nil
+  else Cons(sprout_ir.IRLoadEnvSlot("%cap" ++ int_to_string(i), "%env$", i + 1, sprout_ir.IRTHeap),
+            build_partial_capture_loads(i + 1, applied))
+
+fn build_partial_capture_ssas(i: Int, applied: Int) -> List String =
+  if i >= applied then Nil
+  else Cons("%cap" ++ int_to_string(i), build_partial_capture_ssas(i + 1, applied))
+
 export fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
   match decls with
   | Nil -> set_empty()
@@ -3987,13 +4063,18 @@ fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
 # Synthesize @__sprout_init_globals: evaluate each runtime-let body in
 # sequence, IRStoreGlobal the result into the corresponding @name slot,
 # end with `ret void`.  Mirrors codegen.sprout:3276-3297.
+# Returns (init_fn, lifted) where `lifted` are functions synthesized while
+# translating the let-initializer bodies (partial-application/eta wrappers,
+# lifted lambdas).  Callers MUST emit `lifted` alongside init_fn — a top-level
+# `let` bound to a partial application (e.g. `let f = repeat("x")`) builds a
+# @__sprout_partial_N wrapper here; dropping it leaves an undefined reference.
 export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.TypedExpr),
                                      ctors: Dict (Int, Int, Int, String),
                                      top_level: Set, let_names: Set,
                                      fn_arities: Dict Int,
                                      lambda_ctr_ref: Ref Int,
                                      lifted_idx_ref: Ref (Dict Int)) ->
-    Result String sprout_ir.IRFunction !{IO} =
+    Result String (sprout_ir.IRFunction, List sprout_ir.IRFunction) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
     match synthesize_init_body_loop(runtime_lets, ctors, "entry", Nil, Nil, 0,
@@ -4003,12 +4084,15 @@ export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.Typed
     | Ok pair ->
         match pair with
         | (blocks, cur_lbl, cur_ops, _next_idx) ->
-            Ok(sprout_ir.IRFunction("__sprout_init_globals", Nil, "void",
-                                    list_append(blocks,
-                                      Cons(sprout_ir.IRBlock(cur_lbl,
-                                             list_append(cur_ops,
-                                               Cons(sprout_ir.IRRetVoid, Nil))),
-                                      Nil))))
+            do
+              lifted <- ref_read(lifted_ref)
+              Ok((sprout_ir.IRFunction("__sprout_init_globals", Nil, "void",
+                                       list_append(blocks,
+                                         Cons(sprout_ir.IRBlock(cur_lbl,
+                                                list_append(cur_ops,
+                                                  Cons(sprout_ir.IRRetVoid, Nil))),
+                                         Nil))),
+                   list_reverse(lifted)))
 
 fn synthesize_init_body_loop(runtime_lets: List (String, typed_ast.TypedExpr),
                               ctors: Dict (Int, Int, Int, String),
@@ -4104,7 +4188,10 @@ fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
                                                           top_level_set, let_names, fn_arities,
                                                           lambda_ctr_ref, lifted_idx_ref) with
                         | Err msg -> Err(msg)
-                        | Ok init_fn ->
-                            Ok((sprout_ir.IRProgram(list_append(fns, Cons(init_fn, Nil)),
-                                                    let_globals, ctor_regs, externs), merged))
+                        | Ok init_pair ->
+                            match init_pair with
+                            | (init_fn, init_lifted) ->
+                                Ok((sprout_ir.IRProgram(
+                                      list_append(fns, list_append(init_lifted, Cons(init_fn, Nil))),
+                                      let_globals, ctor_regs, externs), merged))
   where externs = collect_extern_decls(decls)

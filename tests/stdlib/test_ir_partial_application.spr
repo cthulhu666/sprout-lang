@@ -1,0 +1,30 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.string as string
+
+# Regression (PR 11, typed IR codegen): partial application of a multi-arg
+# function must build a closure (IRMkClosure + a synthesized @__sprout_partial_N
+# wrapper that captures the supplied args), and a top-level `let` bound to such
+# a closure must be applied via IRLoadGlobal + IRApplyClosure.
+#
+# Before the fix the typed (--use-ir-codegen) path lowered `repeat("ab")` as a
+# saturated one-arg `call @stdlib.string.repeat` (arity mismatch -> garbage) and
+# lowered `rep(3)` as a direct `call @rep` against the global slot, segfaulting
+# at runtime. The direct (--emit-ir) path already handled both correctly.
+
+fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
+
+# top-level let bound to a partial application of a stdlib fn (captures "ab")
+let rep = string.repeat("ab")
+
+# top-level let bound to a partial application of a user fn (captures 5, 6)
+let add_5_6 = add3(5, 6)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "stdlib partial: rep(3) = ababab", rep(3), "ababab")
+    assert_eq(state, "stdlib partial: rep(0) = ''", rep(0), "")
+    assert_eq(state, "stdlib partial: rep(1) = ab", rep(1), "ab")
+    assert_eq(state, "user-fn partial: add_5_6(7) = 18", add_5_6(7), 18)
+    assert_eq(state, "user-fn partial: add_5_6(0) = 11", add_5_6(0), 11)
+    summary(state)

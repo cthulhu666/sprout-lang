@@ -167,10 +167,14 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                     runtime_lets, ctors, top_level_set, let_names, fn_arities,
                                     lambda_ctr_ref, lifted_idx_ref) with
                                   | Err msg -> Err(msg)
-                                  | Ok init_fn ->
-                                      # Root init fn with an empty map (name absent → default 0,
-                                      # matching batch path where init fn is absent from merged map).
-                                      match emit_one_fn(init_fn, dict_empty(),
+                                  | Ok init_pair ->
+                                    match init_pair with
+                                    | (init_fn, init_lifted) ->
+                                      # Root init fn (and any wrappers synthesized for its
+                                      # let-initializer bodies, e.g. partial applications) with an
+                                      # empty map — names absent → default 0, matching the wrapper
+                                      # rooting convention and the batch path.
+                                      match emit_lifted_then_fn(init_lifted, init_fn, dict_empty(),
                                                         StreamState(next_idx2, str_acc, bodies_acc,
                                                                     defined, has_user_main)) with
                                       | Err msg -> Err(msg)
