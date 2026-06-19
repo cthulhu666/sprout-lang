@@ -14613,7 +14613,7 @@ join_1:
   ret i64 %t2
 }
 
-define i64 @examples.repl_hosted.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = call i64 @stdlib.repl.run()
   ret i64 %t0
@@ -15914,6 +15914,7 @@ entry:
   %cfkinds_ptr_25 = getelementptr inbounds [2 x i8], ptr @.cfkinds.25, i64 0, i64 0
   %creg_25 = call i64 @sprout_register_ctor(i64 25, ptr %cname_ptr_25, i64 1, ptr %cfkinds_ptr_25)
   call void @__sprout_init_globals()
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

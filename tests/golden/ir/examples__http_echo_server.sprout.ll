@@ -9540,7 +9540,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @examples.http_echo_server.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = add i64 0, 8081
   %t1 = add i64 0, 1000000
@@ -10864,6 +10864,7 @@ entry:
   %cname_ptr_35 = getelementptr inbounds [47 x i8], ptr @.cname.35, i64 0, i64 0
   %cfkinds_ptr_35 = getelementptr inbounds [2 x i8], ptr @.cfkinds.35, i64 0, i64 0
   %creg_35 = call i64 @sprout_register_ctor(i64 35, ptr %cname_ptr_35, i64 1, ptr %cfkinds_ptr_35)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

@@ -1,0 +1,15 @@
+module tests.stdlib.test_ir_entry_main_qualified
+
+# Regression: an entry `main` in a file with a `module` declaration is qualified
+# by the bundler to `<module>.main`. The typed-IR path (ast_to_ir) only renamed
+# `name == "main"` to `__sprout_user_main`, so a qualified entry main was emitted
+# as `<module>.main` and the @main C-ABI shim never called it — producing EMPTY
+# output for every program that declares a module (the dominant empty-output
+# miscompile class found by ir_runtime_parity.sh). Direct codegen handles this via
+# is_entry_fn_name (codegen.sprout:1906); the typed path now mirrors it.
+#
+# Run via --use-ir-codegen this must print "entry-main-ran"; before the fix it
+# printed nothing. Under `just test` (direct codegen) it also prints it.
+
+fn main() -> Unit !{IO} =
+  print("entry-main-ran")

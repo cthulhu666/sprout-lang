@@ -5424,7 +5424,7 @@ entry:
   ret i64 %t28
 }
 
-define i64 @examples.json_demo.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = call i64 @examples.json_demo.payload()
   %t1 = call i64 @stdlib.json.stringify(i64 %t0)
@@ -6747,6 +6747,7 @@ entry:
   %cname_ptr_25 = getelementptr inbounds [27 x i8], ptr @.cname.25, i64 0, i64 0
   %cfkinds_ptr_25 = getelementptr inbounds [4 x i8], ptr @.cfkinds.25, i64 0, i64 0
   %creg_25 = call i64 @sprout_register_ctor(i64 25, ptr %cname_ptr_25, i64 3, ptr %cfkinds_ptr_25)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

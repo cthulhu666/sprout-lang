@@ -5587,7 +5587,7 @@ join_1:
   ret i64 %t2
 }
 
-define i64 @examples.modules_demo.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = getelementptr inbounds [13 x i8], ptr @.str.62, i64 0, i64 0
   %t1 = ptrtoint ptr %t0 to i64
@@ -6868,6 +6868,7 @@ entry:
   %cname_ptr_21 = getelementptr inbounds [27 x i8], ptr @.cname.21, i64 0, i64 0
   %cfkinds_ptr_21 = getelementptr inbounds [3 x i8], ptr @.cfkinds.21, i64 0, i64 0
   %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 2, ptr %cfkinds_ptr_21)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

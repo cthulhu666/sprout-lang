@@ -6570,7 +6570,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @examples.io_result_do_demo.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = call i64 @examples.io_result_do_demo.random_payload_size()
   %t1 = call i64 @sprout_tag(i64 %t0)
@@ -7880,6 +7880,7 @@ entry:
   %cname_ptr_17 = getelementptr inbounds [37 x i8], ptr @.cname.17, i64 0, i64 0
   %cfkinds_ptr_17 = getelementptr inbounds [3 x i8], ptr @.cfkinds.17, i64 0, i64 0
   %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 2, ptr %cfkinds_ptr_17)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

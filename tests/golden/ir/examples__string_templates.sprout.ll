@@ -5107,7 +5107,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @examples.string_templates.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = add i64 0, 0
   %t1 = getelementptr inbounds [4 x i8], ptr @.str.15, i64 0, i64 0
@@ -6569,6 +6569,7 @@ entry:
   %cname_ptr_12 = getelementptr inbounds [4 x i8], ptr @.cname.12, i64 0, i64 0
   %cfkinds_ptr_12 = getelementptr inbounds [2 x i8], ptr @.cfkinds.12, i64 0, i64 0
   %creg_12 = call i64 @sprout_register_ctor(i64 12, ptr %cname_ptr_12, i64 1, ptr %cfkinds_ptr_12)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

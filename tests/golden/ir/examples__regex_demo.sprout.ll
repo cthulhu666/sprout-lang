@@ -6652,7 +6652,7 @@ join_4:
   ret i64 %t5
 }
 
-define i64 @examples.regex_demo.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = add i64 0, 0
   %t1 = call i64 @argv_get(i64 %t0)
@@ -7951,6 +7951,7 @@ entry:
   %cfkinds_ptr_16 = getelementptr inbounds [3 x i8], ptr @.cfkinds.16, i64 0, i64 0
   %creg_16 = call i64 @sprout_register_ctor(i64 16, ptr %cname_ptr_16, i64 2, ptr %cfkinds_ptr_16)
   call void @__sprout_init_globals()
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

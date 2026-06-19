@@ -4978,7 +4978,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @examples.typeclass_functor_foldable_demo.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = call i64 @examples.typeclass_functor_foldable_demo.sample_list()
   %t1 = call i64 @sprout_alloc_closure_env(i64 8)
@@ -6253,6 +6253,7 @@ entry:
   %cname_ptr_12 = getelementptr inbounds [4 x i8], ptr @.cname.12, i64 0, i64 0
   %cfkinds_ptr_12 = getelementptr inbounds [2 x i8], ptr @.cfkinds.12, i64 0, i64 0
   %creg_12 = call i64 @sprout_register_ctor(i64 12, ptr %cname_ptr_12, i64 1, ptr %cfkinds_ptr_12)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

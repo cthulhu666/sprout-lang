@@ -5732,7 +5732,7 @@ entry:
   ret i64 %t12
 }
 
-define i64 @examples.http_get_cli.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = call i64 @examples.http_get_cli.fetch_body_from_argv()
   %t1 = call i64 @sprout_tag(i64 %t0)
@@ -7034,6 +7034,7 @@ entry:
   %cname_ptr_21 = getelementptr inbounds [27 x i8], ptr @.cname.21, i64 0, i64 0
   %cfkinds_ptr_21 = getelementptr inbounds [3 x i8], ptr @.cfkinds.21, i64 0, i64 0
   %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 2, ptr %cfkinds_ptr_21)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

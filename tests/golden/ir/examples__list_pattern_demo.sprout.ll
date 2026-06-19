@@ -5223,7 +5223,7 @@ join_1:
   ret i64 %t2
 }
 
-define i64 @examples.list_pattern_demo.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = call i64 @sprout_make0(i64 6)
   %t1 = call i64 @examples.list_pattern_demo.parse_args(i64 %t0)
@@ -6648,6 +6648,7 @@ entry:
   %cname_ptr_17 = getelementptr inbounds [35 x i8], ptr @.cname.17, i64 0, i64 0
   %cfkinds_ptr_17 = getelementptr inbounds [2 x i8], ptr @.cfkinds.17, i64 0, i64 0
   %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 1, ptr %cfkinds_ptr_17)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

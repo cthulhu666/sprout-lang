@@ -6892,7 +6892,7 @@ join_4:
   ret i64 %t5
 }
 
-define i64 @examples.aoc_2025_day_5.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = call i64 @examples.aoc_2025_day_5.solve_stdin()
   %t1 = call i64 @print_value(i64 %t0)
@@ -8149,6 +8149,7 @@ entry:
   %cname_ptr_14 = getelementptr inbounds [33 x i8], ptr @.cname.14, i64 0, i64 0
   %cfkinds_ptr_14 = getelementptr inbounds [3 x i8], ptr @.cfkinds.14, i64 0, i64 0
   %creg_14 = call i64 @sprout_register_ctor(i64 14, ptr %cname_ptr_14, i64 2, ptr %cfkinds_ptr_14)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 

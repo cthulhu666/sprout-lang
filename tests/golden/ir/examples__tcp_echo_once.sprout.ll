@@ -5483,7 +5483,7 @@ entry:
   ret i64 %t2
 }
 
-define i64 @examples.tcp_echo_once.main() {
+define i64 @__sprout_user_main() {
 entry:
   %t0 = add i64 0, 8081
   %t1 = call i64 @tcp_listen(i64 %t0)
@@ -6762,6 +6762,7 @@ entry:
   %cname_ptr_21 = getelementptr inbounds [23 x i8], ptr @.cname.21, i64 0, i64 0
   %cfkinds_ptr_21 = getelementptr inbounds [2 x i8], ptr @.cfkinds.21, i64 0, i64 0
   %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 1, ptr %cfkinds_ptr_21)
+  call i64 @__sprout_user_main()
   ret i32 0
 }
 
