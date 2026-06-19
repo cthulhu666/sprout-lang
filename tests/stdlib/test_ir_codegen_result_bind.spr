@@ -1,0 +1,46 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression: typed IR codegen (--use-ir-codegen) must strip the Result wrapper
+# on a do-bind `pat <- action` where action returns `Result E a`, mirroring the
+# Maybe wrapper-strip.  Before the fix, Result binds fell through to the plain
+# path (no Ok-strip), so the bound variable received the raw Ok-box word instead
+# of the payload -- garbage values at best, sprout_tag-on-non-pointer SIGSEGV in
+# the self-hosted parser at worst.  Covers both scalar and tuple bind patterns
+# (routing is by Result type, not pattern shape) and the Err short-circuit.
+
+fn pair(x: Int) -> Result String (Int, Int) =
+  Ok((x, x + 1))
+
+fn scalar(x: Int) -> Result String Int =
+  Ok(x * 10)
+
+fn fails() -> Result String Int =
+  Err("boom")
+
+fn use_tuple(x: Int) -> Result String Int =
+  do
+    (a, b) <- pair(x)
+    Ok(a + b)
+
+fn use_scalar(x: Int) -> Result String Int =
+  do
+    v <- scalar(x)
+    Ok(v + 1)
+
+fn use_short_circuit(x: Int) -> Result String Int =
+  do
+    v <- fails()
+    Ok(v + x)
+
+fn unwrap(r: Result String Int, dflt: Int) -> Int =
+  match r with
+  | Ok n -> n
+  | Err _ -> dflt
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "tuple result bind", unwrap(use_tuple(5), -1), 11)
+    assert_eq(state, "scalar result bind", unwrap(use_scalar(5), -1), 51)
+    assert_eq(state, "err short-circuit", unwrap(use_short_circuit(5), -9), -9)
+    summary(state)
