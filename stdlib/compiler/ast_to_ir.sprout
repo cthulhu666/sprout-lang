@@ -1863,6 +1863,30 @@ fn has_ctor_pattern_arm(arms: List typed_ast.TypedMatchBranch) -> Bool =
           | ast.ConstructorPattern _ _ _ -> true
           | _ -> has_ctor_pattern_arm(rest)
 
+# True if a ConstructorPattern arm matches a `wrap` ctor (tag sentinel -1,
+# mirrors codegen.sprout wrap_tag()).  Wrap values are UNBOXED (the raw
+# payload), so the match must NOT hoist IRGetTag — sprout_tag on a raw Int
+# derefs it as a pointer and segfaults.  The downstream arm dispatch already
+# binds the wrap field by identity, so skipping the tag hoist suffices.  A wrap
+# type has exactly one ctor, so the first ctor-pattern arm is decisive; the
+# discriminator is strictly tag == -1 (a normal single-field ADT is boxed and
+# genuinely needs the tag).
+fn is_wrap_match(arms: List typed_ast.TypedMatchBranch,
+                 ctors: Dict (Int, Int, Int, String)) -> Bool =
+  match arms with
+  | Nil -> false
+  | Cons arm rest ->
+      match arm with
+      | typed_ast.TypedMatchBranch pat _ ->
+          match pat with
+          | ast.ConstructorPattern name _ _ ->
+              match dict_get(name, ctors) with
+              | Just entry ->
+                  match entry with
+                  | (tag, _, _, _) -> tag == -1
+              | Nothing -> is_wrap_match(rest, ctors)
+          | _ -> is_wrap_match(rest, ctors)
+
 # field_kind_char_to_irtype and fk_at moved to stdlib.compiler.field_kinds
 # (/code-review fix #10). Call sites below use fk.field_kind_char_to_irtype /
 # fk.fk_at.
@@ -2434,7 +2458,7 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
   # (not once per arm), so it is bounded and is NOT the O(N²) pattern that
   # fix #7/#8 eliminated. Widening the Cons-prepend convention upstream into
   # translate_expr is a broader refactor and is out of scope here.
-  if has_ctor_pattern_arm(arms)
+  if has_ctor_pattern_arm(arms) && ! is_wrap_match (arms, ctors)
   then
     translate_match_dispatch(arms, match_ty, params, ctors, s_blocks, s_cur_lbl,
                              list_append(s_ops,

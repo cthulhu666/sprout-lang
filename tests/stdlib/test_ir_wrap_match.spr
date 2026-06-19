@@ -1,0 +1,22 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression (PR 11, typed IR codegen): matching on a `wrap` value must NOT
+# emit `call @sprout_tag(scrutinee)`.  A wrap value is the RAW unboxed payload
+# (here a bare Int), so sprout_tag dereferences the integer as a pointer and
+# segfaults.  Direct codegen knows the wrap ctor has tag -1 and emits an
+# unconditional branch with identity field binding; the typed path hoisted
+# IRGetTag whenever any arm was a ConstructorPattern, including the wrap arm.
+
+wrap Cents = Int
+
+fn value(c: Cents) -> Int = match c with | Cents (n) -> n
+
+fn double(c: Cents) -> Cents = match c with | Cents (n) -> Cents(n * 2)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "wrap extract 42", value(Cents(42)), 42)
+    assert_eq(state, "wrap extract 0", value(Cents(0)), 0)
+    assert_eq(state, "wrap double 10 -> 20", value(double(Cents(10))), 20)
+    summary(state)
