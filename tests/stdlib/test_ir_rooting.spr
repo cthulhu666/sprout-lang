@@ -152,7 +152,7 @@ fn test5_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("f_heap_param", Cons(("s", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRConst("%z0", 0),
-        Cons(sprout_ir.IRCall("%r0", "i64", "bar", Cons("%s", Nil)),
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTUnknown, "bar", Cons("%s", Nil)),
         Cons(sprout_ir.IRMakeCtor("%ctor", "T3", 0, Cons("%s", Cons("%z0", Cons("%z0", Nil)))),
         Cons(sprout_ir.IRRet("%ctor"), Nil))))),
       Nil)),

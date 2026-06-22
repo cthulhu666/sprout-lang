@@ -82,6 +82,14 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRMkClosure r _ _ -> Just(r)
   # Closure-application result is conservatively heap-typed (M2: all results are i64).
   | sprout_ir.IRApplyClosure r _ _ -> Just(r)
+  # A direct call's result is heap iff its return-type kind is heap/unknown.
+  # IRTScalar returns (Int/Bool/Char) are not heap and are not rooted, so a
+  # call result held live across a later GC trigger gets a root only when it can
+  # actually be a heap pointer.
+  | sprout_ir.IRCall r kind _ _ ->
+      match kind with
+      | sprout_ir.IRTScalar -> Nothing
+      | _ -> Just(r)
   # FIX R4#7: honour the kind field. IRTScalar slots (Int, Bool, Char) are
   # not heap; IRTHeap slots (String, ADT, closure) are; IRTUnknown is
   # treated as heap (conservative). This avoids over-rooting scalar captures

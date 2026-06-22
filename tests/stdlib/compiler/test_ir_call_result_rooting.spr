@@ -1,0 +1,98 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.typed_ast as typed_ast
+
+# Regression: the typed IR rooting pass (ir_rooting) must root a HEAP-typed
+# function-call result that stays live across a later allocating call.
+#
+# Before the fix, ast_to_ir.IRCall carried no IRType kind and
+# ir_rooting.op_produces_simple_heap had no IRCall case, so call results never
+# entered heap_origin and were never rooted across triggers.  A do-bound value
+# like `state <- new_state()` then got collected mid-function (use-after-free),
+# surfacing downstream as `runtime error: non-exhaustive match`.
+#
+# Differential, deterministic (no GC-timing dependence): in a do-block, bind a
+# call result, then make a SECOND allocating call (a trigger) with the first
+# result still live (used afterwards).  This exercises ir_rooting's per-block
+# liveness (not ast_to_ir's arg-rooting, which already covers results within a
+# single call's argument list).  The two snippets are structurally identical
+# except the bound call returns a heap value (Box) vs a scalar (Int): the heap
+# version must root the live result across the trigger, so it emits strictly
+# MORE root pushes than the scalar twin.  Pre-fix both are equal (call results
+# never rooted); post-fix heap > scalar.
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack) - pos - str_len(needle)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    # Drive the same streaming orchestrator that --use-ir-codegen
+                    # uses (ir_pipeline.compile_program_streaming) so the test
+                    # exercises the production codegen path end to end.
+                    ir_pipeline.compile_program_streaming(lowered)
+
+fn get_ir_or_msg(src: String) -> String !{IO} =
+  do
+    match translate_source(src) with
+    | Ok ir -> ir
+    | Err msg -> "ERROR: " ++ msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # No prelude in the empty-env translate_source path, so snippets must be
+    # self-contained: IO-annotated pure bodies make the do-bind legal, and the
+    # second call is itself the GC trigger the first result must survive.
+    let heap_src =
+      "type Box = Box(Int)\n" ++
+      "fn mkbox(n: Int) -> Box !{IO} = Box(n)\n" ++
+      "fn unbox(b: Box) -> Int =\n" ++
+      "  match b with\n" ++
+      "  | Box (k) -> k\n" ++
+      "fn driver(n: Int) -> Int !{IO} =\n" ++
+      "  do\n" ++
+      "    b <- mkbox(n)\n" ++
+      "    c <- mkbox(n)\n" ++
+      "    unbox(b)\n"
+    heap_ir <- get_ir_or_msg(heap_src)
+    let heap_pushes = count(heap_ir, "sprout_gc_push_i64_root")
+
+    let scalar_src =
+      "fn mkint(n: Int) -> Int !{IO} = n\n" ++
+      "fn driver(n: Int) -> Int !{IO} =\n" ++
+      "  do\n" ++
+      "    b <- mkint(n)\n" ++
+      "    c <- mkint(n)\n" ++
+      "    b\n"
+    scalar_ir <- get_ir_or_msg(scalar_src)
+    let scalar_pushes = count(scalar_ir, "sprout_gc_push_i64_root")
+
+    # Heap result is live across the second call -> must be rooted; scalar must
+    # not.  Differential isolates the call-result rooting from ambient rooting.
+    assert_true(state, "heap call result rooted across later call (more than scalar twin)",
+                heap_pushes > scalar_pushes)
+    summary(state)

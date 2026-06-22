@@ -34,9 +34,9 @@ module stdlib.compiler.sprout_ir
 #         from translate_expr — e.g. "%x" for a parameter, "%t3" for a temp);
 #         the second String is the block label WITHOUT a '%' prefix (e.g.
 #         "then_0").  lower_op adds the '%' before the label at render time.
-#   IRCall   String String String (List String)
-#       — result = call <ret-ty> @<fn-name>(<arg-ty> %<a0>, ...)
-#       — fields: result-name, LLVM ret-type ("i64" or "i1"),
+#   IRCall   String IRType String (List String)
+#       — result = call i64 @<fn-name>(i64 %<a0>, ...)
+#       — fields: result-name, return-value IRType kind (for ir_rooting),
 #         callee function name (NO '@' prefix), list of arg value-names
 #         (each carries its '%' prefix already).
 #         PR 1.5 implies every arg is i64 (only scalar Int args are
@@ -131,7 +131,11 @@ export type IROp (..) =
   | IRBr String
   | IRCondBr String String String
   | IRPhi String String (List (String, String))
-  | IRCall String String String (List String)
+  # IRCall <result> <ret-kind> <fn-name> <args>.  <ret-kind> is the IRType of
+  # the callee's return value (IRTScalar for Int/Bool/Char returns, else
+  # IRTHeap/IRTUnknown), used by ir_rooting to decide whether the result must be
+  # rooted across later GC triggers.  Lowering ignores it (uniform i64 ABI).
+  | IRCall String IRType String (List String)
   | IRStrConst String String String
   | IRStrSlice String String String String
   | IRStrConcat String String String
@@ -361,8 +365,8 @@ fn print_op(op: IROp) -> String =
   | IRBr lbl -> "    br " ++ lbl
   | IRCondBr cond t e -> "    condbr " ++ cond ++ ", " ++ t ++ ", " ++ e
   | IRPhi r ty pairs -> "    " ++ r ++ " = phi " ++ ty ++ " " ++ print_phi_pairs(pairs)
-  | IRCall r ret_ty fname args ->
-      "    " ++ r ++ " = call " ++ ret_ty ++ " @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
+  | IRCall r _kind fname args ->
+      "    " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
   | IRStrConst r raw s ->
       "    " ++ r ++ " = strconst (" ++ raw ++ ") \"" ++ s ++ "\""
   | IRStrSlice r s start len ->

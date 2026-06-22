@@ -651,8 +651,18 @@ fn is_supported_ctor_arg_type(_t: types.Type) -> Bool = true
 #     argument, so Bool return values must also be i64 to round-trip.
 # The i1 representation only appears as the implicit result of icmp /
 # the cond operand of br i1, both of which are local to a block.
+# LLVM return-type string for IRPhi / IRFunction fields — always i64 under the
+# uniform-value ABI.
 fn llvm_ret_type(t: types.Type) -> String =
   "i64"
+
+# Map a call's Sprout return type to the IRType kind carried by IRCall, so
+# ir_rooting roots only heap-returning call results.  Scalars (Int/Bool/Char)
+# are IRTScalar (never rooted); everything else is conservatively heap.
+fn ret_irtype(t: types.Type) -> sprout_ir.IRType =
+  if type_kind.type_is_non_heap_scalar(t)
+  then sprout_ir.IRTScalar
+  else sprout_ir.IRTUnknown
 
 # Translate a TypedExpr in a multi-block-aware fashion.  See the contract
 # block at the top of this file for the full signature description.
@@ -836,7 +846,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                   | (eblocks, ecur_lbl, ecur_ops, e_name, idx2) ->
                       Ok((list_append(sblocks, eblocks), ecur_lbl,
                            list_append(ecur_ops,
-                             Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx2), "i64",
+                             Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx2), sprout_ir.IRTHeap,
                                                    "int_range", Cons(s_name, Cons(e_name, Nil))), Nil)),
                            fresh_name(name_prefix, idx2), idx2 + 1))
   | typed_ast.TDo steps _ _ ->
@@ -1194,7 +1204,7 @@ fn translate_do_bind_maybe_finish(pat: ast.Pattern, rest: List typed_ast.TypedDo
         nothing_val_name = fresh_name(name_prefix, eidx + 4)
         short_block = sprout_ir.IRBlock(short_lbl,
                         Cons(sprout_ir.IRConst(nothing_const_name, nothing_tag),
-                        Cons(sprout_ir.IRCall(nothing_val_name, "i64", "sprout_make0",
+                        Cons(sprout_ir.IRCall(nothing_val_name, sprout_ir.IRTHeap, "sprout_make0",
                                               Cons(nothing_const_name, Nil)),
                         Cons(sprout_ir.IRBr(done_lbl), Nil))))
         payload_name = fresh_name(name_prefix, eidx + 5)
@@ -3276,7 +3286,7 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
                         fresh_name(name_prefix, idx1), idx1 + 1))
               else Ok((ablocks, acur_lbl,
                         list_append(acur_ops,
-                          Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), "i64", "print_value", Cons(a_name, Nil)), Nil)),
+                          Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTScalar, "print_value", Cons(a_name, Nil)), Nil)),
                         fresh_name(name_prefix, idx1), idx1 + 1))
 
 fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
@@ -3587,7 +3597,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
             | [l_name, r_name] ->
                 Ok((arg_blocks, arg_cur_lbl,
                      list_append(arg_cur_ops,
-                       Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), "i64", "list_append", Cons(l_name, Cons(r_name, Nil))), Nil)),
+                       Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTHeap, "list_append", Cons(l_name, Cons(r_name, Nil))), Nil)),
                      fresh_name(name_prefix, idx1), idx1 + 1))
             | _ -> Err("ast_to_ir: append (list): expected exactly 2 translated args")
   else
@@ -3727,7 +3737,7 @@ fn finish_direct_call(fname: String, call_ty: types.Type,
        list_append(arg_cur_ops, Cons(call_op, Nil)),
        result, idx + 1))
   where result = fresh_name(name_prefix, idx)
-        call_op = sprout_ir.IRCall(result, llvm_ret_type(call_ty),
+        call_op = sprout_ir.IRCall(result, ret_irtype(call_ty),
                                    fname, arg_names)
 
 # Thread a list of argument expressions through translate_expr, accumulating
@@ -4138,7 +4148,7 @@ fn synthesize_eta_wrapper(fn_name: String, arity: Int, wrapper_name: String) -> 
                         Cons(("env$", sprout_ir.IRTHeap), build_wrapper_arg_params(0, arity)),
                         "i64",
                         Cons(sprout_ir.IRBlock("entry",
-                              Cons(sprout_ir.IRCall("%ret", "i64", fn_name, build_wrapper_arg_ssas(0, arity)),
+                              Cons(sprout_ir.IRCall("%ret", sprout_ir.IRTUnknown, fn_name, build_wrapper_arg_ssas(0, arity)),
                               Cons(sprout_ir.IRRet("%ret"), Nil))),
                         Nil))
 
@@ -4164,7 +4174,7 @@ fn synthesize_partial_wrapper(fn_name: String, arity: Int, applied: Int,
                         "i64",
                         Cons(sprout_ir.IRBlock("entry",
                               list_append(build_partial_capture_loads(0, applied),
-                              Cons(sprout_ir.IRCall("%ret", "i64", fn_name,
+                              Cons(sprout_ir.IRCall("%ret", sprout_ir.IRTUnknown, fn_name,
                                      list_append(build_partial_capture_ssas(0, applied),
                                                  build_wrapper_arg_ssas(0, arity - applied))),
                               Cons(sprout_ir.IRRet("%ret"), Nil)))),

@@ -14,6 +14,7 @@ module stdlib.compiler.type_kind
 # the bug this module exists to fix structurally.
 
 import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
 
 # --- Private leaf helpers (mirror codegen.sprout's same-named local fns;
 #     local copies kept so this module has no dep on codegen). ---
@@ -34,6 +35,19 @@ fn type_name_leaf_is(name: String, leaf: String) -> Bool =
 export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
   match te with
   | ast.TypeName name ->
+      type_name_leaf_is(name, "Int") ||
+      type_name_leaf_is(name, "Bool") ||
+      type_name_leaf_is(name, "Char")
+  | _ -> false
+
+# Same predicate over an inferred `types.Type` (used by ast_to_ir to classify a
+# call's return type for IRCall rooting).  Only the concrete scalar constants
+# Int/Bool/Char are non-heap; everything else — String, ADTs, tuples, closures,
+# Unit, and TVars/polymorphic positions — is treated as heap and rooted
+# conservatively, matching the TypeExpr predicate above.
+export fn type_is_non_heap_scalar(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name ->
       type_name_leaf_is(name, "Int") ||
       type_name_leaf_is(name, "Bool") ||
       type_name_leaf_is(name, "Char")

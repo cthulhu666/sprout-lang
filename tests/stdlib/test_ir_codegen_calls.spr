@@ -52,7 +52,7 @@ fn fact_program() -> sprout_ir.IRProgram =
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRConst("%t6", 1),
         Cons(sprout_ir.IRISub("%t7", "%n", "%t6"),
-        Cons(sprout_ir.IRCall("%t8", "i64", "fact", Cons("%t7", Nil)),
+        Cons(sprout_ir.IRCall("%t8", sprout_ir.IRTScalar, "fact", Cons("%t7", Nil)),
         Cons(sprout_ir.IRIMul("%t9", "%n", "%t8"),
         Cons(sprout_ir.IRBr("join_4"), Nil)))))),
       Cons(sprout_ir.IRBlock("join_4", Cons(
@@ -95,10 +95,10 @@ fn fib_program() -> sprout_ir.IRProgram =
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRConst("%t5", 1),
         Cons(sprout_ir.IRISub("%t6", "%n", "%t5"),
-        Cons(sprout_ir.IRCall("%t7", "i64", "fib", Cons("%t6", Nil)),
+        Cons(sprout_ir.IRCall("%t7", sprout_ir.IRTScalar, "fib", Cons("%t6", Nil)),
         Cons(sprout_ir.IRConst("%t8", 2),
         Cons(sprout_ir.IRISub("%t9", "%n", "%t8"),
-        Cons(sprout_ir.IRCall("%t10", "i64", "fib", Cons("%t9", Nil)),
+        Cons(sprout_ir.IRCall("%t10", sprout_ir.IRTScalar, "fib", Cons("%t9", Nil)),
         Cons(sprout_ir.IRIAdd("%t11", "%t7", "%t10"),
         Cons(sprout_ir.IRBr("join_4"), Nil))))))))),
       Cons(sprout_ir.IRBlock("join_4", Cons(
@@ -121,8 +121,8 @@ fn twice_and_add4_program() -> sprout_ir.IRProgram =
       Nil)),
     Cons(sprout_ir.IRFunction("add4", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRCall("%t0", "i64", "twice", Cons("%n", Nil)),
-        Cons(sprout_ir.IRCall("%t1", "i64", "twice", Cons("%n", Nil)),
+        sprout_ir.IRCall("%t0", sprout_ir.IRTScalar, "twice", Cons("%n", Nil)),
+        Cons(sprout_ir.IRCall("%t1", sprout_ir.IRTScalar, "twice", Cons("%n", Nil)),
         Cons(sprout_ir.IRIAdd("%t2", "%t0", "%t1"),
         Cons(sprout_ir.IRRet("%t2"), Nil))))),
       Nil)),

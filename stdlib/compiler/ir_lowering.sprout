@@ -31,10 +31,10 @@ fn encode_str_for_ir(s: String, i: Int, acc: String) -> String =
 # the linked binary can run.
 #
 # IRCall is rendered as
-#   %r = call <ret-ty> @<fname>(i64 %a0, i64 %a1, ...)
-# Every argument is typed `i64` — PR 1.5 only handles Int arguments; if
-# IRCall ever arrives with `ret-ty == "void"` (not expected at this PR,
-# but tolerated defensively) we omit the result binding.
+#   %r = call i64 @<fname>(i64 %a0, i64 %a1, ...)
+# Every value is i64 (uniform ABI).  IRCall's IRType field is the return-value
+# kind consumed by ir_rooting; lowering ignores it and always emits an i64 call
+# with a result binding (no function returns void in this ABI).
 #
 # Calling convention: every IRFunction lowers to
 #   `define <ret-ty> @<name>(i64 %p, ...)`
@@ -133,10 +133,8 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRBr lbl -> "  br label %" ++ lbl
   | sprout_ir.IRCondBr cond t e -> "  br i1 " ++ cond ++ ", label %" ++ t ++ ", label %" ++ e
   | sprout_ir.IRPhi r ty pairs -> "  " ++ r ++ " = phi " ++ ty ++ " " ++ lower_phi_pairs(pairs)
-  | sprout_ir.IRCall r call_ret_ty fname args ->
-      if call_ret_ty == "void"
-      then "  call void @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")"
-      else "  " ++ r ++ " = call " ++ call_ret_ty ++ " @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")"
+  | sprout_ir.IRCall r _kind fname args ->
+      "  " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")"
   | sprout_ir.IRStrConst r raw _ ->
       match dict_get(raw, str_table) with
       | Just entry ->
