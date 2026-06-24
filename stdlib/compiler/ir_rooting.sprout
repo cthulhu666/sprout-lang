@@ -63,7 +63,28 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # /code-review-v2 fix #3: width-conversion ops are pure casts; NOT triggers.
   | sprout_ir.IRZextI1ToI64 _ _ -> false
   | sprout_ir.IRTruncI64ToI1 _ _ -> false
-  | _ -> false
+  # Remaining ops are non-allocating (arithmetic, control flow, loads/stores,
+  # and the root ops themselves).  EXHAUSTIVE on purpose — no `_` catch-all, so
+  # a new IROp is a COMPILE ERROR here until its GC-trigger status is decided
+  # (P11-2e: IRMakeTuple silently defaulting to non-trigger caused a UAF).
+  | sprout_ir.IRConst _ _ -> false
+  | sprout_ir.IRRet _ -> false
+  | sprout_ir.IRRetVoid -> false
+  | sprout_ir.IRIAdd _ _ _ -> false
+  | sprout_ir.IRISub _ _ _ -> false
+  | sprout_ir.IRIMul _ _ _ -> false
+  | sprout_ir.IRIDiv _ _ _ -> false
+  | sprout_ir.IRBoolNot _ _ -> false
+  | sprout_ir.IRINeg _ _ -> false
+  | sprout_ir.IRLoadGlobal _ _ -> false
+  | sprout_ir.IRStoreGlobal _ _ -> false
+  | sprout_ir.IRGetTupleField _ _ _ -> false
+  | sprout_ir.IRICmp _ _ _ _ -> false
+  | sprout_ir.IRBr _ -> false
+  | sprout_ir.IRCondBr _ _ _ -> false
+  | sprout_ir.IRPhi _ _ _ -> false
+  | sprout_ir.IRRoot _ _ _ -> false
+  | sprout_ir.IRUnroot _ _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
 # IRPhi, whose heap-ness depends on operand membership in heap_origin and is
@@ -122,7 +143,28 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   # Width-conversion ops produce i64/i1 scalars — never heap.
   | sprout_ir.IRZextI1ToI64 _ _ -> Nothing
   | sprout_ir.IRTruncI64ToI1 _ _ -> Nothing
-  | _ -> Nothing
+  # Remaining ops produce no heap value (scalars, control flow, void, the root
+  # ops; IRPhi heap-ness is resolved in compute_heap_origin/update_scope, so it
+  # is Nothing here).  EXHAUSTIVE on purpose — no `_` catch-all, so a new
+  # heap-producing IROp is a COMPILE ERROR until classified (P11-2e: IRMakeTuple
+  # /IRGetTupleField silently defaulting to Nothing left tuple values unrooted).
+  | sprout_ir.IRConst _ _ -> Nothing
+  | sprout_ir.IRRet _ -> Nothing
+  | sprout_ir.IRRetVoid -> Nothing
+  | sprout_ir.IRIAdd _ _ _ -> Nothing
+  | sprout_ir.IRISub _ _ _ -> Nothing
+  | sprout_ir.IRIMul _ _ _ -> Nothing
+  | sprout_ir.IRIDiv _ _ _ -> Nothing
+  | sprout_ir.IRBoolNot _ _ -> Nothing
+  | sprout_ir.IRINeg _ _ -> Nothing
+  | sprout_ir.IRLoadGlobal _ _ -> Nothing
+  | sprout_ir.IRStoreGlobal _ _ -> Nothing
+  | sprout_ir.IRICmp _ _ _ _ -> Nothing
+  | sprout_ir.IRBr _ -> Nothing
+  | sprout_ir.IRCondBr _ _ _ -> Nothing
+  | sprout_ir.IRPhi _ _ _ -> Nothing
+  | sprout_ir.IRRoot _ _ _ -> Nothing
+  | sprout_ir.IRUnroot _ _ -> Nothing
 
 # ---------------------------------------------------------------------------
 # CFG helpers
@@ -458,7 +500,43 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # @sprout_alloc_tuple_blob allocates, then the lowering stores the element
   # operands — same store-after-alloc exposure as @sprout_makeN.
   | sprout_ir.IRMakeTuple _ _ -> true
-  | _ -> false
+  # Everything else does NOT expose operands: str builtins SPROUT_HANDLE their
+  # inputs before allocating; calls hand operands to a callee that roots its own
+  # params; the rest do not allocate.  EXHAUSTIVE on purpose — no `_` catch-all,
+  # so a new allocating IROp is a COMPILE ERROR until its exposure is decided.
+  | sprout_ir.IRConst _ _ -> false
+  | sprout_ir.IRRet _ -> false
+  | sprout_ir.IRRetVoid -> false
+  | sprout_ir.IRIAdd _ _ _ -> false
+  | sprout_ir.IRISub _ _ _ -> false
+  | sprout_ir.IRIMul _ _ _ -> false
+  | sprout_ir.IRIDiv _ _ _ -> false
+  | sprout_ir.IRBoolNot _ _ -> false
+  | sprout_ir.IRINeg _ _ -> false
+  | sprout_ir.IRLoadGlobal _ _ -> false
+  | sprout_ir.IRStoreGlobal _ _ -> false
+  | sprout_ir.IRGetTupleField _ _ _ -> false
+  | sprout_ir.IRICmp _ _ _ _ -> false
+  | sprout_ir.IRBr _ -> false
+  | sprout_ir.IRCondBr _ _ _ -> false
+  | sprout_ir.IRPhi _ _ _ -> false
+  | sprout_ir.IRCall _ _ _ _ -> false
+  | sprout_ir.IRStrConst _ _ _ -> false
+  | sprout_ir.IRStrSlice _ _ _ _ -> false
+  | sprout_ir.IRStrConcat _ _ _ -> false
+  | sprout_ir.IRStrEq _ _ _ -> false
+  | sprout_ir.IRStrCompare _ _ _ _ -> false
+  | sprout_ir.IRPrintStr _ _ _ -> false
+  | sprout_ir.IRStrFromInt _ _ -> false
+  | sprout_ir.IRApplyClosure _ _ _ -> false
+  | sprout_ir.IRLoadEnvSlot _ _ _ _ -> false
+  | sprout_ir.IRRoot _ _ _ -> false
+  | sprout_ir.IRUnroot _ _ -> false
+  | sprout_ir.IRGetTag _ _ -> false
+  | sprout_ir.IRGetField _ _ _ _ -> false
+  | sprout_ir.IRAbortMatch -> false
+  | sprout_ir.IRZextI1ToI64 _ _ -> false
+  | sprout_ir.IRTruncI64ToI1 _ _ -> false
 
 # Set of an op's operand names.  O(uses).
 fn op_operand_set(op: sprout_ir.IROp) -> Set =

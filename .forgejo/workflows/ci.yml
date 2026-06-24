@@ -132,6 +132,12 @@ jobs:
       - name: Example canary via --use-ir-codegen
         run: just run-example-canary-ir
 
+      - name: GC-stress pass (typed-codegen rooting guard)
+        # Runs curated rooting-exercising tests under SPROUT_GC_STRESS=1 (collect
+        # on every allocation). Default-threshold greens hide use-after-free
+        # rooting bugs; this fails loudly. See justfile `test-stress`.
+        run: just test-stress
+
       - name: CPR differential check (--emit-ir vs --use-ir-codegen)
         # Compares external function signatures emitted by both codegen paths
         # on the shared-OK corpus.  Intersection-side divergence = candidate

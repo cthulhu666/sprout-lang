@@ -251,6 +251,26 @@ fn test9_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Test 10: a heap value (%a) live ACROSS an IRMakeTuple is rooted, even though
+# it is not a tuple element.  IRMakeTuple is a GC trigger (@sprout_alloc_tuple_blob
+# collects), so %a — used after the tuple build — must be rooted across it.  The
+# tuple element %n is a scalar, so it contributes no root.  Exactly 1 root.
+# Guards that IRMakeTuple stays in op_triggers_gc (the exhaustive classifier
+# turns any future omission into a compile error, not a silent UAF — P11-2e).
+fn test10_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("live_across_tuple", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
+        Cons(sprout_ir.IRConst("%n", 5),
+        Cons(sprout_ir.IRMakeTuple("%tup", Cons("%n", Nil)),
+        Cons(sprout_ir.IRStrConst("%c", "%c_raw", "c"),
+        Cons(sprout_ir.IRStrConcat("%r", "%a", "%c"),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -319,6 +339,10 @@ fn main() -> Unit !{IO} =
     # 2 pushes: %a at the tuple build, %x across the %cd concat.
     assert_eq(state, "T9: two push_i64_root (tuple operand + extracted value across trigger)",
               count(lower(test9_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+
+    # --- Test 10: value live across IRMakeTuple is rooted (IRMakeTuple is a trigger).
+    assert_eq(state, "T10: one push_i64_root (heap value live across IRMakeTuple)",
+              count(lower(test10_program()), "call i64 @sprout_gc_push_i64_root"), 1)
 
     # --- Header declares the rooting runtime functions.
     assert_true(state, "header declares @sprout_gc_push_i64_root",

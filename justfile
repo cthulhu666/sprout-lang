@@ -785,6 +785,80 @@ run-example-canary: bootstrap-from-seed
   fi
   echo "==> run-example-canary ✓"
 
+# GC-stress pass (P11-2e lessons): run a curated set of rooting-exercising
+# typed-codegen tests under SPROUT_GC_STRESS=1 (collect on EVERY allocation).
+# The default-threshold suite hides use-after-free rooting bugs as false greens;
+# stress collapses the timing window and fails loudly.  This is the durable
+# guard for the whole typed-codegen rooting class.  See project_gc_stress_oracle.
+# Grow STRESS_FILES as typed-codegen coverage warrants.
+test-stress: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_stress_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
+    || { echo "test-stress: runtime compile failed" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  # Gated (must pass under stress):
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr"
+  # Known-failing under stress — false-green at the default threshold, FOUND BY
+  # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
+  # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
+  # STRESS_FILES as each is fixed (an UNEXPECTED PASS flags that it's ready).
+  STRESS_XFAIL="tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr"
+  failed=0
+  run_one() {  # prints "ok" or "fail"; never exits
+    local f="$1" name ll bin out
+    name=$(basename "$f" .spr); ll="$TMPD/$name.ll"; bin="$TMPD/$name.bin"
+    "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$f" > "$ll" 2>"$TMPD/err" || { echo fail; return; }
+    clang "$ll" "$TMPD/rt.o" {{clang_extra}} -o "$bin" 2>"$TMPD/err" || { echo fail; return; }
+    if out=$(SPROUT_GC_STRESS=1 "$bin" 2>&1); then
+      echo "$out" | grep -q "SUITE FAILED" && echo fail || echo ok
+    else
+      echo fail
+    fi
+  }
+  for f in $STRESS_FILES; do
+    [ -f "$f" ] || { echo "test-stress: missing $f" >&2; failed=$((failed + 1)); continue; }
+    if [[ "$(run_one "$f")" == ok ]]; then
+      echo "  PASS (stress): $f"
+    else
+      echo "test-stress: $f FAILED under SPROUT_GC_STRESS=1" >&2; failed=$((failed + 1))
+    fi
+  done
+  for f in $STRESS_XFAIL; do
+    [ -f "$f" ] || continue
+    if [[ "$(run_one "$f")" == ok ]]; then
+      echo "  UNEXPECTED PASS (stress) — promote to STRESS_FILES: $f"
+    else
+      echo "  xfail (stress, tracked): $f"
+    fi
+  done
+  if (( failed > 0 )); then
+    echo "test-stress: $failed gated file(s) failed under SPROUT_GC_STRESS=1" >&2; exit 1
+  fi
+  echo "==> test-stress ✓"
+
+# GC use-after-free free-tracer (P11-2e diagnostic).  Compiles <file> via typed
+# codegen with debug info, runs it under lldb + SPROUT_GC_STRESS=1, and stops the
+# instant <watch_fn> is entered with a pointer arg (x0) that was already freed,
+# printing the victim's full alloc/free lineage.  <watch_fn> MUST be a function
+# that RECEIVES the suspected victim as its first argument — find it from the
+# crash's abort backtrace first (e.g. the match-dispatch fn that reads the
+# corrupted scrutinee), NOT the arg-less sprout_abort_match.  See scripts/gc_free_trace.py.
+gc-trace file watch_fn: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_gctrace_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "{{file}}" > "$TMPD/t.ll" 2>"$TMPD/err" \
+    || { echo "gc-trace: typed emit failed for {{file}}" >&2; cat "$TMPD/err" >&2; exit 1; }
+  clang -g "$TMPD/t.ll" runtime/sprout_runtime.c -O0 {{clang_extra}} -o "$TMPD/t.bin" -Wno-override-module 2>"$TMPD/err" \
+    || { echo "gc-trace: link failed for {{file}}" >&2; cat "$TMPD/err" >&2; exit 1; }
+  lldb -b \
+    -o "settings set target.env-vars SPROUT_GC_STRESS=1" \
+    -o "command script import scripts/gc_free_trace.py" \
+    -o "gctrace {{watch_fn}}" \
+    -o "run" -o "quit" "$TMPD/t.bin"
+
 # ── IR Codegen Dual-Path (M3 Milestone) ──────────────────────────────────────
 #
 # These recipes mirror compile-examples-stage1, test-stdlib-stage1, smoke-shapes,

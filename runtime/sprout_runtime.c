@@ -1137,7 +1137,14 @@ static void sprout_gc_collect(void) {
   sprout_gc_collect_with_reason("atexit");
 }
 
+static int g_gc_disabled = -1;
 static void sprout_gc_collect_with_reason(const char* reason) {
+  /* SPROUT_GC_DISABLE=1 is a TRUE no-collect mode for diagnosis: it lets you
+     cleanly bisect "is this a GC/rooting bug or a codegen value bug?".  Unlike
+     SPROUT_GC_THRESHOLD=<huge>, which does NOT stop collection, this skips the
+     collector entirely.  Do NOT use it as a workaround — it leaks. */
+  if (g_gc_disabled < 0) { const char* e = getenv("SPROUT_GC_DISABLE"); g_gc_disabled = (e && e[0] == '1') ? 1 : 0; }
+  if (g_gc_disabled) return;
   if (g_gc_active) return;
   g_gc_active = 1;
   long long started_us = sprout_now_micros();
