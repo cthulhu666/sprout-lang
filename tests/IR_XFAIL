@@ -95,7 +95,11 @@
 #                 compile at ~240 MB via the streaming ir_pipeline.sprout
 #                 orchestrator (translate→root→lower per-function, no full
 #                 IRProgram materialized).  Removed from this list.
-#    ~4 entries — pre-existing 't0' dup-block (codegen idx bug; pre-existing)
+#    't0' dup-block class — RESOLVED (PR 11 item 2a).  Source params named
+#                 `t<N>` collided with synthetic `%t<N>` temps on the typed path.
+#                 Fixed by hardcoding the "%t$" prefix in ast_to_ir.fresh_name +
+#                 ir_rooting.prefix_for_fn ('$' is reserved, so synthetic temps
+#                 are disjoint from all source names).  astar/nqueens removed.
 #    ~3 entries — typeclass `__unresolved_Eq__` / `__unresolved_ToString__`
 #                 (typeclass dispatch gap — out of M3 IR-codegen scope)
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
@@ -103,8 +107,6 @@
 # === examples/ ===
 # aoc_2025_day_1/2 cleared by the P11-2e init-globals idx_map fix (was the
 # 't0' root-slot collision); removed from xfail.
-examples/astar.sprout                          # multiple definition of local 't0' (pre-existing codegen dup-block)
-examples/nqueens.sprout                        # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
 

@@ -233,14 +233,15 @@ fn main() -> Unit !{IO} =
       "@__sprout_ir_lambda_")
     assert_true(state, "T18: outer-Bool-capture + inner-shadow lambda compiles (/code-review-v2 fix #7)", t18)
 
-    # T19: Round-4 Finding #2 — derived SSA name collision. A user fn param
-    # named `t0_raw` collides with the IRMkClosure-derived `%t0_raw` SSA name
-    # (built from result `%t0` + `_raw` suffix in ir_lowering). Fix: use the
-    # `$raw` separator so derived names cannot match any source identifier.
-    # Assertion: the emitted LLVM contains `%t0$raw`, proving the separator.
+    # T19: Round-4 Finding #2 — derived SSA name collision. The IRMkClosure
+    # result (now `%t$0`, since fresh_name hardcodes the "%t$" prefix) plus the
+    # `_raw`/`$raw` suffix builds a derived name in ir_lowering. The `$raw`
+    # separator ensures derived names cannot match any source identifier (a user
+    # param named `t0_raw` lowers to `%t0_raw`, never `%t$0$raw`).
+    # Assertion: the emitted LLVM contains `%t$0$raw`, proving the separator.
     t19 <- translated_ok_ir_contains(
       "fn f(t0_raw: Int) -> Int = (\\x -> x + 1)(t0_raw)",
-      "%t0$raw")
+      "%t$0$raw")
     assert_true(state, "T19: IRMkClosure-derived SSA name uses $raw separator (no collision with user param `t0_raw`)", t19)
 
     # T20 (deferred): Round-4 Finding #4 — top-level let binding visible to

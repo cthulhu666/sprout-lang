@@ -42,63 +42,63 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @fact(i64 %n) {
 entry:
-  %t0 = add i64 0, 0
-  %t1 = icmp eq i64 %n, %t0
-  %t2 = zext i1 %t1 to i64
-  %t10 = trunc i64 %t2 to i1
-  br i1 %t10, label %then_3, label %else_3
+  %t$0 = add i64 0, 0
+  %t$1 = icmp eq i64 %n, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$10 = trunc i64 %t$2 to i1
+  br i1 %t$10, label %then_3, label %else_3
 then_3:
-  %t5 = add i64 0, 1
+  %t$5 = add i64 0, 1
   br label %join_3
 else_3:
-  %t6 = add i64 0, 1
-  %t7 = sub i64 %n, %t6
-  %t8 = call i64 @fact(i64 %t7)
-  %t9 = mul i64 %n, %t8
+  %t$6 = add i64 0, 1
+  %t$7 = sub i64 %n, %t$6
+  %t$8 = call i64 @fact(i64 %t$7)
+  %t$9 = mul i64 %n, %t$8
   br label %join_3
 join_3:
-  %t4 = phi i64 [%t5, %then_3], [%t9, %else_3]
-  ret i64 %t4
+  %t$4 = phi i64 [%t$5, %then_3], [%t$9, %else_3]
+  ret i64 %t$4
 }
 
 define i64 @fib(i64 %n) {
 entry:
-  %t0 = add i64 0, 2
-  %t1 = icmp slt i64 %n, %t0
-  %t2 = zext i1 %t1 to i64
-  %t12 = trunc i64 %t2 to i1
-  br i1 %t12, label %then_3, label %else_3
+  %t$0 = add i64 0, 2
+  %t$1 = icmp slt i64 %n, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$12 = trunc i64 %t$2 to i1
+  br i1 %t$12, label %then_3, label %else_3
 then_3:
   br label %join_3
 else_3:
-  %t5 = add i64 0, 1
-  %t6 = sub i64 %n, %t5
-  %t7 = call i64 @fib(i64 %t6)
-  %t8 = add i64 0, 2
-  %t9 = sub i64 %n, %t8
-  %t10 = call i64 @fib(i64 %t9)
-  %t11 = add i64 %t7, %t10
+  %t$5 = add i64 0, 1
+  %t$6 = sub i64 %n, %t$5
+  %t$7 = call i64 @fib(i64 %t$6)
+  %t$8 = add i64 0, 2
+  %t$9 = sub i64 %n, %t$8
+  %t$10 = call i64 @fib(i64 %t$9)
+  %t$11 = add i64 %t$7, %t$10
   br label %join_3
 join_3:
-  %t4 = phi i64 [%n, %then_3], [%t11, %else_3]
-  ret i64 %t4
+  %t$4 = phi i64 [%n, %then_3], [%t$11, %else_3]
+  ret i64 %t$4
 }
 
 define i64 @abs_diff(i64 %a, i64 %b) {
 entry:
-  %t0 = icmp slt i64 %a, %b
-  %t1 = zext i1 %t0 to i64
-  %t6 = trunc i64 %t1 to i1
-  br i1 %t6, label %then_2, label %else_2
+  %t$0 = icmp slt i64 %a, %b
+  %t$1 = zext i1 %t$0 to i64
+  %t$6 = trunc i64 %t$1 to i1
+  br i1 %t$6, label %then_2, label %else_2
 then_2:
-  %t4 = sub i64 %b, %a
+  %t$4 = sub i64 %b, %a
   br label %join_2
 else_2:
-  %t5 = sub i64 %a, %b
+  %t$5 = sub i64 %a, %b
   br label %join_2
 join_2:
-  %t3 = phi i64 [%t4, %then_2], [%t5, %else_2]
-  ret i64 %t3
+  %t$3 = phi i64 [%t$4, %then_2], [%t$5, %else_2]
+  ret i64 %t$3
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

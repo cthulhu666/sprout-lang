@@ -42,31 +42,31 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @fact(i64 %n) {
 entry:
-  %t0 = add i64 0, 0
-  %t1 = icmp eq i64 %n, %t0
-  %t2 = zext i1 %t1 to i64
-  %t10 = trunc i64 %t2 to i1
-  br i1 %t10, label %then_3, label %else_3
+  %t$0 = add i64 0, 0
+  %t$1 = icmp eq i64 %n, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$10 = trunc i64 %t$2 to i1
+  br i1 %t$10, label %then_3, label %else_3
 then_3:
-  %t5 = add i64 0, 1
+  %t$5 = add i64 0, 1
   br label %join_3
 else_3:
-  %t6 = add i64 0, 1
-  %t7 = sub i64 %n, %t6
-  %t8 = call i64 @fact(i64 %t7)
-  %t9 = mul i64 %n, %t8
+  %t$6 = add i64 0, 1
+  %t$7 = sub i64 %n, %t$6
+  %t$8 = call i64 @fact(i64 %t$7)
+  %t$9 = mul i64 %n, %t$8
   br label %join_3
 join_3:
-  %t4 = phi i64 [%t5, %then_3], [%t9, %else_3]
-  ret i64 %t4
+  %t$4 = phi i64 [%t$5, %then_3], [%t$9, %else_3]
+  ret i64 %t$4
 }
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = add i64 0, 5
-  %t1 = call i64 @fact(i64 %t0)
-  %t2 = call i64 @print_value(i64 %t1)
-  ret i64 %t2
+  %t$0 = add i64 0, 5
+  %t$1 = call i64 @fact(i64 %t$0)
+  %t$2 = call i64 @print_value(i64 %t$1)
+  ret i64 %t$2
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

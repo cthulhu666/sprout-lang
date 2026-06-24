@@ -42,15 +42,15 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @val() {
 entry:
-  %t0 = add i64 0, 42
-  ret i64 %t0
+  %t$0 = add i64 0, 42
+  ret i64 %t$0
 }
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = call i64 @val()
-  %t1 = call i64 @print_value(i64 %t0)
-  ret i64 %t1
+  %t$0 = call i64 @val()
+  %t$1 = call i64 @print_value(i64 %t$0)
+  ret i64 %t$1
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

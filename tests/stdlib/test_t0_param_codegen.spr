@@ -1,0 +1,21 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression (PR 11 item 2a): a function parameter literally named `t0` (or any
+# `t<N>`) must not collide with the codegen's synthetic `%t<N>` temporaries on
+# the typed path (`--use-ir-codegen`).  Pre-fix the LLVM verifier rejected the
+# module with `multiple definition of local value named 't0'` because user-fn
+# bodies emitted synthetic temps with the `%t` prefix, clashing with the param.
+# Direct codegen avoided it only by luck (module-global temp counter).
+
+fn shift(t0: Int, t1: Int) -> Int =
+  t0 + t1 + double(t0)
+
+fn double(t0: Int) -> Int =
+  t0 + t0
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "t0/t1 params do not collide with synthetic temps",
+              shift(3, 4), 13)
+    summary(state)

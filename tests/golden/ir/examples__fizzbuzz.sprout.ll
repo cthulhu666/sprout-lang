@@ -47,71 +47,71 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @rem(i64 %n, i64 %m) {
 entry:
-  %t0 = sdiv i64 %n, %m
-  %t1 = mul i64 %t0, %m
-  %t2 = sub i64 %n, %t1
-  ret i64 %t2
+  %t$0 = sdiv i64 %n, %m
+  %t$1 = mul i64 %t$0, %m
+  %t$2 = sub i64 %n, %t$1
+  ret i64 %t$2
 }
 
 define i64 @fizzbuzz(i64 %n) {
 entry:
-  %t0 = add i64 0, 15
-  %t1 = call i64 @rem(i64 %n, i64 %t0)
-  %t2 = add i64 0, 0
-  %t3 = icmp eq i64 %t1, %t2
-  %t4 = zext i1 %t3 to i64
-  %t31 = trunc i64 %t4 to i1
-  br i1 %t31, label %then_5, label %else_5
+  %t$0 = add i64 0, 15
+  %t$1 = call i64 @rem(i64 %n, i64 %t$0)
+  %t$2 = add i64 0, 0
+  %t$3 = icmp eq i64 %t$1, %t$2
+  %t$4 = zext i1 %t$3 to i64
+  %t$31 = trunc i64 %t$4 to i1
+  br i1 %t$31, label %then_5, label %else_5
 then_5:
-  %t7 = getelementptr inbounds [9 x i8], ptr @.str.0, i64 0, i64 0
-  %t8 = ptrtoint ptr %t7 to i64
+  %t$7 = getelementptr inbounds [9 x i8], ptr @.str.0, i64 0, i64 0
+  %t$8 = ptrtoint ptr %t$7 to i64
   br label %join_5
 else_5:
-  %t9 = add i64 0, 3
-  %t10 = call i64 @rem(i64 %n, i64 %t9)
-  %t11 = add i64 0, 0
-  %t12 = icmp eq i64 %t10, %t11
-  %t13 = zext i1 %t12 to i64
-  %t30 = trunc i64 %t13 to i1
-  br i1 %t30, label %then_14, label %else_14
+  %t$9 = add i64 0, 3
+  %t$10 = call i64 @rem(i64 %n, i64 %t$9)
+  %t$11 = add i64 0, 0
+  %t$12 = icmp eq i64 %t$10, %t$11
+  %t$13 = zext i1 %t$12 to i64
+  %t$30 = trunc i64 %t$13 to i1
+  br i1 %t$30, label %then_14, label %else_14
 then_14:
-  %t16 = getelementptr inbounds [5 x i8], ptr @.str.1, i64 0, i64 0
-  %t17 = ptrtoint ptr %t16 to i64
+  %t$16 = getelementptr inbounds [5 x i8], ptr @.str.1, i64 0, i64 0
+  %t$17 = ptrtoint ptr %t$16 to i64
   br label %join_14
 else_14:
-  %t18 = add i64 0, 5
-  %t19 = call i64 @rem(i64 %n, i64 %t18)
-  %t20 = add i64 0, 0
-  %t21 = icmp eq i64 %t19, %t20
-  %t22 = zext i1 %t21 to i64
-  %t29 = trunc i64 %t22 to i1
-  br i1 %t29, label %then_23, label %else_23
+  %t$18 = add i64 0, 5
+  %t$19 = call i64 @rem(i64 %n, i64 %t$18)
+  %t$20 = add i64 0, 0
+  %t$21 = icmp eq i64 %t$19, %t$20
+  %t$22 = zext i1 %t$21 to i64
+  %t$29 = trunc i64 %t$22 to i1
+  br i1 %t$29, label %then_23, label %else_23
 then_23:
-  %t25 = getelementptr inbounds [5 x i8], ptr @.str.2, i64 0, i64 0
-  %t26 = ptrtoint ptr %t25 to i64
+  %t$25 = getelementptr inbounds [5 x i8], ptr @.str.2, i64 0, i64 0
+  %t$26 = ptrtoint ptr %t$25 to i64
   br label %join_23
 else_23:
-  %t27 = getelementptr inbounds [7 x i8], ptr @.str.3, i64 0, i64 0
-  %t28 = ptrtoint ptr %t27 to i64
+  %t$27 = getelementptr inbounds [7 x i8], ptr @.str.3, i64 0, i64 0
+  %t$28 = ptrtoint ptr %t$27 to i64
   br label %join_23
 join_23:
-  %t24 = phi i64 [%t26, %then_23], [%t28, %else_23]
+  %t$24 = phi i64 [%t$26, %then_23], [%t$28, %else_23]
   br label %join_14
 join_14:
-  %t15 = phi i64 [%t17, %then_14], [%t24, %join_23]
+  %t$15 = phi i64 [%t$17, %then_14], [%t$24, %join_23]
   br label %join_5
 join_5:
-  %t6 = phi i64 [%t8, %then_5], [%t15, %join_14]
-  ret i64 %t6
+  %t$6 = phi i64 [%t$8, %then_5], [%t$15, %join_14]
+  ret i64 %t$6
 }
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = add i64 0, 15
-  %t1 = call i64 @fizzbuzz(i64 %t0)
-  %t2$ptr = inttoptr i64 %t1 to ptr
-  %t2 = call i64 @print_str(ptr %t2$ptr)
-  ret i64 %t2
+  %t$0 = add i64 0, 15
+  %t$1 = call i64 @fizzbuzz(i64 %t$0)
+  %t$2$ptr = inttoptr i64 %t$1 to ptr
+  %t$2 = call i64 @print_str(ptr %t$2$ptr)
+  ret i64 %t$2
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

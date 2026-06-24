@@ -45,20 +45,20 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @cat(i64 %a, i64 %b) {
 entry:
-  %t0 = call i64 @str_concat(i64 %a, i64 %b)
-  ret i64 %t0
+  %t$0 = call i64 @str_concat(i64 %a, i64 %b)
+  ret i64 %t$0
 }
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = getelementptr inbounds [6 x i8], ptr @.str.0, i64 0, i64 0
-  %t1 = ptrtoint ptr %t0 to i64
-  %t2 = getelementptr inbounds [6 x i8], ptr @.str.1, i64 0, i64 0
-  %t3 = ptrtoint ptr %t2 to i64
-  %t4 = call i64 @cat(i64 %t1, i64 %t3)
-  %t5$ptr = inttoptr i64 %t4 to ptr
-  %t5 = call i64 @print_str(ptr %t5$ptr)
-  ret i64 %t5
+  %t$0 = getelementptr inbounds [6 x i8], ptr @.str.0, i64 0, i64 0
+  %t$1 = ptrtoint ptr %t$0 to i64
+  %t$2 = getelementptr inbounds [6 x i8], ptr @.str.1, i64 0, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  %t$4 = call i64 @cat(i64 %t$1, i64 %t$3)
+  %t$5$ptr = inttoptr i64 %t$4 to ptr
+  %t$5 = call i64 @print_str(ptr %t$5$ptr)
+  ret i64 %t$5
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

@@ -44,11 +44,11 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = getelementptr inbounds [18 x i8], ptr @.str.0, i64 0, i64 0
-  %t1 = ptrtoint ptr %t0 to i64
-  %t2$ptr = inttoptr i64 %t1 to ptr
-  %t2 = call i64 @print_str(ptr %t2$ptr)
-  ret i64 %t2
+  %t$0 = getelementptr inbounds [18 x i8], ptr @.str.0, i64 0, i64 0
+  %t$1 = ptrtoint ptr %t$0 to i64
+  %t$2$ptr = inttoptr i64 %t$1 to ptr
+  %t$2 = call i64 @print_str(ptr %t$2$ptr)
+  ret i64 %t$2
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

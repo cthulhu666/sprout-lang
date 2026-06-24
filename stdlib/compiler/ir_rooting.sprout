@@ -565,8 +565,9 @@ fn roots_across(in_scope_ord_rev: List String, live_after_op: Set,
 
 # Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
 # slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
-# prefix: "%t" for user fns; "%t$" for lifted lambdas (avoids colliding with
-# the IRLoadEnvSlot names %t$0, %t$1, ... emitted by build_load_env_ops_go).
+# prefix is always "%t$" (see prefix_for_fn) — matches ast_to_ir.fresh_name so
+# rooting temps share a namespace with body temps and stay disjoint from
+# source-derived names (incl. the IRLoadEnvSlot names %t$0, %t$1, ...).
 fn emit_roots_loop(vs: List String, idx: Int, prefix: String, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match vs with
   | Nil -> (acc, idx)
@@ -713,20 +714,25 @@ fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
 export fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name _ _ _ ->
-      # Lifted lambda bodies use "%t$" as the fresh-name prefix to avoid colliding
-      # with the IRLoadEnvSlot names "%t$0", "%t$1", ... emitted by build_load_env_ops.
-      # User functions use "%t" (the classic prefix).  The start_idx from idx_map
-      # prevents the rooting pass from reusing indices already consumed by the
-      # translator; lifted lambdas in idx_map carry body_next_idx which starts
-      # after the n_caps IRLoadEnvSlot names.
+      # All functions use "%t$" as the fresh-name prefix (see prefix_for_fn),
+      # matching ast_to_ir.fresh_name so rooting temps share the body namespace
+      # and stay disjoint from source-derived names (incl. the IRLoadEnvSlot
+      # names "%t$0", "%t$1", ... emitted by build_load_env_ops).  The start_idx
+      # from idx_map prevents the rooting pass from reusing indices already
+      # consumed by the translator; lifted lambdas in idx_map carry body_next_idx
+      # which starts after the n_caps IRLoadEnvSlot names.
       match dict_get(name, idx_map) with
       | Just i -> rewrite_fn(f, i, prefix_for_fn(name))
       | Nothing -> rewrite_fn(f, 0, prefix_for_fn(name))
 
-# Pick the SSA fresh-name prefix for a function: "%t$" for lifted lambdas,
-# "%t" for user functions.  O(n) in the function name length.
+# SSA fresh-name prefix for root-slot temps the rooting pass generates: always
+# "%t$".  Must match ast_to_ir.fresh_name (which hardcodes "%t$" for every body
+# temp) so body temps and rooting temps share one namespace AND are disjoint
+# from source-derived names.  '$' cannot appear in a source identifier, so a
+# source param named `t<N>` (→ %t<N>) can never collide with %t$<N>.
+# O(n) in the function name length.
 fn prefix_for_fn(name: String) -> String =
-  if str_starts_with(name, "__sprout_ir_lambda_") then "%t$" else "%t"
+  "%t$"
 
 fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int,
                acc: List sprout_ir.IRFunction) -> List sprout_ir.IRFunction =

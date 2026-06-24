@@ -1,0 +1,30 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.string as string
+
+# Invariant lock for the typed-codegen synthetic-temp namespace (PR 11 item 2a).
+#
+# ast_to_ir.fresh_name hardcodes the "%t$" prefix for every synthetic SSA
+# temporary. That is collision-proof against source-derived names ONLY because
+# '$' can never appear in a Sprout-source identifier — so a user parameter named
+# `t0` (→ LLVM `%t0`) can never equal a synthetic `%t$0`.
+#
+# is_ident_start / is_ident_continue (stdlib/string.sprout) are the lexer's
+# definition of which characters may begin / continue an identifier. If '$' ever
+# becomes a valid identifier character, the disjointness guarantee silently
+# breaks. This test fails loudly the moment that happens.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # The load-bearing assertions: '$' is reserved (not an identifier char).
+    assert_false(state, "'$' is NOT an identifier start", string.is_ident_start('$'))
+    assert_false(state, "'$' is NOT an identifier continuation", string.is_ident_continue('$'))
+
+    # Controls: ordinary identifier characters still qualify (guards against a
+    # change that breaks the functions wholesale rather than just for '$').
+    assert_true(state, "letter is an identifier start", string.is_ident_start('a'))
+    assert_true(state, "'_' is an identifier start", string.is_ident_start('_'))
+    assert_true(state, "digit is an identifier continuation", string.is_ident_continue('0'))
+
+    summary(state)

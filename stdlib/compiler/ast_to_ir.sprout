@@ -512,14 +512,23 @@ fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr,
         fks = fk.ctor_field_kinds_string(ctor_args)
 
 # Fresh-name counter threaded through the translator.
-# User fns use prefix "%t" → %t0, %t1, …
-# Lifted lambda bodies use prefix "%t$" → %t$0, %t$1, … to avoid colliding
-# with user-written param names like "t0" (which produce "%t0" in LLVM).
-# '$' cannot appear in Sprout-source identifiers, guaranteeing disjointness.
+# ALL synthetic SSA temporaries use the "%t$" prefix → %t$0, %t$1, …
+# '$' cannot appear in a Sprout-source identifier (enforced by the lexer; see
+# tests/stdlib/test_lexer_dollar_reserved.spr), so synthetic temps are provably
+# disjoint from EVERY source-derived name — params, lets, pattern vars, lambda
+# params. A source parameter literally named `t0` lowers to `%t0`, which can
+# never collide with `%t$0`.
+#
+# DO NOT reintroduce a caller-supplied prefix into the body. The prefix is
+# hardcoded in this single generator on purpose: every synthetic temp name flows
+# through here, so hardcoding makes the disjointness invariant hold BY
+# CONSTRUCTION — no call site can produce a speakable `%tN` name. The vestigial
+# `prefix` argument is ignored (kept only to avoid churning every call site);
+# do not wire it back into the body.
 # The same counter is reused for block labels via fresh_then/else/join_label
 # below — different namespaces, so uniqueness is preserved.
 fn fresh_name(prefix: String, idx: Int) -> String =
-  prefix ++ int_to_string(idx)
+  "%t$" ++ int_to_string(idx)
 
 fn fresh_then_label(idx: Int) -> String =
   "then_" ++ int_to_string(idx)
@@ -3861,8 +3870,9 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
 # Translate a function body into a complete List IRBlock.  The body always
 # starts in the "entry" block; the final block (whatever cur_label is after
 # translation) is sealed with IRRet.
-# name_prefix: "%t" for top-level user fns; passed through to translate_expr
-# so all fresh SSA names in this function use the right prefix.
+# name_prefix is threaded through translate_expr but IGNORED by fresh_name,
+# which hardcodes "%t$" for every synthetic temp (see fresh_name). The arg is
+# vestigial; all fresh SSA names are "%t$N" regardless of what is passed.
 fn translate_body(body: typed_ast.TypedExpr, params: List String,
                   ctors: Dict (Int, Int, Int, String), idx: Int,
                   captures: Dict String,
@@ -3931,7 +3941,8 @@ fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.Typed
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
-    # User functions use "%t" prefix; lifted lambda bodies use "%t$" (see translate_lambda).
+    # Prefix arg is ignored — fresh_name hardcodes "%t$" for ALL functions so
+    # synthetic temps never collide with a source param named `t<N>` (→ %t<N>).
     match translate_body(body, pnames, ctors, 0, dict_empty(), lifted_ref, top_level, let_names, fn_arities,
                          lambda_ctr_ref, lifted_idx_ref, "%t") with
     | Err msg -> Err(msg)

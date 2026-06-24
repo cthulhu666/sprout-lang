@@ -47,39 +47,43 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @map(i64 %f, i64 %m) {
 entry:
-  %t0 = call i64 @sprout_tag(i64 %m)
+  %t$0 = call i64 @sprout_tag(i64 %m)
   br label %arm_0_1
 arm_0_1:
-  %t3 = add i64 0, 0
-  %t4 = icmp eq i64 %t0, %t3
-  br i1 %t4, label %body_0_1, label %arm_1_1
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t5 = call i64 @sprout_field(i64 %m, i64 0)
-  %t6$env_ptr = inttoptr i64 %f to ptr
-  %t6$code = load ptr, ptr %t6$env_ptr
-  %t6 = call i64 (i64, i64) %t6$code(i64 %f, i64 %t5)
-  %t7 = call i64 @sprout_make1(i64 0, i64 %t6)
+  %t$5 = call i64 @sprout_field(i64 %m, i64 0)
+  %t$6$env_ptr = inttoptr i64 %f to ptr
+  %t$6$code = load ptr, ptr %t$6$env_ptr
+  %t$6 = call i64 (i64, i64) %t$6$code(i64 %f, i64 %t$5)
+  %t$11 = alloca i64
+  store i64 %t$6, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$7 = call i64 @sprout_make1(i64 0, i64 %t$6)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
-  %t8 = add i64 0, 1
-  %t9 = icmp eq i64 %t0, %t8
-  br i1 %t9, label %body_1_1, label %arm_2_1
+  %t$8 = add i64 0, 1
+  %t$9 = icmp eq i64 %t$0, %t$8
+  br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t10 = call i64 @sprout_make0(i64 1)
+  %t$10 = call i64 @sprout_make0(i64 1)
   br label %join_1
 arm_2_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t2 = phi i64 [%t7, %body_0_1], [%t10, %body_1_1]
-  ret i64 %t2
+  %t$2 = phi i64 [%t$7, %body_0_1], [%t$10, %body_1_1]
+  ret i64 %t$2
 }
 
 define i64 @inc(i64 %x) {
 entry:
-  %t0 = add i64 0, 1
-  %t1 = add i64 %x, %t0
-  ret i64 %t1
+  %t$0 = add i64 0, 1
+  %t$1 = add i64 %x, %t$0
+  ret i64 %t$1
 }
 
 define i64 @__sprout_ir_eta_inc_0(i64 %env$, i64 %a0) {
@@ -90,18 +94,18 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = call i64 @sprout_alloc_closure_env(i64 8)
-  %t0$raw = inttoptr i64 %t0 to ptr
-  store ptr @__sprout_ir_eta_inc_0, ptr %t0$raw
-  %t1 = add i64 0, 2
-  %t5 = alloca i64
-  store i64 %t0, ptr %t5
-  %t6 = call i64 @sprout_gc_push_i64_root(ptr %t5)
-  %t2 = call i64 @sprout_make1(i64 0, i64 %t1)
-  %t7 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t3 = call i64 @map(i64 %t0, i64 %t2)
-  %t4 = call i64 @print_value(i64 %t3)
-  ret i64 %t4
+  %t$0 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$0$raw = inttoptr i64 %t$0 to ptr
+  store ptr @__sprout_ir_eta_inc_0, ptr %t$0$raw
+  %t$1 = add i64 0, 2
+  %t$5 = alloca i64
+  store i64 %t$0, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$2 = call i64 @sprout_make1(i64 0, i64 %t$1)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$3 = call i64 @map(i64 %t$0, i64 %t$2)
+  %t$4 = call i64 @print_value(i64 %t$3)
+  ret i64 %t$4
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

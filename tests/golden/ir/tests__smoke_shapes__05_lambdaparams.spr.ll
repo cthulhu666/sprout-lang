@@ -42,10 +42,10 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @apply(i64 %f, i64 %x) {
 entry:
-  %t0$env_ptr = inttoptr i64 %f to ptr
-  %t0$code = load ptr, ptr %t0$env_ptr
-  %t0 = call i64 (i64, i64) %t0$code(i64 %f, i64 %x)
-  ret i64 %t0
+  %t$0$env_ptr = inttoptr i64 %f to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %f, i64 %x)
+  ret i64 %t$0
 }
 
 define i64 @__sprout_ir_lambda_0(i64 %env$, i64 %n) {
@@ -64,25 +64,25 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = call i64 @sprout_alloc_closure_env(i64 8)
-  %t0$raw = inttoptr i64 %t0 to ptr
-  store ptr @__sprout_ir_lambda_0, ptr %t0$raw
-  %t6 = alloca i64
-  store i64 %t0, ptr %t6
-  %t7 = call i64 @sprout_gc_push_i64_root(ptr %t6)
-  %t1 = call i64 @sprout_alloc_closure_env(i64 8)
-  %t1$raw = inttoptr i64 %t1 to ptr
-  store ptr @__sprout_ir_lambda_1, ptr %t1$raw
-  %t8 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t2 = add i64 0, 3
-  %t9 = alloca i64
-  store i64 %t0, ptr %t9
-  %t10 = call i64 @sprout_gc_push_i64_root(ptr %t9)
-  %t3 = call i64 @apply(i64 %t1, i64 %t2)
-  %t11 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t4 = call i64 @apply(i64 %t0, i64 %t3)
-  %t5 = call i64 @print_value(i64 %t4)
-  ret i64 %t5
+  %t$0 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$0$raw = inttoptr i64 %t$0 to ptr
+  store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
+  %t$6 = alloca i64
+  store i64 %t$0, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$1 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$1$raw = inttoptr i64 %t$1 to ptr
+  store ptr @__sprout_ir_lambda_1, ptr %t$1$raw
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$2 = add i64 0, 3
+  %t$9 = alloca i64
+  store i64 %t$0, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$3 = call i64 @apply(i64 %t$1, i64 %t$2)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$4 = call i64 @apply(i64 %t$0, i64 %t$3)
+  %t$5 = call i64 @print_value(i64 %t$4)
+  ret i64 %t$5
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

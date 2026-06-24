@@ -49,43 +49,43 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @color_code(i64 %c) {
 entry:
-  %t0 = call i64 @sprout_tag(i64 %c)
+  %t$0 = call i64 @sprout_tag(i64 %c)
   br label %arm_0_1
 arm_0_1:
-  %t3 = add i64 0, 0
-  %t4 = icmp eq i64 %t0, %t3
-  br i1 %t4, label %body_0_1, label %arm_1_1
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t5 = add i64 0, 0
+  %t$5 = add i64 0, 0
   br label %join_1
 arm_1_1:
-  %t6 = add i64 0, 1
-  %t7 = icmp eq i64 %t0, %t6
-  br i1 %t7, label %body_1_1, label %arm_2_1
+  %t$6 = add i64 0, 1
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t8 = add i64 0, 1
+  %t$8 = add i64 0, 1
   br label %join_1
 arm_2_1:
-  %t9 = add i64 0, 2
-  %t10 = icmp eq i64 %t0, %t9
-  br i1 %t10, label %body_2_1, label %arm_3_1
+  %t$9 = add i64 0, 2
+  %t$10 = icmp eq i64 %t$0, %t$9
+  br i1 %t$10, label %body_2_1, label %arm_3_1
 body_2_1:
-  %t11 = add i64 0, 2
+  %t$11 = add i64 0, 2
   br label %join_1
 arm_3_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t2 = phi i64 [%t5, %body_0_1], [%t8, %body_1_1], [%t11, %body_2_1]
-  ret i64 %t2
+  %t$2 = phi i64 [%t$5, %body_0_1], [%t$8, %body_1_1], [%t$11, %body_2_1]
+  ret i64 %t$2
 }
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = call i64 @sprout_make0(i64 0)
-  %t1 = call i64 @color_code(i64 %t0)
-  %t2 = call i64 @print_value(i64 %t1)
-  ret i64 %t2
+  %t$0 = call i64 @sprout_make0(i64 0)
+  %t$1 = call i64 @color_code(i64 %t$0)
+  %t$2 = call i64 @print_value(i64 %t$1)
+  ret i64 %t$2
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

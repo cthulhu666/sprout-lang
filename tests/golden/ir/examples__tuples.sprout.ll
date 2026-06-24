@@ -47,133 +47,170 @@ define i64 @swap(i64 %pair) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t2$ptr = inttoptr i64 %pair to ptr
-  %t2$gep = getelementptr i64, ptr %t2$ptr, i64 0
-  %t2 = load i64, ptr %t2$gep
-  %t3$ptr = inttoptr i64 %pair to ptr
-  %t3$gep = getelementptr i64, ptr %t3$ptr, i64 1
-  %t3 = load i64, ptr %t3$gep
-  %t4 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t4$ptr = inttoptr i64 %t4 to ptr
-  %t4$s0 = getelementptr i64, ptr %t4$ptr, i64 0
-  store i64 %t3, ptr %t4$s0
-  %t4$s1 = getelementptr i64, ptr %t4$ptr, i64 1
-  store i64 %t2, ptr %t4$s1
+  %t$2$ptr = inttoptr i64 %pair to ptr
+  %t$2$gep = getelementptr i64, ptr %t$2$ptr, i64 0
+  %t$2 = load i64, ptr %t$2$gep
+  %t$3$ptr = inttoptr i64 %pair to ptr
+  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
+  %t$3 = load i64, ptr %t$3$gep
+  %t$5 = alloca i64
+  store i64 %t$2, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %t$3, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$4 = call i64 @sprout_alloc_tuple_blob(i64 16)
+  %t$4$ptr = inttoptr i64 %t$4 to ptr
+  %t$4$s0 = getelementptr i64, ptr %t$4$ptr, i64 0
+  store i64 %t$3, ptr %t$4$s0
+  %t$4$s1 = getelementptr i64, ptr %t$4$ptr, i64 1
+  store i64 %t$2, ptr %t$4$s1
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t1 = phi i64 [%t4, %arm_0_0]
-  ret i64 %t1
+  %t$1 = phi i64 [%t$4, %arm_0_0]
+  ret i64 %t$1
 }
 
 define i64 @sum_coords(i64 %point) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t2$ptr = inttoptr i64 %point to ptr
-  %t2$gep = getelementptr i64, ptr %t2$ptr, i64 0
-  %t2 = load i64, ptr %t2$gep
-  %t3$ptr = inttoptr i64 %point to ptr
-  %t3$gep = getelementptr i64, ptr %t3$ptr, i64 1
-  %t3 = load i64, ptr %t3$gep
-  %t4 = add i64 %t2, %t3
+  %t$2$ptr = inttoptr i64 %point to ptr
+  %t$2$gep = getelementptr i64, ptr %t$2$ptr, i64 0
+  %t$2 = load i64, ptr %t$2$gep
+  %t$3$ptr = inttoptr i64 %point to ptr
+  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
+  %t$3 = load i64, ptr %t$3$gep
+  %t$4 = add i64 %t$2, %t$3
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t1 = phi i64 [%t4, %arm_0_0]
-  ret i64 %t1
+  %t$1 = phi i64 [%t$4, %arm_0_0]
+  ret i64 %t$1
 }
 
 define i64 @describe(i64 %sample) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t2$ptr = inttoptr i64 %sample to ptr
-  %t2$gep = getelementptr i64, ptr %t2$ptr, i64 0
-  %t2 = load i64, ptr %t2$gep
-  %t3$ptr = inttoptr i64 %sample to ptr
-  %t3$gep = getelementptr i64, ptr %t3$ptr, i64 1
-  %t3 = load i64, ptr %t3$gep
-  %t4$ptr = inttoptr i64 %t3 to ptr
-  %t4$gep = getelementptr i64, ptr %t4$ptr, i64 0
-  %t4 = load i64, ptr %t4$gep
-  %t5$ptr = inttoptr i64 %t3 to ptr
-  %t5$gep = getelementptr i64, ptr %t5$ptr, i64 1
-  %t5 = load i64, ptr %t5$gep
-  %t6 = add i64 0, 0
-  %t7 = icmp sgt i64 %t2, %t6
-  %t8 = zext i1 %t7 to i64
-  %t15 = trunc i64 %t8 to i1
-  br i1 %t15, label %then_9, label %else_9
+  %t$2$ptr = inttoptr i64 %sample to ptr
+  %t$2$gep = getelementptr i64, ptr %t$2$ptr, i64 0
+  %t$2 = load i64, ptr %t$2$gep
+  %t$3$ptr = inttoptr i64 %sample to ptr
+  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
+  %t$3 = load i64, ptr %t$3$gep
+  %t$4$ptr = inttoptr i64 %t$3 to ptr
+  %t$4$gep = getelementptr i64, ptr %t$4$ptr, i64 0
+  %t$4 = load i64, ptr %t$4$gep
+  %t$5$ptr = inttoptr i64 %t$3 to ptr
+  %t$5$gep = getelementptr i64, ptr %t$5$ptr, i64 1
+  %t$5 = load i64, ptr %t$5$gep
+  %t$6 = add i64 0, 0
+  %t$7 = icmp sgt i64 %t$2, %t$6
+  %t$8 = zext i1 %t$7 to i64
+  %t$15 = trunc i64 %t$8 to i1
+  br i1 %t$15, label %then_9, label %else_9
 then_9:
-  %t11 = getelementptr inbounds [15 x i8], ptr @.str.0, i64 0, i64 0
-  %t12 = ptrtoint ptr %t11 to i64
+  %t$11 = getelementptr inbounds [15 x i8], ptr @.str.0, i64 0, i64 0
+  %t$12 = ptrtoint ptr %t$11 to i64
   br label %join_9
 else_9:
-  %t13 = getelementptr inbounds [19 x i8], ptr @.str.1, i64 0, i64 0
-  %t14 = ptrtoint ptr %t13 to i64
+  %t$13 = getelementptr inbounds [19 x i8], ptr @.str.1, i64 0, i64 0
+  %t$14 = ptrtoint ptr %t$13 to i64
   br label %join_9
 join_9:
-  %t10 = phi i64 [%t12, %then_9], [%t14, %else_9]
+  %t$10 = phi i64 [%t$12, %then_9], [%t$14, %else_9]
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t1 = phi i64 [%t10, %join_9]
-  ret i64 %t1
+  %t$1 = phi i64 [%t$10, %join_9]
+  ret i64 %t$1
 }
 
 define i64 @__sprout_user_main() {
 entry:
-  %t0 = add i64 0, 7
-  %t1 = add i64 0, 1
-  %t2 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t2$ptr = inttoptr i64 %t2 to ptr
-  %t2$s0 = getelementptr i64, ptr %t2$ptr, i64 0
-  store i64 %t0, ptr %t2$s0
-  %t2$s1 = getelementptr i64, ptr %t2$ptr, i64 1
-  store i64 %t1, ptr %t2$s1
-  %t3 = call i64 @swap(i64 %t2)
-  %t4 = add i64 0, 20
-  %t5 = add i64 0, 22
-  %t6 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t6$ptr = inttoptr i64 %t6 to ptr
-  %t6$s0 = getelementptr i64, ptr %t6$ptr, i64 0
-  store i64 %t4, ptr %t6$s0
-  %t6$s1 = getelementptr i64, ptr %t6$ptr, i64 1
-  store i64 %t5, ptr %t6$s1
-  %t7 = call i64 @sum_coords(i64 %t6)
-  %t8 = add i64 0, 1
-  %t9 = add i64 0, 3
-  %t10 = add i64 0, 4
-  %t11 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t11$ptr = inttoptr i64 %t11 to ptr
-  %t11$s0 = getelementptr i64, ptr %t11$ptr, i64 0
-  store i64 %t9, ptr %t11$s0
-  %t11$s1 = getelementptr i64, ptr %t11$ptr, i64 1
-  store i64 %t10, ptr %t11$s1
-  %t12 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t12$ptr = inttoptr i64 %t12 to ptr
-  %t12$s0 = getelementptr i64, ptr %t12$ptr, i64 0
-  store i64 %t8, ptr %t12$s0
-  %t12$s1 = getelementptr i64, ptr %t12$ptr, i64 1
-  store i64 %t11, ptr %t12$s1
-  %t13 = call i64 @describe(i64 %t12)
-  %t14 = call i64 @sprout_alloc_tuple_blob(i64 24)
-  %t14$ptr = inttoptr i64 %t14 to ptr
-  %t14$s0 = getelementptr i64, ptr %t14$ptr, i64 0
-  store i64 %t3, ptr %t14$s0
-  %t14$s1 = getelementptr i64, ptr %t14$ptr, i64 1
-  store i64 %t7, ptr %t14$s1
-  %t14$s2 = getelementptr i64, ptr %t14$ptr, i64 2
-  store i64 %t13, ptr %t14$s2
-  %t15 = call i64 @print_value(i64 %t14)
-  ret i64 %t15
+  %t$0 = add i64 0, 7
+  %t$1 = add i64 0, 1
+  %t$2 = call i64 @sprout_alloc_tuple_blob(i64 16)
+  %t$2$ptr = inttoptr i64 %t$2 to ptr
+  %t$2$s0 = getelementptr i64, ptr %t$2$ptr, i64 0
+  store i64 %t$0, ptr %t$2$s0
+  %t$2$s1 = getelementptr i64, ptr %t$2$ptr, i64 1
+  store i64 %t$1, ptr %t$2$s1
+  %t$3 = call i64 @swap(i64 %t$2)
+  %t$4 = add i64 0, 20
+  %t$5 = add i64 0, 22
+  %t$16 = alloca i64
+  store i64 %t$3, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$6 = call i64 @sprout_alloc_tuple_blob(i64 16)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$s0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %t$4, ptr %t$6$s0
+  %t$6$s1 = getelementptr i64, ptr %t$6$ptr, i64 1
+  store i64 %t$5, ptr %t$6$s1
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$19 = alloca i64
+  store i64 %t$3, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$7 = call i64 @sum_coords(i64 %t$6)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$8 = add i64 0, 1
+  %t$9 = add i64 0, 3
+  %t$10 = add i64 0, 4
+  %t$22 = alloca i64
+  store i64 %t$3, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$11 = call i64 @sprout_alloc_tuple_blob(i64 16)
+  %t$11$ptr = inttoptr i64 %t$11 to ptr
+  %t$11$s0 = getelementptr i64, ptr %t$11$ptr, i64 0
+  store i64 %t$9, ptr %t$11$s0
+  %t$11$s1 = getelementptr i64, ptr %t$11$ptr, i64 1
+  store i64 %t$10, ptr %t$11$s1
+  %t$24 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$25 = alloca i64
+  store i64 %t$3, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$27 = alloca i64
+  store i64 %t$11, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$12 = call i64 @sprout_alloc_tuple_blob(i64 16)
+  %t$12$ptr = inttoptr i64 %t$12 to ptr
+  %t$12$s0 = getelementptr i64, ptr %t$12$ptr, i64 0
+  store i64 %t$8, ptr %t$12$s0
+  %t$12$s1 = getelementptr i64, ptr %t$12$ptr, i64 1
+  store i64 %t$11, ptr %t$12$s1
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$30 = alloca i64
+  store i64 %t$3, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$13 = call i64 @describe(i64 %t$12)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$33 = alloca i64
+  store i64 %t$3, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$35 = alloca i64
+  store i64 %t$13, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$14 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$14$ptr = inttoptr i64 %t$14 to ptr
+  %t$14$s0 = getelementptr i64, ptr %t$14$ptr, i64 0
+  store i64 %t$3, ptr %t$14$s0
+  %t$14$s1 = getelementptr i64, ptr %t$14$ptr, i64 1
+  store i64 %t$7, ptr %t$14$s1
+  %t$14$s2 = getelementptr i64, ptr %t$14$ptr, i64 2
+  store i64 %t$13, ptr %t$14$s2
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$15 = call i64 @print_value(i64 %t$14)
+  ret i64 %t$15
 }
 
 define i32 @main(i32 %argc, ptr %argv) {
