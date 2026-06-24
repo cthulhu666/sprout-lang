@@ -1,0 +1,96 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.typed_ast as typed_ast
+
+# Regression: the typed IR rooting pass (ir_rooting) must root a tuple value
+# produced by IRMakeTuple when it stays live across a later allocating op.
+#
+# Before the fix, ir_rooting.op_produces_simple_heap had no IRMakeTuple case, so
+# a tuple-blob result (lowered to @sprout_alloc_tuple_blob, a heap pointer) never
+# entered heap_origin and was never rooted across triggers.  A local tuple held
+# live across a subsequent call then got collected mid-function (use-after-free).
+# This is the P11-2e crash: checker.typecheck_typed builds (key, scheme) tuples
+# for dict_from_list; under default GC a collection swept the unrooted blobs and
+# dict_from_list read a garbage key -> SIGSEGV in sprout_intern_hash.
+#
+# Differential, deterministic (no GC-timing dependence): in a do-block, bind a
+# local, then make an allocating call (a trigger) with the local still live
+# (used afterwards).  The two snippets are structurally identical except the
+# live local is a tuple (IRMakeTuple, heap) vs a scalar (Int).  The heap version
+# must root the live tuple across the trigger, so it emits strictly MORE root
+# pushes than the scalar twin.  Pre-fix both are equal (tuple not classified
+# heap); post-fix tuple > scalar.
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack) - pos - str_len(needle)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    ir_pipeline.compile_program_streaming(lowered)
+
+fn get_ir_or_msg(src: String) -> String !{IO} =
+  do
+    match translate_source(src) with
+    | Ok ir -> ir
+    | Err msg -> "ERROR: " ++ msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # No prelude in the empty-env translate_source path, so snippets must be
+    # self-contained.  The tuple local is built directly (IRMakeTuple) and held
+    # live across the intervening call, which the rooting pass treats as a GC
+    # trigger; the tuple must be rooted across it.
+    let heap_src =
+      "fn use_tup(t: (Int, Int)) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | (a, b) -> a + b\n" ++
+      "fn sink(n: Int) -> Int !{IO} = n\n" ++
+      "fn driver(n: Int) -> Int !{IO} =\n" ++
+      "  do\n" ++
+      "    let t = (n, n)\n" ++
+      "    c <- sink(n)\n" ++
+      "    use_tup(t)\n"
+    heap_ir <- get_ir_or_msg(heap_src)
+    let heap_pushes = count(heap_ir, "sprout_gc_push_i64_root")
+
+    let scalar_src =
+      "fn use_int(t: Int) -> Int = t + t\n" ++
+      "fn sink(n: Int) -> Int !{IO} = n\n" ++
+      "fn driver(n: Int) -> Int !{IO} =\n" ++
+      "  do\n" ++
+      "    let t = n\n" ++
+      "    c <- sink(n)\n" ++
+      "    use_int(t)\n"
+    scalar_ir <- get_ir_or_msg(scalar_src)
+    let scalar_pushes = count(scalar_ir, "sprout_gc_push_i64_root")
+
+    # Tuple result is live across the trigger -> must be rooted; scalar must not.
+    # Differential isolates the IRMakeTuple rooting from ambient rooting.
+    assert_true(state, "tuple result rooted across later call (more than scalar twin)",
+                heap_pushes > scalar_pushes)
+    summary(state)

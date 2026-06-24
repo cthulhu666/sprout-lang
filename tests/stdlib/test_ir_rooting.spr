@@ -158,6 +158,99 @@ fn test5_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Test 6: IRMakeCtor with a heap operand that is DEAD after the make.
+#
+# IR for:
+#   %a = "a"                       (heap)
+#   %r = IRMakeCtor "Box" 1 [%a]   ← trigger; %a is an operand, dead afterward
+#   ret %r
+#
+# @sprout_makeN allocates (a GC point) BEFORE storing its operand registers,
+# and — unlike @str_concat — does NOT SPROUT_HANDLE them.  So %a must be rooted
+# across the make even though it is not live after it.  Expected: 1 root.
+fn test6_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("ctor_operand", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
+        Cons(sprout_ir.IRMakeCtor("%r", "Box", 1, Cons("%a", Nil)),
+        Cons(sprout_ir.IRRet("%r"), Nil)))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# ---------------------------------------------------------------------------
+# Test 7: IRMkClosure with a heap capture that is DEAD after the mk-closure.
+#
+# IR for:
+#   %c   = "c"                       (heap)
+#   %clo = IRMkClosure "lam" [%c]    ← trigger; %c is a capture, dead afterward
+#   ret %clo
+#
+# @sprout_alloc_closure_env allocates the env (a GC point) before the capture
+# stores emitted by ir_lowering; the capture is not handle-protected, so %c
+# must be rooted across the mk-closure.  Expected: 1 root.
+fn test7_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("closure_cap", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%c", "%c_raw", "c"),
+        Cons(sprout_ir.IRMkClosure("%clo", "lam", Cons("%c", Nil)),
+        Cons(sprout_ir.IRRet("%clo"), Nil)))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# ---------------------------------------------------------------------------
+# Test 8: IRMakeTuple with a heap operand that is DEAD after the tuple build.
+#
+# IR for:
+#   %a   = "a"                 (heap)
+#   %tup = IRMakeTuple [%a]    ← trigger; %a is an operand, dead afterward
+#   ret %tup
+#
+# @sprout_alloc_tuple_blob calls sprout_gc_maybe_collect_threshold() then
+# allocates then stores the fields — so a tuple build is a GC trigger and its
+# operands are exposed, exactly like @sprout_makeN.  %a must be rooted.
+fn test8_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("tuple_operand", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
+        Cons(sprout_ir.IRMakeTuple("%tup", Cons("%a", Nil)),
+        Cons(sprout_ir.IRRet("%tup"), Nil)))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# ---------------------------------------------------------------------------
+# Test 9: IRGetTupleField result live across a later trigger.
+#
+# IR for:
+#   %a   = "a"                          (heap; tuple operand → 1 root at the build)
+#   %tup = IRMakeTuple [%a]
+#   %x   = IRGetTupleField %tup 0        (heap — the result must be tracked)
+#   %c1  = "c"; %c2 = "d"; %cd = %c1++%c2  ← trigger; %x is live across it
+#   %r   = %x ++ %cd
+#   ret %r
+#
+# %x (an IRGetTupleField result) is live across the %cd concat and is NOT that
+# op's operand, so it must be rooted there.  Pre-fix IRGetTupleField is not
+# heap-classified, so %x gets no root.  Expected post-fix: 2 pushes total
+# (%a at the tuple build, %x across the %cd concat).
+fn test9_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("tuple_extract_live", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
+        Cons(sprout_ir.IRMakeTuple("%tup", Cons("%a", Nil)),
+        Cons(sprout_ir.IRGetTupleField("%x", "%tup", 0),
+        Cons(sprout_ir.IRStrConst("%c1", "%c1_raw", "c"),
+        Cons(sprout_ir.IRStrConst("%c2", "%c2_raw", "d"),
+        Cons(sprout_ir.IRStrConcat("%cd", "%c1", "%c2"),
+        Cons(sprout_ir.IRStrConcat("%r", "%x", "%cd"),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -191,13 +284,41 @@ fn main() -> Unit !{IO} =
               count(lower(test4_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
 
     # --- Test 5: heap param %s seeded into heap_origin (S2 regression).
-    # %s is live across IRCall bar(%s) because IRMakeCtor uses it afterward.
-    # Exactly one root is pushed (for %s); no second root needed at IRMakeCtor
-    # because %s is an operand of that op, not live after it.
-    assert_eq(state, "T5: exactly one push_i64_root for heap param live across call",
-              count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T5: exactly one pop_roots(i64 1) for heap param",
-              count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    # %s is live across IRCall bar(%s) → 1 root there.  %s is ALSO an operand of
+    # the following IRMakeCtor, and @sprout_makeN allocates before storing its
+    # operands without SPROUT_HANDLE-protecting them, so %s must be rooted across
+    # the make too → a second root.  (Both roots are pop_roots(i64 1).)
+    assert_eq(state, "T5: two push_i64_root (heap param across call AND make operand)",
+              count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+    assert_eq(state, "T5: two pop_roots(i64 1) for heap param",
+              count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 2)
+
+    # --- Test 6: IRMakeCtor operand rooted across the make (PR-A regression).
+    # %a is dead after the make but must be rooted because @sprout_makeN
+    # allocates before storing operands and does not handle-protect them.
+    assert_eq(state, "T6: exactly one push_i64_root for IRMakeCtor operand",
+              count(lower(test6_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T6: exactly one pop_roots(i64 1) around the make",
+              count(lower(test6_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+
+    # --- Test 7: IRMkClosure capture rooted across the mk-closure (PR-A regression).
+    # %c is dead after the mk-closure but must be rooted because
+    # @sprout_alloc_closure_env allocates before the capture stores.
+    assert_eq(state, "T7: exactly one push_i64_root for IRMkClosure capture",
+              count(lower(test7_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T7: exactly one pop_roots(i64 1) around the mk-closure",
+              count(lower(test7_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+
+    # --- Test 8: IRMakeTuple operand rooted across the tuple build.
+    assert_eq(state, "T8: exactly one push_i64_root for IRMakeTuple operand",
+              count(lower(test8_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T8: exactly one pop_roots(i64 1) around the tuple build",
+              count(lower(test8_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+
+    # --- Test 9: IRGetTupleField result rooted across a later trigger.
+    # 2 pushes: %a at the tuple build, %x across the %cd concat.
+    assert_eq(state, "T9: two push_i64_root (tuple operand + extracted value across trigger)",
+              count(lower(test9_program()), "call i64 @sprout_gc_push_i64_root"), 2)
 
     # --- Header declares the rooting runtime functions.
     assert_true(state, "header declares @sprout_gc_push_i64_root",

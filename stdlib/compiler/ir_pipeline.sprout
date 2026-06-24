@@ -169,20 +169,24 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                   | Err msg -> Err(msg)
                                   | Ok init_pair ->
                                     match init_pair with
-                                    | (init_fn, init_lifted) ->
-                                      # Root init fn (and any wrappers synthesized for its
-                                      # let-initializer bodies, e.g. partial applications) with an
-                                      # empty map — names absent → default 0, matching the wrapper
-                                      # rooting convention and the batch path.
-                                      match emit_lifted_then_fn(init_lifted, init_fn, dict_empty(),
-                                                        StreamState(next_idx2, str_acc, bodies_acc,
-                                                                    defined, has_user_main)) with
-                                      | Err msg -> Err(msg)
-                                      | Ok final_state ->
-                                          match final_state with
-                                          | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 ->
-                                              assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2,
-                                                              let_globals, ctor_regs, externs)
+                                    | (init_fn, init_lifted, init_idx) ->
+                                      do
+                                        # Build init's idx_map: __sprout_init_globals' own next-free
+                                        # idx plus every lifted-lambda index (incl. wrappers
+                                        # synthesized for let-initializer bodies, e.g. partial
+                                        # applications) so root-slot names don't collide with the
+                                        # function's body temps (%t0..).
+                                        lifted_idx <- ref_read(lifted_idx_ref)
+                                        let init_idx_map = dict_set("__sprout_init_globals", init_idx, lifted_idx)
+                                        match emit_lifted_then_fn(init_lifted, init_fn, init_idx_map,
+                                                          StreamState(next_idx2, str_acc, bodies_acc,
+                                                                      defined, has_user_main)) with
+                                        | Err msg -> Err(msg)
+                                        | Ok final_state ->
+                                            match final_state with
+                                            | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 ->
+                                                assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2,
+                                                                let_globals, ctor_regs, externs)
 
 # Assemble the final LLVM IR text from accumulators.
 # Mirrors lower_program_body exactly.

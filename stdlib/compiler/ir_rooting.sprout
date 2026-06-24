@@ -46,6 +46,9 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
   # IRMkClosure allocates env via @sprout_alloc_closure_env; trigger.
   | sprout_ir.IRMkClosure _ _ _ -> true
+  # IRMakeTuple lowers to @sprout_alloc_tuple_blob which calls
+  # sprout_gc_maybe_collect_threshold() before allocating; trigger.
+  | sprout_ir.IRMakeTuple _ _ -> true
   # IRApplyClosure does an indirect call to a user-provided code-ptr; conservative trigger.
   | sprout_ir.IRApplyClosure _ _ _ -> true
   # IRLoadEnvSlot is a pure i64 load — does NOT trigger GC.
@@ -107,6 +110,13 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
       | sprout_ir.IRTScalar -> Nothing
       | _ -> Just(r)
   | sprout_ir.IRGetTag _ _ -> Nothing
+  # A tuple blob (@sprout_alloc_tuple_blob) is heap; a value held live across a
+  # later trigger must be rooted.
+  | sprout_ir.IRMakeTuple r _ -> Just(r)
+  # IRGetTupleField extracts a tuple field.  The op carries no kind, so treat
+  # the result conservatively as heap (it commonly carries List/ADT values,
+  # e.g. the accumulator returned from maybe_wrap's (List IROp, Int) tuple).
+  | sprout_ir.IRGetTupleField r _ _ -> Just(r)
   # IRAbortMatch defines no value (/code-review fix #15: void noreturn).
   | sprout_ir.IRAbortMatch -> Nothing
   # Width-conversion ops produce i64/i1 scalars — never heap.
@@ -433,6 +443,48 @@ fn live_across_loop(in_scope_ord_rev: List String,
 fn live_across(in_scope_ord_rev: List String, live_after_op: Set) -> List String =
   live_across_loop(in_scope_ord_rev, live_after_op, Nil)
 
+# Some allocating triggers store their operand registers only AFTER the
+# allocation that can fire GC, and (unlike @str_concat, which SPROUT_HANDLEs
+# its inputs first) do NOT protect those operands.  Their heap operands must
+# therefore be rooted across the op even when they are dead afterward:
+#   IRMakeCtor    -> @sprout_makeN: allocate, then store fields.
+#   IRMkClosure   -> @sprout_alloc_closure_env: allocate env, then store caps.
+# IRApplyClosure / IRCall do not allocate before handing operands to a callee
+# that roots its own params, so they are excluded.
+fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRMakeCtor _ _ _ _ -> true
+  | sprout_ir.IRMkClosure _ _ _ -> true
+  # @sprout_alloc_tuple_blob allocates, then the lowering stores the element
+  # operands — same store-after-alloc exposure as @sprout_makeN.
+  | sprout_ir.IRMakeTuple _ _ -> true
+  | _ -> false
+
+# Set of an op's operand names.  O(uses).
+fn op_operand_set(op: sprout_ir.IROp) -> Set =
+  list_fold(\ (acc, u) -> set_insert(u, acc), set_empty(), op_uses(op))
+
+# Like live_across, but also keeps any in-scope value that is an operand of
+# this op (def order preserved, deduped by the single traversal).
+fn roots_across_loop(in_scope_ord_rev: List String,
+                     live_after_op: Set,
+                     operands: Set,
+                     acc: List String) -> List String =
+  match in_scope_ord_rev with
+  | Nil -> acc
+  | Cons v rest ->
+      if set_member(v, live_after_op) || set_member(v, operands)
+      then roots_across_loop(rest, live_after_op, operands, Cons(v, acc))
+      else roots_across_loop(rest, live_after_op, operands, acc)
+
+# Values to root across `op`: those live after it, plus — for operand-exposing
+# allocating ops — its own heap operands.  O(in_scope * uses).
+fn roots_across(in_scope_ord_rev: List String, live_after_op: Set,
+                op: sprout_ir.IROp) -> List String =
+  if op_exposes_operands(op)
+  then roots_across_loop(in_scope_ord_rev, live_after_op, op_operand_set(op), Nil)
+  else live_across(in_scope_ord_rev, live_after_op)
+
 # Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
 # slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
 # prefix: "%t" for user fns; "%t$" for lifted lambdas (avoids colliding with
@@ -470,7 +522,7 @@ fn maybe_wrap(op: sprout_ir.IROp,
               prefix: String,
               acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   if op_triggers_gc(op)
-  then maybe_wrap_trigger(op, live_across(in_scope_ord, live_after_op), idx, prefix, acc)
+  then maybe_wrap_trigger(op, roots_across(in_scope_ord, live_after_op, op), idx, prefix, acc)
   else (Cons(op, acc), idx)
 
 # Carry both a reverse-definition-order list and dedup via list_member.

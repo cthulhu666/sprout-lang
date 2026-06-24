@@ -274,14 +274,15 @@ fn main() -> Unit !{IO} =
     assert_true(state, "rooting: IRGetField heap result has a root-pop call",
                 contains(lower_with_roots(field_program_heap()),
                          "call i64 @sprout_gc_pop_roots"))
-    # Negative control: IRGetField with kind="scalar" across the SAME
-    # cross-trigger shape must NOT push a root — scalar fields are i64
-    # values (Int), not GC handles.  Differs from field_program_scalar
-    # above (which has no trigger at all) — this version exercises the
+    # Negative control: the SCALAR IRGetField result %n must NOT be rooted —
+    # scalar fields are i64 values (Int), not GC handles.  (The trailing
+    # IRMakeCtor's heap operand %marker IS rooted now — @sprout_makeN exposes
+    # its operands — so we check specifically that %n is never stored into a
+    # root slot, not that no root exists at all.)  This exercises the
     # heap-vs-scalar discrimination in op_produces_simple_heap.
-    assert_false(state, "rooting: IRGetField scalar across trigger does NOT push a root",
+    assert_false(state, "rooting: scalar IRGetField result %n is NOT rooted",
                  contains(lower_with_roots(field_program_scalar_across_trigger()),
-                          "call i64 @sprout_gc_push_i64_root"))
+                          "store i64 %n, ptr"))
 
     # =================================================================
     # Phase 2 — translator-driven tests for ast_to_ir.translate_match.

@@ -4237,7 +4237,7 @@ export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.Typed
                                      fn_arities: Dict Int,
                                      lambda_ctr_ref: Ref Int,
                                      lifted_idx_ref: Ref (Dict Int)) ->
-    Result String (sprout_ir.IRFunction, List sprout_ir.IRFunction) !{IO} =
+    Result String (sprout_ir.IRFunction, List sprout_ir.IRFunction, Int) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
     match synthesize_init_body_loop(runtime_lets, ctors, "entry", Nil, Nil, 0,
@@ -4246,7 +4246,10 @@ export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.Typed
     | Err msg -> Err(msg)
     | Ok pair ->
         match pair with
-        | (blocks, cur_lbl, cur_ops, _next_idx) ->
+        # next_idx is the next-free %tN index after the init body; it MUST be
+        # registered in idx_map for "__sprout_init_globals" so the rooting pass
+        # picks collision-free root-slot names (else %t0.. collide with body).
+        | (blocks, cur_lbl, cur_ops, next_idx) ->
             do
               lifted <- ref_read(lifted_ref)
               Ok((sprout_ir.IRFunction("__sprout_init_globals", Nil, "void",
@@ -4255,7 +4258,7 @@ export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.Typed
                                                 list_append(cur_ops,
                                                   Cons(sprout_ir.IRRetVoid, Nil))),
                                          Nil))),
-                   list_reverse(lifted)))
+                   list_reverse(lifted), next_idx))
 
 fn synthesize_init_body_loop(runtime_lets: List (String, typed_ast.TypedExpr),
                               ctors: Dict (Int, Int, Int, String),
@@ -4339,22 +4342,31 @@ fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
       | Ok pair ->
           match pair with
           | (fns, idx_map) ->
-              do
-                lifted_idx <- ref_read(lifted_idx_ref)
-                match merge_idx_dicts(idx_map, lifted_idx) with
-                | Err msg -> Err(msg)
-                | Ok merged ->
-                    match runtime_lets with
-                    | Nil -> Ok((sprout_ir.IRProgram(fns, let_globals, ctor_regs, externs), merged))
-                    | _ ->
-                        match synthesize_init_globals_fn(runtime_lets, ctors,
-                                                          top_level_set, let_names, fn_arities,
-                                                          lambda_ctr_ref, lifted_idx_ref) with
-                        | Err msg -> Err(msg)
-                        | Ok init_pair ->
-                            match init_pair with
-                            | (init_fn, init_lifted) ->
+              match runtime_lets with
+              | Nil ->
+                  do
+                    lifted_idx <- ref_read(lifted_idx_ref)
+                    match merge_idx_dicts(idx_map, lifted_idx) with
+                    | Err msg -> Err(msg)
+                    | Ok merged -> Ok((sprout_ir.IRProgram(fns, let_globals, ctor_regs, externs), merged))
+              | _ ->
+                  match synthesize_init_globals_fn(runtime_lets, ctors,
+                                                    top_level_set, let_names, fn_arities,
+                                                    lambda_ctr_ref, lifted_idx_ref) with
+                  | Err msg -> Err(msg)
+                  | Ok init_pair ->
+                      match init_pair with
+                      | (init_fn, init_lifted, init_idx) ->
+                          do
+                            # Read lifted-idx AFTER init synthesis so lambdas lifted
+                            # while translating let-initializer bodies are registered,
+                            # and record __sprout_init_globals' own next-free idx.
+                            lifted_idx <- ref_read(lifted_idx_ref)
+                            match merge_idx_dicts(idx_map, lifted_idx) with
+                            | Err msg -> Err(msg)
+                            | Ok merged ->
                                 Ok((sprout_ir.IRProgram(
                                       list_append(fns, list_append(init_lifted, Cons(init_fn, Nil))),
-                                      let_globals, ctor_regs, externs), merged))
+                                      let_globals, ctor_regs, externs),
+                                    dict_set("__sprout_init_globals", init_idx, merged)))
   where externs = collect_extern_decls(decls)
