@@ -1253,6 +1253,19 @@ static void print_inline_value(long long v) {
   } else if (node != NULL && node->kind == SPROUT_HEAP_RANGE) {
     IntRangeVal* value = (IntRangeVal*)node->ptr;
     printf("%lld..%lld", value->start, value->end);
+  } else if (node != NULL && node->kind == SPROUT_HEAP_TUPLE) {
+    /* Tuple blob: aux_slots words, each a value (recurse).  Renders
+       structurally like an ADT — e.g. (1, 7) — consistent with print's
+       Bool-as-i64 semantics (print(true) prints 1, not "true"). */
+    size_t n = node->aux_slots;
+    printf("(");
+    for (size_t i = 0; i < n; i++) {
+      if (i > 0) printf(", ");
+      long long word;
+      memcpy(&word, (const char*)node->ptr + i * sizeof(uintptr_t), sizeof(word));
+      print_inline_value(word);
+    }
+    printf(")");
   } else if (is_obj_handle(v)) {
     print_inline_obj(unbox_ptr(v));
   } else {

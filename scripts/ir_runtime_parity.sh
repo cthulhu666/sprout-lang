@@ -192,6 +192,25 @@ process_file() {
   local typed_rc
   typed_rc="$(run_bin "$typed_bin" "$typed_out")"
 
+  # Golden mode: for ABI-divergent constructs (tuples/closures) the direct path
+  # is NOT a valid reference — e.g. direct silently drops `print(tuple)` while
+  # typed renders it structurally.  When a golden file exists we assert the
+  # typed output against it directly (a stronger check than typed==direct), which
+  # is the gate's intended post-flip form once direct codegen is retired.
+  local golden="$REPO_ROOT/tests/golden/runtime/$label.out"
+  if [[ -f "$golden" ]]; then
+    if [[ "$typed_rc" -eq 0 ]] && cmp -s "$golden" "$typed_out"; then
+      n_ok=$((n_ok + 1))
+      RESULTS+=("OK             $label  [golden]")
+      return
+    fi
+    n_typed_runtime=$((n_typed_runtime + 1))
+    RESULTS+=("TYPED-GOLDEN   $label  (typed exit=$typed_rc)")
+    RESULTS+=("  golden: $(head -1 "$golden" 2>/dev/null || true)")
+    RESULTS+=("  typed : $(head -1 "$typed_out" 2>/dev/null || true)")
+    return
+  fi
+
   # Compare stdout (file-to-file to preserve trailing newlines) and exit code
   if [[ "$typed_rc" -eq "$direct_rc" ]] && cmp -s "$direct_out" "$typed_out"; then
     n_ok=$((n_ok + 1))
