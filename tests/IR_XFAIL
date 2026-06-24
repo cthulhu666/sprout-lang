@@ -101,8 +101,8 @@
 #    ~2 entries — pre-existing direct-codegen xfails (unresolved name in source)
 
 # === examples/ ===
-examples/aoc_2025_day_1.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
-examples/aoc_2025_day_2.sprout                 # multiple definition of local 't0' (pre-existing codegen dup-block)
+# aoc_2025_day_1/2 cleared by the P11-2e init-globals idx_map fix (was the
+# 't0' root-slot collision); removed from xfail.
 examples/astar.sprout                          # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/nqueens.sprout                        # multiple definition of local 't0' (pre-existing codegen dup-block)
 examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfail (unresolved name in source)
@@ -112,5 +112,5 @@ examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfa
 tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
 tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
 tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
-tests/stdlib/test_string.spr                   # multiple definition of local 't0' (pre-existing codegen dup-block)
-tests/stdlib/test_to_string.spr                # multiple definition of local 't0' (pre-existing codegen dup-block)
+# test_string / test_to_string cleared by the P11-2e init-globals idx_map fix
+# (was the 't0' root-slot collision); removed from xfail.
