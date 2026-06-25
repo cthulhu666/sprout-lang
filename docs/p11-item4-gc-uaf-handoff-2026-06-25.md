@@ -1,8 +1,59 @@
 # PR 11 Item 4 — GC use-after-free class (self-hosting backend) — handoff
 
 **Date:** 2026-06-25
-**Status:** Root cause UNPINNED. Two hypotheses falsified (see §Falsified). Diagnosis,
-tooling, and repro are banked here for a fresh, dedicated attempt.
+**Status:** ✅ FIXED & VERIFIED (2026-06-25 PM). The typed path (`ir_rooting.sprout`)
+failed to root heap **operands of an `IRCall`** across the call; `ref_new` GCs (via
+`sprout_gc_maybe_collect_threshold`) before storing its argument, so the unrooted
+operand was swept and `ref_new` stored a dangling pointer. Fix: `op_exposes_operands(IRCall)
+→ true`. All three instances (ctors, match, closures) now pass under `SPROUT_GC_STRESS=1`
+and are gated in `test-stress` STRESS_FILES. See §ROOT CAUSE and §RESOLUTION.
+
+## RESOLUTION
+
+- **Fix:** `stdlib/compiler/ir_rooting.sprout` `op_exposes_operands(IRCall)` flipped
+  `false → true`. Roots in-scope heap operands across every call (the operand is live
+  *during* the call but dead *after*, so the live-after seed alone missed it). Purely
+  additive — only adds roots, can never cause a UAF. `op_uses(IRCall)` returns the
+  operand names, so exactly the heap operands get rooted; scalars/out-of-scope are skipped.
+- **Why universal, not a `ref_new` whitelist:** the typed path can't cheaply know which
+  callees alloc-before-store; this matches `op_triggers_gc`'s existing "every call may
+  allocate" stance and the direct `--emit-ir` path. Confirmed multi-site: hand-rooting one
+  `ref_new` operand moved the crash to the next, proving a per-site fix is whack-a-mole.
+- **All three were the same class.** ctors/match presented as `non-exhaustive match` (the
+  swept node was reused as a different-tag ctor, read via `sprout_tag`); closures as
+  `EXC_BAD_ACCESS` (the swept value was wild-dereferenced). One fix covers all three.
+- **Regression:** `test_ir_rooting.spr` T11 (IRCall with a heap operand dead-after-call →
+  exactly 1 root; verified RED at 0 roots pre-fix). ctors/match/closures promoted from
+  STRESS_XFAIL to gated STRESS_FILES; all green under `SPROUT_GC_STRESS=1`.
+- **Diagnostic banked:** `SPROUT_GC_LINEAGE=1` (runtime) — see §Tooling. Committed
+  separately ahead of the compiler fix; reusable for the next rooting UAF.
+
+## ROOT CAUSE (PINNED)
+
+Pinned with new runtime instrumentation `SPROUT_GC_LINEAGE=1` (poison-on-free +
+free-backtrace stashed in the corpse; aborts at the `sprout_tag` read of a poisoned
+ptr). Free backtrace of the `ctors` victim:
+```
+sprout_gc_collect_with_reason  <- ref_new  <- __sprout_ir_lambda_119  <- translate_decls ...
+```
+- `runtime/sprout_runtime.c` `ref_new` (~851): calls `sprout_gc_maybe_collect_threshold()`
+  BEFORE `r->value = value`. The arg `value` is passed in a register, unrooted.
+- Typed IR `__sprout_ir_lambda_119`: `%t$10 = sprout_make0(6)` (Nil) then
+  `%t$11 = ref_new(%t$10)`. The roots pushed across `ref_new` are the env captures
+  (`params_with_kinds`, `t$0..t$9`) — **`%t$10` is NOT rooted**.
+- **Differential proof:** direct `--emit-ir` `new_state` roots the `ref_new` operand:
+  `%t45581 = dict_empty()` → `push_i64_root` → `ref_new(%t45581)` → `pop_roots(1)`.
+  Direct roots heap operands of GC-triggering calls; typed misses `ref_new`.
+- **Fix locus:** `stdlib/compiler/ir_rooting.sprout` — `ref_new` (and any allocating
+  runtime call) must be classified so its heap operands are rooted ACROSS the call,
+  exactly as `sprout_make*` operands are. The gap: typed rooting seeds from values
+  live *after* the op; a call's own operand is live *during* but dead *after*, so it
+  is missed unless the call is explicitly classified as exposing/rooting operands.
+
+---
+
+*(Historical context below — the investigation notes, falsified hypotheses, and
+repro that led to the fix are retained for the record.)*
 
 ---
 
@@ -87,12 +138,40 @@ SPROUT_GC_DISABLE=1 /tmp/c   # SUITE PASSED → confirms GC-caused
   *(The fixpoint-liveness fix is a genuine separate correctness improvement worth
   revisiting on its own — but only with a plan for the closures fallout, which proves
   there are MORE latent UAFs that more-rooting exposes rather than fixes.)*
+  **NOTE (post-fix):** the H2 "T11" above refers to a *reverted, never-landed* fixpoint
+  experiment — distinct from the **landed `test_ir_rooting.spr` T11** (IRCall heap operand
+  dead-after-call), which is the regression for the actual item-4 fix. The fixpoint-liveness
+  cross-block improvement remains an open, independent follow-up. Notably, item-4's operand-
+  rooting fix (`op_exposes_operands(IRCall)`) fixed `closures` cleanly — the H2 closures
+  fallout came from the *different* fixpoint change, not from operand rooting.
 
 ---
 
-## Tooling (built this session)
+## Tooling
 
-`scripts/gc_free_trace.py` — added a **`gctracetag <fn> <legal-tags>`** lldb command
+### `SPROUT_GC_LINEAGE=1` (runtime — THE tool that pinned this bug)
+
+Env-gated mode in `runtime/sprout_runtime.c` (zero effect when unset). On collection it
+**poisons swept OBJ payloads** (tag → `0xDEADBEEF`) instead of recycling them onto the
+freelist, **leaks (retains)** the object so the address is never reused, and **stashes the
+free-time backtrace in the corpse** (`f1`=frames, `f2`=count). `sprout_tag` then aborts the
+instant a dangling reference reads a poisoned tag, dumping that backtrace — which names the
+allocation that triggered the fatal collection (= the site across which the victim was
+live-but-unrooted). In-process, exact keying (same C ptr), no lldb fragility. Usage:
+```sh
+clang -c runtime/sprout_runtime.c -O1 -g -o /tmp/rt_dbg.o     # legible C frames
+B=build/compile_driver_bin_stage1
+$B --use-ir-codegen stdlib tests/stdlib/test_ir_codegen_ctors.spr > /tmp/c.ll 2>/dev/null
+clang /tmp/c.ll /tmp/rt_dbg.o -framework Security -framework CoreFoundation -o /tmp/c
+SPROUT_GC_STRESS=1 SPROUT_GC_LINEAGE=1 /tmp/c    # aborts with the free backtrace
+```
+**Limitation:** only `SPROUT_HEAP_OBJ` is poisoned. A closure/vector/etc. victim takes the
+`free(node->ptr)` path and won't be caught — extend the poison to those kinds if a
+non-OBJ UAF is suspected.
+
+### `scripts/gc_free_trace.py` (lldb — superseded by the above)
+
+Added a **`gctracetag <fn> <legal-tags>`** lldb command
 (alongside the existing `gctrace`). It records every alloc/free and **stops when the
 watched fn is entered with a scrutinee whose tag (offset 0) is not legal** — robust to
 freed-then-reallocated addresses (the old `gctrace` free-history check false-positives on

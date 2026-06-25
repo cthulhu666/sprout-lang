@@ -491,8 +491,14 @@ fn live_across(in_scope_ord_rev: List String, live_after_op: Set) -> List String
 # therefore be rooted across the op even when they are dead afterward:
 #   IRMakeCtor    -> @sprout_makeN: allocate, then store fields.
 #   IRMkClosure   -> @sprout_alloc_closure_env: allocate env, then store caps.
-# IRApplyClosure / IRCall do not allocate before handing operands to a callee
-# that roots its own params, so they are excluded.
+# IRCall is in the SAME class: a runtime builtin may collect BEFORE consuming
+# its operands.  @ref_new calls sprout_gc_maybe_collect_threshold() and
+# allocates the RefVal before `r->value = value`, so an unrooted heap operand is
+# swept and a dangling pointer is stored (PR 11 item 4 GC-UAF).  The direct
+# --emit-ir path roots call operands across the call; the typed path must match.
+# We can't cheaply know which callees alloc-before-store, so root the operands of
+# ALL calls — matching op_triggers_gc's "every call may allocate" conservatism.
+# Purely additive (only adds roots; can never cause a UAF, at worst over-retains).
 fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   match op with
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
@@ -500,10 +506,13 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # @sprout_alloc_tuple_blob allocates, then the lowering stores the element
   # operands — same store-after-alloc exposure as @sprout_makeN.
   | sprout_ir.IRMakeTuple _ _ -> true
+  # A call may collect before consuming its operands (e.g. @ref_new); root the
+  # heap operands across the call.  See the function-level comment above.
+  | sprout_ir.IRCall _ _ _ _ -> true
   # Everything else does NOT expose operands: str builtins SPROUT_HANDLE their
-  # inputs before allocating; calls hand operands to a callee that roots its own
-  # params; the rest do not allocate.  EXHAUSTIVE on purpose — no `_` catch-all,
-  # so a new allocating IROp is a COMPILE ERROR until its exposure is decided.
+  # inputs before allocating; the rest do not allocate.  EXHAUSTIVE on purpose —
+  # no `_` catch-all, so a new allocating IROp is a COMPILE ERROR until its
+  # exposure is decided.
   | sprout_ir.IRConst _ _ -> false
   | sprout_ir.IRRet _ -> false
   | sprout_ir.IRRetVoid -> false

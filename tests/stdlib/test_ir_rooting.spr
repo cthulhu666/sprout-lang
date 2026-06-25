@@ -271,6 +271,31 @@ fn test10_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Test 11: IRCall with a heap operand that is DEAD after the call (PR 11 item 4
+# GC-UAF regression).
+#
+# IR for:
+#   %a = "a"                                   (heap)
+#   %r = IRCall ref_new IRTUnknown [%a]        ← trigger; %a operand, dead afterward
+#   ret %r
+#
+# @ref_new calls sprout_gc_maybe_collect_threshold() and allocates the RefVal
+# BEFORE `r->value = value` — so it can collect before consuming its operand,
+# exactly like @sprout_makeN.  %a is NOT live after the call, so live_across
+# alone misses it; the operand must be rooted because IRCall exposes operands.
+# Pre-fix (IRCall not exposing operands): 0 roots → this test FAILS.
+# Post-fix: exactly 1 root.  Distinct from T5, where %s is live-AFTER the call.
+fn test11_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("call_operand", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTUnknown, "ref_new", Cons("%a", Nil)),
+        Cons(sprout_ir.IRRet("%r"), Nil)))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -343,6 +368,14 @@ fn main() -> Unit !{IO} =
     # --- Test 10: value live across IRMakeTuple is rooted (IRMakeTuple is a trigger).
     assert_eq(state, "T10: one push_i64_root (heap value live across IRMakeTuple)",
               count(lower(test10_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+
+    # --- Test 11: IRCall operand rooted across the call (PR 11 item 4 regression).
+    # %a is dead after the call but must be rooted because @ref_new (and any
+    # runtime builtin) may collect before consuming its operand.
+    assert_eq(state, "T11: exactly one push_i64_root for IRCall operand",
+              count(lower(test11_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T11: exactly one pop_roots(i64 1) around the call",
+              count(lower(test11_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
 
     # --- Header declares the rooting runtime functions.
     assert_true(state, "header declares @sprout_gc_push_i64_root",

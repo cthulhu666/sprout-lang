@@ -798,13 +798,17 @@ test-stress: bootstrap-from-seed
   trap 'rm -rf "$TMPD"' EXIT
   clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
     || { echo "test-stress: runtime compile failed" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
-  # Gated (must pass under stress):
-  STRESS_FILES="tests/stdlib/test_ir_rooting.spr"
+  # Gated (must pass under stress).  ctors/match/closures promoted here once the
+  # PR 11 item 4 GC-UAF was fixed (ir_rooting: IRCall now roots its heap operands
+  # across the call; @ref_new and other builtins may collect before consuming an
+  # operand).  All three were the same class — they presented differently (tag-
+  # read abort vs EXC_BAD_ACCESS) only by how the swept address was reused.
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
   # STRESS_FILES as each is fixed (an UNEXPECTED PASS flags that it's ready).
-  STRESS_XFAIL="tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr"
+  STRESS_XFAIL=""
   failed=0
   run_one() {  # prints "ok" or "fail"; never exits
     local f="$1" name ll bin out
