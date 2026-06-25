@@ -4,6 +4,19 @@ on:
   push:
     branches: [master]
   pull_request:
+  schedule:
+    # Nightly run of the (non-blocking) typed-codegen probe, which is kept off
+    # the PR critical path below. 03:00 UTC = low-traffic window.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+# Single self-hosted runner: a superseded run blocks the next for hours. Group
+# by ref and cancel in-progress runs of the same ref so a fresh push (or a
+# rebase/force-push on a PR) reclaims the runner immediately. The ref-scoped
+# group keeps PRs from cancelling each other or master.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -92,6 +105,11 @@ jobs:
   # removes `continue-on-error` to flip this gate to required.
   # See /Users/cthulhu/.claude/plans/witty-brewing-wolf.md.
   test-ir:
+    # Off the PR critical path. This typed-codegen probe is non-blocking
+    # (continue-on-error) and adds ~55 min on the single runner, so running it
+    # per-PR only delays feedback. Run it on master pushes + the nightly
+    # schedule (and manual dispatch) instead — never on pull_request events.
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: [self-hosted, linux-x86_64]
     continue-on-error: true
     steps:
