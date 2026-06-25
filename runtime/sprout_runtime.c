@@ -19,6 +19,7 @@
 #include <signal.h>
 #include <termios.h>
 #include <unistd.h>
+#include <execinfo.h>
 #ifdef __APPLE__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -435,6 +436,19 @@ static void sprout_gc_log_cycle(
     g_gc_live_ref, g_gc_live_cstr, (double)g_gc_live_cstr_bytes / 1024.0,
     g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple, g_gc_live_range
   );
+}
+
+/* SPROUT_GC_LINEAGE=1 — diagnostic mode for the rooting use-after-free class.
+   When on, swept OBJ payloads are NOT recycled onto the freelist; instead their
+   tag is poisoned to SPROUT_GC_POISON_TAG and the object is leaked (retained).
+   A later read via sprout_tag of a dangling reference then sees the poison and
+   aborts at the exact use site instead of silently walking a reused object.
+   Leaking is acceptable: this mode is for short diagnostic runs only. */
+#define SPROUT_GC_POISON_TAG ((long long)0xDEADBEEF)
+static int g_gc_lineage = -1;
+static int sprout_gc_lineage_on(void) {
+  if (g_gc_lineage < 0) { const char* e = getenv("SPROUT_GC_LINEAGE"); g_gc_lineage = (e && e[0] == '1') ? 1 : 0; }
+  return g_gc_lineage;
 }
 
 static int g_gc_stress = -1;
@@ -1039,6 +1053,19 @@ static void sprout_gc_free_payload(ManagedNode* node) {
   switch (node->kind) {
     case SPROUT_HEAP_OBJ: {
       SproutObj* obj = (SproutObj*)node->ptr;
+      if (sprout_gc_lineage_on()) {
+        /* Poison and retain (leak) instead of recycling, so a dangling
+           reference reads the poison tag at its use site (see sprout_tag).
+           Stash the free-time backtrace in the corpse (f1=frames, f2=count):
+           it names the allocation that triggered this collection, i.e. the
+           site across which the victim was live-but-unrooted. */
+        void** frames = (void**)malloc(sizeof(void*) * 32);
+        int n = frames ? backtrace(frames, 32) : 0;
+        obj->tag = SPROUT_GC_POISON_TAG;
+        obj->f1 = (long long)(uintptr_t)frames;
+        obj->f2 = (long long)n;
+        return;
+      }
       obj->f0 = (long long)(uintptr_t)g_sprout_obj_freelist;
       g_sprout_obj_freelist = obj;
       return;
@@ -3272,6 +3299,26 @@ long long sprout_tag(long long h) {
     abort();
   }
   SproutObj* obj = unbox_ptr(h);
+  if (sprout_gc_lineage_on() && obj->tag == SPROUT_GC_POISON_TAG) {
+    fprintf(stderr,
+            "\n=== USE-AFTER-FREE: sprout_tag read poisoned ptr 0x%llx ===\n",
+            (unsigned long long)h);
+    if (g_sprout_current_fn != NULL)
+      fprintf(stderr, "  (reading fn: %s)\n", g_sprout_current_fn);
+    void** frames = (void**)(uintptr_t)obj->f1;
+    int n = (int)obj->f2;
+    if (frames != NULL && n > 0) {
+      fprintf(stderr,
+              "  free backtrace (collection that swept the victim; the alloc\n"
+              "  frame above the GC chain is the unrooted-live-across site):\n");
+      fflush(stderr);
+      backtrace_symbols_fd(frames, n, fileno(stderr));
+    } else {
+      fprintf(stderr, "  (no free backtrace recorded)\n");
+      fflush(stderr);
+    }
+    abort();
+  }
   return obj->tag;
 }
 long long sprout_field(long long h, long long idx) {
