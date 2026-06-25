@@ -73,6 +73,52 @@ def _on_watch(frame, bp_loc, d):
     return False
 
 
+_VALID_TAGS = [None]   # set by gctracetag: only these tags are legal for the watched scrutinee
+
+
+def _on_watch_tag(frame, bp_loc, d):
+    # Content check (robust to freed-then-reallocated addresses): fire when the
+    # watched fn is entered with a scrutinee whose tag is not a legal one.  This
+    # catches the exact entry that would `sprout_abort_match`, then dumps the
+    # node's recorded alloc/free lineage (the free backtrace is the unrooted
+    # live-across-alloc site).  Tag is at offset 0 of the (identity-unboxed) ptr.
+    arg = frame.FindRegister("x0").GetValueAsUnsigned()
+    if not arg:
+        return False
+    err = lldb.SBError()
+    tag = frame.thread.process.ReadUnsignedFromMemory(arg, 8, err)
+    if not err.Success():
+        return False
+    if tag in _VALID_TAGS[0]:
+        return False
+    print("\n=== CORRUPT SCRUTINEE: watched fn entered with ptr 0x%x, tag=%d (legal: %s) ===" % (arg, tag, sorted(_VALID_TAGS[0])))
+    evs = _hist.get(arg)
+    if not evs:
+        print("  (no recorded alloc/free history for this address — not a managed ptr or pre-trace)")
+    else:
+        for ev, o, k, frs in evs:
+            print("--- %-5s order=%d kind=%s" % (ev, o, k))
+            for fn in frs:
+                print("      " + fn)
+    return True   # STOP
+
+
+def _cmd_gctracetag(debugger, command, result, internal_dict):
+    parts = command.split()
+    if len(parts) != 2:
+        print("usage: gctracetag <watch_fn_name> <comma-separated-legal-tags>")
+        return
+    watch_fn = parts[0]
+    _VALID_TAGS[0] = set(int(t) for t in parts[1].split(","))
+    target = debugger.GetSelectedTarget()
+    for name, cb in (("register_managed_ptr", "_on_alloc"),
+                     ("sprout_gc_free_payload", "_on_free"),
+                     (watch_fn, "_on_watch_tag")):
+        bp = target.BreakpointCreateByName(name)
+        bp.SetScriptCallbackFunction("gc_free_trace." + cb)
+    print("gctracetag armed: alloc/free recorded; stop when %s sees tag not in %s" % (watch_fn, sorted(_VALID_TAGS[0])))
+
+
 def _cmd_gctrace(debugger, command, result, internal_dict):
     watch_fn = command.strip()
     if not watch_fn:
@@ -89,3 +135,4 @@ def _cmd_gctrace(debugger, command, result, internal_dict):
 
 def __lldb_init_module(debugger, internal_dict):
     debugger.HandleCommand("command script add -f gc_free_trace._cmd_gctrace gctrace")
+    debugger.HandleCommand("command script add -f gc_free_trace._cmd_gctracetag gctracetag")
