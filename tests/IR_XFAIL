@@ -111,8 +111,9 @@ examples/sentry_issue_browser.sprout           # pre-existing direct-codegen xfa
 examples/sentry_issue_browser_tui.sprout       # pre-existing direct-codegen xfail (unresolved name in source)
 
 # === tests/stdlib/ ===
-tests/stdlib/test_deriving_eq_parametric.spr   # __unresolved_Eq__ (typeclass dispatch gap)
-tests/stdlib/test_deriving_to_string.spr       # __unresolved_ToString__ (typeclass dispatch gap)
-tests/stdlib/test_eq_operator_adt_dispatch.spr # __unresolved_Eq__ (typeclass dispatch gap)
+# deriving_eq_parametric / deriving_to_string / eq_operator_adt_dispatch cleared:
+# typed codegen now null-fills the `__unresolved_<Class>` inner-dict sentinel
+# that lowering emits for free-type-var dicts (provably never invoked), matching
+# direct codegen.  See ast_to_ir.sprout TVar fallthrough.
 # test_string / test_to_string cleared by the P11-2e init-globals idx_map fix
 # (was the 't0' root-slot collision); removed from xfail.

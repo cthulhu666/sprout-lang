@@ -754,7 +754,25 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                              list_append(cur_ops,
                                Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), wrapper_name, Nil), Nil)),
                              fresh_name(name_prefix, idx), idx + 1))
-                  | Nothing -> Err("ast_to_ir: unbound variable '" ++ name ++ "'")
+                  | Nothing ->
+                      # An unbound name at codegen is always a compiler-internal
+                      # sentinel — genuine unbound vars are rejected at typecheck,
+                      # before lowering. `lowering` mints `__unresolved_<Class>...`
+                      # TVars for inner typeclass dicts whose type var is free
+                      # (e.g. `ToString a` for `to_string(Empty)`, `Empty : Box a`).
+                      # Such a dict is provably never invoked: it goes unresolved
+                      # iff its type var is free iff no value of that type is present
+                      # iff the method body never reaches the dict. Null-fill with
+                      # `i64 0`, matching the unresolved-dict slot direct codegen emits.
+                      # Every OTHER unknown name stays a hard error — keeping this
+                      # path stricter than direct codegen, a backstop for future
+                      # compiler regressions.
+                      if str_starts_with(name, "__unresolved_")
+                      then Ok((Nil, cur_label,
+                                list_append(cur_ops,
+                                  Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
+                                fresh_name(name_prefix, idx), idx + 1))
+                      else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
   | typed_ast.TBinary op left right _ _ ->
       translate_binary(op, left, right, params, ctors, idx, cur_label, cur_ops,
                        captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,

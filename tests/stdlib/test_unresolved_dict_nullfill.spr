@@ -1,0 +1,28 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression: parametric `deriving (ToString)` with a nullary constructor.
+#
+# `to_string(Empty)` has type `Box a` with a FREE type variable `a` — lowering
+# cannot (and need not) resolve the inner `ToString a` dict, so it emits an
+# `__unresolved_ToString_` sentinel. The dict is provably never invoked: the
+# derived `Box` ToString body only reaches the inner dict in the `Hold` branch,
+# never the `Empty` branch. Both codegen backends must null-fill the sentinel
+# (`i64 0`) rather than reject it.
+#
+# Direct codegen has always null-filled (this passes under `just test`); the
+# typed path (`--use-ir-codegen`) used to hard-error on the sentinel — the
+# defect this fixture guards. The `Hold(42)` case additionally pins that a
+# *needed* inner dict (`ToString Int`) still resolves to a real witness.
+
+type Box a (..) deriving (ToString) =
+  | Empty
+  | Hold a
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Free type var, nullary ctor — inner dict unresolved + null-filled, unused.
+    assert_eq(state, "to_string Empty", to_string(Empty), "Empty")
+    # Concrete inner type — inner ToString Int dict resolves to a real witness.
+    assert_eq(state, "to_string Hold 42", to_string(Hold(42)), "Hold(42)")
+    summary(state)
