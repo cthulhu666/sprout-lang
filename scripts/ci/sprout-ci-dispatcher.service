@@ -1,0 +1,26 @@
+# Sprout CI dispatcher — oneshot control-loop tick.
+# Triggered by sprout-ci-dispatcher.timer; not enabled on its own.
+#
+# Install: copy dispatcher.sh to /opt/sprout-ci/dispatcher.sh (0755), this unit
+# and the .timer to /etc/systemd/system/, the env file to
+# /etc/sprout-ci-dispatcher.env (0600, root), then:
+#   systemctl daemon-reload && systemctl enable --now sprout-ci-dispatcher.timer
+[Unit]
+Description=Sprout CI dispatcher tick (start/stop the e2 worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/sprout-ci-dispatcher.env
+ExecStart=/opt/sprout-ci/dispatcher.sh
+# gcloud uses the VM's attached service account (metadata ADC), but still needs
+# a writable config/cache dir; keep it inside the state dir so the hardening
+# below can lock everything else down.
+StateDirectory=sprout-ci-dispatcher
+Environment=CLOUDSDK_CONFIG=%S/sprout-ci-dispatcher/gcloud
+# Hardening: the dispatcher only needs network + its state dir.
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true

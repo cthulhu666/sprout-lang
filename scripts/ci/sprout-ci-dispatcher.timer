@@ -1,0 +1,12 @@
+# Fires the dispatcher tick every ~45s while the dispatcher VM is up.
+[Unit]
+Description=Run the Sprout CI dispatcher tick periodically
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=45s
+AccuracySec=5s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
