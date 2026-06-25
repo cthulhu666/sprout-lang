@@ -112,7 +112,8 @@ fn format_ms(micros: Int) -> String =
 fn print_result(n: Int, total: Int, t0: Int) -> Unit !{IO} =
   do
     t1 <- time_now_micros()
-    print(string_concat_many(["A* 100x100, ", int_to_string(n), " runs: ", format_ms(t1 - t0), "  (", int_to_string((t1 - t0) / n), " us/run, path=", int_to_string(total / n), " steps)"]))
+    print(string_concat_many(["A* 100x100, ", int_to_string(n), " runs, path=", int_to_string(total / n), " steps"]))
+    eprint(string_concat_many([format_ms(t1 - t0), "  (", int_to_string((t1 - t0) / n), " us/run)"]))
 
 fn main() -> Unit !{IO} =
   do
