@@ -1,3 +1,5 @@
+module main
+
 fn swap(pair: (Int, Bool)) -> (Bool, Int) =
   match pair with
   | (count, flag) -> (flag, count)

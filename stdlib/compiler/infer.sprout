@@ -551,6 +551,13 @@ fn infer_if_merge(
 
 # --- Call ---
 
+# True for tuple types `(a, b, …)`.  Used to route `print` of a tuple through
+# its `ToString` instance (see infer_print_call).
+fn is_tuple_type(t: types.Type) -> Bool =
+  match t with
+  | types.TTuple _ -> true
+  | _ -> false
+
 fn infer_call(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -562,13 +569,10 @@ fn infer_call(
 ) -> InferResult !{IO} =
   match callee with
   | ast.VarExpr name cpos ->
-      match dict_get(name, env) with
-      | Nothing -> InferErr(cpos, "Unknown variable: " ++ name)
-      | Just scheme ->
-          do
-            (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
-            infer_call_inner(state, env, subst, eff_subst, callee,
-              typed_ast.TVar(name, t, cpos), types.EffectPure, prog_to_fresh, args, pos)
+      if name == "print" then
+        infer_print_call(state, env, subst, eff_subst, callee, cpos, args, pos)
+      else
+        infer_call_var(state, env, subst, eff_subst, callee, name, cpos, args, pos)
   | _ ->
       do
         cr <- infer_expr(state, env, subst, eff_subst, callee)
@@ -576,6 +580,63 @@ fn infer_call(
         | InferErr pos e -> InferErr(pos, e)
         | InferOk typed_callee s1 es1 callee_eff ->
             infer_call_inner(state, env, s1, es1, callee, typed_callee, callee_eff, dict_empty(), args, pos)
+
+# Infer a call whose callee is a bare variable `name` (the common case).
+fn infer_call_var(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  callee: ast.Expr,
+  name: String,
+  cpos: source.SourcePos,
+  args: List ast.Expr,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match dict_get(name, env) with
+  | Nothing -> InferErr(cpos, "Unknown variable: " ++ name)
+  | Just scheme ->
+      do
+        (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
+        infer_call_inner(state, env, subst, eff_subst, callee,
+          typed_ast.TVar(name, t, cpos), types.EffectPure, prog_to_fresh, args, pos)
+
+# `print` is a type-erased runtime renderer, so it cannot recover per-element
+# types of a tuple (a Bool prints as 1, a static-String element as its raw
+# pointer).  When the single argument is a tuple, rewrite `print(t)` to
+# `print(to_string(t))` so the tuple's `ToString` instance renders each element
+# via its own instance.  Inference then resolves the (possibly nested) element
+# dictionaries for free.  Non-tuple arguments keep the intrinsic `print` path
+# (so `print(Int)`/`print(String)` need no prelude — importless-safe).
+#
+# The argument is inferred once here only to read its type; that result is
+# discarded (InferState accumulates no constraints — evidence lives in the
+# returned AST), and the rewritten call re-infers it normally.
+fn infer_print_call(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  callee: ast.Expr,
+  cpos: source.SourcePos,
+  args: List ast.Expr,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match args with
+  | Cons single Nil ->
+      do
+        pr <- infer_expr(state, env, subst, eff_subst, single)
+        match pr with
+        | InferErr _ _ ->
+            infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
+        | InferOk targ s_peek _ _ ->
+            if is_tuple_type(unifier.apply_subst(s_peek, typed_ast.typed_expr_type(targ))) then
+              infer_call_var(state, env, subst, eff_subst, callee, "print", cpos,
+                Cons(ast.CallExpr(ast.VarExpr("to_string", cpos), Cons(single, Nil), pos), Nil), pos)
+            else
+              infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
+  | _ ->
+      infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
 
 fn infer_call_inner(
   state: unifier.InferState,
