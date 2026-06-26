@@ -5,8 +5,8 @@ on:
     branches: [master]
   pull_request:
   schedule:
-    # Nightly run of the (non-blocking) typed-codegen probe, which is kept off
-    # the PR critical path below. 03:00 UTC = low-traffic window.
+    # Nightly run of the typed-codegen gate (now required on PRs + master too).
+    # 03:00 UTC = low-traffic window.
     - cron: '0 3 * * *'
   workflow_dispatch:
 
@@ -113,18 +113,18 @@ jobs:
   # Sprout-IR path) instead of --emit-ir (direct codegen). tests/IR_XFAIL lists
   # known-failing files; each M3 PR shrinks that list as parity gaps close.
   #
-  # Non-blocking during the M3 implementation arc. PR 10 of the M3 roadmap
-  # removes `continue-on-error` to flip this gate to required.
-  # See /Users/cthulhu/.claude/plans/witty-brewing-wolf.md.
+  # Required gate. The typed Sprout-IR codegen path must pass the full corpus
+  # (compile / test / smoke / canary + GC-stress + CPR differential) on every
+  # PR, master push, and nightly. Runtime parity reached 0 TYPED-* and
+  # tests/IR_XFAIL holds only pre-existing direct-codegen xfails, so the typed
+  # path is held to the same bar as direct codegen — a typed regression blocks
+  # the merge.
   test-ir:
-    # Off the PR critical path. This typed-codegen probe is non-blocking
-    # (continue-on-error) and adds ~55 min on the single runner, so running it
-    # per-PR only delays feedback. Run it on master pushes + the nightly
-    # schedule (and manual dispatch) instead — never on pull_request events.
-    if: ${{ github.event_name != 'pull_request' }}
+    # Runs on pull_request + master + nightly. Adds ~55 min on the single
+    # self-hosted runner (capacity 2; co-runs with `test`) — an accepted cost
+    # for blocking typed-codegen regressions before merge rather than after.
     needs: setup
     runs-on: [self-hosted, linux-x86_64]
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
