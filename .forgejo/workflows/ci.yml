@@ -19,7 +19,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Install the shared OS toolchain once, before the parallel jobs fan out.
+  # test and test-ir run concurrently on one self-hosted worker (capacity 2);
+  # if both ran `apt-get install` they would collide on the dpkg lock. Doing it
+  # here (a dependency of both) serializes the install, and the packages persist
+  # host-wide for the dependent jobs. NOTE: assumes setup and the test jobs land
+  # on the same worker — true for a single worker; revisit if more are added.
+  setup:
+    runs-on: [self-hosted, linux-x86_64]
+    steps:
+      - name: Install Clang / LLVM / ripgrep
+        # clang-16+ required: Sprout IR uses opaque ptr type (LLVM 16 default).
+        # clang-14 (Debian 12 default) cannot parse ptr in IR text.
+        # llvm-16 required: provides opt (IR verifier); build recipes call
+        # `opt --passes=verify` as a hard step.
+        run: sudo apt-get install -y clang-16 llvm-16 ripgrep
+
   test:
+    needs: setup
     runs-on: [self-hosted, linux-x86_64]
     steps:
       - uses: actions/checkout@v4
@@ -28,14 +45,9 @@ jobs:
         # mise manages just 1.39.0 on the self-hosted runner.
         run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
 
-      - name: Install Clang / LLVM
-        # clang-16+ required: Sprout IR uses opaque ptr type (LLVM 16 default).
-        # clang-14 (Debian 12 default) cannot parse ptr in IR text.
-        # llvm-16 required: provides opt (IR verifier); all build recipes call
-        # `opt --passes=verify` as a hard step — not a soft skip.
-        run: |
-          sudo apt-get install -y clang-16 llvm-16 ripgrep
-          echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
+      - name: Add LLVM 16 to PATH
+        # Toolchain installed once by the `setup` job; expose opt/llvm tools here.
+        run: echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
 
       - name: Cache stage-1 binary
         # Key on seed IR + runtime source. When unchanged, restore the linked
@@ -110,6 +122,7 @@ jobs:
     # per-PR only delays feedback. Run it on master pushes + the nightly
     # schedule (and manual dispatch) instead — never on pull_request events.
     if: ${{ github.event_name != 'pull_request' }}
+    needs: setup
     runs-on: [self-hosted, linux-x86_64]
     continue-on-error: true
     steps:
@@ -118,10 +131,9 @@ jobs:
       - name: Add mise shims to PATH
         run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
 
-      - name: Install Clang / LLVM
-        run: |
-          sudo apt-get install -y clang-16 llvm-16
-          echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
+      - name: Add LLVM 16 to PATH
+        # Toolchain installed once by the `setup` job; expose opt/llvm tools here.
+        run: echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
 
       - name: Cache stage-1 binary
         # Shares the same cache key as the `test` job — first job to finish
