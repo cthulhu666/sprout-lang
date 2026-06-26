@@ -48,9 +48,10 @@ else
   echo "swap already present — skipping"
 fi
 
-echo "== 2. Toolchain (clang-16/llvm-16 also re-asserted by CI; pre-baking = fast no-op) =="
+echo "== 2. Toolchain + node (clang-16/llvm-16 re-asserted by CI; node runs JS"
+echo "      actions like actions/checkout@v4 — required on a system path) =="
 sudo apt-get update -y
-sudo apt-get install -y clang-16 llvm-16 ripgrep git curl jq
+sudo apt-get install -y clang-16 llvm-16 ripgrep git curl jq nodejs
 
 echo "== 3. mise + just (CI expects mise-managed just on PATH) =="
 if ! command -v mise >/dev/null; then
