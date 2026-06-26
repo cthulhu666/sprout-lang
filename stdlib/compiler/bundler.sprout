@@ -493,6 +493,13 @@ fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, Li
         do
           mods <- ref_read(ordered)
           let rev_mods = list_reverse(mods)
+          # Self-contained (importless) files are DELIBERATELY not given the
+          # prelude — they define their own types/functions (see
+          # examples/maybe_map.sprout, which redefines Maybe and map).  A bare
+          # file with no named modules is such a unit; only append the prelude
+          # once some imported module pulls it into scope.  A call to a
+          # non-intrinsic prelude name from such a file is a hard error
+          # (codegen.emit_named_call), not a silent zero_val.
           if any_has_module_name(rev_mods) then
             match read_file(prelude_path(stdlib_root)) with
             | Err msg -> panic("read_file: prelude: " ++ msg)

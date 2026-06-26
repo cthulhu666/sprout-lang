@@ -2586,7 +2586,14 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
                                 pop_temp_roots(rooted_args, em)
                                 result
                     | Nothing ->
-                        zero_val(type_to_ll(ty))
+                        # A statically-named callee that resolves to NONE of
+                        # {ctors, fn_sigs, extern_sigs, locals, globals} is a
+                        # bundling/registration bug, not a value.  Fail loudly
+                        # instead of silently emitting zero_val (`ret i64 0`),
+                        # which historically disguised bundler/iface gaps as GC,
+                        # typeclass, and print bugs.  A common trigger: a bare
+                        # importless file skips the prelude (see bundler).
+                        panic("codegen: unresolved call to '" ++ name ++ "' — not a known function, extern, constructor, or global (missing from the bundle or extern_sigs?)")
 
 fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   match args with

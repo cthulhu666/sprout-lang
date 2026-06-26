@@ -722,6 +722,28 @@ bundle-smoke: bootstrap-from-seed
   fi
   echo "==> bundle-smoke ✓"
 
+# Loud-fail guard.  A self-contained (importless) file that calls a
+# non-intrinsic prelude name must FAIL to compile with a clear "unresolved
+# call" error, NOT silently emit zero_val (`ret i64 0`).  Regression for the
+# codegen.emit_named_call silent fallback that disguised bundler/iface gaps as
+# GC/typeclass/print bugs.
+[group('ci-checks')]
+loud-fail-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_lfs_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  printf 'fn main() -> Unit !{IO} =\n  print(int_to_string(5))\n' > "$TMPD/unresolved.spr"
+  if "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$TMPD/unresolved.spr" > "$TMPD/out.ll" 2>"$TMPD/err"; then
+    echo "loud-fail-smoke: importless int_to_string call compiled silently (expected a hard 'unresolved call' error)" >&2
+    exit 1
+  fi
+  if ! grep -q "unresolved call" "$TMPD/err"; then
+    echo "loud-fail-smoke: compile failed but without the expected 'unresolved call' message:" >&2
+    cat "$TMPD/err" >&2; exit 1
+  fi
+  echo "==> loud-fail-smoke ✓"
+
 # DoD #9 — APPROVED_BUILTINS guard.  Every non-static `long long <name>(` in
 # runtime/sprout_runtime.c must be listed in runtime/APPROVED_BUILTINS.
 # Per AGENTS.md "Builtin vs Stdlib" rules 4–6.
