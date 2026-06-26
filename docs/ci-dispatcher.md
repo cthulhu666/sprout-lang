@@ -56,8 +56,8 @@ stopping mid-job.
 ### 0. Prerequisites
 - `gcloud` authenticated to your project; pick a `ZONE` (e.g. `europe-west1-b`).
 - A Codeberg access token with `read:repository` scope (dispatcher → API).
-- A Codeberg **runner registration token**: repo → Settings → Actions → Runners
-  → "Create new Runner" (worker → registers once).
+- A Codeberg **runner (UUID, token) pair**: repo → Settings → Actions → Runners
+  → "Create new Runner" (shown once; the worker daemon authenticates with it).
 
 ### 1. Worker instance (provision, then leave stopped)
 
@@ -73,56 +73,34 @@ gcloud compute instances create "$WORKER" \
   --no-service-account --no-scopes        # worker needs no GCP perms
 ```
 
-SSH in and provision the toolchain + runner **once** (persists on the boot disk):
+Provision the toolchain + runner **once** (persists on the boot disk) with
+`scripts/ci/provision-worker.sh` — it installs swap, clang-16/llvm-16, mise+just,
+the forgejo-runner binary, writes the systemd unit, and brings the runner online.
+
+**Registration mechanism (Codeberg / Forgejo 15).** "Create new Runner" in the
+repo runners UI *pre-creates* the runner server-side and shows a **(UUID, token)
+pair** — shown once. The daemon authenticates with that pair via
+`--uuid … --token-url file://…`. There is **no `register` step**: that verb is for
+a separate registration-token flow that Codeberg rejects with
+`registration token not found`. (Mirror the EXECUTOR of your existing runner —
+`:host` here, since the workflows `sudo apt-get install`.)
 
 ```sh
-# Toolchain (clang-16/llvm-16 are also re-asserted by the workflow; pre-baking
-# makes that a fast no-op instead of a multi-minute install each run).
-sudo apt-get update
-sudo apt-get install -y clang-16 llvm-16 ripgrep git curl jq
-curl https://mise.run | sh        # provides `just` per mise.toml
+# 1. Repo → Settings → Actions → Runners → "Create new Runner". Copy the UUID
+#    and Token it shows (token is displayed ONCE).
+# 2. Drop them onto the worker as files (keeps them off the command line):
+#      printf '%s' '<UUID>'  > ~/reguuid  && chmod 600 ~/reguuid
+#      printf '%s' '<TOKEN>' > ~/regtoken && chmod 600 ~/regtoken
+# 3. Run the provisioner (reads ~/reguuid + ~/regtoken by default):
+scp scripts/ci/provision-worker.sh worker:/tmp/
+ssh worker 'bash /tmp/provision-worker.sh'     # CAPACITY=2, swap 16G by default
+```
 
-# Swapfile — OOM insurance so the two parallel bootstraps (test + test-ir,
-# each clang -O2 over ~298k IR lines) can peak past 16 GB without an OOM kill.
-sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile
-sudo mkswap /swapfile && sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+The script self-verifies (`systemctl is-active` + the `declared successfully`
+log line). Confirm the runner shows **Active** in the Codeberg UI, then stop the
+worker — this is its resting state:
 
-# Dedicated runner user. The workflows call `sudo apt-get`, so it needs
-# passwordless sudo — mirror however your *current* runner is set up.
-sudo useradd -m -d /home/runner -s /bin/bash runner
-echo 'runner ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/runner
-sudo install -m0755 forgejo-runner /usr/local/bin/forgejo-runner   # release binary
-
-# Register ONCE, AS THE runner USER, so `.runner` lands in /home/runner (where
-# the daemon's WorkingDirectory points). Mirror the EXECUTOR and LABELS of your
-# existing runner — `:host` below assumes the current runner runs jobs on the
-# host (it must, since the workflows `sudo apt-get install`). If your current
-# runner uses docker, use `:docker` instead.
-sudo -u runner -H bash -c 'cd ~ && forgejo-runner register --no-interactive \
-  --instance https://codeberg.org \
-  --token "<RUNNER_REGISTRATION_TOKEN>" \
-  --name sprout-ci-worker-x86 \
-  --labels "self-hosted:host,linux-x86_64:host"'
-# then set `runner.capacity: 2` in /home/runner/.runner (concurrent test+test-ir)
-
-# systemd: start the runner daemon on every boot (so stop/start "just works").
-sudo tee /etc/systemd/system/forgejo-runner.service >/dev/null <<'UNIT'
-[Unit]
-Description=Forgejo Runner
-After=network-online.target
-Wants=network-online.target
-[Service]
-ExecStart=/usr/local/bin/forgejo-runner daemon
-WorkingDirectory=/home/runner        # where .runner was written above
-User=runner
-Restart=always
-[Install]
-WantedBy=multi-user.target
-UNIT
-sudo systemctl enable --now forgejo-runner.service
-
-# Confirm one CI run drains, then stop — this is the resting state.
+```sh
 gcloud compute instances stop "$WORKER" --project "$PROJECT" --zone "$ZONE"
 ```
 
