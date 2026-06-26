@@ -529,7 +529,6 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRBr _ -> false
   | sprout_ir.IRCondBr _ _ _ -> false
   | sprout_ir.IRPhi _ _ _ -> false
-  | sprout_ir.IRCall _ _ _ _ -> false
   | sprout_ir.IRStrConst _ _ _ -> false
   | sprout_ir.IRStrSlice _ _ _ _ -> false
   | sprout_ir.IRStrConcat _ _ _ -> false

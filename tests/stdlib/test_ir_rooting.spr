@@ -296,6 +296,31 @@ fn test11_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Test 12: IRCall with a MIXED operand list (heap + scalar) — only the heap
+# operand is rooted across the call.
+#
+# IR for:
+#   %a = "a"                                     (heap)
+#   %n = 5                                        (scalar)
+#   %r = IRCall foo IRTUnknown [%a, %n]          ← trigger; exposes operands
+#   ret %r
+#
+# Guards that operand exposure (IRCall -> op_exposes_operands) roots only the
+# in-scope HEAP operands: %a gets a root, the scalar %n (an IRConst, never in
+# heap_origin) does not.  Complements T11 (single heap operand) by exercising
+# the scalar-filtering path in roots_across_loop.  Expected: exactly 1 root.
+fn test12_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("call_mixed_operands", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
+        Cons(sprout_ir.IRConst("%n", 5),
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTUnknown, "foo", Cons("%a", Cons("%n", Nil))),
+        Cons(sprout_ir.IRRet("%r"), Nil))))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -376,6 +401,10 @@ fn main() -> Unit !{IO} =
               count(lower(test11_program()), "call i64 @sprout_gc_push_i64_root"), 1)
     assert_eq(state, "T11: exactly one pop_roots(i64 1) around the call",
               count(lower(test11_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+
+    # --- Test 12: IRCall with mixed heap+scalar operands roots only the heap one.
+    assert_eq(state, "T12: exactly one push_i64_root (heap operand only, scalar skipped)",
+              count(lower(test12_program()), "call i64 @sprout_gc_push_i64_root"), 1)
 
     # --- Header declares the rooting runtime functions.
     assert_true(state, "header declares @sprout_gc_push_i64_root",

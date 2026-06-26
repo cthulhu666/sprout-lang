@@ -3299,7 +3299,9 @@ long long sprout_tag(long long h) {
     abort();
   }
   SproutObj* obj = unbox_ptr(h);
-  if (sprout_gc_lineage_on() && obj->tag == SPROUT_GC_POISON_TAG) {
+  /* Cheap constant compare first: the poison tag is virtually never present, so
+     this short-circuits before the lineage-flag check on this hot path. */
+  if (obj->tag == SPROUT_GC_POISON_TAG && sprout_gc_lineage_on()) {
     fprintf(stderr,
             "\n=== USE-AFTER-FREE: sprout_tag read poisoned ptr 0x%llx ===\n",
             (unsigned long long)h);
@@ -3315,7 +3317,6 @@ long long sprout_tag(long long h) {
       backtrace_symbols_fd(frames, n, fileno(stderr));
     } else {
       fprintf(stderr, "  (no free backtrace recorded)\n");
-      fflush(stderr);
     }
     abort();
   }
