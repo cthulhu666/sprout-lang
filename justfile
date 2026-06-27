@@ -842,6 +842,99 @@ stack-overflow-smoke: bootstrap-from-seed
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
 
+# TCO differential: typed codegen (--use-ir-codegen) must emit at least as many
+# tail-call-optimization loops as direct codegen (--emit-ir) for the same source.
+# A self-tail-recursive function that direct codegen loops but typed codegen does
+# NOT becomes one native frame per iteration — fine on small inputs, a stack
+# overflow at scale (e.g. the compiler's own lexer.tokenize_from: flip blocker #2).
+# The parity corpus can't see this (all inputs are small); this can. Counts the
+# `tco_loop` basic-block labels direct codegen emits and asserts typed emits no
+# fewer. Diagnostic + progress meter for the typed-codegen TCO work.
+tco-diff PROBE="tests/stack_overflow_smoke/deep_recursion.spr": bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_tco_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  BIN="{{build_dir}}/compile_driver_bin_stage1"
+  if ! "$BIN" --emit-ir        "{{stdlib_root}}" "{{PROBE}}" > "$TMPD/direct.ll" 2>"$TMPD/d.err"; then
+    echo "tco-diff: direct emit failed for {{PROBE}}" >&2; cat "$TMPD/d.err" >&2; exit 1
+  fi
+  if ! "$BIN" --use-ir-codegen "{{stdlib_root}}" "{{PROBE}}" > "$TMPD/typed.ll"  2>"$TMPD/t.err"; then
+    echo "tco-diff: typed emit failed for {{PROBE}}" >&2; cat "$TMPD/t.err" >&2; exit 1
+  fi
+  d=$(grep -cE '^tco_loop' "$TMPD/direct.ll" || true)
+  t=$(grep -cE '^tco_loop' "$TMPD/typed.ll"  || true)
+  echo "tco-diff {{PROBE}}: direct=$d typed=$t"
+  if [ "$t" -lt "$d" ]; then
+    echo "tco-diff: REGRESSION — typed codegen dropped $((d - t)) TCO loop(s)." >&2
+    echo "  Self-tail-recursive functions will overflow the stack at scale; see flip blocker #2 (lexer.tokenize_from)." >&2
+    exit 1
+  fi
+  echo "==> tco-diff ✓ (typed >= direct TCO loops)"
+
+# Flip-readiness dry-run: the real gate for making typed codegen the default.
+# Parity (ir_runtime_parity.sh) is necessary but NOT sufficient — it runs only
+# small corpus files with no argv. The compiler self-compiling exercises argv,
+# deep recursion, and the whole language at once, which is where both flip
+# blockers surfaced. This drives the canonical sequence: typed self-compile the
+# compiler -> verify -> link -> have THAT binary self-compile to a fixed point.
+# RED until BOTH the argv fix (#95) is in the seed AND blocker #2 (typed codegen
+# does no TCO) is fixed: without #95 the typed-built compiler sees empty argv and
+# prints usage; with #95 it then stack-overflows self-compiling. The new
+# stack-overflow panic names the culprit when it fails. Make this a hard CI gate
+# once it goes green.
+flip-readiness: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_flip_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  BIN="{{build_dir}}/compile_driver_bin_stage1"
+  COMPILER=stdlib/compiler/compile_driver.sprout
+  echo "== [1/4] typed self-compile of the compiler =="
+  if ! "$BIN" --use-ir-codegen "{{stdlib_root}}" "$COMPILER" > "$TMPD/typed_self.ll" 2>"$TMPD/emit.err"; then
+    echo "flip-readiness: FAIL [1/4] typed self-compile emit failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  echo "   ok ($(wc -c <"$TMPD/typed_self.ll" | tr -d ' ') bytes)"
+  echo "== [2/4] opt --passes=verify =="
+  if ! opt --passes=verify "$TMPD/typed_self.ll" -o /dev/null 2>"$TMPD/verify.err"; then
+    echo "flip-readiness: FAIL [2/4] typed IR failed verify" >&2; cat "$TMPD/verify.err" >&2; exit 1
+  fi
+  echo "   ok"
+  echo "== [3/4] link typed-built compiler =="
+  if ! clang "$TMPD/typed_self.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/stage2_typed" 2>"$TMPD/link.err"; then
+    echo "flip-readiness: FAIL [3/4] link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  echo "   ok"
+  echo "== [4/4] FIXED POINT — typed-built compiler self-compiles the compiler =="
+  set +e
+  "$TMPD/stage2_typed" --emit-ir "{{stdlib_root}}" "$COMPILER" > "$TMPD/fp.ll" 2>"$TMPD/fp.err"
+  ec=$?
+  set -e 2>/dev/null || true
+  fpsize=$(wc -c <"$TMPD/fp.ll" | tr -d ' ')
+  # The output must be REAL IR, not a usage/error message: a non-empty exit-0
+  # stdout is not enough (the argv blocker prints a ~240-byte usage string with
+  # exit 0). Require it to verify as LLVM IR, define functions, and be large.
+  real_ir=1
+  [ "$ec" -ne 0 ] && real_ir=0
+  [ "$fpsize" -lt 100000 ] && real_ir=0
+  grep -q '^define ' "$TMPD/fp.ll" || real_ir=0
+  opt --passes=verify "$TMPD/fp.ll" -o /dev/null 2>/dev/null || real_ir=0
+  if [ "$real_ir" -ne 1 ]; then
+    echo "flip-readiness: FAIL [4/4] typed-built compiler did not self-compile to real IR (exit $ec, $fpsize bytes)" >&2
+    if grep -q '^ERROR: usage' "$TMPD/fp.ll"; then
+      echo "  -> typed-built compiler printed USAGE: empty argv (blocker #1, needs the #95 argv fix in the seed)." >&2
+    fi
+    echo "--- its stderr (the stack-overflow panic, if any, names the culprit) ---" >&2
+    head -c 1200 "$TMPD/fp.err" >&2 || true
+    echo "" >&2
+    echo "--- its stdout head ---" >&2
+    head -c 400 "$TMPD/fp.ll" >&2 || true
+    echo "" >&2
+    echo "This is the flip gate. NOT ready until this step emits verifiable IR." >&2
+    exit 1
+  fi
+  echo "   ok ($fpsize bytes, verifies) — FLIP READY ✓"
+
 # GC-stress pass (P11-2e lessons): run a curated set of rooting-exercising
 # typed-codegen tests under SPROUT_GC_STRESS=1 (collect on EVERY allocation).
 # The default-threshold suite hides use-after-free rooting bugs as false greens;

@@ -80,6 +80,27 @@ one run what an `lldb` backtrace cannot (the overflow faults mid-prologue, so
   `[sprout] SIGSEGV` message plus the same backtrace.
 - Regression: `just stack-overflow-smoke` (`tests/stack_overflow_smoke/`).
 
+## Typed-codegen flip gates (`just tco-diff`, `just flip-readiness`)
+
+Two checks for the "typed codegen diverges from direct codegen only at scale or
+under a runtime condition" bug class — the class the parity corpus structurally
+cannot catch (it runs only small files, with no argv). Both are RED until the
+typed-codegen flip work lands; make them hard CI gates once green.
+
+- **`just tco-diff [PROBE]`** — emits IR for `PROBE` via both `--emit-ir`
+  (direct) and `--use-ir-codegen` (typed), counts `tco_loop` basic-block labels,
+  and fails if typed emits fewer. Direct currently emits 55 and typed 0 for the
+  default probe — i.e. typed codegen does **no** tail-call optimization, so any
+  self-tail-recursive function overflows the stack at scale (flip blocker #2,
+  `lexer.tokenize_from`). Doubles as the progress meter for the TCO fix (watch
+  `typed` climb to match `direct`).
+- **`just flip-readiness`** — the real flip gate: typed self-compile the compiler
+  → `opt --passes=verify` → link → have that binary self-compile to a **fixed
+  point**, asserting the result is *verifiable IR with `define` blocks* (not just
+  non-empty — the argv blocker prints a ~240-byte usage string with exit 0, a
+  false green against a naive check). When it fails, read the failing binary's
+  stderr: the stack-overflow panic names the recursing culprit.
+
 ## 2-Step Bootstrap Protocol
 
 **When this applies:** the committed seed (`bootstrap/compile_driver.ll`) predates a parser change. `just refresh-seed` calls `just bootstrap-from-seed` internally, which rebuilds the binary from the committed seed. If that seed has the old parser, the rebuilt binary cannot parse source files that use the new syntax — a catch-22.
