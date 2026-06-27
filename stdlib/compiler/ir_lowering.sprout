@@ -225,6 +225,20 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ " = zext i1 " ++ s ++ " to i64"
   | sprout_ir.IRTruncI64ToI1 r s ->
       "  " ++ r ++ " = trunc i64 " ++ s ++ " to i1"
+  # TCO entry: alloca + store each param slot, then save the stack pointer.
+  # Slot allocas precede the stacksave so the back-edge's stackrestore frees
+  # per-iteration root allocas without freeing the slots.
+  | sprout_ir.IRTcoEntry slots sp ->
+      lower_tco_entry_slots(slots) ++ "  " ++ sp ++ " = call ptr @llvm.stacksave()"
+  # TCO loop header: re-load a param from its slot (kind ignored at lowering).
+  | sprout_ir.IRTcoLoad loaded ll slot _kind ->
+      "  " ++ loaded ++ " = load " ++ ll ++ ", ptr " ++ slot
+  # TCO back-edge: store new args into the slots, restore the stack (free the
+  # iteration's root allocas), and branch back to the loop header.
+  | sprout_ir.IRTcoBack stores sp loop_lbl ->
+      lower_tco_back_stores(stores) ++
+      "  call void @llvm.stackrestore(ptr " ++ sp ++ ")\n" ++
+      "  br label %" ++ loop_lbl
 
 fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match ops with
@@ -239,6 +253,24 @@ fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (Str
   match bs with
   | Nil -> ""
   | Cons b rest -> lower_block(b, ret_ty, str_table) ++ lower_blocks(rest, ret_ty, str_table)
+
+# Emit `alloca` + `store` for each TCO param slot.  Each line ends in '\n' so the
+# trailing `stacksave` (appended by the caller) starts on its own line.
+fn lower_tco_entry_slots(slots: List (String, String, String)) -> String =
+  match slots with
+  | Nil -> ""
+  | Cons (slot, ty, in_name) rest ->
+      "  " ++ slot ++ " = alloca " ++ ty ++ "\n" ++
+      "  store " ++ ty ++ " " ++ in_name ++ ", ptr " ++ slot ++ "\n" ++
+      lower_tco_entry_slots(rest)
+
+# Emit a `store` of each new value into its TCO slot (back-edge).
+fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
+  match stores with
+  | Nil -> ""
+  | Cons (slot, ty, newv) rest ->
+      "  store " ++ ty ++ " " ++ newv ++ ", ptr " ++ slot ++ "\n" ++
+      lower_tco_back_stores(rest)
 
 # Emit per-element store instructions for an IRMakeTuple expansion.
 fn lower_tuple_stores(blob_result: String, args: List String, idx: Int) -> String =
@@ -313,6 +345,9 @@ export fn ir_header() -> String =
   "declare i64 @sprout_tag(i64)\n" ++
   "declare i64 @sprout_field(i64, i64)\n" ++
   "declare void @sprout_abort_match() noreturn\n" ++
+  # Stack save/restore intrinsics for TCO loops (reset per-iteration root allocas).
+  "declare ptr @llvm.stacksave()\n" ++
+  "declare void @llvm.stackrestore(ptr)\n" ++
   # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make9 set in
   # codegen.sprout (compiler intrinsic table).  All arities are declared
   # unconditionally — only the ones actually called are linked.

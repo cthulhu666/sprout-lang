@@ -63,6 +63,10 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # /code-review-v2 fix #3: width-conversion ops are pure casts; NOT triggers.
   | sprout_ir.IRZextI1ToI64 _ _ -> false
   | sprout_ir.IRTruncI64ToI1 _ _ -> false
+  # TCO ops: alloca/store/load/stacksave/stackrestore/br — never collect.
+  | sprout_ir.IRTcoEntry _ _ -> false
+  | sprout_ir.IRTcoLoad _ _ _ _ -> false
+  | sprout_ir.IRTcoBack _ _ _ -> false
   # Remaining ops are non-allocating (arithmetic, control flow, loads/stores,
   # and the root ops themselves).  EXHAUSTIVE on purpose — no `_` catch-all, so
   # a new IROp is a COMPILE ERROR here until its GC-trigger status is decided
@@ -143,6 +147,15 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   # Width-conversion ops produce i64/i1 scalars — never heap.
   | sprout_ir.IRZextI1ToI64 _ _ -> Nothing
   | sprout_ir.IRTruncI64ToI1 _ _ -> Nothing
+  # A TCO param re-load produces a heap value iff the param's kind is heap; the
+  # loaded value then enters heap_origin and is rooted where live across triggers
+  # (the slot is NOT a GC root — the liveness pass covers the loaded value).
+  | sprout_ir.IRTcoLoad loaded _ _ kind ->
+      match kind with
+      | sprout_ir.IRTScalar -> Nothing
+      | _ -> Just(loaded)
+  | sprout_ir.IRTcoEntry _ _ -> Nothing
+  | sprout_ir.IRTcoBack _ _ _ -> Nothing
   # Remaining ops produce no heap value (scalars, control flow, void, the root
   # ops; IRPhi heap-ness is resolved in compute_heap_origin/update_scope, so it
   # is Nothing here).  EXHAUSTIVE on purpose — no `_` catch-all, so a new
@@ -181,6 +194,8 @@ fn op_successors(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRAbortMatch -> Nil
   | sprout_ir.IRZextI1ToI64 _ _ -> Nil
   | sprout_ir.IRTruncI64ToI1 _ _ -> Nil
+  # TCO back-edge: terminator branching to the loop header.
+  | sprout_ir.IRTcoBack _ _ loop_lbl -> Cons(loop_lbl, Nil)
   | _ -> Nil
 
 fn last_op(ops: List sprout_ir.IROp) -> Maybe sprout_ir.IROp =
@@ -213,6 +228,18 @@ fn find_block(label: String, blocks: List sprout_ir.IRBlock) -> Maybe sprout_ir.
 
 # ---------------------------------------------------------------------------
 # Per-op use/def
+
+# IRTcoEntry uses each param's incoming value (the third tuple element).
+fn tco_entry_uses(slots: List (String, String, String)) -> List String =
+  match slots with
+  | Nil -> Nil
+  | Cons (_, _, in_name) rest -> Cons(in_name, tco_entry_uses(rest))
+
+# IRTcoBack uses each new value (stored) and each slot (store target).
+fn tco_back_uses(stores: List (String, String, String)) -> List String =
+  match stores with
+  | Nil -> Nil
+  | Cons (slot, _, newv) rest -> Cons(newv, Cons(slot, tco_back_uses(rest)))
 
 fn op_uses(op: sprout_ir.IROp) -> List String =
   match op with
@@ -258,6 +285,11 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   # /code-review-v2 fix #3: width-conversion ops use their single source.
   | sprout_ir.IRZextI1ToI64 _ s -> Cons(s, Nil)
   | sprout_ir.IRTruncI64ToI1 _ s -> Cons(s, Nil)
+  # TCO ops: entry uses the incoming params; load uses its slot; back uses the
+  # new values + slots (so liveness keeps them across the iteration).
+  | sprout_ir.IRTcoEntry slots _ -> tco_entry_uses(slots)
+  | sprout_ir.IRTcoLoad _ _ slot _ -> Cons(slot, Nil)
+  | sprout_ir.IRTcoBack stores _ _ -> tco_back_uses(stores)
 
 fn op_def(op: sprout_ir.IROp) -> Maybe String =
   match op with
@@ -295,6 +327,9 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   # IRAbortMatch no longer defines anything (/code-review fix #15).
   | sprout_ir.IRZextI1ToI64 r _ -> Just(r)
   | sprout_ir.IRTruncI64ToI1 r _ -> Just(r)
+  # IRTcoLoad defines the re-loaded param value; IRTcoEntry/IRTcoBack define no
+  # single SSA value (slots are not liveness-tracked defs) — they fall through.
+  | sprout_ir.IRTcoLoad loaded _ _ _ -> Just(loaded)
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------
@@ -545,6 +580,11 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRAbortMatch -> false
   | sprout_ir.IRZextI1ToI64 _ _ -> false
   | sprout_ir.IRTruncI64ToI1 _ _ -> false
+  # TCO ops never trigger GC, so they expose nothing (the values they store are
+  # protected by the liveness pass around the triggers that produced them).
+  | sprout_ir.IRTcoEntry _ _ -> false
+  | sprout_ir.IRTcoLoad _ _ _ _ -> false
+  | sprout_ir.IRTcoBack _ _ _ -> false
 
 # Set of an op's operand names.  O(uses).
 fn op_operand_set(op: sprout_ir.IROp) -> Set =

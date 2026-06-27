@@ -265,6 +265,35 @@ export type IROp (..) =
   # operand has the i1 type LLVM's `br i1` requires. NOT a GC trigger.
   | IRTruncI64ToI1 String String
   # /code-review fix #2: IRConstBool and IRICmpBool were removed.
+  #
+  # ----- Tail-call optimization (self-recursion) -----
+  # These three ops turn a self-tail-recursive function into an alloca-slot
+  # loop, mirroring direct codegen's emit_fn_tco.  The function's params are
+  # renamed to '%<p>$in' (the define signature); each gets a stack slot the body
+  # re-loads at the loop header every iteration, and each tail self-call stores
+  # new values into the slots and branches back.  Because state flows through the
+  # SLOTS (re-loaded per iteration), no SSA value spans the back-edge, so the
+  # single-pass ir_rooting liveness analysis stays sound.  See
+  # docs/typed-tco-implementation-2026-06-27.md.
+  #
+  # IRTcoEntry <slots> <sp_save>  — entry block.  slots = (slot, lltype, in_name).
+  # Lowers to, for each: `<slot> = alloca <ty>` + `store <ty> <in>, ptr <slot>`;
+  # then `<sp_save> = call ptr @llvm.stacksave()`.  Slot allocas MUST precede the
+  # stacksave so stackrestore (on the back-edge) frees only per-iteration root
+  # allocas, never the slots.  The caller appends `IRBr "tco_loop"`.  No GC root
+  # push — rooting is handled by the liveness pass on the loaded values.
+  | IRTcoEntry (List (String, String, String)) String
+  # IRTcoLoad <loaded> <lltype> <slot> <kind>  — one per param, at the top of the
+  # tco_loop block.  Lowers to `<loaded> = load <ty>, ptr <slot>`.  kind drives
+  # ir_rooting: IRTHeap/IRTUnknown loaded values enter heap_origin and are rooted
+  # where live across GC triggers; IRTScalar values are not.
+  | IRTcoLoad String String String IRType
+  # IRTcoBack <stores> <sp_save> <loop_label>  — the tail self-call back-edge
+  # (a terminator).  stores = (slot, lltype, new_value).  Lowers to, for each:
+  # `store <ty> <new>, ptr <slot>`; then `call void @llvm.stackrestore(ptr <sp_save>)`;
+  # then `br label %<loop_label>`.  No explicit GC root pop — the per-trigger
+  # bracketing in ir_rooting self-balances each iteration.
+  | IRTcoBack (List (String, String, String)) String String
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -403,6 +432,12 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = zext_i1_i64 " ++ s
   | IRTruncI64ToI1 r s ->
       "    " ++ r ++ " = trunc_i64_i1 " ++ s
+  | IRTcoEntry _ sp ->
+      "    tco_entry; sp=" ++ sp
+  | IRTcoLoad loaded ll slot k ->
+      "    " ++ loaded ++ " = tco_load " ++ slot ++ " : " ++ ll ++ " [" ++ print_ir_type(k) ++ "]"
+  | IRTcoBack _ sp loop_lbl ->
+      "    tco_back; sp=" ++ sp ++ " -> " ++ loop_lbl
 
 fn print_ops(ops: List IROp) -> String =
   match ops with

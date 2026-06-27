@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.string as string
 
 # Tests for the lower_fn_with_table export added in the streaming-codegen prep.
 # lower_fn_with_table(f, fn_table) must produce the same LLVM IR fragment as
@@ -15,6 +16,23 @@ fn make_trivial_fn() -> sprout_ir.IRFunction =
     Cons(sprout_ir.IRBlock("entry", Cons(sprout_ir.IRConst("%r", 42), Cons(sprout_ir.IRRet("%r"), Nil))), Nil)
   )
 
+# A self-tail-recursive `tco_fn(p)` lowered as an alloca-slot loop: entry
+# allocas the param slot, stacksaves, and branches to tco_loop; the loop header
+# re-loads the slot; the back-edge stores a new value, stackrestores, and
+# branches back. Exercises the IRTcoEntry / IRTcoLoad / IRTcoBack lowering.
+fn make_tco_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(
+    "tco_fn",
+    Cons(("p$in", sprout_ir.IRTScalar), Nil),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+           Cons(sprout_ir.IRTcoEntry(Cons(("%p.slot", "i64", "%p$in"), Nil), "%sp"),
+           Cons(sprout_ir.IRBr("tco_loop"), Nil))),
+    Cons(sprout_ir.IRBlock("tco_loop",
+           Cons(sprout_ir.IRTcoLoad("%p", "i64", "%p.slot", sprout_ir.IRTScalar),
+           Cons(sprout_ir.IRTcoBack(Cons(("%p.slot", "i64", "%p"), Nil), "%sp", "tco_loop"), Nil))),
+    Nil)))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -27,5 +45,23 @@ fn main() -> Unit !{IO} =
       str_starts_with(ir, "define "))
     assert_true(state, "lower_fn_with_table output starts with expected header",
       str_starts_with(ir, "define i64 @my_test_fn()"))
+
+    let tco_ir = ir_lowering.lower_fn_with_table(make_tco_fn(), dict_empty())
+    assert_true(state, "tco define renames param to %p$in",
+      string.contains(tco_ir, "define i64 @tco_fn(i64 %p$in)"))
+    assert_true(state, "tco entry allocas the param slot",
+      string.contains(tco_ir, "%p.slot = alloca i64"))
+    assert_true(state, "tco entry stores the incoming param into the slot",
+      string.contains(tco_ir, "store i64 %p$in, ptr %p.slot"))
+    assert_true(state, "tco entry stacksaves",
+      string.contains(tco_ir, "%sp = call ptr @llvm.stacksave()"))
+    assert_true(state, "tco loop header reloads the slot",
+      string.contains(tco_ir, "%p = load i64, ptr %p.slot"))
+    assert_true(state, "tco back-edge stores the new value",
+      string.contains(tco_ir, "store i64 %p, ptr %p.slot"))
+    assert_true(state, "tco back-edge stackrestores",
+      string.contains(tco_ir, "call void @llvm.stackrestore(ptr %sp)"))
+    assert_true(state, "tco back-edge branches to the loop header",
+      string.contains(tco_ir, "br label %tco_loop"))
 
     summary(state)
