@@ -4016,21 +4016,109 @@ fn tco_hits_for_block(self_name: String, b: sprout_ir.IRBlock, all: List sprout_
   | Just rv ->
       match tco_self_call_args(rv, self_name, tco_block_ops(b)) with
       | Just args -> Cons((tco_block_label(b), args, rv, ""), Nil)
-      | Nothing ->
-          match tco_phi_incomings(rv, tco_block_ops(b)) with
-          | Nothing -> Nil
-          | Just incomings -> tco_hits_from_phi(self_name, all, incomings, tco_block_label(b))
+      | Nothing -> tco_trace_phis(self_name, all, Cons(rv, Nil), set_empty(), Nil)
 
-fn tco_hits_from_phi(self_name: String, all: List sprout_ir.IRBlock, incomings: List (String, String), phi_block: String) -> List (String, List String, String, String) =
+# Find the phi defining `val` anywhere: (phi_block_label, incomings).
+fn tco_find_phi(val: String, blocks: List sprout_ir.IRBlock) -> Maybe (String, List (String, String)) =
+  match blocks with
+  | Nil -> Nothing
+  | Cons b rest ->
+      match tco_phi_incomings(val, tco_block_ops(b)) with
+      | Just inc -> Just((tco_block_label(b), inc))
+      | Nothing -> tco_find_phi(val, rest)
+
+# Args of a self-call defining `val` specifically in block `pred`.
+fn tco_self_call_in_block(val: String, self_name: String, pred: String, blocks: List sprout_ir.IRBlock) -> Maybe (List String) =
+  match blocks with
+  | Nil -> Nothing
+  | Cons b rest ->
+      if tco_block_label(b) == pred
+      then tco_self_call_args(val, self_name, tco_block_ops(b))
+      else tco_self_call_in_block(val, self_name, pred, rest)
+
+# Trace returned values through (possibly nested) phis to collect tail self-calls.
+# worklist holds phi-result names still to expand; visited prevents cycles.
+fn tco_trace_phis(self_name: String, all: List sprout_ir.IRBlock, worklist: List String,
+                  visited: Set, acc: List (String, List String, String, String)) -> List (String, List String, String, String) =
+  match worklist with
+  | Nil -> acc
+  | Cons v rest ->
+      if set_member(v, visited)
+      then tco_trace_phis(self_name, all, rest, visited, acc)
+      else
+        match tco_find_phi(v, all) with
+        | Nothing -> tco_trace_phis(self_name, all, rest, set_insert(v, visited), acc)
+        | Just (phi_block, incomings) ->
+            match tco_scan_incomings(self_name, all, incomings, phi_block, rest, acc) with
+            | (wl2, acc2) -> tco_trace_phis(self_name, all, wl2, set_insert(v, visited), acc2)
+
+# Each (val, pred) incoming: a self-call -> a hit; otherwise enqueue val (it may
+# itself be a nested phi).
+fn tco_scan_incomings(self_name: String, all: List sprout_ir.IRBlock, incomings: List (String, String),
+                      phi_block: String, worklist: List String,
+                      acc: List (String, List String, String, String)) ->
+    (List String, List (String, List String, String, String)) =
   match incomings with
-  | Nil -> Nil
+  | Nil -> (worklist, acc)
   | Cons (val, pred) rest ->
-      match tco_find_self_call(val, self_name, all) with
-      | Just (fpred, args) ->
-          if fpred == pred
-          then Cons((pred, args, val, phi_block), tco_hits_from_phi(self_name, all, rest, phi_block))
-          else tco_hits_from_phi(self_name, all, rest, phi_block)
-      | Nothing -> tco_hits_from_phi(self_name, all, rest, phi_block)
+      match tco_self_call_in_block(val, self_name, pred, all) with
+      | Just args -> tco_scan_incomings(self_name, all, rest, phi_block, worklist, Cons((pred, args, val, phi_block), acc))
+      | Nothing -> tco_scan_incomings(self_name, all, rest, phi_block, Cons(val, worklist), acc)
+
+# Safety filter: keep a hit only if its phi keeps >= 1 incoming after the hits
+# are removed. Dropping every incoming would orphan the join's phi (both branches
+# recurse) and cascade into parent phis; we conservatively leave such calls as
+# normal IRCalls (still correct, just not TCO'd).
+fn tco_safe_hits(hits: List (String, List String, String, String), all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+  tco_safe_hits_go(hits, hits, all)
+
+fn tco_safe_hits_go(remaining: List (String, List String, String, String),
+                    allhits: List (String, List String, String, String),
+                    all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+  match remaining with
+  | Nil -> Nil
+  | Cons (pred, args, val, phi_block) rest ->
+      if phi_block == ""
+      then Cons((pred, args, val, phi_block), tco_safe_hits_go(rest, allhits, all))
+      else if tco_phi_retains_incoming(phi_block, allhits, all)
+      then Cons((pred, args, val, phi_block), tco_safe_hits_go(rest, allhits, all))
+      else tco_safe_hits_go(rest, allhits, all)
+
+fn tco_phi_retains_incoming(phi_block: String, allhits: List (String, List String, String, String), all: List sprout_ir.IRBlock) -> Bool =
+  match tco_find_phi_in_block(phi_block, all) with
+  | Nothing -> false
+  | Just incomings -> tco_any_non_hit(incomings, phi_block, allhits)
+
+fn tco_find_phi_in_block(phi_block: String, blocks: List sprout_ir.IRBlock) -> Maybe (List (String, String)) =
+  match blocks with
+  | Nil -> Nothing
+  | Cons b rest ->
+      if tco_block_label(b) == phi_block
+      then tco_first_phi_incomings(tco_block_ops(b))
+      else tco_find_phi_in_block(phi_block, rest)
+
+fn tco_first_phi_incomings(ops: List sprout_ir.IROp) -> Maybe (List (String, String)) =
+  match ops with
+  | Nil -> Nothing
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi _ _ inc -> Just(inc)
+      | _ -> tco_first_phi_incomings(rest)
+
+fn tco_any_non_hit(incomings: List (String, String), phi_block: String, allhits: List (String, List String, String, String)) -> Bool =
+  match incomings with
+  | Nil -> false
+  | Cons (v, _p) rest ->
+      if tco_val_is_hit_for_phi(v, phi_block, allhits)
+      then tco_any_non_hit(rest, phi_block, allhits)
+      else true
+
+fn tco_val_is_hit_for_phi(v: String, phi_block: String, allhits: List (String, List String, String, String)) -> Bool =
+  match allhits with
+  | Nil -> false
+  | Cons (_pred, _args, val, pb) rest ->
+      if val == v && pb == phi_block then true
+      else tco_val_is_hit_for_phi(v, phi_block, rest)
 
 # Per-param slot info: (orig_name, slot_ssa, in_name=%<p>$in, kind).
 fn tco_build_slots(params: List (String, sprout_ir.IRType), idx: Int,
@@ -4161,7 +4249,7 @@ export fn tco_rewrite(f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFu
   | sprout_ir.IRFunction name params ret_ty blocks ->
       if ret_ty == "i64"
       then
-        match tco_collect(name, blocks, blocks) with
+        match tco_safe_hits(tco_collect(name, blocks, blocks), blocks) with
         | Nil -> (f, next_idx)
         | hits ->
             match tco_build_slots(params, next_idx, Nil) with

@@ -33,9 +33,47 @@ fn make_loop_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRRet("%t$4"), Nil))),
     Nil)))))
 
+# Pre-rooting IR for a NESTED tail call (two phi levels):
+#   g(n) = if c1 then base1 else (if c2 then base2 else g(x))
+# The self-call %rx in else2 flows through join2's phi, then join1's phi, to the
+# ret. tco_rewrite must trace phi -> phi -> ret and still catch it.
+fn make_nested_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.g",
+    Cons(("n", sprout_ir.IRTScalar), Nil),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%c1", 1),
+      Cons(sprout_ir.IRCondBr("%c1", "then1", "else1"), Nil))),
+    Cons(sprout_ir.IRBlock("then1",
+      Cons(sprout_ir.IRConst("%base1", 10), Cons(sprout_ir.IRBr("join1"), Nil))),
+    Cons(sprout_ir.IRBlock("else1",
+      Cons(sprout_ir.IRConst("%c2", 1), Cons(sprout_ir.IRCondBr("%c2", "then2", "else2"), Nil))),
+    Cons(sprout_ir.IRBlock("then2",
+      Cons(sprout_ir.IRConst("%base2", 20), Cons(sprout_ir.IRBr("join2"), Nil))),
+    Cons(sprout_ir.IRBlock("else2",
+      Cons(sprout_ir.IRConst("%one", 1),
+      Cons(sprout_ir.IRISub("%x", "%n", "%one"),
+      Cons(sprout_ir.IRCall("%rx", sprout_ir.IRTScalar, "main.g", Cons("%x", Nil)),
+      Cons(sprout_ir.IRBr("join2"), Nil))))),
+    Cons(sprout_ir.IRBlock("join2",
+      Cons(sprout_ir.IRPhi("%m2", "i64", Cons(("%base2", "then2"), Cons(("%rx", "else2"), Nil))),
+      Cons(sprout_ir.IRBr("join1"), Nil))),
+    Cons(sprout_ir.IRBlock("join1",
+      Cons(sprout_ir.IRPhi("%m1", "i64", Cons(("%base1", "then1"), Cons(("%m2", "join2"), Nil))),
+      Cons(sprout_ir.IRRet("%m1"), Nil))),
+    Nil))))))))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    match ast_to_ir.tco_rewrite(make_nested_fn(), 200) with
+    | (nested, _ni) ->
+        do
+          let nir = ir_lowering.lower_fn_with_table(nested, dict_empty())
+          assert_true(state, "nested: renames param", string.contains(nir, "@main.g(i64 %n$in)"))
+          assert_true(state, "nested: has tco_loop", string.contains(nir, "tco_loop:"))
+          assert_true(state, "nested: back-edge to loop", string.contains(nir, "br label %tco_loop"))
+          assert_true(state, "nested: self-call gone", string.contains(nir, "call i64 @main.g") == false)
     match ast_to_ir.tco_rewrite(make_loop_fn(), 100) with
     | (rewritten, _next_idx) ->
         do
