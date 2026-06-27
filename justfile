@@ -898,6 +898,35 @@ tco-diff PROBE="tests/stack_overflow_smoke/deep_recursion.spr": bootstrap-from-s
   fi
   echo "==> tco-diff ✓ (typed >= direct TCO loops)"
 
+# TCO runtime regression: a deep tail-recursive program must run to completion
+# under typed codegen (--use-ir-codegen), not just direct codegen. The fixture
+# carries a heap param rooted across the recursive call, so a non-TCO'd typed
+# build either exhausts the GC root pool or overflows the stack (the failure
+# WITHOUT a per-iteration root reset on the back-edge). Direct codegen already
+# TCOs it. RED until typed-codegen TCO lands (blocker #2); GREEN after.
+tco-runtime-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_tcort_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/stack_overflow_smoke/deep_tail_recursion.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    echo "tco-runtime-smoke: typed emit failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "tco-runtime-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  set +e
+  got=$("$TMPD/bin" 2>"$TMPD/run.err"); ec=$?
+  set -e 2>/dev/null || true
+  if [ "$ec" -ne 0 ] || [ "$got" != "1" ]; then
+    echo "tco-runtime-smoke: deep tail recursion failed under typed codegen (exit $ec, output '$got', expected '1')" >&2
+    echo "  -> typed codegen is not TCO-ing self-tail-recursion (or not resetting roots on the back-edge); see blocker #2." >&2
+    echo "--- stderr ---" >&2; head -c 400 "$TMPD/run.err" >&2 || true; echo "" >&2
+    exit 1
+  fi
+  echo "==> tco-runtime-smoke ✓ (deep tail recursion completes under typed codegen)"
+
 # Flip-readiness dry-run: the real gate for making typed codegen the default.
 # Parity (ir_runtime_parity.sh) is necessary but NOT sufficient — it runs only
 # small corpus files with no argv. The compiler self-compiling exercises argv,

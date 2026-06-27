@@ -1,0 +1,20 @@
+module main
+
+# Deep TAIL recursion — a TCO regression for the typed codegen path.
+#
+# The call to `loop` is the whole else branch (tail position), so a TCO-capable
+# code generator turns the recursion into a single native frame (a loop). The
+# `s: String` parameter is a heap value that is rooted across the recursive call
+# (int_to_string allocates a fresh heap string each iteration), so the GC
+# root push/pop sits between the call and the return — which prevents LLVM's own
+# tailcallelim from rescuing a non-TCO'd `call; ret`. Without Sprout-level TCO
+# this therefore overflows the native stack at depth, exactly like the compiler's
+# own lexer.tokenize_from (typed-codegen flip blocker #2).
+#
+# Direct codegen (--emit-ir) TCOs it and returns 1. Typed codegen
+# (--use-ir-codegen) must do the same once TCO lands; until then it overflows.
+fn loop(n: Int, s: String) -> Int =
+  if n <= 0 then str_len(s)
+  else loop(n - 1, int_to_string(n))
+
+fn main() -> Unit !{IO} = print(loop(2000000, "start"))
