@@ -4065,61 +4065,6 @@ fn tco_scan_incomings(self_name: String, all: List sprout_ir.IRBlock, incomings:
       | Just args -> tco_scan_incomings(self_name, all, rest, phi_block, worklist, Cons((pred, args, val, phi_block), acc))
       | Nothing -> tco_scan_incomings(self_name, all, rest, phi_block, Cons(val, worklist), acc)
 
-# Safety filter: keep a hit only if its phi keeps >= 1 incoming after the hits
-# are removed. Dropping every incoming would orphan the join's phi (both branches
-# recurse) and cascade into parent phis; we conservatively leave such calls as
-# normal IRCalls (still correct, just not TCO'd).
-fn tco_safe_hits(hits: List (String, List String, String, String), all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
-  tco_safe_hits_go(hits, hits, all)
-
-fn tco_safe_hits_go(remaining: List (String, List String, String, String),
-                    allhits: List (String, List String, String, String),
-                    all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
-  match remaining with
-  | Nil -> Nil
-  | Cons (pred, args, val, phi_block) rest ->
-      if phi_block == ""
-      then Cons((pred, args, val, phi_block), tco_safe_hits_go(rest, allhits, all))
-      else if tco_phi_retains_incoming(phi_block, allhits, all)
-      then Cons((pred, args, val, phi_block), tco_safe_hits_go(rest, allhits, all))
-      else tco_safe_hits_go(rest, allhits, all)
-
-fn tco_phi_retains_incoming(phi_block: String, allhits: List (String, List String, String, String), all: List sprout_ir.IRBlock) -> Bool =
-  match tco_find_phi_in_block(phi_block, all) with
-  | Nothing -> false
-  | Just incomings -> tco_any_non_hit(incomings, phi_block, allhits)
-
-fn tco_find_phi_in_block(phi_block: String, blocks: List sprout_ir.IRBlock) -> Maybe (List (String, String)) =
-  match blocks with
-  | Nil -> Nothing
-  | Cons b rest ->
-      if tco_block_label(b) == phi_block
-      then tco_first_phi_incomings(tco_block_ops(b))
-      else tco_find_phi_in_block(phi_block, rest)
-
-fn tco_first_phi_incomings(ops: List sprout_ir.IROp) -> Maybe (List (String, String)) =
-  match ops with
-  | Nil -> Nothing
-  | Cons op rest ->
-      match op with
-      | sprout_ir.IRPhi _ _ inc -> Just(inc)
-      | _ -> tco_first_phi_incomings(rest)
-
-fn tco_any_non_hit(incomings: List (String, String), phi_block: String, allhits: List (String, List String, String, String)) -> Bool =
-  match incomings with
-  | Nil -> false
-  | Cons (v, _p) rest ->
-      if tco_val_is_hit_for_phi(v, phi_block, allhits)
-      then tco_any_non_hit(rest, phi_block, allhits)
-      else true
-
-fn tco_val_is_hit_for_phi(v: String, phi_block: String, allhits: List (String, List String, String, String)) -> Bool =
-  match allhits with
-  | Nil -> false
-  | Cons (_pred, _args, val, pb) rest ->
-      if val == v && pb == phi_block then true
-      else tco_val_is_hit_for_phi(v, phi_block, rest)
-
 # Per-param slot info: (orig_name, slot_ssa, in_name=%<p>$in, kind).
 fn tco_build_slots(params: List (String, sprout_ir.IRType), idx: Int,
                    acc: List (String, String, String, sprout_ir.IRType)) ->
@@ -4223,11 +4168,15 @@ fn tco_make_loop_blocks(blocks: List sprout_ir.IRBlock, slots: List (String, Str
     then sprout_ir.IRBlock("tco_loop", list_append(tco_load_ops(slots), tco_block_ops(b)))
     else b, blocks)
 
-# Drop blocks left unreachable (a phi whose incomings all became empty) — happens
-# when every predecessor of a join was a tail call (both branches recurse).
-fn tco_block_has_empty_phi(b: sprout_ir.IRBlock) -> Bool =
-  tco_ops_have_empty_phi(tco_block_ops(b))
-
+# Drop blocks left unreachable when a join's phi loses all incomings (every
+# predecessor was a tail call rewritten to IRTcoBack). A phi with no incomings
+# means its block has no reachable predecessors, so the block is dead. Iterative:
+# dropping block D also strips the [_, D] incoming from D's branch-successor's
+# phis, which can empty THAT phi — caught on the next pass. Terminates: each pass
+# removes >= 1 block. The function's ret-feeding phi always keeps its base-case
+# incoming (a non-recursive tail), so the cascade stops before the ret. This is
+# what lets single-arm matches (one real arm + an `unreachable` sibling → a
+# single-incoming pass-through phi) and both-branches-recurse joins be TCO'd.
 fn tco_ops_have_empty_phi(ops: List sprout_ir.IROp) -> Bool =
   match ops with
   | Nil -> false
@@ -4236,20 +4185,70 @@ fn tco_ops_have_empty_phi(ops: List sprout_ir.IROp) -> Bool =
       | sprout_ir.IRPhi _ _ Nil -> true
       | _ -> tco_ops_have_empty_phi(rest)
 
-fn tco_drop_dead_blocks(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
+# Label of the first block whose phi has no incomings (dead), if any.
+fn tco_find_empty_phi_block(blocks: List sprout_ir.IRBlock) -> Maybe String =
+  match blocks with
+  | Nil -> Nothing
+  | Cons b rest ->
+      if tco_ops_have_empty_phi(tco_block_ops(b))
+      then Just(tco_block_label(b))
+      else tco_find_empty_phi_block(rest)
+
+# The IRBr successor label of a block's terminator ("" if it is not a plain br).
+fn tco_block_br_succ(ops: List sprout_ir.IROp) -> String =
+  match ops with
+  | Nil -> ""
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRBr target -> target
+      | _ -> tco_block_br_succ(rest)
+
+fn tco_succ_of_block(blocks: List sprout_ir.IRBlock, lbl: String) -> String =
+  match blocks with
+  | Nil -> ""
+  | Cons b rest ->
+      if tco_block_label(b) == lbl then tco_block_br_succ(tco_block_ops(b))
+      else tco_succ_of_block(rest, lbl)
+
+# Strip every phi incoming whose predecessor is `pred`, in `ops`.
+fn tco_drop_incomings_from_pred(inc: List (String, String), pred: String) -> List (String, String) =
+  match inc with
+  | Nil -> Nil
+  | Cons (v, p) rest ->
+      if p == pred then tco_drop_incomings_from_pred(rest, pred)
+      else Cons((v, p), tco_drop_incomings_from_pred(rest, pred))
+
+fn tco_strip_pred_in_ops(ops: List sprout_ir.IROp, pred: String) -> List sprout_ir.IROp =
+  match ops with
+  | Nil -> Nil
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi r ty inc ->
+          Cons(sprout_ir.IRPhi(r, ty, tco_drop_incomings_from_pred(inc, pred)), tco_strip_pred_in_ops(rest, pred))
+      | _ -> Cons(op, tco_strip_pred_in_ops(rest, pred))
+
+# Remove block `dead`; in its successor `succ`, strip any phi incoming from `dead`.
+fn tco_remove_block_and_fix(blocks: List sprout_ir.IRBlock, dead: String, succ: String) -> List sprout_ir.IRBlock =
   match blocks with
   | Nil -> Nil
   | Cons b rest ->
-      if tco_block_has_empty_phi(b)
-      then tco_drop_dead_blocks(rest)
-      else Cons(b, tco_drop_dead_blocks(rest))
+      if tco_block_label(b) == dead
+      then tco_remove_block_and_fix(rest, dead, succ)
+      else if tco_block_label(b) == succ
+      then Cons(sprout_ir.IRBlock(succ, tco_strip_pred_in_ops(tco_block_ops(b), dead)), tco_remove_block_and_fix(rest, dead, succ))
+      else Cons(b, tco_remove_block_and_fix(rest, dead, succ))
+
+fn tco_prune_dead_blocks(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
+  match tco_find_empty_phi_block(blocks) with
+  | Nothing -> blocks
+  | Just dead -> tco_prune_dead_blocks(tco_remove_block_and_fix(blocks, dead, tco_succ_of_block(blocks, dead)))
 
 export fn tco_rewrite(f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFunction, Int) =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       if ret_ty == "i64"
       then
-        match tco_safe_hits(tco_collect(name, blocks, blocks), blocks) with
+        match tco_collect(name, blocks, blocks) with
         | Nil -> (f, next_idx)
         | hits ->
             match tco_build_slots(params, next_idx, Nil) with
@@ -4266,7 +4265,7 @@ fn tco_assemble(name: String, params: List (String, sprout_ir.IRType), ret_ty: S
         entry_block = sprout_ir.IRBlock("entry",
                         Cons(sprout_ir.IRTcoEntry(tco_entry_slot_list(slots), sp),
                         Cons(sprout_ir.IRBr("tco_loop"), Nil)))
-        new_blocks = tco_drop_dead_blocks(Cons(entry_block, loop_blocks))
+        new_blocks = tco_prune_dead_blocks(Cons(entry_block, loop_blocks))
 
 # Apply TCO unless this is the program entry point (mirrors direct codegen's
 # is_entry exclusion). tco_rewrite is itself a no-op without a tail self-call.

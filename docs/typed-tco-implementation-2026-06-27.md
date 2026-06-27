@@ -193,18 +193,53 @@ for i64-returning functions.
 3. **[DONE] Fixed-point seed via 2-step bootstrap** — `verify-bootstrap-fixed-point`
    ✓; the TCO'd compiler (29-coverage applied to its own functions) self-compiles
    byte-identically.
-4. **[TODO] Remaining 26/55 — likely do-blocks.** The missed shapes are probably
-   `do`-notation tails (different control flow than if/match). Inspect a missed
-   function's IR (`tco-diff` says 29 vs 55), find the tail-call shape, extend
-   detection. Re-run `tco-diff`/`test`/`test-stress` each step.
-5. **[TODO] Close the flip.** Check whether `lexer.tokenize_from` is among the 29
-   (if so, the self-compile overflow is fixed). `flip-readiness` is the gate but
-   also needs #95 (argv) in the seed. Then the flip itself.
-3. Verify: `just tco-diff` climbs 0→N; `just tco-runtime-smoke` GREEN;
-   `just test`; `just test-stress` (GC!); smoke-shapes; bundle-smoke;
-   compile-examples-stage1; run-example-canary.
-4. `just flip-readiness` should now pass step [4] further (still needs #95 argv
-   in the seed to fully go green).
+4. **[IN PROGRESS 2026-06-27b] Oracle-driven coverage via the flip-readiness
+   panic — NOT a blind "do-blocks" grind.** Key correction to the old hypothesis:
+   the missed-coverage count (221 tco_loops on the full self-compile, direct=648
+   vs typed=427) is dominated by **mutual recursion** (out of v1 scope) and
+   **dead/cold helpers** (e.g. `module_loader.split_lines_at` — self-recursive but
+   has NO callers; `collect_imports` uses the builtin `str_split_lines`). Chasing
+   the raw count fixes irrelevant functions. The ONLY functions that matter are
+   those that recurse to overflow depth during self-compile — and the
+   stack-overflow panic (commit 8ce597c) NAMES them. Method: run `flip-readiness`,
+   read the panic's named function, fix THAT shape in `tco_rewrite`, repeat to a
+   fixed point.
+   - **First oracle hit: `lexer.tokenize_from`.** It IS in the typed tco set (has a
+     `tco_loop`) yet still overflowed: it has 9 self-call paths in IR; the producer
+     TCO'd 7 (back-edges) but left **2 native `call`s** — both **single-arm
+     tuple-destructure matches** (`match scan_ident_next(...)`/`scan_int_next(...)
+     with | (next, tok) -> tokenize_from(...)`, source lines 346/349). A single-arm
+     match lowers to one real arm + an `unreachable` exhaustiveness sibling, so the
+     join phi is a **single-incoming pass-through** `%mi = phi [%r, arm_0]`. The old
+     `tco_safe_hits` punted (removing the lone incoming empties the phi), leaving a
+     native self-call. The two-arm `Result` matches (scan_string/scan_char) keep
+     their `Err` incoming and were already TCO'd.
+   - **FIX (landed, this branch):** (a) **removed `tco_safe_hits`** entirely — always
+     keep all hits; (b) replaced the one-pass `tco_drop_dead_blocks` with an
+     **iterative `tco_prune_dead_blocks`**: when a join phi loses all incomings (all
+     preds were hits → IRTcoBack), drop the dead block AND strip its `[_, D]`
+     incoming from its `IRBr` successor's phis (parent-phi fixup), repeating to a
+     fixpoint. Empty phi ⟺ unreachable block, so this is safe; the ret-feeding phi
+     keeps its base-case incoming, stopping the cascade. This also handles
+     both-branches-recurse joins for free. Unit test: `test_tco_rewrite.spr`
+     `make_single_arm_fn` (4 asserts incl. the parent-phi/dead-block check) — RED
+     before, GREEN after, via the fast loop (18/18).
+5. **[TODO] Close the flip.** After each `tco_rewrite` fix: `just refresh-seed`
+   (rebuilds stage-1 with the new logic — the fast loop can't show TCO applied to
+   the compiler's own functions), then re-run `flip-readiness`. If it names a NEW
+   overflow function, loop back to step 4. Once step [4] of `flip-readiness` emits
+   verifiable IR, do the flip (escape hatch + dispatcher reroute + refresh-seed),
+   per `docs/p11-flip-handoff-2026-06-27.md` "Once self-compile is clean".
+
+**Status 2026-06-27b:** branch `fix/typed-codegen-tco` rebased onto `origin/master`
+(which now has **#95 argv merged**, commit `b0eea49`), so the argv blocker is gone
+from the typed path (verified: typed `@main` emits `call @sprout_set_argv`).
+`flip-readiness` steps 1-3 PASS; step 4 overflowed in `tokenize_from` (the panic
+oracle) → fixed as above. Seed refresh + re-run `flip-readiness` is the next gate.
+
+Verify (DoD) once flip-readiness is green: `just tco-diff` (per-probe); `just
+tco-runtime-smoke`; `just test`; `just test-stress` (GC!); smoke-shapes;
+bundle-smoke; compile-examples-stage1; run-example-canary; refresh-seed staged.
 
 ## Increment 2 producer — REVISED: post-translation IR rewrite (NOT threading)
 

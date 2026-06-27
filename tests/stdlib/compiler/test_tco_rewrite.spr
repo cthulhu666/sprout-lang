@@ -63,9 +63,51 @@ fn make_nested_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRRet("%m1"), Nil))),
     Nil))))))))
 
+# Pre-rooting IR for a SINGLE-ARM tuple-destructure tail call:
+#   h(n) = if c1 then base1
+#          else (match scan(n) with | (x, _) -> h(x))
+# A single-arm match lowers to one real arm (arm_0) plus an `unreachable`
+# exhaustiveness sibling, so the join (join_inner) has a SINGLE-incoming
+# pass-through phi `%mi = phi [%r, arm_0]`. The old tco_safe_hits punted here
+# (removing the lone incoming would empty the phi), leaving a native self-call
+# that overflows at scale (this is the tokenize_from blocker). The fix keeps the
+# hit, empties join_inner, drops it, and STRIPS [%mi, join_inner] from join1's
+# parent phi — the cascade this test exercises directly.
+fn make_single_arm_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.h",
+    Cons(("n", sprout_ir.IRTScalar), Nil),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%c1", 1),
+      Cons(sprout_ir.IRCondBr("%c1", "then1", "else1"), Nil))),
+    Cons(sprout_ir.IRBlock("then1",
+      Cons(sprout_ir.IRConst("%base1", 10), Cons(sprout_ir.IRBr("join1"), Nil))),
+    Cons(sprout_ir.IRBlock("else1",
+      Cons(sprout_ir.IRConst("%one", 1),
+      Cons(sprout_ir.IRISub("%x", "%n", "%one"),
+      Cons(sprout_ir.IRBr("arm_0"), Nil)))),
+    Cons(sprout_ir.IRBlock("arm_0",
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.h", Cons("%x", Nil)),
+      Cons(sprout_ir.IRBr("join_inner"), Nil))),
+    Cons(sprout_ir.IRBlock("join_inner",
+      Cons(sprout_ir.IRPhi("%mi", "i64", Cons(("%r", "arm_0"), Nil)),
+      Cons(sprout_ir.IRBr("join1"), Nil))),
+    Cons(sprout_ir.IRBlock("join1",
+      Cons(sprout_ir.IRPhi("%m1", "i64", Cons(("%base1", "then1"), Cons(("%mi", "join_inner"), Nil))),
+      Cons(sprout_ir.IRRet("%m1"), Nil))),
+    Nil)))))))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    match ast_to_ir.tco_rewrite(make_single_arm_fn(), 300) with
+    | (sa, _ni3) ->
+        do
+          let sair = ir_lowering.lower_fn_with_table(sa, dict_empty())
+          assert_true(state, "single-arm: has tco_loop", string.contains(sair, "tco_loop:"))
+          assert_true(state, "single-arm: back-edge to loop", string.contains(sair, "br label %tco_loop"))
+          assert_true(state, "single-arm: self-call gone", string.contains(sair, "call i64 @main.h") == false)
+          assert_true(state, "single-arm: dead join_inner block removed", string.contains(sair, "join_inner") == false)
     match ast_to_ir.tco_rewrite(make_nested_fn(), 200) with
     | (nested, _ni) ->
         do
