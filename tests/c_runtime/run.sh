@@ -53,6 +53,13 @@ if grep -q 'b->data = (char\*)realloc' "$ROOT/runtime/sprout_runtime.c"; then
   exit 1
 fi
 
+echo "==> c runtime: read_file rejects invalid UTF-8 with Err"
+printf 'hello world\n' > "$TMP_DIR/utf8_good.txt"
+printf 'ab\xf0' > "$TMP_DIR/utf8_bad.txt"   # trailing truncated 4-byte lead
+compile read_file_utf8_validate.c "$TMP_DIR/read_file_utf8_validate" -O0 -g
+"$TMP_DIR/read_file_utf8_validate" "$TMP_DIR/utf8_good.txt" "$TMP_DIR/utf8_bad.txt" > "$TMP_DIR/read_file_utf8_validate.out"
+test "$(cat "$TMP_DIR/read_file_utf8_validate.out")" = "read_file-utf8-validated"
+
 echo "==> c runtime: SIGPIPE is ignored so broken-pipe writes return EPIPE"
 compile sigpipe_ignored.c "$TMP_DIR/sigpipe_ignored" -O0 -g
 "$TMP_DIR/sigpipe_ignored" > "$TMP_DIR/sigpipe_ignored.out"

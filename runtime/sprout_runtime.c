@@ -305,6 +305,9 @@ long long sprout_set_current_fn(const char* fn_name) {
 }
 
 __attribute__((noreturn)) static void tcp_fail(const char* msg);
+/* A Sprout String is required to be valid UTF-8; raw bytes from external
+ * sources (files, stdin, processes, network) are validated at ingestion. */
+static int utf8_validate(const unsigned char* data, size_t len, const char** reason);
 __attribute__((noreturn)) void sprout_abort_match(void);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
@@ -1560,6 +1563,13 @@ long long read_file(long long path_i) {
   }
   if (close_after) fclose(f);
   out[len] = '\0';
+  const char* utf8_reason = NULL;
+  if (!utf8_validate((const unsigned char*)out, len, &utf8_reason)) {
+    free(out);
+    char* msg = dup_managed_cstr(utf8_reason, "read_file: out of memory");
+    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
+    return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
+  }
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
   return sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_out));

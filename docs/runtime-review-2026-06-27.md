@@ -79,7 +79,16 @@ code without the fix.
 - Fix: `signal(SIGPIPE, SIG_IGN)` once at runtime init, or `MSG_NOSIGNAL` on
   every `send` / `SO_NOSIGPIPE` per socket.
 
-### F2 — MEDIUM: OOB read on truncated trailing UTF-8 sequence
+### F2 — MEDIUM [FIXED]: OOB read on truncated trailing UTF-8 sequence
+
+Fixed by enforcing the invariant **a `String` is always valid UTF-8**:
+`read_file` now runs `utf8_validate` on its content and returns `Err` on
+malformed input (also rejects embedded NUL). Spec updated (§4). Regression:
+`tests/c_runtime/read_file_utf8_validate.c`. Newly-noted follow-up: other
+untrusted-bytes→String boundaries should validate too — `tcp_read` (handled
+with F-NET-4 in the networking work) and `proc_run` stdout/stderr, stdin
+(`term_read_line`), and HTTP body/headers (tracked, not yet validated).
+
 
 - `sprout_utf8_char_width` (`:3571`) returns the declared width (2/3/4) for a
   valid lead byte and only `tcp_fail`s on a structurally invalid one. Callers

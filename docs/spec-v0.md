@@ -57,6 +57,11 @@ Built-in types:
 - `String`
 - `Unit`
 
+A `String` value is always valid UTF-8 and contains no NUL byte. Builtins that
+construct a `String` from raw external bytes (e.g. `read_file`) validate the
+input and report malformed content through their error channel rather than
+producing an invalid `String`.
+
 Effect annotations are attached to function types rather than encoded as an
 ordinary type constructor.
 
