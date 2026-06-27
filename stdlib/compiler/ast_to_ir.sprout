@@ -3943,6 +3943,248 @@ fn is_entry_fn_name(name: String) -> Bool =
   name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
   where n = str_len(name)
 
+# ===========================================================================
+# TCO rewrite — self-tail-recursion -> alloca-slot loop.
+#
+# Runs on the PRE-rooting IRFunction (called from translate_user_fn before
+# ir_rooting). A tail self-call `%r = call @self(args); ... ret <r-via-phi>`
+# becomes an IRTcoBack back-edge that stores the args into per-param slots; the
+# loop header (IRTcoLoad) re-loads them each iteration. Running before rooting
+# is essential: ir_rooting would otherwise root the self-call's heap arg across
+# the (non-tail) call, and that root accumulates per frame -> root-pool
+# exhaustion. As an IRTcoBack (not a GC trigger), no such root is emitted.
+# v1: self-recursion only, i64 returns only. See
+# docs/typed-tco-implementation-2026-06-27.md.
+# ===========================================================================
+
+fn tco_block_label(b: sprout_ir.IRBlock) -> String =
+  match b with | sprout_ir.IRBlock l _ -> l
+
+fn tco_block_ops(b: sprout_ir.IRBlock) -> List sprout_ir.IROp =
+  match b with | sprout_ir.IRBlock _ ops -> ops
+
+# The value returned by a block, if it ends in IRRet.
+fn tco_ret_value(ops: List sprout_ir.IROp) -> Maybe String =
+  match ops with
+  | Nil -> Nothing
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRRet v -> Just(v)
+      | _ -> tco_ret_value(rest)
+
+# Incomings of the IRPhi defining `name`, if present in ops.
+fn tco_phi_incomings(name: String, ops: List sprout_ir.IROp) -> Maybe (List (String, String)) =
+  match ops with
+  | Nil -> Nothing
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi r _ inc ->
+          if r == name then Just(inc) else tco_phi_incomings(name, rest)
+      | _ -> tco_phi_incomings(name, rest)
+
+# Args of `IRCall(val, _, self_name, args)` within ops, if present.
+fn tco_self_call_args(val: String, self_name: String, ops: List sprout_ir.IROp) -> Maybe (List String) =
+  match ops with
+  | Nil -> Nothing
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRCall r _ fname args ->
+          if r == val && fname == self_name then Just(args)
+          else tco_self_call_args(val, self_name, rest)
+      | _ -> tco_self_call_args(val, self_name, rest)
+
+# Block label where `val` is defined by a self-call, plus its args.
+fn tco_find_self_call(val: String, self_name: String, blocks: List sprout_ir.IRBlock) -> Maybe (String, List String) =
+  match blocks with
+  | Nil -> Nothing
+  | Cons b rest ->
+      match tco_self_call_args(val, self_name, tco_block_ops(b)) with
+      | Just args -> Just((tco_block_label(b), args))
+      | Nothing -> tco_find_self_call(val, self_name, rest)
+
+# A tail-call hit: (pred_label, args, call_result, phi_block).
+# phi_block == "" means a direct `call; ret` (no phi incoming to drop).
+fn tco_collect(self_name: String, blocks: List sprout_ir.IRBlock, all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+  match blocks with
+  | Nil -> Nil
+  | Cons b rest ->
+      list_append(tco_hits_for_block(self_name, b, all), tco_collect(self_name, rest, all))
+
+fn tco_hits_for_block(self_name: String, b: sprout_ir.IRBlock, all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+  match tco_ret_value(tco_block_ops(b)) with
+  | Nothing -> Nil
+  | Just rv ->
+      match tco_self_call_args(rv, self_name, tco_block_ops(b)) with
+      | Just args -> Cons((tco_block_label(b), args, rv, ""), Nil)
+      | Nothing ->
+          match tco_phi_incomings(rv, tco_block_ops(b)) with
+          | Nothing -> Nil
+          | Just incomings -> tco_hits_from_phi(self_name, all, incomings, tco_block_label(b))
+
+fn tco_hits_from_phi(self_name: String, all: List sprout_ir.IRBlock, incomings: List (String, String), phi_block: String) -> List (String, List String, String, String) =
+  match incomings with
+  | Nil -> Nil
+  | Cons (val, pred) rest ->
+      match tco_find_self_call(val, self_name, all) with
+      | Just (fpred, args) ->
+          if fpred == pred
+          then Cons((pred, args, val, phi_block), tco_hits_from_phi(self_name, all, rest, phi_block))
+          else tco_hits_from_phi(self_name, all, rest, phi_block)
+      | Nothing -> tco_hits_from_phi(self_name, all, rest, phi_block)
+
+# Per-param slot info: (orig_name, slot_ssa, in_name=%<p>$in, kind).
+fn tco_build_slots(params: List (String, sprout_ir.IRType), idx: Int,
+                   acc: List (String, String, String, sprout_ir.IRType)) ->
+    (List (String, String, String, sprout_ir.IRType), Int) =
+  match params with
+  | Nil -> (list_reverse(acc), idx)
+  | Cons (p, kind) rest ->
+      tco_build_slots(rest, idx + 1, Cons((p, fresh_name("%t", idx), "%" ++ p ++ "$in", kind), acc))
+
+fn tco_rename_params(params: List (String, sprout_ir.IRType)) -> List (String, sprout_ir.IRType) =
+  match params with
+  | Nil -> Nil
+  | Cons (p, k) rest -> Cons((p ++ "$in", k), tco_rename_params(rest))
+
+fn tco_entry_slot_list(slots: List (String, String, String, sprout_ir.IRType)) -> List (String, String, String) =
+  match slots with
+  | Nil -> Nil
+  | Cons (_p, slot, in_name, _k) rest -> Cons((slot, "i64", in_name), tco_entry_slot_list(rest))
+
+fn tco_load_ops(slots: List (String, String, String, sprout_ir.IRType)) -> List sprout_ir.IROp =
+  match slots with
+  | Nil -> Nil
+  | Cons (p, slot, _in, kind) rest ->
+      Cons(sprout_ir.IRTcoLoad("%" ++ p, "i64", slot, kind), tco_load_ops(rest))
+
+# Zip the per-param slots with a tail call's args -> IRTcoBack stores.
+fn tco_zip_stores(slots: List (String, String, String, sprout_ir.IRType), args: List String) -> List (String, String, String) =
+  match (slots, args) with
+  | (Cons(_p, slot, _in, _k) srest, Cons a arest) ->
+      Cons((slot, "i64", a), tco_zip_stores(srest, arest))
+  | _ -> Nil
+
+# Drop the self-call (result == call_result) and the block terminator, then
+# append the IRTcoBack back-edge.
+fn tco_rewrite_pred_ops(ops: List sprout_ir.IROp, call_result: String,
+                        stores: List (String, String, String), sp: String) -> List sprout_ir.IROp =
+  list_append(tco_filter_call_and_term(ops, call_result),
+              Cons(sprout_ir.IRTcoBack(stores, sp, "tco_loop"), Nil))
+
+fn tco_filter_call_and_term(ops: List sprout_ir.IROp, call_result: String) -> List sprout_ir.IROp =
+  match ops with
+  | Nil -> Nil
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRCall r _ _ _ ->
+          if r == call_result then tco_filter_call_and_term(rest, call_result)
+          else Cons(op, tco_filter_call_and_term(rest, call_result))
+      | sprout_ir.IRBr _ -> tco_filter_call_and_term(rest, call_result)
+      | sprout_ir.IRRet _ -> tco_filter_call_and_term(rest, call_result)
+      | _ -> Cons(op, tco_filter_call_and_term(rest, call_result))
+
+fn tco_find_hit_for_pred(lbl: String, hits: List (String, List String, String, String)) -> Maybe (List String, String) =
+  match hits with
+  | Nil -> Nothing
+  | Cons (pred, args, call_result, _phi) rest ->
+      if pred == lbl then Just((args, call_result)) else tco_find_hit_for_pred(lbl, rest)
+
+fn tco_rewrite_block_if_pred(b: sprout_ir.IRBlock, hits: List (String, List String, String, String),
+                             slots: List (String, String, String, sprout_ir.IRType), sp: String) -> sprout_ir.IRBlock =
+  match tco_find_hit_for_pred(tco_block_label(b), hits) with
+  | Nothing -> b
+  | Just (args, call_result) ->
+      sprout_ir.IRBlock(tco_block_label(b),
+        tco_rewrite_pred_ops(tco_block_ops(b), call_result, tco_zip_stores(slots, args), sp))
+
+# Remove (removed_val, pred) from every IRPhi's incomings in `ops`.
+fn tco_fix_phi_in_ops(ops: List sprout_ir.IROp, removed_val: String, pred: String) -> List sprout_ir.IROp =
+  match ops with
+  | Nil -> Nil
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi r ty inc ->
+          Cons(sprout_ir.IRPhi(r, ty, tco_drop_incoming(inc, removed_val, pred)), tco_fix_phi_in_ops(rest, removed_val, pred))
+      | _ -> Cons(op, tco_fix_phi_in_ops(rest, removed_val, pred))
+
+fn tco_drop_incoming(inc: List (String, String), removed_val: String, pred: String) -> List (String, String) =
+  match inc with
+  | Nil -> Nil
+  | Cons (v, p) rest ->
+      if v == removed_val && p == pred then tco_drop_incoming(rest, removed_val, pred)
+      else Cons((v, p), tco_drop_incoming(rest, removed_val, pred))
+
+fn tco_fix_phi_block(blocks: List sprout_ir.IRBlock, phi_block: String, removed_val: String, pred: String) -> List sprout_ir.IRBlock =
+  list_map(\b ->
+    if tco_block_label(b) == phi_block
+    then sprout_ir.IRBlock(phi_block, tco_fix_phi_in_ops(tco_block_ops(b), removed_val, pred))
+    else b, blocks)
+
+fn tco_fix_all_phis(blocks: List sprout_ir.IRBlock, hits: List (String, List String, String, String)) -> List sprout_ir.IRBlock =
+  match hits with
+  | Nil -> blocks
+  | Cons (pred, _args, call_result, phi_block) rest ->
+      if phi_block == ""
+      then tco_fix_all_phis(blocks, rest)
+      else tco_fix_all_phis(tco_fix_phi_block(blocks, phi_block, call_result, pred), rest)
+
+# Rename the old "entry" block to "tco_loop" and prepend the per-param reloads.
+fn tco_make_loop_blocks(blocks: List sprout_ir.IRBlock, slots: List (String, String, String, sprout_ir.IRType)) -> List sprout_ir.IRBlock =
+  list_map(\b ->
+    if tco_block_label(b) == "entry"
+    then sprout_ir.IRBlock("tco_loop", list_append(tco_load_ops(slots), tco_block_ops(b)))
+    else b, blocks)
+
+# Drop blocks left unreachable (a phi whose incomings all became empty) — happens
+# when every predecessor of a join was a tail call (both branches recurse).
+fn tco_block_has_empty_phi(b: sprout_ir.IRBlock) -> Bool =
+  tco_ops_have_empty_phi(tco_block_ops(b))
+
+fn tco_ops_have_empty_phi(ops: List sprout_ir.IROp) -> Bool =
+  match ops with
+  | Nil -> false
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi _ _ Nil -> true
+      | _ -> tco_ops_have_empty_phi(rest)
+
+fn tco_drop_dead_blocks(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
+  match blocks with
+  | Nil -> Nil
+  | Cons b rest ->
+      if tco_block_has_empty_phi(b)
+      then tco_drop_dead_blocks(rest)
+      else Cons(b, tco_drop_dead_blocks(rest))
+
+export fn tco_rewrite(f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFunction, Int) =
+  match f with
+  | sprout_ir.IRFunction name params ret_ty blocks ->
+      if ret_ty == "i64"
+      then
+        match tco_collect(name, blocks, blocks) with
+        | Nil -> (f, next_idx)
+        | hits ->
+            match tco_build_slots(params, next_idx, Nil) with
+            | (slots, idx1) -> tco_assemble(name, params, ret_ty, blocks, hits, slots, fresh_name("%t", idx1), idx1 + 1)
+      else (f, next_idx)
+
+fn tco_assemble(name: String, params: List (String, sprout_ir.IRType), ret_ty: String,
+                blocks: List sprout_ir.IRBlock, hits: List (String, List String, String, String),
+                slots: List (String, String, String, sprout_ir.IRType), sp: String, idx2: Int) ->
+    (sprout_ir.IRFunction, Int) =
+  (sprout_ir.IRFunction(name, tco_rename_params(params), ret_ty, new_blocks), idx2)
+  where rewritten = tco_fix_all_phis(list_map(\b -> tco_rewrite_block_if_pred(b, hits, slots, sp), blocks), hits)
+        loop_blocks = tco_make_loop_blocks(rewritten, slots)
+        entry_block = sprout_ir.IRBlock("entry",
+                        Cons(sprout_ir.IRTcoEntry(tco_entry_slot_list(slots), sp),
+                        Cons(sprout_ir.IRBr("tco_loop"), Nil)))
+        new_blocks = tco_drop_dead_blocks(Cons(entry_block, loop_blocks))
+
+# Apply TCO unless this is the program entry point (mirrors direct codegen's
+# is_entry exclusion). tco_rewrite is itself a no-op without a tail self-call.
+fn maybe_tco(name: String, f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFunction, Int) =
+  if is_entry_fn_name(name) then (f, next_idx) else tco_rewrite(f, next_idx)
+
 # translate_user_fn: returns (IRFunction, next-free-temp-index, lifted-lambdas).
 # The next-free index is the smallest idx never used as %tN/then_N/else_N/join_N
 # during body translation; the rooting pass (M2 PR 2.2) consumes it to allocate
@@ -3969,7 +4211,12 @@ fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.Typed
         | (blocks, next_idx) ->
             do
               lifted <- ref_read(lifted_ref)
-              Ok(Just((build_fn(name, params_with_kinds, ret_ty, blocks), next_idx, list_reverse(lifted))))
+              # TCO: rewrite self-tail-recursion into an alloca-slot loop before
+              # rooting. Skipped for the program entry point (never recursive) and
+              # internally a no-op unless the body has a tail self-call.
+              match maybe_tco(name, build_fn(name, params_with_kinds, ret_ty, blocks), next_idx) with
+              | (tco_fn, next_idx2) ->
+                  Ok(Just((tco_fn, next_idx2, list_reverse(lifted))))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
         pnames = param_names(params)
         params_with_kinds = ast_params_to_irtype_pairs(params, pnames)

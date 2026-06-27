@@ -1,0 +1,55 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.string as string
+
+# Pre-rooting IR for:
+#   loop(n, s) = if n <= 0 then str_len(s) else loop(n - 1, int_to_string(n))
+# The tail self-call is `%t$9 = call @main.loop(%t$7, %t$8)` in else_3, whose
+# result flows through join_3's phi to the ret. tco_rewrite must turn it into an
+# alloca-slot loop: %n/%s slots, a tco_loop header reloading them, and an
+# IRTcoBack back-edge in the former else block.
+fn make_loop_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.loop",
+    Cons(("n", sprout_ir.IRTScalar), Cons(("s", sprout_ir.IRTHeap), Nil)),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%t$0", 0),
+      Cons(sprout_ir.IRICmp("%t$1", "sle", "%n", "%t$0"),
+      Cons(sprout_ir.IRCondBr("%t$1", "then_3", "else_3"), Nil)))),
+    Cons(sprout_ir.IRBlock("then_3",
+      Cons(sprout_ir.IRCall("%t$5", sprout_ir.IRTScalar, "str_len", Cons("%s", Nil)),
+      Cons(sprout_ir.IRBr("join_3"), Nil))),
+    Cons(sprout_ir.IRBlock("else_3",
+      Cons(sprout_ir.IRConst("%t$6", 1),
+      Cons(sprout_ir.IRISub("%t$7", "%n", "%t$6"),
+      Cons(sprout_ir.IRStrFromInt("%t$8", "%n"),
+      Cons(sprout_ir.IRCall("%t$9", sprout_ir.IRTScalar, "main.loop", Cons("%t$7", Cons("%t$8", Nil))),
+      Cons(sprout_ir.IRBr("join_3"), Nil)))))),
+    Cons(sprout_ir.IRBlock("join_3",
+      Cons(sprout_ir.IRPhi("%t$4", "i64", Cons(("%t$5", "then_3"), Cons(("%t$9", "else_3"), Nil))),
+      Cons(sprout_ir.IRRet("%t$4"), Nil))),
+    Nil)))))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match ast_to_ir.tco_rewrite(make_loop_fn(), 100) with
+    | (rewritten, _next_idx) ->
+        do
+          let ir = ir_lowering.lower_fn_with_table(rewritten, dict_empty())
+          assert_true(state, "renames params to $in",
+            string.contains(ir, "define i64 @main.loop(i64 %n$in, i64 %s$in)"))
+          assert_true(state, "has a tco_loop block", string.contains(ir, "tco_loop:"))
+          assert_true(state, "entry stacksaves", string.contains(ir, "@llvm.stacksave()"))
+          assert_true(state, "loop header reloads n", string.contains(ir, "%n = load i64, ptr"))
+          assert_true(state, "loop header reloads s", string.contains(ir, "%s = load i64, ptr"))
+          assert_true(state, "back-edge stores new n", string.contains(ir, "store i64 %t$7, ptr"))
+          assert_true(state, "back-edge stores new s", string.contains(ir, "store i64 %t$8, ptr"))
+          assert_true(state, "back-edge stackrestores", string.contains(ir, "@llvm.stackrestore"))
+          assert_true(state, "back-edge branches to the loop", string.contains(ir, "br label %tco_loop"))
+          assert_true(state, "the self-call is gone",
+            string.contains(ir, "call i64 @main.loop") == false)
+          summary(state)

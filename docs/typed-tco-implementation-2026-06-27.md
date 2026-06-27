@@ -180,8 +180,26 @@ for i64-returning functions.
    `ir_rooting` exhaustive matches (+ `tco_entry_uses`/`tco_back_uses`); printed
    in `sprout_ir.print_op`. Unit test: `test_ir_lowering_exports.spr` (10 asserts,
    GREEN) + the hand-checked shape `opt --passes=verify`s clean. Seed refreshed.
-2. **[TODO] ast_to_ir detection + scaffold** (turns the producer on). The hard
-   part — see below.
+2. **[DONE, PARTIAL] ast_to_ir producer** — `tco_rewrite(f, next_idx)` (post-
+   translation IR rewrite) + `maybe_tco` wired into `translate_user_fn` (skips the
+   entry point). Unit-tested (`test_tco_rewrite.spr`, 10 asserts, GREEN via the
+   fast loop). End-to-end: `tco-runtime-smoke` GREEN (deep tail recursion completes
+   under `--use-ir-codegen`, no root-pool exhaustion), `tco-diff` 0→6, `test-stress`
+   GREEN (GC-safe). **Coverage is PARTIAL: 6 of direct's 55 TCO loops.** The rewrite
+   detects only (a) direct `call; ret` and (b) one-level `call → phi → ret`. It
+   safely SKIPS (leaves as a normal call, no miscompile) tail calls whose result
+   flows through nested phis / deeper merges (nested if/match, some do-blocks).
+   To close the flip blocker, extend detection in `tco_hits_for_block` to trace
+   `phi → phi → … → ret` (transitive returned-phi set) so `lexer.tokenize_from`
+   and friends are caught. Confirm each extension with `tco-diff` (→55) and
+   re-run `test-stress`.
+3. **[TODO] Fixed-point seed via 2-STEP bootstrap.** The producer changes the IR
+   the compiler emits, so one `refresh-seed` is NOT a fixed point (the seed was
+   emitted by a producer-LESS binary; a producer-HAVING binary then emits TCO'd
+   IR for the compiler). Run the 2-step bootstrap (docs/debugging.md) before
+   committing, or CI's `verify-bootstrap-fixed-point` fails. Also verify the
+   typed-built compiler still self-compiles (`flip-readiness`) — that is the real
+   blocker-#2 close, and needs tokenize_from among the TCO'd set (see coverage).
 3. Verify: `just tco-diff` climbs 0→N; `just tco-runtime-smoke` GREEN;
    `just test`; `just test-stress` (GC!); smoke-shapes; bundle-smoke;
    compile-examples-stage1; run-example-canary.
