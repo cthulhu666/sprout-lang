@@ -744,6 +744,32 @@ loud-fail-smoke: bootstrap-from-seed
   fi
   echo "==> loud-fail-smoke ✓"
 
+# Typed-codegen argv gate.  The typed `main` shim (ir_lowering.main_shim) must
+# call @sprout_set_argv(argc, argv) so a typed-built binary's argv_all() sees
+# its command-line arguments — the typed-codegen flip self-compiles the
+# compiler, whose main() reads argv.  The parity corpus runs every binary with
+# NO args, so this is the ONLY gate exercising argv_all() under typed codegen.
+[group('ci-checks')]
+argv-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_argv_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/argv_smoke/argv_echo.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/err"; then
+    echo "argv-smoke: typed emit failed" >&2; cat "$TMPD/err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "argv-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  got=$("$TMPD/bin" ping hello)
+  if [[ "$got" != "pong:hello" ]]; then
+    echo "argv-smoke: typed-built binary mishandled argv — expected 'pong:hello', got '$got'" >&2
+    echo "  (typed main shim likely missing @sprout_set_argv; see ir_lowering.main_shim)" >&2
+    exit 1
+  fi
+  echo "==> argv-smoke ✓"
+
 # DoD #9 — APPROVED_BUILTINS guard.  Every non-static `long long <name>(` in
 # runtime/sprout_runtime.c must be listed in runtime/APPROVED_BUILTINS.
 # Per AGENTS.md "Builtin vs Stdlib" rules 4–6.

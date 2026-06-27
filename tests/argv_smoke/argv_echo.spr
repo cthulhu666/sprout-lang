@@ -1,0 +1,15 @@
+module main
+
+# Regression fixture for the typed-codegen flip blocker: the typed `main` shim
+# must call @sprout_set_argv so argv_all() works in typed-built binaries.
+# Run via `just argv-smoke` (builds with --use-ir-codegen, runs WITH args).
+# The parity corpus runs every binary with NO args, so this gap was invisible
+# there — the compiler is the first program that reads its own argv.
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    match args with
+    | ["ping", x | _] -> print("pong:" ++ x)
+    | [solo | _] -> print("solo:" ++ solo)
+    | _ -> print("empty")
