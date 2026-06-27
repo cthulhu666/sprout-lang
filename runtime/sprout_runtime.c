@@ -304,7 +304,7 @@ long long sprout_set_current_fn(const char* fn_name) {
   return 0;
 }
 
-static void tcp_fail(const char* msg);
+__attribute__((noreturn)) static void tcp_fail(const char* msg);
 __attribute__((noreturn)) void sprout_abort_match(void);
 long long sprout_make0(long long tag);
 long long sprout_make1(long long tag, long long a0);
@@ -813,6 +813,14 @@ static void sprout_handle_table_init(void) {
 
 __attribute__((constructor))
 static void sprout_handle_table_ctor(void) { sprout_handle_table_init(); }
+
+/* Ignore SIGPIPE process-globally: writing to a socket/pipe whose peer has
+ * closed must return EPIPE from send()/write() rather than killing the process.
+ * The TCP builtins (tcp_write, tcp_write_all) and their error-return paths
+ * depend on this disposition. Installed via constructor — not sprout_set_argv —
+ * so it holds even when a codegen entry point omits the argv initializer. */
+__attribute__((constructor))
+static void sprout_ignore_sigpipe_ctor(void) { signal(SIGPIPE, SIG_IGN); }
 
 static SproutHandle sprout_handle_new(long long value) {
   if (g_handle_freelist_top == 0)
@@ -2219,7 +2227,7 @@ static long long* sprout_json_extract_int_array(const char* text, const char* ke
   if (out != NULL) free(out);
   return NULL;
 }
-static void sprout_builtin_fail_detail(const char* builtin_name, const char* detail) {
+__attribute__((noreturn)) static void sprout_builtin_fail_detail(const char* builtin_name, const char* detail) {
   size_t len = strlen(builtin_name) + strlen(detail) + 2;
   char* msg = alloc_cstr(len, "analysis service: out of memory");
   snprintf(msg, len + 1, "%s: %s", builtin_name, detail);
@@ -3469,7 +3477,7 @@ __attribute__((noreturn)) void sprout_abort_match(void) {
   fprintf(stderr, "runtime error: non-exhaustive match\n");
   exit(1);
 }
-static void tcp_fail(const char* msg) {
+__attribute__((noreturn)) static void tcp_fail(const char* msg) {
   const char* colon = strchr(msg, ':');
   if (colon != NULL) {
     size_t name_len = (size_t)(colon - msg);

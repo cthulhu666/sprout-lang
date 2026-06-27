@@ -53,4 +53,15 @@ if grep -q 'b->data = (char\*)realloc' "$ROOT/runtime/sprout_runtime.c"; then
   exit 1
 fi
 
+echo "==> c runtime: SIGPIPE is ignored so broken-pipe writes return EPIPE"
+compile sigpipe_ignored.c "$TMP_DIR/sigpipe_ignored" -O0 -g
+"$TMP_DIR/sigpipe_ignored" > "$TMP_DIR/sigpipe_ignored.out"
+test "$(cat "$TMP_DIR/sigpipe_ignored.out")" = "sigpipe-ignored"
+
+echo "==> c runtime: tcp_fail is declared noreturn (analyzer-signal guard)"
+if ! grep -Eq '__attribute__\(\(noreturn\)\)[[:space:]]+static void tcp_fail\(const char\* msg\);' "$ROOT/runtime/sprout_runtime.c"; then
+  echo "tcp_fail is not declared noreturn; static analysis will report phantom UAF/double-free" >&2
+  exit 1
+fi
+
 echo "==> c runtime tests passed"
