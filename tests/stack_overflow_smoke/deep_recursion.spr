@@ -1,0 +1,21 @@
+module main
+
+# Deep recursion designed to overflow the native stack even at clang -O2.
+#
+#  * NON-tail: `go(n - 1)` is an argument to `combine`, so each level keeps its
+#    own frame (a tail call would be turned into a loop by codegen's TCO).
+#  * NOT accumulator-foldable: the recursive result flows through `combine`,
+#    whose data-dependent branch (`if r > n ...`) is not a single associative
+#    op, so LLVM's accumulator tail-recursion-elimination cannot rewrite the
+#    recursion into a loop (unlike `c + go(n-1)`).
+#  * Zero allocation: no Cons/heap, so it pushes no GC roots — the native stack
+#    overflows before the GC root pool could fill, exercising the runtime's
+#    stack-overflow handler specifically.
+fn combine(n: Int, r: Int) -> Int =
+  if r > n then r - n else n + r
+
+fn go(n: Int) -> Int =
+  if n <= 0 then 1
+  else combine(n, go(n - 1))
+
+fn main() -> Unit !{IO} = print(go(100000000))

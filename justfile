@@ -807,6 +807,41 @@ run-example-canary: bootstrap-from-seed
   fi
   echo "==> run-example-canary ✓"
 
+# Stack-overflow diagnostic regression. A deeply (non-tail) recursive program
+# overflows the native stack; the runtime must catch it on its alternate signal
+# stack and panic cleanly ("stack overflow" + a backtrace) instead of dying with
+# a bare, silent SIGSEGV. RED before the sigaltstack handler (empty stderr,
+# exit 139); GREEN after. -rdynamic (Linux only) makes the backtrace frames
+# named rather than bare addresses; macOS symbolises from the symbol table.
+stack-overflow-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_sov_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/stack_overflow_smoke/deep_recursion.spr
+  RDYN=""; [ "$(uname)" != "Darwin" ] && RDYN="-rdynamic"
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    echo "stack-overflow-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 $RDYN {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "stack-overflow-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  set +e
+  "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+  ec=$?
+  set -e
+  if [ "$ec" -eq 0 ]; then
+    echo "stack-overflow-smoke: fixture did NOT overflow (exit 0) — the optimizer likely folded the recursion; make it deeper/less foldable" >&2
+    exit 1
+  fi
+  if ! grep -q "stack overflow" "$TMPD/run.err"; then
+    echo "stack-overflow-smoke: overflow was not reported cleanly (exit $ec); expected 'stack overflow' on stderr" >&2
+    echo "  (runtime crash handler likely missing the sigaltstack/SA_ONSTACK path — see sprout_install_crash_handlers)" >&2
+    echo "--- stderr was ---" >&2; cat "$TMPD/run.err" >&2
+    exit 1
+  fi
+  echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
+
 # GC-stress pass (P11-2e lessons): run a curated set of rooting-exercising
 # typed-codegen tests under SPROUT_GC_STRESS=1 (collect on EVERY allocation).
 # The default-threshold suite hides use-after-free rooting bugs as false greens;

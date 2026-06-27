@@ -47,6 +47,39 @@ or phi/insertvalue type mismatches. Run `just llvm-where <ll_file> <N>` to ident
 
 **Implementation:** `scripts/llvm_diag.sh` — single-pass awk; O(n) in file size, no temp files.
 
+## Stack-overflow panic + backtrace
+
+Compiled Sprout programs catch native stack overflow and report it instead of
+dying with a silent `SIGSEGV`. The runtime installs its crash handler on an
+**alternate signal stack** (`sprout_install_crash_handlers` in
+`runtime/sprout_runtime.c`), which is what lets the handler run *after* the
+thread stack is exhausted — without it the handler re-faults and the process
+exits 139 with no output. On overflow you get:
+
+```
+[sprout] fatal: stack overflow - unbounded or too-deep recursion
+0   prog   ... sprout_crash_handler
+1   ...    ... _sigtramp
+2   prog   ... stdlib.compiler.lexer.tokenize_from + 800
+3   prog   ... stdlib.compiler.lexer.tokenize_from + 800
+...
+```
+
+The repeated frame names the **recursing function** — the usual culprit is a
+self-recursive function that the code generator failed to turn into a TCO loop
+(it overflows only for large inputs, so small smoke tests pass). This is the
+first thing to read when a large program crashes at exit 139; it pinpoints in
+one run what an `lldb` backtrace cannot (the overflow faults mid-prologue, so
+`lldb` typically can't unwind the blown stack at all).
+
+**Notes:**
+- macOS symbolises frames from the symbol table automatically; on **Linux**,
+  named (vs bare-address) frames require linking the program with `-rdynamic`.
+- Detection compares the fault address against the stack bounds captured at
+  startup; a genuine wild-pointer fault falls through to a generic
+  `[sprout] SIGSEGV` message plus the same backtrace.
+- Regression: `just stack-overflow-smoke` (`tests/stack_overflow_smoke/`).
+
 ## 2-Step Bootstrap Protocol
 
 **When this applies:** the committed seed (`bootstrap/compile_driver.ll`) predates a parser change. `just refresh-seed` calls `just bootstrap-from-seed` internally, which rebuilds the binary from the committed seed. If that seed has the old parser, the rebuilt binary cannot parse source files that use the new syntax — a catch-22.

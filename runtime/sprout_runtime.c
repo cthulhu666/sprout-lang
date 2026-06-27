@@ -20,6 +20,8 @@
 #include <termios.h>
 #include <unistd.h>
 #include <execinfo.h>
+#include <pthread.h>
+#include <sys/resource.h>
 #ifdef __APPLE__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -204,15 +206,97 @@ static int       g_gc_livelock_action = 1;    /* 0=off  1=warn  2=abort */
 /* Crash attribution: name of the function currently being compiled to IR. */
 static const char* g_sprout_current_fn = NULL;
 
-static void sprout_crash_handler(int sig) {
-  const char* sig_name = (sig == SIGSEGV) ? "SIGSEGV" : (sig == SIGBUS) ? "SIGBUS" : "SIGABRT";
-  if (g_sprout_current_fn != NULL)
-    fprintf(stderr, "[sprout] %s while emitting IR for: %s\n", sig_name, g_sprout_current_fn);
-  else
-    fprintf(stderr, "[sprout] %s (no current function set)\n", sig_name);
-  fflush(stderr);
-  signal(sig, SIG_DFL);
-  raise(sig);
+/* Main-thread stack bounds, captured once at startup (sprout_capture_stack_bounds)
+ * from a healthy stack. The SIGSEGV handler uses them to tell a stack overflow
+ * (fault address at/just-below the stack) from a wild-pointer fault. */
+static char* g_stack_lo = NULL;
+static char* g_stack_hi = NULL;
+
+/* async-signal-safe write of a NUL-terminated string to stderr */
+static void sov_write(const char* s) {
+  ssize_t r = write(STDERR_FILENO, s, strlen(s));
+  (void)r;
+}
+
+/* SIGSEGV/SIGBUS/SIGABRT handler. Runs on an ALTERNATE signal stack (see
+ * sprout_install_crash_handlers), which is what lets it execute at all after a
+ * stack overflow has exhausted the thread stack. Uses only async-signal-safe
+ * primitives (write/strlen/backtrace/_exit) — no stdio/malloc. */
+static void sprout_crash_handler(int sig, siginfo_t* info, void* ucontext) {
+  (void)ucontext;
+  int is_overflow = 0;
+  if ((sig == SIGSEGV || sig == SIGBUS) && info != NULL && g_stack_lo != NULL) {
+    char* a = (char*)info->si_addr;
+    /* The live stack never faults; only the guard region just below it does,
+     * so any fault in this band is a stack overflow. 64 KiB of slack covers
+     * the guard pages and the small bounds approximation on Linux. */
+    if (a >= g_stack_lo - 65536 && a <= g_stack_hi) is_overflow = 1;
+  }
+  if (is_overflow) {
+    sov_write("\n[sprout] fatal: stack overflow - unbounded or too-deep recursion\n");
+  } else {
+    sov_write("\n[sprout] ");
+    sov_write((sig == SIGSEGV) ? "SIGSEGV" : (sig == SIGBUS) ? "SIGBUS" : "SIGABRT");
+    if (g_sprout_current_fn != NULL) {
+      sov_write(" while emitting IR for: ");
+      sov_write(g_sprout_current_fn);
+    }
+    sov_write("\n");
+  }
+  /* Native backtrace. On Linux, named (vs bare-address) frames require the
+   * binary to be linked with -rdynamic. */
+  void* frames[64];
+  int n = backtrace(frames, 64);
+  backtrace_symbols_fd(frames, n, STDERR_FILENO);
+  _exit(128 + sig);
+}
+
+/* Capture the main-thread stack bounds. Called once, early, from a healthy
+ * stack. Allocation-free and portable (no _GNU_SOURCE / per-arch code). */
+static void sprout_capture_stack_bounds(void) {
+#if defined(__APPLE__)
+  pthread_t self = pthread_self();
+  char* hi = (char*)pthread_get_stackaddr_np(self);   /* highest address */
+  size_t sz = pthread_get_stacksize_np(self);
+  g_stack_hi = hi;
+  g_stack_lo = hi - sz;
+#else
+  volatile char probe;
+  char* approx_top = (char*)&probe;   /* within a few hundred bytes of the top */
+  struct rlimit rl;
+  size_t sz = (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY)
+                ? (size_t)rl.rlim_cur : (size_t)(8 * 1024 * 1024);
+  g_stack_hi = approx_top;
+  g_stack_lo = approx_top - sz;
+#endif
+}
+
+/* Install crash handlers on an ALTERNATE signal stack. The alternate stack is
+ * essential: a stack-overflow SIGSEGV cannot run a handler on the exhausted
+ * thread stack, so without SA_ONSTACK the handler re-faults and the process
+ * dies silently with a bare SIGSEGV (exactly the failure this replaces). */
+static void sprout_install_crash_handlers(void) {
+  /* Warm up backtrace() now, on a healthy stack: glibc's first call can
+   * dlopen libgcc_s (not async-signal-safe), which would be unsafe to trigger
+   * from inside the handler. */
+  void* warmup[4];
+  (void)backtrace(warmup, 4);
+
+  static char alt_buf[65536];   /* > MINSIGSTKSZ; ample for backtrace(64) */
+  stack_t ss;
+  ss.ss_sp = alt_buf;
+  ss.ss_size = sizeof(alt_buf);
+  ss.ss_flags = 0;
+  sigaltstack(&ss, NULL);
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = sprout_crash_handler;
+  sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGSEGV, &sa, NULL);
+  sigaction(SIGBUS, &sa, NULL);
+  sigaction(SIGABRT, &sa, NULL);
 }
 
 long long sprout_set_current_fn(const char* fn_name) {
@@ -1382,9 +1466,8 @@ long long env_get(const char* name) {
 long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
   g_sprout_argv = argv;
-  signal(SIGSEGV, sprout_crash_handler);
-  signal(SIGABRT, sprout_crash_handler);
-  signal(SIGBUS, sprout_crash_handler);
+  sprout_capture_stack_bounds();
+  sprout_install_crash_handlers();
   sprout_debug_alloc_maybe_enable();
   sprout_debug_gc_maybe_enable();
   sprout_gc_threshold_maybe_enable();
