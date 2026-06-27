@@ -188,7 +188,61 @@ for i64-returning functions.
 4. `just flip-readiness` should now pass step [4] further (still needs #95 argv
    in the seed to fully go green).
 
-## Increment 2 producer — concrete notes (ast_to_ir)
+## Increment 2 producer — REVISED: post-translation IR rewrite (NOT threading)
+
+Inspecting the real pre-flip typed IR for `loop(n, s) = if n<=0 then str_len(s)
+else loop(n-1, int_to_string(n))` shows the tail self-call shape exactly:
+
+```
+else_3:
+  %t$7 = sub i64 %n, %t$6
+  %t$8 = call i64 @int_to_string(i64 %n)
+  %t$9 = call i64 @main.loop(i64 %t$7, i64 %t$8)   ; tail self-call
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3], [%t$9, %else_3]
+  ret i64 %t$4
+```
+
+This makes a **post-translation rewrite far less invasive than threading a TCO
+param through the 14-arg translate_expr**. Implement `tco_rewrite(f, next_idx) ->
+(IRFunction, Int)` and call it on the built IRFunction in `translate_user_fn`
+**before** it is returned (i.e. before ir_rooting). Running before rooting is
+ESSENTIAL: the accumulating arg-root (`push_i64_root` before the self-`IRCall`,
+the cause of root-pool exhaustion) is inserted by ir_rooting around the `IRCall`;
+once the call becomes an `IRTcoBack` (not a GC trigger), that root is never
+emitted. `next_idx` must be threaded out so rooting's fresh `%t$N` names don't
+collide with the slots/sp this adds.
+
+### Algorithm
+1. `IRFunction(name, params, "i64", blocks)` — bail if ret_ty != "i64".
+2. **Find tail self-calls.** For each block ending in `IRRet(rv)`: if `rv` is
+   defined by `IRCall(rv,_,name,args)` in the same block → direct tail call
+   (pred = that block). Else find `IRPhi(rv,_,incomings)` in that block; for each
+   `(val, pred_lbl)` in incomings where `val` is defined by `IRCall(val,_,name,args)`
+   in block `pred_lbl` → tail call in `pred_lbl`. (Guard: `val`/`rv` used ONLY in
+   this flow — scan other blocks; if used elsewhere it is NOT a tail call, skip.)
+3. If none found → return `f` unchanged (no TCO; e.g. non-tail recursion).
+4. **Allocate** fresh names from next_idx: one slot per param + one `sp`.
+5. **Rename** params to `<p>$in` in the param list only (body keeps `%<p>`).
+6. **Rewrite** each tail-call predecessor block: drop the `IRCall(val,...)` and the
+   block's terminating `IRBr`; append `IRTcoBack(zip(slot, ty, args), sp,
+   "tco_loop")`. Remove `(val, pred_lbl)` from the join phi's incomings (a phi
+   with one remaining incoming is valid LLVM).
+7. **Restructure blocks:** rename the old `"entry"` block to `"tco_loop"` (nothing
+   branches to entry today) and prepend one `IRTcoLoad("%<p>", "i64", slot,
+   kind)` per param (kind from the original `params` IRType). Prepend a new
+   `"entry"` block = `[IRTcoEntry(zip(slot,"i64","%<p>$in"), sp), IRBr("tco_loop")]`.
+
+### Test it WITHOUT seed-refresh churn (like increment 1)
+Make `tco_rewrite` an exported pure function and unit-test it: construct the
+`loop` IRFunction above, call `tco_rewrite`, assert the output has the entry/
+tco_loop restructure, an `IRTcoBack` in the former else block, and the phi with
+the else incoming removed. Iterate via the fast loop (compile the test with the
+current stage-1). Only after the logic is green: hook into `translate_user_fn`,
+refresh the seed ONCE, and run tco-diff / tco-runtime-smoke / test-stress.
+
+## Increment 2 producer — earlier threading notes (superseded by the rewrite above)
 
 Entry points read: `translate_user_fn` (:3953) → `translate_body` (:3894) →
 `translate_expr` (the 14-arg workhorse). `translate_body` translates the body
