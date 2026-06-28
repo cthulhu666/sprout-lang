@@ -188,6 +188,11 @@ static long long g_gc_cycle_count = 0;
 static long long g_managed_heap_count = 0;
 static long long g_managed_alloc_since_gc = 0;
 static long long g_gc_threshold = 4096;
+/* Floor for the adaptive threshold (smallest object count at which a collection
+   may be triggered).  Equals the initial g_gc_threshold, or SPROUT_GC_THRESHOLD
+   when set.  Keeps tiny programs from GC-thrashing once the threshold tracks the
+   live set. */
+static long long g_gc_threshold_base = 4096;
 static long long g_gc_marked_count = 0;
 /* Per-type live counts and CSTR bytes after each sweep (logged with SPROUT_DEBUG_GC). */
 static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
@@ -402,6 +407,7 @@ static void sprout_gc_threshold_maybe_enable(void) {
     tcp_fail("SPROUT_GC_THRESHOLD: expected positive integer");
   }
   g_gc_threshold = parsed;
+  g_gc_threshold_base = parsed;
 }
 
 static void sprout_gc_adapt_maybe_enable(void) {
@@ -1283,15 +1289,22 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
-  /* Adaptive threshold: if the swept fraction is below the configured ratio,
-     multiply the threshold to avoid repeated near-useless GC cycles. */
-  if (g_gc_adapt_ratio > 0.0 && heap_before > 0) {
-    double swept_fraction = (double)(heap_before - g_managed_heap_count) / (double)heap_before;
-    if (swept_fraction < g_gc_adapt_ratio) {
-      long long new_threshold = (long long)((double)g_gc_threshold * g_gc_adapt_factor);
-      if (g_gc_adapt_cap > 0 && new_threshold > g_gc_adapt_cap) new_threshold = g_gc_adapt_cap;
-      if (new_threshold > g_gc_threshold) g_gc_threshold = new_threshold;
-    }
+  /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
+     (hence RSS) stays proportional to live data instead of ratcheting upward
+     without bound.  The previous policy only ever GREW the threshold (x
+     adapt_factor whenever < adapt_ratio of the heap was swept), so an
+     allocation-heavy workload that kept tripping the ratio — e.g. the
+     self-hosted compiler emitting its own ~17MB of IR — drove the threshold, and
+     thus the retained garbage, up without limit (multi-GB RSS to produce a few
+     MB of output).  Targeting live*factor self-tunes: it rises for genuinely
+     live-heavy heaps (avoiding GC thrash) and falls again when the working set
+     shrinks, bounding peak RSS to ~factor x the live set.  g_gc_threshold_base
+     is the floor for small programs; the optional cap still applies. */
+  if (g_gc_adapt_ratio > 0.0) {
+    long long target = (long long)((double)g_managed_heap_count * g_gc_adapt_factor);
+    if (target < g_gc_threshold_base) target = g_gc_threshold_base;
+    if (g_gc_adapt_cap > 0 && target > g_gc_adapt_cap) target = g_gc_adapt_cap;
+    g_gc_threshold = target;
   }
   g_managed_alloc_since_gc = 0;
   /* Livelock detection: warn (or abort) when consecutive cycles sweep almost nothing. */
