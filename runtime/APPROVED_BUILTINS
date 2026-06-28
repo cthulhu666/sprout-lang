@@ -47,6 +47,7 @@ bytes_length
 bytes_singleton
 bytes_slice
 bytes_to_utf8
+char_from_codepoint  # total Int->Char constructor; the only way to build a Char from a decoded codepoint. char_to_str/char_to_string only produce String, and Char is a distinct builtin primitive (not a String wrap), so a Char cannot be constructed in Sprout. Enables native-Sprout UTF-8 decoding over Bytes (replaces the unsafe str_char_at_byte). See AGENTS.md Builtin vs Stdlib 4-6.
 char_to_str
 char_to_string
 crypto_base64_decode
@@ -145,8 +146,6 @@ sproutd_self_init
 sproutd_init_with_root  # like sproutd_self_init but takes explicit stdlib_root — setenv/exe-path resolution impossible in Sprout
 str_byte_len
 str_char_at
-str_char_at_byte
-str_char_width_at_byte
 stdin_read_bytes  # fread(n) — no Sprout way to read exactly N bytes; needed for Content-Length framing (LSP, DAP)
 str_compare
 str_concat

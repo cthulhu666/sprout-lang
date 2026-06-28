@@ -3522,7 +3522,6 @@ fn is_cpr_extern_allowlisted(name: String) -> Bool =
   || name == "argv_get"
   || name == "term_read_line"
   || name == "str_char_at"
-  || name == "str_char_at_byte"
   || name == "regex_find_range"
   || name == "vector_get"
   || name == "map_get"

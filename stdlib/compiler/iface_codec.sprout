@@ -106,11 +106,12 @@ fn join_types(ts: List types.Type) -> String =
 # parse failure or if there's leftover non-whitespace after the value.
 
 export fn decode_scheme(input: String) -> Maybe types.Scheme =
-  match decode_scheme_at(input, skip_ws(input, 0, n), n) with
+  match decode_scheme_at(input, bytes, skip_ws(input, bytes, 0, n), n) with
   | Nothing -> Nothing
   | Just (s, next) ->
-      if only_ws_remaining(input, next, n) then Just(s) else Nothing
+      if only_ws_remaining(input, bytes, next, n) then Just(s) else Nothing
   where n = str_byte_len(input)
+        bytes = bytes_from_utf8(input)
 
 # ----------------------------------------------------------------------------
 # Tokenization primitives
@@ -120,24 +121,24 @@ fn is_ws(ch: Char) -> Bool =
   ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 
 # O(leading-ws). Returns the byte position past any leading whitespace.
-fn skip_ws(s: String, i: Int, total: Int) -> Int =
+fn skip_ws(s: String, bytes: Bytes, i: Int, total: Int) -> Int =
   if i >= total then i
   else
-    match str_char_at_byte(s, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> i
-    | Just ch -> if is_ws(ch) then skip_ws(s, i + 1, total) else i
+    | Just (ch, _) -> if is_ws(ch) then skip_ws(s, bytes, i + 1, total) else i
 
 # True iff bytes [i, total) contain only whitespace.
-fn only_ws_remaining(s: String, i: Int, total: Int) -> Bool =
-  skip_ws(s, i, total) == total
+fn only_ws_remaining(s: String, bytes: Bytes, i: Int, total: Int) -> Bool =
+  skip_ws(s, bytes, i, total) == total
 
 # Expect a specific ASCII char at byte i. Returns Just(i+1) on match.
-fn expect_char(s: String, i: Int, total: Int, ch: Char) -> Maybe Int =
+fn expect_char(s: String, bytes: Bytes, i: Int, total: Int, ch: Char) -> Maybe Int =
   if i >= total then Nothing
   else
-    match str_char_at_byte(s, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> Nothing
-    | Just c -> if c == ch then Just(i + 1) else Nothing
+    | Just (c, _) -> if c == ch then Just(i + 1) else Nothing
 
 # Atoms are runs of bytes that aren't whitespace or parens.
 fn is_atom_char(ch: Char) -> Bool =
@@ -147,190 +148,190 @@ fn is_atom_char(ch: Char) -> Bool =
   else true
 
 # Reads one atom starting at byte i. Returns (atom_string, byte_pos_after).
-fn read_atom(s: String, i: Int, total: Int) -> Maybe (String, Int) =
+fn read_atom(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (String, Int) =
   if i >= total then Nothing
   else
-    match str_char_at_byte(s, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> Nothing
-    | Just c -> if is_atom_char(c) then read_atom_continue(s, i, total) else Nothing
+    | Just (c, _) -> if is_atom_char(c) then read_atom_continue(s, bytes, i, total) else Nothing
 
-fn read_atom_continue(s: String, start: Int, total: Int) -> Maybe (String, Int) =
+fn read_atom_continue(s: String, bytes: Bytes, start: Int, total: Int) -> Maybe (String, Int) =
   Just((str_slice(s, start, end_pos - start), end_pos))
-  where end_pos = scan_atom_end(s, start + 1, total)
+  where end_pos = scan_atom_end(s, bytes, start + 1, total)
 
 # Scans forward from i until the next non-atom char or EOF; returns that position.
-fn scan_atom_end(s: String, i: Int, total: Int) -> Int =
+fn scan_atom_end(s: String, bytes: Bytes, i: Int, total: Int) -> Int =
   if i >= total then i
   else
-    match str_char_at_byte(s, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> i
-    | Just c -> if is_atom_char(c) then scan_atom_end(s, i + 1, total) else i
+    | Just (c, _) -> if is_atom_char(c) then scan_atom_end(s, bytes, i + 1, total) else i
 
 # ----------------------------------------------------------------------------
 # Decoders return Just(value, byte_pos_after) on success.
 # All decoders begin by expecting `(`, then the tagged atom, etc.
 # ----------------------------------------------------------------------------
 
-fn decode_scheme_at(s: String, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_scheme_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "Scheme" then decode_scheme_body(s, k, total)
+          if tag == "Scheme" then decode_scheme_body(s, bytes, k, total)
           else Nothing
 
-fn decode_scheme_body(s: String, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
-  match decode_str_list_at(s, skip_ws(s, i, total), total) with
+fn decode_scheme_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
+  match decode_str_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (tvars, k2) ->
-      match decode_str_list_at(s, skip_ws(s, k2, total), total) with
+      match decode_str_list_at(s, bytes, skip_ws(s, bytes, k2, total), total) with
       | Nothing -> Nothing
       | Just (evars, k3) ->
-          match decode_type_at(s, skip_ws(s, k3, total), total) with
+          match decode_type_at(s, bytes, skip_ws(s, bytes, k3, total), total) with
           | Nothing -> Nothing
           | Just (body, k4) ->
-              match decode_effect_at(s, skip_ws(s, k4, total), total) with
+              match decode_effect_at(s, bytes, skip_ws(s, bytes, k4, total), total) with
               | Nothing -> Nothing
               | Just (effect, k5) ->
-                  match expect_char(s, skip_ws(s, k5, total), total, ')') with
+                  match expect_char(s, bytes, skip_ws(s, bytes, k5, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((types.Scheme(tvars, evars, body, effect), end))
 
-fn decode_type_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_type_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
-      | Just (tag, k) -> decode_type_by_tag(s, k, total, tag)
+      | Just (tag, k) -> decode_type_by_tag(s, bytes, k, total, tag)
 
-fn decode_type_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(types.Type, Int) =
-  if tag == "TVar" then decode_tvar_at(s, i, total)
-  else if tag == "TConst" then decode_tconst_at(s, i, total)
-  else if tag == "TApp" then decode_tapp_at(s, i, total)
-  else if tag == "TFunc" then decode_tfunc_at(s, i, total)
-  else if tag == "TTuple" then decode_ttuple_at(s, i, total)
+fn decode_type_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(types.Type, Int) =
+  if tag == "TVar" then decode_tvar_at(s, bytes, i, total)
+  else if tag == "TConst" then decode_tconst_at(s, bytes, i, total)
+  else if tag == "TApp" then decode_tapp_at(s, bytes, i, total)
+  else if tag == "TFunc" then decode_tfunc_at(s, bytes, i, total)
+  else if tag == "TTuple" then decode_ttuple_at(s, bytes, i, total)
   else Nothing
 
 # Reads `<atom>)`. Returns the atom + position past the `)`.
-fn read_atom_then_close(s: String, i: Int, total: Int) -> Maybe (String, Int) =
-  match read_atom(s, skip_ws(s, i, total), total) with
+fn read_atom_then_close(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (String, Int) =
+  match read_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((name, end))
 
-fn decode_tvar_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  match read_atom_then_close(s, i, total) with
+fn decode_tvar_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match read_atom_then_close(s, bytes, i, total) with
   | Nothing -> Nothing
   | Just (name, end) -> Just((types.TVar(name), end))
 
-fn decode_tconst_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  match read_atom_then_close(s, i, total) with
+fn decode_tconst_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match read_atom_then_close(s, bytes, i, total) with
   | Nothing -> Nothing
   | Just (name, end) -> Just((types.TConst(name), end))
 
-fn decode_tapp_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  match decode_type_at(s, skip_ws(s, i, total), total) with
+fn decode_tapp_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (t1, j) ->
-      match decode_type_at(s, skip_ws(s, j, total), total) with
+      match decode_type_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (t2, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((types.TApp(t1, t2), end))
 
-fn decode_tfunc_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  match decode_type_at(s, skip_ws(s, i, total), total) with
+fn decode_tfunc_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (t1, j) ->
-      match decode_type_at(s, skip_ws(s, j, total), total) with
+      match decode_type_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (t2, k) ->
-          match decode_effect_at(s, skip_ws(s, k, total), total) with
+          match decode_effect_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (e, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((types.TFunc(t1, t2, e), end))
 
-fn decode_ttuple_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  match decode_type_list_at(s, skip_ws(s, i, total), total) with
+fn decode_ttuple_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  match decode_type_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (ts, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((types.TTuple(ts), end))
 
-fn decode_effect_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_effect_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
-      | Just (tag, k) -> decode_effect_by_tag(s, k, total, tag)
+      | Just (tag, k) -> decode_effect_by_tag(s, bytes, k, total, tag)
 
-fn decode_effect_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(types.Effect, Int) =
-  if tag == "EffectPure" then decode_effect_pure_close(s, i, total)
-  else if tag == "EffectIO" then decode_effect_io_close(s, i, total)
-  else if tag == "EffectRow" then decode_effect_row_at(s, i, total)
-  else if tag == "EffectVar" then decode_effect_var_at(s, i, total)
+fn decode_effect_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(types.Effect, Int) =
+  if tag == "EffectPure" then decode_effect_pure_close(s, bytes, i, total)
+  else if tag == "EffectIO" then decode_effect_io_close(s, bytes, i, total)
+  else if tag == "EffectRow" then decode_effect_row_at(s, bytes, i, total)
+  else if tag == "EffectVar" then decode_effect_var_at(s, bytes, i, total)
   else Nothing
 
-fn decode_effect_pure_close(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  match expect_char(s, skip_ws(s, i, total), total, ')') with
+fn decode_effect_pure_close(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match expect_char(s, bytes, skip_ws(s, bytes, i, total), total, ')') with
   | Nothing -> Nothing
   | Just end -> Just((types.EffectPure, end))
 
-fn decode_effect_io_close(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  match expect_char(s, skip_ws(s, i, total), total, ')') with
+fn decode_effect_io_close(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match expect_char(s, bytes, skip_ws(s, bytes, i, total), total, ')') with
   | Nothing -> Nothing
   | Just end -> Just((types.EffectIO, end))
 
-fn decode_effect_row_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  match decode_str_list_at(s, skip_ws(s, i, total), total) with
+fn decode_effect_row_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match decode_str_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (xs, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((types.EffectRow(xs), end))
 
-fn decode_effect_var_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  match read_atom_then_close(s, i, total) with
+fn decode_effect_var_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match read_atom_then_close(s, bytes, i, total) with
   | Nothing -> Nothing
   | Just (name, end) -> Just((types.EffectVar(name), end))
 
 # Decodes `( atom* )` as a List String.
-fn decode_str_list_at(s: String, i: Int, total: Int) -> Maybe (List String, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_str_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List String, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_strs(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_strs(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_strs(s: String, i: Int, total: Int, acc: List String) -> Maybe (List String, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_strs(s: String, bytes: Bytes, i: Int, total: Int, acc: List String) -> Maybe (List String, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match read_atom(s, i, total) with
+      match read_atom(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (atom, j) -> collect_strs(s, skip_ws(s, j, total), total, Cons(atom, acc))
+      | Just (atom, j) -> collect_strs(s, bytes, skip_ws(s, bytes, j, total), total, Cons(atom, acc))
 
 # Decodes `( <type>* )` as a List Type.
-fn decode_type_list_at(s: String, i: Int, total: Int) -> Maybe (List types.Type, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_type_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List types.Type, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_types(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_types(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_types(s: String, i: Int, total: Int, acc: List types.Type) -> Maybe (List types.Type, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_types(s: String, bytes: Bytes, i: Int, total: Int, acc: List types.Type) -> Maybe (List types.Type, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_type_at(s, i, total) with
+      match decode_type_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (t, j) -> collect_types(s, skip_ws(s, j, total), total, Cons(t, acc))
+      | Just (t, j) -> collect_types(s, bytes, skip_ws(s, bytes, j, total), total, Cons(t, acc))
 
 # ============================================================================
 # IfaceFile — the top-level iface artifact for one module
@@ -494,47 +495,48 @@ fn encode_instance_info(i: InstanceInfo) -> String =
 # ----------------------------------------------------------------------------
 
 export fn decode_iface_file(input: String) -> Maybe IfaceFile =
-  match decode_iface_file_at(input, skip_ws(input, 0, n), n) with
+  match decode_iface_file_at(input, bytes, skip_ws(input, bytes, 0, n), n) with
   | Nothing -> Nothing
   | Just (f, next) ->
-      if only_ws_remaining(input, next, n) then Just(f) else Nothing
+      if only_ws_remaining(input, bytes, next, n) then Just(f) else Nothing
   where n = str_byte_len(input)
+        bytes = bytes_from_utf8(input)
 
-fn decode_iface_file_at(s: String, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_iface_file_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Just (tag, k) ->
-          if tag == "IfaceFile" then decode_iface_file_body(s, k, total)
+          if tag == "IfaceFile" then decode_iface_file_body(s, bytes, k, total)
           else Nothing
       | Nothing -> Nothing
 
-fn decode_iface_file_body(s: String, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
-  match read_atom(s, skip_ws(s, i, total), total) with
+fn decode_iface_file_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
+  match read_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (version_atom, j) ->
       match decode_iface_version(version_atom) with
       | Nothing -> Nothing
-      | Just version -> decode_iface_v2_tail(s, j, total, version)
+      | Just version -> decode_iface_v2_tail(s, bytes, j, total, version)
 
-fn decode_iface_v2_tail(s: String, i: Int, total: Int, version: Int) -> Maybe (IfaceFile, Int) =
-  match read_atom(s, skip_ws(s, i, total), total) with
+fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: Int) -> Maybe (IfaceFile, Int) =
+  match read_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (mod_name, k) ->
-      match decode_named_scheme_list_at(s, skip_ws(s, k, total), total) with
+      match decode_named_scheme_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
       | Nothing -> Nothing
       | Just (schemes, m) ->
-          match decode_ctor_info_list_at(s, skip_ws(s, m, total), total) with
+          match decode_ctor_info_list_at(s, bytes, skip_ws(s, bytes, m, total), total) with
           | Nothing -> Nothing
           | Just (ctors, n2) ->
-              match decode_class_info_list_at(s, skip_ws(s, n2, total), total) with
+              match decode_class_info_list_at(s, bytes, skip_ws(s, bytes, n2, total), total) with
               | Nothing -> Nothing
               | Just (classes, n3) ->
-                  match decode_instance_info_list_at(s, skip_ws(s, n3, total), total) with
+                  match decode_instance_info_list_at(s, bytes, skip_ws(s, bytes, n3, total), total) with
                   | Nothing -> Nothing
                   | Just (instances, n4) ->
-                      match expect_char(s, skip_ws(s, n4, total), total, ')') with
+                      match expect_char(s, bytes, skip_ws(s, bytes, n4, total), total, ')') with
                       | Nothing -> Nothing
                       | Just end -> Just((IfaceFile(version, mod_name, schemes, ctors, classes, instances), end))
 
@@ -545,37 +547,37 @@ fn decode_iface_v2_tail(s: String, i: Int, total: Int, version: Int) -> Maybe (I
 fn decode_iface_version(s: String) -> Maybe Int =
   if s == "2" then Just(2) else Nothing
 
-fn decode_named_scheme_list_at(s: String, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_named_schemes(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_named_schemes(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_named_schemes(s: String, i: Int, total: Int, acc: List NamedScheme) -> Maybe (List NamedScheme, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_named_schemes(s: String, bytes: Bytes, i: Int, total: Int, acc: List NamedScheme) -> Maybe (List NamedScheme, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_named_scheme_at(s, i, total) with
+      match decode_named_scheme_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (n, j) -> collect_named_schemes(s, skip_ws(s, j, total), total, Cons(n, acc))
+      | Just (n, j) -> collect_named_schemes(s, bytes, skip_ws(s, bytes, j, total), total, Cons(n, acc))
 
-fn decode_named_scheme_at(s: String, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_named_scheme_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "NamedScheme" then decode_named_scheme_body(s, k, total)
+          if tag == "NamedScheme" then decode_named_scheme_body(s, bytes, k, total)
           else Nothing
 
-fn decode_named_scheme_body(s: String, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
-  match read_atom(s, skip_ws(s, i, total), total) with
+fn decode_named_scheme_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
+  match read_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_scheme_at(s, skip_ws(s, j, total), total) with
+      match decode_scheme_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (scheme, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((NamedScheme(name, scheme), end))
 
@@ -851,109 +853,109 @@ fn head_type_from_args(type_args: List ast.TypeExpr) -> types.Type =
 # Decoders for CtorInfo / ClassInfo / InstanceInfo
 # ============================================================================
 
-fn decode_ctor_info_list_at(s: String, i: Int, total: Int) -> Maybe (List CtorInfo, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ctor_info_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List CtorInfo, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ctor_infos(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ctor_infos(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ctor_infos(s: String, i: Int, total: Int, acc: List CtorInfo) -> Maybe (List CtorInfo, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ctor_infos(s: String, bytes: Bytes, i: Int, total: Int, acc: List CtorInfo) -> Maybe (List CtorInfo, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ctor_info_at(s, i, total) with
+      match decode_ctor_info_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (c, j) -> collect_ctor_infos(s, skip_ws(s, j, total), total, Cons(c, acc))
+      | Just (c, j) -> collect_ctor_infos(s, bytes, skip_ws(s, bytes, j, total), total, Cons(c, acc))
 
-fn decode_ctor_info_at(s: String, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ctor_info_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "CtorInfo" then decode_ctor_info_body(s, k, total)
+          if tag == "CtorInfo" then decode_ctor_info_body(s, bytes, k, total)
           else Nothing
 
-fn decode_ctor_info_body(s: String, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
-  match read_atom(s, skip_ws(s, i, total), total) with
+fn decode_ctor_info_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
+  match read_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (ctor_name, j) ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (adt_name, k) ->
-          match decode_type_list_at(s, skip_ws(s, k, total), total) with
+          match decode_type_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (field_types, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((CtorInfo(ctor_name, adt_name, field_types), end))
 
-fn decode_class_info_list_at(s: String, i: Int, total: Int) -> Maybe (List ClassInfo, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_class_info_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ClassInfo, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_class_infos(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_class_infos(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_class_infos(s: String, i: Int, total: Int, acc: List ClassInfo) -> Maybe (List ClassInfo, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_class_infos(s: String, bytes: Bytes, i: Int, total: Int, acc: List ClassInfo) -> Maybe (List ClassInfo, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_class_info_at(s, i, total) with
+      match decode_class_info_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (c, j) -> collect_class_infos(s, skip_ws(s, j, total), total, Cons(c, acc))
+      | Just (c, j) -> collect_class_infos(s, bytes, skip_ws(s, bytes, j, total), total, Cons(c, acc))
 
-fn decode_class_info_at(s: String, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_class_info_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "ClassInfo" then decode_class_info_body(s, k, total)
+          if tag == "ClassInfo" then decode_class_info_body(s, bytes, k, total)
           else Nothing
 
-fn decode_class_info_body(s: String, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
+fn decode_class_info_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
   do
-    (name, j) <- read_atom(s, skip_ws(s, i, total), total)
-    (type_params, k) <- decode_str_list_at(s, skip_ws(s, j, total), total)
-    (superclasses, m) <- decode_str_list_at(s, skip_ws(s, k, total), total)
-    (methods, n) <- decode_named_scheme_list_at(s, skip_ws(s, m, total), total)
-    end <- expect_char(s, skip_ws(s, n, total), total, ')')
+    (name, j) <- read_atom(s, bytes, skip_ws(s, bytes, i, total), total)
+    (type_params, k) <- decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total)
+    (superclasses, m) <- decode_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total)
+    (methods, n) <- decode_named_scheme_list_at(s, bytes, skip_ws(s, bytes, m, total), total)
+    end <- expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')')
     Just((ClassInfo(name, type_params, superclasses, methods), end))
 
-fn decode_instance_info_list_at(s: String, i: Int, total: Int) -> Maybe (List InstanceInfo, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_instance_info_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List InstanceInfo, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_instance_infos(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_instance_infos(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_instance_infos(s: String, i: Int, total: Int, acc: List InstanceInfo) -> Maybe (List InstanceInfo, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_instance_infos(s: String, bytes: Bytes, i: Int, total: Int, acc: List InstanceInfo) -> Maybe (List InstanceInfo, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_instance_info_at(s, i, total) with
+      match decode_instance_info_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (inst, j) -> collect_instance_infos(s, skip_ws(s, j, total), total, Cons(inst, acc))
+      | Just (inst, j) -> collect_instance_infos(s, bytes, skip_ws(s, bytes, j, total), total, Cons(inst, acc))
 
-fn decode_instance_info_at(s: String, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_instance_info_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "InstanceInfo" then decode_instance_info_body(s, k, total)
+          if tag == "InstanceInfo" then decode_instance_info_body(s, bytes, k, total)
           else Nothing
 
-fn decode_instance_info_body(s: String, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
-  match read_atom(s, skip_ws(s, i, total), total) with
+fn decode_instance_info_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
+  match read_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (class_name, j) ->
-      match decode_type_at(s, skip_ws(s, j, total), total) with
+      match decode_type_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (head_type, k) ->
-          match read_atom(s, skip_ws(s, k, total), total) with
+          match read_atom(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (dict_name, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((InstanceInfo(class_name, head_type, dict_name), end))
 
@@ -998,27 +1000,28 @@ fn decode_instance_info_body(s: String, i: Int, total: Int) -> Maybe (InstanceIn
 
 # O(n) where n = chars in value; emits '"' ... '"' with backslash escaping.
 fn encode_quoted_str(v: String) -> String =
-  string_concat_many(Cons("\"", Cons(escape_str_content(v, 0, str_byte_len(v), Nil), Cons("\"", Nil))))
+  string_concat_many(Cons("\"", Cons(escape_str_content(v, bytes, 0, str_byte_len(v), Nil), Cons("\"", Nil))))
+  where bytes = bytes_from_utf8(v)
 
-fn escape_str_content(s: String, i: Int, total: Int, acc: List String) -> String =
+fn escape_str_content(s: String, bytes: Bytes, i: Int, total: Int, acc: List String) -> String =
   if i >= total then
     string_concat_many(list_reverse(acc))
   else
-    match str_char_at_byte(s, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> string_concat_many(list_reverse(acc))
-    | Just ch ->
+    | Just (ch, next_i) ->
         if ch == '\\' then
-          escape_str_content(s, i + str_char_width_at_byte(s, i), total, Cons("\\\\", acc))
+          escape_str_content(s, bytes, next_i, total, Cons("\\\\", acc))
         else if ch == '"' then
-          escape_str_content(s, i + str_char_width_at_byte(s, i), total, Cons("\\\"", acc))
+          escape_str_content(s, bytes, next_i, total, Cons("\\\"", acc))
         else if ch == '\n' then
-          escape_str_content(s, i + str_char_width_at_byte(s, i), total, Cons("\\n", acc))
+          escape_str_content(s, bytes, next_i, total, Cons("\\n", acc))
         else if ch == '\r' then
-          escape_str_content(s, i + str_char_width_at_byte(s, i), total, Cons("\\r", acc))
+          escape_str_content(s, bytes, next_i, total, Cons("\\r", acc))
         else if ch == '\t' then
-          escape_str_content(s, i + str_char_width_at_byte(s, i), total, Cons("\\t", acc))
+          escape_str_content(s, bytes, next_i, total, Cons("\\t", acc))
         else
-          escape_str_content(s, i + str_char_width_at_byte(s, i), total, Cons(char_to_string(ch), acc))
+          escape_str_content(s, bytes, next_i, total, Cons(char_to_string(ch), acc))
 
 # O(1). Encodes a single Char as (Char "<c>") using quoted encoding.
 fn encode_ast_char(c: Char) -> String =
@@ -1365,35 +1368,35 @@ export fn encode_ast_program(prog: ast.Program) -> String =
 # Decode a quoted string starting at byte i.  Expects '"', body, '"'.
 # Returns (unescaped_string, byte_pos_after_closing_quote).
 # O(n) where n = byte length of the quoted literal.
-fn decode_quoted_str_at(s: String, i: Int, total: Int) -> Maybe (String, Int) =
-  match expect_char(s, i, total, '"') with
+fn decode_quoted_str_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (String, Int) =
+  match expect_char(s, bytes, i, total, '"') with
   | Nothing -> Nothing
-  | Just j -> collect_quoted_chars(s, j, total, Nil)
+  | Just j -> collect_quoted_chars(s, bytes, j, total, Nil)
 
-fn collect_quoted_chars(s: String, i: Int, total: Int, acc: List String) -> Maybe (String, Int) =
+fn collect_quoted_chars(s: String, bytes: Bytes, i: Int, total: Int, acc: List String) -> Maybe (String, Int) =
   if i >= total then Nothing
   else
-    match str_char_at_byte(s, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> Nothing
-    | Just ch ->
+    | Just (ch, next_i) ->
         if ch == '"' then
           Just((string_concat_many(list_reverse(acc)), i + 1))
         else if ch == '\\' then
-          decode_escape_seq(s, i + 1, total, acc)
+          decode_escape_seq(s, bytes, i + 1, total, acc)
         else
-          collect_quoted_chars(s, i + str_char_width_at_byte(s, i), total, Cons(char_to_string(ch), acc))
+          collect_quoted_chars(s, bytes, next_i, total, Cons(char_to_string(ch), acc))
 
-fn decode_escape_seq(s: String, i: Int, total: Int, acc: List String) -> Maybe (String, Int) =
+fn decode_escape_seq(s: String, bytes: Bytes, i: Int, total: Int, acc: List String) -> Maybe (String, Int) =
   if i >= total then Nothing
   else
-    match str_char_at_byte(s, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> Nothing
-    | Just ch ->
-        if ch == '\\' then collect_quoted_chars(s, i + 1, total, Cons("\\", acc))
-        else if ch == '"' then collect_quoted_chars(s, i + 1, total, Cons("\"", acc))
-        else if ch == 'n' then collect_quoted_chars(s, i + 1, total, Cons("\n", acc))
-        else if ch == 'r' then collect_quoted_chars(s, i + 1, total, Cons("\r", acc))
-        else if ch == 't' then collect_quoted_chars(s, i + 1, total, Cons("\t", acc))
+    | Just (ch, _) ->
+        if ch == '\\' then collect_quoted_chars(s, bytes, i + 1, total, Cons("\\", acc))
+        else if ch == '"' then collect_quoted_chars(s, bytes, i + 1, total, Cons("\"", acc))
+        else if ch == 'n' then collect_quoted_chars(s, bytes, i + 1, total, Cons("\n", acc))
+        else if ch == 'r' then collect_quoted_chars(s, bytes, i + 1, total, Cons("\r", acc))
+        else if ch == 't' then collect_quoted_chars(s, bytes, i + 1, total, Cons("\t", acc))
         else Nothing
 
 # Decode a signed decimal integer atom.  atom_to_int returns Nothing if the
@@ -1401,25 +1404,26 @@ fn decode_escape_seq(s: String, i: Int, total: Int, acc: List String) -> Maybe (
 fn atom_to_int(atom: String) -> Maybe Int =
   if str_byte_len(atom) == 0 then Nothing
   else
-    match str_char_at_byte(atom, 0) with
+    match source.decode_char_at(bytes, 0) with
     | Nothing -> Nothing
-    | Just ch ->
+    | Just (ch, _) ->
         if ch == '-' then
           if str_byte_len(atom) < 2 then Nothing
           else
-            match parse_unsigned_atom(atom, 1, str_byte_len(atom), 0) with
+            match parse_unsigned_atom(atom, bytes, 1, str_byte_len(atom), 0) with
             | Nothing -> Nothing
             | Just n -> Just(0 - n)
-        else parse_unsigned_atom(atom, 0, str_byte_len(atom), 0)
+        else parse_unsigned_atom(atom, bytes, 0, str_byte_len(atom), 0)
+  where bytes = bytes_from_utf8(atom)
 
-fn parse_unsigned_atom(atom: String, i: Int, total: Int, acc: Int) -> Maybe Int =
+fn parse_unsigned_atom(atom: String, bytes: Bytes, i: Int, total: Int, acc: Int) -> Maybe Int =
   if i >= total then Just(acc)
   else
-    match str_char_at_byte(atom, i) with
+    match source.decode_char_at(bytes, i) with
     | Nothing -> Nothing
-    | Just ch ->
+    | Just (ch, _) ->
         if ch >= '0' && ch <= '9' then
-          parse_unsigned_atom(atom, i + 1, total, acc * 10 + (char_digit_value(ch)))
+          parse_unsigned_atom(atom, bytes, i + 1, total, acc * 10 + (char_digit_value(ch)))
         else Nothing
 
 # Returns the decimal digit value 0-9 for a digit char.
@@ -1436,8 +1440,8 @@ fn char_digit_value(ch: Char) -> Int =
   else 9
 
 # Reads one signed-int atom (a run of ['-']digit+).
-fn read_int_atom(s: String, i: Int, total: Int) -> Maybe (Int, Int) =
-  match read_atom(s, i, total) with
+fn read_int_atom(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Int, Int) =
+  match read_atom(s, bytes, i, total) with
   | Nothing -> Nothing
   | Just (atom, j) ->
       match atom_to_int(atom) with
@@ -1445,8 +1449,8 @@ fn read_int_atom(s: String, i: Int, total: Int) -> Maybe (Int, Int) =
       | Just n -> Just((n, j))
 
 # Reads one bool atom: 'true' or 'false'.
-fn read_bool_atom(s: String, i: Int, total: Int) -> Maybe (Bool, Int) =
-  match read_atom(s, i, total) with
+fn read_bool_atom(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Bool, Int) =
+  match read_atom(s, bytes, i, total) with
   | Nothing -> Nothing
   | Just (atom, j) ->
       if atom == "true" then Just((true, j))
@@ -1454,86 +1458,86 @@ fn read_bool_atom(s: String, i: Int, total: Int) -> Maybe (Bool, Int) =
       else Nothing
 
 # Decodes (Char "<c>") — a single codepoint encoded as a quoted string.
-fn decode_char_at(s: String, i: Int, total: Int) -> Maybe (Char, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_char_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Char, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
           if tag == "Char" then
-            match decode_quoted_str_at(s, skip_ws(s, k, total), total) with
+            match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, k, total), total) with
             | Nothing -> Nothing
             | Just (cs, m) ->
-                match str_char_at_byte(cs, 0) with
+                match source.decode_char_at(bytes_from_utf8(cs), 0) with
                 | Nothing -> Nothing
-                | Just c ->
-                    match expect_char(s, skip_ws(s, m, total), total, ')') with
+                | Just (c, _) ->
+                    match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
                     | Nothing -> Nothing
                     | Just end -> Just((c, end))
           else Nothing
 
 # Decodes (Pos idx line col) into source.SourcePos.
-fn decode_pos_at(s: String, i: Int, total: Int) -> Maybe(source.SourcePos, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_pos_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(source.SourcePos, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
           if tag == "Pos" then
-            match read_int_atom(s, skip_ws(s, k, total), total) with
+            match read_int_atom(s, bytes, skip_ws(s, bytes, k, total), total) with
             | Nothing -> Nothing
             | Just (idx, m1) ->
-                match read_int_atom(s, skip_ws(s, m1, total), total) with
+                match read_int_atom(s, bytes, skip_ws(s, bytes, m1, total), total) with
                 | Nothing -> Nothing
                 | Just (line, m2) ->
-                    match read_int_atom(s, skip_ws(s, m2, total), total) with
+                    match read_int_atom(s, bytes, skip_ws(s, bytes, m2, total), total) with
                     | Nothing -> Nothing
                     | Just (col, m3) ->
-                        match expect_char(s, skip_ws(s, m3, total), total, ')') with
+                        match expect_char(s, bytes, skip_ws(s, bytes, m3, total), total, ')') with
                         | Nothing -> Nothing
                         | Just end -> Just((source.SourcePos(idx, line, col), end))
           else Nothing
 
 # Decodes (Just <inner>) or (Nothing) for a Maybe (List String).
-fn decode_maybe_str_list_at(s: String, i: Int, total: Int) -> Maybe (Maybe (List String), Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_maybe_str_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Maybe (List String), Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
           if tag == "Nothing" then
-            match expect_char(s, skip_ws(s, k, total), total, ')') with
+            match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
             | Nothing -> Nothing
             | Just end -> Just((Nothing, end))
           else if tag == "Just" then
-            match decode_str_list_at(s, skip_ws(s, k, total), total) with
+            match decode_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
             | Nothing -> Nothing
             | Just (xs, m) ->
-                match expect_char(s, skip_ws(s, m, total), total, ')') with
+                match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
                 | Nothing -> Nothing
                 | Just end -> Just((Just(xs), end))
           else Nothing
 
 # Decodes (Just <typeexpr>) or (Nothing) for a Maybe TypeExpr.
-fn decode_maybe_typeexpr_at(s: String, i: Int, total: Int) -> Maybe (Maybe ast.TypeExpr, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_maybe_typeexpr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Maybe ast.TypeExpr, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
           if tag == "Nothing" then
-            match expect_char(s, skip_ws(s, k, total), total, ')') with
+            match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
             | Nothing -> Nothing
             | Just end -> Just((Nothing, end))
           else if tag == "Just" then
-            match decode_ast_typeexpr_at(s, skip_ws(s, k, total), total) with
+            match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
             | Nothing -> Nothing
             | Just (te, m) ->
-                match expect_char(s, skip_ws(s, m, total), total, ')') with
+                match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
                 | Nothing -> Nothing
                 | Just end -> Just((Just(te), end))
           else Nothing
@@ -1542,1066 +1546,1066 @@ fn decode_maybe_typeexpr_at(s: String, i: Int, total: Int) -> Maybe (Maybe ast.T
 # TypeExpr decoder
 # ----------------------------------------------------------------------------
 
-fn decode_ast_typeexpr_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_typeexpr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
-      | Just (tag, k) -> decode_ast_typeexpr_by_tag(s, k, total, tag)
+      | Just (tag, k) -> decode_ast_typeexpr_by_tag(s, bytes, k, total, tag)
 
-fn decode_ast_typeexpr_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(ast.TypeExpr, Int) =
-  if tag == "TypeName" then decode_typename_at(s, i, total)
-  else if tag == "TypeApply" then decode_typeapply_at(s, i, total)
-  else if tag == "TypeArrow" then decode_typearrow_at(s, i, total)
-  else if tag == "TypeEffect" then decode_typeeffect_at(s, i, total)
-  else if tag == "TupleType" then decode_tupletype_at(s, i, total)
+fn decode_ast_typeexpr_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(ast.TypeExpr, Int) =
+  if tag == "TypeName" then decode_typename_at(s, bytes, i, total)
+  else if tag == "TypeApply" then decode_typeapply_at(s, bytes, i, total)
+  else if tag == "TypeArrow" then decode_typearrow_at(s, bytes, i, total)
+  else if tag == "TypeEffect" then decode_typeeffect_at(s, bytes, i, total)
+  else if tag == "TupleType" then decode_tupletype_at(s, bytes, i, total)
   else Nothing
 
-fn decode_typename_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_typename_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.TypeName(name), end))
 
-fn decode_typeapply_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
-  match decode_ast_typeexpr_at(s, skip_ws(s, i, total), total) with
+fn decode_typeapply_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
+  match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (base, j) ->
-      match decode_ast_typeexpr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (arg, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.TypeApply(base, arg), end))
 
-fn decode_typearrow_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
-  match decode_ast_typeexpr_at(s, skip_ws(s, i, total), total) with
+fn decode_typearrow_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
+  match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (param, j) ->
-      match decode_ast_typeexpr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (ret, k) ->
-          match decode_maybe_str_list_at(s, skip_ws(s, k, total), total) with
+          match decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (effects, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.TypeArrow(param, ret, effects), end))
 
-fn decode_typeeffect_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
-  match decode_ast_typeexpr_at(s, skip_ws(s, i, total), total) with
+fn decode_typeeffect_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
+  match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (inner, j) ->
-      match decode_str_list_at(s, skip_ws(s, j, total), total) with
+      match decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (labels, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.TypeEffect(inner, labels), end))
 
-fn decode_tupletype_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
-  match decode_ast_typeexpr_list_at(s, skip_ws(s, i, total), total) with
+fn decode_tupletype_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
+  match decode_ast_typeexpr_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (parts, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.TupleType(parts), end))
 
-fn decode_ast_typeexpr_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.TypeExpr, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_typeexpr_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.TypeExpr, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_typeexprs(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_typeexprs(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_typeexprs(s: String, i: Int, total: Int, acc: List ast.TypeExpr) -> Maybe (List ast.TypeExpr, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_typeexprs(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.TypeExpr) -> Maybe (List ast.TypeExpr, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_typeexpr_at(s, i, total) with
+      match decode_ast_typeexpr_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (te, j) -> collect_ast_typeexprs(s, skip_ws(s, j, total), total, Cons(te, acc))
+      | Just (te, j) -> collect_ast_typeexprs(s, bytes, skip_ws(s, bytes, j, total), total, Cons(te, acc))
 
 # ----------------------------------------------------------------------------
 # Param decoder
 # ----------------------------------------------------------------------------
 
-fn decode_ast_param_at(s: String, i: Int, total: Int) -> Maybe(ast.Param, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_param_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Param, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "Param" then decode_param_body(s, k, total)
+          if tag == "Param" then decode_param_body(s, bytes, k, total)
           else Nothing
 
-fn decode_param_body(s: String, i: Int, total: Int) -> Maybe(ast.Param, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_param_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Param, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_maybe_typeexpr_at(s, skip_ws(s, j, total), total) with
+      match decode_maybe_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (maybe_te, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.Param(name, maybe_te), end))
 
-fn decode_ast_param_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.Param, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_param_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Param, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_params(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_params(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_params(s: String, i: Int, total: Int, acc: List ast.Param) -> Maybe (List ast.Param, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_params(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.Param) -> Maybe (List ast.Param, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_param_at(s, i, total) with
+      match decode_ast_param_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (p, j) -> collect_ast_params(s, skip_ws(s, j, total), total, Cons(p, acc))
+      | Just (p, j) -> collect_ast_params(s, bytes, skip_ws(s, bytes, j, total), total, Cons(p, acc))
 
 # ----------------------------------------------------------------------------
 # Pattern decoder
 # ----------------------------------------------------------------------------
 
-fn decode_ast_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
-      | Just (tag, k) -> decode_ast_pattern_by_tag(s, k, total, tag)
+      | Just (tag, k) -> decode_ast_pattern_by_tag(s, bytes, k, total, tag)
 
-fn decode_ast_pattern_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(ast.Pattern, Int) =
-  if tag == "WildcardPattern" then decode_wildcard_pattern_at(s, i, total)
-  else if tag == "VarPattern" then decode_var_pattern_at(s, i, total)
-  else if tag == "IntPattern" then decode_int_pattern_at(s, i, total)
-  else if tag == "BoolPattern" then decode_bool_pattern_at(s, i, total)
-  else if tag == "StringPattern" then decode_string_pattern_at(s, i, total)
-  else if tag == "CharPattern" then decode_char_pattern_at(s, i, total)
-  else if tag == "UnitPattern" then decode_unit_pattern_at(s, i, total)
-  else if tag == "TuplePattern" then decode_tuple_pattern_at(s, i, total)
-  else if tag == "ConstructorPattern" then decode_ctor_pattern_at(s, i, total)
+fn decode_ast_pattern_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(ast.Pattern, Int) =
+  if tag == "WildcardPattern" then decode_wildcard_pattern_at(s, bytes, i, total)
+  else if tag == "VarPattern" then decode_var_pattern_at(s, bytes, i, total)
+  else if tag == "IntPattern" then decode_int_pattern_at(s, bytes, i, total)
+  else if tag == "BoolPattern" then decode_bool_pattern_at(s, bytes, i, total)
+  else if tag == "StringPattern" then decode_string_pattern_at(s, bytes, i, total)
+  else if tag == "CharPattern" then decode_char_pattern_at(s, bytes, i, total)
+  else if tag == "UnitPattern" then decode_unit_pattern_at(s, bytes, i, total)
+  else if tag == "TuplePattern" then decode_tuple_pattern_at(s, bytes, i, total)
+  else if tag == "ConstructorPattern" then decode_ctor_pattern_at(s, bytes, i, total)
   else Nothing
 
-fn decode_wildcard_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match decode_pos_at(s, skip_ws(s, i, total), total) with
+fn decode_wildcard_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match decode_pos_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (p, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.WildcardPattern(p), end))
 
-fn decode_var_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_var_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.VarPattern(name, p), end))
 
-fn decode_int_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match read_int_atom(s, skip_ws(s, i, total), total) with
+fn decode_int_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match read_int_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (n, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.IntPattern(n, p), end))
 
-fn decode_bool_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match read_bool_atom(s, skip_ws(s, i, total), total) with
+fn decode_bool_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match read_bool_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (b, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.BoolPattern(b, p), end))
 
-fn decode_string_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_string_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (v, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.StringPattern(v, p), end))
 
-fn decode_char_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match decode_char_at(s, skip_ws(s, i, total), total) with
+fn decode_char_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match decode_char_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (c, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.CharPattern(c, p), end))
 
-fn decode_unit_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match decode_pos_at(s, skip_ws(s, i, total), total) with
+fn decode_unit_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match decode_pos_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (p, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.UnitPattern(p), end))
 
-fn decode_tuple_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match decode_ast_pattern_list_at(s, skip_ws(s, i, total), total) with
+fn decode_tuple_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match decode_ast_pattern_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (pats, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.TuplePattern(pats, p), end))
 
-fn decode_ctor_pattern_at(s: String, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_ctor_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Pattern, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_pattern_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_pattern_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (pats, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.ConstructorPattern(name, pats, p), end))
 
-fn decode_ast_pattern_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.Pattern, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_pattern_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Pattern, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_patterns(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_patterns(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_patterns(s: String, i: Int, total: Int, acc: List ast.Pattern) -> Maybe (List ast.Pattern, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_patterns(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.Pattern) -> Maybe (List ast.Pattern, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_pattern_at(s, i, total) with
+      match decode_ast_pattern_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (pat, j) -> collect_ast_patterns(s, skip_ws(s, j, total), total, Cons(pat, acc))
+      | Just (pat, j) -> collect_ast_patterns(s, bytes, skip_ws(s, bytes, j, total), total, Cons(pat, acc))
 
 # ----------------------------------------------------------------------------
 # Expr decoder
 # ----------------------------------------------------------------------------
 
-fn decode_ast_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
-      | Just (tag, k) -> decode_ast_expr_by_tag(s, k, total, tag)
+      | Just (tag, k) -> decode_ast_expr_by_tag(s, bytes, k, total, tag)
 
-fn decode_ast_expr_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(ast.Expr, Int) =
-  if tag == "VarExpr" then decode_var_expr_at(s, i, total)
-  else if tag == "IntExpr" then decode_int_expr_at(s, i, total)
-  else if tag == "BoolExpr" then decode_bool_expr_at(s, i, total)
-  else if tag == "StringExpr" then decode_string_expr_at(s, i, total)
-  else if tag == "StringTemplateExpr" then decode_string_template_expr_at(s, i, total)
-  else if tag == "CharExpr" then decode_char_expr_at(s, i, total)
-  else if tag == "UnitExpr" then decode_unit_expr_at(s, i, total)
-  else if tag == "TupleExpr" then decode_tuple_expr_at(s, i, total)
-  else if tag == "IfExpr" then decode_if_expr_at(s, i, total)
-  else if tag == "MatchExpr" then decode_match_expr_at(s, i, total)
-  else if tag == "CallExpr" then decode_call_expr_at(s, i, total)
-  else if tag == "LambdaExpr" then decode_lambda_expr_at(s, i, total)
-  else if tag == "BinaryExpr" then decode_binary_expr_at(s, i, total)
-  else if tag == "UnaryExpr" then decode_unary_expr_at(s, i, total)
-  else if tag == "IntRangeExpr" then decode_int_range_expr_at(s, i, total)
-  else if tag == "DoExpr" then decode_do_expr_at(s, i, total)
-  else if tag == "RecordExpr" then decode_record_expr_at(s, i, total)
-  else if tag == "GetFieldExpr" then decode_get_field_expr_at(s, i, total)
+fn decode_ast_expr_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(ast.Expr, Int) =
+  if tag == "VarExpr" then decode_var_expr_at(s, bytes, i, total)
+  else if tag == "IntExpr" then decode_int_expr_at(s, bytes, i, total)
+  else if tag == "BoolExpr" then decode_bool_expr_at(s, bytes, i, total)
+  else if tag == "StringExpr" then decode_string_expr_at(s, bytes, i, total)
+  else if tag == "StringTemplateExpr" then decode_string_template_expr_at(s, bytes, i, total)
+  else if tag == "CharExpr" then decode_char_expr_at(s, bytes, i, total)
+  else if tag == "UnitExpr" then decode_unit_expr_at(s, bytes, i, total)
+  else if tag == "TupleExpr" then decode_tuple_expr_at(s, bytes, i, total)
+  else if tag == "IfExpr" then decode_if_expr_at(s, bytes, i, total)
+  else if tag == "MatchExpr" then decode_match_expr_at(s, bytes, i, total)
+  else if tag == "CallExpr" then decode_call_expr_at(s, bytes, i, total)
+  else if tag == "LambdaExpr" then decode_lambda_expr_at(s, bytes, i, total)
+  else if tag == "BinaryExpr" then decode_binary_expr_at(s, bytes, i, total)
+  else if tag == "UnaryExpr" then decode_unary_expr_at(s, bytes, i, total)
+  else if tag == "IntRangeExpr" then decode_int_range_expr_at(s, bytes, i, total)
+  else if tag == "DoExpr" then decode_do_expr_at(s, bytes, i, total)
+  else if tag == "RecordExpr" then decode_record_expr_at(s, bytes, i, total)
+  else if tag == "GetFieldExpr" then decode_get_field_expr_at(s, bytes, i, total)
   else Nothing
 
-fn decode_var_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_var_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.VarExpr(name, p), end))
 
-fn decode_int_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match read_int_atom(s, skip_ws(s, i, total), total) with
+fn decode_int_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match read_int_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (n, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.IntExpr(n, p), end))
 
-fn decode_bool_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match read_bool_atom(s, skip_ws(s, i, total), total) with
+fn decode_bool_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match read_bool_atom(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (b, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.BoolExpr(b, p), end))
 
-fn decode_string_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_string_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (v, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.StringExpr(v, p), end))
 
-fn decode_string_template_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_template_part_list_at(s, skip_ws(s, i, total), total) with
+fn decode_string_template_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_template_part_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (parts, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.StringTemplateExpr(parts, p), end))
 
-fn decode_char_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_char_at(s, skip_ws(s, i, total), total) with
+fn decode_char_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_char_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (c, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.CharExpr(c, p), end))
 
-fn decode_unit_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_pos_at(s, skip_ws(s, i, total), total) with
+fn decode_unit_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_pos_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (p, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.UnitExpr(p), end))
 
-fn decode_tuple_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_ast_expr_list_at(s, skip_ws(s, i, total), total) with
+fn decode_tuple_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_ast_expr_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (es, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.TupleExpr(es, p), end))
 
-fn decode_if_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_ast_expr_at(s, skip_ws(s, i, total), total) with
+fn decode_if_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (cond, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (t, k) ->
-          match decode_ast_expr_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (f, m) ->
-              match decode_pos_at(s, skip_ws(s, m, total), total) with
+              match decode_pos_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (p, n) ->
-                  match expect_char(s, skip_ws(s, n, total), total, ')') with
+                  match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((ast.IfExpr(cond, t, f, p), end))
 
-fn decode_match_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_ast_expr_at(s, skip_ws(s, i, total), total) with
+fn decode_match_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (scrut, j) ->
-      match decode_match_branch_list_at(s, skip_ws(s, j, total), total) with
+      match decode_match_branch_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (branches, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.MatchExpr(scrut, branches, p), end))
 
-fn decode_call_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_ast_expr_at(s, skip_ws(s, i, total), total) with
+fn decode_call_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (fn_expr, j) ->
-      match decode_ast_expr_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (args, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.CallExpr(fn_expr, args, p), end))
 
-fn decode_lambda_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_ast_param_list_at(s, skip_ws(s, i, total), total) with
+fn decode_lambda_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_ast_param_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (params, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (body, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.LambdaExpr(params, body, p), end))
 
-fn decode_binary_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_binary_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (op, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (lhs, k) ->
-          match decode_ast_expr_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (rhs, m) ->
-              match decode_pos_at(s, skip_ws(s, m, total), total) with
+              match decode_pos_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (p, n) ->
-                  match expect_char(s, skip_ws(s, n, total), total, ')') with
+                  match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((ast.BinaryExpr(op, lhs, rhs, p), end))
 
-fn decode_unary_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_unary_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (op, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (operand, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.UnaryExpr(op, operand, p), end))
 
-fn decode_int_range_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_ast_expr_at(s, skip_ws(s, i, total), total) with
+fn decode_int_range_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (lo, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (hi, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.IntRangeExpr(lo, hi, p), end))
 
-fn decode_do_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_do_step_list_at(s, skip_ws(s, i, total), total) with
+fn decode_do_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_do_step_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (steps, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (p, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.DoExpr(steps, p), end))
 
-fn decode_record_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_record_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_record_field_list_at(s, skip_ws(s, j, total), total) with
+      match decode_record_field_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (fields, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.RecordExpr(name, fields, p), end))
 
-fn decode_get_field_expr_at(s: String, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
-  match decode_ast_expr_at(s, skip_ws(s, i, total), total) with
+fn decode_get_field_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (obj, j) ->
-      match decode_quoted_str_at(s, skip_ws(s, j, total), total) with
+      match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (field, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (p, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.GetFieldExpr(obj, field, p), end))
 
-fn decode_ast_expr_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.Expr, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_expr_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Expr, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_exprs(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_exprs(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_exprs(s: String, i: Int, total: Int, acc: List ast.Expr) -> Maybe (List ast.Expr, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_exprs(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.Expr) -> Maybe (List ast.Expr, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_expr_at(s, i, total) with
+      match decode_ast_expr_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (e, j) -> collect_ast_exprs(s, skip_ws(s, j, total), total, Cons(e, acc))
+      | Just (e, j) -> collect_ast_exprs(s, bytes, skip_ws(s, bytes, j, total), total, Cons(e, acc))
 
-fn decode_match_branch_at(s: String, i: Int, total: Int) -> Maybe(ast.MatchBranch, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_match_branch_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.MatchBranch, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "MatchBranch" then decode_match_branch_body(s, k, total)
+          if tag == "MatchBranch" then decode_match_branch_body(s, bytes, k, total)
           else Nothing
 
-fn decode_match_branch_body(s: String, i: Int, total: Int) -> Maybe(ast.MatchBranch, Int) =
-  match decode_ast_pattern_at(s, skip_ws(s, i, total), total) with
+fn decode_match_branch_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.MatchBranch, Int) =
+  match decode_ast_pattern_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (pat, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (body, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.MatchBranch(pat, body), end))
 
-fn decode_match_branch_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.MatchBranch, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_match_branch_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.MatchBranch, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_match_branches(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_match_branches(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_match_branches(s: String, i: Int, total: Int, acc: List ast.MatchBranch) -> Maybe (List ast.MatchBranch, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_match_branches(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.MatchBranch) -> Maybe (List ast.MatchBranch, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_match_branch_at(s, i, total) with
+      match decode_match_branch_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (b, j) -> collect_match_branches(s, skip_ws(s, j, total), total, Cons(b, acc))
+      | Just (b, j) -> collect_match_branches(s, bytes, skip_ws(s, bytes, j, total), total, Cons(b, acc))
 
-fn decode_do_step_at(s: String, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_do_step_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "DoBindStep" then decode_do_bind_step_body(s, k, total)
-          else if tag == "DoLetStep" then decode_do_let_step_body(s, k, total)
-          else if tag == "DoExprStep" then decode_do_expr_step_body(s, k, total)
+          if tag == "DoBindStep" then decode_do_bind_step_body(s, bytes, k, total)
+          else if tag == "DoLetStep" then decode_do_let_step_body(s, bytes, k, total)
+          else if tag == "DoExprStep" then decode_do_expr_step_body(s, bytes, k, total)
           else Nothing
 
-fn decode_do_bind_step_body(s: String, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
-  match decode_ast_pattern_at(s, skip_ws(s, i, total), total) with
+fn decode_do_bind_step_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
+  match decode_ast_pattern_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (pat, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (e, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.DoBindStep(pat, e), end))
 
-fn decode_do_let_step_body(s: String, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_do_let_step_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (e, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.DoLetStep(name, e), end))
 
-fn decode_do_expr_step_body(s: String, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
-  match decode_ast_expr_at(s, skip_ws(s, i, total), total) with
+fn decode_do_expr_step_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
+  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (e, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.DoExprStep(e), end))
 
-fn decode_do_step_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.DoStep, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_do_step_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.DoStep, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_do_steps(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_do_steps(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_do_steps(s: String, i: Int, total: Int, acc: List ast.DoStep) -> Maybe (List ast.DoStep, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_do_steps(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.DoStep) -> Maybe (List ast.DoStep, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_do_step_at(s, i, total) with
+      match decode_do_step_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (step, j) -> collect_do_steps(s, skip_ws(s, j, total), total, Cons(step, acc))
+      | Just (step, j) -> collect_do_steps(s, bytes, skip_ws(s, bytes, j, total), total, Cons(step, acc))
 
-fn decode_record_field_at(s: String, i: Int, total: Int) -> Maybe(ast.RecordField, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_record_field_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.RecordField, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "RecordField" then decode_record_field_body(s, k, total)
+          if tag == "RecordField" then decode_record_field_body(s, bytes, k, total)
           else Nothing
 
-fn decode_record_field_body(s: String, i: Int, total: Int) -> Maybe(ast.RecordField, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_record_field_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.RecordField, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (e, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.RecordField(name, e), end))
 
-fn decode_record_field_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.RecordField, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_record_field_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.RecordField, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_record_fields(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_record_fields(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_record_fields(s: String, i: Int, total: Int, acc: List ast.RecordField) -> Maybe (List ast.RecordField, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_record_fields(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.RecordField) -> Maybe (List ast.RecordField, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_record_field_at(s, i, total) with
+      match decode_record_field_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (f, j) -> collect_record_fields(s, skip_ws(s, j, total), total, Cons(f, acc))
+      | Just (f, j) -> collect_record_fields(s, bytes, skip_ws(s, bytes, j, total), total, Cons(f, acc))
 
-fn decode_template_part_at(s: String, i: Int, total: Int) -> Maybe(ast.TemplateExprPart, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_template_part_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TemplateExprPart, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "LitPart" then decode_lit_part_body(s, k, total)
-          else if tag == "InterpPart" then decode_interp_part_body(s, k, total)
+          if tag == "LitPart" then decode_lit_part_body(s, bytes, k, total)
+          else if tag == "InterpPart" then decode_interp_part_body(s, bytes, k, total)
           else Nothing
 
-fn decode_lit_part_body(s: String, i: Int, total: Int) -> Maybe(ast.TemplateExprPart, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_lit_part_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TemplateExprPart, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (str_val, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.LitPart(str_val), end))
 
-fn decode_interp_part_body(s: String, i: Int, total: Int) -> Maybe(ast.TemplateExprPart, Int) =
-  match decode_ast_expr_at(s, skip_ws(s, i, total), total) with
+fn decode_interp_part_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TemplateExprPart, Int) =
+  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (e, j) ->
-      match expect_char(s, skip_ws(s, j, total), total, ')') with
+      match expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') with
       | Nothing -> Nothing
       | Just end -> Just((ast.InterpPart(e), end))
 
-fn decode_template_part_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.TemplateExprPart, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_template_part_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.TemplateExprPart, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_template_parts(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_template_parts(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_template_parts(s: String, i: Int, total: Int, acc: List ast.TemplateExprPart) -> Maybe (List ast.TemplateExprPart, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_template_parts(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.TemplateExprPart) -> Maybe (List ast.TemplateExprPart, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_template_part_at(s, i, total) with
+      match decode_template_part_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (p, j) -> collect_template_parts(s, skip_ws(s, j, total), total, Cons(p, acc))
+      | Just (p, j) -> collect_template_parts(s, bytes, skip_ws(s, bytes, j, total), total, Cons(p, acc))
 
 # ----------------------------------------------------------------------------
 # Decl decoder
 # ----------------------------------------------------------------------------
 
-fn decode_ast_type_constraint_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeConstraint, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_type_constraint_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeConstraint, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "TypeConstraint" then decode_type_constraint_body(s, k, total)
+          if tag == "TypeConstraint" then decode_type_constraint_body(s, bytes, k, total)
           else Nothing
 
-fn decode_type_constraint_body(s: String, i: Int, total: Int) -> Maybe(ast.TypeConstraint, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_type_constraint_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeConstraint, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (class_name, j) ->
-      match decode_ast_typeexpr_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_typeexpr_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (args, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.TypeConstraint(class_name, args), end))
 
-fn decode_ast_type_constraint_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.TypeConstraint, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_type_constraint_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.TypeConstraint, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_type_constraints(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_type_constraints(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_type_constraints(s: String, i: Int, total: Int, acc: List ast.TypeConstraint) -> Maybe (List ast.TypeConstraint, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_type_constraints(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.TypeConstraint) -> Maybe (List ast.TypeConstraint, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_type_constraint_at(s, i, total) with
+      match decode_ast_type_constraint_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (tc, j) -> collect_ast_type_constraints(s, skip_ws(s, j, total), total, Cons(tc, acc))
+      | Just (tc, j) -> collect_ast_type_constraints(s, bytes, skip_ws(s, bytes, j, total), total, Cons(tc, acc))
 
-fn decode_ast_type_constructor_at(s: String, i: Int, total: Int) -> Maybe(ast.TypeConstructor, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_type_constructor_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeConstructor, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "TypeConstructor" then decode_type_constructor_body(s, k, total)
+          if tag == "TypeConstructor" then decode_type_constructor_body(s, bytes, k, total)
           else Nothing
 
-fn decode_type_constructor_body(s: String, i: Int, total: Int) -> Maybe(ast.TypeConstructor, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_type_constructor_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeConstructor, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_typeexpr_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_typeexpr_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (fields, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.TypeConstructor(name, fields), end))
 
-fn decode_ast_type_constructor_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.TypeConstructor, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_type_constructor_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.TypeConstructor, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_type_constructors(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_type_constructors(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_type_constructors(s: String, i: Int, total: Int, acc: List ast.TypeConstructor) -> Maybe (List ast.TypeConstructor, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_type_constructors(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.TypeConstructor) -> Maybe (List ast.TypeConstructor, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_type_constructor_at(s, i, total) with
+      match decode_ast_type_constructor_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (c, j) -> collect_ast_type_constructors(s, skip_ws(s, j, total), total, Cons(c, acc))
+      | Just (c, j) -> collect_ast_type_constructors(s, bytes, skip_ws(s, bytes, j, total), total, Cons(c, acc))
 
-fn decode_ast_record_field_decl_at(s: String, i: Int, total: Int) -> Maybe(ast.RecordFieldDecl, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_record_field_decl_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.RecordFieldDecl, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "RecordFieldDecl" then decode_record_field_decl_body(s, k, total)
+          if tag == "RecordFieldDecl" then decode_record_field_decl_body(s, bytes, k, total)
           else Nothing
 
-fn decode_record_field_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.RecordFieldDecl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_record_field_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.RecordFieldDecl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_typeexpr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (te, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.RecordFieldDecl(name, te), end))
 
-fn decode_ast_record_field_decl_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.RecordFieldDecl, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_record_field_decl_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.RecordFieldDecl, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_record_field_decls(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_record_field_decls(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_record_field_decls(s: String, i: Int, total: Int, acc: List ast.RecordFieldDecl) -> Maybe (List ast.RecordFieldDecl, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_record_field_decls(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.RecordFieldDecl) -> Maybe (List ast.RecordFieldDecl, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_record_field_decl_at(s, i, total) with
+      match decode_ast_record_field_decl_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (f, j) -> collect_ast_record_field_decls(s, skip_ws(s, j, total), total, Cons(f, acc))
+      | Just (f, j) -> collect_ast_record_field_decls(s, bytes, skip_ws(s, bytes, j, total), total, Cons(f, acc))
 
-fn decode_ast_class_method_sig_at(s: String, i: Int, total: Int) -> Maybe(ast.ClassMethodSig, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_class_method_sig_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.ClassMethodSig, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "ClassMethodSig" then decode_class_method_sig_body(s, k, total)
+          if tag == "ClassMethodSig" then decode_class_method_sig_body(s, bytes, k, total)
           else Nothing
 
-fn decode_class_method_sig_body(s: String, i: Int, total: Int) -> Maybe(ast.ClassMethodSig, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_class_method_sig_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.ClassMethodSig, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_param_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_param_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (params, k) ->
-          match decode_ast_typeexpr_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (ret, m) ->
-              match decode_maybe_str_list_at(s, skip_ws(s, m, total), total) with
+              match decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (effects, n) ->
-                  match expect_char(s, skip_ws(s, n, total), total, ')') with
+                  match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((ast.ClassMethodSig(name, params, ret, effects), end))
 
-fn decode_ast_class_method_sig_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.ClassMethodSig, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_class_method_sig_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.ClassMethodSig, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_class_method_sigs(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_class_method_sigs(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_class_method_sigs(s: String, i: Int, total: Int, acc: List ast.ClassMethodSig) -> Maybe (List ast.ClassMethodSig, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_class_method_sigs(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.ClassMethodSig) -> Maybe (List ast.ClassMethodSig, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_class_method_sig_at(s, i, total) with
+      match decode_ast_class_method_sig_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (m, j) -> collect_ast_class_method_sigs(s, skip_ws(s, j, total), total, Cons(m, acc))
+      | Just (m, j) -> collect_ast_class_method_sigs(s, bytes, skip_ws(s, bytes, j, total), total, Cons(m, acc))
 
-fn decode_ast_instance_method_impl_at(s: String, i: Int, total: Int) -> Maybe(ast.InstanceMethodImpl, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_instance_method_impl_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.InstanceMethodImpl, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "InstanceMethodImpl" then decode_instance_method_impl_body(s, k, total)
+          if tag == "InstanceMethodImpl" then decode_instance_method_impl_body(s, bytes, k, total)
           else Nothing
 
-fn decode_instance_method_impl_body(s: String, i: Int, total: Int) -> Maybe(ast.InstanceMethodImpl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_instance_method_impl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.InstanceMethodImpl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_param_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_param_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (params, k) ->
-          match decode_maybe_typeexpr_at(s, skip_ws(s, k, total), total) with
+          match decode_maybe_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (ret, m) ->
-              match decode_maybe_str_list_at(s, skip_ws(s, m, total), total) with
+              match decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (effects, n) ->
-                  match decode_ast_expr_at(s, skip_ws(s, n, total), total) with
+                  match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, n, total), total) with
                   | Nothing -> Nothing
                   | Just (body, p) ->
-                      match expect_char(s, skip_ws(s, p, total), total, ')') with
+                      match expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') with
                       | Nothing -> Nothing
                       | Just end -> Just((ast.InstanceMethodImpl(name, params, ret, effects, body), end))
 
-fn decode_ast_instance_method_impl_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.InstanceMethodImpl, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_instance_method_impl_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.InstanceMethodImpl, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_instance_method_impls(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_instance_method_impls(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_instance_method_impls(s: String, i: Int, total: Int, acc: List ast.InstanceMethodImpl) -> Maybe (List ast.InstanceMethodImpl, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_instance_method_impls(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.InstanceMethodImpl) -> Maybe (List ast.InstanceMethodImpl, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_instance_method_impl_at(s, i, total) with
+      match decode_ast_instance_method_impl_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (m, j) -> collect_ast_instance_method_impls(s, skip_ws(s, j, total), total, Cons(m, acc))
+      | Just (m, j) -> collect_ast_instance_method_impls(s, bytes, skip_ws(s, bytes, j, total), total, Cons(m, acc))
 
-fn decode_ast_decl_at(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_decl_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
-      | Just (tag, k) -> decode_ast_decl_by_tag(s, k, total, tag)
+      | Just (tag, k) -> decode_ast_decl_by_tag(s, bytes, k, total, tag)
 
-fn decode_ast_decl_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(ast.Decl, Int) =
-  if tag == "FnDecl" then decode_fn_decl_body(s, i, total)
-  else if tag == "ExternFnDecl" then decode_extern_fn_decl_body(s, i, total)
-  else if tag == "TypeDecl" then decode_type_decl_body(s, i, total)
-  else if tag == "RecordDecl" then decode_record_decl_body(s, i, total)
-  else if tag == "LetDecl" then decode_let_decl_body(s, i, total)
-  else if tag == "ClassDecl" then decode_class_decl_body(s, i, total)
-  else if tag == "InstanceDecl" then decode_instance_decl_body(s, i, total)
-  else if tag == "AliasDecl" then decode_alias_decl_body(s, i, total)
+fn decode_ast_decl_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(ast.Decl, Int) =
+  if tag == "FnDecl" then decode_fn_decl_body(s, bytes, i, total)
+  else if tag == "ExternFnDecl" then decode_extern_fn_decl_body(s, bytes, i, total)
+  else if tag == "TypeDecl" then decode_type_decl_body(s, bytes, i, total)
+  else if tag == "RecordDecl" then decode_record_decl_body(s, bytes, i, total)
+  else if tag == "LetDecl" then decode_let_decl_body(s, bytes, i, total)
+  else if tag == "ClassDecl" then decode_class_decl_body(s, bytes, i, total)
+  else if tag == "InstanceDecl" then decode_instance_decl_body(s, bytes, i, total)
+  else if tag == "AliasDecl" then decode_alias_decl_body(s, bytes, i, total)
   else Nothing
 
-fn decode_fn_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_fn_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_param_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_param_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (params, k) ->
-          match decode_maybe_typeexpr_at(s, skip_ws(s, k, total), total) with
+          match decode_maybe_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (ret, m) ->
-              match decode_maybe_str_list_at(s, skip_ws(s, m, total), total) with
+              match decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (effects, n) ->
-                  match decode_ast_type_constraint_list_at(s, skip_ws(s, n, total), total) with
+                  match decode_ast_type_constraint_list_at(s, bytes, skip_ws(s, bytes, n, total), total) with
                   | Nothing -> Nothing
                   | Just (constraints, p) ->
-                      match decode_ast_expr_at(s, skip_ws(s, p, total), total) with
+                      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, p, total), total) with
                       | Nothing -> Nothing
                       | Just (body, q) ->
-                          match decode_pos_at(s, skip_ws(s, q, total), total) with
+                          match decode_pos_at(s, bytes, skip_ws(s, bytes, q, total), total) with
                           | Nothing -> Nothing
                           | Just (pos, r) ->
-                              match expect_char(s, skip_ws(s, r, total), total, ')') with
+                              match expect_char(s, bytes, skip_ws(s, bytes, r, total), total, ')') with
                               | Nothing -> Nothing
                               | Just end -> Just((ast.FnDecl(name, params, ret, effects, constraints, body, pos), end))
 
-fn decode_extern_fn_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_extern_fn_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_param_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_param_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (params, k) ->
-          match decode_maybe_typeexpr_at(s, skip_ws(s, k, total), total) with
+          match decode_maybe_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (ret, m) ->
-              match decode_maybe_str_list_at(s, skip_ws(s, m, total), total) with
+              match decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (effects, n) ->
-                  match decode_pos_at(s, skip_ws(s, n, total), total) with
+                  match decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) with
                   | Nothing -> Nothing
                   | Just (pos, p) ->
-                      match expect_char(s, skip_ws(s, p, total), total, ')') with
+                      match expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') with
                       | Nothing -> Nothing
                       | Just end -> Just((ast.ExternFnDecl(name, params, ret, effects, pos), end))
 
-fn decode_type_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_type_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_str_list_at(s, skip_ws(s, j, total), total) with
+      match decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (type_params, k) ->
-          match decode_ast_type_constructor_list_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_type_constructor_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (ctors, m) ->
-              match decode_str_list_at(s, skip_ws(s, m, total), total) with
+              match decode_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (deriving_classes, n) ->
-                  match decode_pos_at(s, skip_ws(s, n, total), total) with
+                  match decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) with
                   | Nothing -> Nothing
                   | Just (pos, p) ->
-                      match expect_char(s, skip_ws(s, p, total), total, ')') with
+                      match expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') with
                       | Nothing -> Nothing
                       | Just end -> Just((ast.TypeDecl(name, type_params, ctors, deriving_classes, pos), end))
 
-fn decode_record_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_record_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_str_list_at(s, skip_ws(s, j, total), total) with
+      match decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (type_params, k) ->
-          match decode_ast_record_field_decl_list_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_record_field_decl_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (fields, m) ->
-              match decode_pos_at(s, skip_ws(s, m, total), total) with
+              match decode_pos_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (pos, n) ->
-                  match expect_char(s, skip_ws(s, n, total), total, ')') with
+                  match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((ast.RecordDecl(name, type_params, fields, pos), end))
 
-fn decode_let_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_let_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_ast_expr_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (body, k) ->
-          match decode_pos_at(s, skip_ws(s, k, total), total) with
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (pos, m) ->
-              match expect_char(s, skip_ws(s, m, total), total, ')') with
+              match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
               | Nothing -> Nothing
               | Just end -> Just((ast.LetDecl(name, body, pos), end))
 
-fn decode_class_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_class_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_str_list_at(s, skip_ws(s, j, total), total) with
+      match decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (type_params, k) ->
-          match decode_ast_class_method_sig_list_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_class_method_sig_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (methods, m) ->
-              match decode_ast_type_constraint_list_at(s, skip_ws(s, m, total), total) with
+              match decode_ast_type_constraint_list_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (superclasses, n) ->
-                  match decode_pos_at(s, skip_ws(s, n, total), total) with
+                  match decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) with
                   | Nothing -> Nothing
                   | Just (pos, p) ->
-                      match expect_char(s, skip_ws(s, p, total), total, ')') with
+                      match expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') with
                       | Nothing -> Nothing
                       | Just end -> Just((ast.ClassDecl(name, type_params, methods, superclasses, pos), end))
 
-fn decode_instance_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_ast_type_constraint_at(s, skip_ws(s, i, total), total) with
+fn decode_instance_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_ast_type_constraint_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (constraint, j) ->
-      match decode_ast_type_constraint_list_at(s, skip_ws(s, j, total), total) with
+      match decode_ast_type_constraint_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (inst_constraints, k) ->
-          match decode_ast_instance_method_impl_list_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_instance_method_impl_list_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (methods, m) ->
-              match decode_pos_at(s, skip_ws(s, m, total), total) with
+              match decode_pos_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (pos, n) ->
-                  match expect_char(s, skip_ws(s, n, total), total, ')') with
+                  match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((ast.InstanceDecl(constraint, inst_constraints, methods, pos), end))
 
-fn decode_alias_decl_body(s: String, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
-  match decode_quoted_str_at(s, skip_ws(s, i, total), total) with
+fn decode_alias_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (name, j) ->
-      match decode_str_list_at(s, skip_ws(s, j, total), total) with
+      match decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (type_params, k) ->
-          match decode_ast_typeexpr_at(s, skip_ws(s, k, total), total) with
+          match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) with
           | Nothing -> Nothing
           | Just (rhs, m) ->
-              match decode_pos_at(s, skip_ws(s, m, total), total) with
+              match decode_pos_at(s, bytes, skip_ws(s, bytes, m, total), total) with
               | Nothing -> Nothing
               | Just (pos, n) ->
-                  match expect_char(s, skip_ws(s, n, total), total, ')') with
+                  match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((ast.AliasDecl(name, type_params, rhs, pos), end))
 
-fn decode_ast_decl_list_at(s: String, i: Int, total: Int) -> Maybe (List ast.Decl, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_decl_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Decl, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
-  | Just j -> collect_ast_decls(s, skip_ws(s, j, total), total, Nil)
+  | Just j -> collect_ast_decls(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
 
-fn collect_ast_decls(s: String, i: Int, total: Int, acc: List ast.Decl) -> Maybe (List ast.Decl, Int) =
-  match expect_char(s, i, total, ')') with
+fn collect_ast_decls(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.Decl) -> Maybe (List ast.Decl, Int) =
+  match expect_char(s, bytes, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      match decode_ast_decl_at(s, i, total) with
+      match decode_ast_decl_at(s, bytes, i, total) with
       | Nothing -> Nothing
-      | Just (d, j) -> collect_ast_decls(s, skip_ws(s, j, total), total, Cons(d, acc))
+      | Just (d, j) -> collect_ast_decls(s, bytes, skip_ws(s, bytes, j, total), total, Cons(d, acc))
 
 # ----------------------------------------------------------------------------
 # Top-level entry points
@@ -2609,53 +2613,57 @@ fn collect_ast_decls(s: String, i: Int, total: Int, acc: List ast.Decl) -> Maybe
 
 # O(n) in size of the expression.
 export fn decode_ast_expr(input: String) -> Maybe ast.Expr =
-  match decode_ast_expr_at(input, skip_ws(input, 0, n), n) with
+  match decode_ast_expr_at(input, bytes, skip_ws(input, bytes, 0, n), n) with
   | Nothing -> Nothing
   | Just (e, next) ->
-      if only_ws_remaining(input, next, n) then Just(e) else Nothing
+      if only_ws_remaining(input, bytes, next, n) then Just(e) else Nothing
   where n = str_byte_len(input)
+        bytes = bytes_from_utf8(input)
 
 # O(n) in size of the pattern.
 export fn decode_ast_pattern(input: String) -> Maybe ast.Pattern =
-  match decode_ast_pattern_at(input, skip_ws(input, 0, n), n) with
+  match decode_ast_pattern_at(input, bytes, skip_ws(input, bytes, 0, n), n) with
   | Nothing -> Nothing
   | Just (p, next) ->
-      if only_ws_remaining(input, next, n) then Just(p) else Nothing
+      if only_ws_remaining(input, bytes, next, n) then Just(p) else Nothing
   where n = str_byte_len(input)
+        bytes = bytes_from_utf8(input)
 
 # O(n) in size of the declaration.
 export fn decode_ast_decl(input: String) -> Maybe ast.Decl =
-  match decode_ast_decl_at(input, skip_ws(input, 0, n), n) with
+  match decode_ast_decl_at(input, bytes, skip_ws(input, bytes, 0, n), n) with
   | Nothing -> Nothing
   | Just (d, next) ->
-      if only_ws_remaining(input, next, n) then Just(d) else Nothing
+      if only_ws_remaining(input, bytes, next, n) then Just(d) else Nothing
   where n = str_byte_len(input)
+        bytes = bytes_from_utf8(input)
 
 # O(n) in size of the program.
 export fn decode_ast_program(input: String) -> Maybe ast.Program =
-  match decode_ast_program_at(input, skip_ws(input, 0, n), n) with
+  match decode_ast_program_at(input, bytes, skip_ws(input, bytes, 0, n), n) with
   | Nothing -> Nothing
   | Just (prog, next) ->
-      if only_ws_remaining(input, next, n) then Just(prog) else Nothing
+      if only_ws_remaining(input, bytes, next, n) then Just(prog) else Nothing
   where n = str_byte_len(input)
+        bytes = bytes_from_utf8(input)
 
-fn decode_ast_program_at(s: String, i: Int, total: Int) -> Maybe(ast.Program, Int) =
-  match expect_char(s, i, total, '(') with
+fn decode_ast_program_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Program, Int) =
+  match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
-      match read_atom(s, skip_ws(s, j, total), total) with
+      match read_atom(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (tag, k) ->
-          if tag == "Program" then decode_program_body(s, k, total)
+          if tag == "Program" then decode_program_body(s, bytes, k, total)
           else Nothing
 
-fn decode_program_body(s: String, i: Int, total: Int) -> Maybe(ast.Program, Int) =
-  match decode_ast_decl_list_at(s, skip_ws(s, i, total), total) with
+fn decode_program_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Program, Int) =
+  match decode_ast_decl_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with
   | Nothing -> Nothing
   | Just (decls, j) ->
-      match decode_pos_at(s, skip_ws(s, j, total), total) with
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
       | Nothing -> Nothing
       | Just (pos, k) ->
-          match expect_char(s, skip_ws(s, k, total), total, ')') with
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.Program(decls, pos), end))

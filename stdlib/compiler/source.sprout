@@ -4,8 +4,13 @@ import stdlib.string as string
 export type SourcePos (..) =
   | SourcePos Int Int Int
 
+# SourceCursor carries the raw source String (for byte slicing and prefix
+# matching), its UTF-8 Bytes (for safe, bounds-checked codepoint decoding), the
+# current BYTE offset, and the SourcePos (codepoint index + line/column for
+# diagnostics).  The byte offset indexes both the String and the Bytes — they
+# share byte positions since the Bytes are the String's UTF-8 encoding.
 export type SourceCursor (..) =
-  | SourceCursor String Int SourcePos
+  | SourceCursor String Bytes Int SourcePos
 
 # FilePath is the path to a single source file (e.g. "main.sprout").
 # StdlibRoot is the directory from which `stdlib.*` imports resolve.
@@ -41,11 +46,11 @@ export fn qualified_name_str(q: QualifiedName) -> String =
   match q with | QualifiedName s -> s
 
 export fn cursor_from_string(raw: String) -> SourceCursor =
-  SourceCursor(raw, 0, SourcePos(0, 1, 1))
+  SourceCursor(raw, bytes_from_utf8(raw), 0, SourcePos(0, 1, 1))
 
 export fn source_position(cursor: SourceCursor) -> SourcePos =
   match cursor with
-  | SourceCursor _ _ pos -> pos
+  | SourceCursor _ _ _ pos -> pos
 
 export fn position_index(pos: SourcePos) -> Int =
   match pos with
@@ -61,18 +66,82 @@ export fn position_column(pos: SourcePos) -> Int =
 
 fn cursor_source(cursor: SourceCursor) -> String =
   match cursor with
-  | SourceCursor raw _ _ -> raw
+  | SourceCursor raw _ _ _ -> raw
 
-# cursor_byte_offset: the SourceCursor's Int field is now a BYTE offset into the
-# raw source string.  SourcePos.index still tracks the codepoint index for
-# diagnostics (line/column info) — these two indices are intentionally separate.
+fn cursor_bytes(cursor: SourceCursor) -> Bytes =
+  match cursor with
+  | SourceCursor _ bytes _ _ -> bytes
+
+# cursor_byte_offset: the current BYTE offset into the raw source.  SourcePos.index
+# still tracks the codepoint index for diagnostics — these two are intentionally
+# separate.
 export fn cursor_byte_offset(cursor: SourceCursor) -> Int =
   match cursor with
-  | SourceCursor _ byte_offset _ -> byte_offset
+  | SourceCursor _ _ byte_offset _ -> byte_offset
 
-# peek_char: O(1) — reads one UTF-8 codepoint from the byte position.
-export fn peek_char(cursor: SourceCursor) -> Maybe Char =
-  str_char_at_byte(cursor_source(cursor), cursor_byte_offset(cursor))
+# ── Safe UTF-8 decode over Bytes ─────────────────────────────────────────────
+# Every byte read goes through bytes_get, which is bounds-checked (Nothing past
+# the end), so no offset — however large or fabricated — can read out of bounds.
+
+fn is_cont(byte: Int) -> Bool =
+  byte >= 128 && byte < 192
+
+# decode_char_at: total UTF-8 decode at a byte offset.  Returns the codepoint as
+# a Char plus the next byte offset, or Nothing at end-of-input, out-of-range,
+# truncated, or invalid input.  Codepoint assembly is plain arithmetic (no
+# bitwise ops needed): the low bits of a lead byte are (byte - range_base), and
+# each continuation contributes 6 bits == one base-64 digit.
+export fn decode_char_at(b: Bytes, i: Int) -> Maybe (Char, Int) =
+  match bytes_get(b, i) with
+  | Nothing -> Nothing
+  | Just b0 ->
+      if b0 < 128 then Just((char_from_codepoint(b0), i + 1))
+      else if b0 < 192 then Nothing
+      else if b0 < 224 then decode2(b, i, b0)
+      else if b0 < 240 then decode3(b, i, b0)
+      else if b0 < 248 then decode4(b, i, b0)
+      else Nothing
+
+fn decode2(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
+  match bytes_get(b, i + 1) with
+  | Nothing -> Nothing
+  | Just b1 ->
+      if is_cont(b1) then
+        Just((char_from_codepoint((b0 - 192) * 64 + (b1 - 128)), i + 2))
+      else Nothing
+
+fn decode3(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
+  match bytes_get(b, i + 1) with
+  | Nothing -> Nothing
+  | Just b1 ->
+      match bytes_get(b, i + 2) with
+      | Nothing -> Nothing
+      | Just b2 ->
+          if is_cont(b1) && is_cont(b2) then
+            Just((char_from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)), i + 3))
+          else Nothing
+
+fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
+  match bytes_get(b, i + 1) with
+  | Nothing -> Nothing
+  | Just b1 ->
+      match bytes_get(b, i + 2) with
+      | Nothing -> Nothing
+      | Just b2 ->
+          match bytes_get(b, i + 3) with
+          | Nothing -> Nothing
+          | Just b3 ->
+              if is_cont(b1) && is_cont(b2) && is_cont(b3) then
+                Just((char_from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)), i + 4))
+              else Nothing
+
+# ── Cursor scanning ──────────────────────────────────────────────────────────
+
+# peek: the codepoint at the cursor, or Nothing at end. O(1).
+export fn peek(cursor: SourceCursor) -> Maybe Char =
+  match decode_char_at(cursor_bytes(cursor), cursor_byte_offset(cursor)) with
+  | Nothing -> Nothing
+  | Just (ch, _) -> Just(ch)
 
 fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
   match pos with
@@ -82,26 +151,42 @@ fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
       else
         SourcePos(index + 1, line, column + 1)
 
-# advance_char: O(1) — advances by the UTF-8 character width at the current byte offset.
-export fn advance_char(cursor: SourceCursor) -> SourceCursor =
+# next: consume one codepoint — returns the char and the advanced cursor, or
+# Nothing at end.  Total: end-of-input is a value the caller must handle, so a
+# scan can't silently spin past the end the way a cursor->cursor advance could.
+export fn next(cursor: SourceCursor) -> Maybe (Char, SourceCursor) =
   match cursor with
-  | SourceCursor raw byte_offset pos ->
-      match str_char_at_byte(raw, byte_offset) with
-      | Nothing -> cursor
-      | Just ch ->
-          SourceCursor(raw, byte_offset + str_char_width_at_byte(raw, byte_offset), advance_position(pos, ch))
+  | SourceCursor raw bytes byte_offset pos ->
+      match decode_char_at(bytes, byte_offset) with
+      | Nothing -> Nothing
+      | Just (ch, next_off) ->
+          Just((ch, SourceCursor(raw, bytes, next_off, advance_position(pos, ch))))
 
+# take_while: advance past every codepoint satisfying pred; returns the advanced
+# cursor.  Text extraction is slice-based and the caller's job (record the start
+# cursor, then slice between byte offsets) — O(run), no per-char concatenation.
+export fn take_while(cursor: SourceCursor, pred: Char -> Bool) -> SourceCursor =
+  match next(cursor) with
+  | Nothing -> cursor
+  | Just (ch, c2) -> if pred(ch) then take_while(c2, pred) else cursor
+
+# advance_one: advance past one codepoint (no-op at end).  Internal helper for
+# match_string's character-by-character walk over a known-present prefix.
+fn advance_one(cursor: SourceCursor) -> SourceCursor =
+  match next(cursor) with
+  | Nothing -> cursor
+  | Just (_, c2) -> c2
 
 fn advance_expected(cursor: SourceCursor, expected: String, index: Int, total: Int) -> SourceCursor =
   if index >= total then
     cursor
   else
     match string.char_at(expected, index) with
-    | Just _ -> advance_expected(advance_char(cursor), expected, index + 1, total)
+    | Just _ -> advance_expected(advance_one(cursor), expected, index + 1, total)
     | Nothing -> cursor
 
-# match_string: O(|expected|) — uses str_starts_with_at_byte to avoid the
-# old O(N) remaining_text allocation that caused O(N^2) behaviour in the lexer.
+# match_string: O(|expected|) — uses the safe, bounds-checked str_starts_with_at_byte
+# to avoid the old O(N) remaining_text allocation that caused O(N^2) lexing.
 export fn match_string(expected: String, cursor: SourceCursor) -> Maybe SourceCursor =
   if str_starts_with_at_byte(cursor_source(cursor), cursor_byte_offset(cursor), expected) then
     Just(advance_expected(cursor, expected, 0, string.length(expected)))

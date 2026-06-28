@@ -104,7 +104,21 @@ with F-NET-4 in the networking work) and `proc_run` stdout/stderr, stdin
   bytes) before advancing/`memcpy`. Affects 3580-3598, 3706/3713, 3887-3895,
   3911-3919, 3991-3999, 4155-4156. (Or: validate UTF-8 in `read_file`.)
 
-### F3 — MEDIUM: `str_char_at_byte` family has no upper bound on `byte_pos`
+### F3 — MEDIUM [FIXED]: `str_char_at_byte` family has no upper bound on `byte_pos`
+
+Fixed by a full string-scanning redesign rather than a bound (the obvious
+`strlen` guard reintroduces O(n²) lexing). The unsafe `str_char_at_byte` /
+`str_char_width_at_byte` (+ unboxed variant) are **removed** from the prelude
+and runtime, replaced by a safe, total `decode_char_at(Bytes, Int) -> Maybe
+(Char, Int)` in `stdlib.compiler.source` that scans over the bounds-checked
+`bytes_get` (no offset can read OOB). The cursor now holds `Bytes` and exposes
+total `peek`/`next` (replacing the partial `advance_char`); `lexer`, `bundler`,
+and `iface_codec` are migrated. One new builtin `char_from_codepoint(Int) ->
+Char` (the missing total Char constructor; ASCII fast-path keeps the lexer
+0-alloc/char). Cost: ~7% slower whole-compiler self-compile (per-char `Maybe`
+boxing), negligible for normal programs. Tests: `tests/stdlib/compiler/
+test_source_decode.spr`. Seed refreshed via the 2-step bridge (the old seed
+depended on the removed builtins).
 
 - `str_char_at_byte` (`:3984`), `str_char_width_at_byte` (`:4009`),
   `str_char_at_byte_unboxed` (`:3905`) check only `byte_pos >= 0`, then read

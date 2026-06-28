@@ -1,0 +1,50 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.source as source
+
+# decode_char_at(bytes, i) -> Maybe (Char, Int): total UTF-8 decode over Bytes.
+# Returns the codepoint as a Char plus the next byte offset, or Nothing at end,
+# out-of-range, truncated, or invalid input. Safe by construction: every read is
+# a bounds-checked bytes_get, so no offset can read out of bounds.
+
+fn dchar(b: Bytes, i: Int) -> String =
+  match source.decode_char_at(b, i) with
+  | Nothing -> "none"
+  | Just (ch, _) -> char_to_string(ch)
+
+fn dnext(b: Bytes, i: Int) -> Int =
+  match source.decode_char_at(b, i) with
+  | Nothing -> -1
+  | Just (_, next) -> next
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ASCII: one byte, advances by 1
+    assert_eq(state, "ascii char @0", dchar(bytes_from_utf8("abc"), 0), "a")
+    assert_eq(state, "ascii next @0", dnext(bytes_from_utf8("abc"), 0), 1)
+    assert_eq(state, "ascii char @1", dchar(bytes_from_utf8("abc"), 1), "b")
+    assert_eq(state, "ascii next @2", dnext(bytes_from_utf8("abc"), 2), 3)
+
+    # Two-byte codepoint (U+00E9 'é' = 0xC3 0xA9): advances by 2
+    assert_eq(state, "2-byte char", dchar(bytes_from_utf8("é"), 0), "é")
+    assert_eq(state, "2-byte next", dnext(bytes_from_utf8("é"), 0), 2)
+
+    # Three-byte codepoint (U+20AC '€'): advances by 3
+    assert_eq(state, "3-byte char", dchar(bytes_from_utf8("€"), 0), "€")
+    assert_eq(state, "3-byte next", dnext(bytes_from_utf8("€"), 0), 3)
+
+    # End of input -> Nothing
+    assert_eq(state, "end -> none", dchar(bytes_from_utf8("ab"), 2), "none")
+
+    # Out of range -> Nothing (the F3 OOB case: cannot read past the buffer)
+    assert_eq(state, "oob -> none", dchar(bytes_from_utf8("ab"), 99), "none")
+    assert_eq(state, "negative -> none", dchar(bytes_from_utf8("ab"), 0 - 1), "none")
+
+    # Truncated multibyte: lead byte of 'é' with the continuation byte missing
+    assert_eq(state, "truncated -> none", dchar(bytes_slice(bytes_from_utf8("é"), 0, 1), 0), "none")
+
+    # Lone continuation byte as lead -> invalid -> Nothing
+    assert_eq(state, "lone continuation -> none", dchar(bytes_slice(bytes_from_utf8("é"), 1, 1), 0), "none")
+
+    summary(state)

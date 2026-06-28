@@ -195,104 +195,105 @@ fn dict_merge_keys(acc: Dict String, keys: List String, src: Dict String) -> Dic
 # Source scanning: module name and export names from raw source text
 # ---------------------------------------------------------------------------
 
-fn find_newline(s: String, b: Int) -> Int =
+fn find_newline(s: String, bytes: Bytes, b: Int) -> Int =
   if b >= str_byte_len(s) then str_byte_len(s)
   else
-    match str_char_at_byte(s, b) with
+    match source.decode_char_at(bytes, b) with
     | Nothing -> b + 1
-    | Just ch -> if ch == '\n' then b else find_newline(s, b + str_char_width_at_byte(s, b))
+    | Just (ch, next_b) -> if ch == '\n' then b else find_newline(s, bytes, next_b)
 
-fn skip_spaces_in(s: String, b: Int) -> Int =
+fn skip_spaces_in(s: String, bytes: Bytes, b: Int) -> Int =
   if b >= str_byte_len(s) then b
   else
-    match str_char_at_byte(s, b) with
+    match source.decode_char_at(bytes, b) with
     | Nothing -> b
-    | Just ch -> if ch == ' ' || ch == '\t' then skip_spaces_in(s, b + 1) else b
+    | Just (ch, _) -> if ch == ' ' || ch == '\t' then skip_spaces_in(s, bytes, b + 1) else b
 
 fn is_ident_char(ch: Char) -> Bool =
   (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
   (ch >= '0' && ch <= '9') || ch == '_'
 
-fn read_ident_chars(s: String, b: Int, acc: String) -> (String, Int) =
+fn read_ident_chars(s: String, bytes: Bytes, b: Int, acc: String) -> (String, Int) =
   if b >= str_byte_len(s) then (acc, b)
   else
-    match str_char_at_byte(s, b) with
+    match source.decode_char_at(bytes, b) with
     | Nothing -> (acc, b)
-    | Just ch ->
-        if is_ident_char(ch) then read_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
+    | Just (ch, _) ->
+        if is_ident_char(ch) then read_ident_chars(s, bytes, b + 1, str_concat(acc, char_to_string(ch)))
         else (acc, b)
 
-fn read_ident_at(s: String, b: Int) -> (String, Int) =
-  read_ident_chars(s, skip_spaces_in(s, b), "")
+fn read_ident_at(s: String, bytes: Bytes, b: Int) -> (String, Int) =
+  read_ident_chars(s, bytes, skip_spaces_in(s, bytes, b), "")
 
 # Read a dotted identifier like "stdlib.compiler.ast".
-fn read_dotted_ident_chars(s: String, b: Int, acc: String) -> (String, Int) =
+fn read_dotted_ident_chars(s: String, bytes: Bytes, b: Int, acc: String) -> (String, Int) =
   if b >= str_byte_len(s) then (acc, b)
   else
-    match str_char_at_byte(s, b) with
+    match source.decode_char_at(bytes, b) with
     | Nothing -> (acc, b)
-    | Just ch ->
-        if is_ident_char(ch) then read_dotted_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
+    | Just (ch, _) ->
+        if is_ident_char(ch) then read_dotted_ident_chars(s, bytes, b + 1, str_concat(acc, char_to_string(ch)))
         else if ch == '.' then
-          match str_char_at_byte(s, b + 1) with
+          match source.decode_char_at(bytes, b + 1) with
           | Nothing -> (acc, b)
-          | Just next ->
+          | Just (next, _) ->
               if is_ident_char(next) then
-                read_dotted_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
+                read_dotted_ident_chars(s, bytes, b + 1, str_concat(acc, char_to_string(ch)))
               else (acc, b)
         else (acc, b)
 
-fn read_dotted_ident_at(s: String, b: Int) -> (String, Int) =
-  read_dotted_ident_chars(s, skip_spaces_in(s, b), "")
+fn read_dotted_ident_at(s: String, bytes: Bytes, b: Int) -> (String, Int) =
+  read_dotted_ident_chars(s, bytes, skip_spaces_in(s, bytes, b), "")
 
-fn has_ctor_export(s: String, b: Int) -> Bool =
-  str_starts_with_at_byte(s, skip_spaces_in(s, b), "(..)")
+fn has_ctor_export(s: String, bytes: Bytes, b: Int) -> Bool =
+  str_starts_with_at_byte(s, skip_spaces_in(s, bytes, b), "(..)")
 
 # Returns (module_name, exported_names, ctor_export_type_names).
 # Scans all lines for `module`, `export fn`, `export type`, `export let`, `export class`.
 export fn scan_source_info(src: String) -> (String, List String, List String) =
-  scan_lines(src, 0, "", Nil, Nil)
+  scan_lines(src, bytes, 0, "", Nil, Nil)
+  where bytes = bytes_from_utf8(src)
 
-fn scan_lines(src: String, i: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
+fn scan_lines(src: String, bytes: Bytes, i: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
   if i >= str_byte_len(src) then (mod_name, list_reverse(exported), list_reverse(ctor_types))
   else
-    match process_line(src, i, nl, mod_name, exported, ctor_types) with
+    match process_line(src, bytes, i, nl, mod_name, exported, ctor_types) with
     | (new_mod, new_exp, new_ctor) ->
-        scan_lines(src, nl + 1, new_mod, new_exp, new_ctor)
-  where nl = find_newline(src, i)
+        scan_lines(src, bytes, nl + 1, new_mod, new_exp, new_ctor)
+  where nl = find_newline(src, bytes, i)
 
-fn process_line(src: String, i: Int, nl: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
+fn process_line(src: String, bytes: Bytes, i: Int, nl: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
   if str_starts_with_at_byte(src, i, "module ") then
-    match read_dotted_ident_at(src, i + 7) with
+    match read_dotted_ident_at(src, bytes, i + 7) with
     | (name, _) -> (name, exported, ctor_types)
   else if str_starts_with_at_byte(src, i, "export type alias ") then
-    match read_ident_at(src, i + 18) with
+    match read_ident_at(src, bytes, i + 18) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
   else if str_starts_with_at_byte(src, i, "export type ") then
-    match read_ident_at(src, i + 12) with
+    match read_ident_at(src, bytes, i + 12) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, i2) ->
-        if has_ctor_export(src, i2) then
+        if has_ctor_export(src, bytes, i2) then
           (mod_name, Cons(name, exported), Cons(name, ctor_types))
         else
           (mod_name, Cons(name, exported), ctor_types)
   else if str_starts_with_at_byte(src, i, "export fn ") then
-    match read_ident_at(src, i + 10) with
+    match read_ident_at(src, bytes, i + 10) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
   else if str_starts_with_at_byte(src, i, "export let ") then
-    match read_ident_at(src, i + 11) with
+    match read_ident_at(src, bytes, i + 11) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
   else if str_starts_with_at_byte(src, i, "export class ") then
-    match read_ident_at(src, i + 13) with
+    match read_ident_at(src, bytes, i + 13) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
   # export wrap Foo = T — exports the type AND its synthetic constructor
   # (which shares the type's name), so add to both exported and ctor_types.
   else if str_starts_with_at_byte(src, i, "export wrap ") then
-    match read_ident_at(src, i + 12) with
+    match read_ident_at(src, bytes, i + 12) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), Cons(name, ctor_types))
   else
@@ -308,19 +309,22 @@ fn is_header_line_b(s: String, pos: Int) -> Bool =
   str_starts_with_at_byte(s, pos, "#") ||
   str_starts_with_at_byte(s, pos, "\n")
 
-fn next_line_b(s: String, pos: Int) -> Int =
-  find_newline(s, pos) + 1
+fn next_line_b(s: String, bytes: Bytes, pos: Int) -> Int =
+  find_newline(s, bytes, pos) + 1
 
-fn strip_headers_b(s: String, pos: Int) -> String =
+fn strip_headers_b(s: String, bytes: Bytes, pos: Int) -> String =
   if pos >= str_byte_len(s) then ""
-  else if is_header_line_b(s, pos) then strip_headers_b(s, next_line_b(s, pos))
+  else if is_header_line_b(s, pos) then strip_headers_b(s, bytes, next_line_b(s, bytes, pos))
   else str_slice(s, cp, str_len(s) - cp)
-  where cp = byte_pos_to_cp_acc(s, 0, 0, pos)
+  where cp = byte_pos_to_cp_acc(s, bytes, 0, 0, pos)
 
 # Count codepoints in s up to byte offset limit (for converting byte→codepoint index).
-fn byte_pos_to_cp_acc(s: String, b: Int, cp: Int, limit: Int) -> Int =
+fn byte_pos_to_cp_acc(s: String, bytes: Bytes, b: Int, cp: Int, limit: Int) -> Int =
   if b >= limit then cp
-  else byte_pos_to_cp_acc(s, b + str_char_width_at_byte(s, b), cp + 1, limit)
+  else
+    match source.decode_char_at(bytes, b) with
+    | Nothing -> byte_pos_to_cp_acc(s, bytes, b + 1, cp + 1, limit)
+    | Just (_, next_b) -> byte_pos_to_cp_acc(s, bytes, next_b, cp + 1, limit)
 
 # ---------------------------------------------------------------------------
 # Topological DFS collection (iterative, using an explicit work stack)
@@ -450,7 +454,7 @@ fn process_wi_finalize(
   do
     match scan_source_info(src) with
     | (mod_name, exported_names, ctor_type_names) ->
-        match lexer.tokenize(strip_headers_b(src, 0)) with
+        match lexer.tokenize(strip_headers_b(src, bytes_from_utf8(src), 0)) with
         | Err e ->
             match e with
             | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
@@ -506,7 +510,7 @@ fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, Li
             | Ok prelude_src ->
                 match scan_source_info(prelude_src) with
                   | (_, prelude_exported, prelude_ctor_types) ->
-                      match lexer.tokenize(strip_headers_b(prelude_src, 0)) with
+                      match lexer.tokenize(strip_headers_b(prelude_src, bytes_from_utf8(prelude_src), 0)) with
                       | Err e ->
                           match e with
                           | token.TokenizeError msg _ -> (Just(str_concat("Lex error in prelude: ", msg)), Nil)

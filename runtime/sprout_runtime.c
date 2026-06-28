@@ -3920,25 +3920,6 @@ SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   return (SproutUnboxed2){ cached_tag_nothing(), 0 };
 }
 
-SproutUnboxed2 str_char_at_byte_unboxed(long long s_val, long long byte_pos) {
-  const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_char_at_byte_unboxed: null input");
-  if (byte_pos < 0) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  size_t pos = (size_t)byte_pos;
-  if (s[pos] == '\0') return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
-  if (width == 1) {
-    if (!g_ascii_char_strs_init) init_ascii_char_strs();
-    return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)g_ascii_char_strs[(unsigned char)s[pos]] };
-  }
-  char* tmp = (char*)malloc(width + 1);
-  if (!tmp) tcp_fail("str_char_at_byte_unboxed: out of memory");
-  memcpy(tmp, s + pos, width);
-  tmp[width] = '\0';
-  register_cstr(tmp);
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)tmp };
-}
-
 SproutUnboxed2 regex_find_range_unboxed(const char* pattern, const char* text) {
   if (pattern == NULL || text == NULL) tcp_fail("regex_find_range_unboxed: null input");
   regex_t compiled;
@@ -3994,16 +3975,11 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
 
 /* ── end CPR unboxed extern variants ────────────────────────────────────────*/
 
-/* str_char_at_byte: O(1) access to the codepoint at a given BYTE position.
- * Avoids the O(index) codepoint scan of str_char_at.
- * Bounds check: null-byte sentinel instead of strlen — O(1) vs O(file_size).
- * Callers (lexer cursor) only advance by str_char_width_at_byte, so byte_pos
- * reaches exactly strlen(s) (the '\0') but never further. */
+/* TEMP BRIDGE (remove after seed refresh): old seed still calls these. */
 long long str_char_at_byte(long long s_val, long long byte_pos) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_at_byte: null input");
-  if (byte_pos < 0)
-    return sprout_make0(cached_tag_nothing());
+  if (byte_pos < 0) return sprout_make0(cached_tag_nothing());
   size_t pos = (size_t)byte_pos;
   if (s[pos] == '\0') return sprout_make0(cached_tag_nothing());
   size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
@@ -4023,7 +3999,6 @@ long long str_char_at_byte(long long s_val, long long byte_pos) {
   return sprout_make1(cached_tag_just(), (long long)(uintptr_t)char_str);
 }
 
-/* str_char_width_at_byte: UTF-8 byte width of the char at byte_pos; 0 at end. O(1). */
 long long str_char_width_at_byte(long long s_val, long long byte_pos) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_width_at_byte: null input");
@@ -4233,6 +4208,20 @@ long long char_to_str(long long codepoint) {
   memcpy(out, buf, len + 1);
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
+}
+
+/* char_from_codepoint: total Char constructor from a Unicode scalar value.
+ * Same UTF-8 encoding as char_to_str, but typed Char at the Sprout level
+ * (Char and String share the heap-string representation). ASCII fast path
+ * returns the shared one-byte cache, so scanning loops stay 0-alloc per ASCII
+ * char. Codepoints come from decoded valid UTF-8, so no range check is needed. */
+long long char_from_codepoint(long long codepoint) {
+  unsigned int cp = (unsigned int)codepoint;
+  if (cp <= 0x7f) {
+    if (!g_ascii_char_strs_init) init_ascii_char_strs();
+    return (long long)(uintptr_t)g_ascii_char_strs[cp];
+  }
+  return char_to_str(codepoint);
 }
 
 static void buf_init(ByteBuf* buf) {

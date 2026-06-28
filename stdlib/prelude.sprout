@@ -956,6 +956,7 @@ extern fn parse_int(s: String) -> Int
 extern fn int_to_string(n: Int) -> String
 extern fn char_to_string(c: Char) -> String
 extern fn char_to_str(codepoint: Int) -> String
+extern fn char_from_codepoint(cp: Int) -> Char
 
 # Integer ranges
 extern fn int_range(start: Int, end: Int) -> IntRange
@@ -980,8 +981,6 @@ extern fn str_find(haystack: String, needle: String) -> Int
 extern fn str_starts_with(s: String, prefix: String) -> Bool
 extern fn str_compare(a: String, b: String) -> Int
 extern fn str_split_lines(s: String) -> List String
-extern fn str_char_at_byte(s: String, byte: Int) -> Maybe Char
-extern fn str_char_width_at_byte(s: String, byte: Int) -> Int
 extern fn str_byte_len(s: String) -> Int
 extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
 extern fn split_words(s: String) -> List String
