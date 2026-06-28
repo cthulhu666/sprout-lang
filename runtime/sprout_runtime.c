@@ -3975,38 +3975,8 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
 
 /* ── end CPR unboxed extern variants ────────────────────────────────────────*/
 
-/* TEMP BRIDGE (remove after seed refresh): old seed still calls these. */
-long long str_char_at_byte(long long s_val, long long byte_pos) {
-  const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_char_at_byte: null input");
-  if (byte_pos < 0) return sprout_make0(cached_tag_nothing());
-  size_t pos = (size_t)byte_pos;
-  if (s[pos] == '\0') return sprout_make0(cached_tag_nothing());
-  size_t width = sprout_utf8_char_width((unsigned char)s[pos]);
-  const char* char_str;
-  if (width == 1) {
-    if (!g_ascii_char_strs_init) init_ascii_char_strs();
-    char_str = g_ascii_char_strs[(unsigned char)s[pos]];
-  } else {
-    char* tmp = (char*)malloc(width + 1);
-    if (!tmp) tcp_fail("str_char_at_byte: out of memory");
-    memcpy(tmp, s + pos, width);
-    tmp[width] = '\0';
-    register_cstr(tmp);
-    SPROUT_HANDLE(h_char, (long long)(uintptr_t)tmp);
-    return sprout_make1(cached_tag_just(), sprout_handle_get(h_char));
-  }
-  return sprout_make1(cached_tag_just(), (long long)(uintptr_t)char_str);
-}
-
-long long str_char_width_at_byte(long long s_val, long long byte_pos) {
-  const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_char_width_at_byte: null input");
-  if (byte_pos < 0) return 0;
-  size_t pos = (size_t)byte_pos;
-  if (s[pos] == '\0') return 0;
-  return (long long)sprout_utf8_char_width((unsigned char)s[pos]);
-}
+/* str_char_at_byte / str_char_width_at_byte removed: replaced by the safe,
+ * total decode_char_at over Bytes in stdlib.compiler.source (review F3). */
 
 /* str_byte_len: byte length of the string (strlen). */
 long long str_byte_len(long long s_val) {
