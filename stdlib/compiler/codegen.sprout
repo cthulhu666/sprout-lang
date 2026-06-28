@@ -840,15 +840,16 @@ fn sizeof_struct(struct_type: String, em: Emitter) -> String !{IO} =
 # ===========================================================================
 
 # Returns true for Sprout source-level types that are guaranteed to be pure
-# scalars and can never be GC-managed heap pointers.  Only whitelisted
-# TConst names — everything else (TVars, TApp, ADT names, Unit, …) may
-# resolve to a heap object and must be rooted conservatively.
+# scalars and can never be GC-managed heap pointers.  Only Int and Bool —
+# Char is heap (Char and String share the heap-string runtime layout, so a
+# Char must be rooted across allocations like a String).  Everything else
+# (TVars, TApp, ADT names, Unit, …) may resolve to a heap object and must be
+# rooted conservatively.
 fn type_is_non_heap_scalar(t: types.Type) -> Bool =
   match t with
   | types.TConst name ->
       type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool") ||
-      type_name_leaf_is(name, "Char")
+      type_name_leaf_is(name, "Bool")
   | _ -> false
 
 # NB: type_expr_is_non_heap_scalar has been hoisted to stdlib.compiler.type_kind

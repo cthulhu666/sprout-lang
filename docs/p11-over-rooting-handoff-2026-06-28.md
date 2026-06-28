@@ -85,6 +85,25 @@ diff FIRST — it tells you how much of the 2.76× is A vs B vs C before you bui
 
 ## Guardrails (read before touching ir_rooting)
 
+- **MANDATORY roots — do NOT "optimize" these away.** Two rooting facts are
+  correctness-load-bearing (found after a rebase onto master's UTF-8 lexer, both
+  fixed in commit on `fix/typed-codegen-tco`; regression: `tests/stdlib/test_ir_codegen_char_rooting.spr`):
+  1. **`Char` is heap.** Char and String share the heap-string runtime layout
+     (non-ASCII chars are freshly allocated). `type_kind`/`codegen`/`capture_kind`
+     classify Char as heap; a precision pass must NOT re-add it to the non-heap
+     scalar whitelist (would reintroduce a swept-multi-byte-char UAF). The proper
+     way to make Char a scalar is the representation change in
+     `docs/char-scalar-representation-followup.md`, not a rooting tweak.
+  2. **Phi operands are live-out of the predecessor they are chosen on**
+     (`rewrite_phi_in_set`, unconditional). A phi result consumed locally (e.g.
+     `phi … -> ret`, the join chain a TCO'd `take_while` ends with) is subtracted
+     from the successor's live_in, so a *conditional* propagation drops the
+     operand and leaves it unrooted across an earlier GC trigger (SourceCursor
+     UAF). This is also a (small) over-rooting source — it adds every phi operand
+     to its predecessor's live-out. Tightening it to "only when the phi result is
+     actually live" is legitimate precision work, but it must stay correct for
+     locally-consumed phis (live-out OR locally-used-after-the-phi), NOT revert to
+     the live_in-only guard.
 - **Under-rooting = use-after-free, not a verify error.** `opt --passes=verify` will
   NOT catch a dropped root. The oracle is `just test-stress` (SPROUT_GC_STRESS=1,
   collect on every alloc) — see `[[project_gc_stress_oracle]]`. Run it after every

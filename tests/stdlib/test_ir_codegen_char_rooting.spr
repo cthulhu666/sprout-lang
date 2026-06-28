@@ -1,0 +1,54 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.source as source
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+
+# Regression test for the typed-codegen Char under-rooting UAF.
+#
+# A Sprout `Char` IS a heap value (the runtime represents Char and String with
+# the same heap-string layout; non-ASCII chars are freshly allocated by
+# char_to_str).  The typed IR rooting pass previously classified Char as a
+# non-heap scalar, so a Char held live across an allocation (e.g. the boxed
+# `Maybe (Char, Int)` tuple in source.decode_char_at / source.next) was swept
+# by an intervening GC.  ASCII chars survived only because they are immortal
+# cached singletons; a multi-byte char like 'é' was collected and corrupted.
+#
+# These cases run in the test's OWN typed-compiled runtime, so under
+# `--use-ir-codegen` + SPROUT_GC_STRESS=1 (collect on every allocation) they
+# deterministically reproduce the UAF.  See project_gc_stress_oracle.
+
+# Decode the codepoint at byte offset `i`, returning its string rendering or a
+# marker.  The Char is held live across the boxed-tuple allocation inside
+# decode_char_at — the exact rooting hazard under test.
+fn decoded_str(b: Bytes, i: Int) -> String =
+  match source.decode_char_at(b, i) with
+  | Nothing -> "<none>"
+  | Just (ch, _) -> char_to_string(ch)
+
+fn tok_count(raw: String) -> Int =
+  match lexer.tokenize(raw) with
+  | Err _ -> -1
+  | Ok toks -> vec_length(toks)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Multi-byte Char round-trips through decode_char_at (the é case) ---
+    # "Aé" — 'A' is ASCII (offset 0), 'é' is 2-byte UTF-8 (offset 1).
+    assert_eq(state, "char-root: ASCII 'A' decodes",
+              decoded_str(bytes_from_utf8("Aé"), 0), "A")
+    assert_eq(state, "char-root: 2-byte 'é' decodes (UAF if Char unrooted)",
+              decoded_str(bytes_from_utf8("Aé"), 1), "é")
+    assert_eq(state, "char-root: 3-byte '─' decodes",
+              decoded_str(bytes_from_utf8("─"), 0), "─")
+
+    # --- Lexing survives box-drawing chars + multi-char operators ---
+    # The box-drawing chars in the comment header are 3-byte heap Chars; a
+    # collected one corrupts the heap so a later token read aborts.
+    assert_true(state, "lex-root: && amid box-drawing comment tokenizes",
+                tok_count("# ─── header ───\nfn f(a: Bool, b: Bool) -> Bool = a && b\n") > 0)
+    assert_true(state, "lex-root: bare && tokenizes",
+                tok_count("&&") > 0)
+
+    summary(state)

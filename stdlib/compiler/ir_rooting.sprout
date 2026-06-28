@@ -355,8 +355,8 @@ fn block_use_def_loop(ops: List sprout_ir.IROp, uses: Set, defs: Set) -> (Set, S
 fn block_use_def(b: sprout_ir.IRBlock) -> (Set, Set) =
   block_use_def_loop(block_ops(b), set_empty(), set_empty())
 
-# For each IRPhi in S, replace its def-name in s_live_in with the operand
-# chosen on the B→S edge.  Names that are not phi-defs pass through unchanged.
+# For each IRPhi in S, drop its def-name from the successor's live_in and add
+# the operand chosen on the B→S edge.  Names that are not phi-defs pass through.
 fn add_phi_operand_for_pred(pred_label: String,
                             pairs: List (String, String),
                             acc: Set) -> Set =
@@ -368,12 +368,18 @@ fn add_phi_operand_for_pred(pred_label: String,
           if lbl == pred_label then set_insert(v, acc)
           else add_phi_operand_for_pred(pred_label, rest, acc)
 
+# A phi operand is live-out of the predecessor it is chosen on — the phi reads
+# it on that edge — so it is added UNCONDITIONALLY here.  Earlier this only fired
+# when the phi RESULT was in the successor's live_in, but op_def(IRPhi)=Just(r)
+# subtracts the result from live_in (it is a def), so a phi result consumed
+# locally (e.g. `phi ... -> ret`, the join chain a TCO'd `take_while` ends with)
+# left its operand off the predecessor's live-out — unrooted across an earlier
+# GC trigger in that predecessor and swept (the SourceCursor UAF).  Removing the
+# phi def is still correct: a phi result is never itself live-out of a pred.
 fn rewrite_phi_in_set(pred_label: String, r: String,
                       pairs: List (String, String),
                       acc: Set) -> Set =
-  if set_member(r, acc)
-  then add_phi_operand_for_pred(pred_label, pairs, set_remove(r, acc))
-  else acc
+  add_phi_operand_for_pred(pred_label, pairs, set_remove(r, acc))
 
 fn s_live_in_phi_rewrite(pred_label: String,
                          ops: List sprout_ir.IROp,

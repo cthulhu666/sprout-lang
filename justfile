@@ -1039,7 +1039,7 @@ test-stress: bootstrap-from-seed
   # across the call; @ref_new and other builtins may collect before consuming an
   # operand).  All three were the same class — they presented differently (tag-
   # read abort vs EXC_BAD_ACCESS) only by how the swept address was reused.
-  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr"
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to

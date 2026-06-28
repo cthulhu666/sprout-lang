@@ -266,16 +266,17 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
         dict_set(v, "%t$" ++ int_to_string(base_idx + i), acc))
 
 # Determine the IRLoadEnvSlot kind for a single captured variable:
-#   IRTScalar  — Int or Char (no GC root needed)
+#   IRTScalar  — Int (no GC root needed)
 #   IRTHeap    — everything else with a known type
 #   IRTUnknown — type lookup failed (conservative; ir_rooting treats as heap)
-# FIX R4#7 (kind=String); migrated to IRType in BACKLOG.md:367 follow-up.
+# Char is heap (Char and String share the heap-string runtime layout); a
+# captured Char must be rooted across allocations, so it is NOT scalar here.
 # O(n) where n = body size (scans body for the TVar occurrence).
 fn capture_kind(v: String, body: typed_ast.TypedExpr) -> sprout_ir.IRType =
   match find_capture_type(body, v) with
   | Nothing -> sprout_ir.IRTUnknown
   | Just t ->
-      if is_int_type(t) || is_char_type(t)
+      if is_int_type(t)
       then sprout_ir.IRTScalar
       else sprout_ir.IRTHeap
 
