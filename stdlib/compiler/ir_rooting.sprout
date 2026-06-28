@@ -447,17 +447,23 @@ fn op_live_before(op: sprout_ir.IROp, live_after_op: Set) -> Set =
             after_minus_def(op_def(op), live_after_op),
             op_uses(op))
 
-# live_after for the HEAD of `ops` given the block's live_out — by walking the
-# REST of ops backward, undoing each op.  O(N) per call → O(N²) per block.
-fn live_after_head(ops: List sprout_ir.IROp, block_live_out: Set) -> Set =
+# Per-op live_after for a whole block in ONE backward pass.  Returns, in op
+# order, the set live immediately AFTER each op.  O(block) total — replaces the
+# old per-op recompute that re-walked the suffix each time (O(block^2) per block
+# with a Set allocated at every step, the dominant codegen allocation churn).
+# `live_after(op_i) = live_before(op_{i+1})`, threaded backward from block_live_out.
+# Behaviour-identical to the former live_after_head(ops_suffix, block_live_out).
+fn block_live_afters_go(ops: List sprout_ir.IROp, block_live_out: Set) -> (List Set, Set) =
   match ops with
-  | Nil -> block_live_out
-  | Cons _ rest -> live_before_first(rest, block_live_out)
+  | Nil -> (Nil, block_live_out)
+  | Cons op rest ->
+      match block_live_afters_go(rest, block_live_out) with
+      | (rest_afters, after_op) ->
+          (Cons(after_op, rest_afters), op_live_before(op, after_op))
 
-fn live_before_first(ops: List sprout_ir.IROp, block_live_out: Set) -> Set =
-  match ops with
-  | Nil -> block_live_out
-  | Cons op rest -> op_live_before(op, live_before_first(rest, block_live_out))
+fn block_live_afters(ops: List sprout_ir.IROp, block_live_out: Set) -> List Set =
+  match block_live_afters_go(ops, block_live_out) with
+  | (afters, _) -> afters
 
 # ---------------------------------------------------------------------------
 # heap_origin propagation
@@ -668,8 +674,10 @@ fn update_scope(op: sprout_ir.IROp, heap_origin: Set,
           else ord
       | _ -> ord
 
+# `live_afters` is the precomputed per-op live_after list (parallel to `ops`),
+# from block_live_afters — so the per-op live set is read, not recomputed.
 fn rewrite_ops(ops: List sprout_ir.IROp,
-               block_live_out: Set,
+               live_afters: List Set,
                heap_origin: Set,
                in_scope_ord: List String,
                idx: Int,
@@ -678,12 +686,14 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
   match ops with
   | Nil -> (list_reverse(acc), idx)
   | Cons op rest ->
-      match maybe_wrap(op, live_after_head(ops, block_live_out),
-                       in_scope_ord, idx, prefix, acc) with
-      | (acc1, idx1) ->
-          rewrite_ops(rest, block_live_out, heap_origin,
-                      update_scope(op, heap_origin, in_scope_ord),
-                      idx1, prefix, acc1)
+      match live_afters with
+      | Nil -> (list_reverse(acc), idx)
+      | Cons live_after_op la_rest ->
+          match maybe_wrap(op, live_after_op, in_scope_ord, idx, prefix, acc) with
+          | (acc1, idx1) ->
+              rewrite_ops(rest, la_rest, heap_origin,
+                          update_scope(op, heap_origin, in_scope_ord),
+                          idx1, prefix, acc1)
 
 fn seed_in_scope_loop(names: List String, ord: List String) -> List String =
   match names with
@@ -708,7 +718,7 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
   match b with
   | sprout_ir.IRBlock lbl ops ->
       match rewrite_ops(ops,
-                        compute_live_out(b, all_blocks, live_in_map),
+                        block_live_afters(ops, compute_live_out(b, all_blocks, live_in_map)),
                         heap_origin,
                         seed_in_scope(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
                         idx, prefix, Nil) with

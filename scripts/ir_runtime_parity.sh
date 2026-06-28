@@ -111,8 +111,8 @@ process_file() {
   # Cleanup between files
   rm -f "$direct_ir" "$typed_ir" "$direct_bin" "$typed_bin" "$direct_out" "$typed_out"
 
-  # --- STEP 1: direct compile ---
-  "$COMPILER" --emit-ir stdlib "$src" >"$direct_ir" 2>/dev/null || true
+  # --- STEP 1: direct compile (escape hatch; --emit-ir now routes to typed) ---
+  "$COMPILER" --use-direct-codegen stdlib "$src" >"$direct_ir" 2>/dev/null || true
 
   if [[ ! -s "$direct_ir" ]] || grep -q "^ERROR:" "$direct_ir" 2>/dev/null; then
     n_skipped=$((n_skipped + 1))

@@ -303,13 +303,14 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, debug_mode_: Bool) ->
   | Nothing -> ()
   | Just path ->
       do
-        if phase == "ir" then ()
+        if phase == "ir" || phase == "ir-typed" then ()
         else print("=== " ++ path ++ " ===")
         if phase == "bundle" then run_file_bundle(path, stdlib_root)
         else if phase == "check" then run_file_check(path, stdlib_root)
         else if phase == "lower" then run_file_lower(path, stdlib_root)
         else if phase == "recheck" then run_file_recheck(path, stdlib_root)
         else if phase == "ir" then run_file_ir(path, stdlib_root, debug_mode_)
+        else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root)
         else if phase == "scan-info" then run_file_scan_info(path, stdlib_root)
         else if phase == "dump-qualify" then run_file_dump_qualify(path, stdlib_root)
         else run_file(path, stdlib_root)
@@ -320,13 +321,21 @@ fn main() -> Unit !{IO} =
     args <- argv_all()
     match args with
     | ["--emit-ir", "--debug", stdlib_root | _] ->
-        run_batch(stdlib_root, 3, "ir", true)
+        run_batch(stdlib_root, 3, "ir-typed", false)
     | ["--emit-ir", "--debug" | _] ->
         print("ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
     | ["--emit-ir", stdlib_root | _] ->
-        run_batch(stdlib_root, 2, "ir", false)
+        run_batch(stdlib_root, 2, "ir-typed", false)
     | ["--emit-ir" | _] ->
         print("ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> <file>...")
+    | ["--use-direct-codegen", "--debug", stdlib_root | _] ->
+        run_batch(stdlib_root, 3, "ir", true)
+    | ["--use-direct-codegen", "--debug" | _] ->
+        print("ERROR: usage: compile-driver --use-direct-codegen --debug <stdlib-root> <file>...")
+    | ["--use-direct-codegen", stdlib_root | _] ->
+        run_batch(stdlib_root, 2, "ir", false)
+    | ["--use-direct-codegen" | _] ->
+        print("ERROR: usage: compile-driver --use-direct-codegen [--debug] <stdlib-root> <file>...")
     | ["--emit-ir-one", fn_name, stdlib_root, path | _] ->
         run_file_ir_one(fn_name, path, stdlib_root)
     | ["--emit-ir-one", _ | _] ->
@@ -354,4 +363,4 @@ fn main() -> Unit !{IO} =
     | [stdlib_root | _] ->
         run_batch(stdlib_root, 1, "", false)
     | _ ->
-        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --emit-ir-one <fn_name> | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|ir|scan-info|dump-qualify | --emit-ir [--debug] | --use-direct-codegen [--debug] | --emit-ir-one <fn_name> | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")

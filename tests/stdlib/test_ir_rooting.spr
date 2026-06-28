@@ -321,9 +321,42 @@ fn test12_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Test 5: a LONG single block — five heap values built up front, then folded
+# by a chain of concats so each stays live across many successive triggers.
+# Exercises the per-op live_after computation over a long op sequence (the
+# path optimized from O(block^2) to O(block) by the single-backward-pass
+# precompute). The expected push count is the characterized current behavior;
+# the optimization must leave it byte-identical.
+fn mkval(name: String, raw1: String, raw2: String, rest: List sprout_ir.IROp) -> List sprout_ir.IROp =
+  Cons(sprout_ir.IRStrConst(name ++ "1", name ++ "1r", raw1),
+  Cons(sprout_ir.IRStrConst(name ++ "2", name ++ "2r", raw2),
+  Cons(sprout_ir.IRStrConcat(name, name ++ "1", name ++ "2"), rest)))
+
+fn test13_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("long_block", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        mkval("%v0", "a0", "b0",
+        mkval("%v1", "a1", "b1",
+        mkval("%v2", "a2", "b2",
+        mkval("%v3", "a3", "b3",
+        mkval("%v4", "a4", "b4",
+        Cons(sprout_ir.IRStrConcat("%s1", "%v0", "%v1"),
+        Cons(sprout_ir.IRStrConcat("%s2", "%s1", "%v2"),
+        Cons(sprout_ir.IRStrConcat("%s3", "%s2", "%v3"),
+        Cons(sprout_ir.IRStrConcat("%r", "%s3", "%v4"),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))))))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+
+    # --- Test 13: long-block live_after characterization (push count locked).
+    assert_eq(state, "T13: long block push_i64_root count",
+              count(lower(test13_program()), "call i64 @sprout_gc_push_i64_root"), 16)
 
     # --- Test 1: no rooting emitted.  Search for the call site, not the
     # declare line (the header always declares the runtime functions).

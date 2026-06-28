@@ -3324,8 +3324,27 @@ fn emit_global_root_registration(name: String, ll: String, em: Emitter) -> Unit 
 fn compiler_intrinsic_sigs_dict() -> Dict FnSig =
   dict_from_list(compiler_intrinsic_sigs())
 
+# Split into chunks so no single function holds the whole signature table live at
+# once: a list literal [e1..eN] keeps every element live until the spine is built,
+# so the GC-rooting pass roots all prior elements across each allocation — O(N^2)
+# roots and transient allocation that spiked typed-codegen memory into the GBs for
+# this one function.  Each chunk keeps only ~9 elements live; list_append joins them.
+# Monomorphic append for the signature table — codegen.sprout's local list_append
+# (line ~1520) is List String only, so the polymorphic prelude one is shadowed here.
+fn append_sigs(xs: List (String, FnSig), ys: List (String, FnSig)) -> List (String, FnSig) =
+  match xs with
+  | Nil -> ys
+  | Cons h t -> Cons(h, append_sigs(t, ys))
+
 fn compiler_intrinsic_sigs() -> List (String, FnSig) =
-  # ADT boxing / unboxing (hardcoded in IR templates)
+  append_sigs(compiler_intrinsic_sigs_1(),
+  append_sigs(compiler_intrinsic_sigs_2(),
+  append_sigs(compiler_intrinsic_sigs_3(),
+  append_sigs(compiler_intrinsic_sigs_4(),
+              compiler_intrinsic_sigs_5()))))
+
+# ADT boxing / unboxing (hardcoded in IR templates)
+fn compiler_intrinsic_sigs_1() -> List (String, FnSig) =
   [("sprout_make0", FnSig("sprout_make0", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_make1", FnSig("sprout_make1", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_make2", FnSig("sprout_make2", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
@@ -3342,30 +3361,42 @@ fn compiler_intrinsic_sigs() -> List (String, FnSig) =
   , ("sprout_abort_match", FnSig("sprout_abort_match", Nil, "void", Nothing))
   , ("sprout_rebox2", FnSig("sprout_rebox2", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_rebox3", FnSig("sprout_rebox3", Cons(ll_i64(), Cons(ll_i64(), Cons(ll_i64(), Nil))), ll_i64(), Nothing))
-  # Closure / tuple allocation
-  , ("sprout_alloc_closure_env", FnSig("sprout_alloc_closure_env", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  ]
+
+# Closure / tuple allocation
+fn compiler_intrinsic_sigs_2() -> List (String, FnSig) =
+  [("sprout_alloc_closure_env", FnSig("sprout_alloc_closure_env", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_alloc_tuple_blob", FnSig("sprout_alloc_tuple_blob", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   # Runtime startup (uses raw ptr for argv/ctor-name)
   , ("sprout_register_ctor", FnSig("sprout_register_ctor", Cons(ll_i64(), Cons(ll_ptr(), Cons(ll_i64(), Cons(ll_ptr(), Nil)))), ll_i64(), Nothing))
   , ("sprout_set_argv", FnSig("sprout_set_argv", Cons(ll_i32(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
-  # String operations — called directly from codegen IR templates, must be declared even without prelude
-  , ("str_eq", FnSig("str_eq", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
+  ]
+
+# String operations — called directly from codegen IR templates, must be declared even without prelude
+fn compiler_intrinsic_sigs_3() -> List (String, FnSig) =
+  [("str_eq", FnSig("str_eq", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i1(), Nothing))
   , ("str_concat", FnSig("str_concat", Cons(ll_i64(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("str_compare", FnSig("str_compare", Cons(ll_ptr(), Cons(ll_ptr(), Nil)), ll_i64(), Nothing))
   # Print helpers — called with ptr/i64 operands from print codegen templates
   , ("print_str", FnSig("print_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("eprint_str", FnSig("eprint_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("print_value", FnSig("print_value", Cons(ll_i64(), Nil), ll_i64(), Nothing))
-  # GC root management — use raw ptr (stack slot addresses, not Sprout values)
-  , ("sprout_gc_push_i64_root", FnSig("sprout_gc_push_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  ]
+
+# GC root management — use raw ptr (stack slot addresses, not Sprout values)
+fn compiler_intrinsic_sigs_4() -> List (String, FnSig) =
+  [("sprout_gc_push_i64_root", FnSig("sprout_gc_push_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_push_ptr_root", FnSig("sprout_gc_push_ptr_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_push_scan_root", FnSig("sprout_gc_push_scan_root", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
   , ("sprout_gc_pop_roots", FnSig("sprout_gc_pop_roots", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_i64_root", FnSig("sprout_gc_register_i64_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_ptr_root", FnSig("sprout_gc_register_ptr_root", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("sprout_gc_register_scan_root", FnSig("sprout_gc_register_scan_root", Cons(ll_ptr(), Cons(ll_i64(), Nil)), ll_i64(), Nothing))
-  # Analysis bridge — C functions take const char* (ptr), not i64; extern fn String would give i64 ABI
-  , ("analysis_check_source", FnSig("analysis_check_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
+  ]
+
+# Analysis bridge — C functions take const char* (ptr), not i64; extern fn String would give i64 ABI
+fn compiler_intrinsic_sigs_5() -> List (String, FnSig) =
+  [("analysis_check_source", FnSig("analysis_check_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("analysis_declared_names_in_source", FnSig("analysis_declared_names_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("analysis_exported_names_in_source", FnSig("analysis_exported_names_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("analysis_symbol_inventory_in_source", FnSig("analysis_symbol_inventory_in_source", Cons(ll_ptr(), Nil), ll_i64(), Nothing))

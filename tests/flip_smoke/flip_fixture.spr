@@ -1,0 +1,10 @@
+module main
+
+# Self-tail-recursive so typed and direct codegen both produce a tco_loop but
+# with structurally different IR text — used by `just flip-smoke` to verify
+# `--emit-ir` now routes through typed codegen (identical to `--use-ir-codegen`)
+# and `--use-direct-codegen` still reaches the direct backend.
+fn count(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc else count(n - 1, acc + 1)
+
+fn main() -> Unit !{IO} = print(count(5, 0))

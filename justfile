@@ -514,9 +514,10 @@ _compile-examples stage xfail="":
   echo "==> All examples compiled OK"
 
 # Stage-1: emit IR → clang link for each example.
-# Known xfail: sentry_api (no main fn), sentry_issue_browser{,_tui} (import examples.* unresolved),
+# Known xfail: sentry_issue_browser{,_tui} (import examples.* unresolved).
+# (sentry_api now compiles under typed codegen — removed from xfail.)
 [group('examples')]
-compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_api.sprout examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
+compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
@@ -770,6 +771,36 @@ argv-smoke: bootstrap-from-seed
   fi
   echo "==> argv-smoke ✓"
 
+# Flip smoke: verifies `--emit-ir` routes through TYPED codegen (the flip) by
+# asserting its output is byte-identical to `--use-ir-codegen`, and that the
+# `--use-direct-codegen` escape hatch still reaches the direct backend (valid,
+# non-empty IR that DIFFERS from typed). RED until the flip lands in the seed.
+flip-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_flipsmoke_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  BIN="{{build_dir}}/compile_driver_bin_stage1"
+  FIX=tests/flip_smoke/flip_fixture.spr
+  "$BIN" --emit-ir        "{{stdlib_root}}" "$FIX" > "$TMPD/emit.ll"   2>"$TMPD/emit.err"
+  "$BIN" --use-ir-codegen "{{stdlib_root}}" "$FIX" > "$TMPD/typed.ll"  2>"$TMPD/typed.err"
+  if ! "$BIN" --use-direct-codegen "{{stdlib_root}}" "$FIX" > "$TMPD/direct.ll" 2>"$TMPD/direct.err"; then
+    echo "flip-smoke: --use-direct-codegen failed (escape hatch missing?)" >&2; cat "$TMPD/direct.err" >&2; exit 1
+  fi
+  if ! cmp -s "$TMPD/emit.ll" "$TMPD/typed.ll"; then
+    echo "flip-smoke: --emit-ir is NOT routing through typed codegen (differs from --use-ir-codegen)." >&2
+    echo "  -> the flip is not in the seed; refresh-seed after the dispatcher reroute." >&2
+    exit 1
+  fi
+  if [ ! -s "$TMPD/direct.ll" ] || ! grep -q '^define ' "$TMPD/direct.ll"; then
+    echo "flip-smoke: --use-direct-codegen produced no real IR." >&2; exit 1
+  fi
+  if cmp -s "$TMPD/emit.ll" "$TMPD/direct.ll"; then
+    echo "flip-smoke: --use-direct-codegen output equals typed — escape hatch not reaching direct codegen." >&2
+    exit 1
+  fi
+  echo "==> flip-smoke ✓ (--emit-ir == typed; --use-direct-codegen reaches direct)"
+
 # DoD #9 — APPROVED_BUILTINS guard.  Every non-static `long long <name>(` in
 # runtime/sprout_runtime.c must be listed in runtime/APPROVED_BUILTINS.
 # Per AGENTS.md "Builtin vs Stdlib" rules 4–6.
@@ -882,7 +913,7 @@ tco-diff PROBE="tests/stack_overflow_smoke/deep_recursion.spr": bootstrap-from-s
   TMPD=$(mktemp -d /tmp/sprout_tco_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   BIN="{{build_dir}}/compile_driver_bin_stage1"
-  if ! "$BIN" --emit-ir        "{{stdlib_root}}" "{{PROBE}}" > "$TMPD/direct.ll" 2>"$TMPD/d.err"; then
+  if ! "$BIN" --use-direct-codegen "{{stdlib_root}}" "{{PROBE}}" > "$TMPD/direct.ll" 2>"$TMPD/d.err"; then
     echo "tco-diff: direct emit failed for {{PROBE}}" >&2; cat "$TMPD/d.err" >&2; exit 1
   fi
   if ! "$BIN" --use-ir-codegen "{{stdlib_root}}" "{{PROBE}}" > "$TMPD/typed.ll"  2>"$TMPD/t.err"; then

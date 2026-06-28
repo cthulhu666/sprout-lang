@@ -79,9 +79,10 @@ for f in "${CORPUS[@]}"; do
   typed_ll="$TMPD/$base.typed.ll"
 
   # Emit via both paths. Suppress stderr — failures show in stdout markers.
-  "$STAGE" --emit-ir "$STDLIB" "$f" > "$direct_ll" 2>/dev/null || true
+  # --emit-ir now routes to typed codegen; --use-direct-codegen is the direct backend.
+  "$STAGE" --use-direct-codegen "$STDLIB" "$f" > "$direct_ll" 2>/dev/null || true
   if [[ ! -s "$direct_ll" ]] || grep -qE '(^|: )ERROR:' "$direct_ll"; then
-    echo "SKIP (--emit-ir failed for $f — fix direct path first)"
+    echo "SKIP (--use-direct-codegen failed for $f — fix direct path first)"
     skipped=$((skipped + 1)); continue
   fi
 

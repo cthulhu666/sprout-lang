@@ -4243,12 +4243,57 @@ fn tco_prune_dead_blocks(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlo
   | Nothing -> blocks
   | Just dead -> tco_prune_dead_blocks(tco_remove_block_and_fix(blocks, dead, tco_succ_of_block(blocks, dead)))
 
+# A self-call is only a TRUE tail call when nothing after it in its block consumes
+# its result — i.e. the IRCall is followed only by the block terminator.  A do-step
+# like `r <- g(..); h(r); r` (e.g. union-find path compression:
+# `root <- find_root(..); ref_write(.., BoundTo(root)); root`) places `h(r)` after
+# the call, so g is NOT in tail position: the return value still traces back to the
+# call through the join phi, but the result is also `h`'s operand, and converting
+# the call to an IRTcoBack back-edge would drop the value `h` needs (an SSA
+# use-of-undefined).  Such hits are filtered out and stay normal IRCalls.
+fn tco_tail_safe_hits(hits: List (String, List String, String, String), all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+  match hits with
+  | Nil -> Nil
+  | Cons (pred, args, call_result, phi_block) rest ->
+      if tco_call_in_tail_position(call_result, pred, all)
+      then Cons((pred, args, call_result, phi_block), tco_tail_safe_hits(rest, all))
+      else tco_tail_safe_hits(rest, all)
+
+fn tco_call_in_tail_position(call_result: String, pred: String, blocks: List sprout_ir.IRBlock) -> Bool =
+  match blocks with
+  | Nil -> false
+  | Cons b rest ->
+      if tco_block_label(b) == pred
+      then tco_ops_after_call_are_terminators(tco_block_ops(b), call_result)
+      else tco_call_in_tail_position(call_result, pred, rest)
+
+# Find the IRCall defining call_result; true iff only terminators (IRBr/IRRet)
+# follow it in the block.
+fn tco_ops_after_call_are_terminators(ops: List sprout_ir.IROp, call_result: String) -> Bool =
+  match ops with
+  | Nil -> false
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRCall r _ _ _ ->
+          if r == call_result then tco_only_terminators(rest)
+          else tco_ops_after_call_are_terminators(rest, call_result)
+      | _ -> tco_ops_after_call_are_terminators(rest, call_result)
+
+fn tco_only_terminators(ops: List sprout_ir.IROp) -> Bool =
+  match ops with
+  | Nil -> true
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRBr _ -> tco_only_terminators(rest)
+      | sprout_ir.IRRet _ -> tco_only_terminators(rest)
+      | _ -> false
+
 export fn tco_rewrite(f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFunction, Int) =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       if ret_ty == "i64"
       then
-        match tco_collect(name, blocks, blocks) with
+        match tco_tail_safe_hits(tco_collect(name, blocks, blocks), blocks) with
         | Nil -> (f, next_idx)
         | hits ->
             match tco_build_slots(params, next_idx, Nil) with
