@@ -129,6 +129,12 @@ test suite went from <6 GB (direct) to **7.8 GB**. Root causes and fixes:
    back-edge, dropping the value (`opt --passes=verify`: use-of-undefined; caught by
    `compile-examples` on `ref_tutorial`/`ref_union_find`). FIX: only TCO a self-call
    that is the last op before its block terminator (`tco_tail_safe_hits`).
+   *Caveat:* this guard is POSITIONAL (last-op-before-terminator), which assumes the
+   call's result leaves the block only via its terminator/phi — true for what the
+   translator emits today. If a future change lets a self-call result be consumed in
+   a LATER block it dominates, the guard must become use-based (result used only by
+   `IRPhi`/`IRRet`). Parity (98/98 OK, 0 TYPED-*) + the typed self-compile confirm no
+   such pattern exists in the current corpus.
 
 **Result:** whole compiler **1.4 GB / 35s** (was 2.67 GB / 78s; direct 305 MB);
 test suite **3.38 GB** (was 7.8 GB; below the pre-flip direct suite). Regression
