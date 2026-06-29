@@ -342,6 +342,7 @@ static void buf_append_char(ByteBuf* buf, char ch);
 static void regex_builtin_fail(const char* builtin, const char* detail);
 static int regex_compile_ere(const char* pattern, regex_t* out_regex, char** out_error);
 static size_t sprout_utf8_char_width(unsigned char lead);
+static long long sprout_utf8_decode_at(const char* s, size_t pos, size_t width);
 static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_limit);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
@@ -3608,6 +3609,20 @@ static size_t sprout_utf8_char_width(unsigned char lead) {
   return 1;
 }
 
+/* Decode the Unicode codepoint of the `width`-byte UTF-8 sequence at s[pos].
+ * Mirrors stdlib.compiler.source.decode_codepoint_at; assumes valid UTF-8
+ * (callers get `width` from sprout_utf8_char_width over a NUL-terminated str).
+ * Returns the codepoint as an i64 — the runtime representation of a Sprout Char. */
+static long long sprout_utf8_decode_at(const char* s, size_t pos, size_t width) {
+  const unsigned char* u = (const unsigned char*)(s + pos);
+  switch (width) {
+    case 1:  return (long long)u[0];
+    case 2:  return (long long)(((u[0] & 0x1FU) << 6) | (u[1] & 0x3FU));
+    case 3:  return (long long)(((u[0] & 0x0FU) << 12) | ((u[1] & 0x3FU) << 6) | (u[2] & 0x3FU));
+    default: return (long long)(((u[0] & 0x07U) << 18) | ((u[1] & 0x3FU) << 12) | ((u[2] & 0x3FU) << 6) | (u[3] & 0x3FU));
+  }
+}
+
 static size_t sprout_utf8_codepoint_count(const char* s) {
   size_t count = 0;
   size_t i = 0;
@@ -3708,20 +3723,6 @@ long long str_slice_bytes(long long s_i, long long byte_start, long long byte_le
   return (long long)(uintptr_t)out;
 }
 
-/* Pre-allocated one-byte C strings for each ASCII codepoint (0-127).
- * str_char_at returns a pointer into this table for ASCII characters,
- * completely avoiding malloc for the common case in Sprout source files. */
-static char g_ascii_char_strs[128][2];
-static int  g_ascii_char_strs_init = 0;
-
-static void init_ascii_char_strs(void) {
-  for (int i = 0; i < 128; i++) {
-    g_ascii_char_strs[i][0] = (char)i;
-    g_ascii_char_strs[i][1] = '\0';
-  }
-  g_ascii_char_strs_init = 1;
-}
-
 long long str_char_at(long long s_val, long long index) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_at: null input");
@@ -3734,22 +3735,11 @@ long long str_char_at(long long s_val, long long index) {
   long long cp_idx = 0;
   while (s[byte_pos] != '\0') {
     if (cp_idx == index) {
+      /* A Sprout Char is its Unicode codepoint (immediate i64), so return the
+       * decoded codepoint directly — no allocation. */
       size_t width = sprout_utf8_char_width((unsigned char)s[byte_pos]);
-      const char* char_str;
-      if (width == 1) {
-        if (!g_ascii_char_strs_init) init_ascii_char_strs();
-        char_str = g_ascii_char_strs[(unsigned char)s[byte_pos]];
-      } else {
-        /* Multi-byte codepoint: rare in Sprout source files. */
-        char* tmp = (char*)malloc(width + 1);
-        if (!tmp) tcp_fail("str_char_at: out of memory");
-        memcpy(tmp, s + byte_pos, width);
-        tmp[width] = '\0';
-        register_cstr(tmp);
-        SPROUT_HANDLE(h_char, (long long)(uintptr_t)tmp);
-        return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_char));
-      }
-      return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)char_str);
+      return sprout_make1(find_ctor_tag_by_name("Just"),
+                          sprout_utf8_decode_at(s, byte_pos, width));
     }
     byte_pos += sprout_utf8_char_width((unsigned char)s[byte_pos]);
     cp_idx++;
@@ -3915,17 +3905,10 @@ SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   long long cp_idx = 0;
   while (s[byte_pos] != '\0') {
     if (cp_idx == index) {
+      /* A Sprout Char is its Unicode codepoint (immediate i64) — return it. */
       size_t width = sprout_utf8_char_width((unsigned char)s[byte_pos]);
-      if (width == 1) {
-        if (!g_ascii_char_strs_init) init_ascii_char_strs();
-        return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)g_ascii_char_strs[(unsigned char)s[byte_pos]] };
-      }
-      char* tmp = (char*)malloc(width + 1);
-      if (!tmp) tcp_fail("str_char_at_unboxed: out of memory");
-      memcpy(tmp, s + byte_pos, width);
-      tmp[width] = '\0';
-      register_cstr(tmp);
-      return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)tmp };
+      return (SproutUnboxed2){ cached_tag_just(),
+                               (int64_t)sprout_utf8_decode_at(s, byte_pos, width) };
     }
     byte_pos += sprout_utf8_char_width((unsigned char)s[byte_pos]);
     cp_idx++;
@@ -4160,11 +4143,6 @@ long long regex_escape(long long raw_i) {
   return (long long)(uintptr_t)result;
 }
 
-long long char_to_string(long long ch_i) {
-  const char* ch = (const char*)(uintptr_t)ch_i;
-  if (ch == NULL) tcp_fail("char_to_string: null input");
-  return ch_i;
-}
 long long char_to_str(long long codepoint) {
   unsigned int cp = (unsigned int)codepoint;
   char buf[5];
@@ -4193,18 +4171,18 @@ long long char_to_str(long long codepoint) {
   return (long long)(uintptr_t)out;
 }
 
-/* char_from_codepoint: total Char constructor from a Unicode scalar value.
- * Same UTF-8 encoding as char_to_str, but typed Char at the Sprout level
- * (Char and String share the heap-string representation). ASCII fast path
- * returns the shared one-byte cache, so scanning loops stay 0-alloc per ASCII
- * char. Codepoints come from decoded valid UTF-8, so no range check is needed. */
+/* char_to_string: a Char is an immediate i64 Unicode codepoint; encode it to a
+ * fresh UTF-8 heap String.  (Formerly the identity, when Char and String shared
+ * the heap-string representation.) */
+long long char_to_string(long long ch) {
+  return char_to_str(ch);
+}
+
+/* char_from_codepoint: a Char IS its Unicode codepoint (an immediate i64), so
+ * this is the identity.  Retained as the typed Int->Char constructor at the
+ * Sprout level (char_to_str / char_to_string only produce String). */
 long long char_from_codepoint(long long codepoint) {
-  unsigned int cp = (unsigned int)codepoint;
-  if (cp <= 0x7f) {
-    if (!g_ascii_char_strs_init) init_ascii_char_strs();
-    return (long long)(uintptr_t)g_ascii_char_strs[cp];
-  }
-  return char_to_str(codepoint);
+  return codepoint;
 }
 
 static void buf_init(ByteBuf* buf) {

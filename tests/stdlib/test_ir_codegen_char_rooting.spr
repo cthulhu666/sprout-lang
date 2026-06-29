@@ -3,19 +3,18 @@ import stdlib.compiler.source as source
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
 
-# Regression test for the typed-codegen Char under-rooting UAF.
+# GC-stress test for typed-codegen UTF-8 decoding over multi-byte input.
 #
-# A Sprout `Char` IS a heap value (the runtime represents Char and String with
-# the same heap-string layout; non-ASCII chars are freshly allocated by
-# char_to_str).  The typed IR rooting pass previously classified Char as a
-# non-heap scalar, so a Char held live across an allocation (e.g. the boxed
-# `Maybe (Char, Int)` tuple in source.decode_char_at / source.next) was swept
-# by an intervening GC.  ASCII chars survived only because they are immortal
-# cached singletons; a multi-byte char like 'é' was collected and corrupted.
+# A Sprout `Char` is now an immediate i64 codepoint (a non-heap scalar), so a
+# Char value can never be a dangling pointer — the historical "swept multi-byte
+# Char" UAF this file was written for is structurally impossible now.  What it
+# still exercises is the surrounding hazard: source.decode_char_at returns a
+# boxed `Maybe (Int, Int)` tuple, and the decode walks multi-byte sequences while
+# other heap values (Bytes, the tuple) are live across allocations.
 #
 # These cases run in the test's OWN typed-compiled runtime, so under
 # `--use-ir-codegen` + SPROUT_GC_STRESS=1 (collect on every allocation) they
-# deterministically reproduce the UAF.  See project_gc_stress_oracle.
+# stress the decode path's rooting.  See project_gc_stress_oracle.
 
 # Decode the codepoint at byte offset `i`, returning its string rendering or a
 # marker.  The Char is held live across the boxed-tuple allocation inside

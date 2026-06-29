@@ -83,4 +83,13 @@ fn main() -> Unit !{IO} =
     assert_true(state, "from_cp 128512", char_from_codepoint(128512) == '😀')
     assert_true(state, "char_at emoji", char_at_eq("a😀b", 1, '😀'))
 
+    # Ordering is by codepoint value and is preserved across UTF-8 byte widths.
+    # (In Phase 2 this lowers to integer icmp on codepoints, replacing str_compare;
+    # UTF-8 byte order and codepoint order coincide, so results are unchanged.)
+    assert_true(state, "ord ascii lt 2byte", 'a' < 'λ')
+    assert_true(state, "ord 2byte lt 3byte", 'λ' < '✓')
+    assert_true(state, "ord 3byte lt 4byte", '✓' < '😀')
+    assert_false(state, "ord 4byte lt ascii", '😀' < 'a')
+    assert_true(state, "ord ge emoji ascii", '😀' >= 'a')
+
     summary(state)

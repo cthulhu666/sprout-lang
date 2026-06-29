@@ -1,12 +1,11 @@
 module stdlib.compiler.type_kind
 
 # Single source of truth for "is this source-level type a known non-heap
-# scalar?".  Only Int and Bool qualify.  Char does NOT: the runtime represents
-# Char and String with the same heap-string layout (non-ASCII chars are freshly
-# allocated by char_to_str), so a Char held live across an allocation must be GC
-# rooted exactly like a String.  Treating Char as a scalar here left it unrooted
-# and produced a use-after-free under GC (a swept multi-byte char corrupting the
-# heap).  Used by both backend paths to decide whether a value needs GC rooting:
+# scalar?".  Int, Bool, and Char qualify.  A Char is an immediate i64 Unicode
+# codepoint (not a heap string), so it is never a managed pointer and never needs
+# GC rooting — exactly like Int.  (char_to_string encodes a codepoint to a heap
+# String on demand; that String is rooted, but the Char itself is not.)
+# Used by both backend paths to decide whether a value needs GC rooting:
 #   - stdlib.compiler.codegen (direct AST→LLVM): elides push_temp_root_typed
 #     for scalar-typed values.
 #   - stdlib.compiler.ast_to_ir (Sprout-IR path): tags IRFunction params,
@@ -33,24 +32,26 @@ fn type_name_leaf_is(name: String, leaf: String) -> Bool =
 # --- Public predicate ---
 
 # Returns true when an ast.TypeExpr annotation declares a known non-heap
-# scalar (Int, Bool).  Char is heap (see the module header) and returns false,
-# as does everything else including TVars and polymorphic positions, which may
-# resolve to heap objects at runtime and must be rooted conservatively.
+# scalar (Int, Bool, Char).  Everything else — String, ADTs, tuples, closures,
+# Unit, and TVars/polymorphic positions, which may resolve to heap objects at
+# runtime — returns false and is rooted conservatively.
 export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
   match te with
   | ast.TypeName name ->
       type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool")
+      type_name_leaf_is(name, "Bool") ||
+      type_name_leaf_is(name, "Char")
   | _ -> false
 
 # Same predicate over an inferred `types.Type` (used by ast_to_ir to classify a
-# call's return type for IRCall rooting).  Only the concrete scalar constants
-# Int/Bool are non-heap; everything else — Char (heap, see module header),
-# String, ADTs, tuples, closures, Unit, and TVars/polymorphic positions — is
-# treated as heap and rooted conservatively, matching the TypeExpr predicate.
+# call's return type for IRCall rooting).  The concrete scalar constants
+# Int/Bool/Char are non-heap; everything else — String, ADTs, tuples, closures,
+# Unit, and TVars/polymorphic positions — is treated as heap and rooted
+# conservatively, matching the TypeExpr predicate.
 export fn type_is_non_heap_scalar(t: types.Type) -> Bool =
   match t with
   | types.TConst name ->
       type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool")
+      type_name_leaf_is(name, "Bool") ||
+      type_name_leaf_is(name, "Char")
   | _ -> false

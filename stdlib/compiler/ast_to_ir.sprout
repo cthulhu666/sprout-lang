@@ -269,14 +269,14 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
 #   IRTScalar  — Int (no GC root needed)
 #   IRTHeap    — everything else with a known type
 #   IRTUnknown — type lookup failed (conservative; ir_rooting treats as heap)
-# Char is heap (Char and String share the heap-string runtime layout); a
-# captured Char must be rooted across allocations, so it is NOT scalar here.
+# Char is a non-heap scalar (an immediate i64 codepoint), so a captured Char is
+# treated like Int and needs no rooting.
 # O(n) where n = body size (scans body for the TVar occurrence).
 fn capture_kind(v: String, body: typed_ast.TypedExpr) -> sprout_ir.IRType =
   match find_capture_type(body, v) with
   | Nothing -> sprout_ir.IRTUnknown
   | Just t ->
-      if is_int_type(t)
+      if is_int_type(t) || is_char_type(t)
       then sprout_ir.IRTScalar
       else sprout_ir.IRTHeap
 
@@ -579,6 +579,11 @@ fn is_char_type(t: types.Type) -> Bool =
   | types.TConst name -> name == "Char"
   | _ -> false
 
+# True iff t is Int or Char — both are immediate i64 values that compare and
+# arithmetically lower through the same integer IR path.
+fn is_int_or_char_type(t: types.Type) -> Bool =
+  is_int_type(t) || is_char_type(t)
+
 # True iff t is the monomorphic Unit type.
 fn is_unit_type(t: types.Type) -> Bool =
   match t with
@@ -801,14 +806,11 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
            list_append(cur_ops, Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), s), Nil)),
            fresh_name(name_prefix, idx + 1), idx + 2))
   | typed_ast.TChar ch _ _ ->
-      # Char is stored as a UTF-8 string pointer (same ABI as String).
-      # ch is the Unicode codepoint (CharExpr/TChar now carry an Int).  Encode it
-      # to its UTF-8 String via char_to_str and lower to IRStrConst — same string
-      # constant the heap-Char representation produced.
-      # Mirrors codegen.sprout TChar arm: emit_str_ptr(em, char_to_str(ch)).
+      # A Char is an immediate i64 Unicode codepoint; ch is that codepoint.
+      # Lower to an IRConst, exactly like TInt.
       Ok((Nil, cur_label,
-           list_append(cur_ops, Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_str(ch)), Nil)),
-           fresh_name(name_prefix, idx + 1), idx + 2))
+           list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), ch), Nil)),
+           fresh_name(name_prefix, idx), idx + 1))
   | typed_ast.TUnit _ _ ->
       # Direct codegen convention: Unit has no meaningful value; emit i64 0
       # sentinel (mirrors codegen.sprout val_make(ll_i64(), "0")).  The
@@ -1708,17 +1710,16 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                          list_append(rcur_ops,
                            Cons(sprout_ir.IRStrConcat(fresh_name(name_prefix, idx2), l_name, r_name), Nil)),
                          fresh_name(name_prefix, idx2), idx2 + 1))
-  # M3 PR 9: `==` and `!=` on String (and Char) operands lower to @str_eq
-  # (i1 result, zext'd to i64 for Bool ABI).  Must be before the Int-type
-  # guard below.  Direct codegen's equivalent: emit_ptr_comparison
-  # (codegen.sprout ~2094).  Char uses the same string-pointer representation
-  # at runtime as String (`Char is a UTF-8 string pointer at runtime` per
-  # prelude Eq Char instance comment), so it routes through the same arm.
+  # M3 PR 9: `==` and `!=` on String operands lower to @str_eq (i1 result,
+  # zext'd to i64 for Bool ABI).  Must be before the Int-type guard below.
+  # Direct codegen's equivalent: emit_ptr_comparison (codegen.sprout ~2094).
+  # Char is NOT here: it is an immediate i64 codepoint and compares via integer
+  # icmp through the Int/Char path below.
   # `!=` is `==` followed by IRBoolNot (xor i64 %r, 1) — same as other Bool
   # negation in the IR pipeline (PR 3's IRBoolNot op).
   else if (op == "==" || op == "!=")
-       && (is_string_type(typed_ast.typed_expr_type(left)) || is_char_type(typed_ast.typed_expr_type(left)))
-       && (is_string_type(typed_ast.typed_expr_type(right)) || is_char_type(typed_ast.typed_expr_type(right)))
+       && is_string_type(typed_ast.typed_expr_type(left))
+       && is_string_type(typed_ast.typed_expr_type(right))
   then
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
                          captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
@@ -1745,16 +1746,18 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                                 Cons(sprout_ir.IRBoolNot(fresh_name(name_prefix, idx2 + 1),
                                                          fresh_name(name_prefix, idx2)), Nil))),
                               fresh_name(name_prefix, idx2 + 1), idx2 + 2))
-  # String/Char ordering: `<` / `<=` / `>` / `>=` on String or Char operands.
+  # String ordering: `<` / `<=` / `>` / `>=` on String operands.
   # Emits IRStrCompare which lowers to @str_compare(i64,i64) + icmp <pred> i64 _,0 + zext.
   # @str_compare takes i64 handles directly (C: long long str_compare(long long, long long)).
   # Must appear before the Int-only guard below.
+  # Char ordering is NOT here: a Char is an immediate i64 codepoint and orders via
+  # integer icmp through the Int/Char path below (codepoint order == UTF-8 order).
   # Note: String literal ordering is currently also gated at the type-checker level
   # (infer.sprout check_compare accepts only Int/Char); the is_string_type arm here
   # is a forward-compatibility hook for when that restriction is lifted.
   else if (op == "<" || op == "<=" || op == ">" || op == ">=")
-       && (is_string_type(typed_ast.typed_expr_type(left)) || is_char_type(typed_ast.typed_expr_type(left)))
-       && (is_string_type(typed_ast.typed_expr_type(right)) || is_char_type(typed_ast.typed_expr_type(right)))
+       && is_string_type(typed_ast.typed_expr_type(left))
+       && is_string_type(typed_ast.typed_expr_type(right))
   then
     match cmp_predicate(op) with
     | Nothing -> Err("ast_to_ir: unexpected ordering op: " ++ op)
@@ -1801,7 +1804,7 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                 | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
                     finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops,
                                   l_name, r_name, idx2, name_prefix)
-  else if ! (is_int_type(typed_ast.typed_expr_type(left)) && is_int_type(typed_ast.typed_expr_type(right)))
+  else if ! (is_int_or_char_type(typed_ast.typed_expr_type(left)) && is_int_or_char_type(typed_ast.typed_expr_type(right)))
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int operands")
   else
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
@@ -2992,17 +2995,12 @@ fn translate_match_arm_string(s: String, body: typed_ast.TypedExpr,
     lifted_idx_ref, name_prefix)
 
 # Translate a CharPattern arm.
-# Char has the same runtime representation as String (UTF-8 string pointer i64).
-# Emit: IRStrConst for the char literal, IRStrEq (i64 Bool result), IRConst(1),
-# IRICmp eq i64 to convert the Bool i64 back to i1 for IRCondBr.
-# IRStrEq emits `zext i1 ... to i64`; IRCondBr requires i1; the extra
-# IRConst(1) + IRICmp pair converts the i64 Bool back to i1 for the branch.
+# A Char is an immediate i64 codepoint, so the dispatch is an integer compare
+# against the codepoint — identical in shape to translate_match_arm_int.
+# Emit: %const = const ch; %cmp = icmp eq i64 s_name, const; condbr.
 # Fresh name slots:
-#   idx   = raw GEP ptr (IRStrConst raw name)
-#   idx+1 = i64 ptrtoint result (IRStrConst result)
-#   idx+2 = IRStrEq i64 Bool result
-#   idx+3 = IRConst 1 (the true sentinel for comparison)
-#   idx+4 = IRICmp i1 result (used in IRCondBr)
+#   idx   = IRConst (the codepoint)
+#   idx+1 = IRICmp i1 result (used in IRCondBr)
 fn translate_match_arm_char(ch: Int, body: typed_ast.TypedExpr,
                              rest_arms: List typed_ast.TypedMatchBranch,
                              branch_idx: Int, base_idx: Int,
@@ -3024,21 +3022,17 @@ fn translate_match_arm_char(ch: Int, body: typed_ast.TypedExpr,
   translate_match_arm_body_with_test(body, rest_arms, branch_idx, base_idx,
     sprout_ir.IRBlock(dispatch_lbl,
       list_append(
-        Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_str(ch)),
-        Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx + 2), s_name,
-                               fresh_name(name_prefix, idx + 1)),
-        Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 3), 1),
-        Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 4), "eq",
-                              fresh_name(name_prefix, idx + 2),
-                              fresh_name(name_prefix, idx + 3)),
-        Nil)))),
-        Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 4),
+        Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), ch),
+        Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 1), "eq", s_name,
+                              fresh_name(name_prefix, idx)),
+        Nil)),
+        Cons(sprout_ir.IRCondBr(fresh_name(name_prefix, idx + 1),
                                 fresh_body_label(branch_idx, base_idx),
                                 fresh_arm_label(branch_idx + 1, base_idx)), Nil))),
     fresh_body_label(branch_idx, base_idx),
     fresh_arm_label(branch_idx + 1, base_idx),
     join_lbl, match_ty, s_name, tag_name, params, ctors,
-    idx + 5, acc_blocks, acc_phi, captures,
+    idx + 2, acc_blocks, acc_phi, captures,
     lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
     lifted_idx_ref, name_prefix)
 
@@ -3309,7 +3303,14 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
                         list_append(acur_ops,
                           Cons(sprout_ir.IRPrintStr(fresh_name(name_prefix, idx1), "eprint_str", a_name), Nil)),
                         fresh_name(name_prefix, idx1), idx1 + 1))
-              else if is_string_type(typed_ast.typed_expr_type(arg)) || is_char_type(typed_ast.typed_expr_type(arg))
+              else if is_char_type(typed_ast.typed_expr_type(arg))
+              then  # A Char is an i64 codepoint; encode to a String before printing.
+                   Ok((ablocks, acur_lbl,
+                        list_append(acur_ops,
+                          Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTHeap, "char_to_string", Cons(a_name, Nil)),
+                          Cons(sprout_ir.IRPrintStr(fresh_name(name_prefix, idx1 + 1), "print_str", fresh_name(name_prefix, idx1)), Nil))),
+                        fresh_name(name_prefix, idx1 + 1), idx1 + 2))
+              else if is_string_type(typed_ast.typed_expr_type(arg))
               then Ok((ablocks, acur_lbl,
                         list_append(acur_ops,
                           Cons(sprout_ir.IRPrintStr(fresh_name(name_prefix, idx1), "print_str", a_name), Nil)),

@@ -579,7 +579,7 @@ instance Eq String {
 }
 
 instance Eq Char {
-  # Char is a UTF-8 string pointer at runtime; == dispatches to str_eq.
+  # O(1). A Char is an immediate i64 codepoint; == is an integer compare.
   fn eq(left: Char, right: Char) -> Bool = left == right
 }
 
@@ -664,7 +664,7 @@ instance ToString String {
 }
 
 instance ToString Char {
-  # O(1). Char is stored as a UTF-8 string pointer; return it directly.
+  # O(1). A Char is an i64 codepoint; char_to_string encodes it to a UTF-8 String.
   fn to_string(value: Char) -> String =
     char_to_string(value)
 }

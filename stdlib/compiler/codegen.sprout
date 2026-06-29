@@ -841,15 +841,15 @@ fn sizeof_struct(struct_type: String, em: Emitter) -> String !{IO} =
 
 # Returns true for Sprout source-level types that are guaranteed to be pure
 # scalars and can never be GC-managed heap pointers.  Only Int and Bool —
-# Char is heap (Char and String share the heap-string runtime layout, so a
-# Char must be rooted across allocations like a String).  Everything else
-# (TVars, TApp, ADT names, Unit, …) may resolve to a heap object and must be
-# rooted conservatively.
+# Int, Bool, and Char are non-heap scalars (a Char is an immediate i64 codepoint,
+# never a managed pointer).  Everything else (String, TVars, TApp, ADT names,
+# Unit, …) may resolve to a heap object and must be rooted conservatively.
 fn type_is_non_heap_scalar(t: types.Type) -> Bool =
   match t with
   | types.TConst name ->
       type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool")
+      type_name_leaf_is(name, "Bool") ||
+      type_name_leaf_is(name, "Char")
   | _ -> false
 
 # NB: type_expr_is_non_heap_scalar has been hoisted to stdlib.compiler.type_kind
@@ -1086,11 +1086,11 @@ fn emit_pattern_test(pat: ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) ->
         emit_template(em, `  ${tmp} = call i1 @str_eq(ptr ${val_ir (scrut_ptr)}, ptr ${val_ir (lit_v)})`)
         val_make(ll_i1(), tmp)
   | ast.CharPattern ch _ ->
+      # ch is the Unicode codepoint; a Char is an immediate i64, so the pattern
+      # test is an integer compare against the codepoint (mirrors IntPattern).
       do
-        lit_v <- emit_str_ptr(em, char_to_str(ch))
-        scrut_ptr <- coerce_value(scrut, ll_ptr(), em)
         tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = call i1 @str_eq(ptr ${val_ir (scrut_ptr)}, ptr ${val_ir (lit_v)})`)
+        emit_template(em, `  ${tmp} = icmp eq i64 ${val_ir (scrut)}, ${int_to_string (ch)}`)
         val_make(ll_i1(), tmp)
   | ast.UnitPattern _ ->
       do
@@ -1771,9 +1771,8 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
         p <- emit_str_ptr(em, s)
         coerce_value(p, ll_i64(), em)
   | typed_ast.TChar ch _ _ ->
-      do
-        p <- emit_str_ptr(em, char_to_str(ch))
-        coerce_value(p, ll_i64(), em)
+      # A Char is an immediate i64 codepoint; emit the codepoint constant directly.
+      val_make(ll_i64(), int_to_string(ch))
   | typed_ast.TUnit _ _ ->
       val_make(ll_i64(), "0")
   | typed_ast.TTuple items ty _ ->
@@ -2037,8 +2036,10 @@ fn emit_range(start: typed_ast.TypedExpr, end_: typed_ast.TypedExpr, ctx: CgCtx,
     emit_template(em, `  ${tmp} = call i64 @int_range(i64 ${val_ir (sv)}, i64 ${val_ir (ev)})`)
     val_make(ll_i64(), tmp)
 
+# Only String operands use pointer dispatch (@str_eq / @str_compare).  Char is an
+# immediate i64 codepoint and compares via integer icmp (emit_comparison), like Int.
 fn compare_needs_ptr_dispatch(left_ty: types.Type, right_ty: types.Type) -> Bool =
-  is_string_type(left_ty) || is_char_type(left_ty) || is_string_type(right_ty) || is_char_type(right_ty)
+  is_string_type(left_ty) || is_string_type(right_ty)
 
 fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   if op == "&&" || op == "||" then
@@ -2484,7 +2485,16 @@ fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Valu
             tmp <- fresh_tmp(em)
             emit_template(em, `  ${tmp} = call i64 @print_str(ptr ${val_ir (v)})`)
             val_make(ll_i64(), tmp)
-        else if val_is_i64(v) && (is_string_type(arg_ty) || is_char_type(arg_ty)) then
+        else if val_is_i64(v) && is_char_type(arg_ty) then
+          # A Char is an i64 codepoint; encode it to a UTF-8 String before printing.
+          do
+            enc <- fresh_tmp(em)
+            emit_template(em, `  ${enc} = call i64 @char_to_string(i64 ${val_ir (v)})`)
+            encp <- coerce_value(val_make(ll_i64(), enc), ll_ptr(), em)
+            tmp <- fresh_tmp(em)
+            emit_template(em, `  ${tmp} = call i64 @print_str(ptr ${val_ir (encp)})`)
+            val_make(ll_i64(), tmp)
+        else if val_is_i64(v) && is_string_type(arg_ty) then
           do
             vp <- coerce_value(v, ll_ptr(), em)
             tmp <- fresh_tmp(em)
@@ -3382,6 +3392,9 @@ fn compiler_intrinsic_sigs_3() -> List (String, FnSig) =
   , ("print_str", FnSig("print_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("eprint_str", FnSig("eprint_str", Cons(ll_ptr(), Nil), ll_i64(), Nothing))
   , ("print_value", FnSig("print_value", Cons(ll_i64(), Nil), ll_i64(), Nothing))
+  # char_to_string(i64 codepoint) -> i64 String ptr: emitted by print(Char) and
+  # must be declared even without prelude (print is importless-safe).
+  , ("char_to_string", FnSig("char_to_string", Cons(ll_i64(), Nil), ll_i64(), Nothing))
   ]
 
 # GC root management — use raw ptr (stack slot addresses, not Sprout values)

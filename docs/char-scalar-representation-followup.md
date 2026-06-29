@@ -1,8 +1,43 @@
 # Follow-up: represent `Char` as an immediate codepoint (not a heap string)
 
-Status: **proposed**, not scheduled. Captured 2026-06-28 during the typed-codegen
-flip (PR fix/typed-codegen-tco), prompted by the question "why is Char heap at
-all?".
+Status: **IMPLEMENTED** (2026-06-29, branch `feat/char-immediate-codepoint`).
+Landed in two phases: Phase 1 made the AST/typed-AST char nodes carry the `Int`
+codepoint (representation-neutral); Phase 2 flipped the runtime representation to
+an immediate `i64` codepoint. The original proposal (captured 2026-06-28 during
+the typed-codegen flip) follows for historical context.
+
+## What landed
+
+- Runtime: `char_from_codepoint` is the identity; `char_to_string` encodes the
+  codepoint to a UTF-8 String (via `char_to_str`); `str_char_at` /
+  `str_char_at_unboxed` return the decoded codepoint; the ASCII one-byte string
+  cache was removed (dead).
+- Both codegen backends: `'a'` lowers to an `i64` constant; `==`/`!=`/ordering
+  and char patterns lower to integer `icmp`; `print`/`to_string` of a `Char`
+  encode to a String first.
+- Rooting: `Char` is a non-heap scalar in `type_kind`, the `codegen` duplicate,
+  `capture_kind`, and `field_kinds` (`'i'`). The entire "Char rooting" class is
+  gone — Char is never a managed pointer.
+- Regression guard: `tests/stdlib/test_char_representation.spr` (codepoints across
+  1–4 UTF-8 byte widths). GC-stress green; `ir_runtime_parity` unchanged.
+
+## Measured impact (important)
+
+This is a **correctness + char-op-perf** change, **not** an over-rooting/memory
+win. Measured before/after (clean, same binary/method):
+
+- `lexer.sprout` typed GC roots: 2323 → 2280 (**−1.9%**)
+- `compile_driver.sprout` typed roots: 97818 → 97614 (**−0.2%**)
+- whole-compiler peak RSS: unchanged within GC-threshold timing noise
+
+The original "Why this helps → directly advances the P2 over-rooting goal" claim
+below is **disproven**: the 2.76× typed-vs-direct over-rooting is structural
+(per-GC-trigger push-all/pop-all bracketing — P11 option A), independent of which
+types are heap, so reclassifying `Char` removes only a tiny fraction of roots.
+The real over-rooting work remains options A/B in
+`docs/p11-over-rooting-handoff-2026-06-28.md`. The value that *did* land:
+removing the swept-multi-byte-char UAF class, integer char comparisons, and zero
+per-char allocation in the lexer.
 
 ## Problem
 

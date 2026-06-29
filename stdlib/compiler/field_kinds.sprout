@@ -4,12 +4,10 @@ module stdlib.compiler.field_kinds
 # native backends (stdlib.compiler.codegen and stdlib.compiler.ast_to_ir).
 #
 # Encoding (byte per constructor field, in source order):
-#   'i' — Int           (scalar, not GC-tracked)
+#   'i' — Int | Char    (scalar, not GC-tracked; a Char is an immediate i64
+#         codepoint, identical to Int for rooting purposes)
 #   'b' — Bool          (scalar, not GC-tracked)
-#   's' — String|Char   (heap; decoded as "heap" per /code-review fix #1
-#         to ensure String fields are rooted across allocations. Char
-#         fields are over-rooted as a result — correctness-safe. A future
-#         refactor may split into distinct 's'/'c' codes.)
+#   's' — String        (heap; rooted across allocations)
 #   'p' — ADT/closure/tuple/function   (heap, GC handle)
 #   '_' — type-variable                (heap, conservative)
 #
@@ -50,7 +48,7 @@ export fn ctor_field_kind(te: ast.TypeExpr) -> String =
       if type_name_leaf_is(name, "Int") then "i"
       else if type_name_leaf_is(name, "Bool") then "b"
       else if type_name_leaf_is(name, "String") then "s"
-      else if type_name_leaf_is(name, "Char") then "s"
+      else if type_name_leaf_is(name, "Char") then "i"
       else
         match str_char_at(strip_module_prefix(name), 0) with
         | Nothing -> "_"
@@ -71,9 +69,8 @@ export fn ctor_field_kinds_string(exprs: List ast.TypeExpr) -> String =
 
 # Decode a single field-kind byte to the rooting-classification IRType
 # expected by ir_rooting's op_produces_simple_heap.
-#   'i' / 'b'    → IRTScalar
-#   's' / 'p'    → IRTHeap   (conservative for String/Char-collapsed 's'
-#                              per /code-review fix #1)
+#   'i' / 'b'    → IRTScalar  ('i' covers Int and Char codepoints)
+#   's' / 'p'    → IRTHeap
 #   '_'          → IRTUnknown (type-variable; treated as heap by rooting)
 #   anything else→ IRTUnknown (defensive fallback)
 export fn field_kind_char_to_irtype(ch: Char) -> sprout_ir.IRType =
