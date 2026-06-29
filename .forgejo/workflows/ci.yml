@@ -107,69 +107,20 @@ jobs:
       - name: GC safety check
         run: just gc-safety-check --strict
 
-  # ── Dual-path IR codegen probe (M3 milestone) ────────────────────────────────
-  #
-  # Runs every test/example/smoke-shape through --use-ir-codegen (the typed
-  # Sprout-IR path) instead of --emit-ir (direct codegen). tests/IR_XFAIL lists
-  # known-failing files; each M3 PR shrinks that list as parity gaps close.
-  #
-  # Required gate. The typed Sprout-IR codegen path must pass the full corpus
-  # (compile / test / smoke / canary + GC-stress + CPR differential) on every
-  # PR, master push, and nightly. Runtime parity reached 0 TYPED-* and
-  # tests/IR_XFAIL holds only pre-existing direct-codegen xfails, so the typed
-  # path is held to the same bar as direct codegen — a typed regression blocks
-  # the merge.
-  test-ir:
-    # Runs on pull_request + master + nightly. Adds ~55 min on the single
-    # self-hosted runner (capacity 2; co-runs with `test`) — an accepted cost
-    # for blocking typed-codegen regressions before merge rather than after.
-    needs: setup
-    runs-on: [self-hosted, linux-x86_64]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Add mise shims to PATH
-        run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
-
-      - name: Add LLVM 16 to PATH
-        # Toolchain installed once by the `setup` job; expose opt/llvm tools here.
-        run: echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
-
-      - name: Cache stage-1 binary
-        # Shares the same cache key as the `test` job — first job to finish
-        # populates, second restores. No double-bootstrap.
-        uses: actions/cache@v4
-        with:
-          path: build/compile_driver_bin_stage1
-          key: stage1-${{ runner.os }}-${{ hashFiles('bootstrap/compile_driver.ll', 'runtime/sprout_runtime.c') }}
-
-      - name: Bootstrap stage-1 from committed IR seed
-        run: just bootstrap-from-seed
-
-      - name: Validate tests/IR_XFAIL format
-        # No stale entries, no duplicates, paths under tests/ or examples/.
-        run: just check-ir-xfail-format
-
-      - name: Compile examples via --use-ir-codegen
-        run: just compile-examples-stage1-ir
-
-      - name: Test stdlib via --use-ir-codegen
-        run: just test-stdlib-stage1-ir
-
-      - name: Smoke shapes via --use-ir-codegen
-        run: just smoke-shapes-ir
-
-      - name: Example canary via --use-ir-codegen
-        run: just run-example-canary-ir
-
+      # The two gates below moved here from the former `test-ir` job. That job
+      # ran the whole corpus through --use-ir-codegen, which is identical to
+      # `test`'s --emit-ir after the typed-codegen flip (both resolve to
+      # run_file_use_ir_codegen in compile_driver.sprout) — so its compile /
+      # test / smoke / canary steps were pure duplication (and weaker: opt-verify
+      # only, no link+run). Only these two gates were unique to it.
       - name: GC-stress pass (typed-codegen rooting guard)
         # Runs curated rooting-exercising tests under SPROUT_GC_STRESS=1 (collect
         # on every allocation). Default-threshold greens hide use-after-free
         # rooting bugs; this fails loudly. See justfile `test-stress`.
         run: just test-stress
 
-      - name: CPR differential check (--emit-ir vs --use-ir-codegen)
-        # Compares external function signatures emitted by both codegen paths
-        # on the shared-OK corpus.  Intersection-side divergence = candidate
-        # CPR/ABI parity bug.  Allowlist: tests/CPR_DIFF_ALLOWLIST.
+      - name: CPR differential check (--use-direct-codegen vs --use-ir-codegen)
+        # Compares external function signatures emitted by the direct and typed
+        # codegen paths on the shared-OK corpus. Intersection-side divergence =
+        # candidate CPR/ABI parity bug. Allowlist: tests/CPR_DIFF_ALLOWLIST.
         run: just cpr-differential-check
