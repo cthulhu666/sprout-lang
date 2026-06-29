@@ -802,10 +802,12 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
            fresh_name(name_prefix, idx + 1), idx + 2))
   | typed_ast.TChar ch _ _ ->
       # Char is stored as a UTF-8 string pointer (same ABI as String).
-      # Lower to IRStrConst with char_to_string(ch) as the value.
-      # Mirrors codegen.sprout TChar arm: emit_str_ptr(em, char_to_string(ch)).
+      # ch is the Unicode codepoint (CharExpr/TChar now carry an Int).  Encode it
+      # to its UTF-8 String via char_to_str and lower to IRStrConst — same string
+      # constant the heap-Char representation produced.
+      # Mirrors codegen.sprout TChar arm: emit_str_ptr(em, char_to_str(ch)).
       Ok((Nil, cur_label,
-           list_append(cur_ops, Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_string(ch)), Nil)),
+           list_append(cur_ops, Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_str(ch)), Nil)),
            fresh_name(name_prefix, idx + 1), idx + 2))
   | typed_ast.TUnit _ _ ->
       # Direct codegen convention: Unit has no meaningful value; emit i64 0
@@ -3001,7 +3003,7 @@ fn translate_match_arm_string(s: String, body: typed_ast.TypedExpr,
 #   idx+2 = IRStrEq i64 Bool result
 #   idx+3 = IRConst 1 (the true sentinel for comparison)
 #   idx+4 = IRICmp i1 result (used in IRCondBr)
-fn translate_match_arm_char(ch: Char, body: typed_ast.TypedExpr,
+fn translate_match_arm_char(ch: Int, body: typed_ast.TypedExpr,
                              rest_arms: List typed_ast.TypedMatchBranch,
                              branch_idx: Int, base_idx: Int,
                              dispatch_lbl: String, join_lbl: String,
@@ -3022,7 +3024,7 @@ fn translate_match_arm_char(ch: Char, body: typed_ast.TypedExpr,
   translate_match_arm_body_with_test(body, rest_arms, branch_idx, base_idx,
     sprout_ir.IRBlock(dispatch_lbl,
       list_append(
-        Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_string(ch)),
+        Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 1), fresh_name(name_prefix, idx), char_to_str(ch)),
         Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx + 2), s_name,
                                fresh_name(name_prefix, idx + 1)),
         Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 3), 1),

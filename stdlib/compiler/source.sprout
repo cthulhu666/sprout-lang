@@ -86,31 +86,34 @@ export fn cursor_byte_offset(cursor: SourceCursor) -> Int =
 fn is_cont(byte: Int) -> Bool =
   byte >= 128 && byte < 192
 
-# decode_char_at: total UTF-8 decode at a byte offset.  Returns the codepoint as
-# a Char plus the next byte offset, or Nothing at end-of-input, out-of-range,
-# truncated, or invalid input.  Codepoint assembly is plain arithmetic (no
-# bitwise ops needed): the low bits of a lead byte are (byte - range_base), and
-# each continuation contributes 6 bits == one base-64 digit.
-export fn decode_char_at(b: Bytes, i: Int) -> Maybe (Char, Int) =
+# decode_codepoint_at: total UTF-8 decode at a byte offset.  Returns the raw
+# Unicode codepoint as an Int plus the next byte offset, or Nothing at
+# end-of-input, out-of-range, truncated, or invalid input.  Codepoint assembly is
+# plain arithmetic (no bitwise ops needed): the low bits of a lead byte are
+# (byte - range_base), and each continuation contributes 6 bits == one base-64
+# digit.  Representation-stable: this is pure byte arithmetic, independent of how
+# Char is represented at runtime, so the parser can use it to record char-literal
+# codepoints in the AST without depending on the Char representation.
+export fn decode_codepoint_at(b: Bytes, i: Int) -> Maybe (Int, Int) =
   match bytes_get(b, i) with
   | Nothing -> Nothing
   | Just b0 ->
-      if b0 < 128 then Just((char_from_codepoint(b0), i + 1))
+      if b0 < 128 then Just((b0, i + 1))
       else if b0 < 192 then Nothing
       else if b0 < 224 then decode2(b, i, b0)
       else if b0 < 240 then decode3(b, i, b0)
       else if b0 < 248 then decode4(b, i, b0)
       else Nothing
 
-fn decode2(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
+fn decode2(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
   match bytes_get(b, i + 1) with
   | Nothing -> Nothing
   | Just b1 ->
       if is_cont(b1) then
-        Just((char_from_codepoint((b0 - 192) * 64 + (b1 - 128)), i + 2))
+        Just(((b0 - 192) * 64 + (b1 - 128), i + 2))
       else Nothing
 
-fn decode3(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
+fn decode3(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
   match bytes_get(b, i + 1) with
   | Nothing -> Nothing
   | Just b1 ->
@@ -118,10 +121,10 @@ fn decode3(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
       | Nothing -> Nothing
       | Just b2 ->
           if is_cont(b1) && is_cont(b2) then
-            Just((char_from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)), i + 3))
+            Just(((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128), i + 3))
           else Nothing
 
-fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
+fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
   match bytes_get(b, i + 1) with
   | Nothing -> Nothing
   | Just b1 ->
@@ -132,8 +135,24 @@ fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Char, Int) =
           | Nothing -> Nothing
           | Just b3 ->
               if is_cont(b1) && is_cont(b2) && is_cont(b3) then
-                Just((char_from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)), i + 4))
+                Just(((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128), i + 4))
               else Nothing
+
+# decode_char_at: total UTF-8 decode at a byte offset.  Returns the codepoint as
+# a Char plus the next byte offset.  Thin wrapper over decode_codepoint_at.
+export fn decode_char_at(b: Bytes, i: Int) -> Maybe (Char, Int) =
+  match decode_codepoint_at(b, i) with
+  | Nothing -> Nothing
+  | Just (cp, next) -> Just((char_from_codepoint(cp), next))
+
+# first_codepoint: the Unicode codepoint of the first character of s, or Nothing
+# if s is empty.  Representation-stable; the parser uses this to store char-literal
+# codepoints in the AST without going through str_char_at (whose result type flips
+# with the Char representation).
+export fn first_codepoint(s: String) -> Maybe Int =
+  match decode_codepoint_at(bytes_from_utf8(s), 0) with
+  | Nothing -> Nothing
+  | Just (cp, _) -> Just(cp)
 
 # ── Cursor scanning ──────────────────────────────────────────────────────────
 

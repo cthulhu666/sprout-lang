@@ -1024,8 +1024,8 @@ fn escape_str_content(s: String, bytes: Bytes, i: Int, total: Int, acc: List Str
           escape_str_content(s, bytes, next_i, total, Cons(char_to_string(ch), acc))
 
 # O(1). Encodes a single Char as (Char "<c>") using quoted encoding.
-fn encode_ast_char(c: Char) -> String =
-  string_concat_many(["(Char ", encode_quoted_str(char_to_string(c)), ")"])
+fn encode_ast_char(c: Int) -> String =
+  string_concat_many(["(Char ", encode_quoted_str(char_to_str(c)), ")"])
 
 # O(1). Encodes a Bool as bare atom.
 fn encode_ast_bool(b: Bool) -> String =
@@ -1457,8 +1457,9 @@ fn read_bool_atom(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Bool, I
       else if atom == "false" then Just((false, j))
       else Nothing
 
-# Decodes (Char "<c>") — a single codepoint encoded as a quoted string.
-fn decode_char_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Char, Int) =
+# Decodes (Char "<c>") — a single codepoint encoded as a quoted string.  Returns
+# the codepoint as an Int (CharExpr/CharPattern carry the codepoint, not a Char).
+fn decode_char_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Int, Int) =
   match expect_char(s, bytes, i, total, '(') with
   | Nothing -> Nothing
   | Just j ->
@@ -1469,12 +1470,12 @@ fn decode_char_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Char, I
             match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, k, total), total) with
             | Nothing -> Nothing
             | Just (cs, m) ->
-                match source.decode_char_at(bytes_from_utf8(cs), 0) with
+                match source.decode_codepoint_at(bytes_from_utf8(cs), 0) with
                 | Nothing -> Nothing
-                | Just (c, _) ->
+                | Just (cp, _) ->
                     match expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') with
                     | Nothing -> Nothing
-                    | Just end -> Just((c, end))
+                    | Just end -> Just((cp, end))
           else Nothing
 
 # Decodes (Pos idx line col) into source.SourcePos.

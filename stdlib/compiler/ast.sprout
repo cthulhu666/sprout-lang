@@ -20,7 +20,7 @@ export type Pattern (..) =
   | IntPattern Int source.SourcePos
   | BoolPattern Bool source.SourcePos
   | StringPattern String source.SourcePos
-  | CharPattern Char source.SourcePos
+  | CharPattern Int source.SourcePos
   | UnitPattern source.SourcePos
   | TuplePattern (List Pattern) source.SourcePos
   | ConstructorPattern String (List Pattern) source.SourcePos
@@ -52,7 +52,7 @@ export type Expr (..) =
   | BoolExpr Bool source.SourcePos
   | StringExpr String source.SourcePos
   | StringTemplateExpr (List TemplateExprPart) source.SourcePos
-  | CharExpr Char source.SourcePos
+  | CharExpr Int source.SourcePos
   | UnitExpr source.SourcePos
   | TupleExpr (List Expr) source.SourcePos
   | IfExpr Expr Expr Expr source.SourcePos

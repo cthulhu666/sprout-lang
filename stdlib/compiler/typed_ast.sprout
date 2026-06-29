@@ -34,7 +34,7 @@ export type TypedExpr (..) =
   | TInt Int types.Type source.SourcePos
   | TBool Bool types.Type source.SourcePos
   | TString String types.Type source.SourcePos
-  | TChar Char types.Type source.SourcePos
+  | TChar Int types.Type source.SourcePos
   | TUnit types.Type source.SourcePos
   | TTuple (List TypedExpr) types.Type source.SourcePos
   | TIf TypedExpr TypedExpr TypedExpr types.Type source.SourcePos

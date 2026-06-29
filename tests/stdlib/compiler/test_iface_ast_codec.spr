@@ -72,11 +72,13 @@ fn main() -> Unit !{IO} =
     assert_true(state, "StringExpr with backslash roundtrip",
       rt_expr(ast.StringExpr("a\\b", pos0())))
 
+    # CharExpr/CharPattern carry the Unicode codepoint as an Int (97 = 'a').
     assert_true(state, "CharExpr plain roundtrip",
-      rt_expr(ast.CharExpr('a', pos0())))
+      rt_expr(ast.CharExpr(97, pos0())))
 
+    # 10 = '\n'
     assert_true(state, "CharExpr newline roundtrip",
-      rt_expr(ast.CharExpr('\n', pos0())))
+      rt_expr(ast.CharExpr(10, pos0())))
 
     assert_true(state, "UnitExpr roundtrip",
       rt_expr(ast.UnitExpr(pos0())))
@@ -201,8 +203,9 @@ fn main() -> Unit !{IO} =
     assert_true(state, "StringPattern roundtrip",
       rt_pattern(ast.StringPattern("hello", pos0())))
 
+    # 122 = 'z'
     assert_true(state, "CharPattern roundtrip",
-      rt_pattern(ast.CharPattern('z', pos0())))
+      rt_pattern(ast.CharPattern(122, pos0())))
 
     assert_true(state, "UnitPattern roundtrip",
       rt_pattern(ast.UnitPattern(pos0())))

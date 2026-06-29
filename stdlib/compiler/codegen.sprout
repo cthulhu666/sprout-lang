@@ -1087,7 +1087,7 @@ fn emit_pattern_test(pat: ast.Pattern, scrut: Value, ctx: CgCtx, em: Emitter) ->
         val_make(ll_i1(), tmp)
   | ast.CharPattern ch _ ->
       do
-        lit_v <- emit_str_ptr(em, char_to_string(ch))
+        lit_v <- emit_str_ptr(em, char_to_str(ch))
         scrut_ptr <- coerce_value(scrut, ll_ptr(), em)
         tmp <- fresh_tmp(em)
         emit_template(em, `  ${tmp} = call i1 @str_eq(ptr ${val_ir (scrut_ptr)}, ptr ${val_ir (lit_v)})`)
@@ -1772,7 +1772,7 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
         coerce_value(p, ll_i64(), em)
   | typed_ast.TChar ch _ _ ->
       do
-        p <- emit_str_ptr(em, char_to_string(ch))
+        p <- emit_str_ptr(em, char_to_str(ch))
         coerce_value(p, ll_i64(), em)
   | typed_ast.TUnit _ _ ->
       val_make(ll_i64(), "0")

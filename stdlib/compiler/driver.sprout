@@ -97,7 +97,7 @@ fn dump_pat(p: ast.Pattern) -> String =
   | ast.IntPattern n _ -> sexp("int-pat", Cons(int_to_string(n), Nil))
   | ast.BoolPattern b _ -> sexp("bool-pat", Cons(bool_str(b), Nil))
   | ast.StringPattern s _ -> sexp("string-pat", Cons(q(s), Nil))
-  | ast.CharPattern ch _ -> sexp("char-pat", Cons(q(char_to_string(ch)), Nil))
+  | ast.CharPattern ch _ -> sexp("char-pat", Cons(q(char_to_str(ch)), Nil))
   | ast.UnitPattern _ -> "(unit-pat)"
   | ast.TuplePattern items _ -> sexp("tuple-pat", dump_pats(items))
   | ast.ConstructorPattern name args _ -> sexp("ctor-pat", Cons(q(name), dump_pats(args)))
@@ -145,7 +145,7 @@ fn dump_expr(e: ast.Expr) -> String =
   | ast.BoolExpr b _ -> sexp("bool", Cons(bool_str(b), Nil))
   | ast.StringExpr s _ -> sexp("string", Cons(q(s), Nil))
   | ast.StringTemplateExpr parts _ -> sexp("template-expr", dump_template_parts(parts))
-  | ast.CharExpr ch _ -> sexp("char", Cons(q(char_to_string(ch)), Nil))
+  | ast.CharExpr ch _ -> sexp("char", Cons(q(char_to_str(ch)), Nil))
   | ast.UnitExpr _ -> "(unit)"
   | ast.TupleExpr items _ -> sexp("tuple", dump_exprs(items))
   | ast.IfExpr cond then_ else_ _ ->
