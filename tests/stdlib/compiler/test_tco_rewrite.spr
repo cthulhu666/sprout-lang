@@ -97,6 +97,20 @@ fn make_single_arm_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRRet("%m1"), Nil))),
     Nil)))))))
 
+# A function with NO self-call at all: tco_collect finds nothing, so tco_rewrite
+# must return it byte-identical — params NOT renamed to $in, no tco_loop block.
+# This locks the no-op early-return path (distinct from make_non_tail_fn, which
+# DOES contain a self-call that is then filtered out as non-tail).
+fn make_no_self_call_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.inc",
+    Cons(("n", sprout_ir.IRTScalar), Nil),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%one", 1),
+      Cons(sprout_ir.IRIAdd("%r", "%n", "%one"),
+      Cons(sprout_ir.IRRet("%r"), Nil)))),
+    Nil))
+
 # A self-call whose result is used by a COMPUTATIONAL op before the return is NOT
 # in tail position — e.g. `r <- g(n-1); h(r); r` (path-compression in union-find:
 # `root <- find_root(..); ref_write(.., BoundTo(root)); root`).  The return value
@@ -127,6 +141,13 @@ fn make_non_tail_fn() -> sprout_ir.IRFunction =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    match ast_to_ir.tco_rewrite(make_no_self_call_fn(), 500) with
+    | (unchanged, _ni5) ->
+        do
+          let ncir = ir_lowering.lower_fn_with_table(unchanged, dict_empty())
+          assert_true(state, "no-self-call: not rewritten (no tco_loop)", string.contains(ncir, "tco_loop") == false)
+          assert_true(state, "no-self-call: param kept (not renamed to $in)", string.contains(ncir, "%n$in") == false)
+          assert_true(state, "no-self-call: define keeps plain param", string.contains(ncir, "define i64 @main.inc(i64 %n)"))
     match ast_to_ir.tco_rewrite(make_non_tail_fn(), 400) with
     | (nt, _ni4) ->
         do

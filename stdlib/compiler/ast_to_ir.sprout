@@ -3994,15 +3994,6 @@ fn tco_self_call_args(val: String, self_name: String, ops: List sprout_ir.IROp) 
           else tco_self_call_args(val, self_name, rest)
       | _ -> tco_self_call_args(val, self_name, rest)
 
-# Block label where `val` is defined by a self-call, plus its args.
-fn tco_find_self_call(val: String, self_name: String, blocks: List sprout_ir.IRBlock) -> Maybe (String, List String) =
-  match blocks with
-  | Nil -> Nothing
-  | Cons b rest ->
-      match tco_self_call_args(val, self_name, tco_block_ops(b)) with
-      | Just args -> Just((tco_block_label(b), args))
-      | Nothing -> tco_find_self_call(val, self_name, rest)
-
 # A tail-call hit: (pred_label, args, call_result, phi_block).
 # phi_block == "" means a direct `call; ret` (no phi incoming to drop).
 fn tco_collect(self_name: String, blocks: List sprout_ir.IRBlock, all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
@@ -4012,12 +4003,13 @@ fn tco_collect(self_name: String, blocks: List sprout_ir.IRBlock, all: List spro
       list_append(tco_hits_for_block(self_name, b, all), tco_collect(self_name, rest, all))
 
 fn tco_hits_for_block(self_name: String, b: sprout_ir.IRBlock, all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
-  match tco_ret_value(tco_block_ops(b)) with
+  match tco_ret_value(ops) with
   | Nothing -> Nil
   | Just rv ->
-      match tco_self_call_args(rv, self_name, tco_block_ops(b)) with
+      match tco_self_call_args(rv, self_name, ops) with
       | Just args -> Cons((tco_block_label(b), args, rv, ""), Nil)
       | Nothing -> tco_trace_phis(self_name, all, Cons(rv, Nil), set_empty(), Nil)
+  where ops = tco_block_ops(b)
 
 # Find the phi defining `val` anywhere: (phi_block_label, incomings).
 fn tco_find_phi(val: String, blocks: List sprout_ir.IRBlock) -> Maybe (String, List (String, String)) =
