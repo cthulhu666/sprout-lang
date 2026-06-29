@@ -147,30 +147,10 @@ fi
 sleep 3
 codeberg_curl GET "/pulls/$PR" > "$tmp" 2>/dev/null
 NEW_HEAD=$(jq -r '.head.sha' "$tmp")
-echo "PR#$PR: new head ${NEW_HEAD:0:12}; requeueing auto-merge"
-
-HTTP=$(curl -s -o /tmp/cm_requeue_${PR}.out -w "%{http_code}" \
-  -X POST "$API/pulls/$PR/merge" \
-  -H "Authorization: token $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"Do\":\"fast-forward-only\",\"head_commit_id\":\"$NEW_HEAD\",\"merge_when_checks_succeed\":true}")
-case "$HTTP" in
-  201)
-    echo "PR#$PR: auto-merge queued (HTTP 201) — ff-only, fires when CI passes"
-    ;;
-  405)
-    # Opaque 405 — could be "queue already armed" (fine) or "not
-    # ff-able" (would need another rebase). Check ancestry to decide.
-    if git merge-base --is-ancestor origin/master "origin/$HEAD_REF" 2>/dev/null; then
-      echo "PR#$PR: queue HTTP 405 but branch is ff-able — likely idempotent rejection (latch already armed). Trusting it."
-    else
-      escalate "queue HTTP 405 and branch is not ff-able vs master — another rebase needed"
-    fi
-    ;;
-  *)
-    BODY=$(cat /tmp/cm_requeue_${PR}.out 2>/dev/null || echo '(no body)')
-    escalate "requeue failed HTTP=$HTTP body=$BODY"
-    ;;
-esac
-
-echo "PR#$PR: DONE (push complete, requeue submitted, monitor separately)"
+# Do NOT requeue an auto-merge here. On this repo (no required status checks)
+# `merge_when_checks_succeed:true` fast-forwards immediately, landing the
+# rebased head BEFORE its CI runs (the bug this skill exists to avoid). The
+# caller re-launches pr-monitor.sh on $NEW_HEAD and performs the explicit
+# ff-merge only after the reliable CI signal goes green (SKILL.md Step 3).
+echo "PR#$PR: new head ${NEW_HEAD:0:12} pushed — re-monitor for CI green, then ff-merge (do NOT auto-queue)"
+echo "PR#$PR: DONE (push complete; caller resumes monitoring)"

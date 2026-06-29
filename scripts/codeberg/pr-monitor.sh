@@ -46,7 +46,25 @@ while :; do
     if [ "$sha" = "none" ]; then
       continue
     fi
-    ci=$(codeberg_curl GET "/commits/$sha/status" | jq -r '.state // "no-status"')
+    # CI signal from Forgejo Actions run statuses — NOT the combined
+    # commit-status endpoint, which ghosts as "pending" forever on this repo
+    # (see project_codeberg_null_status_ghost). A SHA accumulates superseded
+    # runs, so a re-run leaves a `cancelled`/`skipped` entry alongside the real
+    # `success` — those must NOT count as failure. Aggregate per-job `status`:
+    #   failure/error          -> failure (real red)
+    #   running/waiting/pending -> pending (still going)
+    #   >=1 success, none above -> success
+    #   only cancelled/skipped  -> no-status (nothing real yet; keep waiting)
+    sel=$(codeberg_curl GET "/actions/tasks?limit=50" \
+          | jq -c --arg sha "${sha:0:7}" '[(.workflow_runs // .tasks // [])[] | select((.head_sha[0:7])==$sha)]' 2>/dev/null || echo '[]')
+    n_fail=$(echo "$sel" | jq '[.[]|select(.status=="failure" or .status=="error")]|length')
+    n_run=$(echo "$sel" | jq '[.[]|select(.status=="running" or .status=="waiting" or .status=="pending" or .status=="unknown")]|length')
+    n_ok=$(echo "$sel" | jq '[.[]|select(.status=="success")]|length')
+    if   [ "$n_fail" -gt 0 ]; then ci=failure
+    elif [ "$n_run"  -gt 0 ]; then ci=pending
+    elif [ "$n_ok"   -gt 0 ]; then ci=success
+    else ci=no-status
+    fi
     cur="PR#$pr: state=$pr_state merged=$merged ci=$ci sha=${sha:0:7}"
     if [ "$cur" != "${prev[$pr]:-}" ]; then
       echo "$cur"

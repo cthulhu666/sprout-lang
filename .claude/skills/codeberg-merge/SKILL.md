@@ -91,23 +91,21 @@ Skip checks (not escalations — log "skipping" and `continue`):
 
 If none of the above trigger, proceed to Step 2.
 
-### Step 2 — Queue the auto-merge
+### Step 2 — Proceed to monitoring (do NOT auto-queue the merge)
 
-```sh
-HTTP=$(curl -s -o /tmp/cm_queue_$PR.out -w "%{http_code}" \
-  -X POST "$API/pulls/$PR/merge" \
-  -H "Authorization: token $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"Do\":\"fast-forward-only\",\"head_commit_id\":\"$HEAD_SHA\",\"merge_when_checks_succeed\":true}")
-```
+**Do NOT POST the merge here.** This repo has **no branch protection /
+required status checks**, so Codeberg's `merge_when_checks_succeed:true` does
+NOT gate — it fast-forwards *immediately*, before CI even starts (confirmed on
+PR #102, 2026-06-29: queued HTTP 201, then merged while jobs were still
+`status=running`; see memory `project_codeberg_merge_via_tea_api`). Trusting it
+silently lands code before CI is green.
 
-- `HTTP=201` → queued, proceed to Step 3.
-- `HTTP=405` with body containing "checks have already succeeded" → CI
-  already green and master moved; go straight to Step 4 (rebase) without
-  polling.
-- `HTTP=500` with empty body → master is already ahead at this moment;
-  go straight to Step 4 (rebase).
-- Any other code → `ESCALATION: PR#$PR queue failed HTTP=$HTTP body=<see /tmp/cm_queue_$PR.out>`.
+Instead, gate the merge on CI yourself: record `HEAD_SHA` and proceed straight
+to Step 3. The monitor reports a RELIABLE CI signal (derived from
+`actions/tasks` run statuses, not the ghost commit-status), and Step 3 performs
+the fast-forward merge **explicitly, only once that signal is `success`**. This
+is correct even if branch protection is later enabled — the explicit merge
+fires after green, by which point any required checks are satisfied too.
 
 ### Step 3 — Wait for a terminal state via Monitor
 
@@ -139,10 +137,18 @@ For each event line you receive, decide:
 - `merged=true` → `PR#$PR: merged ✓`, mark done.
 - `state=closed` && `merged=false` → `ESCALATION: PR#$PR closed without merge`, mark done.
 - `ci=failure` → `ESCALATION: PR#$PR CI failed at $SHA`, mark done.
-- `ci=success` && `state=open` && `merged=false` → auto-merge did not
-  fire (master moved during CI). Use `TaskStop` on the monitor, run
-  Step 4 (rebase + requeue), then relaunch the monitor for any PRs
-  not yet done.
+- `ci=success` && `state=open` && `merged=false` → **CI is green; merge now.**
+  `TaskStop` the monitor, then fast-forward merge explicitly:
+  ```sh
+  HTTP=$(curl -s -o /tmp/cm_merge_$PR.out -w "%{http_code}" \
+    -X POST "$API/pulls/$PR/merge" \
+    -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
+    -d "{\"Do\":\"fast-forward-only\",\"head_commit_id\":\"$SHA\"}")
+  ```
+  - `HTTP=200`/`201` → `PR#$PR: merged ✓`, mark done.
+  - `HTTP=405`/`409` (not fast-forwardable — master moved during CI) → run
+    Step 4 (rebase), then relaunch the monitor for any PRs not yet done.
+  - any other code → `ESCALATION: PR#$PR ff-merge failed HTTP=$HTTP body=<see /tmp/cm_merge_$PR.out>`.
 - Otherwise (`ci=pending`, `ci=no-status`) → no action; the monitor
   continues.
 
@@ -150,7 +156,7 @@ Wall-clock cap: 4 hours total. Beyond that, `TaskStop` the monitor and
 escalate any still-open PRs with
 `ESCALATION: PR#$PR — 4-hour cap reached`.
 
-### Step 4 — Rebase + regenerate seed + requeue
+### Step 4 — Rebase + regenerate seed (then re-monitor)
 
 Autonomous-handling path for the master-moved race. The full Step 4
 algorithm lives in `scripts/codeberg/pr-rebase.sh`:
@@ -170,10 +176,13 @@ The script handles, in order:
 8. Commit the regenerated seed iff it actually differs from HEAD.
 9. `git push --force-with-lease origin <push-refspec>`.
 10. Restore the original working branch.
-11. Refetch the new head SHA and POST the auto-merge requeue with `merge_when_checks_succeed: true`.
+11. Report the new head SHA. It does NOT requeue an auto-merge (that would
+    fast-forward the rebased head before its CI runs — the bug this skill
+    avoids); the caller re-monitors and merges explicitly once CI is green.
 
 The script's exit code tells you everything:
-- **0** → success. PR is force-pushed and auto-merge requeued. Resume monitoring.
+- **0** → success. PR is force-pushed. Relaunch the monitor on the new head;
+  CI re-runs, and Step 3 performs the explicit ff-merge once it goes green.
 - **1** → escalation. The script prints `ESCALATION: PR#<N> <reason>` to stdout before exiting. Stop work on this PR; surface to the human/supervisor.
 - **2** → usage error (wrong arg count).
 
@@ -183,8 +192,8 @@ For tooling-only PRs, the run completes in well under a minute and can
 be run foreground.
 
 After a successful `pr-rebase.sh`, relaunch the Monitor on any PRs not
-yet in a done state — the requeue is in place but you still need to
-watch for terminal state.
+yet in a done state — CI re-runs on the new head, and Step 3's
+`ci=success` handler performs the explicit ff-merge once it is green.
 
 ## Bounds
 
