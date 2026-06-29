@@ -126,7 +126,7 @@ export type IROp (..) =
   #   <result>$ptr = inttoptr i64 <tuple-ssa> to ptr
   #   <result>$gep = getelementptr i64, ptr <result>$ptr, i64 <field-idx>
   #   <result>     = load i64, ptr <result>$gep
-  | IRGetTupleField String String Int
+  | IRGetTupleField String String Int IRType
   | IRICmp String String String String
   | IRBr String
   | IRCondBr String String String
@@ -389,7 +389,7 @@ fn print_op(op: IROp) -> String =
   | IRLoadGlobal r name -> "    " ++ r ++ " = load_global @" ++ name
   | IRStoreGlobal name v -> "    store_global @" ++ name ++ ", " ++ v
   | IRMakeTuple r args -> "    " ++ r ++ " = make_tuple(" ++ print_call_args(args) ++ ")"
-  | IRGetTupleField r t idx -> "    " ++ r ++ " = get_tuple_field " ++ t ++ ", " ++ int_to_string(idx)
+  | IRGetTupleField r t idx _ -> "    " ++ r ++ " = get_tuple_field " ++ t ++ ", " ++ int_to_string(idx)
   | IRICmp r pred a b -> "    " ++ r ++ " = icmp " ++ pred ++ " " ++ a ++ ", " ++ b
   | IRBr lbl -> "    br " ++ lbl
   | IRCondBr cond t e -> "    condbr " ++ cond ++ ", " ++ t ++ ", " ++ e

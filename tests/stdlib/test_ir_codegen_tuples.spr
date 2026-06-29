@@ -45,5 +45,18 @@ fn mid_of_triple(t: (Int, Int, Int)) -> Int =
 fn round_trip(a: Int, b: Int) -> Int =
   fst(make_pair(a, b)) + snd(make_pair(a, b))
 
+# Tuple holding a String field (heap value) — coverage gap for the IRGetTupleField
+# kind field added in sprout_ir.sprout.  Ensures extraction of a heap-typed element
+# round-trips correctly (field index 0 = String, field index 1 = Int).
+fn make_labeled(s: String, n: Int) -> (String, Int) = (s, n)
+
+fn get_label(p: (String, Int)) -> String =
+  match p with
+  | (lbl, _) -> lbl
+
+fn get_count(p: (String, Int)) -> Int =
+  match p with
+  | (_, n) -> n
+
 # Trivial main — IR path requires `() : Unit` until PR 8 lands do/IO.
 fn main() -> Unit !{IO} = ()

@@ -1069,7 +1069,7 @@ fn do_bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           do_bind_tuple_items(rest_items, scrut_name, idx + 1, field_idx + 1,
                               name_prefix,
                               Cons(sprout_ir.IRGetTupleField(fresh_name(name_prefix, idx),
-                                                             scrut_name, field_idx),
+                                                             scrut_name, field_idx, sprout_ir.IRTUnknown),
                                    acc_ops),
                               dict_set(v, fresh_name(name_prefix, idx), acc_captures))
       | ast.TuplePattern inner_items _ ->
@@ -1077,7 +1077,7 @@ fn do_bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           | field_ssa ->
               match do_bind_tuple_items(inner_items, field_ssa, idx + 1, 0,
                                         name_prefix,
-                                        Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                                        Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx, sprout_ir.IRTUnknown),
                                              acc_ops),
                                         acc_captures) with
               | Err msg -> Err(msg)
@@ -2320,7 +2320,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           bind_tuple_items(rest_items, scrut_name, idx + 1, field_idx + 1,
                            name_prefix,
                            Cons(sprout_ir.IRGetTupleField(fresh_name(name_prefix, idx),
-                                                          scrut_name, field_idx),
+                                                          scrut_name, field_idx, sprout_ir.IRTUnknown),
                                 cur_ops),
                            dict_set(v, fresh_name(name_prefix, idx), acc_captures),
                            cur_lbl, miss_lbl, ctors, acc_extra)
@@ -2329,7 +2329,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           match fresh_name(name_prefix, idx) with
           | field_ssa ->
               match bind_tuple_items(inner_items, field_ssa, idx + 1, 0, name_prefix,
-                                     Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                                     Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx, sprout_ir.IRTUnknown),
                                           cur_ops),
                                      acc_captures, cur_lbl, miss_lbl, ctors, acc_extra) with
               | Err msg -> Err(msg)
@@ -2359,7 +2359,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
                                   | inner_lbl ->
                                       match list_append(
                                         list_reverse(cur_ops),
-                                        Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                                        Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx, sprout_ir.IRTUnknown),
                                         Cons(sprout_ir.IRGetTag(tag_ssa, field_ssa),
                                         Cons(sprout_ir.IRConst(c_ssa, nested_tag),
                                         Cons(sprout_ir.IRICmp(cmp_ssa, "eq", tag_ssa, c_ssa),
@@ -2392,7 +2392,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
               | inner_lbl ->
                   match list_append(
                     list_reverse(cur_ops),
-                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx, sprout_ir.IRTScalar),
                     Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 1), n),
                     Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 2), "eq",
                                           field_ssa,
@@ -2419,7 +2419,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
               | inner_lbl ->
                   match list_append(
                     list_reverse(cur_ops),
-                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx, sprout_ir.IRTScalar),
                     Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx + 1),
                                            if b then 1 else 0),
                     Cons(sprout_ir.IRICmp(fresh_name(name_prefix, idx + 2), "eq",
@@ -2450,7 +2450,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
               | inner_lbl ->
                   match list_append(
                     list_reverse(cur_ops),
-                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx),
+                    Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx, sprout_ir.IRTUnknown),
                     Cons(sprout_ir.IRStrConst(fresh_name(name_prefix, idx + 2),
                                               fresh_name(name_prefix, idx + 1), s),
                     Cons(sprout_ir.IRStrEq(fresh_name(name_prefix, idx + 3),

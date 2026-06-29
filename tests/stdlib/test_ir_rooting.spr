@@ -242,12 +242,34 @@ fn test9_program() -> sprout_ir.IRProgram =
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
         Cons(sprout_ir.IRMakeTuple("%tup", Cons("%a", Nil)),
-        Cons(sprout_ir.IRGetTupleField("%x", "%tup", 0),
+        Cons(sprout_ir.IRGetTupleField("%x", "%tup", 0, sprout_ir.IRTHeap),
         Cons(sprout_ir.IRStrConst("%c1", "%c1_raw", "c"),
         Cons(sprout_ir.IRStrConst("%c2", "%c2_raw", "d"),
         Cons(sprout_ir.IRStrConcat("%cd", "%c1", "%c2"),
         Cons(sprout_ir.IRStrConcat("%r", "%x", "%cd"),
         Cons(sprout_ir.IRRet("%r"), Nil))))))))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# Test 14: IRGetTupleField with an IRTScalar kind is NOT rooted across a trigger.
+#
+# Same shape as Test 9, but the extracted field %x carries kind IRTScalar (e.g.
+# an Int field).  A scalar is never a managed pointer, so op_produces_simple_heap
+# returns Nothing for it: %x does not enter heap_origin and gets no root across
+# the %cd concat.  Only %a (the heap tuple operand) is rooted at the tuple build.
+# Expected: exactly 1 push (vs Test 9's 2).  This locks the kind-honoring path.
+fn test14_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("tuple_extract_scalar_live", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRStrConst("%a", "%a_raw", "a"),
+        Cons(sprout_ir.IRMakeTuple("%tup", Cons("%a", Nil)),
+        Cons(sprout_ir.IRGetTupleField("%x", "%tup", 0, sprout_ir.IRTScalar),
+        Cons(sprout_ir.IRStrConst("%c1", "%c1_raw", "c"),
+        Cons(sprout_ir.IRStrConst("%c2", "%c2_raw", "d"),
+        Cons(sprout_ir.IRStrConcat("%cd", "%c1", "%c2"),
+        Cons(sprout_ir.IRIAdd("%y", "%x", "%x"),
+        Cons(sprout_ir.IRRet("%y"), Nil))))))))),
       Nil)),
     Nil), Nil, Nil, Nil)
 
@@ -422,6 +444,11 @@ fn main() -> Unit !{IO} =
     # 2 pushes: %a at the tuple build, %x across the %cd concat.
     assert_eq(state, "T9: two push_i64_root (tuple operand + extracted value across trigger)",
               count(lower(test9_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+
+    # --- Test 14: scalar-kind IRGetTupleField result is NOT rooted (vs Test 9).
+    # 1 push: only %a at the tuple build; the scalar %x needs no root.
+    assert_eq(state, "T14: one push_i64_root (scalar tuple field skipped across trigger)",
+              count(lower(test14_program()), "call i64 @sprout_gc_push_i64_root"), 1)
 
     # --- Test 10: value live across IRMakeTuple is rooted (IRMakeTuple is a trigger).
     assert_eq(state, "T10: one push_i64_root (heap value live across IRMakeTuple)",

@@ -125,7 +125,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
         int_to_string(list_length(args) * 8) ++ ")\n" ++
       "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
       lower_tuple_stores(r, args, 0)
-  | sprout_ir.IRGetTupleField r t idx ->
+  | sprout_ir.IRGetTupleField r t idx _ ->
       "  " ++ r ++ "$ptr = inttoptr i64 " ++ t ++ " to ptr\n" ++
       "  " ++ r ++ "$gep = getelementptr i64, ptr " ++ r ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
       "  " ++ r ++ " = load i64, ptr " ++ r ++ "$gep"

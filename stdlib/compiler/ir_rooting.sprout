@@ -82,7 +82,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false
   | sprout_ir.IRStoreGlobal _ _ -> false
-  | sprout_ir.IRGetTupleField _ _ _ -> false
+  | sprout_ir.IRGetTupleField _ _ _ _ -> false
   | sprout_ir.IRICmp _ _ _ _ -> false
   | sprout_ir.IRBr _ -> false
   | sprout_ir.IRCondBr _ _ _ -> false
@@ -138,10 +138,13 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   # A tuple blob (@sprout_alloc_tuple_blob) is heap; a value held live across a
   # later trigger must be rooted.
   | sprout_ir.IRMakeTuple r _ -> Just(r)
-  # IRGetTupleField extracts a tuple field.  The op carries no kind, so treat
-  # the result conservatively as heap (it commonly carries List/ADT values,
+  # IRGetTupleField extracts a tuple field.  When kind is IRTScalar the result
+  # is a scalar; otherwise treat as heap (it commonly carries List/ADT values,
   # e.g. the accumulator returned from maybe_wrap's (List IROp, Int) tuple).
-  | sprout_ir.IRGetTupleField r _ _ -> Just(r)
+  | sprout_ir.IRGetTupleField r _ _ kind ->
+      match kind with
+      | sprout_ir.IRTScalar -> Nothing
+      | _ -> Just(r)
   # IRAbortMatch defines no value (/code-review fix #15: void noreturn).
   | sprout_ir.IRAbortMatch -> Nothing
   # Width-conversion ops produce i64/i1 scalars — never heap.
@@ -255,7 +258,7 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRLoadGlobal _ _ -> Nil
   | sprout_ir.IRStoreGlobal _ v -> Cons(v, Nil)
   | sprout_ir.IRMakeTuple _ args -> args
-  | sprout_ir.IRGetTupleField _ t _ -> Cons(t, Nil)
+  | sprout_ir.IRGetTupleField _ t _ _ -> Cons(t, Nil)
   | sprout_ir.IRICmp _ _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRBr _ -> Nil
   | sprout_ir.IRCondBr cond _ _ -> Cons(cond, Nil)
@@ -302,7 +305,7 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRINeg r _ -> Just(r)
   | sprout_ir.IRLoadGlobal r _ -> Just(r)
   | sprout_ir.IRMakeTuple r _ -> Just(r)
-  | sprout_ir.IRGetTupleField r _ _ -> Just(r)
+  | sprout_ir.IRGetTupleField r _ _ _ -> Just(r)
   | sprout_ir.IRICmp r _ _ _ -> Just(r)
   | sprout_ir.IRPhi r _ _ -> Just(r)
   | sprout_ir.IRCall r _ _ _ -> Just(r)
@@ -571,7 +574,7 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false
   | sprout_ir.IRStoreGlobal _ _ -> false
-  | sprout_ir.IRGetTupleField _ _ _ -> false
+  | sprout_ir.IRGetTupleField _ _ _ _ -> false
   | sprout_ir.IRICmp _ _ _ _ -> false
   | sprout_ir.IRBr _ -> false
   | sprout_ir.IRCondBr _ _ _ -> false
