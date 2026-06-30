@@ -96,6 +96,9 @@ jobs:
       - name: Run stdlib tests (stage-1)
         run: just test-stdlib-stage1
 
+      - name: Negative type-checking conformance (stage-1)
+        run: just test-type-errors
+
       - name: Verify examples compile (stage-1)
         run: just compile-examples-stage1
 

@@ -1,0 +1,31 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# Regression guard for the dict-resolution north-star refactor.
+#
+# Nested ToString over constrained container instances must keep threading the
+# correct inner element dictionaries.  These valid cases must continue to render
+# correctly while the unsatisfiable case (`to_string([()])`, no `ToString ()`
+# instance) is turned from a runtime SIGSEGV into a clean compile-time error.
+# The negative case lives in tests/conformance/type_error/ (see plan doc).
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(
+      state,
+      "List of List renders with inner List dict",
+      to_string([[1]]) == "[[1]]"
+    )
+    assert_true(
+      state,
+      "List of Maybe renders with inner Maybe dict",
+      to_string([Just(1)]) == "[Just(1)]"
+    )
+    assert_true(
+      state,
+      "List of tuple renders with inner tuple dict",
+      to_string([(1, 2)]) == "[(1, 2)]"
+    )
+
+    summary(state)

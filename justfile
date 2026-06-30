@@ -236,7 +236,7 @@ debug-run file:
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1
+test: test-stdlib-stage1 test-type-errors
 
 [private]
 _test-stdlib stage:
@@ -518,6 +518,55 @@ _compile-examples stage xfail="":
 # (sentry_api now compiles under typed codegen — removed from xfail.)
 [group('examples')]
 compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
+
+# Negative type-checking conformance: each tests/conformance/type_error/<n>.spr must
+# be rejected by `--phase check` with output containing the substring in <n>.err.
+# (`--phase check` exits 0 even on type errors, so matching is by output content.)
+# xfail = fixtures whose expected diagnostic is not yet produced (tracked TODO).
+_test-type-errors stage xfail="":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE="{{stage}}"
+  XFAIL="{{xfail}}"
+  if [[ ! -x "./$STAGE" ]]; then
+    echo "ERROR: $STAGE not found" >&2; exit 1
+  fi
+  total_failed=0
+  total_xfail=0
+  for spr in tests/conformance/type_error/*.spr; do
+    [ -f "$spr" ] || continue
+    name="$(basename "${spr%.spr}")"
+    err="tests/conformance/type_error/$name.err"
+    if [[ ! -f "$err" ]]; then
+      echo "==> $name"; echo "  MISSING .err"; total_failed=$((total_failed + 1)); continue
+    fi
+    is_xfail=0
+    for xf in $XFAIL; do [[ "$name" == "$xf" ]] && is_xfail=1 && break; done
+    expected="$(cat "$err")"
+    out="$("./$STAGE" --phase check "{{stdlib_root}}" "$spr" 2>&1 || true)"
+    echo "==> $name"
+    if echo "$out" | grep -qF -- "$expected"; then
+      if [[ $is_xfail -eq 1 ]]; then echo "  UNEXPECTED MATCH (remove from xfail)"; total_failed=$((total_failed + 1))
+      else echo "  OK (rejected)"; fi
+    else
+      if [[ $is_xfail -eq 1 ]]; then echo "  xfail (expected diagnostic not yet produced)"; total_xfail=$((total_xfail + 1))
+      else echo "  FAILED: expected output to contain: $expected"; total_failed=$((total_failed + 1)); fi
+    fi
+  done
+  echo ""
+  [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail type-error fixture(s) xfail (expected)"
+  if [ "$total_failed" -gt 0 ]; then
+    echo "==> $total_failed type-error fixture(s) FAILED"
+    exit 1
+  fi
+  echo "==> All type-error fixtures rejected as expected"
+
+# Stage-1 negative type-checking gate.
+# xfail: overlapping-instance detection (duplicate_instance, overlapping_instance) and
+# do-block family-conflict diagnostics (stdlib_mixed_do_*) are not yet implemented;
+# missing_nested_instance is the north-star bug fix target (promote when M2 lands).
+[group('test')]
+test-type-errors: (_test-type-errors "build/compile_driver_bin_stage1" "duplicate_instance overlapping_instance stdlib_mixed_do_bind_family_conflict stdlib_mixed_do_wrong_final_family missing_nested_instance")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]

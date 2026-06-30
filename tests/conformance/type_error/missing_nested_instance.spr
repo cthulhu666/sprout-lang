@@ -1,0 +1,8 @@
+module main
+
+# `ToString (List a)` requires `ToString a`. There is no `ToString ()` instance,
+# so `to_string([()])` is unsatisfiable and must be rejected at compile time with
+# the same diagnostic as the direct `to_string(())` — not silently null-filled and
+# segfaulted at runtime (exit 139). Regression for the dict-resolution north star.
+
+fn main() -> Unit !{IO} = print(to_string([()]))
