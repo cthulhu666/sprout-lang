@@ -206,20 +206,15 @@ fn main() -> Unit !{IO} =
     assert_true(state, "mutual TCO cross-fn calls emit no stack-frame warning", list_length(mutual_warns) == 0)
 
     # Intrinsic signature table integrity (characterization guard for the
-    # append_sigs->single-literal merge: must keep all 46 entries, no drops).
-    assert_eq(state, "compiler_intrinsic_sigs has 46 entries",
-              list_length(codegen.compiler_intrinsic_sigs()), 46)
-    assert_true(state, "intrinsic table has sprout_make0 (first chunk)",
-                (match dict_get("sprout_make0", dict_from_list(codegen.compiler_intrinsic_sigs())) with
-                 | Just _ -> true
-                 | Nothing -> false))
-    assert_true(state, "intrinsic table has char_to_string (mid chunk)",
-                (match dict_get("char_to_string", dict_from_list(codegen.compiler_intrinsic_sigs())) with
-                 | Just _ -> true
-                 | Nothing -> false))
-    assert_true(state, "intrinsic table has llvm.stackrestore (last chunk)",
-                (match dict_get("llvm.stackrestore", dict_from_list(codegen.compiler_intrinsic_sigs())) with
-                 | Just _ -> true
-                 | Nothing -> false))
+    # append_sigs -> single-literal merge: must keep all 46 entries, no drops).
+    let sigs = codegen.compiler_intrinsic_sigs()
+    let sigs_dict = dict_from_list(sigs)
+    assert_eq(state, "compiler_intrinsic_sigs has 46 entries", list_length(sigs), 46)
+    assert_true(state, "intrinsic table has sprout_make0 (first entry)",
+                (match dict_get("sprout_make0", sigs_dict) with | Just _ -> true | Nothing -> false))
+    assert_true(state, "intrinsic table has char_to_string (mid entry)",
+                (match dict_get("char_to_string", sigs_dict) with | Just _ -> true | Nothing -> false))
+    assert_true(state, "intrinsic table has llvm.stackrestore (last entry)",
+                (match dict_get("llvm.stackrestore", sigs_dict) with | Just _ -> true | Nothing -> false))
 
     summary(state)
