@@ -372,13 +372,65 @@ fn test13_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Test 15: a heap value (%p) rooted in one block and live across a `br` into a
+# successor with its own trigger.  Exercises the block-end pop (emitted BEFORE
+# the terminator — an op after a terminator is invalid IR, so a placement bug
+# here would make this program fail to lower/compile, not silently mis-root) and
+# the re-seed-in-successor path.  %p is rooted across %x in `entry` (popped at the
+# block end, before `br`), then re-rooted across %z in `next` → exactly 2 pushes,
+# two pop_roots(i64 1).
+fn test15_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("cross_block", Cons(("p", sprout_ir.IRTHeap), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%x1", "%x1_raw", "x"),
+        Cons(sprout_ir.IRStrConst("%x2", "%x2_raw", "y"),
+        Cons(sprout_ir.IRStrConcat("%x", "%x1", "%x2"),
+        Cons(sprout_ir.IRBr("next"), Nil))))),
+      Cons(sprout_ir.IRBlock("next", Cons(
+        sprout_ir.IRStrConst("%z1", "%z1_raw", "z"),
+        Cons(sprout_ir.IRStrConst("%z2", "%z2_raw", "w"),
+        Cons(sprout_ir.IRStrConcat("%z", "%z1", "%z2"),
+        Cons(sprout_ir.IRStrConcat("%r", "%p", "%z"),
+        Cons(sprout_ir.IRRet("%r"), Nil)))))),
+      Nil))),
+    Nil), Nil, Nil, Nil)
+
+# ---------------------------------------------------------------------------
+# Test 16: interleaved (non-nested) lifetimes — %a dies while %b (defined later,
+# above it on the root stack) is still live.  %a cannot be popped from the middle,
+# so it is over-retained until %b dies, then both pop together.  This is the safe
+# degradation: %a pushed ONCE (not re-rooted), over-retained, never under-rooted.
+# Expected: 2 pushes (%a, %b), one pop_roots(i64 2) at the end.
+fn test16_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("interleaved", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%a1", "%a1_raw", "a"),
+        Cons(sprout_ir.IRStrConst("%a2", "%a2_raw", "b"),
+        Cons(sprout_ir.IRStrConcat("%a", "%a1", "%a2"),
+        Cons(sprout_ir.IRStrConst("%b1", "%b1_raw", "c"),
+        Cons(sprout_ir.IRStrConst("%b2", "%b2_raw", "d"),
+        Cons(sprout_ir.IRStrConcat("%b", "%b1", "%b2"),
+        Cons(sprout_ir.IRStrConst("%e1", "%e1_raw", "e"),
+        Cons(sprout_ir.IRStrConst("%e2", "%e2_raw", "f"),
+        Cons(sprout_ir.IRStrConcat("%t1", "%e1", "%e2"),
+        Cons(sprout_ir.IRStrConcat("%u1", "%a", "%t1"),
+        Cons(sprout_ir.IRStrConcat("%u2", "%b", "%u1"),
+        Cons(sprout_ir.IRRet("%u2"), Nil))))))))))))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
     # --- Test 13: long-block live_after characterization (push count locked).
-    assert_eq(state, "T13: long block push_i64_root count",
-              count(lower(test13_program()), "call i64 @sprout_gc_push_i64_root"), 16)
+    assert_eq(state, "T13: long block push count (coalesced O(N): 5 values, 5 pushes)",
+              count(lower(test13_program()), "call i64 @sprout_gc_push_i64_root"), 5)
+    assert_eq(state, "T13: one pop_roots(i64 5) (deferred batch pop at end of liveness)",
+              count(lower(test13_program()), "@sprout_gc_pop_roots(i64 5)"), 1)
 
     # --- Test 1: no rooting emitted.  Search for the call site, not the
     # declare line (the header always declares the runtime functions).
@@ -394,12 +446,10 @@ fn main() -> Unit !{IO} =
               count(lower(test2_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
 
     # --- Test 3: 4 total root pushes; at least one pop(2); at least two pop(1).
-    assert_eq(state, "T3: four push_i64_root calls",
-              count(lower(test3_program()), "call i64 @sprout_gc_push_i64_root"), 4)
-    assert_true(state, "T3: at least one pop_roots(i64 2)",
-                contains(lower(test3_program()), "@sprout_gc_pop_roots(i64 2)"))
-    assert_true(state, "T3: at least two pop_roots(i64 1)",
-                count(lower(test3_program()), "@sprout_gc_pop_roots(i64 1)") >= 2)
+    assert_eq(state, "T3: three push_i64_root calls (coalesced)",
+              count(lower(test3_program()), "call i64 @sprout_gc_push_i64_root"), 3)
+    assert_eq(state, "T3: one pop_roots(i64 3) (deferred batch pop)",
+              count(lower(test3_program()), "@sprout_gc_pop_roots(i64 3)"), 1)
 
     # --- Test 4: phi-of-heap — exactly one push.  Neither arm pre-roots; the
     # root sits in the join block before the %zw concat.
@@ -413,10 +463,10 @@ fn main() -> Unit !{IO} =
     # the following IRMakeCtor, and @sprout_makeN allocates before storing its
     # operands without SPROUT_HANDLE-protecting them, so %s must be rooted across
     # the make too → a second root.  (Both roots are pop_roots(i64 1).)
-    assert_eq(state, "T5: two push_i64_root (heap param across call AND make operand)",
-              count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 2)
-    assert_eq(state, "T5: two pop_roots(i64 1) for heap param",
-              count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 2)
+    assert_eq(state, "T5: one push_i64_root (heap param rooted once across call AND make)",
+              count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    assert_eq(state, "T5: one pop_roots(i64 1) (single coalesced root)",
+              count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
 
     # --- Test 6: IRMakeCtor operand rooted across the make (PR-A regression).
     # %a is dead after the make but must be rooted because @sprout_makeN
@@ -473,5 +523,19 @@ fn main() -> Unit !{IO} =
     assert_true(state, "header declares @sprout_gc_pop_roots",
                 contains(lower(test1_program()),
                          "declare i64 @sprout_gc_pop_roots(i64)"))
+
+    # --- Test 15: heap value rooted in entry, live across br, re-rooted in next.
+    # Guards the block-end pop (before the terminator) + successor re-seed.
+    assert_eq(state, "T15: two push_i64_root (rooted in entry, re-rooted in next)",
+              count(lower(test15_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+    assert_eq(state, "T15: two pop_roots(i64 1) (entry block-end + next end-of-liveness)",
+              count(lower(test15_program()), "@sprout_gc_pop_roots(i64 1)"), 2)
+
+    # --- Test 16: interleaved lifetimes — %a over-retained under live %b, popped
+    # together.  Pushed once each (no re-rooting); safe over-retention.
+    assert_eq(state, "T16: two push_i64_root (interleaved, each pushed once)",
+              count(lower(test16_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+    assert_eq(state, "T16: one pop_roots(i64 2) (over-retained %a popped with %b)",
+              count(lower(test16_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
 
     summary(state)

@@ -205,14 +205,16 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "T3: one pop_roots(i64 2) around the make",
               count(lower_with_roots(t3_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
 
-    # T4: three roots total — %first across %second (live-across, 1), then both
-    # heap operands %first and %second across WrapPair (operand-exposure, 2).
-    # The two Int args %c0/%c1 are scalars and are never rooted.
-    assert_eq(state, "T4: three push_i64_root (live-across + WrapPair operands)",
-              count(lower_with_roots(t4_program()), "call i64 @sprout_gc_push_i64_root"), 3)
-    assert_eq(state, "T4: one pop_roots(i64 1) (%first across %second)",
-              count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
-    assert_eq(state, "T4: one pop_roots(i64 2) (WrapPair operands)",
+    # T4: two roots total under stack coalescing — %first is rooted ONCE across
+    # %second's make and stays rooted (reused, not re-pushed) across WrapPair;
+    # %second is pushed at WrapPair.  The pop deferred to a single pop_roots(i64 2)
+    # at WrapPair (no intermediate pop_roots(i64 1)).  The Int args %c0/%c1 are
+    # scalars and are never rooted.
+    assert_eq(state, "T4: two push_i64_root (coalesced: %first rooted once across both makes)",
+              count(lower_with_roots(t4_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+    assert_eq(state, "T4: no pop_roots(i64 1) (%first not popped between makes)",
+              count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 1)"), 0)
+    assert_eq(state, "T4: one pop_roots(i64 2) (%first + %second at WrapPair)",
               count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
     assert_eq(state, "T4: two @sprout_make1 calls (SinglePtr)",
               count(lower_with_roots(t4_program()), "call i64 @sprout_make1(i64 11"), 2)
