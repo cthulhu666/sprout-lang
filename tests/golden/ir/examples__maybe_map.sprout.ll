@@ -14,6 +14,8 @@ declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
 declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
+declare ptr @llvm.stacksave()
+declare void @llvm.stackrestore(ptr)
 declare i64 @sprout_make0(i64)
 declare i64 @sprout_make1(i64, i64)
 declare i64 @sprout_make2(i64, i64, i64)
@@ -28,6 +30,7 @@ declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
+declare i64 @sprout_set_argv(i32, ptr)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
 declare i64 @analysis_declared_names_in_source(ptr)
@@ -88,7 +91,11 @@ entry:
 
 define i64 @__sprout_ir_eta_inc_0(i64 %env$, i64 %a0) {
 entry:
+  %t$0 = alloca i64
+  store i64 %a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
   %ret = call i64 @inc(i64 %a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
 
@@ -102,14 +109,22 @@ entry:
   store i64 %t$0, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$2 = call i64 @sprout_make1(i64 0, i64 %t$1)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$7 = alloca i64
+  store i64 %t$2, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$3 = call i64 @map(i64 %t$0, i64 %t$2)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$10 = alloca i64
+  store i64 %t$3, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$4 = call i64 @print_value(i64 %t$3)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
 }
 
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
+  %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
   %cname_ptr_0 = getelementptr inbounds [5 x i8], ptr @.cname.0, i64 0, i64 0
   %cfkinds_ptr_0 = getelementptr inbounds [2 x i8], ptr @.cfkinds.0, i64 0, i64 0
   %creg_0 = call i64 @sprout_register_ctor(i64 0, ptr %cname_ptr_0, i64 1, ptr %cfkinds_ptr_0)

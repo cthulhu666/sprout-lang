@@ -14,6 +14,8 @@ declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
 declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
+declare ptr @llvm.stacksave()
+declare void @llvm.stackrestore(ptr)
 declare i64 @sprout_make0(i64)
 declare i64 @sprout_make1(i64, i64)
 declare i64 @sprout_make2(i64, i64, i64)
@@ -28,6 +30,7 @@ declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
+declare i64 @sprout_set_argv(i32, ptr)
 declare i64 @int_range(i64, i64)
 declare i64 @analysis_check_source(ptr)
 declare i64 @analysis_declared_names_in_source(ptr)
@@ -83,13 +86,18 @@ join_1:
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = call i64 @sprout_make0(i64 0)
+  %t$3 = alloca i64
+  store i64 %t$0, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$1 = call i64 @color_code(i64 %t$0)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = call i64 @print_value(i64 %t$1)
   ret i64 %t$2
 }
 
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
+  %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
   %cname_ptr_0 = getelementptr inbounds [4 x i8], ptr @.cname.0, i64 0, i64 0
   %cfkinds_ptr_0 = getelementptr inbounds [1 x i8], ptr @.cfkinds.0, i64 0, i64 0
   %creg_0 = call i64 @sprout_register_ctor(i64 0, ptr %cname_ptr_0, i64 0, ptr %cfkinds_ptr_0)
