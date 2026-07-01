@@ -141,8 +141,20 @@ Wired into `compile_phase_check` (+ `_with_cache`, the REPL path). Validated:
      markers but may have no bundled `TInstanceDecl`. resolve now checks env markers
      for *existence* (same source of truth as infer.sprout:769) and keeps the decl
      table only for *context recursion* (it alone carries the `where` constraints).
-     Consequence: an imported *constrained* instance whose decls aren't bundled is
-     accepted without deep-checking its context — a safe miss (never a false positive).
+     Consequence: an instance whose decls aren't bundled is accepted without
+     deep-checking its context — a safe miss (never a false positive).
+     **Downgraded 2026-07-01 (repro attempt): not reachable via source imports.**
+     The bundler bundles imported modules' decls (topologically), so an imported
+     *constrained* instance's `where` context IS in the decl table and resolve
+     recurses normally. Verified: a module `stdlib.reprobox` exporting
+     `instance ToString (Box a) where ToString a`, imported and applied as
+     `to_string(mk_box(()))`, is cleanly rejected with `No instance of ToString
+     for Unit` — the context recursion fires across the module boundary. The
+     env-marker-only set is therefore just: builtins (all *unconstrained* → no
+     context to miss) and future `.iface` imports (markers without decls — not in
+     the default source-compile path). The residual hole is theoretical, gated on
+     the iface arc, and closable only when iface imports carry instance context —
+     resolve has nothing to thread until then. No code fix warranted now.
 - Prereqs discovered & fixed properly (not worked around): `stdlib.string`
   `rsplit_once`/`substring_after_last` (replacing a 7th `strip_module_prefix` copy) and
   prelude `Eq` instances for tuples (arities 2–5; tuples had `ToString` but no `Eq`, a
