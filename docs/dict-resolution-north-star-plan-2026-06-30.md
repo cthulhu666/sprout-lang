@@ -154,19 +154,43 @@ into a resolved `Evidence` tree. Lowering starts consuming `Evidence` instead of
 re-resolving — but must emit **byte-identical** witness exprs. Gate: golden IR / `just
 verify-bootstrap-fixed-point` unchanged.
 
-**M4 — Make lowering mechanical.**
-Strip the `resolve_tdict` family of all lookups (it becomes an `Evidence`-walk). Move
-`inst`/`fwd`/`inst_meta`/`super_map` table-building to the resolution pass or a shared
-builder. Delete the three `__unresolved_*` sentinel sites (now unreachable → convert to
-`panic`/internal-error).
+**M4/M5 — PARKED as follow-ups (2026-06-30).** After M3a, a standalone "turn the
+`__unresolved_` sentinels / codegen null-fills into hard errors" pass is **not worth
+doing on its own** and was rejected (advisor-reviewed):
+- It is a *dead branch*: M3a already rejects every concrete-head constraint at check
+  time, so a concrete-head sentinel surviving to codegen is unreachable for well-typed
+  programs. The guard would never fire on valid input and has **no positive test**.
+- A leaky (null-fill-on-ambiguity), untestable classifier added to bootstrap-critical
+  files (`ast_to_ir`, `codegen`) reads as "the null-fill hole is handled" when it barely
+  is — a half-measure.
+- The value it chased ("a future resolve gap becomes loud") is already better served by
+  the `test-type-errors` gate: add a negative fixture whenever `resolve` is touched.
+- The *genuine* "no silent escape hatch" fix is M3b done properly — centralizing
+  resolution so the null-fill becomes **structurally unreachable**, not a codegen
+  string-parse. Folded into M3b's scope below.
 
-**M5 — Codegen null-fill → hard error (guarded).**
-Convert ast_to_ir.sprout:776 and codegen.sprout:1900 dict null-fill to a loud compiler
-error. **Caveat:** the *legitimate* phantom free-tyvar dict (provably never invoked;
-ast_to_ir.sprout:764-775) must be preserved — but now distinguished by an **explicit
-marker** (e.g. `EvForward` of a known-phantom slot) rather than by the `__unresolved_`
-name prefix. M2's guarantee (every *concrete* constraint resolved or rejected) is what
-makes any surviving unresolved dict provably phantom.
+**⚠️ CRITICAL CONSTRAINT for M3b — the `__unresolved_` sentinel is load-bearing.**
+`has_unresolved_dict` (lowering.sprout:860, used at 1074) consumes the `__unresolved_`
+sentinel as a *reroute signal*: in the eta/value-position path, an inner dict that comes
+back unresolved (inner constraint not in scope) causes lowering to fall back to the
+**forwarded slot** instead of emitting a bad node. So the sentinel has **dual
+semantics**: (1) transient reroute signal (eta path, replaced upstream, never reaches
+codegen) and (2) genuine null-fill marker (call path, survives to codegen). Consequences
+for M3b:
+- The `Evidence` rewrite must **preserve the reroute behavior**, not just the null-fill.
+- The two paths mint sentinels at *different sites*; only line 1255 (`resolve_tdict_with_key`)
+  was confirmed. **M3b's real first step is to enumerate every sentinel mint site and
+  which path (call vs eta) consumes it** — this was never fully verified and is the
+  prerequisite, not an afterthought.
+
+**M3b — Evidence representation + mechanical lowering (the real north-star core; LAST).**
+Feasible via Option A: resolve emits `EvInstance` for the concrete subtree + an opaque
+`EvForward` marker; lowering fills the forward slot from `ctx_fwd` mechanically (a lookup,
+no *decision*) — without moving per-function hidden-param assignment into resolve. Add
+`Evidence`, have resolve rewrite each TDict into a resolved tree (or diagnostic), and have
+lowering consume it while emitting **byte-identical** witness exprs (preserving the reroute
+semantics above). Gate: golden IR / `just verify-bootstrap-fixed-point` unchanged. This is
+what structurally eliminates the `__unresolved_`/null-fill escape hatch.
 
 ## 5. Impact
 
