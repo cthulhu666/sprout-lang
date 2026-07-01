@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
-import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right, join, replace_all)
+import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right, join, replace_all, rsplit_once, substring_after_last)
 
 # Regression: global lets that call string_concat_many (via join) must work.
 # The codegen bug emitted __sprout_init_globals before register_ctor in the
@@ -66,6 +66,31 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "replace_all chained via pipe",
       "abc" |> replace_all("a", "X") |> replace_all("c", "Y"),
       "XbY")
+
+    # rsplit_once: split around the LAST occurrence of sep -> Just((head, tail)),
+    # or Nothing when sep is absent.
+    assert_eq(state, "rsplit_once multi-segment", rsplit_once("a.b.c", "."), Just(("a.b", "c")))
+    assert_eq(state, "rsplit_once single segment", rsplit_once("plain", "."), Nothing)
+    assert_eq(state, "rsplit_once trailing sep", rsplit_once("a.b.", "."), Just(("a.b", "")))
+    assert_eq(state, "rsplit_once leading sep only", rsplit_once(".x", "."), Just(("", "x")))
+    assert_eq(state, "rsplit_once sep is whole", rsplit_once(".", "."), Just(("", "")))
+    assert_eq(state, "rsplit_once multi-char sep", rsplit_once("a::b::c", "::"), Just(("a::b", "c")))
+
+    # Eq for tuples (arities 2-5): structural, componentwise.
+    assert_true(state, "tuple2 eq", (1, "x") == (1, "x"))
+    assert_false(state, "tuple2 ne fst", (1, "x") == (2, "x"))
+    assert_false(state, "tuple2 ne snd", (1, "x") == (1, "y"))
+    assert_true(state, "tuple3 eq", (1, "x", true) == (1, "x", true))
+    assert_false(state, "tuple3 ne", (1, "x", true) == (1, "x", false))
+    assert_true(state, "tuple4 eq", (1, 2, 3, 4) == (1, 2, 3, 4))
+    assert_true(state, "tuple5 eq", (1, 2, 3, 4, 5) == (1, 2, 3, 4, 5))
+    assert_false(state, "tuple5 ne", (1, 2, 3, 4, 5) == (1, 2, 3, 4, 9))
+
+    # substring_after_last: tail after the last sep, or the whole string if absent.
+    assert_eq(state, "substring_after_last multi", substring_after_last("a.b.c", "."), "c")
+    assert_eq(state, "substring_after_last absent", substring_after_last("plain", "."), "plain")
+    assert_eq(state, "substring_after_last trailing", substring_after_last("a.b.", "."), "")
+    assert_eq(state, "substring_after_last module name", substring_after_last("stdlib.compiler.types.Type", "."), "Type")
 
     # Regression: GC rooting hole in emit_binary string comparison path.
     # lv and rv were unrooted when coerce_value triggered GC (string_concat_many

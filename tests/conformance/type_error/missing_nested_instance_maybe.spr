@@ -1,0 +1,7 @@
+module main
+
+# Generalization of missing_nested_instance beyond List: `ToString (Maybe a)`
+# requires `ToString a`, and there is no `ToString ()` instance, so
+# `to_string(Just(()))` must be rejected at compile time rather than segfaulting.
+
+fn main() -> Unit !{IO} = print(to_string(Just(())))

@@ -20,6 +20,33 @@ export fn byte_length(raw: String) -> Int =
 export fn slice(raw: String, start: Int, count: Int) -> String =
   str_slice(raw, start, count)
 
+# O(codepoints × occurrences of sep): split `raw` around the LAST occurrence of
+# `sep`, returning Just((before, after)), or Nothing when `sep` is absent (or
+# empty).  Mirrors Rust's `str::rsplit_once`; the Maybe carries found-ness, so no
+# redundant separator element is returned (cf. Python/Ruby `rpartition`).
+export fn rsplit_once(raw: String, sep: String) -> Maybe (String, String) =
+  if sep == "" then Nothing
+  else if idx == -1 then Nothing
+  else Just((slice(raw, 0, idx), slice(raw, idx + length(sep), length(raw) - idx - length(sep))))
+  where idx = last_index_of(raw, sep)
+
+# Last codepoint index at which `sep` starts in `raw`, or -1 if absent.
+fn last_index_of(raw: String, sep: String) -> Int =
+  last_index_of_loop(raw, sep, 0, -1)
+
+fn last_index_of_loop(raw: String, sep: String, offset: Int, best: Int) -> Int =
+  match find(slice(raw, offset, length(raw) - offset), sep) with
+  | Nothing -> best
+  | Just rel -> last_index_of_loop(raw, sep, offset + rel + 1, offset + rel)
+
+# O(codepoints × occurrences of sep): the segment after the last `sep`, or the
+# whole string if `sep` is absent.  Convenience over rsplit_once for the common
+# "bare-ify a dotted/qualified name" case ("a.b.c" / "." -> "c").
+export fn substring_after_last(raw: String, sep: String) -> String =
+  match rsplit_once(raw, sep) with
+  | Just (_, tail) -> tail
+  | Nothing -> raw
+
 export fn take(raw: String, count: Int) -> String =
   if count <= 0 then ""
   else if count >= length(raw) then raw

@@ -608,6 +608,34 @@ instance Eq (Result e a) where Eq e, Eq a {
     | Err e -> match right with | Ok _ -> false | Err f -> eq(e, f)
 }
 
+instance Eq (a, b) where Eq a, Eq b {
+  fn eq(left: (a, b), right: (a, b)) -> Bool =
+    match left with
+    | (x1, y1) -> match right with
+      | (x2, y2) -> eq(x1, x2) && eq(y1, y2)
+}
+
+instance Eq (a, b, c) where Eq a, Eq b, Eq c {
+  fn eq(left: (a, b, c), right: (a, b, c)) -> Bool =
+    match left with
+    | (x1, y1, z1) -> match right with
+      | (x2, y2, z2) -> eq(x1, x2) && eq(y1, y2) && eq(z1, z2)
+}
+
+instance Eq (a, b, c, d) where Eq a, Eq b, Eq c, Eq d {
+  fn eq(left: (a, b, c, d), right: (a, b, c, d)) -> Bool =
+    match left with
+    | (x1, y1, z1, w1) -> match right with
+      | (x2, y2, z2, w2) -> eq(x1, x2) && eq(y1, y2) && eq(z1, z2) && eq(w1, w2)
+}
+
+instance Eq (a, b, c, d, e) where Eq a, Eq b, Eq c, Eq d, Eq e {
+  fn eq(left: (a, b, c, d, e), right: (a, b, c, d, e)) -> Bool =
+    match left with
+    | (x1, y1, z1, w1, v1) -> match right with
+      | (x2, y2, z2, w2, v2) -> eq(x1, x2) && eq(y1, y2) && eq(z1, z2) && eq(w1, w2) && eq(v1, v2)
+}
+
 fn vec_eq_from(left: Vec a, right: Vec a, i: Int, total: Int) -> Bool where Eq a =
   if i == total then true
   else

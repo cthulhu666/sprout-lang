@@ -115,18 +115,43 @@ source of truth.
 `inst_constraints` (and instance type args / method arities as needed) instead of
 `mono(Unit)`. Pure enrichment; verify suite + seed fixed-point unchanged.
 
-**M2 — Checker-side recursive discharge → diagnostics (closes the bug).**
-In `check_instance_for_marker` (infer.sprout:748–789) and the sibling resolution sites
-(1211, 1275, 1295, 1456, 3118), after matching the head, instantiate the stored context
-constraints at the concrete args and recursively resolve; emit the existing "No instance
-of X for Y" diagnostic on a miss. **M0 negative test now passes.** At this point the
-runtime segfault class is closed even though lowering/codegen still do the mechanical
-resolution. *(This subsumes the originally-scoped #1+#2 fix.)*
+**M1–M2 (infer-side) — DROPPED (2026-06-30).** Advisor review showed the infer prefix
+was the wrong path: `state` is not threaded to the discharge sites, the homogeneous
+`GlobalEnv` (`Dict Scheme`) can't carry `ast.TypeConstraint` context, and the discharge
+logic already exists in lowering. Rebuilding it in infer would be throwaway churn and a
+third copy of the diagnostic. Folded into M3a below.
 
-**M3 — Evidence representation + checker produces it (north-star core).**
-Add `Evidence` + evidence-carrying node. The post-inference pass rewrites each TDict
-constraint into a resolved `Evidence` tree. Lowering starts consuming `Evidence` instead
-of re-resolving — but must emit **byte-identical** witness exprs. Gate: golden IR / `just
+**M3a — resolve.sprout discharge + diagnostic in the check phase. DONE (2026-06-30).**
+New `stdlib/compiler/resolve.sprout` owns its instance tables (existence + context),
+built from the typed decls (prelude is bundled in, so prelude instances are visible). A
+`resolve_program` pass walks every `TDict`; a constraint whose head is *concrete* with no
+instance → `"No instance of X for Y"`; a *variable*-headed (forwarded/polymorphic)
+constraint → skipped (mirrors lowering's inst-vs-fwd split without the per-fn fwd table).
+Wired into `compile_phase_check` (+ `_with_cache`, the REPL path). Validated:
+- `missing_nested_instance{,_maybe}` now reject at `--phase check` with the exact
+  `No instance of ToString for Unit`; promoted off xfail.
+- positive guard (`[[1]]`/`[Just(1)]`/`[(1,2)]`) still compiles+runs.
+- stage-2→stage-3 self-compile clean (no false positives on the compiler + prelude).
+- Two false-positive classes found via the full suite and fixed (invariants for M3b):
+  1. **Concrete-head test must be "uppercase head", not an `a–z` allowlist.** `_` and
+     fresh metavars are non-uppercase → variable/forwarded. `head_is_concrete =
+     starts_upper(type_expr_head_name(te))`.
+  2. **Existence must consult the checker `@inst:` env markers, not just bundled
+     decls.** Instances from imported modules / builtins register `@inst:Class:Head`
+     markers but may have no bundled `TInstanceDecl`. resolve now checks env markers
+     for *existence* (same source of truth as infer.sprout:769) and keeps the decl
+     table only for *context recursion* (it alone carries the `where` constraints).
+     Consequence: an imported *constrained* instance whose decls aren't bundled is
+     accepted without deep-checking its context — a safe miss (never a false positive).
+- Prereqs discovered & fixed properly (not worked around): `stdlib.string`
+  `rsplit_once`/`substring_after_last` (replacing a 7th `strip_module_prefix` copy) and
+  prelude `Eq` instances for tuples (arities 2–5; tuples had `ToString` but no `Eq`, a
+  latent segfault source).
+
+**M3b — Evidence representation + checker produces it (north-star core).**
+Add `Evidence` + evidence-carrying node. resolve.sprout rewrites each TDict constraint
+into a resolved `Evidence` tree. Lowering starts consuming `Evidence` instead of
+re-resolving — but must emit **byte-identical** witness exprs. Gate: golden IR / `just
 verify-bootstrap-fixed-point` unchanged.
 
 **M4 — Make lowering mechanical.**

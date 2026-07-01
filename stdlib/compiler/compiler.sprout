@@ -8,6 +8,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.resolve as resolve
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
 import stdlib.compiler.codegen as codegen
@@ -226,7 +227,10 @@ export fn compile_phase_check(path: source.FilePath, stdlib_root: source.StdlibR
           result <- checker.typecheck_typed(prog, prelude_pairs)
           match result with
           | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-          | ok -> ok
+          | typed_ast.TypedOk typed_prog env ->
+              match resolve.resolve_program(typed_prog, env) with
+              | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
+              | resolve.ResolveOk resolved -> typed_ast.TypedOk(resolved, env)
 
 export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   do
@@ -415,7 +419,10 @@ fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.Std
           result <- checker.typecheck_typed(prog, prelude_pairs)
           match result with
           | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-          | ok -> ok
+          | typed_ast.TypedOk typed_prog env ->
+              match resolve.resolve_program(typed_prog, env) with
+              | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
+              | resolve.ResolveOk resolved -> typed_ast.TypedOk(resolved, env)
 
 fn compile_phase_lower_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   do

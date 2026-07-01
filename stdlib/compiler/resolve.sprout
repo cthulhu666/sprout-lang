@@ -1,0 +1,358 @@
+module stdlib.compiler.resolve
+
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.string as string
+
+# ---------------------------------------------------------------------------
+# Constraint resolution / discharge pass
+# ---------------------------------------------------------------------------
+#
+# Runs in the check phase, after type inference, over the typed program (which
+# includes the bundled prelude decls).  For every TDict evidence node it walks
+# the required instance dictionary tree and rejects a constraint whose head is
+# a *concrete* type with no instance — the diagnostic the type checker owes but
+# previously skipped, letting an unsatisfiable nested dictionary (e.g.
+# `to_string([()])` needing `ToString ()`) reach codegen and segfault.
+#
+# Conservative by design: a constraint whose head is a type *variable* is
+# forwarded/polymorphic (lowering threads it as a hidden parameter), so it is
+# left alone here.  This mirrors lowering's own resolution order — concrete head
+# uses the instance table, variable head is forwarded — without needing the
+# per-function forwarding table that only exists during lowering.
+#
+# Owns its instance tables (built from the typed decls, exactly like lowering's
+# collect_instance_table / collect_inst_meta).  This is the first brick of the
+# north-star refactor that moves all dictionary resolution into the checker.
+
+export type ResolveResult (..) =
+  | ResolveOk typed_ast.TypedProgram
+  | ResolveErr source.SourcePos String
+
+# Instance tables: existence (constraint_key → present from bundled decls),
+# context (constraint_key → (instance head type args, instance context constraints)),
+# and the full checker env (carries @inst: markers for instances defined in
+# imported modules whose decls are NOT bundled into this program).
+type Tables = Tables(Dict Bool) (Dict (List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme)
+
+fn tables_exists(t: Tables) -> Dict Bool =
+  match t with | Tables e _ _ -> e
+
+fn tables_ctx(t: Tables) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
+  match t with | Tables _ c _ -> c
+
+fn tables_env(t: Tables) -> Dict types.Scheme =
+  match t with | Tables _ _ v -> v
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+export fn resolve_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> ResolveResult =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      match check_decls(decls, build_tables(decls, env)) with
+      | Nothing -> ResolveOk(prog)
+      | Just (pos, msg) -> ResolveErr(pos, msg)
+
+# ---------------------------------------------------------------------------
+# Table construction (from typed decls — prelude is bundled in)
+# ---------------------------------------------------------------------------
+
+fn build_tables(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Tables =
+  collect_tables(decls, Tables(dict_empty(), dict_empty(), env))
+
+fn collect_tables(decls: List typed_ast.TypedDecl, acc: Tables) -> Tables =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TInstanceDecl constraint inst_constraints _ ->
+          collect_tables(rest, add_instance(constraint, inst_constraints, acc))
+      | _ -> collect_tables(rest, acc)
+
+fn add_instance(
+  constraint: ast.TypeConstraint,
+  inst_constraints: List ast.TypeConstraint,
+  acc: Tables
+) -> Tables =
+  match constraint with
+  | ast.TypeConstraint _ type_args ->
+      Tables(
+        dict_set(constraint_key_from_tc(constraint), true, tables_exists(acc)),
+        add_ctx(constraint_key_from_tc(constraint), type_args, inst_constraints, tables_ctx(acc)),
+        tables_env(acc))
+
+fn add_ctx(
+  key: String,
+  type_args: List ast.TypeExpr,
+  inst_constraints: List ast.TypeConstraint,
+  acc: Dict (List ast.TypeExpr, List ast.TypeConstraint)
+) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
+  match inst_constraints with
+  | Nil -> acc
+  | _ -> dict_set(key, (type_args, inst_constraints), acc)
+
+# ---------------------------------------------------------------------------
+# Constraint discharge
+# ---------------------------------------------------------------------------
+
+# Returns the first unsatisfiable-constraint error, or Nothing.
+fn check_constraint(
+  c: ast.TypeConstraint,
+  pos: source.SourcePos,
+  tables: Tables
+) -> Maybe(source.SourcePos, String) =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> Nothing
+      | Cons head_arg _ ->
+          # Only diagnose constraints whose head is a concrete type constructor
+          # (uppercase head). A lowercase/`_`/non-letter head is a type variable —
+          # forwarded/polymorphic, resolved as a hidden parameter by lowering.
+          if head_is_concrete(head_arg) == false then Nothing
+          else
+            if instance_exists(string.substring_after_last(class_name, "."), type_args, head_arg, tables)
+            then check_context(constraint_key_str(string.substring_after_last(class_name, "."), type_args), type_args, pos, tables)
+            else Just((pos,
+              "No instance of " ++ string.substring_after_last(class_name, ".") ++ " for " ++ type_expr_head_name(head_arg)))
+
+# An instance exists if a bundled decl provides it OR the checker env carries an
+# @inst: marker for it (instances from imported modules whose decls are not
+# bundled into this program register markers in the env but no TInstanceDecl).
+fn instance_exists(
+  class_bare: String,
+  type_args: List ast.TypeExpr,
+  head_arg: ast.TypeExpr,
+  tables: Tables
+) -> Bool =
+  dict_has(constraint_key_str(class_bare, type_args), tables_exists(tables))
+  || env_has_inst("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables))
+
+fn env_has_inst(key: String, env: Dict types.Scheme) -> Bool =
+  match dict_get(key, env) with
+  | Just _ -> true
+  | Nothing -> false
+
+# Recurse into a matched instance's context constraints (substituted at the
+# concrete type args).  A context-free instance has no entry → Nothing.
+fn check_context(
+  key: String,
+  type_args: List ast.TypeExpr,
+  pos: source.SourcePos,
+  tables: Tables
+) -> Maybe(source.SourcePos, String) =
+  match dict_get(key, tables_ctx(tables)) with
+  | Nothing -> Nothing
+  | Just (inst_type_args, inst_constraints) ->
+      check_constraint_list(
+        list_map(\c -> substitute_constraint(c, unify_type_args_list(inst_type_args, type_args, dict_empty())),
+                 inst_constraints),
+        pos, tables)
+
+fn check_constraint_list(
+  cs: List ast.TypeConstraint,
+  pos: source.SourcePos,
+  tables: Tables
+) -> Maybe(source.SourcePos, String) =
+  match cs with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match check_constraint(c, pos, tables) with
+      | Just e -> Just(e)
+      | Nothing -> check_constraint_list(rest, pos, tables)
+
+fn dict_has(key: String, d: Dict Bool) -> Bool =
+  match dict_get(key, d) with
+  | Just _ -> true
+  | Nothing -> false
+
+# ---------------------------------------------------------------------------
+# Typed-AST walk: find every TDict and check its constraint
+# ---------------------------------------------------------------------------
+
+fn check_decls(
+  decls: List typed_ast.TypedDecl,
+  tables: Tables
+) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match check_decl(d, tables) with
+      | Just e -> Just(e)
+      | Nothing -> check_decls(rest, tables)
+
+fn check_decl(d: typed_ast.TypedDecl, tables: Tables) -> Maybe(source.SourcePos, String) =
+  match d with
+  | typed_ast.TFnDecl _ _ _ _ _ body -> check_expr(body, tables)
+  | typed_ast.TLetDecl _ body -> check_expr(body, tables)
+  | typed_ast.TInstanceDecl _ _ methods -> check_methods(methods, tables)
+  | typed_ast.TExternFnDecl _ _ _ _ -> Nothing
+  | typed_ast.TPassThrough _ -> Nothing
+
+fn check_methods(
+  methods: List typed_ast.TypedInstanceMethod,
+  tables: Tables
+) -> Maybe(source.SourcePos, String) =
+  match methods with
+  | Nil -> Nothing
+  | Cons m rest ->
+      match m with
+      | typed_ast.TypedInstanceMethod _ _ _ _ body ->
+          match check_expr(body, tables) with
+          | Just e -> Just(e)
+          | Nothing -> check_methods(rest, tables)
+
+fn check_expr(e: typed_ast.TypedExpr, tables: Tables) -> Maybe(source.SourcePos, String) =
+  match e with
+  | typed_ast.TDict c _ pos -> check_constraint(c, pos, tables)
+  | typed_ast.TCall callee args _ _ -> check_expr_list(Cons(callee, args), tables)
+  | typed_ast.TIf cnd thn els _ _ -> check_expr_list([cnd, thn, els], tables)
+  | typed_ast.TMatch scrut branches _ _ -> check_expr_list(Cons(scrut, branch_bodies(branches)), tables)
+  | typed_ast.TLambda _ body _ _ -> check_expr(body, tables)
+  | typed_ast.TTuple items _ _ -> check_expr_list(items, tables)
+  | typed_ast.TBinary _ l r _ _ -> check_expr_list([l, r], tables)
+  | typed_ast.TUnary _ x _ _ -> check_expr(x, tables)
+  | typed_ast.TRange lo hi _ _ -> check_expr_list([lo, hi], tables)
+  | typed_ast.TDo steps _ _ -> check_expr_list(do_step_exprs(steps), tables)
+  | typed_ast.TRecord _ fields _ _ -> check_expr_list(record_field_exprs(fields), tables)
+  | typed_ast.TGetField obj _ _ _ -> check_expr(obj, tables)
+  | _ -> Nothing
+
+fn check_expr_list(
+  es: List typed_ast.TypedExpr,
+  tables: Tables
+) -> Maybe(source.SourcePos, String) =
+  match es with
+  | Nil -> Nothing
+  | Cons e rest ->
+      match check_expr(e, tables) with
+      | Just x -> Just(x)
+      | Nothing -> check_expr_list(rest, tables)
+
+fn branch_bodies(branches: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedExpr =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | typed_ast.TypedMatchBranch _ body -> Cons(body, branch_bodies(rest))
+
+fn do_step_exprs(steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedExpr =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest ->
+      match s with
+      | typed_ast.TDoBindStep _ ex -> Cons(ex, do_step_exprs(rest))
+      | typed_ast.TDoLetStep _ ex -> Cons(ex, do_step_exprs(rest))
+      | typed_ast.TDoExprStep ex -> Cons(ex, do_step_exprs(rest))
+
+fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedExpr =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField _ ex -> Cons(ex, record_field_exprs(rest))
+
+# ---------------------------------------------------------------------------
+# Type-expression helpers (ported from lowering; resolve owns its own copies)
+# ---------------------------------------------------------------------------
+
+# True if a type expression's outermost head is a concrete type constructor.
+# Concrete heads start with an uppercase letter (List, Maybe, Int, Tuple2, Fn);
+# type variables (a, b), wildcards (`_`), and fresh metavars do not.  Uses
+# type_expr_head_name so module-qualified concrete names (stdlib.x.Bar) still
+# read as concrete after their prefix is stripped.
+fn head_is_concrete(te: ast.TypeExpr) -> Bool =
+  starts_upper(type_expr_head_name(te))
+
+fn starts_upper(s: String) -> Bool =
+  match str_char_at(s, 0) with
+  | Nothing -> false
+  | Just c -> c >= 'A' && c <= 'Z'
+
+fn is_type_var_name(name: String) -> Bool =
+  match str_char_at(name, 0) with
+  | Nothing -> false
+  | Just c ->
+      c == 'a' || c == 'b' || c == 'c' || c == 'd' || c == 'e' || c == 'f' ||
+      c == 'g' || c == 'h' || c == 'i' || c == 'j' || c == 'k' || c == 'l' ||
+      c == 'm' || c == 'n' || c == 'o' || c == 'p' || c == 'q' || c == 'r' ||
+      c == 's' || c == 't' || c == 'u' || c == 'v' || c == 'w' || c == 'x' ||
+      c == 'y' || c == 'z'
+
+fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      constraint_key_str(string.substring_after_last(class_name, "."), type_args)
+
+fn constraint_key_str(class_name: String, type_args: List ast.TypeExpr) -> String =
+  match type_args with
+  | Nil -> class_name
+  | Cons h rest ->
+      class_name ++ "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
+
+fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
+  match args with
+  | Nil -> ""
+  | Cons h rest -> "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
+
+fn type_expr_head_name(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName name -> string.substring_after_last(name, ".")
+  | ast.TypeApply base _ -> type_expr_head_name(base)
+  | ast.TypeArrow _ _ _ -> "Fn"
+  | ast.TypeEffect _ _ -> "Eff"
+  | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
+
+fn unify_type_expr(
+  pattern: ast.TypeExpr,
+  concrete: ast.TypeExpr,
+  acc: Dict ast.TypeExpr
+) -> Dict ast.TypeExpr =
+  match pattern with
+  | ast.TypeName name ->
+      if is_type_var_name(name) then dict_set(name, concrete, acc)
+      else acc
+  | ast.TypeApply pat_base pat_arg ->
+      match concrete with
+      | ast.TypeApply con_base con_arg ->
+          unify_type_expr(pat_arg, con_arg, unify_type_expr(pat_base, con_base, acc))
+      | _ -> acc
+  | ast.TupleType pat_items ->
+      match concrete with
+      | ast.TupleType con_items -> unify_type_args_list(pat_items, con_items, acc)
+      | _ -> acc
+  | _ -> acc
+
+fn unify_type_args_list(
+  patterns: List ast.TypeExpr,
+  concretes: List ast.TypeExpr,
+  acc: Dict ast.TypeExpr
+) -> Dict ast.TypeExpr =
+  match (patterns, concretes) with
+  | (Nil, _) -> acc
+  | (_, Nil) -> acc
+  | (Cons p rest_p, Cons c rest_c) ->
+      unify_type_args_list(rest_p, rest_c, unify_type_expr(p, c, acc))
+
+fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeExpr =
+  match te with
+  | ast.TypeName name ->
+      match dict_get(name, subs) with
+      | Just concrete -> concrete
+      | Nothing -> te
+  | ast.TypeApply base arg ->
+      ast.TypeApply(substitute_type_expr(base, subs), substitute_type_expr(arg, subs))
+  | ast.TypeArrow from_ to_ effs ->
+      ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs)
+  | ast.TupleType items ->
+      ast.TupleType(list_map(\item -> substitute_type_expr(item, subs), items))
+  | _ -> te
+
+fn substitute_constraint(tc: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> ast.TypeConstraint =
+  match tc with
+  | ast.TypeConstraint class_name type_args ->
+      ast.TypeConstraint(class_name, list_map(\te -> substitute_type_expr(te, subs), type_args))

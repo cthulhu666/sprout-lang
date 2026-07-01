@@ -563,10 +563,10 @@ _test-type-errors stage xfail="":
 
 # Stage-1 negative type-checking gate.
 # xfail: overlapping-instance detection (duplicate_instance, overlapping_instance) and
-# do-block family-conflict diagnostics (stdlib_mixed_do_*) are not yet implemented;
-# missing_nested_instance is the north-star bug fix target (promote when M2 lands).
+# do-block family-conflict diagnostics (stdlib_mixed_do_*) are not yet implemented.
+# (missing_nested_instance{,_maybe} now reject via the resolve pass — promoted.)
 [group('test')]
-test-type-errors: (_test-type-errors "build/compile_driver_bin_stage1" "duplicate_instance overlapping_instance stdlib_mixed_do_bind_family_conflict stdlib_mixed_do_wrong_final_family missing_nested_instance")
+test-type-errors: (_test-type-errors "build/compile_driver_bin_stage1" "duplicate_instance overlapping_instance stdlib_mixed_do_bind_family_conflict stdlib_mixed_do_wrong_final_family")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
