@@ -2526,14 +2526,8 @@ fn emit_eprint_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Val
         emit_template(em, `  ${tmp} = call i64 @eprint_str(ptr ${val_ir (vp)})`)
         val_make(ll_i64(), tmp)
 
-fn strip_module_prefix(name: String) -> String =
-  if dot_pos < 0
-  then name
-  else strip_module_prefix(str_slice(name, dot_pos + 1, str_len(name)))
-  where dot_pos = str_find(name, ".")
-
 fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx) -> Value !{IO} =
-  if strip_module_prefix(name) == "append" then
+  if string.after_last_dot(name) == "append" then
     emit_append_call(args, ty, ctx, locals, em)
   else
     match dict_get(name, ctx_ctor_sigs(ctx)) with
@@ -4085,7 +4079,7 @@ fn build_ctor_reg_meta(ctor_sigs_: Dict CtorSig, em: Emitter) -> Dict (List (Str
   build_ctor_reg_meta_keys(dict_keys(ctor_sigs_), ctor_sigs_, em, 0, dict_empty())
 
 # Build the registration alias list: always the qualified name; add the leaf name when it differs.
-# Uses strip_module_prefix to get the leaf (the part after the last dot).
+# Uses after_last_dot to get the leaf (the part after the last dot).
 fn ctor_reg_aliases(k: String, leaf: String, tag: Int, arity: Int, gname: String, gname_len: Int, fkinds: String, em: Emitter) -> List (String, Int, Int, Int, String) !{IO} =
   if leaf == k
   then Cons((gname, gname_len, tag, arity, fkinds), Nil)
@@ -4110,7 +4104,7 @@ fn build_ctor_reg_meta_keys(keys: Vec String, ctor_sigs_: Dict CtorSig, em: Emit
             else do
               (gname, gname_len) <- string_const(em, k)
               let fkinds = fk.ctor_field_kinds_string(ctor_type_exprs(ctor))
-              aliases <- ctor_reg_aliases(k, strip_module_prefix(k), ctor_tag(ctor), ctor_arity(ctor), gname, gname_len, fkinds, em)
+              aliases <- ctor_reg_aliases(k, string.after_last_dot(k), ctor_tag(ctor), ctor_arity(ctor), gname, gname_len, fkinds, em)
               build_ctor_reg_meta_keys(keys, ctor_sigs_, em, idx + 1, dict_set(k, aliases, acc))
 
 fn assemble_ir_sections(em: Emitter) -> (List String, List String, List String, List String) !{IO} =

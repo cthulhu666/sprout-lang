@@ -87,16 +87,6 @@ fn desugar_program(prog: ast.Program) -> ast.Program =
       ast.Program(desugar_decls_i(decls, build_fn_sig_index(decls)), pos)
 
 # ---------------------------------------------------------------------------
-# strip_module_prefix — strip all leading module path segments from a name
-# ---------------------------------------------------------------------------
-# Duplicated from infer.sprout/unifier.sprout to avoid circular imports.
-
-fn strip_module_prefix(name: String) -> String =
-  if dot == -1 then name
-  else strip_module_prefix(str_slice(name, dot + 1, str_len(name)))
-  where dot = str_find(name, ".")
-
-# ---------------------------------------------------------------------------
 # Phase 4B.5 — FnSig index: maps fn name → List (Maybe String) of param types
 # ---------------------------------------------------------------------------
 
@@ -375,7 +365,7 @@ fn type_expr_bare_name(te: Maybe ast.TypeExpr) -> Maybe String =
 fn type_texpr_to_maybe_name(texpr: ast.TypeExpr) -> Maybe String =
   match texpr with
   | ast.TypeName tname ->
-      Just(strip_module_prefix(tname))
+      Just(string.after_last_dot(tname))
   | _ ->
       Nothing
 

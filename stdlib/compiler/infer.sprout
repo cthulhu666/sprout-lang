@@ -4,6 +4,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # Env wraps — GlobalEnv vs raw body-scope Dict types.Scheme
@@ -117,15 +118,10 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
   | ast.TypeEffect inner _ -> type_from_ast(inner, local_vars)
   | ast.TupleType parts -> types.TTuple(type_list_from_ast(parts, local_vars))
 
-fn strip_module_prefix(name: String) -> String =
-  if dot == -1 then name
-  else strip_module_prefix(str_slice(name, dot + 1, str_len(name)))
-  where dot = str_find(name, ".")
-
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   match dict_get(name, local_vars) with
   | Just t -> t
-  | Nothing -> types.TConst(strip_module_prefix(name))
+  | Nothing -> types.TConst(string.after_last_dot(name))
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
@@ -869,7 +865,7 @@ fn str_list_contains(xs: List String, target: String) -> Bool =
 # Only TConst, TApp, and TTuple are meaningful here; anything else falls back to "_".
 fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(strip_module_prefix(name))
+  | types.TConst name -> ast.TypeName(string.after_last_dot(name))
   | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base), type_to_typeexpr(arg))
   | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_typeexpr(item), items))
   | _ -> ast.TypeName("_")
@@ -878,7 +874,7 @@ fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
 # TTuple is always concrete (its head is a known arity, never a variable).
 fn concrete_typeexpr(t: types.Type) -> Maybe ast.TypeExpr =
   match t with
-  | types.TConst name -> Just(ast.TypeName(strip_module_prefix(name)))
+  | types.TConst name -> Just(ast.TypeName(string.after_last_dot(name)))
   | types.TApp base _ ->
       match concrete_typeexpr(base) with
       | Nothing -> Nothing
@@ -959,7 +955,7 @@ fn first_concrete_arg_typeexpr_fwd(
 # to recover the programmer-visible variable name (e.g. "a") rather than emitting "_".
 fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(strip_module_prefix(name))
+  | types.TConst name -> ast.TypeName(string.after_last_dot(name))
   | types.TApp base arg ->
       ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, env),
                     type_to_typeexpr_with_prog_vars(arg, class_name, env))
@@ -1012,10 +1008,10 @@ fn type_head_str(t: types.Type) -> String =
 #
 # Module prefix is stripped (e.g. "stdlib.compiler.types.Type" → "Type") so
 # that instance lookups use bare names, matching how register_instance_marker
-# registers them via type_from_ast → lookup_type_var → strip_module_prefix.
+# registers them via type_from_ast → lookup_type_var → after_last_dot.
 fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(strip_module_prefix(name))
+  | types.TConst name -> Just(string.after_last_dot(name))
   | types.TApp base _ -> concrete_type_str(base)
   | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | _ -> Nothing
@@ -1905,8 +1901,8 @@ fn collect_seen_ctors(branches: List typed_ast.TypedMatchBranch, acc: List Strin
 fn join_comma(names: List String) -> String =
   match names with
   | Nil -> ""
-  | Cons n Nil -> strip_module_prefix(n)
-  | Cons n rest -> strip_module_prefix(n) ++ ", " ++ join_comma(rest)
+  | Cons n Nil -> string.after_last_dot(n)
+  | Cons n rest -> string.after_last_dot(n) ++ ", " ++ join_comma(rest)
 
 fn missing_ctor_names(all_ctors: List String, branches: List typed_ast.TypedMatchBranch) -> List String =
   types.list_diff(all_ctors, collect_seen_ctors(branches, Nil))
@@ -2668,7 +2664,7 @@ export fn typecheck_decls(
 # Type parameters (always lowercase in Sprout, e.g. `a`, `b`) are detected by
 # is_lowercase_name and skipped without consulting the declared set.
 # Qualified names (e.g. `stdlib.compiler.ast.TypeExpr`) are stripped to their
-# short form before lookup, matching the strip_module_prefix convention used
+# short form before lookup, matching the after_last_dot convention used
 # throughout lookup_type_var.
 
 # O(1): built-in primitive type names always valid without a declaration.
@@ -2697,13 +2693,13 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
   | Cons decl rest ->
       match decl with
       | ast.TypeDecl name _ _ _ _ ->
-          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+          collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.RecordDecl name _ _ _ ->
-          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+          collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.AliasDecl name _ _ _ ->
-          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+          collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.WrapDecl name _ _ ->
-          collect_declared_type_names(rest, Cons(strip_module_prefix(name), acc))
+          collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | _ -> collect_declared_type_names(rest, acc)
 
 # O(depth): validate a single TypeExpr, returning the first error found.
@@ -2712,9 +2708,9 @@ fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Ma
   | ast.TypeName name ->
       if is_lowercase_name(name) then Nothing
       else
-        if types.list_member(strip_module_prefix(name), declared) then Nothing
-        else Just("type-validation: unknown type name `" ++ strip_module_prefix(name) ++
-                  "` in declaration `" ++ strip_module_prefix(decl_name) ++ "`")
+        if types.list_member(string.after_last_dot(name), declared) then Nothing
+        else Just("type-validation: unknown type name `" ++ string.after_last_dot(name) ++
+                  "` in declaration `" ++ string.after_last_dot(decl_name) ++ "`")
   | ast.TypeApply left right ->
       match validate_te(left, decl_name, declared) with
       | Just e -> Just(e)
@@ -2801,7 +2797,7 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
       | Nil -> Nothing
       | Cons head_te _ ->
           Just((str_concat("@inst:", str_concat(class_name, str_concat(":", type_head_str(type_from_ast(head_te, dict_empty()))))),
-                strip_module_prefix(class_name)))
+                string.after_last_dot(class_name)))
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe String =
   match decls with

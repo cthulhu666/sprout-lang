@@ -1,0 +1,18 @@
+module main
+
+# Two instances of a prelude class (ToString) for the same user type overlap on
+# @inst:ToString:Foo. Exercises check_overlapping_instances / instance_key_and_class
+# with a non-user class name, and guards the class-name rendering in the message.
+
+type Foo (..) =
+  | MkFoo
+
+instance ToString Foo {
+  fn to_string(x: Foo) -> String = "a"
+}
+
+instance ToString Foo {
+  fn to_string(x: Foo) -> String = "b"
+}
+
+fn main() -> Unit !{IO} = print(to_string(MkFoo))

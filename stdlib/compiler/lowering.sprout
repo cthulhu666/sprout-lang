@@ -203,7 +203,7 @@ fn add_class_param_entry(class_name: String, type_params: List String, acc: Dict
   match type_params with
   | Nil -> acc
   | Cons param _ ->
-      dict_set(strip_module_prefix(class_name), param, dict_set(class_name, param, acc))
+      dict_set(string.after_last_dot(class_name), param, dict_set(class_name, param, acc))
 
 # ---------------------------------------------------------------------------
 # Pass 1 – collect superclass map
@@ -607,7 +607,7 @@ fn build_hidden_for_constraint_with_supers(
       | (new_params, method_map) ->
           build_hidden_for_constraint_with_supers(direct_class, type_args, idx, rest, class_order,
             prepend_params(new_params, param_rev),
-            dict_set(constraint_key_str(strip_module_prefix(eff_class), type_args), method_map, map_acc))
+            dict_set(constraint_key_str(string.after_last_dot(eff_class), type_args), method_map, map_acc))
 
 fn build_hidden_for_one(
   class_name: String,
@@ -656,7 +656,7 @@ fn class_methods_for(class_name: String, class_order: Dict (List String)) -> Lis
 fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
   match c with
   | ast.TypeConstraint class_name type_args ->
-      constraint_key_str(strip_module_prefix(class_name), type_args)
+      constraint_key_str(string.after_last_dot(class_name), type_args)
 
 fn constraint_key_str(class_name: String, type_args: List ast.TypeExpr) -> String =
   match type_args with
@@ -673,7 +673,7 @@ fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
 # For TupleType, include the arity so 2-tuple and 3-tuple instances don't collide.
 fn type_expr_head_name(te: ast.TypeExpr) -> String =
   match te with
-  | ast.TypeName name -> strip_module_prefix(name)
+  | ast.TypeName name -> string.after_last_dot(name)
   | ast.TypeApply base _ -> type_expr_head_name(base)
   | ast.TypeArrow _ _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
@@ -702,7 +702,7 @@ fn mangle_type_args_rev(args: List ast.TypeExpr, acc: List String) -> List Strin
 
 fn mangle_type_expr(te: ast.TypeExpr) -> String =
   match te with
-  | ast.TypeName name -> strip_module_prefix(name)
+  | ast.TypeName name -> string.after_last_dot(name)
   | ast.TypeApply base arg ->
       mangle_type_expr(base) ++ "_" ++ mangle_type_expr(arg)
   | ast.TypeArrow l r effects_maybe ->
@@ -714,16 +714,6 @@ fn mangle_effects_suffix(effects_maybe: Maybe (List String)) -> String =
   match effects_maybe with
   | Nothing -> ""
   | Just effs -> "_eff_" ++ string.join("_", effs)
-
-# ---------------------------------------------------------------------------
-# Module prefix stripping
-# ---------------------------------------------------------------------------
-
-fn strip_module_prefix(name: String) -> String =
-  if dot_pos < 0
-  then name
-  else strip_module_prefix(str_slice(name, dot_pos + 1, str_len(name)))
-  where dot_pos = str_find(name, ".")
 
 fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
   if str_len(s) < str_len(suffix) then false
@@ -744,7 +734,7 @@ fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
 # infer-injected TDict nodes in direct calls expand correctly.
 
 fn find_class_of_method(method_name: String, class_order: Dict (List String)) -> Maybe String =
-  find_class_in_co_entries(strip_module_prefix(method_name), vec_to_list(dict_entries(class_order)))
+  find_class_in_co_entries(string.after_last_dot(method_name), vec_to_list(dict_entries(class_order)))
 
 fn find_class_in_co_entries(method_name: String, entries: List (String, List String)) -> Maybe String =
   match entries with
@@ -757,19 +747,19 @@ fn list_str_member_stripped(needle: String, xs: List String) -> Bool =
   match xs with
   | Nil -> false
   | Cons x rest ->
-      if strip_module_prefix(x) == needle then true
+      if string.after_last_dot(x) == needle then true
       else list_str_member_stripped(needle, rest)
 
 fn first_concrete_head_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(strip_module_prefix(name))
+  | types.TConst name -> Just(string.after_last_dot(name))
   | types.TApp base _ -> first_concrete_head_str(base)
   | _ -> Nothing
 
 fn class_param_for(class_name: String, ctx: LowerCtx) -> Maybe String =
   match dict_get(class_name, ctx_class_params(ctx)) with
   | Just param -> Just(param)
-  | Nothing -> dict_get(strip_module_prefix(class_name), ctx_class_params(ctx))
+  | Nothing -> dict_get(string.after_last_dot(class_name), ctx_class_params(ctx))
 
 fn eta_class_type(class_name: String, method_name: String, actual_type: types.Type, fallback: types.Type, ctx: LowerCtx) -> types.Type =
   match class_param_for(class_name, ctx) with
@@ -782,7 +772,7 @@ fn eta_class_type(class_name: String, method_name: String, actual_type: types.Ty
 fn lookup_method_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
   match dict_get(method_name, scheme_env) with
   | Just scheme -> Just(scheme)
-  | Nothing -> dict_get(strip_module_prefix(method_name), scheme_env)
+  | Nothing -> dict_get(string.after_last_dot(method_name), scheme_env)
 
 fn eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actual_type: types.Type, fallback: types.Type) -> types.Type =
   match dict_get(class_param, match_type_vars(scheme_type, eta_actual_type_for_scheme_match(scheme_type, actual_type), dict_empty())) with
@@ -802,7 +792,7 @@ fn eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.
 
 fn type_is_unit(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> strip_module_prefix(name) == "Unit"
+  | types.TConst name -> string.after_last_dot(name) == "Unit"
   | _ -> false
 
 fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
@@ -829,24 +819,24 @@ fn match_type_var_lists(patterns: List types.Type, actuals: List types.Type, acc
   | (Cons p prest, Cons a arest) -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
 
 fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
-  # strip_module_prefix: class_order stores bundler-qualified names (e.g. "prelude.ToString")
+  # after_last_dot: class_order stores bundler-qualified names (e.g. "prelude.ToString")
   # but inst_table keys are always stripped (built via constraint_key_from_tc which calls
-  # strip_module_prefix).  Strip here so both sides of the lookup use the same key form.
-  match dict_get(strip_module_prefix(class_name) ++ "_" ++ head, ctx_inst(ctx)) with
+  # after_last_dot).  Strip here so both sides of the lookup use the same key form.
+  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx_inst(ctx)) with
   | Nothing -> Nothing
   | Just method_map -> dict_get_method(method_name, method_map)
 
 fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String =
   match dict_get(method_name, method_map) with
   | Just value -> Just(value)
-  | Nothing -> dict_get(strip_module_prefix(method_name), method_map)
+  | Nothing -> dict_get(string.after_last_dot(method_name), method_map)
 
 # Exact-head lookup: returns the forwarded slot for ClassName_head if the current
 # function received that constraint as a hidden dict parameter.  Used to prefer the
 # forwarded slot over the concrete instance when both share the same key (e.g.
 # "MyEq_Box"), avoiding an unresolvable inner-dict reference at eta-expansion time.
 fn find_fwd_method_for_head(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
-  match dict_get(strip_module_prefix(class_name) ++ "_" ++ head, ctx_fwd(ctx)) with
+  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx_fwd(ctx)) with
   | Nothing -> Nothing
   | Just method_map -> dict_get_method(method_name, method_map)
 
@@ -949,7 +939,7 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
 
 fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(strip_module_prefix(name))
+  | types.TConst name -> ast.TypeName(string.after_last_dot(name))
   | types.TVar name -> ast.TypeName(name)
   | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
   | types.TFunc param ret _ ->
@@ -990,7 +980,7 @@ fn resolve_eta_substituted_inner_dict(c: ast.TypeConstraint, pos: source.SourceP
       | _ -> resolve_tdict(c, pos, ctx)
 
 fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: source.SourcePos, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
-  match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ strip_module_prefix(class_name), ctx_scheme_env(ctx)) with
+  match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ string.after_last_dot(class_name), ctx_scheme_env(ctx)) with
   | Nothing -> Nothing
   | Just prog_scheme ->
       match types.scheme_type(prog_scheme) with
@@ -1053,7 +1043,7 @@ fn lookup_class_marker(method_name: String, ctx: LowerCtx) -> Maybe String =
 fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
   match dict_get("@class:" ++ method_name, scheme_env) with
   | Just scheme -> Just(scheme)
-  | Nothing -> dict_get("@class:" ++ strip_module_prefix(method_name), scheme_env)
+  | Nothing -> dict_get("@class:" ++ string.after_last_dot(method_name), scheme_env)
 
 fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match t with
@@ -1064,7 +1054,7 @@ fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerC
           | Just head ->
               match find_concrete_method_impl(class_name, name, head, ctx) with
               | Just impl_name ->
-                  match lookup_eta_inner_dicts_general(strip_module_prefix(class_name), head, class_type, ctx) with
+                  match lookup_eta_inner_dicts_general(string.after_last_dot(class_name), head, class_type, ctx) with
                   | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
                   | Just inner_dicts ->
                       # If any inner dict is the __unresolved_* sentinel it means the
@@ -1112,7 +1102,7 @@ fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, pr
 fn lookup_eta_fwd_scheme(tvar_name: String, class_name: String, ctx: LowerCtx) -> Maybe types.Scheme =
   match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ class_name, ctx_scheme_env(ctx)) with
   | Just scheme -> Just(scheme)
-  | Nothing -> dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ strip_module_prefix(class_name), ctx_scheme_env(ctx))
+  | Nothing -> dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ string.after_last_dot(class_name), ctx_scheme_env(ctx))
 
 # lower_expr_callee: lower the callee of a TCall without eta-expanding TVar class methods.
 # Direct class method calls already have TDict nodes injected by infer; rewriting the
@@ -1143,7 +1133,7 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
             | Nothing ->
                 match try_eta_forwarded_without_class(name, t, ctx) with
                 | Just expanded -> lower_expr(expanded, ctx)
-                | Nothing -> typed_ast.TVar("__eta_unresolved_" ++ strip_module_prefix(class_name) ++ "_" ++ strip_module_prefix(name), t, pos)
+                | Nothing -> typed_ast.TVar("__eta_unresolved_" ++ string.after_last_dot(class_name) ++ "_" ++ string.after_last_dot(name), t, pos)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)
@@ -1231,7 +1221,7 @@ fn resolve_tdict_for_classes(
   | Cons eff_class rest ->
       list_append(
         resolve_tdict_with_key(
-          constraint_key_str(strip_module_prefix(eff_class), type_args),
+          constraint_key_str(string.after_last_dot(eff_class), type_args),
           eff_class, type_args, pos, ctx),
         resolve_tdict_for_classes(rest, type_args, pos, ctx))
 

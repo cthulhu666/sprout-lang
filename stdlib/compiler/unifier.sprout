@@ -1,15 +1,6 @@
 module stdlib.compiler.unifier
 import stdlib.compiler.types as types
-
-# ---------------------------------------------------------------------------
-# strip_module_prefix — strip all leading module path segments from a name
-# ---------------------------------------------------------------------------
-# Duplicated from infer.sprout to avoid a circular import (infer imports unifier).
-
-fn strip_module_prefix(name: String) -> String =
-  if dot == -1 then name
-  else strip_module_prefix(str_slice(name, dot + 1, str_len(name)))
-  where dot = str_find(name, ".")
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # InferState — mutable counter for fresh type/effect variables
@@ -189,7 +180,7 @@ fn unify_applied(
   | (types.TVar a, _) -> bind_var(a, r, subst)
   | (_, types.TVar b) -> bind_var(b, l, subst)
   | (types.TConst a, types.TConst b) ->
-      if strip_module_prefix(a) == strip_module_prefix(b) then Ok(subst) else Err("Type mismatch: " ++ a ++ " vs " ++ b)
+      if string.after_last_dot(a) == string.after_last_dot(b) then Ok(subst) else Err("Type mismatch: " ++ a ++ " vs " ++ b)
   | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, bl, al, br, ar)
   | (types.TFunc p1 r1 _, types.TFunc p2 r2 _) -> unify_tfunc(subst, p1, r1, p2, r2)
   | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, xs, ys)

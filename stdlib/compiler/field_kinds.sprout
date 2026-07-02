@@ -18,6 +18,7 @@ module stdlib.compiler.field_kinds
 
 import stdlib.compiler.ast as ast
 import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.string as string
 
 # --- Private leaf helpers (mirror codegen.sprout's same-named local fns;
 #     local copies kept so this module has no dep on codegen). ---
@@ -32,12 +33,6 @@ fn string_ends_with(raw: String, suffix: String) -> Bool =
 fn type_name_leaf_is(name: String, leaf: String) -> Bool =
   name == leaf || string_ends_with(name, "." ++ leaf)
 
-fn strip_module_prefix(name: String) -> String =
-  if dot_pos < 0
-  then name
-  else strip_module_prefix(str_slice(name, dot_pos + 1, str_len(name)))
-  where dot_pos = str_find(name, ".")
-
 # --- Encoder ---
 
 # Map a constructor field's source-level TypeExpr to a one-byte kind code.
@@ -50,7 +45,7 @@ export fn ctor_field_kind(te: ast.TypeExpr) -> String =
       else if type_name_leaf_is(name, "String") then "s"
       else if type_name_leaf_is(name, "Char") then "i"
       else
-        match str_char_at(strip_module_prefix(name), 0) with
+        match str_char_at(string.after_last_dot(name), 0) with
         | Nothing -> "_"
         | Just ch -> if char_is_uppercase(ch) then "p" else "_"
   | ast.TypeArrow _ _ _ -> "p"

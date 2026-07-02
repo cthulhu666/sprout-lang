@@ -47,6 +47,12 @@ export fn substring_after_last(raw: String, sep: String) -> String =
   | Just (_, tail) -> tail
   | Nothing -> raw
 
+# O(codepoints): the segment after the last '.', or the whole string if there is
+# none.  Dot-specific convenience over substring_after_last for bare-ifying a
+# dotted/qualified name ("a.b.c" -> "c", "x" -> "x").
+export fn after_last_dot(name: String) -> String =
+  substring_after_last(name, ".")
+
 export fn take(raw: String, count: Int) -> String =
   if count <= 0 then ""
   else if count >= length(raw) then raw
