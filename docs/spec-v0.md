@@ -223,8 +223,8 @@ It associates to the left, so `x |> f(a) |> g(b)` means `g(b, f(a, x))`.
 
 ```sprout
 type Maybe a =
-  | Just a
   | Nothing
+  | Just a
 ```
 
 Every type name referenced in a constructor field, record field, or type alias
@@ -548,8 +548,8 @@ fn sign(n: Int) -> String =
 
 ```sprout
 type Maybe a =
-  | Just a
   | Nothing
+  | Just a
 
 fn with_default(m: Maybe Int, d: Int) -> Int =
   match m with
@@ -613,8 +613,8 @@ executable boundary. Helper functions may still use shapes such as
 
 ```sprout
 type Maybe a =
-  | Just a
   | Nothing
+  | Just a
 
 fn bad(m: Maybe Int) -> Int =
   match m with
@@ -627,8 +627,8 @@ Compiler should report non-exhaustive pattern matching.
 
 ```sprout
 type Maybe a =
-  | Just a
   | Nothing
+  | Just a
 
 fn bad(m: Maybe Int) -> Int =
   match m with
