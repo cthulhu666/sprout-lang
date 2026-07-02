@@ -1,0 +1,9 @@
+module main
+
+# Doubly-nested case: `ToString (List a)` requires `ToString a` at every level,
+# so `to_string([[()]])` must recurse through `List (List ())` down to the missing
+# `ToString ()` and be rejected at compile time — same diagnostic as the direct
+# `to_string(())`. Guards that resolve's context discharge is fully recursive,
+# not one-level-deep.
+
+fn main() -> Unit !{IO} = print(to_string([[()]]))

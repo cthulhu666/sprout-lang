@@ -1,0 +1,8 @@
+module main
+
+# `Ord (List a)` requires `Ord a`. There is no `Ord ()` instance, so
+# `compare([()], [()])` is unsatisfiable and must be rejected at compile time.
+# Ord parallel of the ToString nested-instance regression: same
+# constrained-instance machinery, different class.
+
+fn main() -> Unit !{IO} = print(to_string(compare([()], [()])))

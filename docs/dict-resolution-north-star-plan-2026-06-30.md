@@ -280,11 +280,20 @@ which family the reroute predicate (1074) and the null-fill guard (`ast_to_ir:77
 
 ## 6. Tests
 
-- M0 negative + positive fixtures (above).
+- M0 negative + positive fixtures (above). DONE.
 - Broaden coverage for the blast radius: `Maybe`, `Vec`, tuples, and *nested* missing
-  instances (`to_string([[()]])`, `to_string(Just(()))`).
+  instances (`to_string([[()]])`, `to_string(Just(()))`). **DONE (2026-07-02):**
+  `missing_nested_instance_maybe` (`Just(())`) landed with M0;
+  `missing_nested_instance_deep` (`[[()]]`) added — the doubly-nested case rejects
+  correctly with no code change, confirming resolve's context discharge is fully
+  recursive.
 - Eq/Ord/Serialize parallels (same constrained-instance machinery) get at least one
-  missing-instance negative test each.
+  missing-instance negative test each. **DONE for Eq/Ord (2026-07-02):**
+  `missing_nested_instance_eq` (`[()] == [()]` → `No instance of Eq for Unit`) and
+  `missing_nested_instance_ord` (`compare([()], [()])` → `No instance of Ord for
+  Unit`) both reject with no code change — the check-phase discharge generalizes
+  across classes, not just ToString. **Serialize is N/A:** no `Serialize` class exists
+  yet (deriving v1 still in design); when it lands, add its negative fixture then.
 - Golden IR snapshots + `just verify-bootstrap-fixed-point` as the no-ABI-drift gate
   through M4.
 

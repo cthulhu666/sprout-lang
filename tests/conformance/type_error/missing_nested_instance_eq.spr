@@ -1,0 +1,9 @@
+module main
+
+# `Eq (List a)` requires `Eq a`. There is no `Eq ()` instance, so comparing
+# `[()]` values is unsatisfiable and must be rejected at compile time. Eq
+# parallel of the ToString nested-instance regression: same constrained-instance
+# machinery, different class.
+
+fn main() -> Unit !{IO} =
+  if[()] == [()] then print("equal") else print("unequal")
