@@ -1,0 +1,31 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Positive guard for the do-block short-circuit-family check (PR-3): a do block
+# that stays in ONE family (all Maybe, or all Result) must keep compiling and
+# running. The negative cases (mixing Maybe and Result) live in
+# tests/conformance/type_error/stdlib_mixed_do_*.
+
+fn maybe_chain(a: Maybe Int, b: Maybe Int) -> Maybe Int =
+  do
+    x <- a
+    y <- b
+    Just(x + y)
+
+fn result_chain(a: Result String Int, b: Result String Int) -> Result String Int =
+  do
+    x <- a
+    y <- b
+    Ok(x + y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "maybe do both just", maybe_chain(Just(1), Just(2)), Just(3))
+    assert_eq(state, "maybe do short-circuits", maybe_chain(Just(1), Nothing), no_int())
+    assert_eq(state, "result do both ok", result_chain(Ok(1), Ok(2)), ok3())
+    assert_eq(state, "result do short-circuits", result_chain(Ok(1), Err("x")), errx())
+    summary(state)
+
+fn no_int() -> Maybe Int = Nothing
+fn ok3() -> Result String Int = Ok(3)
+fn errx() -> Result String Int = Err("x")

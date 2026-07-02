@@ -561,12 +561,12 @@ _test-type-errors stage xfail="":
   fi
   echo "==> All type-error fixtures rejected as expected"
 
-# Stage-1 negative type-checking gate.
-# xfail: overlapping-instance detection (duplicate_instance, overlapping_instance) and
-# do-block family-conflict diagnostics (stdlib_mixed_do_*) are not yet implemented.
-# (missing_nested_instance{,_maybe} now reject via the resolve pass — promoted.)
+# Stage-1 negative type-checking gate. No xfail — every fixture is expected to
+# be rejected with its diagnostic. (Overlapping-instance and do-block
+# family-conflict diagnostics landed in PR-3; missing_nested_instance{,_maybe}
+# via the resolve pass in #110.)
 [group('test')]
-test-type-errors: (_test-type-errors "build/compile_driver_bin_stage1" "duplicate_instance overlapping_instance stdlib_mixed_do_bind_family_conflict stdlib_mixed_do_wrong_final_family")
+test-type-errors: (_test-type-errors "build/compile_driver_bin_stage1" "")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]

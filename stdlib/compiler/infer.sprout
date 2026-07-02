@@ -2196,6 +2196,53 @@ fn extend_env_from_pattern_list(pats: List ast.Pattern, subst: Dict types.Type, 
 # Do expression
 # ---------------------------------------------------------------------------
 
+# Short-circuit family ("Maybe" / "Result") of a do-step's inferred type, or
+# Nothing for any other type (IO actions, pure values).  Mirrors the shape
+# recognized by do_unwrap_type: `Maybe a` = TApp (TConst Maybe) a;
+# `Result e a` = TApp (TApp (TConst Result) e) a.
+fn short_circuit_family(t: types.Type) -> Maybe String =
+  match t with
+  | types.TApp outer _ ->
+      match outer with
+      | types.TConst name -> if name == "Maybe" then Just("Maybe") else Nothing
+      | types.TApp outer2 _ ->
+          match outer2 with
+          | types.TConst name -> if name == "Result" then Just("Result") else Nothing
+          | _ -> Nothing
+      | _ -> Nothing
+  | _ -> Nothing
+
+# A do block may sequence exactly one short-circuit family.  A `<-` bind fixes
+# the family; a later bind or the final expression in a different family is an
+# error.  Returns Ok(updated-family) or Err(diagnostic).  IO/pure steps and
+# `let` steps leave the family unchanged.
+fn do_family_update(
+  step: ast.DoStep,
+  is_last: Bool,
+  step_type: types.Type,
+  subst: Dict types.Type,
+  family: Maybe String
+) -> Result String (Maybe String) =
+  match short_circuit_family(unifier.apply_subst(subst, step_type)) with
+  | Nothing -> Ok(family)
+  | Just cur ->
+      match step with
+      | ast.DoBindStep _ _ ->
+          match family with
+          | Nothing -> Ok(Just(cur))
+          | Just est ->
+              if est == cur then Ok(family)
+              else Err(string_concat_many(["This do block started with ", est, " bindings, but this step returns ", cur, ". Keep one short-circuit family per do block."]))
+      | ast.DoExprStep _ ->
+          if is_last then
+            match family with
+            | Nothing -> Ok(family)
+            | Just est ->
+                if est == cur then Ok(family)
+                else Err(string_concat_many(["do block started with ", est, " bindings, but its final expression returns ", cur]))
+          else Ok(family)
+      | ast.DoLetStep _ _ -> Ok(family)
+
 fn infer_do(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -2204,7 +2251,7 @@ fn infer_do(
   steps: List ast.DoStep,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  infer_do_steps(state, env, subst, eff_subst, steps, dummy_unit(), Nil, types.EffectPure, pos)
+  infer_do_steps(state, env, subst, eff_subst, steps, dummy_unit(), Nil, types.EffectPure, Nothing, pos)
 
 fn infer_do_steps(
   state: unifier.InferState,
@@ -2215,6 +2262,7 @@ fn infer_do_steps(
   last_typed: typed_ast.TypedExpr,
   acc_steps: List typed_ast.TypedDoStep,
   acc_eff: types.Effect,
+  family: Maybe String,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match steps with
@@ -2229,12 +2277,20 @@ fn infer_do_steps(
         match sr with
         | InferErr pos e -> InferErr(pos, e)
         | InferOk typed_step_expr s1 es1 step_eff ->
-            infer_do_steps(
-              state,
-              extend_env_from_do_step(step, typed_ast.typed_expr_type(typed_step_expr), s1, env),
-              s1, es1, rest, typed_step_expr,
-              Cons(do_step_to_typed(step, typed_step_expr), acc_steps),
-              merge_effects(acc_eff, step_eff), pos)
+            match do_family_update(step, is_nil_steps(rest), typed_ast.typed_expr_type(typed_step_expr), s1, family) with
+            | Err msg -> InferErr(pos, msg)
+            | Ok new_family ->
+                infer_do_steps(
+                  state,
+                  extend_env_from_do_step(step, typed_ast.typed_expr_type(typed_step_expr), s1, env),
+                  s1, es1, rest, typed_step_expr,
+                  Cons(do_step_to_typed(step, typed_step_expr), acc_steps),
+                  merge_effects(acc_eff, step_eff), new_family, pos)
+
+fn is_nil_steps(steps: List ast.DoStep) -> Bool =
+  match steps with
+  | Nil -> true
+  | Cons _ _ -> false
 
 fn infer_do_step(
   state: unifier.InferState,
@@ -2586,10 +2642,13 @@ export fn typecheck_decls(
     match validate_all_decls(decls, declared_types) with
     | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
     | Nothing ->
-        # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
-        # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
-        # the env flows between decls as the wrap-protected GlobalEnv.
-        typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
+        match check_overlapping_instances(decls, dict_empty()) with
+        | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
+        | Nothing ->
+            # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
+            # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
+            # the env flows between decls as the wrap-protected GlobalEnv.
+            typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
 
 # ---------------------------------------------------------------------------
 # Strict type-name validation pass
@@ -2722,6 +2781,41 @@ fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe Stri
       match validate_decl(decl, declared) with
       | Just e -> Just(e)
       | Nothing -> validate_all_decls(rest, declared)
+
+# ---------------------------------------------------------------------------
+# Overlapping-instance validation pass
+# ---------------------------------------------------------------------------
+#
+# Two instances whose head constructors coincide would register the same
+# `@inst:{Class}:{Head}` marker, so the second silently shadows the first at
+# dispatch.  Sprout has no orphan/overlap resolution, so this is always an
+# error.  The key mirrors register_instance_marker exactly (head-constructor
+# only), so `instance Bar (List a)` and `instance Bar (List Int)` collide on
+# `@inst:Bar:List` just like a literal duplicate does.  Scans the program's own
+# decls (not the seeded prelude env), so prelude instances — each a distinct
+# head — never false-positive.
+fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> Nothing
+      | Cons head_te _ ->
+          Just((str_concat("@inst:", str_concat(class_name, str_concat(":", type_head_str(type_from_ast(head_te, dict_empty()))))),
+                strip_module_prefix(class_name)))
+
+fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe String =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.InstanceDecl constraint _ _ _ ->
+          match instance_key_and_class(constraint) with
+          | Nothing -> check_overlapping_instances(rest, seen)
+          | Just (key, cls) ->
+              match dict_get(key, seen) with
+              | Just _ -> Just(str_concat("Overlapping instances for ", cls))
+              | Nothing -> check_overlapping_instances(rest, dict_set(key, true, seen))
+      | _ -> check_overlapping_instances(rest, seen)
 
 # Pre-scan pass: register FnDecl signatures, @constrained_N markers, and
 # TypeDecl constructors for all declarations without typechecking bodies.
