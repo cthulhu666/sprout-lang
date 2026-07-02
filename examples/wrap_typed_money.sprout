@@ -1,0 +1,68 @@
+module examples.wrap_typed_money
+
+# `wrap` introduces a zero-cost distinct type. `AccountId` and `Cents` are both
+# just `Int` at runtime — no allocation, no boxing — but the type checker treats
+# them as different types. That distinction catches a whole class of bugs: an
+# amount of money can never be silently used as an account number, and two
+# account numbers can never be added together as if they were quantities.
+
+wrap AccountId = Int
+wrap Cents = Int
+
+# A `wrap` type can carry its own typeclass instances. Even though both wrap an
+# `Int`, dispatch is on the static type, so each renders differently: an account
+# id as "#1001", a money amount as "$12.99".
+
+instance ToString AccountId {
+  fn to_string(id: AccountId) -> String =
+    match id with
+    | AccountId n -> "#" ++ to_string(n)
+}
+
+instance ToString Cents {
+  fn to_string(amount: Cents) -> String =
+    match amount with
+    | Cents total -> "$" ++ to_string(total / 100) ++ "." ++ pad2(cents_fraction(total))
+}
+
+# Sub-dollar remainder of an amount, e.g. 1299 -> 99. There is no `%` operator,
+# so we derive it from integer division.
+fn cents_fraction(total: Int) -> Int =
+  total - (total / 100) * 100
+
+# Zero-pad a value in 0..99 so 5 renders as "05".
+fn pad2(n: Int) -> String =
+  if n < 10 then "0" ++ to_string(n) else to_string(n)
+
+fn cents_add(a: Cents, b: Cents) -> Cents =
+  match a with
+  | Cents x ->
+      match b with
+      | Cents y -> Cents(x + y)
+
+fn cents_sub(a: Cents, b: Cents) -> Cents =
+  match a with
+  | Cents x ->
+      match b with
+      | Cents y -> Cents(x - y)
+
+# The wrapped parameters document intent and enforce it. Calling this as
+# `describe_transfer(price, alice, bob)` is a *compile error*: a `Cents` value
+# cannot stand in for an `AccountId`. Without `wrap`, all three would be `Int`
+# and the mistake would compile and ship.
+fn describe_transfer(from: AccountId, to: AccountId, amount: Cents) -> String =
+  "transfer " ++ to_string(amount)
+    ++ " from " ++ to_string(from)
+    ++ " to " ++ to_string(to)
+
+fn main() -> Unit !{IO} =
+  do
+    let alice = AccountId(1001)
+    let bob = AccountId(2002)
+    let alice_balance = Cents(5000)
+    let price = Cents(1299)
+
+    print(describe_transfer(alice, bob, price))
+    print("alice balance before: " ++ to_string(alice_balance))
+    print("alice balance after:  " ++ to_string(cents_sub(alice_balance, price)))
+    print("bob receives:         " ++ to_string(cents_add(Cents(0), price)))
