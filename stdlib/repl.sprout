@@ -1,5 +1,6 @@
 module stdlib.repl
 import stdlib.compiler as compiler
+import stdlib.compiler.parser as parser
 import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_line_once)
 import stdlib.string as string
 
@@ -579,13 +580,10 @@ fn render_expr_result(result: Result String (Vec String)) -> Vec String =
 fn help_lines() -> Vec String =
   single_line("Commands: :type EXPR, :t EXPR, :instances TYPE, :i TYPE, :quit, :help, :{ ... :}, and :cancel inside block mode, plus ordinary import lines")
 
-fn is_declaration(raw: String) -> Bool =
-  string.starts_with(raw, "fn ")
-  || string.starts_with(raw, "let ")
-  || string.starts_with(raw, "type ")
-  || string.starts_with(raw, "class ")
-  || string.starts_with(raw, "instance ")
-  || string.starts_with(raw, "export ")
+# Routes a submission to the declaration path. Delegates to the parser's own
+# keyword predicate so the REPL holds no copy of the decl-keyword set.
+export fn is_declaration(raw: String) -> Bool =
+  parser.submission_starts_decl(raw)
 
 fn block_line_is_continuation(line: String) -> Bool =
   if line == "" then false

@@ -1390,6 +1390,35 @@ fn parse_optional_instance_constraints(tokens: Vec token.Token, i: Int) -> Resul
         (cs, i3) <- collect_constraints(tokens, i2, Nil)
         Ok((list_reverse(cs), i3))
 
+# Single source of truth for the keywords that begin a top-level declaration.
+# parse_decl_body guards its dispatch on this predicate, so the two cannot
+# drift: a keyword in the dispatch but missing here is rejected before it
+# reaches its arm; a keyword here but missing from the dispatch reaches the
+# internal-error arm. Any client that must classify submissions (the REPL,
+# and later a language server) reuses this instead of copying the list.
+export fn is_decl_keyword(text: String) -> Bool =
+  text == "extern"
+  || text == "fn"
+  || text == "let"
+  || text == "class"
+  || text == "instance"
+  || text == "type"
+  || text == "wrap"
+
+# Does `raw` begin a top-level declaration? Looks only at the leading keyword
+# (skipping an `export` modifier), the same signal parse_decl uses. Clients
+# route on this to choose the declaration path over an expression path.
+export fn submission_starts_decl(raw: String) -> Bool =
+  match string.words(raw) with
+  | Nil -> false
+  | Cons first rest ->
+      if first == "export" then
+        match rest with
+        | Nil -> false
+        | Cons second _ -> is_decl_keyword(second)
+      else
+        is_decl_keyword(first)
+
 fn parse_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   parse_decl_body(tokens, skip_export(tokens, i))
 
@@ -1398,7 +1427,23 @@ fn skip_export(tokens: Vec token.Token, i: Int) -> Int =
   | Just (_, i2) -> i2
   | Nothing -> i
 
+# True when the token is a keyword that begins a declaration. Checks kind as
+# well as text so a same-named string literal at decl position falls through
+# to the ordinary "Expected declaration" error rather than the internal arm.
+fn head_is_decl_keyword(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenKeywordKind -> is_decl_keyword(token.token_text(t))
+  | _ -> false
+
 fn parse_decl_body(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
+  if head_is_decl_keyword(tok_at(tokens, i)) then parse_decl_dispatch(tokens, i)
+  else
+    Err(ParseError(
+      string.concat("Expected declaration at ", pos_str(cur_pos(tokens, i))),
+      cur_pos(tokens, i)
+    ))
+
+fn parse_decl_dispatch(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   if tok_is_keyword(tok_at(tokens, i), "extern") then parse_extern_fn_decl(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "fn") then parse_fn_decl(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "let") then parse_let_decl(tokens, i)
@@ -1408,7 +1453,7 @@ fn parse_decl_body(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
   else if tok_is_keyword(tok_at(tokens, i), "wrap") then parse_wrap_decl(tokens, i)
   else
     Err(ParseError(
-      string.concat("Expected declaration at ", pos_str(cur_pos(tokens, i))),
+      string.concat("internal: is_decl_keyword accepted a keyword with no parser arm at ", pos_str(cur_pos(tokens, i))),
       cur_pos(tokens, i)
     ))
 
