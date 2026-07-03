@@ -1,0 +1,69 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+fn is_unresolved(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvUnresolved -> true
+  | _ -> false
+
+fn is_instance(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvInstance _ _ -> true
+  | _ -> false
+
+fn is_forward(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvForward _ -> true
+  | _ -> false
+
+fn is_missing(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvMissing _ -> true
+  | _ -> false
+
+fn evidence_key(ev: typed_ast.Evidence) -> String =
+  match ev with
+  | typed_ast.EvUnresolved -> "unresolved"
+  | typed_ast.EvInstance key _ -> key
+  | typed_ast.EvForward slot -> slot
+  | typed_ast.EvMissing _ -> "missing"
+
+fn tdict_ev_is_unresolved() -> Bool =
+  match typed_ast.TDict(
+    ast.TypeConstraint("Show", Cons(ast.TypeName("Int"), Nil)),
+    types.TConst("Show"),
+    source.SourcePos(0, 1, 1),
+    typed_ast.EvUnresolved) with
+  | typed_ast.TDict _ _ _ ev -> is_unresolved(ev)
+  | _ -> false
+
+fn tdict_ev_is_forwarded() -> Bool =
+  match typed_ast.TDict(
+    ast.TypeConstraint("Show", Cons(ast.TypeName("a"), Nil)),
+    types.TConst("Show"),
+    source.SourcePos(0, 1, 1),
+    typed_ast.EvForward("dict0")) with
+  | typed_ast.TDict _ _ _ ev -> is_forward(ev)
+  | _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "EvUnresolved: is_unresolved", is_unresolved(typed_ast.EvUnresolved))
+    assert_false(state, "EvUnresolved: not is_instance", is_instance(typed_ast.EvUnresolved))
+    assert_true(state, "EvInstance: is_instance",
+      is_instance(typed_ast.EvInstance("Show__Int", Cons(typed_ast.EvUnresolved, Nil))))
+    assert_eq(state, "EvInstance key",
+      evidence_key(typed_ast.EvInstance("Show__Int", Nil)), "Show__Int")
+    assert_true(state, "EvForward: is_forward", is_forward(typed_ast.EvForward("dict0")))
+    assert_eq(state, "EvForward slot", evidence_key(typed_ast.EvForward("dict0")), "dict0")
+    assert_true(state, "EvMissing: is_missing",
+      is_missing(typed_ast.EvMissing(ast.TypeConstraint("Show", Nil))))
+    assert_eq(state, "EvMissing key",
+      evidence_key(typed_ast.EvMissing(ast.TypeConstraint("Show", Nil))), "missing")
+    assert_true(state, "TDict 4-field: evidence is EvUnresolved", tdict_ev_is_unresolved())
+    assert_true(state, "TDict 4-field: evidence is EvForward", tdict_ev_is_forwarded())
+    summary(state)

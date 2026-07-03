@@ -29,6 +29,17 @@ export type TypedDoStep (..) =
 
 export type TypedRecordField (..) = TypedRecordField String TypedExpr
 
+# Resolved typeclass-dictionary evidence attached to a TDict node.
+# EvUnresolved: not yet rewritten by the resolve pass (lowering resolves it itself).
+# EvInstance: instance method-map key + evidence for the instance's context constraints.
+# EvForward: forwarded hidden-param dict slot at a polymorphic call site.
+# EvMissing: unsatisfiable constraint; resolve rejects it with a diagnostic.
+export type Evidence (..) =
+  | EvUnresolved
+  | EvInstance String (List Evidence)
+  | EvForward String
+  | EvMissing ast.TypeConstraint
+
 export type TypedExpr (..) =
   | TVar String types.Type source.SourcePos
   | TInt Int types.Type source.SourcePos
@@ -40,7 +51,7 @@ export type TypedExpr (..) =
   | TIf TypedExpr TypedExpr TypedExpr types.Type source.SourcePos
   | TMatch TypedExpr (List TypedMatchBranch) types.Type source.SourcePos
   | TCall TypedExpr (List TypedExpr) types.Type source.SourcePos
-  | TDict ast.TypeConstraint types.Type source.SourcePos
+  | TDict ast.TypeConstraint types.Type source.SourcePos Evidence
   | TLambda (List ast.Param) TypedExpr types.Type source.SourcePos
   | TBinary String TypedExpr TypedExpr types.Type source.SourcePos
   | TUnary String TypedExpr types.Type source.SourcePos
@@ -61,7 +72,7 @@ export fn typed_expr_type(e: TypedExpr) -> types.Type =
   | TIf _ _ _ t _ -> t
   | TMatch _ _ t _ -> t
   | TCall _ _ t _ -> t
-  | TDict _ t _ -> t
+  | TDict _ t _ _ -> t
   | TLambda _ _ t _ -> t
   | TBinary _ _ _ t _ -> t
   | TUnary _ _ t _ -> t
@@ -82,7 +93,7 @@ export fn typed_expr_pos(e: TypedExpr) -> source.SourcePos =
   | TIf _ _ _ _ p -> p
   | TMatch _ _ _ p -> p
   | TCall _ _ _ p -> p
-  | TDict _ _ p -> p
+  | TDict _ _ p _ -> p
   | TLambda _ _ _ p -> p
   | TBinary _ _ _ _ p -> p
   | TUnary _ _ _ p -> p

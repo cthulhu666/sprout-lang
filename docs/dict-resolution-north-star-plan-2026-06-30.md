@@ -210,10 +210,18 @@ below) two facts settled it:
 
 M3a is the shipped fix; this map is the spec for whenever full M3b is undertaken.
 
+**M3b-1 — Dormant Evidence threading. DONE (2026-07-02).**
+Add `Evidence` ADT to `typed_ast.sprout` and thread a 4th `EvUnresolved` field through every
+`TDict` construction and match site (12 constructions in infer + 24 matches across 7 files;
+36 sites total). IR is byte-for-byte unchanged — `EvUnresolved` is dormant plumbing.
+New test: `tests/stdlib/compiler/test_evidence.spr` exercises all four constructors and the
+4-field TDict pattern. Gate: `just verify-bootstrap-fixed-point` unchanged.
+
 **If full M3b is ever done — design notes.** Option A: resolve emits `EvInstance` for the
 concrete subtree + an opaque `EvForward` marker; lowering fills the forward slot from
 `ctx_fwd` mechanically (a lookup, no *decision*). Evidence threading: add an `Evidence`
-field to `typed_ast.TDict` (ripples to ~15 match sites but travels with the node and
+field to `typed_ast.TDict` (ripples to 36 sites: 12 constructions in infer + 24 matches
+across 7 files; travels with the node and
 survives dce/apply_subst — a pos-keyed side table breaks on synthetic/duplicate-pos
 TDicts). Sequence `resolve_tdict` deletion LAST, after both paths consume evidence and the
 fixed-point still holds. Three known traps: the load-bearing sentinel (below), per-function
@@ -223,28 +231,29 @@ fixed-point still holds. Three known traps: the load-bearing sentinel (below), p
 
 ## Appendix — `__unresolved_` / `__eta_unresolved_` sentinel-flow map (M3b spec)
 
-Verified 2026-06-30. All lines in `stdlib/compiler/`.
+Verified 2026-06-30; line numbers re-verified 2026-07-02. All lines in `stdlib/compiler/`.
 
 **Mint sites — Family A `__unresolved_*` (dict resolution), all in the `resolve_tdict`
 family:**
-- **A1** `lowering.sprout:1255` `resolve_tdict_with_key` — `"__unresolved_" ++ key` (per
-  method). Condition: key absent from BOTH `ctx_fwd` (1245) AND `ctx_inst` (1250).
-- **A2** `lowering.sprout:1302` `resolve_method_with_lambda` — `"__unresolved_" ++ key ++
+- **A1** `lowering.sprout:1245` `resolve_tdict_with_key` — `"__unresolved_" ++ key` (per
+  method). Condition: key absent from BOTH `ctx_fwd` (1235) AND `ctx_inst` (1240).
+- **A2** `lowering.sprout:1292` `resolve_method_with_lambda` — `"__unresolved_" ++ key ++
   "_" ++ method`. Condition: concrete instance matched but a method slot missing from its
   `method_map`.
-- **A3** `lowering.sprout:1320` `resolve_method_var` — `"__unresolved_" ++ fallback_key ++
+- **A3** `lowering.sprout:1310` `resolve_method_var` — `"__unresolved_" ++ fallback_key ++
   "_" ++ method`. Condition: method absent from the resolved `method_map`.
 
 **Mint site — Family B `__eta_unresolved_*` (eta expansion):**
-- **B1** `lowering.sprout:1146` `lower_expr` (TVar) — `"__eta_unresolved_" ++ class ++ "_"
-  ++ name`. Condition: bare TVar is a class method but all eta-expansion attempts failed.
-  Carries the real type. NO dedicated consumer → hard error at `ast_to_ir.sprout:781`;
-  silent zero at `codegen.sprout:1900`.
+- **B1** `lowering.sprout:1136` `lower_expr` (TVar) — `"__eta_unresolved_" ++
+  string.after_last_dot(class_name) ++ "_" ++ string.after_last_dot(name)`. Condition:
+  bare TVar is a class method but all eta-expansion attempts failed. Carries the real type.
+  NO dedicated consumer → hard error at `ast_to_ir.sprout:781`; silent zero at
+  `codegen.sprout:1900`.
 
 **Consumers of Family A:**
-- **C1 (transient, reroute)** `has_unresolved_dict` `lowering.sprout:866`, used at `:1074`
+- **C1 (transient, reroute)** `has_unresolved_dict` `lowering.sprout:850`, used at `:1064`
   in `try_eta_in_class`: if an eta inner-dict list contains a sentinel, REROUTE to the
-  forwarded slot (`make_eta_lambda(fwd_slot,…)` 1076) or return `Nothing` (1077). Sentinel
+  forwarded slot (`make_eta_lambda(fwd_slot,…)` 1066) or return `Nothing` (1067). Sentinel
   is discarded — never reaches codegen.
 - **C2 (terminal, explicit null-fill)** `ast_to_ir.sprout:776`: `str_starts_with(name,
   "__unresolved_")` → `IRConst 0`; other unknown → hard error (781).
@@ -252,19 +261,19 @@ family:**
   (incl. sentinels) falls through to `zero_val`. NOT sentinel-specific.
 
 **The two paths:**
-- **Call-position (TERMINAL):** `lower_expr`(TCall) → `expand_call_args`(1187) →
-  `expand_dict_witness_args`(1196) → `resolve_tdict`(1200) → … → mint A1/A2/A3. The result
+- **Call-position (TERMINAL):** `lower_expr`(TCall) → `expand_call_args`(1177) →
+  `expand_dict_witness_args`(1186) → `resolve_tdict`(1198) → … → mint A1/A2/A3. The result
   is spliced straight into TCall witness args; `has_unresolved_dict` is NEVER called on it.
   → reaches codegen (C2/C3). **This is the only path to the null-fill, and the path the
   original bug took.**
-- **Eta/value-position (TRANSIENT):** `lower_expr`(TVar) → `try_eta_in_class`(1058) →
-  `lookup_eta_inner_dicts_general`(959) → `resolve_tdict` → mint A1/A2/A3, THEN inspected by
-  `has_unresolved_dict`(1074) → reroute/discard. Family-A sentinels never escape here; a
+- **Eta/value-position (TRANSIENT):** `lower_expr`(TVar) → `try_eta_in_class`(1048) →
+  `lookup_eta_inner_dicts_general`(949) → `resolve_tdict` → mint A1/A2/A3, THEN inspected by
+  `has_unresolved_dict`(1064) → reroute/discard. Family-A sentinels never escape here; a
   failed reroute instead mints a Family-B sentinel (B1) that does reach codegen.
 
 **Refactor hazard:** `has_unresolved_dict` matches the bare prefix `"__unresolved_"` and
 does NOT match `"__eta_unresolved_"`. Unifying or renaming the prefixes silently changes
-which family the reroute predicate (1074) and the null-fill guard (`ast_to_ir:776`) catch.
+which family the reroute predicate (1064) and the null-fill guard (`ast_to_ir:776`) catch.
 
 ## 5. Impact
 

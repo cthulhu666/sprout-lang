@@ -1329,7 +1329,7 @@ fn collect_free_vars(e: typed_ast.TypedExpr, bound: Set, acc: List String, seen:
       | (a1, s1) -> collect_free_vars(end_, bound, a1, s1)
   | typed_ast.TDo steps _ _ ->
       collect_free_vars_steps(steps, bound, acc, seen)
-  | typed_ast.TDict _ _ _ -> (acc, seen)
+  | typed_ast.TDict _ _ _ _ -> (acc, seen)
   | typed_ast.TRecord _ _ _ _ -> (acc, seen)
   | typed_ast.TGetField obj _ _ _ ->
       collect_free_vars(obj, bound, acc, seen)
@@ -1795,7 +1795,7 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
       emit_call(callee, args, ty, ctx, locals, em, tco_ctx)
   | typed_ast.TDo steps ty _ ->
       emit_do(steps, ty, ctx, locals, em, tco_ctx)
-  | typed_ast.TDict _ ty _ ->
+  | typed_ast.TDict _ ty _ _ ->
       # TDict nodes should be eliminated by lowering; treat as unit if we see one
       zero_val(type_to_ll(ty))
   | typed_ast.TRecord _ _ ty _ ->
@@ -2602,7 +2602,7 @@ fn emit_named_call(name: String, callee_ty: types.Type, args: List typed_ast.Typ
 
 fn emit_append_call(args: List typed_ast.TypedExpr, ty: types.Type, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   match args with
-  | [typed_ast.TDict _ _ _, left, right | _] ->
+  | [typed_ast.TDict _ _ _ _, left, right | _] ->
       emit_append_operands(left, right, ty, ctx, locals, em)
   | [left, right | _] ->
       emit_append_operands(left, right, ty, ctx, locals, em)

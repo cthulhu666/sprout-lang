@@ -769,7 +769,7 @@ fn check_instance_for_marker(
                       typed_ast.TCall(typed_callee,
                         Cons(typed_ast.TDict(
                           ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_fwd(head_str, class_name, typed_args, subst, env), Nil)),
-                          types.TConst(class_name), pos),
+                          types.TConst(class_name), pos, typed_ast.EvUnresolved),
                           typed_args),
                         ret_t, pos),
                       s3, es3, call_eff)
@@ -1135,7 +1135,7 @@ fn class_var_in_args(method_type: types.Type, class_vars: List String) -> Bool =
 fn user_typed_args(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
-  | Cons (typed_ast.TDict _ _ _) rest -> user_typed_args(rest)
+  | Cons (typed_ast.TDict _ _ _ _) rest -> user_typed_args(rest)
   | Cons (typed_ast.TVar name t p) rest ->
       if str_starts_with(name, "__tc_") then user_typed_args(rest)
       else Cons(typed_ast.TVar(name, t, p), user_typed_args(rest))
@@ -1152,7 +1152,7 @@ fn collect_injected_heads_acc(class_name: String, typed_args: List typed_ast.Typ
   | Nil -> acc
   | Cons arg rest ->
       match arg with
-      | typed_ast.TDict (ast.TypeConstraint cn type_args) _ _ ->
+      | typed_ast.TDict (ast.TypeConstraint cn type_args) _ _ _ ->
           if cn == class_name then
             collect_injected_heads_acc(class_name, rest, list_append(acc, Cons(te_head_str(type_args), Nil)))
           else
@@ -1208,7 +1208,7 @@ fn scan_ptf_entries(
                 | Just _ ->
                     Just(typed_ast.TDict(
                       ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                      types.TConst(class_name), pos))
+                      types.TConst(class_name), pos, typed_ast.EvUnresolved))
                 | Nothing ->
                     scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
 
@@ -1272,7 +1272,7 @@ fn scan_ptf_prog_var_entries(
                 | Just _ ->
                     Just(typed_ast.TDict(
                       ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                      types.TConst(class_name), pos))
+                      types.TConst(class_name), pos, typed_ast.EvUnresolved))
                 | Nothing ->
                     scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
               else
@@ -1292,7 +1292,7 @@ fn resolve_one_constraint_tdict(
       | Just _ ->
           Just(typed_ast.TDict(
             ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, excluded), Nil)),
-            types.TConst(class_name), pos))
+            types.TConst(class_name), pos, typed_ast.EvUnresolved))
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
   | Nothing ->
@@ -1306,7 +1306,7 @@ fn resolve_one_constraint_tdict(
           | Just _ ->
               Just(typed_ast.TDict(
                 ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst), Nil)),
-                types.TConst(class_name), pos))
+                types.TConst(class_name), pos, typed_ast.EvUnresolved))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
       | Nothing ->
@@ -1341,7 +1341,7 @@ fn fwd_scheme_to_tdict(fwd_scheme: types.Scheme, class_name: String, pos: source
   | types.Scheme _ _ (types.TConst prog_var) _ ->
       Just(typed_ast.TDict(
         ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
-        types.TConst(class_name), pos))
+        types.TConst(class_name), pos, typed_ast.EvUnresolved))
   | _ -> Nothing
 
 # Scan all env entries for the first "@fwd:*:class_name" marker.
@@ -1403,7 +1403,7 @@ fn scan_fwd_markers_for_prog_var(
                 if stored_prog_var == prog_var
                 then Just(typed_ast.TDict(
                        ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
-                       types.TConst(class_name), pos))
+                       types.TConst(class_name), pos, typed_ast.EvUnresolved))
                 else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
             | _ -> scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
           else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
@@ -1453,7 +1453,7 @@ fn resolve_obligation(
           | Just _ ->
               Just(typed_ast.TDict(
                 ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                types.TConst(class_name), pos))
+                types.TConst(class_name), pos, typed_ast.EvUnresolved))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
       | Nothing ->
@@ -3043,8 +3043,8 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
       typed_ast.TMatch(apply_subst_typed_expr(subst, scrutinee), apply_subst_typed_match_branches(subst, branches), unifier.apply_subst(subst, t), pos)
   | typed_ast.TCall fn_ args t pos ->
       typed_ast.TCall(apply_subst_typed_expr(subst, fn_), apply_subst_typed_expr_list(subst, args), unifier.apply_subst(subst, t), pos)
-  | typed_ast.TDict constraint t pos ->
-      typed_ast.TDict(constraint, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TDict constraint t pos ev ->
+      typed_ast.TDict(constraint, unifier.apply_subst(subst, t), pos, ev)
   | typed_ast.TLambda params body t pos ->
       typed_ast.TLambda(params, apply_subst_typed_expr(subst, body), unifier.apply_subst(subst, t), pos)
   | typed_ast.TBinary op left right t pos ->
@@ -3089,7 +3089,7 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
 fn strip_leading_tdicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
-  | Cons (typed_ast.TDict _ _ _) rest -> strip_leading_tdicts(rest)
+  | Cons (typed_ast.TDict _ _ _ _) rest -> strip_leading_tdicts(rest)
   | _ -> args
 
 # Collect ALL TDict nodes from an arg list, in the order they appear.
@@ -3098,7 +3098,7 @@ fn strip_leading_tdicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedE
 fn collect_all_tdicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
-  | Cons (typed_ast.TDict c t2 p) rest -> Cons(typed_ast.TDict(c, t2, p), collect_all_tdicts(rest))
+  | Cons (typed_ast.TDict c t2 p ev) rest -> Cons(typed_ast.TDict(c, t2, p, ev), collect_all_tdicts(rest))
   | Cons _ rest -> collect_all_tdicts(rest)
 
 # Return the element at zero-based index `idx`, or Nothing.
@@ -3209,7 +3209,7 @@ fn find_inst_in_return_type(class_name: String, t: types.Type, env: Dict types.S
       | Just _ ->
           Just(typed_ast.TDict(
             ast.TypeConstraint(class_name, Cons(type_to_typeexpr(t), Nil)),
-            types.TConst(class_name), pos))
+            types.TConst(class_name), pos, typed_ast.EvUnresolved))
       | Nothing ->
           find_inst_in_return_type_children(class_name, t, env, pos)
   | Nothing ->
@@ -3256,7 +3256,7 @@ fn try_rewrite_for_return_dispatch(
           typed_ast.TCall(fn_,
             Cons(typed_ast.TDict(
               ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, env), Nil)),
-              types.TConst(class_name), pos),
+              types.TConst(class_name), pos, typed_ast.EvUnresolved),
               strip_leading_tdicts(args)),
             t, pos)
 
@@ -3314,7 +3314,7 @@ fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, e
         resolve_dispatch_typed_expr(env, subst, fn_),
         resolve_dispatch_typed_list(env, subst, args),
         t, pos)
-  | typed_ast.TDict _ _ _ -> e
+  | typed_ast.TDict _ _ _ _ -> e
   | typed_ast.TLambda params body t pos ->
       typed_ast.TLambda(params, resolve_dispatch_typed_expr(env, subst, body), t, pos)
   | typed_ast.TBinary op left right t pos ->
@@ -3406,7 +3406,7 @@ fn assert_resolved_typed_expr(fn_name: String, expr: typed_ast.TypedExpr) -> Uni
         do
           assert_resolved_typed_expr(fn_name, fn_)
           assert_resolved_typed_expr_list(fn_name, args)
-    | typed_ast.TDict _ _ _ -> ()
+    | typed_ast.TDict _ _ _ _ -> ()
     | typed_ast.TLambda _ body _ _ -> assert_resolved_typed_expr(fn_name, body)
     | typed_ast.TBinary _ left right _ _ ->
         do

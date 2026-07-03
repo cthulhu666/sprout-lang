@@ -58,7 +58,7 @@ fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set, top_level: Set) -> S
                 compute_free_vars(end_, bound, top_level))
   | typed_ast.TDo steps _ _ ->
       compute_free_vars_do_steps(steps, bound, top_level)
-  | typed_ast.TDict _ _ _ -> set_empty()
+  | typed_ast.TDict _ _ _ _ -> set_empty()
   | typed_ast.TRecord _ fields _ _ ->
       compute_free_vars_record_fields(fields, bound, top_level)
   | typed_ast.TMatch scrut arms _ _ ->
@@ -830,7 +830,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       translate_match(scrut, arms, match_ty, params, ctors, idx, cur_label, cur_ops,
                       captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                       name_prefix)
-  | typed_ast.TDict _ _ _ -> Err("ast_to_ir: TDict not yet supported")
+  | typed_ast.TDict _ _ _ _ -> Err("ast_to_ir: TDict not yet supported")
   | typed_ast.TLambda lparams body lam_ty _ ->
       translate_lambda(lparams, body, lam_ty, params, ctors, idx, cur_label, cur_ops,
                        captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
@@ -1377,7 +1377,7 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
   | typed_ast.TDo steps _ _ ->
       # FIX R4#6: mirror compute_free_vars_do_steps; walk steps threading shadow info.
       find_capture_type_do_steps(steps, name)
-  | typed_ast.TDict _ _ _ -> Nothing
+  | typed_ast.TDict _ _ _ _ -> Nothing
   | typed_ast.TRecord _ fields _ _ ->
       find_capture_type_fields(fields, name)
   | typed_ast.TMatch scrut arms _ _ ->
@@ -3444,7 +3444,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                       Ok((list_append(inner_blocks, call_blocks), call_lbl, call_ops,
                            call_result, idx2))
   | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: method/field call not yet supported")
-  | typed_ast.TDict _ _ _ -> Err("ast_to_ir: typeclass dispatch call not yet supported")
+  | typed_ast.TDict _ _ _ _ -> Err("ast_to_ir: typeclass dispatch call not yet supported")
   | _ -> Err("ast_to_ir: indirect call not yet supported")
 
 # Evaluate args left-to-right, then emit IRApplyClosure(result, callee_ssa, arg_names).
@@ -3570,7 +3570,7 @@ fn translate_append_call(args: List typed_ast.TypedExpr, call_ty: types.Type,
                          name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match args with
-  | [typed_ast.TDict _ _ _, left, right | _] ->
+  | [typed_ast.TDict _ _ _ _, left, right | _] ->
       translate_append_operands(left, right, call_ty, params, ctors, idx,
                                 cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                                 fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)

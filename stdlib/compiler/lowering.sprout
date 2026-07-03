@@ -1147,7 +1147,7 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       typed_ast.TMatch(lower_expr(scrut, ctx), lower_branches(branches, ctx), t, pos)
   | typed_ast.TCall callee args t pos ->
       typed_ast.TCall(lower_expr_callee(callee, ctx), expand_call_args(args, ctx), t, pos)
-  | typed_ast.TDict _ t pos ->
+  | typed_ast.TDict _ t pos _ ->
       # TDict should only appear as a prefix arg inside TCall — never standalone.
       # If seen standalone, emit as unit.  Note: `t` here is the constraint evidence
       # type (not TConst "Unit"), but this path is unreachable in valid programs so
@@ -1180,13 +1180,13 @@ fn expand_call_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed
 fn expand_user_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
-  | Cons (typed_ast.TDict _ _ _) rest -> expand_user_args(rest, ctx)
+  | Cons (typed_ast.TDict _ _ _ _) rest -> expand_user_args(rest, ctx)
   | Cons e rest -> Cons(lower_expr(e, ctx), expand_user_args(rest, ctx))
 
 fn expand_dict_witness_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
-  | Cons (typed_ast.TDict c _ pos) rest ->
+  | Cons (typed_ast.TDict c _ pos _) rest ->
       list_append(resolve_tdict(c, pos, ctx), expand_dict_witness_args(rest, ctx))
   | Cons _ rest -> expand_dict_witness_args(rest, ctx)
 

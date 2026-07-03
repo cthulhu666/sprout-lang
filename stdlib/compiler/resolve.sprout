@@ -208,7 +208,7 @@ fn check_methods(
 
 fn check_expr(e: typed_ast.TypedExpr, tables: Tables) -> Maybe(source.SourcePos, String) =
   match e with
-  | typed_ast.TDict c _ pos -> check_constraint(c, pos, tables)
+  | typed_ast.TDict c _ pos _ -> check_constraint(c, pos, tables)
   | typed_ast.TCall callee args _ _ -> check_expr_list(Cons(callee, args), tables)
   | typed_ast.TIf cnd thn els _ _ -> check_expr_list([cnd, thn, els], tables)
   | typed_ast.TMatch scrut branches _ _ -> check_expr_list(Cons(scrut, branch_bodies(branches)), tables)
