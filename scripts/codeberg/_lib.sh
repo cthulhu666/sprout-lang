@@ -13,24 +13,28 @@
 # themselves. Setup failures are still loud (stderr + exit 1) because
 # nothing useful can happen without config.
 
-if [ ! -f .codeberg.config ]; then
-  echo "ESCALATION: setup — .codeberg.config missing — copy .codeberg.config.example and fill in your values" >&2
-  exit 1
+# Set CODEBERG_LIB_NO_SETUP=1 to source only the pure helper functions below
+# (e.g. from unit tests) without requiring config/token/network.
+if [ -z "${CODEBERG_LIB_NO_SETUP:-}" ]; then
+  if [ ! -f .codeberg.config ]; then
+    echo "ESCALATION: setup — .codeberg.config missing — copy .codeberg.config.example and fill in your values" >&2
+    exit 1
+  fi
+
+  # shellcheck disable=SC1091
+  source .codeberg.config
+
+  TOKEN=$(grep -A2 'name: codeberg.org' "$TEA_CONFIG_PATH" 2>/dev/null \
+    | grep token \
+    | cut -d: -f2 \
+    | tr -d ' ')
+  if [ -z "${TOKEN:-}" ]; then
+    echo "ESCALATION: setup — could not extract API token from $TEA_CONFIG_PATH — check tea login" >&2
+    exit 1
+  fi
+
+  API="https://codeberg.org/api/v1/repos/$CODEBERG_OWNER/$CODEBERG_REPO"
 fi
-
-# shellcheck disable=SC1091
-source .codeberg.config
-
-TOKEN=$(grep -A2 'name: codeberg.org' "$TEA_CONFIG_PATH" 2>/dev/null \
-  | grep token \
-  | cut -d: -f2 \
-  | tr -d ' ')
-if [ -z "${TOKEN:-}" ]; then
-  echo "ESCALATION: setup — could not extract API token from $TEA_CONFIG_PATH — check tea login" >&2
-  exit 1
-fi
-
-API="https://codeberg.org/api/v1/repos/$CODEBERG_OWNER/$CODEBERG_REPO"
 
 # Wrapper around `curl` for Codeberg API calls. Adds auth header and
 # silences progress output. Caller specifies HTTP method, path
@@ -75,4 +79,44 @@ pr_snapshot() {
 # Returns 0 if the title looks like a WIP marker, 1 otherwise.
 title_is_wip() {
   echo "$1" | grep -qiE '^(WIP:|WIP |\[WIP\])'
+}
+
+# Aggregate a Forgejo Actions `/actions/tasks` JSON payload into one CI signal
+# for <sha>. Args: <tasks-json> <sha>. Echoes: failure | pending | success |
+# no-status. Pure (no network) so it is unit-testable — see pr-monitor-test.sh.
+#
+# Gates ONLY on the `test` job (the DoD suite). `setup` is a `needs:` dependency
+# of `test`, so there is a window where `setup` is green and `test` has not
+# spawned; aggregating over ALL jobs reads that as false `success` (it merged
+# PR#121 prematurely, 2026-07-03; see feedback_codeberg_merge_reverify_ci).
+# Restricting to `test` makes that window read as no-status (keep waiting).
+ci_from_tasks() {
+  local json=$1 sha=$2 sel n_fail n_run n_ok
+  sel=$(printf '%s' "$json" | jq -c --arg sha "${sha:0:7}" \
+        '[(.workflow_runs // .tasks // [])[] | select((.head_sha[0:7])==$sha and .name=="test")]' 2>/dev/null || echo '[]')
+  n_fail=$(printf '%s' "$sel" | jq '[.[]|select(.status=="failure" or .status=="error")]|length')
+  n_run=$(printf '%s' "$sel"  | jq '[.[]|select(.status=="running" or .status=="waiting" or .status=="pending" or .status=="unknown")]|length')
+  n_ok=$(printf '%s' "$sel"   | jq '[.[]|select(.status=="success")]|length')
+  if   [ "$n_fail" -gt 0 ]; then echo failure
+  elif [ "$n_run"  -gt 0 ]; then echo pending
+  elif [ "$n_ok"   -gt 0 ]; then echo success
+  else echo no-status; fi
+}
+
+# Authoritative pre-merge CI gate. Returns 0 iff the combined commit status for
+# <sha> is exactly "success" (i.e. every required context is green).
+#
+# ALWAYS call this immediately before POSTing a merge. Do NOT merge on the
+# pr-monitor.sh `ci=success` event alone: that is a heuristic over Actions runs
+# and can fire early in the `setup`-green / `test`-not-spawned window (it merged
+# PR#121 prematurely, 2026-07-03; see feedback_codeberg_merge_reverify_ci). The
+# combined-status endpoint returns "pending" while any required check is
+# unfinished, so requiring == "success" here cannot be fooled by that window,
+# nor by the null-state ghost (null != success) that makes the endpoint
+# unreliable as a *read* signal — see project_codeberg_null_status_ghost.
+ci_is_green() {
+  local sha=$1
+  local state
+  state=$(codeberg_curl GET "/commits/$sha/status" | jq -r '.state // "unknown"' 2>/dev/null)
+  [ "$state" = "success" ]
 }

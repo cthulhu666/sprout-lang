@@ -190,11 +190,28 @@ Required when you want master to literally advance to the PR's branch
 tip without creating any new commits. The branch must be a strict
 descendant of `master` at the moment the merge actually runs.
 
+> **Re-verify CI ground truth before you POST this merge.** Do NOT merge on
+> `pr-monitor.sh`'s `ci=success` event alone — it is a heuristic over Actions
+> runs and can fire early in the `setup`-green / `test`-not-spawned window (it
+> merged PR#121 prematurely, 2026-07-03; see `feedback_codeberg_merge_reverify_ci`).
+> Gate the merge on the combined commit status via the `_lib.sh` helper:
+>
+> ```sh
+> ci_is_green "$SHA" || { echo "CI not green for $SHA — not merging"; exit 1; }
+> ```
+>
+> The combined-status endpoint returns `pending` while any required check is
+> unfinished, so requiring `success` here cannot be fooled by that window nor by
+> the null-state ghost (null != success).
+
 ```sh
 source .codeberg.config
 TOKEN=$(grep -A2 'name: codeberg.org' "$TEA_CONFIG_PATH" | grep token | cut -d: -f2 | tr -d ' ')
 PR=<N>
 SHA=$(curl -sf "https://codeberg.org/api/v1/repos/$CODEBERG_OWNER/$CODEBERG_REPO/pulls/$PR" | jq -r '.head.sha')
+
+# Ground-truth gate — see the note above. Requires _lib.sh sourced.
+ci_is_green "$SHA" || { echo "CI not green for $SHA — not merging"; exit 1; }
 
 curl -s -X POST "https://codeberg.org/api/v1/repos/$CODEBERG_OWNER/$CODEBERG_REPO/pulls/$PR/merge" \
   -H "Authorization: token $TOKEN" \

@@ -137,13 +137,25 @@ For each event line you receive, decide:
 - `merged=true` → `PR#$PR: merged ✓`, mark done.
 - `state=closed` && `merged=false` → `ESCALATION: PR#$PR closed without merge`, mark done.
 - `ci=failure` → `ESCALATION: PR#$PR CI failed at $SHA`, mark done.
-- `ci=success` && `state=open` && `merged=false` → **CI is green; merge now.**
-  `TaskStop` the monitor, then fast-forward merge explicitly:
+- `ci=success` && `state=open` && `merged=false` → **candidate to merge — but
+  RE-VERIFY GROUND TRUTH FIRST.** `TaskStop` the monitor, then re-check the
+  combined commit status and only merge if it is truly `success`. Do NOT trust
+  the monitor's `ci=success` alone: it is a heuristic over Actions runs and can
+  fire early in the `setup`-green / `test`-not-spawned window (this merged PR#121
+  prematurely, 2026-07-03; see `feedback_codeberg_merge_reverify_ci`).
   ```sh
+  # _lib.sh provides ci_is_green; if merging inline (not via a sourced lib),
+  # inline the check: state=$(curl -sf -H "Authorization: token $TOKEN" \
+  #   "$API/commits/$SHA/status" | jq -r '.state'); [ "$state" = success ]
+  if ! ci_is_green "$SHA"; then
+    echo "PR#$PR: monitor said green but commit status != success — keep waiting"
+    # relaunch the monitor; do NOT merge.
+  else
   HTTP=$(curl -s -o /tmp/cm_merge_$PR.out -w "%{http_code}" \
     -X POST "$API/pulls/$PR/merge" \
     -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
     -d "{\"Do\":\"fast-forward-only\",\"head_commit_id\":\"$SHA\"}")
+  fi
   ```
   - `HTTP=200`/`201` → `PR#$PR: merged ✓`, mark done.
   - `HTTP=405`/`409` (not fast-forwardable — master moved during CI) → run
