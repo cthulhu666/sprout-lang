@@ -4,6 +4,16 @@ This file tracks open design, implementation, and tooling follow-up work.
 
 ## Current Priorities
 
+**Fundamentals-review fix campaign (2026-07-03).** An adversarial review of the runtime,
+both codegen paths, the type system, and the prelude found confirmed soundness and
+memory-safety holes: effect system unenforced, declared type variables not rigid, no
+value restriction, class-method dict dispatch by wrong position, typed-path top-level
+`let` globals never GC-rooted (silent use-after-free), UTF-8 out-of-bounds walkers +
+unvalidated ingestion, `/` division UB, exhaustiveness gaps. Full findings, probe
+programs, session-by-session fix plan, and the five user decisions needed (D1-D5) are in
+[fundamentals-code-review-handoff-2026-07-03.md](./fundamentals-code-review-handoff-2026-07-03.md).
+Recommended first session: W1 (global GC roots).
+
 1. Execute Model C GC-rooting plan (typed Sprout-IR + linear types).
    Design doc: [gc-rooting-model-c-plan-2026-06-02.md](./gc-rooting-model-c-plan-2026-06-02.md).
    Status: Milestone 1 (scalar IR scaffolding, PRs 1.1–1.5) and Milestone 2 PRs 2.1–2.5
