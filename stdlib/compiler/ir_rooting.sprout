@@ -82,6 +82,9 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false
   | sprout_ir.IRStoreGlobal _ _ -> false
+  # register_root_slot mallocs a RootNode (C heap), never the Sprout GC heap,
+  # and does not call sprout_gc_maybe_collect_threshold — NOT a GC trigger.
+  | sprout_ir.IRRegisterGlobalRoot _ -> false
   | sprout_ir.IRGetTupleField _ _ _ _ -> false
   | sprout_ir.IRICmp _ _ _ _ -> false
   | sprout_ir.IRBr _ -> false
@@ -173,8 +176,13 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRIDiv _ _ _ -> Nothing
   | sprout_ir.IRBoolNot _ _ -> Nothing
   | sprout_ir.IRINeg _ _ -> Nothing
+  # A value loaded from a global needs no temp root: its slot is a permanent GC
+  # root (IRRegisterGlobalRoot, emitted per global in @__sprout_init_globals),
+  # so the pointed-to object is already reachable across any later trigger.
   | sprout_ir.IRLoadGlobal _ _ -> Nothing
   | sprout_ir.IRStoreGlobal _ _ -> Nothing
+  # Produces no SSA value (uncaptured void-style call) — defines nothing heap.
+  | sprout_ir.IRRegisterGlobalRoot _ -> Nothing
   | sprout_ir.IRICmp _ _ _ _ -> Nothing
   | sprout_ir.IRBr _ -> Nothing
   | sprout_ir.IRCondBr _ _ _ -> Nothing
@@ -257,6 +265,8 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRINeg _ a -> Cons(a, Nil)
   | sprout_ir.IRLoadGlobal _ _ -> Nil
   | sprout_ir.IRStoreGlobal _ v -> Cons(v, Nil)
+  # Its operand is a global name, not an SSA value — no liveness use.
+  | sprout_ir.IRRegisterGlobalRoot _ -> Nil
   | sprout_ir.IRMakeTuple _ args -> args
   | sprout_ir.IRGetTupleField _ t _ _ -> Cons(t, Nil)
   | sprout_ir.IRICmp _ _ a b -> Cons(a, Cons(b, Nil))
@@ -574,6 +584,8 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false
   | sprout_ir.IRStoreGlobal _ _ -> false
+  # Its only operand is a global name (@name), not an SSA value — nothing to root.
+  | sprout_ir.IRRegisterGlobalRoot _ -> false
   | sprout_ir.IRGetTupleField _ _ _ _ -> false
   | sprout_ir.IRICmp _ _ _ _ -> false
   | sprout_ir.IRBr _ -> false

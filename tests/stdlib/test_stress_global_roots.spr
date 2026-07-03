@@ -1,0 +1,38 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# W1 (F-GROOT) runtime regression.  Before the fix the typed codegen path never
+# GC-registered top-level `let` globals, so under SPROUT_GC_STRESS=1 (collect on
+# EVERY allocation) the churn below swept them and recycled their memory — a
+# silent use-after-free that read back garbage.  This is the false-green class
+# the default GC threshold cannot catch (see project_gc_stress_oracle): it must
+# run under `just test-stress`, where a swept global fails the assert_eq below
+# and the harness sees "SUITE FAILED".
+#
+# Two global shapes: a string built with `++` (str_concat heap value) and a
+# List String built with ctors (IRMakeCtor heap value) — proving the fix is not
+# str-concat-specific.
+
+let greeting = "hello, " ++ "world"
+
+let names = Cons("alice", Cons("bob", Nil))
+
+# Allocate n short-lived strings to drive many stress collections.
+fn churn(n: Int, acc: String) -> String =
+  if n == 0 then acc else churn(n - 1, acc ++ "x")
+
+fn first_or(xs: List String, d: String) -> String =
+  match xs with
+  | Cons s _ -> s
+  | Nil -> d
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Force ~500 collections under stress before touching the globals.
+    let junk = churn(500, "")
+    assert_eq(state, "local churn produced 500 chars", str_len(junk), 500)
+    # If greeting's slot was swept, its recycled memory reads back garbage.
+    assert_eq(state, "string global survives GC churn", greeting, "hello, world")
+    # Ctor-built (List String) global — exercises IRMakeCtor heap production.
+    assert_eq(state, "list-string global survives GC churn", first_or(names, "none"), "alice")
+    summary(state)

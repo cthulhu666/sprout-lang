@@ -111,6 +111,17 @@ export type IROp (..) =
   # only in the synthesized `@__sprout_init_globals` function to initialize
   # runtime-computed globals once at program start.
   | IRStoreGlobal String String
+  # IRRegisterGlobalRoot <global-name>  — register a top-level let's storage
+  # slot as a permanent GC root.  Lowers to
+  #   call i64 @sprout_gc_register_i64_root(ptr @<global-name>)
+  # Emitted once per global immediately after its IRStoreGlobal in
+  # `@__sprout_init_globals`.  Without it the typed path never roots top-level
+  # heap globals, so the GC sweeps them on the next collection (silent UAF).
+  # Registering a scalar (Int/Bool) slot is harmless: the i64-root marker runs
+  # the value through find_managed_ptr, which returns NULL for non-heap values,
+  # so every global is registered unconditionally (mirrors direct codegen's
+  # emit_global_root_registration).
+  | IRRegisterGlobalRoot String
   # IRMakeTuple <result> <element-ssas>  — heap-allocate a tuple blob and
   # store each element.  Lowers to:
   #   <result>      = call i64 @sprout_alloc_tuple_blob(i64 <N*8>)
@@ -388,6 +399,7 @@ fn print_op(op: IROp) -> String =
   | IRINeg r a -> "    " ++ r ++ " = ineg " ++ a
   | IRLoadGlobal r name -> "    " ++ r ++ " = load_global @" ++ name
   | IRStoreGlobal name v -> "    store_global @" ++ name ++ ", " ++ v
+  | IRRegisterGlobalRoot name -> "    register_global_root @" ++ name
   | IRMakeTuple r args -> "    " ++ r ++ " = make_tuple(" ++ print_call_args(args) ++ ")"
   | IRGetTupleField r t idx _ -> "    " ++ r ++ " = get_tuple_field " ++ t ++ ", " ++ int_to_string(idx)
   | IRICmp r pred a b -> "    " ++ r ++ " = icmp " ++ pred ++ " " ++ a ++ ", " ++ b

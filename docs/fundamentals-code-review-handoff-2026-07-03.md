@@ -73,7 +73,24 @@ Required reading before any compiler/runtime session: `docs/compiler-internals.m
 
 ---
 
-### W1 — F-GROOT: typed path never GC-roots top-level `let` globals  [1S, CRITICAL, confirmed empirically]
+### W1 — F-GROOT: typed path never GC-roots top-level `let` globals  [DONE 2026-07-03, CRITICAL, confirmed empirically]
+
+**Fixed.** New inert IR op `IRRegisterGlobalRoot name` (`sprout_ir.sprout`), emitted once
+per global right after its `IRStoreGlobal` in `synthesize_init_body_loop`
+(`ast_to_ir.sprout`), classified in the four exhaustive `ir_rooting.sprout` matches
+(non-trigger / no-heap / no-use / no-exposure), and lowered to an uncaptured
+`call i64 @sprout_gc_register_i64_root(ptr @<name>)` with a matching `ir_header()`
+declare (`ir_lowering.sprout`). Every global is registered unconditionally: the i64-root
+marker runs the slot value through `find_managed_ptr`, which returns NULL for non-heap
+scalars, so registering an `Int`/`Bool` slot is a proven no-op (mirrors direct codegen's
+`emit_global_root_registration`). Regression tests: `tests/stdlib/test_ir_global_roots.spr`
+(deterministic IR-text: register call emitted, header declared, one-per-global,
+string-concat + ctor + list shapes) and `tests/stdlib/test_stress_global_roots.spr`
+(runtime, wired into `just test-stress` STRESS_FILES; a swept global fails `assert_eq`
+under `SPROUT_GC_STRESS=1`). Note: `debugging.md:90` is stale — `--emit-ir` is now the
+TYPED path (its IR header reads `ir_lowering.sprout`), not the direct path.
+
+<details><summary>original plan</summary>
 
 - **Evidence:** probe `sr_globalroot` prints `x` instead of `hello, world` under
   `SPROUT_GC_STRESS=1` (silent use-after-free), correct output without stress.
@@ -99,6 +116,8 @@ Required reading before any compiler/runtime session: `docs/compiler-internals.m
   is a `List String` (ctor, not string concat).
 - **Gates:** compiler-source change → smoke shapes, bundle smoke, `just refresh-seed`
   BEFORE `just test` (see §4), examples canary.
+
+</details>
 
 ### W2 — F-UTF8: runtime string-safety batch  [1S, CRITICAL, source-verified; partially blocked on D4]
 
@@ -390,7 +409,7 @@ repro under `--use-direct-codegen` as its DoR step.
 
 | Session | Workstream | Blocked on |
 |---|---|---|
-| 1 | W1 global GC roots | — |
+| 1 | ~~W1 global GC roots~~ **DONE 2026-07-03** | — |
 | 2 | W2 runtime UTF-8 (R1+R3+R4 now; R2 when D4 lands) | D4 partial |
 | 3 | W4 dispatch-by-constraint-position | — |
 | 4-5 | W3 rigidity + value restriction | — |

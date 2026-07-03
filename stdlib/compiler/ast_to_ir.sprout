@@ -4688,8 +4688,12 @@ fn synthesize_init_body_loop(runtime_lets: List (String, typed_ast.TypedExpr),
           | Ok body_r ->
               match body_r with
               | (body_blocks, body_lbl, body_ops, body_result, next_idx) ->
+                  # Store the initializer, then register the global's slot as a
+                  # permanent GC root (rationale on IRRegisterGlobalRoot itself).
                   synthesize_init_body_loop(rest, ctors, body_lbl,
-                    list_append(body_ops, Cons(sprout_ir.IRStoreGlobal(name, body_result), Nil)),
+                    list_append(body_ops,
+                      Cons(sprout_ir.IRStoreGlobal(name, body_result),
+                        Cons(sprout_ir.IRRegisterGlobalRoot(name), Nil))),
                     list_append(blocks, body_blocks), next_idx,
                     lifted_ref, top_level, let_names, fn_arities,
                     lambda_ctr_ref, lifted_idx_ref)

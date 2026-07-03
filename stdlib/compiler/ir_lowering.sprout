@@ -120,6 +120,10 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRINeg r a -> "  " ++ r ++ " = sub i64 0, " ++ a
   | sprout_ir.IRLoadGlobal r name -> "  " ++ r ++ " = load i64, ptr @" ++ name
   | sprout_ir.IRStoreGlobal name v -> "  store i64 " ++ v ++ ", ptr @" ++ name
+  # Uncaptured i64 call: register the global's slot as a permanent GC root.
+  # The return value (always 0) is unused; LLVM accepts an unnamed call result.
+  | sprout_ir.IRRegisterGlobalRoot name ->
+      "  call i64 @sprout_gc_register_i64_root(ptr @" ++ name ++ ")"
   | sprout_ir.IRMakeTuple r args ->
       "  " ++ r ++ " = call i64 @sprout_alloc_tuple_blob(i64 " ++
         int_to_string(list_length(args) * 8) ++ ")\n" ++
@@ -335,6 +339,7 @@ export fn ir_header() -> String =
   "declare i64 @char_to_string(i64)\n" ++
   "declare i64 @sprout_gc_push_i64_root(ptr)\n" ++
   "declare i64 @sprout_gc_pop_roots(i64)\n" ++
+  "declare i64 @sprout_gc_register_i64_root(ptr)\n" ++
   "declare i64 @sprout_alloc_closure_env(i64)\n" ++
   # Heap-allocate a raw i64-array blob for tuple storage (N * 8 bytes).
   # Called by IRMakeTuple lowering; one declaration covers all arities.

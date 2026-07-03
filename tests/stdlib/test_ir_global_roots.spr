@@ -1,0 +1,106 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+
+# W1 (F-GROOT): the typed codegen path never GC-registered top-level `let`
+# globals, so the GC swept them on the next collection (silent use-after-free,
+# reproduced by SPROUT_GC_STRESS in tests/stdlib/test_stress_global_roots.spr).
+# The fix synthesizes an IRRegisterGlobalRoot op after every IRStoreGlobal in
+# `@__sprout_init_globals`, lowering to a permanent i64-root registration.
+# The "one register call per global" assertion below pins that emission.
+#
+# These are deterministic IR-text assertions (no GC timing): they check the
+# register call is actually emitted, one per global, which a clean compile of
+# the exhaustive ir_rooting matches alone would NOT prove.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+# lex -> parse -> typecheck_typed -> lower_program -> translate_program ->
+# insert_roots -> lower.  Returns the final LLVM IR text (or an Err string).
+# NB: match the Result DIRECTLY — a do-block `<-` bind strips both the Result
+# and IO layers (see memory project_do_block_result_io_quirk).
+fn source_to_ir(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                match lowering.lower_program(typed_prog, env) with
+                | lowering.LowerErr msg -> Err("lower: " ++ msg)
+                | lowering.LowerOk lowered ->
+                    match ast_to_ir.translate_program(lowered) with
+                    | Err msg -> Err(msg)
+                    | Ok pair ->
+                        match pair with
+                        | (ir_prog, idx_map) ->
+                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn ir_contains(src: String, needle: String) -> Bool !{IO} =
+  match source_to_ir(src) with
+  | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+fn ir_count(src: String, needle: String) -> Int !{IO} =
+  match source_to_ir(src) with
+  | Ok ir -> count(ir, needle)
+  | Err _ -> -1
+
+# Bare-pipeline sources use only LOCALLY-declared ctor types: the checker here
+# runs with no prelude env (typecheck_typed(prog, Nil)), so `++` (desugars to
+# the Semigroup `append`) and prelude ctors (`Cons`/`Nil`) are unresolved.  A
+# `Box String` value is a runtime heap allocation, so its top-level `let`
+# becomes an IRStoreGlobal in @__sprout_init_globals — the slot W1 must root.
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # One heap-ctor global initialized at runtime.
+    one_global <- ir_contains(
+      "type Box = Box String\nlet g = Box(\"a\")\nfn get() -> Box = g",
+      "call i64 @sprout_gc_register_i64_root(ptr @")
+    assert_true(state, "heap-ctor global slot registered as a GC root",
+                one_global)
+
+    # The register-root declaration is emitted in the IR header.
+    decl <- ir_contains(
+      "type Box = Box String\nlet g = Box(\"a\")\nfn get() -> Box = g",
+      "declare i64 @sprout_gc_register_i64_root(ptr)")
+    assert_true(state, "ir_header declares @sprout_gc_register_i64_root", decl)
+
+    # Registration is emitted once per global — two runtime lets -> two calls.
+    two_calls <- ir_count(
+      "type Box = Box String\nlet g = Box(\"a\")\nlet h = Box(\"b\")\nfn get() -> Box = g",
+      "call i64 @sprout_gc_register_i64_root(ptr @")
+    assert_eq(state, "two globals -> two register-root calls", two_calls, 2)
+
+    # A recursive-ctor (list-shaped) global registers too — not Box-specific.
+    list_global <- ir_contains(
+      "type SL = SNil | SCons String SL\nlet xs = SCons(\"a\", SNil)\nfn hd(d: String) -> String =\n  match xs with\n  | SCons s _ -> s\n  | SNil -> d",
+      "call i64 @sprout_gc_register_i64_root(ptr @")
+    assert_true(state, "recursive-ctor (list-shaped) global slot registered as a GC root",
+                list_global)
+
+    summary(state)
