@@ -621,10 +621,10 @@ static void sprout_managed_index_remove(ManagedNode* node) {
  * Single-threaded; no locking required. */
 static ManagedNode* g_managed_node_freelist = NULL;
 
-/* SproutObj freelist: recycle GC-swept SproutObj allocations.
- * f0 is used as the next-pointer while the object is on the freelist;
- * sprout_init_obj always overwrites f0 before any code reads it. */
-static SproutObj* g_sprout_obj_freelist = NULL;
+/* SproutObj freelists: one per alloc_arity (0..9), recycling exact-size blocks.
+ * The tag word is used as the next-pointer while the object is on the freelist;
+ * every make path always overwrites tag before any code reads it. */
+static SproutObj* g_sprout_obj_freelist[10] = {NULL};
 
 static ManagedNode* alloc_managed_node(void) {
   if (g_managed_node_freelist != NULL) {
@@ -740,42 +740,56 @@ static void register_root_slot(void* slot, SproutRootKind kind, size_t aux_words
   g_root_nodes = node;
 }
 
-static void register_obj(SproutObj* p) {
-  register_managed_ptr(p, SPROUT_HEAP_OBJ, 0);
+/* Allocation arity for a SproutObj with the given ctor arity.
+ * In lineage mode the corpse must hold tag + f1 + f2 (poison backtrace slots),
+ * so objects smaller than 3 fields are padded up to 3.
+ * In normal builds this always returns arity unchanged — no overhead. */
+static int sprout_obj_alloc_arity(int arity) {
+  return (sprout_gc_lineage_on() && arity < 3) ? 3 : arity;
 }
 
-static SproutObj* sprout_alloc_obj_raw(const char* ctx) {
+static void register_obj(SproutObj* p, int arity) {
+  register_managed_ptr(p, SPROUT_HEAP_OBJ, (size_t)sprout_obj_alloc_arity(arity));
+}
+
+static SproutObj* sprout_alloc_obj_raw(int arity, const char* ctx) {
   sprout_gc_maybe_collect_threshold();
-  if (g_sprout_obj_freelist != NULL) {
-    SproutObj* obj = g_sprout_obj_freelist;
-    g_sprout_obj_freelist = (SproutObj*)(uintptr_t)obj->f0;
+  int aa = sprout_obj_alloc_arity(arity);
+  if (g_sprout_obj_freelist[aa] != NULL) {
+    SproutObj* obj = g_sprout_obj_freelist[aa];
+    g_sprout_obj_freelist[aa] = (SproutObj*)(uintptr_t)obj->tag;
     g_debug_alloc_sprout_obj++;
     return obj;
   }
-  return (SproutObj*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(SproutObj), ctx);
+  size_t sz = 8 + (size_t)aa * 8;
+  SproutObj* obj = (SproutObj*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sz, ctx);
+  /* Zero padding slots (lineage only: aa > arity); no-op in normal builds. */
+  for (int i = arity; i < aa; i++) ((long long*)obj)[1 + i] = 0;
+  return obj;
 }
 
+/* Writes tag and first three fields; called only by make4..9 (arity >= 4).
+ * Higher fields (f3+) are written by the caller; no zero-fill beyond f2. */
 static SproutObj* sprout_init_obj(SproutObj* obj, long long tag, long long f0, long long f1, long long f2) {
   obj->tag = tag;
   obj->f0 = f0;
   obj->f1 = f1;
   obj->f2 = f2;
-  obj->f3 = 0;
-  obj->f4 = 0;
-  obj->f5 = 0;
-  obj->f6 = 0;
-  obj->f7 = 0;
-  obj->f8 = 0;
   return obj;
 }
 
-static long long sprout_box_registered_obj(SproutObj* obj) {
-  register_obj(obj);
+static long long sprout_box_registered_obj(SproutObj* obj, int arity) {
+  register_obj(obj, arity);
   return box_ptr(obj);
 }
 
-static long long sprout_make_registered_obj(long long tag, long long f0, long long f1, long long f2, const char* ctx) {
-  return sprout_box_registered_obj(sprout_init_obj(sprout_alloc_obj_raw(ctx), tag, f0, f1, f2));
+static long long sprout_make_registered_obj(int arity, long long tag, long long a0, long long a1, long long a2, const char* ctx) {
+  SproutObj* obj = sprout_alloc_obj_raw(arity, ctx);
+  obj->tag = tag;
+  if (arity >= 1) obj->f0 = a0;
+  if (arity >= 2) obj->f1 = a1;
+  if (arity >= 3) obj->f2 = a2;
+  return sprout_box_registered_obj(obj, arity);
 }
 
 long long sprout_alloc_closure_env(long long size) {
@@ -1240,7 +1254,9 @@ static void sprout_gc_free_payload(ManagedNode* node) {
            reference reads the poison tag at its use site (see sprout_tag).
            Stash the free-time backtrace in the corpse (f1=frames, f2=count):
            it names the allocation that triggered this collection, i.e. the
-           site across which the victim was live-but-unrooted. */
+           site across which the victim was live-but-unrooted.
+           alloc_arity >= 3 is guaranteed in lineage mode (see sprout_obj_alloc_arity),
+           so f1 and f2 are always within the allocated block. */
         void** frames = (void**)malloc(sizeof(void*) * 32);
         int n = frames ? backtrace(frames, 32) : 0;
         obj->tag = SPROUT_GC_POISON_TAG;
@@ -1248,8 +1264,11 @@ static void sprout_gc_free_payload(ManagedNode* node) {
         obj->f2 = (long long)n;
         return;
       }
-      obj->f0 = (long long)(uintptr_t)g_sprout_obj_freelist;
-      g_sprout_obj_freelist = obj;
+      /* Push onto the per-arity freelist; link through the tag word.
+         aux_slots holds the alloc_arity recorded at registration. */
+      size_t k = node->aux_slots;
+      obj->tag = (long long)(uintptr_t)g_sprout_obj_freelist[k];
+      g_sprout_obj_freelist[k] = obj;
       return;
     }
     case SPROUT_HEAP_CLOSURE:
@@ -1589,8 +1608,10 @@ long long sprout_set_argv(int argc, char** argv) {
 }
 long long sprout_nothing(long long tag) {
   if (g_nothing_singleton == NULL) {
-    g_nothing_singleton = sprout_init_obj(sprout_alloc_obj_raw("sprout_nothing: out of memory"), tag, 0, 0, 0);
-    register_obj(g_nothing_singleton);
+    SproutObj* obj = sprout_alloc_obj_raw(0, "sprout_nothing: out of memory");
+    obj->tag = tag;
+    register_obj(obj, 0);
+    g_nothing_singleton = obj;
   }
   return box_ptr(g_nothing_singleton);
 }
@@ -1750,7 +1771,7 @@ static long long sprout_make_proc_result(int exit_code, GrowBuf* out, GrowBuf* e
   long long rooted_err = (long long)(uintptr_t)err->data;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_err);
   long long tag = find_ctor_tag_by_name("stdlib.process.ProcResult");
-  long long obj = sprout_make_registered_obj(tag, (long long)exit_code,
+  long long obj = sprout_make_registered_obj(3, tag, (long long)exit_code,
                                              rooted_out, rooted_err,
                                              "proc_run: out of memory");
   SPROUT_GC_POP_LOCALS(2);
@@ -3449,8 +3470,10 @@ static void sprout_debug_adt_rec(long long val, int depth) {
   if (meta->arity == 0) return;
   fprintf(stderr, "(");
   const char* fk = (meta->field_kinds != NULL) ? meta->field_kinds : "";
-  long long fields[9] = { obj->f0, obj->f1, obj->f2, obj->f3, obj->f4,
-                          obj->f5, obj->f6, obj->f7, obj->f8 };
+  /* Read only the fields this object actually has; reading beyond alloc_arity is OOB. */
+  long long fields[9] = {0};
+  for (long long i = 0; i < meta->arity && i < 9; i++)
+    fields[i] = ((long long*)obj)[1 + i];
   for (long long i = 0; i < meta->arity && i < 9; i++) {
     if (i > 0) fprintf(stderr, ", ");
     char kind = (fk[i] != '\0') ? fk[i] : '_';
@@ -3467,8 +3490,10 @@ void sprout_debug_adt(long long val) {
 /* Helper: lazily allocate or return the cached nullary-ctor singleton. */
 static long long get_or_make_singleton(SproutObj** slot, long long tag) {
   if (*slot == NULL) {
-    *slot = sprout_init_obj(sprout_alloc_obj_raw("sprout_make0: out of memory"), tag, 0, 0, 0);
-    register_obj(*slot);
+    SproutObj* obj = sprout_alloc_obj_raw(0, "sprout_make0: out of memory");
+    obj->tag = tag;
+    register_obj(obj, 0);
+    *slot = obj;
   }
   return box_ptr(*slot);
 }
@@ -3494,13 +3519,13 @@ long long sprout_make0(long long tag) {
     if (strcmp(name, "stdlib.compiler.sprout_ir.IRTUnknown") == 0)
       return get_or_make_singleton(&g_irtunknown_singleton, tag);
   }
-  return sprout_make_registered_obj(tag, 0, 0, 0, "sprout_make0: out of memory");
+  return sprout_make_registered_obj(0, tag, 0, 0, 0, "sprout_make0: out of memory");
 }
 long long sprout_make1(long long tag, long long a0) {
-  return sprout_make_registered_obj(tag, a0, 0, 0, "sprout_make1: out of memory");
+  return sprout_make_registered_obj(1, tag, a0, 0, 0, "sprout_make1: out of memory");
 }
 long long sprout_make2(long long tag, long long a0, long long a1) {
-  return sprout_make_registered_obj(tag, a0, a1, 0, "sprout_make2: out of memory");
+  return sprout_make_registered_obj(2, tag, a0, a1, 0, "sprout_make2: out of memory");
 }
 long long sprout_rebox2(long long tag, long long f0) {
   CtorMeta* m = find_ctor(tag);
@@ -3514,7 +3539,7 @@ long long sprout_rebox3(long long tag, long long f0, long long f1) {
   return sprout_make2(tag, f0, f1);
 }
 long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
-  return sprout_make_registered_obj(tag, a0, a1, a2, "sprout_make3: out of memory");
+  return sprout_make_registered_obj(3, tag, a0, a1, a2, "sprout_make3: out of memory");
 }
 long long sprout_tag(long long h) {
   if (h == 0) {
@@ -3564,49 +3589,49 @@ long long sprout_field(long long h, long long idx) {
   return o->f8;
 }
 long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make4: out of memory"), tag, a0, a1, a2);
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(4, "sprout_make4: out of memory"), tag, a0, a1, a2);
   obj->f3 = a3;
-  return sprout_box_registered_obj(obj);
+  return sprout_box_registered_obj(obj, 4);
 }
 long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make5: out of memory"), tag, a0, a1, a2);
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(5, "sprout_make5: out of memory"), tag, a0, a1, a2);
   obj->f3 = a3;
   obj->f4 = a4;
-  return sprout_box_registered_obj(obj);
+  return sprout_box_registered_obj(obj, 5);
 }
 long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make6: out of memory"), tag, a0, a1, a2);
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(6, "sprout_make6: out of memory"), tag, a0, a1, a2);
   obj->f3 = a3;
   obj->f4 = a4;
   obj->f5 = a5;
-  return sprout_box_registered_obj(obj);
+  return sprout_box_registered_obj(obj, 6);
 }
 long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make7: out of memory"), tag, a0, a1, a2);
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(7, "sprout_make7: out of memory"), tag, a0, a1, a2);
   obj->f3 = a3;
   obj->f4 = a4;
   obj->f5 = a5;
   obj->f6 = a6;
-  return sprout_box_registered_obj(obj);
+  return sprout_box_registered_obj(obj, 7);
 }
 long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make8: out of memory"), tag, a0, a1, a2);
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(8, "sprout_make8: out of memory"), tag, a0, a1, a2);
   obj->f3 = a3;
   obj->f4 = a4;
   obj->f5 = a5;
   obj->f6 = a6;
   obj->f7 = a7;
-  return sprout_box_registered_obj(obj);
+  return sprout_box_registered_obj(obj, 8);
 }
 long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw("sprout_make9: out of memory"), tag, a0, a1, a2);
+  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(9, "sprout_make9: out of memory"), tag, a0, a1, a2);
   obj->f3 = a3;
   obj->f4 = a4;
   obj->f5 = a5;
   obj->f6 = a6;
   obj->f7 = a7;
   obj->f8 = a8;
-  return sprout_box_registered_obj(obj);
+  return sprout_box_registered_obj(obj, 9);
 }
 
 __attribute__((noreturn)) void sprout_abort_match(void) {

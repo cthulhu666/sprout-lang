@@ -74,3 +74,39 @@ just gc-profile stdlib/compiler/compile_driver.sprout
 Prints a `[gc profile] ...` summary to stderr at exit. The hot-path counters are
 compile-time gated behind `-DSPROUT_GC_PROFILE`, so a normal build (`just run`) is
 byte-identical and pays nothing.
+
+Note: profiling `compile_driver.sprout` via the recipe runs the compiled driver
+with no arguments (usage error, no work). For the self-emit workload, build the
+profiled binary the same way and run it compiling its own source:
+`SPROUT_GC_PROFILE=1 <profiled_driver> --emit-ir stdlib stdlib/compiler/compile_driver.sprout > /dev/null`.
+
+## Addendum (2026-07-03, later): exact-size `SproutObj` results
+
+Phase 1 of the header rewrite (exact-size `SproutObj`: `8 + arity*8` bytes,
+per-arity freelists) landed on top of the 4.19M-bucket index STOPGAP. New
+counters: `max_probe` (worst single probe) and a drain-phase hit/miss hop split
+(`miss_hop_frac` = share of trace hash work spent proving scalars are not
+pointers).
+
+Measured on the same machine, sequential runs, self-emit workload:
+
+| metric | before (STOPGAP base) | after exact-size | Δ |
+|---|---|---|---|
+| self-emit GC time (profiled) | 26.1s | 14.3s | −45% |
+| self-emit wall (plain -O2) | 35.8s | 28.4s | −21% |
+| self-emit peak memory footprint | 420.5 MB | 322.5 MB | −23% |
+| self-emit max RSS | 437.8 MB | 415.3 MB | −5% |
+| nqueens max RSS | 39.0 MB | 38.1 MB | −2% |
+
+- The GC-time drop comes from locality (cycles and hop counts are unchanged;
+  sweep/trace touch ~half the bytes). nqueens is vector-heavy with few ADT
+  cells, so its flat result is expected, not a regression.
+- Max RSS moves less than footprint because freelists retain the high-water
+  mark and the enlarged index adds ~32 MiB static.
+- `miss_hop_frac` = **6.9%** on self-emit: a `field_kinds`-based scalar skip at
+  trace time would eliminate ~33% of trace lookups but only ~7% of hop work —
+  a modest win, not a lever.
+- Remaining per-object overhead is the 48-byte `ManagedNode` + hash table;
+  that is the Phase 2 target (inline 1-word header + region allocator +
+  address-range membership; decided direction: non-moving generational,
+  integer tagging deferred).
