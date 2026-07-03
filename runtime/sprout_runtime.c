@@ -666,9 +666,13 @@ static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slot
  * live heap (it degrades from ~0.3 on a small heap to >4 on the self-compile). */
 #if defined(SPROUT_GC_PROFILE)
 static unsigned long long g_prof_fmp_calls, g_prof_fmp_hops;       /* hot */
+static unsigned long long g_prof_fmp_max_probe;                     /* hot: max chain length seen in a single lookup */
 static unsigned long long g_prof_drain_edges, g_prof_sweep_visits; /* hot */
+static unsigned long long g_prof_trace_hits, g_prof_trace_misses;  /* hot: drain-phase lookup outcomes */
+static unsigned long long g_prof_trace_hit_hops, g_prof_trace_miss_hops; /* hot: hops per outcome during drain */
 static unsigned long long g_prof_cycles, g_prof_mark_slots, g_prof_gc_us; /* cold */
 static int g_prof_enabled = -1;
+static int g_gc_tracing = 0;   /* set to 1 during drain to classify hit/miss hops */
 static int sprout_prof_on(void) {
   if (g_prof_enabled < 0) {
     const char* e = getenv("SPROUT_GC_PROFILE");
@@ -676,17 +680,32 @@ static int sprout_prof_on(void) {
   }
   return g_prof_enabled;
 }
+/* Update per-call probe metrics; called once per find_managed_ptr invocation. */
+static void sprout_prof_note_probe(unsigned long long hops, int hit) {
+  if (hops > g_prof_fmp_max_probe) g_prof_fmp_max_probe = hops;
+  if (g_gc_tracing) {
+    if (hit) { g_prof_trace_hits++; g_prof_trace_hit_hops += hops; }
+    else     { g_prof_trace_misses++; g_prof_trace_miss_hops += hops; }
+  }
+}
 #  define SPROUT_PROF_HOT(stmt)  do { stmt; } while (0)
 #  define SPROUT_PROF_COLD(stmt) do { if (sprout_prof_on()) { stmt; } } while (0)
 __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
   if (!sprout_prof_on()) return;
   double avg_hops = g_prof_fmp_calls ? (double)g_prof_fmp_hops / (double)g_prof_fmp_calls : 0.0;
+  unsigned long long drain_total = g_prof_trace_hit_hops + g_prof_trace_miss_hops;
+  double miss_hop_frac = drain_total ? (double)g_prof_trace_miss_hops / (double)drain_total : 0.0;
   fprintf(stderr,
     "[gc profile] cycles=%llu find_managed_ptr_calls=%llu total_hops=%llu "
-    "avg_probe_len=%.2f drain_edges=%llu sweep_visits=%llu mark_root_slots=%llu "
-    "gc_us=%llu\n",
+    "avg_probe_len=%.2f max_probe=%llu drain_edges=%llu sweep_visits=%llu "
+    "mark_root_slots=%llu gc_us=%llu "
+    "trace_hits=%llu trace_misses=%llu trace_hit_hops=%llu trace_miss_hops=%llu "
+    "miss_hop_frac=%.3f\n",
     g_prof_cycles, g_prof_fmp_calls, g_prof_fmp_hops, avg_hops,
-    g_prof_drain_edges, g_prof_sweep_visits, g_prof_mark_slots, g_prof_gc_us);
+    g_prof_fmp_max_probe, g_prof_drain_edges, g_prof_sweep_visits,
+    g_prof_mark_slots, g_prof_gc_us,
+    g_prof_trace_hits, g_prof_trace_misses, g_prof_trace_hit_hops,
+    g_prof_trace_miss_hops, miss_hop_frac);
 }
 #else
 #  define SPROUT_PROF_HOT(stmt)  ((void)0)
@@ -696,10 +715,18 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
 static ManagedNode* find_managed_ptr(void* ptr) {
   size_t bucket = sprout_managed_ptr_hash(ptr);
   SPROUT_PROF_HOT(g_prof_fmp_calls++);
+#if defined(SPROUT_GC_PROFILE)
+  unsigned long long _probe_hops = 0;
+#endif
   for (ManagedNode* n = g_heap_index[bucket]; n != NULL; n = n->hash_next) {
     SPROUT_PROF_HOT(g_prof_fmp_hops++);
-    if (n->ptr == ptr) return n;
+    SPROUT_PROF_HOT(_probe_hops++);
+    if (n->ptr == ptr) {
+      SPROUT_PROF_HOT(sprout_prof_note_probe(_probe_hops, 1));
+      return n;
+    }
   }
+  SPROUT_PROF_HOT(sprout_prof_note_probe(_probe_hops, 0));
   return NULL;
 }
 
@@ -1340,7 +1367,9 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
   sprout_gc_mark_roots();
+  SPROUT_PROF_HOT(g_gc_tracing = 1);
   sprout_gc_drain_marks();
+  SPROUT_PROF_HOT(g_gc_tracing = 0);
   sprout_gc_sweep();
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
