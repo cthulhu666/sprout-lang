@@ -173,7 +173,19 @@ match m with
 ```
 
 Patterns are checked top-to-bottom; first match wins.
-In v0, unreachable top-level branches are a compile error when they are
+
+A `match` must be **exhaustive**: the branch patterns must cover every value of
+the scrutinee type, or it is a compile error. Coverage is checked per field
+position ("column"): a constructor is covered when, for each of its fields, the
+union of the sub-patterns appearing at that position covers the field's type;
+`Bool` requires both `true` and `false` (or a catch-all); `Unit` requires the
+unit pattern; the unbounded scalar domains (`Int`, `String`, `Char`) are covered
+only by a catch-all. Because coverage is checked one column at a time,
+non-exhaustiveness that arises only from a *combination* of field values —
+e.g. `(true, true) | (false, false)` on `(Bool, Bool)` — is not yet rejected in
+v0 (a full usefulness matrix is future work); everything else is.
+
+Unreachable top-level branches are a compile error when they are
 shadowed by an earlier `_` or variable pattern, repeat an earlier top-level
 literal pattern, repeat an earlier top-level constructor branch that already
 covers that constructor completely, or appear after all constructors of an ADT
@@ -621,7 +633,7 @@ fn bad(m: Maybe Int) -> Int =
   | Just x -> x
 ```
 
-Compiler should report non-exhaustive pattern matching.
+The compiler rejects this with a non-exhaustive-match error (see §5.5).
 
 ### 10.12 Unreachable match branch (compile error)
 
@@ -637,7 +649,7 @@ fn bad(m: Maybe Int) -> Int =
   | _ -> 1
 ```
 
-Compiler should report the final branch as unreachable.
+The compiler rejects the final branch as an unreachable match branch (see §5.5).
 
 ### 10.13 Using `stdlib.math`
 

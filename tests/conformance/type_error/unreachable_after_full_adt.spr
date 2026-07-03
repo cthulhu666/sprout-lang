@@ -1,0 +1,12 @@
+module main
+
+# W5 (F-EXH): spec §10.12 exact example — the `_` branch is unreachable because
+# Just and Nothing already cover every value of Maybe Int.
+fn bad(m: Maybe Int) -> Int =
+  match m with
+  | Just x -> x
+  | Nothing -> 0
+  | _ -> 1
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(bad(Just(5))))

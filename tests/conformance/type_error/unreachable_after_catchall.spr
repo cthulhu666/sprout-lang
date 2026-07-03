@@ -1,0 +1,12 @@
+module main
+
+# W5 (F-EXH): the branch after a catchall is unreachable. Spec v0 (§10.12,
+# lines 176-181) makes a top-level branch shadowed by an earlier `_`/variable
+# pattern a compile error.
+fn h(b: Bool) -> Int =
+  match b with
+  | _ -> 1
+  | true -> 2
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(h(true)))

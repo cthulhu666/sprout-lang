@@ -1880,53 +1880,378 @@ fn is_catchall_pattern(pat: ast.Pattern) -> Bool =
   | ast.VarPattern _ _ -> true
   | _ -> false
 
-fn branches_have_catchall(branches: List typed_ast.TypedMatchBranch) -> Bool =
-  match branches with
+# --- Exhaustiveness (W5): per-column value-space coverage ---------------------
+#
+# `covers(ty, column)` asks whether the patterns in one position ("column")
+# exhaust the values of type `ty`.  A match is exhaustive iff its top-level
+# branch patterns cover the scrutinee type.  The check is SOUND: it flags only
+# genuine holes (a missing column value is a value no branch matches), never a
+# valid match.  It over-accepts product gaps like `(true,true)|(false,false)`
+# — deep nested-pattern subsumption is explicitly outside the v0 contract
+# (spec §10.11); a full usefulness matrix is the deferred v1 end-state.
+
+fn pats_have_catchall(pats: List ast.Pattern) -> Bool =
+  match pats with
   | Nil -> false
-  | Cons branch rest ->
-      match branch with
-      | typed_ast.TypedMatchBranch pat _ ->
-          if is_catchall_pattern(pat) then true else branches_have_catchall(rest)
+  | Cons p rest -> if is_catchall_pattern(p) then true else pats_have_catchall(rest)
 
-fn collect_seen_ctors(branches: List typed_ast.TypedMatchBranch, acc: List String) -> List String =
-  match branches with
-  | Nil -> acc
-  | Cons branch rest ->
-      match branch with
-      | typed_ast.TypedMatchBranch pat _ ->
-          match pat with
-          | ast.ConstructorPattern name _ _ -> collect_seen_ctors(rest, Cons(name, acc))
-          | _ -> collect_seen_ctors(rest, acc)
+fn pats_have_bool(pats: List ast.Pattern, want: Bool) -> Bool =
+  match pats with
+  | Nil -> false
+  | Cons p rest ->
+      match p with
+      | ast.BoolPattern b _ -> if b == want then true else pats_have_bool(rest, want)
+      | _ -> pats_have_bool(rest, want)
 
-fn join_comma(names: List String) -> String =
-  match names with
-  | Nil -> ""
-  | Cons n Nil -> string.after_last_dot(n)
-  | Cons n rest -> string.after_last_dot(n) ++ ", " ++ join_comma(rest)
+fn pats_have_unit(pats: List ast.Pattern) -> Bool =
+  match pats with
+  | Nil -> false
+  | Cons p rest ->
+      match p with
+      | ast.UnitPattern _ -> true
+      | _ -> pats_have_unit(rest)
 
-fn missing_ctor_names(all_ctors: List String, branches: List typed_ast.TypedMatchBranch) -> List String =
-  types.list_diff(all_ctors, collect_seen_ctors(branches, Nil))
+# Bool is a two-value domain; covered iff both true and false appear.
+fn bool_gap(pats: List ast.Pattern) -> Maybe String =
+  if pats_have_bool(pats, true) == false then Just("true")
+  else if pats_have_bool(pats, false) == false then Just("false")
+  else Nothing
 
-fn check_missing_ctors(adt_name: String, missing: List String) -> Maybe String =
-  match missing with
+fn ctor_display(name: String) -> String = string.after_last_dot(name)
+
+# Subpattern-lists of every branch whose head constructor is `name`.
+fn ctor_branch_subpats(name: String, pats: List ast.Pattern) -> List (List ast.Pattern) =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.ConstructorPattern n subs _ ->
+          if string.after_last_dot(n) == string.after_last_dot(name)
+          then Cons(subs, ctor_branch_subpats(name, rest))
+          else ctor_branch_subpats(name, rest)
+      | _ -> ctor_branch_subpats(name, rest)
+
+fn tuple_branch_subpats(pats: List ast.Pattern) -> List (List ast.Pattern) =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.TuplePattern subs _ -> Cons(subs, tuple_branch_subpats(rest))
+      | _ -> tuple_branch_subpats(rest)
+
+# Column i across a set of equal-arity rows: the head of each row, and the tails.
+fn column_heads(rows: List (List ast.Pattern)) -> List ast.Pattern =
+  match rows with
+  | Nil -> Nil
+  | Cons row rest ->
+      match row with
+      | Nil -> column_heads(rest)
+      | Cons h _ -> Cons(h, column_heads(rest))
+
+fn column_tails(rows: List (List ast.Pattern)) -> List (List ast.Pattern) =
+  match rows with
+  | Nil -> Nil
+  | Cons row rest ->
+      match row with
+      | Nil -> column_tails(rest)
+      | Cons _ t -> Cons(t, column_tails(rest))
+
+fn apply_subst_list(subst: Dict types.Type, ts: List types.Type) -> List types.Type =
+  match ts with
+  | Nil -> Nil
+  | Cons t rest -> Cons(unifier.apply_subst(subst, t), apply_subst_list(subst, rest))
+
+# Field types of constructor `name` when its result is `adt_type`.  Mirrors
+# infer_ctor_pattern_typed: instantiate the ctor scheme, unify its result with
+# the scrutinee type to bind the type arguments, read the parameter types.
+fn ctor_field_types(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  name: String,
+  adt_type: types.Type
+) -> Maybe (List types.Type) !{IO} =
+  match dict_get(name, env) with
+  | Nothing -> Nothing
+  | Just scheme ->
+      do
+        ctor_type <- unifier.instantiate(state, scheme)
+        match unifier.unify_types(subst, adt_type, ctor_result_type(ctor_type)) with
+        | Err _ -> Nothing
+        | Ok s1 -> Just(apply_subst_list(s1, ctor_param_types(ctor_type)))
+
+# Are all field columns of a constructor covered?  Returns the first gap, if any.
+fn columns_covered(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  ctor_map: Dict (List String),
+  field_types: List types.Type,
+  rows: List (List ast.Pattern)
+) -> Maybe String !{IO} =
+  match field_types with
   | Nil -> Nothing
-  | Cons _ _ -> Just("Non-exhaustive match on " ++ adt_name ++ ", missing: " ++ join_comma(missing))
+  | Cons ft ft_rest ->
+      # Match the Maybe-!{IO} result directly: a do-block `<-` bind would strip
+      # the Maybe layer (project_do_block_result_io_quirk) and misparse below.
+      match coverage_gap(state, env, subst, ctor_map, ft, column_heads(rows)) with
+      | Just w -> Just(w)
+      | Nothing -> columns_covered(state, env, subst, ctor_map, ft_rest, column_tails(rows))
+
+# Nothing = the patterns cover `ty`; Just witness = a value none of them match.
+fn coverage_gap(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  ctor_map: Dict (List String),
+  ty: types.Type,
+  pats: List ast.Pattern
+) -> Maybe String !{IO} =
+  if pats_have_catchall(pats) then Nothing
+  else coverage_gap_resolved(state, env, subst, ctor_map, unifier.apply_subst(subst, ty), pats)
+
+fn coverage_gap_resolved(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  ctor_map: Dict (List String),
+  rty: types.Type,
+  pats: List ast.Pattern
+) -> Maybe String !{IO} =
+  match rty with
+  | types.TConst name -> coverage_gap_const(state, env, subst, ctor_map, name, rty, pats)
+  | types.TApp _ _ -> coverage_gap_adt(state, env, subst, ctor_map, rty, pats)
+  | types.TTuple elems -> tuple_gap(state, env, subst, ctor_map, elems, pats)
+  # TVar / TFunc / records / anything unresolved: accept (never reject the
+  # unanticipated — preserves the historical Nothing-means-exhaustive bias).
+  | _ -> Nothing
+
+fn coverage_gap_const(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  ctor_map: Dict (List String),
+  name: String,
+  rty: types.Type,
+  pats: List ast.Pattern
+) -> Maybe String !{IO} =
+  if name == "Bool" then bool_gap(pats)
+  else if name == "Unit" then (if pats_have_unit(pats) then Nothing else Just("()"))
+  # Infinite literal domains are exhaustive only via a catch-all (handled above).
+  else if name == "Int" then Just("an Int not matched by the listed literals (add a catch-all)")
+  else if name == "String" then Just("a String not matched by the listed literals (add a catch-all)")
+  else if name == "Char" then Just("a Char not matched by the listed literals (add a catch-all)")
+  else coverage_gap_adt(state, env, subst, ctor_map, rty, pats)
+
+fn coverage_gap_adt(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  ctor_map: Dict (List String),
+  rty: types.Type,
+  pats: List ast.Pattern
+) -> Maybe String !{IO} =
+  match extract_adt_name(rty) with
+  | Nothing -> Nothing
+  | Just adt_name ->
+      match dict_get(adt_name, ctor_map) with
+      | Nothing -> Nothing
+      | Just all_ctors -> adt_gap(state, env, subst, ctor_map, all_ctors, rty, pats)
+
+fn adt_gap(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  ctor_map: Dict (List String),
+  all_ctors: List String,
+  rty: types.Type,
+  pats: List ast.Pattern
+) -> Maybe String !{IO} =
+  match all_ctors with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match ctor_branch_subpats(c, pats) with
+      # Constructor never mentioned -> not covered.
+      | Nil -> Just(ctor_display(c))
+      | Cons row0 rows_rest ->
+          # Match Maybe-!{IO} results directly (do-bind would strip the Maybe).
+          match ctor_field_types(state, env, subst, c, rty) with
+          # Field types unresolvable (e.g. missing scheme): conservatively treat
+          # this constructor as covered and move on.
+          | Nothing -> adt_gap(state, env, subst, ctor_map, rest, rty, pats)
+          | Just fts ->
+              match columns_covered(state, env, subst, ctor_map, fts, Cons(row0, rows_rest)) with
+              | Just w -> Just(ctor_display(c) ++ "(" ++ w ++ ")")
+              | Nothing -> adt_gap(state, env, subst, ctor_map, rest, rty, pats)
+
+fn tuple_gap(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  ctor_map: Dict (List String),
+  elem_types: List types.Type,
+  pats: List ast.Pattern
+) -> Maybe String !{IO} =
+  match tuple_branch_subpats(pats) with
+  | Nil -> Just("a tuple value not matched")
+  | Cons row0 rows_rest ->
+      match columns_covered(state, env, subst, ctor_map, elem_types, Cons(row0, rows_rest)) with
+      | Just w -> Just("(" ++ w ++ ")")
+      | Nothing -> Nothing
+
+fn branch_pats(branches: List typed_ast.TypedMatchBranch) -> List ast.Pattern =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | typed_ast.TypedMatchBranch pat _ -> Cons(pat, branch_pats(rest))
 
 fn exhaustiveness_check(
-  ctor_map: Dict (List String),
+  state: unifier.InferState,
+  env: Dict types.Scheme,
   subst: Dict types.Type,
+  ctor_map: Dict (List String),
   scrut_type: types.Type,
   branches: List typed_ast.TypedMatchBranch
-) -> Maybe String =
-  if branches_have_catchall(branches) then Nothing
-  else
-    match extract_adt_name(unifier.apply_subst(subst, scrut_type)) with
-    | Nothing -> Nothing
-    | Just adt_name ->
-        match dict_get(adt_name, ctor_map) with
-        | Nothing -> Nothing
-        | Just all_ctors ->
-            check_missing_ctors(adt_name, missing_ctor_names(all_ctors, branches))
+) -> Maybe String !{IO} =
+  match coverage_gap(state, env, subst, ctor_map, rty, branch_pats(branches)) with
+  | Nothing -> Nothing
+  | Just w ->
+      Just("Non-exhaustive match on " ++ types.type_to_string(rty) ++
+           " — no branch matches " ++ w)
+  where rty = unifier.apply_subst(subst, scrut_type)
+
+# --- Unreachable branches (W5): spec §10.12 top-level contract ----------------
+#
+# A branch is unreachable when the branches BEFORE it already handle every value
+# it could match.  Per the v0 contract (spec lines 176-181) this covers exactly:
+# shadowed by an earlier catch-all, a repeated top-level literal, a repeat of a
+# constructor already fully covered, or any branch after all constructors are
+# covered.  Deeper nested subsumption is out of scope.
+
+fn all_catchall(subs: List ast.Pattern) -> Bool =
+  match subs with
+  | Nil -> true
+  | Cons s rest -> if is_catchall_pattern(s) then all_catchall(rest) else false
+
+fn is_literal_pattern(p: ast.Pattern) -> Bool =
+  match p with
+  | ast.IntPattern _ _ -> true
+  | ast.BoolPattern _ _ -> true
+  | ast.StringPattern _ _ -> true
+  | ast.CharPattern _ _ -> true
+  | ast.UnitPattern _ -> true
+  | _ -> false
+
+fn same_literal(a: ast.Pattern, b: ast.Pattern) -> Bool =
+  match a with
+  | ast.IntPattern x _ -> (match b with | ast.IntPattern y _ -> x == y | _ -> false)
+  | ast.BoolPattern x _ -> (match b with | ast.BoolPattern y _ -> x == y | _ -> false)
+  | ast.StringPattern x _ -> (match b with | ast.StringPattern y _ -> x == y | _ -> false)
+  | ast.CharPattern x _ -> (match b with | ast.CharPattern y _ -> x == y | _ -> false)
+  | ast.UnitPattern _ -> (match b with | ast.UnitPattern _ -> true | _ -> false)
+  | _ -> false
+
+fn literal_in(prefix: List ast.Pattern, pat: ast.Pattern) -> Bool =
+  match prefix with
+  | Nil -> false
+  | Cons p rest -> if same_literal(p, pat) then true else literal_in(rest, pat)
+
+fn prefix_has_full_ctor(prefix: List ast.Pattern, name: String) -> Bool =
+  match prefix with
+  | Nil -> false
+  | Cons p rest ->
+      match p with
+      | ast.ConstructorPattern n subs _ ->
+          if string.after_last_dot(n) == string.after_last_dot(name) then
+            (if all_catchall(subs) then true else prefix_has_full_ctor(rest, name))
+          else prefix_has_full_ctor(rest, name)
+      | _ -> prefix_has_full_ctor(rest, name)
+
+fn ctor_fully_covered_in(prefix: List ast.Pattern, pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.ConstructorPattern name _ _ -> prefix_has_full_ctor(prefix, name)
+  | _ -> false
+
+fn pat_pos(p: ast.Pattern) -> source.SourcePos =
+  match p with
+  | ast.WildcardPattern pos -> pos
+  | ast.VarPattern _ pos -> pos
+  | ast.IntPattern _ pos -> pos
+  | ast.BoolPattern _ pos -> pos
+  | ast.StringPattern _ pos -> pos
+  | ast.CharPattern _ pos -> pos
+  | ast.UnitPattern pos -> pos
+  | ast.TuplePattern _ pos -> pos
+  | ast.ConstructorPattern _ _ pos -> pos
+
+# Sound TOP-LEVEL coverage for the unreachability check.  Unlike exhaustiveness
+# (which may over-accept product gaps like `(true,true)|(false,false)`), this
+# must never OVER-claim coverage — an over-claim would flag a reachable branch
+# as dead (e.g. unify_applied's final `_` after per-column-"covered" tuple
+# patterns).  So it uses only sound top-level signals, with NO per-column
+# recursion: Bool by both literals, Unit by a unit pattern, an ADT by an
+# all-catch-all branch per constructor, a tuple by an all-wildcard tuple
+# pattern.  Nested/product unreachability is intentionally out of scope — spec
+# v0 §10.12 restricts the unreachable-branch contract to the top level.
+
+fn prefix_has_full_tuple(prefix: List ast.Pattern) -> Bool =
+  match prefix with
+  | Nil -> false
+  | Cons p rest ->
+      match p with
+      | ast.TuplePattern subs _ -> if all_catchall(subs) then true else prefix_has_full_tuple(rest)
+      | _ -> prefix_has_full_tuple(rest)
+
+fn all_ctors_covered(ctors: List String, prefix: List ast.Pattern) -> Bool =
+  match ctors with
+  | Nil -> true
+  | Cons c rest -> if prefix_has_full_ctor(prefix, c) then all_ctors_covered(rest, prefix) else false
+
+fn adt_all_ctors_covered(ctor_map: Dict (List String), adt_name: String, prefix: List ast.Pattern) -> Bool =
+  match dict_get(adt_name, ctor_map) with
+  | Nothing -> false
+  | Just ctors -> all_ctors_covered(ctors, prefix)
+
+fn prefix_covers_toplevel(ctor_map: Dict (List String), scrut_type: types.Type, prefix: List ast.Pattern) -> Bool =
+  match scrut_type with
+  | types.TConst name ->
+      if name == "Bool" then
+        (if pats_have_bool(prefix, true) then pats_have_bool(prefix, false) else false)
+      else if name == "Unit" then pats_have_unit(prefix)
+      else adt_all_ctors_covered(ctor_map, name, prefix)
+  | types.TApp _ _ ->
+      match extract_adt_name(scrut_type) with
+      | Nothing -> false
+      | Just nm -> adt_all_ctors_covered(ctor_map, nm, prefix)
+  | types.TTuple _ -> prefix_has_full_tuple(prefix)
+  | _ -> false
+
+# A branch is dead if its own shape is already handled: a repeated top-level
+# literal, or a constructor an earlier branch already fully covers.
+fn structurally_shadowed(prefix: List ast.Pattern, pat: ast.Pattern) -> Bool =
+  if is_literal_pattern(pat) then literal_in(prefix, pat)
+  else ctor_fully_covered_in(prefix, pat)
+
+fn branch_is_unreachable(ctor_map: Dict (List String), scrut_type: types.Type, prefix: List ast.Pattern, pat: ast.Pattern) -> Bool =
+  # (1) shadowed by an earlier catch-all; (2) repeated literal / fully-covered
+  # constructor; (3) after the scrutinee is already fully covered (top-level).
+  if pats_have_catchall(prefix) then true
+  else if structurally_shadowed(prefix, pat) then true
+  else prefix_covers_toplevel(ctor_map, scrut_type, prefix)
+
+fn unreachable_walk(ctor_map: Dict (List String), scrut_type: types.Type, prefix: List ast.Pattern, remaining: List typed_ast.TypedMatchBranch) -> Maybe (String, source.SourcePos) =
+  match remaining with
+  | Nil -> Nothing
+  | Cons b rest ->
+      match b with
+      | typed_ast.TypedMatchBranch pat _ ->
+          if branch_is_unreachable(ctor_map, scrut_type, prefix, pat)
+          then Just(("Unreachable match branch", pat_pos(pat)))
+          else unreachable_walk(ctor_map, scrut_type, list_append(prefix, Cons(pat, Nil)), rest)
+
+fn unreachable_check(subst: Dict types.Type, ctor_map: Dict (List String), scrut_type: types.Type, branches: List typed_ast.TypedMatchBranch) -> Maybe (String, source.SourcePos) =
+  unreachable_walk(ctor_map, unifier.apply_subst(subst, scrut_type), Nil, branches)
 
 # --- Match ---
 
@@ -1965,12 +2290,18 @@ fn infer_branches(
       do
         let reversed = typed_branch_list_reverse(acc_branches)
         ctor_map <- unifier.get_ctor_map(state)
-        match exhaustiveness_check(ctor_map, subst, typed_ast.typed_expr_type(typed_scrut), reversed) with
+        let scrut_ty = typed_ast.typed_expr_type(typed_scrut)
+        # Match these Maybe-!{IO} checks directly: a `<-` bind would strip the
+        # Maybe layer (project_do_block_result_io_quirk).
+        match exhaustiveness_check(state, env, subst, ctor_map, scrut_ty, reversed) with
         | Just err -> InferErr(pos, err)
         | Nothing ->
-            InferOk(
-              typed_ast.TMatch(typed_scrut, reversed, unifier.apply_subst(subst, ret_type), pos),
-              subst, eff_subst, acc_eff)
+            match unreachable_check(subst, ctor_map, scrut_ty, reversed) with
+            | Just (msg, upos) -> InferErr(upos, msg)
+            | Nothing ->
+                InferOk(
+                  typed_ast.TMatch(typed_scrut, reversed, unifier.apply_subst(subst, ret_type), pos),
+                  subst, eff_subst, acc_eff)
   | Cons branch rest ->
       match branch with
       | ast.MatchBranch pat _ ->

@@ -1,0 +1,11 @@
+module main
+
+# W5 (F-EXH): non-exhaustive match on Bool — the `false` case is missing and
+# there is no catchall. Bool is treated as a two-value domain {true, false};
+# the old check missed it because Bool is absent from the constructor map.
+fn h(b: Bool) -> Int =
+  match b with
+  | true -> 1
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(h(false)))

@@ -1,0 +1,13 @@
+module main
+
+# W5 (F-EXH): non-exhaustive because `Just 2` is not covered — but the top-level
+# constructor NAMES {Just, Nothing} are all "seen", so the old name-set check
+# wrongly accepted this. Field-column coverage: Just's column 0 is {IntPattern 1},
+# and Int is an infinite domain with no catchall -> Just is not fully covered.
+fn h(m: Maybe Int) -> Int =
+  match m with
+  | Just 1 -> 1
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(h(Just(2))))

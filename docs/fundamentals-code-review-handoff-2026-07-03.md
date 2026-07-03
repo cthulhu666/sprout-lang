@@ -214,7 +214,15 @@ All in `runtime/sprout_runtime.c`. No compiler changes, no seed refresh. No new 
 - **Gates:** compiler change → full §4 battery (dict resolution is bootstrap-sensitive:
   self-compile oracle mandatory).
 
-### W5 — F-EXH: exhaustiveness + unreachable-branch diagnostics  [1-2S, HIGH, confirmed empirically]
+### W5 — F-EXH: exhaustiveness + unreachable-branch diagnostics  [DONE 2026-07-03, HIGH, confirmed empirically]
+
+**Fixed.** Per-column value-space coverage for exhaustiveness + a sound
+structural top-level unreachability check, in `infer.sprout`. Warm-only survey
+found the two false-positive classes (unresolved-name `filepath_str`, product
+over-claim `unify_applied`) before any seed refresh; final self-compile +
+examples + tests clean → one-shot flip. Spec §5.5 updated; BACKLOG records the
+two deferred follow-ups (Maranget product matrix; `module main` user-ADT
+qualified-name resolution). Fixtures under `tests/conformance/{type_error,run}/`.
 
 - **Evidence:** probes `sr_exh_nested` (`Just 1` + `Nothing` accepted; `Just 2` → runtime
   `abort_match`), `sr_exh_bool` (`true`-only match accepted), `sr_unreach` (branch after
@@ -413,7 +421,7 @@ repro under `--use-direct-codegen` as its DoR step.
 | 2 | W2 runtime UTF-8 (R1+R3+R4 now; R2 when D4 lands) | D4 partial |
 | 3 | W4 dispatch-by-constraint-position | — |
 | 4-5 | W3 rigidity + value restriction | — |
-| 6 | W5 exhaustiveness + unreachability | — |
+| 6 | ~~W5 exhaustiveness + unreachability~~ **DONE 2026-07-03** | — |
 | 7 | W8 prelude batch | D5 for P1/P2 |
 | 8 | W9 lexer/parser batch | — |
 | 9-11 | W6 effects campaign | D2 |

@@ -1,0 +1,18 @@
+module main
+
+# W5 soundness guard (the unify_applied class): a `_` after partial TUPLE
+# patterns is REACHABLE — per-column coverage would wrongly call the tuple
+# "covered" ({true,false} in each column) and flag `_` as dead. The sound
+# top-level unreachability check must NOT flag it, so this must compile + run.
+fn describe(a: Bool, b: Bool) -> String =
+  match (a, b) with
+  | (true, true) -> "tt"
+  | (false, false) -> "ff"
+  | _ -> "mixed"
+
+fn main() -> Unit !{IO} =
+  do
+    print(describe(true, true))
+    print(describe(false, false))
+    print(describe(true, false))
+    print(describe(false, true))

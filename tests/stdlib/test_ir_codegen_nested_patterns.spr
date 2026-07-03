@@ -112,7 +112,11 @@ fn main() -> Unit !{IO} =
       "  | Wrap(Wrap(Wrap(Leaf(x)))) -> x\n" ++
       "  | Wrap(Wrap(Leaf(x))) -> x\n" ++
       "  | Wrap(Leaf(x)) -> x\n" ++
-      "  | Leaf(x) -> x\n",
+      "  | Leaf(x) -> x\n" ++
+      # Wrap nested deeper than three (e.g. Wrap(Wrap(Wrap(Wrap(Leaf))))) is not
+      # matched by the specific arms above, so a Wrap catch-all is required for
+      # exhaustiveness (W5). It stays reachable — no earlier arm covers all Wraps.
+      "  | Wrap(y) -> 0\n",
       "define i64 @n4")
     assert_true(state, "N4: triply-nested Wrap(Wrap(Wrap(Leaf(x)))) compiles", n4)
 
