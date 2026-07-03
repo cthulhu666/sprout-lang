@@ -176,6 +176,26 @@ run file:
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_BIN"
   "$TMP_BIN"
 
+# Build {{file}} with GC profiling compiled in (-DSPROUT_GC_PROFILE) and run it
+# with SPROUT_GC_PROFILE=1, printing a "[gc profile] ..." summary to stderr at
+# exit: find_managed_ptr calls/hops, avg hash-probe length, drain edges, sweep
+# visits, mark-root slots, and total GC microseconds. The hot-path counters are
+# compile-time gated, so a normal `just run` build is byte-identical (no cost).
+[group('dev')]
+gc-profile file:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
+    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
+    exit 1
+  fi
+  TMP_LL="/tmp/sprout_gcprof_$$.ll"
+  TMP_BIN="/tmp/sprout_gcprof_$$"
+  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  clang "$TMP_LL" runtime/sprout_runtime.c -O2 -DSPROUT_GC_PROFILE {{clang_extra}} -o "$TMP_BIN"
+  SPROUT_GC_PROFILE=1 "$TMP_BIN"
+
 # Emit LLVM IR for {{file}} to {{out}} using stage-1.
 [group('dev')]
 compile file out:

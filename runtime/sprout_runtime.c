@@ -643,9 +643,53 @@ static void register_managed_ptr(void* ptr, SproutHeapKind kind, size_t aux_slot
   g_managed_alloc_since_gc++;
 }
 
+/* ── GC profiling instrumentation (opt-in, off by default) ────────────────
+ * HOT counters (per-hop / per-edge / per-node — hundreds of millions of times)
+ * are gated at COMPILE time behind -DSPROUT_GC_PROFILE, so they are byte-for-
+ * byte absent from a default build: no counter, no branch, in the
+ * find_managed_ptr / drain / sweep inner loops.  COLD per-cycle counters and
+ * the exit dump are gated at RUNTIME on SPROUT_GC_PROFILE=1, so a profiling
+ * build stays silent until asked (and pays ~nothing when the env is unset).
+ *
+ * Build a profiling binary, then run it:
+ *   clang <ir>.ll runtime/sprout_runtime.c -O2 -DSPROUT_GC_PROFILE ... -o bin
+ *   SPROUT_GC_PROFILE=1 ./bin            # dumps "[gc profile] ..." at exit
+ * avg_probe_len is the mean g_heap_index chain length — watch it grow with the
+ * live heap (it degrades from ~0.3 on a small heap to >4 on the self-compile). */
+#if defined(SPROUT_GC_PROFILE)
+static unsigned long long g_prof_fmp_calls, g_prof_fmp_hops;       /* hot */
+static unsigned long long g_prof_drain_edges, g_prof_sweep_visits; /* hot */
+static unsigned long long g_prof_cycles, g_prof_mark_slots, g_prof_gc_us; /* cold */
+static int g_prof_enabled = -1;
+static int sprout_prof_on(void) {
+  if (g_prof_enabled < 0) {
+    const char* e = getenv("SPROUT_GC_PROFILE");
+    g_prof_enabled = (e && e[0] == '1') ? 1 : 0;
+  }
+  return g_prof_enabled;
+}
+#  define SPROUT_PROF_HOT(stmt)  do { stmt; } while (0)
+#  define SPROUT_PROF_COLD(stmt) do { if (sprout_prof_on()) { stmt; } } while (0)
+__attribute__((destructor)) static void sprout_gc_profile_dump(void) {
+  if (!sprout_prof_on()) return;
+  double avg_hops = g_prof_fmp_calls ? (double)g_prof_fmp_hops / (double)g_prof_fmp_calls : 0.0;
+  fprintf(stderr,
+    "[gc profile] cycles=%llu find_managed_ptr_calls=%llu total_hops=%llu "
+    "avg_probe_len=%.2f drain_edges=%llu sweep_visits=%llu mark_root_slots=%llu "
+    "gc_us=%llu\n",
+    g_prof_cycles, g_prof_fmp_calls, g_prof_fmp_hops, avg_hops,
+    g_prof_drain_edges, g_prof_sweep_visits, g_prof_mark_slots, g_prof_gc_us);
+}
+#else
+#  define SPROUT_PROF_HOT(stmt)  ((void)0)
+#  define SPROUT_PROF_COLD(stmt) ((void)0)
+#endif
+
 static ManagedNode* find_managed_ptr(void* ptr) {
   size_t bucket = sprout_managed_ptr_hash(ptr);
+  SPROUT_PROF_HOT(g_prof_fmp_calls++);
   for (ManagedNode* n = g_heap_index[bucket]; n != NULL; n = n->hash_next) {
+    SPROUT_PROF_HOT(g_prof_fmp_hops++);
     if (n->ptr == ptr) return n;
   }
   return NULL;
@@ -1102,6 +1146,7 @@ static void sprout_gc_drain_marks(void) {
     size_t child_count = sprout_heap_child_count(node);
     for (size_t i = 0; i < child_count; i++) {
       long long child_val = sprout_heap_child_value(node, i);
+      SPROUT_PROF_HOT(g_prof_drain_edges++);
       gc_mark_enqueue(find_managed_ptr((void*)(uintptr_t)child_val));
     }
   }
@@ -1221,6 +1266,7 @@ static void sprout_gc_sweep(void) {
   g_gc_live_cstr = g_gc_live_cstr_bytes = 0;
   while (node != NULL) {
     ManagedNode* next = node->next;
+    SPROUT_PROF_HOT(g_prof_sweep_visits++);
     if (!node->marked) {
       if (node->ptr == g_nothing_singleton) g_nothing_singleton = NULL;
       if (node->ptr == g_irtheap_singleton) g_irtheap_singleton = NULL;
@@ -1282,6 +1328,8 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long alloc_since_gc = g_managed_alloc_since_gc;
   long long swept_before = g_debug_gc_swept;
   g_gc_cycle_count++;
+  SPROUT_PROF_COLD(g_prof_cycles++);
+  SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
   sprout_gc_mark_roots();
   sprout_gc_drain_marks();
@@ -1289,6 +1337,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
+  SPROUT_PROF_COLD(g_prof_gc_us += (unsigned long long)elapsed_us);
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
