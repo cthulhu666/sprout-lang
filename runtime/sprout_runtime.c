@@ -2393,7 +2393,33 @@ static int sprout_ensure_analysis_service(char** error_out) {
   if (pid == 0) {
     dup2(request_pipe[0], STDIN_FILENO);
     dup2(response_pipe[1], STDOUT_FILENO);
-    freopen("/dev/null", "w", stderr);
+    /* The daemon's stdout carries the JSON protocol, so stderr is a free
+       diagnostic channel.  Historically it was sent to /dev/null, which
+       silently discarded every panic, `sprout_tag: null pointer` abort, and
+       stack-overflow backtrace — leaving a crashed daemon indistinguishable
+       from a hang (the client just sees "empty response").  Capture stderr to
+       a logfile instead.  Override the path with SPROUT_ANALYSIS_SERVICE_LOG,
+       or set it to "off" to restore the previous /dev/null behavior. */
+    const char* log_target = getenv("SPROUT_ANALYSIS_SERVICE_LOG");
+    if (log_target == NULL || log_target[0] == '\0')
+      log_target = "/tmp/sprout_analysis_service.log";
+    if (strcmp(log_target, "off") == 0 || freopen(log_target, "a", stderr) == NULL) {
+      freopen("/dev/null", "w", stderr);
+    } else {
+      /* freopen reassigns fd 2 to the logfile; the fd (not the FILE* stream's
+         buffering state) is what survives the execl below, so the daemon
+         inherits the redirect.  C guarantees stderr is never fully buffered at
+         startup and both glibc and macOS libc leave it unbuffered, so the
+         daemon's post-exec fprintf(stderr,...) crash messages — including the
+         no-newline `sprout_tag: null pointer` abort — reach the log on their
+         own.  The banner is written with raw write(2) for the same reason the
+         stack-overflow handler does: no dependence on stdio state. */
+      char banner[160];
+      int bn = snprintf(banner, sizeof(banner),
+        "\n=== sprout analysis-service daemon started (pid %d) ===\n",
+        (int)getpid());
+      if (bn > 0) { ssize_t bw = write(STDERR_FILENO, banner, (size_t)bn); (void)bw; }
+    }
     close(request_pipe[0]);
     close(request_pipe[1]);
     close(response_pipe[0]);
