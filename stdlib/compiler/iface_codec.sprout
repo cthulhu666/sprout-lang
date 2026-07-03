@@ -1337,6 +1337,8 @@ export fn encode_ast_decl(d: ast.Decl) -> String =
       string_concat_many(["(InstanceDecl ", encode_ast_type_constraint(constraint), " ", encode_ast_type_constraint_list(inst_constraints), " ", encode_ast_instance_method_impl_list(methods), " ", encode_ast_pos(p), ")"])
   | ast.AliasDecl name type_params rhs p ->
       string_concat_many(["(AliasDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_typeexpr(rhs), " ", encode_ast_pos(p), ")"])
+  | ast.WrapDecl name inner p ->
+      string_concat_many(["(WrapDecl ", encode_quoted_str(name), " ", encode_ast_typeexpr(inner), " ", encode_ast_pos(p), ")"])
 
 fn encode_ast_decl_list(xs: List ast.Decl) -> String =
   string_concat_many(["(", join_ast_decls(xs), ")"])
@@ -2442,6 +2444,7 @@ fn decode_ast_decl_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: Stri
   else if tag == "ClassDecl" then decode_class_decl_body(s, bytes, i, total)
   else if tag == "InstanceDecl" then decode_instance_decl_body(s, bytes, i, total)
   else if tag == "AliasDecl" then decode_alias_decl_body(s, bytes, i, total)
+  else if tag == "WrapDecl" then decode_wrap_decl_body(s, bytes, i, total)
   else Nothing
 
 fn decode_fn_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
@@ -2594,6 +2597,23 @@ fn decode_alias_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(
                   match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
                   | Nothing -> Nothing
                   | Just end -> Just((ast.AliasDecl(name, type_params, rhs, pos), end))
+
+# WrapDecl body: name (quoted str), inner type-expr, pos.  Mirrors the encoder
+# arm in encode_ast_decl.  Added when W5 exhaustiveness surfaced that the codec
+# never handled WrapDecl (added with the `wrap` keyword).
+fn decode_wrap_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
+  | Nothing -> Nothing
+  | Just (name, j) ->
+      match decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) with
+      | Nothing -> Nothing
+      | Just (inner, k) ->
+          match decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) with
+          | Nothing -> Nothing
+          | Just (pos, n) ->
+              match expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') with
+              | Nothing -> Nothing
+              | Just end -> Just((ast.WrapDecl(name, inner, pos), end))
 
 fn decode_ast_decl_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Decl, Int) =
   match expect_char(s, bytes, i, total, '(') with

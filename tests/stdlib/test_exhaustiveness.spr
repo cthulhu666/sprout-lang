@@ -1,0 +1,76 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.typed_ast as typed_ast
+
+# W5 behavioral coverage, RUN by test-stdlib-stage1 (unlike tests/conformance/run,
+# which no recipe executes). Uses only MODULE-DEFINED ADTs so it works in the
+# bare checker pipeline (no prelude): this exercises the completion fix — own-module
+# ADTs resolve via the suffix-normalized ctor lookup and ARE exhaustiveness-checked.
+# The Maybe/Bool-based cases live in tests/conformance/type_error/ (bundled pipeline).
+
+# Checker verdict only: Ok on acceptance, Err(msg) on a type error.
+fn verdict(src: String) -> Result String Unit !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err(msg)
+            | typed_ast.TypedOk _ _ -> Ok(())
+
+fn accepts(src: String) -> Bool !{IO} =
+  match verdict(src) with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn rejects_with(src: String, needle: String) -> Bool !{IO} =
+  match verdict(src) with
+  | Err msg -> str_find(msg, needle) != -1
+  | Ok _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- ACCEPT: exhaustive / reachable matches must stay accepted ---
+
+    ok_full <- accepts("type C = A | B\nfn f(c: C) -> Int = match c with | A -> 1 | B -> 2")
+    assert_true(state, "exhaustive 2-ctor match accepted", ok_full)
+
+    # Nested-field exhaustive: W's field is covered by {O, Z}. Per-column coverage
+    # must accept this (the coarse 'any nested ctor -> not covered' rule would not).
+    ok_nested <- accepts("type Two = O | Z\ntype Wr = W Two\nfn h(w: Wr) -> Int = match w with | W O -> 1 | W Z -> 2")
+    assert_true(state, "nested-field exhaustive match accepted", ok_nested)
+
+    # Tuple with a reachable trailing `_` (the unify_applied soundness class):
+    # per-column would call the tuple 'covered', but `_` is reachable and must NOT
+    # be flagged, so the program compiles.
+    ok_tuple <- accepts("type Two = O | Z\nfn g(a: Two, b: Two) -> Int = match (a, b) with | (O, O) -> 1 | (Z, Z) -> 2 | _ -> 3")
+    assert_true(state, "tuple match with reachable catch-all accepted", ok_tuple)
+
+    # --- REJECT: non-exhaustive / unreachable must be errors ---
+
+    no_missing <- rejects_with("type C = A | B\nfn f(c: C) -> Int = match c with | A -> 1", "Non-exhaustive")
+    assert_true(state, "own-module ADT missing ctor rejected (completion fix)", no_missing)
+
+    # Own-module ADT resolution must not depend on ctor count — pins the bare-name
+    # ctor_map keying that lets `main.C` be looked up as `C`.
+    ok_three <- accepts("type Col = R | G | B\nfn c(x: Col) -> Int = match x with | R -> 1 | G -> 2 | B -> 3")
+    assert_true(state, "exhaustive 3-ctor own-module ADT accepted", ok_three)
+
+    no_three <- rejects_with("type Col = R | G | B\nfn c(x: Col) -> Int = match x with | R -> 1 | G -> 2", "Non-exhaustive")
+    assert_true(state, "own-module 3-ctor ADT missing one rejected", no_three)
+
+    no_after_wild <- rejects_with("type C = A | B\nfn f(c: C) -> Int = match c with | _ -> 1 | A -> 2", "Unreachable")
+    assert_true(state, "branch after wildcard rejected as unreachable", no_after_wild)
+
+    no_after_full <- rejects_with("type C = A | B\nfn f(c: C) -> Int = match c with | A -> 1 | B -> 2 | _ -> 3", "Unreachable")
+    assert_true(state, "branch after all ctors covered rejected as unreachable", no_after_full)
+
+    summary(state)

@@ -64,7 +64,7 @@ export fn apply_subst(subst: Dict types.Type, t: types.Type) -> types.Type =
   | types.TTuple items ->
       types.TTuple(apply_subst_list(subst, items))
 
-fn apply_subst_list(subst: Dict types.Type, items: List types.Type) -> List types.Type =
+export fn apply_subst_list(subst: Dict types.Type, items: List types.Type) -> List types.Type =
   match items with
   | Nil -> Nil
   | Cons h t -> Cons(apply_subst(subst, h), apply_subst_list(subst, t))

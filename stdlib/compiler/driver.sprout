@@ -276,6 +276,8 @@ fn dump_decl(d: ast.Decl) -> String =
       sexp("instance", Cons(dump_constraint(constraint), dump_method_impls(methods)))
   | ast.AliasDecl name type_params _ _ ->
       sexp("alias", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), Nil)))
+  | ast.WrapDecl name _ _ ->
+      sexp("wrap", Cons(q(name), Nil))
   | ast.ExternFnDecl name _ _ _ _ ->
       sexp("extern-fn", Cons(q(name), Nil))
 

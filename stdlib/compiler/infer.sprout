@@ -319,11 +319,14 @@ fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List S
   | Nil -> acc
   | Cons decl rest ->
       match decl with
+      # Key by the bare type name: scrutinee types resolve to bare names via
+      # lookup_type_var (TConst(after_last_dot(...))), so the ctor map must agree
+      # or lookups for own-module ADTs (keyed `main.C`, looked up as `C`) miss.
       | ast.TypeDecl name _ ctors _ _ ->
-          build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
+          build_ctor_map(rest, dict_set(string.after_last_dot(name), collect_ctor_names(ctors, Nil), acc))
       # WrapDecl: a single synthetic constructor with the same name as the type.
       | ast.WrapDecl name _ _ ->
-          build_ctor_map(rest, dict_set(name, Cons(name, Nil), acc))
+          build_ctor_map(rest, dict_set(string.after_last_dot(name), Cons(name, Nil), acc))
       | _ -> build_ctor_map(rest, acc)
 
 fn collect_ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
@@ -1956,10 +1959,6 @@ fn column_tails(rows: List (List ast.Pattern)) -> List (List ast.Pattern) =
       | Nil -> column_tails(rest)
       | Cons _ t -> Cons(t, column_tails(rest))
 
-fn apply_subst_list(subst: Dict types.Type, ts: List types.Type) -> List types.Type =
-  match ts with
-  | Nil -> Nil
-  | Cons t rest -> Cons(unifier.apply_subst(subst, t), apply_subst_list(subst, rest))
 
 # Field types of constructor `name` when its result is `adt_type`.  Mirrors
 # infer_ctor_pattern_typed: instantiate the ctor scheme, unify its result with
@@ -1978,7 +1977,7 @@ fn ctor_field_types(
         ctor_type <- unifier.instantiate(state, scheme)
         match unifier.unify_types(subst, adt_type, ctor_result_type(ctor_type)) with
         | Err _ -> Nothing
-        | Ok s1 -> Just(apply_subst_list(s1, ctor_param_types(ctor_type)))
+        | Ok s1 -> Just(unifier.apply_subst_list(s1, ctor_param_types(ctor_type)))
 
 # Are all field columns of a constructor covered?  Returns the first gap, if any.
 fn columns_covered(
@@ -2054,6 +2053,8 @@ fn coverage_gap_adt(
   match extract_adt_name(rty) with
   | Nothing -> Nothing
   | Just adt_name ->
+      # ctor_map is keyed by bare type name (build_ctor_map), matching the bare
+      # names extract_adt_name yields, so a direct lookup resolves every ADT.
       match dict_get(adt_name, ctor_map) with
       | Nothing -> Nothing
       | Just all_ctors -> adt_gap(state, env, subst, ctor_map, all_ctors, rty, pats)
@@ -2248,7 +2249,9 @@ fn unreachable_walk(ctor_map: Dict (List String), scrut_type: types.Type, prefix
       | typed_ast.TypedMatchBranch pat _ ->
           if branch_is_unreachable(ctor_map, scrut_type, prefix, pat)
           then Just(("Unreachable match branch", pat_pos(pat)))
-          else unreachable_walk(ctor_map, scrut_type, list_append(prefix, Cons(pat, Nil)), rest)
+          # Prepend, not append: every prefix consumer is an order-independent
+          # membership scan, so O(1) Cons beats O(n) list_append per branch.
+          else unreachable_walk(ctor_map, scrut_type, Cons(pat, prefix), rest)
 
 fn unreachable_check(subst: Dict types.Type, ctor_map: Dict (List String), scrut_type: types.Type, branches: List typed_ast.TypedMatchBranch) -> Maybe (String, source.SourcePos) =
   unreachable_walk(ctor_map, unifier.apply_subst(subst, scrut_type), Nil, branches)

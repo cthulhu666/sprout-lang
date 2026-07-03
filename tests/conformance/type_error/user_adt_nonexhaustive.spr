@@ -1,0 +1,15 @@
+module main
+
+# W5 completion: a user ADT declared in THIS module must be exhaustiveness-checked
+# too. The scrutinee resolves to the bare name `Color` while the ctor map is keyed
+# by the qualified `main.Color`; a suffix-normalized lookup reconciles them so the
+# missing `Blue` case is caught (was silently accepted before the completion fix).
+type Color = Red | Green | Blue
+
+fn name(c: Color) -> String =
+  match c with
+  | Red -> "red"
+  | Green -> "green"
+
+fn main() -> Unit !{IO} =
+  print(name(Red))

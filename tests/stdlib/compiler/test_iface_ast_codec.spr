@@ -303,6 +303,11 @@ fn main() -> Unit !{IO} =
         ast.TypeArrow(ast.TypeName("a"), ast.TypeName("Bool"), Nothing),
         pos0())))
 
+    # WrapDecl roundtrip — regression for the codec gap W5 exhaustiveness
+    # surfaced (encode/decode of `wrap Foo = T` was missing entirely).
+    assert_true(state, "WrapDecl roundtrip",
+      rt_decl(ast.WrapDecl("Money", ast.TypeName("Int"), pos0())))
+
     # === TypeExpr variants ===
 
     assert_true(state, "TypeName roundtrip (via FnDecl)",

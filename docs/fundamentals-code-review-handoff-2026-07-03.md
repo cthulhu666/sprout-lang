@@ -220,9 +220,14 @@ All in `runtime/sprout_runtime.c`. No compiler changes, no seed refresh. No new 
 structural top-level unreachability check, in `infer.sprout`. Warm-only survey
 found the two false-positive classes (unresolved-name `filepath_str`, product
 over-claim `unify_applied`) before any seed refresh; final self-compile +
-examples + tests clean → one-shot flip. Spec §5.5 updated; BACKLOG records the
-two deferred follow-ups (Maranget product matrix; `module main` user-ADT
-qualified-name resolution). Fixtures under `tests/conformance/{type_error,run}/`.
+examples + tests clean → one-shot flip. A follow-up commit extended exhaustiveness
+to own-module ADTs (suffix-normalized ctor lookup), which surfaced and fixed 4
+latent `WrapDecl` non-exhaustive `Decl`-consumers (iface codec, LSP, dump-ast).
+Coverage now: exhaustiveness for own-module + prelude/imported ADTs + Bool + Unit
++ tuples; unreachability fully general. Spec §5.5 updated; BACKLOG records the one
+remaining deferral (Maranget product matrix) + two notes (suffix-collision =
+unifier T7; `tests/conformance/run/` is orphaned). Fixtures under
+`tests/conformance/type_error/` and `tests/stdlib/test_exhaustiveness.spr`.
 
 - **Evidence:** probes `sr_exh_nested` (`Just 1` + `Nothing` accepted; `Just 2` → runtime
   `abort_match`), `sr_exh_bool` (`true`-only match accepted), `sr_unreach` (branch after

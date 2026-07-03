@@ -141,6 +141,8 @@ fn collect_decl_names(decls: List ast.Decl, acc: List String) -> List String =
           collect_decl_names(rest, acc)
       | ast.AliasDecl name _ _ _ ->
           collect_decl_names(rest, Cons(name, acc))
+      | ast.WrapDecl name _ _ ->
+          collect_decl_names(rest, Cons(name, acc))
       | ast.ExternFnDecl _ _ _ _ _ ->
           collect_decl_names(rest, acc)
 
@@ -200,6 +202,11 @@ fn collect_decl_locations(
       | ast.AliasDecl name _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("alias", categories), Cons(name, names),
+            Cons(source.position_line(pos) + line_offset, lines),
+            Cons(source.position_column(pos), cols))
+      | ast.WrapDecl name _ pos ->
+          collect_decl_locations(rest, line_offset,
+            Cons("type", categories), Cons(name, names),
             Cons(source.position_line(pos) + line_offset, lines),
             Cons(source.position_column(pos), cols))
       | ast.ExternFnDecl _ _ _ _ _ ->
