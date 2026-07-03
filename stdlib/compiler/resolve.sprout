@@ -52,10 +52,17 @@ fn tables_env(t: Tables) -> Dict types.Scheme =
 
 export fn resolve_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> ResolveResult =
   match prog with
-  | typed_ast.TypedProgram decls ->
-      match check_decls(decls, build_tables(decls, env)) with
-      | Nothing -> ResolveOk(prog)
-      | Just (pos, msg) -> ResolveErr(pos, msg)
+  | typed_ast.TypedProgram decls -> resolve_with_tables(decls, build_tables(decls, env))
+
+# Two passes over the typed decls: check first (produce the diagnostic the type
+# checker owes for an unsatisfiable concrete-head constraint), then, only if the
+# program is well-formed, rewrite every TDict's Evidence field with the resolved
+# instance/forward tree.  The rewrite is dormant today — lowering still resolves
+# dictionaries itself and ignores the field — but M3b-3 makes lowering consume it.
+fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> ResolveResult =
+  match check_decls(decls, tables) with
+  | Just (pos, msg) -> ResolveErr(pos, msg)
+  | Nothing -> ResolveOk(typed_ast.TypedProgram(rewrite_decls(decls, tables)))
 
 # ---------------------------------------------------------------------------
 # Table construction (from typed decls — prelude is bundled in)
@@ -169,6 +176,128 @@ fn dict_has(key: String, d: Dict Bool) -> Bool =
   match dict_get(key, d) with
   | Just _ -> true
   | Nothing -> false
+
+# ---------------------------------------------------------------------------
+# Evidence production
+# ---------------------------------------------------------------------------
+#
+# Resolve one constraint into the Evidence tree lowering will consume.  Mirrors
+# lowering's resolve_tdict decision order exactly so the two agree byte-for-byte:
+#   * type-variable head        → EvForward key   (lowering threads a hidden param
+#                                  whose ctx_fwd key is this same super-expanded key)
+#   * concrete head, bundled    → EvInstance key children  (children = one Evidence
+#                                  per substituted instance context constraint)
+#   * concrete head, env-marker → EvUnresolved    (imported instance not bundled;
+#                                  lowering resolves it, same as today)
+#   * concrete head, no instance→ EvMissing       (unreachable once check passes)
+fn produce_evidence(c: ast.TypeConstraint, tables: Tables) -> typed_ast.Evidence =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> typed_ast.EvUnresolved
+      | Cons head_arg _ ->
+          if head_is_concrete(head_arg) == false then
+            typed_ast.EvForward(constraint_key_str(string.substring_after_last(class_name, "."), type_args))
+          else
+            produce_concrete_evidence(string.substring_after_last(class_name, "."), type_args, head_arg, c, tables)
+
+fn produce_concrete_evidence(
+  class_bare: String,
+  type_args: List ast.TypeExpr,
+  head_arg: ast.TypeExpr,
+  c: ast.TypeConstraint,
+  tables: Tables
+) -> typed_ast.Evidence =
+  if dict_has(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
+    produce_instance_evidence(constraint_key_str(class_bare, type_args), type_args, tables)
+  else if env_has_inst("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables)) then
+    typed_ast.EvUnresolved
+  else
+    typed_ast.EvMissing(c)
+
+# Bundled instance: an unconstrained instance has no context entry → no children;
+# a constrained instance recurses on each context constraint substituted at the
+# concrete head's type args, in declaration order (matching lowering's inner_dicts).
+fn produce_instance_evidence(
+  key: String,
+  type_args: List ast.TypeExpr,
+  tables: Tables
+) -> typed_ast.Evidence =
+  match dict_get(key, tables_ctx(tables)) with
+  | Nothing -> typed_ast.EvInstance(key, Nil)
+  | Just (inst_type_args, inst_constraints) ->
+      typed_ast.EvInstance(key,
+        list_map(
+          \ic -> produce_evidence(substitute_constraint(ic, unify_type_args_list(inst_type_args, type_args, dict_empty())), tables),
+          inst_constraints))
+
+# ---------------------------------------------------------------------------
+# Evidence rewrite: fill every TDict's Evidence, structure otherwise unchanged
+# ---------------------------------------------------------------------------
+
+fn rewrite_decls(decls: List typed_ast.TypedDecl, tables: Tables) -> List typed_ast.TypedDecl =
+  list_map(\d -> rewrite_decl(d, tables), decls)
+
+fn rewrite_decl(d: typed_ast.TypedDecl, tables: Tables) -> typed_ast.TypedDecl =
+  match d with
+  | typed_ast.TFnDecl name params ret_ty effects constraints body ->
+      typed_ast.TFnDecl(name, params, ret_ty, effects, constraints, rewrite_expr(body, tables))
+  | typed_ast.TLetDecl name body ->
+      typed_ast.TLetDecl(name, rewrite_expr(body, tables))
+  | typed_ast.TInstanceDecl constraint inst_constraints methods ->
+      typed_ast.TInstanceDecl(constraint, inst_constraints, list_map(\m -> rewrite_method(m, tables), methods))
+  | typed_ast.TExternFnDecl _ _ _ _ -> d
+  | typed_ast.TPassThrough _ -> d
+
+fn rewrite_method(m: typed_ast.TypedInstanceMethod, tables: Tables) -> typed_ast.TypedInstanceMethod =
+  match m with
+  | typed_ast.TypedInstanceMethod name params ret_ty effects body ->
+      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, rewrite_expr(body, tables))
+
+# Structural rebuild that visits the same nodes as check_expr; at each TDict the
+# Evidence field is replaced.  Any node not walked keeps EvUnresolved, which
+# lowering resolves itself — so a missed site degrades to today's behavior, never
+# to a wrong witness.
+fn rewrite_expr(e: typed_ast.TypedExpr, tables: Tables) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TDict c t pos _ -> typed_ast.TDict(c, t, pos, produce_evidence(c, tables))
+  | typed_ast.TCall callee args t pos ->
+      typed_ast.TCall(rewrite_expr(callee, tables), list_map(\a -> rewrite_expr(a, tables), args), t, pos)
+  | typed_ast.TIf cnd thn els t pos ->
+      typed_ast.TIf(rewrite_expr(cnd, tables), rewrite_expr(thn, tables), rewrite_expr(els, tables), t, pos)
+  | typed_ast.TMatch scrut branches t pos ->
+      typed_ast.TMatch(rewrite_expr(scrut, tables), list_map(\b -> rewrite_branch(b, tables), branches), t, pos)
+  | typed_ast.TLambda params body t pos ->
+      typed_ast.TLambda(params, rewrite_expr(body, tables), t, pos)
+  | typed_ast.TTuple items t pos ->
+      typed_ast.TTuple(list_map(\i -> rewrite_expr(i, tables), items), t, pos)
+  | typed_ast.TBinary op l r t pos ->
+      typed_ast.TBinary(op, rewrite_expr(l, tables), rewrite_expr(r, tables), t, pos)
+  | typed_ast.TUnary op x t pos ->
+      typed_ast.TUnary(op, rewrite_expr(x, tables), t, pos)
+  | typed_ast.TRange lo hi t pos ->
+      typed_ast.TRange(rewrite_expr(lo, tables), rewrite_expr(hi, tables), t, pos)
+  | typed_ast.TDo steps t pos ->
+      typed_ast.TDo(list_map(\s -> rewrite_step(s, tables), steps), t, pos)
+  | typed_ast.TRecord name fields t pos ->
+      typed_ast.TRecord(name, list_map(\f -> rewrite_field(f, tables), fields), t, pos)
+  | typed_ast.TGetField obj fld t pos ->
+      typed_ast.TGetField(rewrite_expr(obj, tables), fld, t, pos)
+  | _ -> e
+
+fn rewrite_branch(b: typed_ast.TypedMatchBranch, tables: Tables) -> typed_ast.TypedMatchBranch =
+  match b with
+  | typed_ast.TypedMatchBranch pat body -> typed_ast.TypedMatchBranch(pat, rewrite_expr(body, tables))
+
+fn rewrite_step(s: typed_ast.TypedDoStep, tables: Tables) -> typed_ast.TypedDoStep =
+  match s with
+  | typed_ast.TDoBindStep pat ex -> typed_ast.TDoBindStep(pat, rewrite_expr(ex, tables))
+  | typed_ast.TDoLetStep name ex -> typed_ast.TDoLetStep(name, rewrite_expr(ex, tables))
+  | typed_ast.TDoExprStep ex -> typed_ast.TDoExprStep(rewrite_expr(ex, tables))
+
+fn rewrite_field(f: typed_ast.TypedRecordField, tables: Tables) -> typed_ast.TypedRecordField =
+  match f with
+  | typed_ast.TypedRecordField name ex -> typed_ast.TypedRecordField(name, rewrite_expr(ex, tables))
 
 # ---------------------------------------------------------------------------
 # Typed-AST walk: find every TDict and check its constraint

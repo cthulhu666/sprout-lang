@@ -1,0 +1,111 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.resolve as resolve
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+# M3b-2 regression: resolve_program must populate each TDict's Evidence field
+# with the resolved instance/forward tree. On the pre-M3b-2 pass the program is
+# returned unchanged (every TDict stays EvUnresolved), so these assertions fail
+# for the right reason.
+
+fn dpos() -> source.SourcePos = source.SourcePos(0, 1, 1)
+
+fn tn(name: String) -> ast.TypeExpr = ast.TypeName(name)
+
+fn tapp(base: ast.TypeExpr, arg: ast.TypeExpr) -> ast.TypeExpr = ast.TypeApply(base, arg)
+
+fn ec(class_name: String, args: List ast.TypeExpr) -> ast.TypeConstraint =
+  ast.TypeConstraint(class_name, args)
+
+# A function decl whose body is a single TDict — a synthetic but valid input to
+# resolve's walk, chosen so the produced Evidence is trivially extractable.
+fn mk_fn(name: String, c: ast.TypeConstraint) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil,
+    typed_ast.TDict(c, types.TVar("dummy"), dpos(), typed_ast.EvUnresolved))
+
+fn mk_inst(c: ast.TypeConstraint, ctx: List ast.TypeConstraint) -> typed_ast.TypedDecl =
+  typed_ast.TInstanceDecl(c, ctx, Nil)
+
+fn find_fn_body(decls: List typed_ast.TypedDecl, name: String) -> Maybe typed_ast.TypedExpr =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl n _ _ _ _ body -> if n == name then Just(body) else find_fn_body(rest, name)
+      | _ -> find_fn_body(rest, name)
+
+fn body_evidence(mb: Maybe typed_ast.TypedExpr) -> typed_ast.Evidence =
+  match mb with
+  | Just body ->
+      match body with
+      | typed_ast.TDict _ _ _ ev -> ev
+      | _ -> typed_ast.EvUnresolved
+  | Nothing -> typed_ast.EvUnresolved
+
+fn ev_tag(ev: typed_ast.Evidence) -> String =
+  match ev with
+  | typed_ast.EvUnresolved -> "U"
+  | typed_ast.EvInstance _ _ -> "I"
+  | typed_ast.EvForward _ -> "F"
+  | typed_ast.EvMissing _ -> "M"
+
+fn ev_key(ev: typed_ast.Evidence) -> String =
+  match ev with
+  | typed_ast.EvInstance k _ -> k
+  | typed_ast.EvForward k -> k
+  | _ -> ""
+
+fn ev_first_child(ev: typed_ast.Evidence) -> typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvInstance _ children ->
+      match children with
+      | Cons c _ -> c
+      | Nil -> typed_ast.EvUnresolved
+  | _ -> typed_ast.EvUnresolved
+
+fn program_decls(r: resolve.ResolveResult) -> List typed_ast.TypedDecl =
+  match r with
+  | resolve.ResolveOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls -> decls
+  | resolve.ResolveErr _ _ -> Nil
+
+fn is_ok(r: resolve.ResolveResult) -> Bool =
+  match r with
+  | resolve.ResolveOk _ -> true
+  | resolve.ResolveErr _ _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # instance Eq Int  +  instance Eq (Maybe a) where Eq a
+    # three test fns exercising concrete, constrained, and forwarded resolution.
+    let result = resolve.resolve_program(
+      typed_ast.TypedProgram([
+        mk_inst(ec("Eq", [tn("Int")]), Nil),
+        mk_inst(ec("Eq", [tapp(tn("Maybe"), tn("a"))]), [ec("Eq", [tn("a")])]),
+        mk_fn("test_concrete", ec("Eq", [tn("Int")])),
+        mk_fn("test_constrained", ec("Eq", [tapp(tn("Maybe"), tn("Int"))])),
+        mk_fn("test_forward", ec("Eq", [tn("a")]))
+      ]),
+      dict_empty())
+
+    assert_true(state, "resolve_program returns Ok", is_ok(result))
+
+    # concrete unconstrained instance → EvInstance("Eq_Int", [])
+    assert_eq(state, "concrete tag", ev_tag(body_evidence(find_fn_body(program_decls(result), "test_concrete"))), "I")
+    assert_eq(state, "concrete key", ev_key(body_evidence(find_fn_body(program_decls(result), "test_concrete"))), "Eq_Int")
+
+    # constrained instance → EvInstance("Eq_Maybe", [EvInstance("Eq_Int", [])])
+    assert_eq(state, "constrained tag", ev_tag(body_evidence(find_fn_body(program_decls(result), "test_constrained"))), "I")
+    assert_eq(state, "constrained key", ev_key(body_evidence(find_fn_body(program_decls(result), "test_constrained"))), "Eq_Maybe")
+    assert_eq(state, "constrained child tag", ev_tag(ev_first_child(body_evidence(find_fn_body(program_decls(result), "test_constrained")))), "I")
+    assert_eq(state, "constrained child key", ev_key(ev_first_child(body_evidence(find_fn_body(program_decls(result), "test_constrained")))), "Eq_Int")
+
+    # type-variable head → EvForward("Eq_a")
+    assert_eq(state, "forward tag", ev_tag(body_evidence(find_fn_body(program_decls(result), "test_forward"))), "F")
+    assert_eq(state, "forward key", ev_key(body_evidence(find_fn_body(program_decls(result), "test_forward"))), "Eq_a")
+
+    summary(state)

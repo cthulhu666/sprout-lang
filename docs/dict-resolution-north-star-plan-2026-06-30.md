@@ -210,12 +210,43 @@ below) two facts settled it:
 
 M3a is the shipped fix; this map is the spec for whenever full M3b is undertaken.
 
-**M3b-1 — Dormant Evidence threading. DONE (2026-07-02).**
-Add `Evidence` ADT to `typed_ast.sprout` and thread a 4th `EvUnresolved` field through every
-`TDict` construction and match site (12 constructions in infer + 24 matches across 7 files;
-36 sites total). IR is byte-for-byte unchanged — `EvUnresolved` is dormant plumbing.
-New test: `tests/stdlib/compiler/test_evidence.spr` exercises all four constructors and the
-4-field TDict pattern. Gate: `just verify-bootstrap-fixed-point` unchanged.
+**Full M3b — FUNDED (Kuba, 2026-07-03), eyes open on the eta cost below.** The machinery
+map (see "eta blocker" below) showed M3b-full needs an *inference-level* change, not just
+resolve+lowering work, so it is sequenced as four byte-identical increments:
+- **M3b-1** — dormant `Evidence` field (DONE, below).
+- **M3b-2** — `resolve.sprout` *populates* Evidence on every TDict; lowering ignores it.
+- **M3b-3** — lowering *consumes* Evidence on the call-position path (`expand_dict_witness_args`),
+  falling back to `resolve_tdict` on `EvUnresolved`.
+- **M3b-4** — inference emits an evidence-carrying node for value-position class methods so
+  the eta path can consume Evidence.
+- **M3b-5** — delete `resolve_tdict`; lowering becomes a pure Evidence→witness printer.
+
+**The eta blocker (why M3b needs inference surgery).** `resolve_tdict` has three callers.
+Two are coverable by Evidence-on-TDict: the call-position witness args and nested context
+dicts (the latter recurse into `EvInstance`'s child list). The third — the value-position
+**eta path** — is entered from a bare `TVar` (`lower_expr` TVar case → `try_eta_in_class`,
+lowering.sprout:1119→1131) that inference never turned into a TDict, and it resolves its
+inner context dicts by calling `resolve_tdict` (`resolve_eta_substituted_inner_dict`,
+lowering.sprout:979-980). To delete `resolve_tdict` the eta path must also run on Evidence,
+but it has no TDict to carry it — so inference must emit an evidence-carrying node for
+value-position class methods (M3b-4). This is outside the plan's original "resolve produces /
+lowering consumes" scope and is the real cost.
+
+**M3b-2 — resolve.sprout populates Evidence. DONE (2026-07-03).**
+`resolve_program` now runs two passes: the existing check pass (diagnostic unchanged), then a
+pure `rewrite_decls` pass that fills each TDict's Evidence via `produce_evidence`. Decision
+order mirrors lowering's `resolve_tdict` exactly: type-variable head → `EvForward key`;
+concrete head with a *bundled* instance → `EvInstance key children` (children = one Evidence
+per substituted instance context constraint, in declaration order); concrete head known only
+via an `@inst:` env marker → `EvUnresolved` (lowering still resolves it, matching today);
+concrete head with no instance → `EvMissing` (unreachable once check passes). **No new tables
+needed** — the key insight is that a forwarded constraint's own `constraint_key` (e.g.
+`Eq_a`) is already the exact super-expanded key lowering's `ctx_fwd` uses, and `EvInstance`
+gates on `tables_exists` (bundled decls) so it stays in lockstep with lowering's `ctx_inst`
+source. Byte-identical verified: IR for `typeclass_collections_demo`, `tuples`, `maybe_map`,
+`fizzbuzz` is unchanged before/after (lowering ignores the field). New test:
+`tests/stdlib/compiler/test_resolve_evidence.spr` runs `resolve_program` on a synthetic
+program and asserts the populated `EvInstance`/nested/`EvForward` trees (9 assertions).
 
 **If full M3b is ever done — design notes.** Option A: resolve emits `EvInstance` for the
 concrete subtree + an opaque `EvForward` marker; lowering fills the forward slot from
