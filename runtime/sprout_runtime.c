@@ -137,7 +137,15 @@ typedef struct {
 } HttpUrl;
 
 static ManagedNode* g_heap_nodes = NULL;
-static ManagedNode* g_heap_index[131071];
+/* STOPGAP (see docs/gc-header-rewrite-handoff-2026-07-03.md): a fixed larger
+ * prime bucket count. The load factor on the self-hosted compiler drove the old
+ * 131071-bucket table to an avg probe length of ~4.1 (296M chain hops), making
+ * find_managed_ptr the dominant GC cost (~63% of self-compile wall time). Bumping
+ * to ~4.19M buckets drops probe length to ~0.74 and GC time 3.2x (compiler wall
+ * 2.1x). This is a band-aid: it costs a flat ~32 MB table even for tiny programs,
+ * and the real fix (inline object header, deleting this table entirely) supersedes
+ * it. Do NOT invest further here; extend the header-rewrite plan instead. */
+static ManagedNode* g_heap_index[4194301]; /* prime: 2^22 - 3 */
 static InternBucket* g_intern_table[65537];
 static RootNode* g_root_nodes = NULL;
 static RootNode* g_temp_root_nodes = NULL;
