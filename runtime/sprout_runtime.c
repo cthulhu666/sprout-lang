@@ -335,6 +335,8 @@ static char* dup_cstr(const char* s);
 static char* register_cstr(char* value);
 static char* dup_managed_slice(const char* start, size_t len, const char* ctx);
 static char* dup_managed_cstr(const char* s, const char* ctx);
+static char* sprout_gc_alloc_cstr(size_t len, const char* ctx);
+static char* sprout_gc_adopt_cstr(char* buf, size_t len, const char* ctx);
 static void buf_init(ByteBuf* buf);
 static void buf_append_bytes(ByteBuf* buf, const char* data, size_t len);
 static void buf_append_cstr(ByteBuf* buf, const char* text);
@@ -606,6 +608,30 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   uint64_t h = sprout_hdr_make(kind, aux);
   memcpy(block, &h, 8);
   return block + 8;
+}
+
+/* Allocate a GC-managed CSTR block with an inline 8-byte header at (payload-8).
+ * Header aux = byte length (excluding NUL terminator).
+ * Caller fills payload[0..len-1] and sets payload[len] = '\0', then calls
+ * register_managed_ptr(payload, SPROUT_HEAP_CSTR, 0).
+ * Never returns NULL (tcp_fail on OOM). */
+static char* sprout_gc_alloc_cstr(size_t len, const char* ctx) {
+  return (char*)sprout_gc_alloc_block(SPROUT_HEAP_CSTR, (unsigned long long)len,
+                                      len + 1, ctx);
+}
+
+/* Adopt a plain malloc'd buffer into a GC-headered CSTR block.
+ * Allocates a new headered block, copies len bytes + NUL, frees buf.
+ * Caller must then call register_managed_ptr(result, SPROUT_HEAP_CSTR, 0).
+ *
+ * INVARIANT: buf must be a plain malloc'd buffer — NEVER a headered-but-unregistered
+ * CSTR (which would cause free() to corrupt the block by ignoring the 8-byte prefix). */
+static char* sprout_gc_adopt_cstr(char* buf, size_t len, const char* ctx) {
+  char* out = sprout_gc_alloc_cstr(len, ctx);
+  if (len > 0) memcpy(out, buf, len);
+  out[len] = '\0';
+  free(buf);
+  return out;
 }
 
 static int g_gc_stress = -1;
@@ -1328,7 +1354,7 @@ static void sprout_gc_mark_roots(void) {
 }
 
 static void sprout_gc_free_payload(ManagedNode* node) {
-  if (sprout_gc_hdrcheck_on() && node->kind != SPROUT_HEAP_CSTR) {
+  if (sprout_gc_hdrcheck_on()) {
     SproutHeapKind hdr_kind = sprout_hdr_kind(sprout_hdr_of(node->ptr));
     if (hdr_kind != node->kind && hdr_kind != (SproutHeapKind)SPROUT_GC_POISON) {
       fprintf(stderr, "[sprout] HDRCHECK: header kind mismatch in free_payload: hdr=%d node=%d\n",
@@ -1340,6 +1366,15 @@ static void sprout_gc_free_payload(ManagedNode* node) {
       if ((size_t)(aux & 0xF) != node->aux_slots) {
         fprintf(stderr, "[sprout] HDRCHECK: OBJ header arity mismatch in free_payload: hdr=%zu aux_slots=%zu\n",
                 (size_t)(aux & 0xF), node->aux_slots);
+        abort();
+      }
+    }
+    if (node->kind == SPROUT_HEAP_CSTR) {
+      unsigned long long aux = sprout_hdr_aux(sprout_hdr_of(node->ptr));
+      size_t actual_len = strlen((const char*)node->ptr);
+      if (aux != (unsigned long long)actual_len) {
+        fprintf(stderr, "[sprout] HDRCHECK: CSTR aux mismatch: hdr_aux=%llu strlen=%zu ptr=%p\n",
+                aux, actual_len, node->ptr);
         abort();
       }
     }
@@ -1405,7 +1440,7 @@ static void sprout_gc_free_payload(ManagedNode* node) {
       free((char*)node->ptr - 8);
       return;
     case SPROUT_HEAP_CSTR:
-      free(node->ptr);  /* CSTR: no header, payload IS the block */
+      free((char*)node->ptr - 8);  /* header precedes payload */
       return;
   }
 }
@@ -1453,7 +1488,7 @@ static void sprout_gc_sweep(void) {
           case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
           case SPROUT_HEAP_CSTR:
             g_gc_live_cstr++;
-            if (node->ptr) g_gc_live_cstr_bytes += (long long)strlen((const char*)node->ptr);
+            if (node->ptr) g_gc_live_cstr_bytes += (long long)sprout_hdr_aux(sprout_hdr_of(node->ptr));
             break;
         }
       }
@@ -1661,11 +1696,11 @@ long long int_to_string(long long value) {
   char buf[32];
   int written = snprintf(buf, sizeof(buf), "%lld", value);
   if (written < 0) tcp_fail("int_to_string: formatting failed");
-  size_t size = (size_t)written + 1;
+  size_t content_len = (size_t)written;
   sprout_gc_maybe_collect_threshold();
-  char* out = (char*)malloc(size);
-  if (out == NULL) tcp_fail("int_to_string: out of memory");
-  memcpy(out, buf, size);
+  char* out = sprout_gc_alloc_cstr(content_len, "int_to_string: out of memory");
+  memcpy(out, buf, content_len);
+  out[content_len] = '\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
 }
@@ -1791,6 +1826,7 @@ long long read_file(long long path_i) {
     SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
     return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_msg));
   }
+  out = sprout_gc_adopt_cstr(out, len, "read_file: out of memory");
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
   return sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_out));
@@ -1862,11 +1898,13 @@ static void sprout_growbuf_append(GrowBuf* b, const char* p, size_t n) {
 }
 
 // Build a Sprout ProcResult(Int, String, String) ADT value: (exit_code, stdout, stderr).
-// Takes GC ownership of out->data and err->data (both must be malloc'd).
+// Takes GC ownership of out->data and err->data (both must be plain malloc'd buffers).
 static long long sprout_make_proc_result(int exit_code, GrowBuf* out, GrowBuf* err) {
+  out->data = sprout_gc_adopt_cstr(out->data, out->len, "proc_run: out of memory");
   register_managed_ptr(out->data, SPROUT_HEAP_CSTR, 0);
   long long rooted_out = (long long)(uintptr_t)out->data;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
+  err->data = sprout_gc_adopt_cstr(err->data, err->len, "proc_run: out of memory");
   register_managed_ptr(err->data, SPROUT_HEAP_CSTR, 0);
   long long rooted_err = (long long)(uintptr_t)err->data;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_err);
@@ -2037,7 +2075,7 @@ long long term_read_line(void) {
     len -= 1;
     line[len] = '\0';
   }
-  register_cstr(line);
+  line = register_cstr(line);
   SPROUT_HANDLE(h_line, (long long)(uintptr_t)line);
   return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_line));
 }
@@ -2059,7 +2097,7 @@ long long stdin_read_bytes(long long n_val) {
     total += got;
   }
   buf[n_val] = '\0';
-  register_cstr(buf);
+  buf = register_cstr(buf);
   SPROUT_HANDLE(h_buf, (long long)(uintptr_t)buf);
   return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_buf));
 }
@@ -2401,7 +2439,7 @@ static VectorVal* sprout_json_extract_string_array(const char* text, const char*
   while (*pos != '\0') {
     char* item = sprout_json_parse_string(&pos);
     if (item == NULL) return (VectorVal*)(uintptr_t)sprout_handle_get(h_out);
-    register_cstr(item);
+    item = register_cstr(item);
     if (out->len == out->cap) {
       long long new_cap = out->cap == 0 ? 4 : (out->cap * 2);
       out->data = sprout_realloc_vector_data(out->data, (size_t)new_cap, "analysis service: out of memory");
@@ -2771,7 +2809,7 @@ static long long sprout_analysis_ok_string_result_from_response(char* response, 
   char* value = sprout_json_extract_string(response, value_key);
   free(response);
   if (value == NULL) return sprout_err_string_result("analysis service: invalid response");
-  register_cstr(value);
+  value = register_cstr(value);
   SPROUT_HANDLE(h_value, (long long)(uintptr_t)value);
   return sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_value));
 }
@@ -2795,7 +2833,7 @@ static long long sprout_analysis_ok_vec_string_result_from_response(char* respon
 
 static long long sprout_analysis_ok_string_vec_pair_result(char* label, VectorVal* items) {
   if (label == NULL || items == NULL) return sprout_err_string_result("analysis service: invalid response");
-  register_cstr(label);
+  label = register_cstr(label);
   SPROUT_HANDLE(h_label, (long long)(uintptr_t)label);
   long long rooted_items = (long long)(uintptr_t)items;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_items);
@@ -2835,7 +2873,7 @@ static long long sprout_analysis_completion_tuple_or_fail(
   if (prefix == NULL || matches == NULL) {
     sprout_builtin_fail_detail(builtin_name, "analysis service: invalid response");
   }
-  register_cstr(prefix);
+  prefix = register_cstr(prefix);
   SPROUT_HANDLE(h_prefix, (long long)(uintptr_t)prefix);
   long long rooted_matches = (long long)(uintptr_t)matches;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_matches);
@@ -3762,11 +3800,11 @@ long long str_concat(long long left_i, long long right_i) {
   sprout_gc_maybe_collect_threshold();
   const char* left_now = (const char*)(uintptr_t)sprout_handle_get(h_left);
   const char* right_now = (const char*)(uintptr_t)sprout_handle_get(h_right);
-  char* out = (char*)malloc(left_len + right_len + 1);
-  if (out == NULL) tcp_fail("str_concat: out of memory");
+  size_t total_len = left_len + right_len;
+  char* out = sprout_gc_alloc_cstr(total_len, "str_concat: out of memory");
   memcpy(out, left_now, left_len);
   memcpy(out + left_len, right_now, right_len);
-  out[left_len + right_len] = '\0';
+  out[total_len] = '\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
 }
@@ -3787,8 +3825,7 @@ long long string_concat_many(long long list_handle) {
   }
   SPROUT_HANDLE(h_list, list_handle);
   sprout_gc_maybe_collect_threshold();
-  char* out = (char*)malloc(total + 1);
-  if (out == NULL) tcp_fail("string_concat_many: out of memory");
+  char* out = sprout_gc_alloc_cstr(total, "string_concat_many: out of memory");
   /* Second pass: copy bytes. */
   size_t pos = 0;
   cur = sprout_handle_get(h_list);
@@ -3820,8 +3857,7 @@ long long string_join_newlines(long long list_handle) {
   }
   SPROUT_HANDLE(h_list, list_handle);
   sprout_gc_maybe_collect_threshold();
-  char* out = (char*)malloc(total + 1);
-  if (out == NULL) tcp_fail("string_join_newlines: out of memory");
+  char* out = sprout_gc_alloc_cstr(total, "string_join_newlines: out of memory");
   size_t pos = 0;
   cur = sprout_handle_get(h_list);
   while (sprout_tag(cur) != nil_tag) {
@@ -3911,6 +3947,15 @@ long long str_len(long long s_val) {
 
 _Bool str_eq(const char* left, const char* right) {
   if (left == NULL || right == NULL) tcp_fail("str_eq: null input");
+  /* Fast-reject: if both are managed CSTRs with differing byte lengths they
+   * cannot be equal (strcmp is byte-wise, so length equality is necessary). */
+  ManagedNode* lnode = find_managed_ptr((void*)left);
+  ManagedNode* rnode = find_managed_ptr((void*)right);
+  if (lnode != NULL && lnode->kind == SPROUT_HEAP_CSTR &&
+      rnode != NULL && rnode->kind == SPROUT_HEAP_CSTR) {
+    if (sprout_hdr_aux(sprout_hdr_of((void*)left)) !=
+        sprout_hdr_aux(sprout_hdr_of((void*)right))) return 0;
+  }
   return strcmp(left, right) == 0;
 }
 
@@ -3931,8 +3976,7 @@ long long str_slice(long long s_i, long long start, long long length) {
   }
   sprout_gc_maybe_collect_threshold();
   const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
-  char* out = (char*)malloc(take + 1);
-  if (out == NULL) tcp_fail("str_slice: out of memory");
+  char* out = sprout_gc_alloc_cstr(take, "str_slice: out of memory");
   if (take > 0) memcpy(out, slice_now + start_byte, take);
   out[take] = '\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
@@ -3975,8 +4019,7 @@ long long str_slice_bytes(long long s_i, long long byte_start, long long byte_le
     tcp_fail("str_slice_bytes: byte_start+byte_len splits a UTF-8 codepoint");
   sprout_gc_maybe_collect_threshold();
   const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
-  char* out = (char*)malloc(bl + 1);
-  if (out == NULL) tcp_fail("str_slice_bytes: out of memory");
+  char* out = sprout_gc_alloc_cstr(bl, "str_slice_bytes: out of memory");
   if (bl > 0) memcpy(out, slice_now + bs, bl);
   out[bl] = '\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
@@ -4040,8 +4083,7 @@ long long str_split_lines(long long s_val) {
   SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
   for (size_t k = nspans; k-- > 0;) {
     size_t slen = spans[k].end - spans[k].start;
-    char* line = (char*)malloc(slen + 1);
-    if (!line) { free(spans); tcp_fail("str_split_lines: out of memory"); }
+    char* line = sprout_gc_alloc_cstr(slen, "str_split_lines: out of memory");
     memcpy(line, s + spans[k].start, slen);
     line[slen] = '\0';
     register_managed_ptr(line, SPROUT_HEAP_CSTR, 0);
@@ -4084,8 +4126,7 @@ long long split_words(const char* s) {
   SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
   for (size_t k = nspans; k-- > 0;) {
     size_t slen = spans[k].end - spans[k].start;
-    char* word = (char*)malloc(slen + 1);
-    if (!word) { free(spans); tcp_fail("split_words: out of memory"); }
+    char* word = sprout_gc_alloc_cstr(slen, "split_words: out of memory");
     memcpy(word, s + spans[k].start, slen);
     word[slen] = '\0';
     register_managed_ptr(word, SPROUT_HEAP_CSTR, 0);
@@ -4153,7 +4194,7 @@ SproutUnboxed2 term_read_line_unboxed(void) {
     len -= 1;
     line[len] = '\0';
   }
-  register_cstr(line);
+  line = register_cstr(line);
   return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)line };
 }
 
@@ -4234,10 +4275,25 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
 /* str_char_at_byte / str_char_width_at_byte removed: replaced by the safe,
  * total decode_char_at over Bytes in stdlib.compiler.source (review F3). */
 
-/* str_byte_len: byte length of the string (strlen). */
+/* str_byte_len: byte length of the string (strlen).
+ * O(1) fast path for managed CSTRs: header aux stores the byte count at
+ * allocation time and is always in sync (HDRCHECK verifies this).
+ * Falls back to strlen for static string literals not in the GC heap. */
 long long str_byte_len(long long s_val) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_byte_len: null input");
+  ManagedNode* node = find_managed_ptr((void*)s);
+  if (node != NULL && node->kind == SPROUT_HEAP_CSTR) {
+    unsigned long long len = sprout_hdr_aux(sprout_hdr_of((void*)s));
+    if (sprout_gc_hdrcheck_on()) {
+      size_t actual = strlen(s);
+      if (len != (unsigned long long)actual) {
+        fprintf(stderr, "[sprout] HDRCHECK: str_byte_len aux=%llu strlen=%zu\n", len, actual);
+        abort();
+      }
+    }
+    return (long long)len;
+  }
   return (long long)strlen(s);
 }
 
@@ -4293,7 +4349,7 @@ long long regex_validate(const char* pattern) {
   regex_t compiled;
   char* error = NULL;
   if (!regex_compile_ere(pattern, &compiled, &error)) {
-    register_cstr(error);
+    error = register_cstr(error);
     SPROUT_HANDLE(h_error, (long long)(uintptr_t)error);
     return sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_error));
   }
@@ -4380,8 +4436,9 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
   }
   buf_append_cstr(&out, cursor);
   regfree(&compiled);
-  register_managed_ptr(out.data, SPROUT_HEAP_CSTR, 0);
-  return (long long)(uintptr_t)out.data;
+  char* result = sprout_gc_adopt_cstr(out.data, out.len, "regex_replace_all_literal: out of memory");
+  register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)result;
 }
 
 long long regex_escape(long long raw_i) {
@@ -4398,7 +4455,9 @@ long long regex_escape(long long raw_i) {
     }
     buf_append_char(&out, raw_now[i]);
   }
-  char* result = out.data == NULL ? dup_cstr("") : out.data;
+  char* escaped = out.data != NULL ? out.data : dup_cstr("");
+  size_t escaped_len = out.data != NULL ? out.len : 0;
+  char* result = sprout_gc_adopt_cstr(escaped, escaped_len, "regex_escape: out of memory");
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)result;
 }
@@ -4435,9 +4494,9 @@ long long char_to_str(long long codepoint) {
   }
   buf[len] = '\0';
   sprout_gc_maybe_collect_threshold();
-  char* out = (char*)malloc(len + 1);
-  if (out == NULL) tcp_fail("char_to_str: out of memory");
-  memcpy(out, buf, len + 1);
+  char* out = sprout_gc_alloc_cstr(len, "char_to_str: out of memory");
+  memcpy(out, buf, len);
+  out[len] = '\0';
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
 }
@@ -4509,18 +4568,40 @@ static char* dup_cstr(const char* text) {
   return dup_slice(text, strlen(text));
 }
 
+/* register_cstr: ensure a string is GC-managed with an inline header.
+ *
+ * If value is already registered (headered, in the GC index) it is returned
+ * as-is.  Otherwise the plain malloc'd buffer is adopted: a new headered block
+ * is allocated, the content is copied, the old buffer is freed, and the new
+ * pointer is registered and returned.
+ *
+ * INVARIANT: callers must capture the return value — the returned pointer may
+ * differ from value.  NEVER pass a headered-but-unregistered CSTR here (both
+ * sprout_gc_alloc_cstr and sprout_gc_adopt_cstr produce unregistered headered
+ * blocks; those must flow to register_managed_ptr directly). */
 static char* register_cstr(char* value) {
-  if (value != NULL && find_managed_ptr(value) == NULL) {
-    register_managed_ptr(value, SPROUT_HEAP_CSTR, 0);
-  }
-  return value;
+  if (value == NULL) return NULL;
+  if (find_managed_ptr(value) != NULL) return value;  /* already registered */
+  /* Plain malloc'd buffer — adopt into a GC-headered block and register.
+   * Deliberately NO collection trigger here: callers register several strings
+   * back-to-back holding earlier ones unrooted (safe only because
+   * registration never collects); pressure still accrues in
+   * register_managed_ptr and collection happens at the next alloc site. */
+  size_t len = strlen(value);
+  char* headered = sprout_gc_alloc_cstr(len, "register_cstr: out of memory");
+  if (len > 0) memcpy(headered, value, len);
+  headered[len] = '\0';
+  free(value);
+  register_managed_ptr(headered, SPROUT_HEAP_CSTR, 0);
+  return headered;
 }
 
 static char* dup_managed_slice(const char* start, size_t len, const char* ctx) {
-  char* out = alloc_cstr(len, ctx);
-  memcpy(out, start, len);
+  char* out = sprout_gc_alloc_cstr(len, ctx);
+  if (len > 0) memcpy(out, start, len);
   out[len] = '\0';
-  return register_cstr(out);
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return out;
 }
 
 static char* dup_managed_cstr(const char* text, const char* ctx) {
@@ -4679,7 +4760,7 @@ static long long http_err1(const char* ctor_name, long long payload) {
 }
 
 static long long http_err_cstr(const char* ctor_name, char* payload) {
-  register_cstr(payload);
+  payload = register_cstr(payload);
   SPROUT_HANDLE(h_payload, (long long)(uintptr_t)payload);
   SPROUT_HANDLE(h_err, sprout_make1(find_ctor_tag_by_name(ctor_name), sprout_handle_get(h_payload)));
   long long out = sprout_make1(find_ctor_tag_by_name("Err"), sprout_handle_get(h_err));
@@ -4691,8 +4772,8 @@ static long long http_err_text(const char* ctor_name, const char* payload) {
 }
 
 static long long http_ok_response(long long status, char* headers, char* body) {
-  register_cstr(headers);
-  register_cstr(body);
+  headers = register_cstr(headers);
+  body = register_cstr(body);
   SPROUT_HANDLE(h_headers, (long long)(uintptr_t)headers);
   SPROUT_HANDLE(h_body, (long long)(uintptr_t)body);
   SPROUT_HANDLE(h_resp, sprout_make3(
@@ -4947,7 +5028,7 @@ static long long json_parse_object(const char** pos_ptr, char** err_msg) {
       return 0;
     }
     {
-      register_cstr(key);
+      key = register_cstr(key);
       SPROUT_HANDLE(h_key, (long long)(uintptr_t)key);
       pos = sprout_json_skip_ws(pos + 1);
       long long value = json_parse_value(&pos, err_msg);
@@ -5025,7 +5106,7 @@ static long long json_parse_value(const char** pos_ptr, char** err_msg) {
       return 0;
     }
     *pos_ptr = pos;
-    register_cstr(value);
+    value = register_cstr(value);
     SPROUT_HANDLE(h_value, (long long)(uintptr_t)value);
     return sprout_make1(find_ctor_tag_by_name("stdlib.json.JsonString"), sprout_handle_get(h_value));
   }
@@ -5066,7 +5147,9 @@ long long json_stringify(long long value) {
   ByteBuf out;
   buf_init(&out);
   json_append_value(&out, sprout_handle_get(h_value));
-  char* result = out.data == NULL ? dup_cstr("") : out.data;
+  char* raw = out.data != NULL ? out.data : dup_cstr("");
+  size_t raw_len = out.data != NULL ? out.len : 0;
+  char* result = sprout_gc_adopt_cstr(raw, raw_len, "json_stringify: out of memory");
   register_managed_ptr(result, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)result;
 }
@@ -6593,11 +6676,11 @@ long long bytes_to_utf8(long long bytes_h) {
     SPROUT_GC_POP_LOCALS(2);
     return out;
   }
-  char* out = (char*)malloc(value->len + 1);
-  if (out == NULL) tcp_fail("bytes_to_utf8: out of memory");
-  if (value->len > 0) memcpy(out, value->data, value->len);
-  out[value->len] = '\0';
-  register_cstr(out);
+  size_t vlen = value->len;
+  char* out = sprout_gc_alloc_cstr(vlen, "bytes_to_utf8: out of memory");
+  if (vlen > 0) memcpy(out, value->data, vlen);
+  out[vlen] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
   long long result = sprout_make1(find_ctor_tag_by_name("Ok"), sprout_handle_get(h_out));
   SPROUT_GC_POP_LOCALS(1);
@@ -7073,8 +7156,10 @@ long long crypto_base64_encode(long long bytes_h) {
   BytesVal* value = (BytesVal*)(uintptr_t)rooted_bytes_h;
   if (value == NULL) tcp_fail("crypto_base64_encode: null bytes");
   sprout_gc_maybe_collect_threshold();
-  char* out = base64_encode_bytes(value->data, value->len);
-  if (out == NULL) tcp_fail("crypto_base64_encode: out of memory");
+  char* plain = base64_encode_bytes(value->data, value->len);
+  if (plain == NULL) tcp_fail("crypto_base64_encode: out of memory");
+  size_t plain_len = strlen(plain);
+  char* out = sprout_gc_adopt_cstr(plain, plain_len, "crypto_base64_encode: out of memory");
   register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
@@ -7281,12 +7366,13 @@ long long tcp_read(long long conn) {
   if (buf == NULL) tcp_fail("tcp_read: out of memory");
   ssize_t n = recv(g_conn_fd[conn], buf, 65536, 0);
   if (n < 0) {
-    free(buf);
+    free(buf);  /* plain malloc buffer, free is correct */
     tcp_fail("tcp_read: recv failed");
   }
   buf[n] = '\0';
-  register_managed_ptr(buf, SPROUT_HEAP_CSTR, 0);
-  return (long long)(uintptr_t)buf;
+  char* head = sprout_gc_adopt_cstr(buf, (size_t)n, "tcp_read: out of memory");
+  register_managed_ptr(head, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)head;
 }
 
 long long tcp_read_exact(long long conn, long long count) {
