@@ -42,25 +42,75 @@ exists, that is a small test-harness sub-task to do first.
 Per AGENTS.md §Collaboration 5/6 these need sign-off before implementation. Everything
 else in this doc is a clear single-solution bug fix and can proceed without asking.
 
-- **D1 (blocks W7):** semantics of `Int` division: (a) runtime panic with location on
-  `x/0` and `INT_MIN / -1` — matches the "runtime errors minimized but explicit" stance;
-  (b) `/` returns `Result`/`Maybe` — matches guidelines §2 totality but breaks all code.
-  Also: pick and document `Int` overflow semantics (current native behavior is two's-
-  complement wrap; interpreter is arbitrary-precision — divergent).
-- **D2 (blocks W6 rollout shape):** effect enforcement will reject currently-compiling
-  code. Proposed rollout: land checks behind `SPROUT_EFFECTS_ENFORCE=1`, fix all stdlib/
-  examples/compiler violations, then flip the default and delete the flag. Approve or
-  choose direct flip.
-- **D3 (blocks W10):** is the direct codegen path (`--use-direct-codegen`, codegen.sprout)
-  being retired after the typed flip completes? If yes, W10's direct-path-only items
-  (C2, C3, C4, C5b, C6) become "add loud panics + retire" instead of full fixes.
-- **D4 (blocks part of W2):** ingestion policy for invalid UTF-8 from external sources
-  (`proc_run` stdout, `tcp_read`, `term_read_line`, `env_get`, `argv_get`): reject via
-  the builtin's error channel where one exists, vs lossy-replace with U+FFFD. Note some
-  of these return bare `String` today, so "reject" may force signature changes.
-- **D5 (blocks P1/P2 in W8):** breaking signature changes: `split_ints : String -> List Int`
-  (returns 0 for junk words) and `mutvec_get : MutVec a -> Int -> a !{IO}` (no bounds
-  check, C UB). Proposed: `Result`-/`Maybe`-returning replacements.
+**Status (2026-07-04): all five worked through with Kuba.** D1 (division), D3 (retire
+direct path), D4 (reject, Bytes-primary), D5 (parse_int/mutvec_get) DECIDED; D2 (effects)
+DEFERRED pending an effect-system design pass. Details inline below.
+
+- **D1 (blocks W7) — DECIDED 2026-07-04:** `/` (and `%` if implemented) stays a bare-`Int`
+  operator that **panics with source location** on divisor `0` and on `INT_MIN / -1` (both
+  are LLVM UB today; the guard is cheap). Rationale: `/` is a core operator, not a stdlib
+  function, so guidelines §2 totality applies via a **stdlib total sibling**, not the
+  operator — add `safe_div : Int -> Int -> Result DivByZero Int`. Matches
+  Rust/OCaml/Swift and language-design §61–62 ("runtime failures reserved for unavoidable
+  cases"). **Overflow:** native `Int` is `i64` two's-complement **wrap** for `+`/`*`
+  (status quo, a documented temporary v0 divergence from the arbitrary-precision
+  interpreter per spec §8.4); the `INT_MIN / -1` division-overflow case is the sole
+  exception (panics, since it is genuine UB). W7 emits the guard in the (surviving, typed)
+  codegen path; spec §6/§8.4 updated in the same change.
+- **D2 (blocks W6) — DEFERRED 2026-07-04:** W6 is blocked on a proper **effect-system
+  design pass**, not merely on rollout shape. Kuba: "effects are not designed properly
+  yet." The open design questions must settle first — the v0 effect lattice (Pure/IO as
+  closed rows vs. open rows), subsumption direction (a pure fn is usable where IO is
+  expected, i.e. Pure ⊆ IO, but not the reverse — today `unify_effects_applied`
+  `unifier.sprout:235-236` accepts `Pure ~ IO` BOTH ways), the meaning of effect
+  polymorphism `!{e}`, and `merge_effects` (`infer.sprout:343`) dropping one side for
+  var/var and var/row merges. Enforcing the three holes (below) before the design exists
+  would cement premature semantics into the checker. **When the design lands**, the
+  recommended rollout is the W5 pattern: build the checks in warn mode (`DiagWarning`,
+  `compiler.sprout:30`), survey the blast radius across stdlib + examples + compiler
+  self-compile on-branch, fix every flagged function, then one-shot flip
+  `DiagWarning → DiagError`. No `SPROUT_EFFECTS_ENFORCE` env flag (pure scaffolding; the
+  warn channel already exists) unless fixes must dribble across many sessions with
+  enforcement shipped-but-off on master.
+- **D3 (blocks W10) — DECIDED 2026-07-04: RETIRE.** The typed flip already landed
+  (`--emit-ir` routes to `ir-typed`/`ast_to_ir`+`ir_lowering`; direct path reachable only
+  via `--use-direct-codegen`), and the original flip plan
+  (`gc-rooting-model-c-plan-2026-06-02.md:72`) always scoped the direct path as a
+  one-release-cycle escape hatch. Decision: **retire `codegen.sprout` + the
+  `--use-direct-codegen` flag + the parity/CPR oracle scripts** in a single retirement PR
+  once the typed path has enough production soak. Keep the oracles running until then (a
+  buggy direct path only reduces oracle coverage → `SKIP`, never a false divergence, so
+  its W10 bugs cost nothing). **This reshapes W10 (see below).**
+- **D4 (blocks W2/R2) — DECIDED 2026-07-04: REJECT, Bytes-primary.** Invalid UTF-8 from
+  external sources is rejected, not lossy-replaced (matches `read_file`'s existing
+  `Result`; upholds the safety value language-design §63; mirrors Rust's
+  `env::var -> Result<_, NotUnicode>`). **Mechanism = Bytes-primary** (the Rust
+  `OsString`/`str` split, already half-built): raw externs return `Bytes` (total); the
+  String-returning wrappers are thin Sprout fns over the *single* existing
+  `bytes_to_utf8 : Bytes -> Result Utf8Error String` choke point, returning
+  `Result Utf8Error T`. NOTE: `Maybe` is NOT a valid reject channel — `env_get`/
+  `term_read_line`'s current `Maybe` conflates absent/EOF with invalid, so those get
+  `Result Utf8Error (Maybe String)` (outer=validity, inner=presence). `tcp_read` retires
+  in favor of the existing `tcp_read_exact -> Result TcpError Bytes` + `bytes_to_utf8`.
+  Pair with an opt-in lossy `Bytes -> String` (U+FFFD) helper for best-effort text.
+  **R2 is a designed workstream** (coupled with D5's signature changes), NOT a quick
+  patch — and non-urgent, since W2/R1 (done on branch `fix/w2-utf8-runtime-safety`)
+  already makes invalid UTF-8 a clean panic when walked rather than a memory-safety hole.
+- **D5 (blocks P1/P2 in W8) — DECIDED 2026-07-04.** **P1 — fix the root, not `split_ints`.**
+  Consumer analysis: `split_ints` has ONE consumer, in orphaned `tests/conformance/run/`
+  (dead API) → **delete it** + its test. The real gap is `parse_int` (junk→0 via C
+  `strtoll`), ~11 consumers. **Add a total `parse_int : String -> Maybe Int` as the
+  canonical public fn; keep the raw/unchecked path NON-EXPORTED** (`parse_int_raw` in
+  prelude; parser either uses total `parse_int` + panic-on-`Nothing` as a lexer-invariant
+  assertion, or a module-local unchecked helper like `iface_codec.atom_to_int` — W8
+  decides). **Fold the guard in** at `http_server.sprout:98`/`scram.sprout:79` (drop the
+  redundant `all_digits`/`digits_only` predicate; consume total `parse_int` directly).
+  Migrate exposed callers (`aoc_2025_day_5`, `string_templates`, `result_demo`,
+  `lsp_driver`). Parser int-literal sites (`parser.sprout` 293/339/705) are lexer-
+  pre-validated → unchecked/panic path. **P2 — `mutvec_get : MutVec a -> Int -> Maybe a
+  !{IO}`** via the already-existing bounds-checked `vector_get` (`:1109`); audit
+  `mutvec_set`/`vector_mutset` for the same missing bounds check. Watch the do-block-bind
+  quirk (`x <- f()` on `Maybe a !{IO}` strips both layers) at the `astar` call sites.
 
 ## 3. Workstreams (recommended order)
 
@@ -333,10 +383,23 @@ All `stdlib/prelude.sprout`. Every touched export gets/keeps a correct `# O(...)
   span in the error output).
 - **Gates:** compiler change → full §4 battery.
 
-### W10 — Direct-codegen-path batch  [1S; blocked on D3]
+### W10 — Direct-codegen-path batch  [RESHAPED by D3=retire 2026-07-04]
 
-All static findings (agent lost run permissions mid-review) — each needs an empirical
-repro under `--use-direct-codegen` as its DoR step.
+**D3 = retire** (direct path is being deleted, not maintained). W10 therefore splits:
+- **C2, C3, C4, C6, C8 (direct-path-only): do NOT full-fix.** They live in code slated for
+  deletion. At most add a loud panic so the parity oracle `SKIP`s cleanly instead of
+  emitting subtly-wrong IR; otherwise leave them for the retirement PR that deletes
+  `codegen.sprout`. Do not spend a session fixing these.
+- **C5 (`append`, explicitly BOTH paths) and C9 (`ir_rooting.rewrite_ops` silent
+  truncation): FIX REGARDLESS.** `ir_rooting` is the *typed* path's rooting pass, so C9
+  guards shipping code (mis-filed here as "direct-path"); C5's typed-path IRConst-0
+  placeholder is a live shipping bug. Fold both into a typed-path session, not this batch.
+- **Retirement PR (separate, post-soak):** delete `codegen.sprout`, the
+  `--use-direct-codegen` dispatch, `scripts/ir_runtime_parity.sh`,
+  `scripts/cpr_differential_check.sh`, and the `flip-smoke` direct-path assertions.
+
+Original static findings (agent lost run permissions mid-review) — retained for the
+retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only if fixed.
 
 - **C2 — width-3 sret ABI mismatch:** `emit_match_unboxed_call` `codegen.sprout:2401-2426`
   calls `{i64,i64,i64}`-returning externs DIRECT while `emit_extern_decls` :3955-3956
@@ -423,15 +486,16 @@ repro under `--use-direct-codegen` as its DoR step.
 | Session | Workstream | Blocked on |
 |---|---|---|
 | 1 | ~~W1 global GC roots~~ **DONE 2026-07-03** | — |
-| 2 | W2 runtime UTF-8 (R1+R3+R4 now; R2 when D4 lands) | D4 partial |
+| 2 | W2 runtime UTF-8 (R1+R3+R4 landed on branch); R2 = designed workstream | D4 DECIDED (reject) |
 | 3 | W4 dispatch-by-constraint-position | — |
 | 4-5 | W3 rigidity + value restriction | — |
 | 6 | ~~W5 exhaustiveness + unreachability~~ **DONE 2026-07-03** | — |
-| 7 | W8 prelude batch | D5 for P1/P2 |
+| 7 | W8 prelude batch | D5 DECIDED |
 | 8 | W9 lexer/parser batch | — |
-| 9-11 | W6 effects campaign | D2 |
-| 12 | W7 division | D1 |
-| 13 | W10 direct-path batch | D3 |
+| 12 | W7 division | D1 DECIDED |
+| 13 | W10 direct-path retirement (C5-typed + C9 elsewhere) | D3 DECIDED (retire) |
+| — | W6 effects campaign | **D2 DEFERRED — needs effect-system design first** |
+| — | W2/R2 ingestion (reject, Bytes-primary) | D4 DECIDED; design + D5 coupling |
 | — | W11 mediums | fold into adjacent sessions |
 
 Rationale for the order: W1 is the worst confirmed corruption with the smallest fix; W4
