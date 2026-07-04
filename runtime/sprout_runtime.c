@@ -716,17 +716,16 @@ static ManagedNode* find_managed_ptr(void* ptr) {
   size_t bucket = sprout_managed_ptr_hash(ptr);
   SPROUT_PROF_HOT(g_prof_fmp_calls++);
 #if defined(SPROUT_GC_PROFILE)
-  unsigned long long _probe_hops = 0;
+  unsigned long long _hops_before = g_prof_fmp_hops;
 #endif
   for (ManagedNode* n = g_heap_index[bucket]; n != NULL; n = n->hash_next) {
     SPROUT_PROF_HOT(g_prof_fmp_hops++);
-    SPROUT_PROF_HOT(_probe_hops++);
     if (n->ptr == ptr) {
-      SPROUT_PROF_HOT(sprout_prof_note_probe(_probe_hops, 1));
+      SPROUT_PROF_HOT(sprout_prof_note_probe(g_prof_fmp_hops - _hops_before, 1));
       return n;
     }
   }
-  SPROUT_PROF_HOT(sprout_prof_note_probe(_probe_hops, 0));
+  SPROUT_PROF_HOT(sprout_prof_note_probe(g_prof_fmp_hops - _hops_before, 0));
   return NULL;
 }
 
@@ -749,7 +748,11 @@ static int sprout_obj_alloc_arity(int arity) {
 }
 
 static void register_obj(SproutObj* p, int arity) {
-  register_managed_ptr(p, SPROUT_HEAP_OBJ, (size_t)sprout_obj_alloc_arity(arity));
+  /* aux_slots records the ctor arity; it equals the allocated field count in
+   * normal builds. Lineage pads allocations to >= 3 fields but never recycles
+   * (corpses are poisoned and leaked), so the freelist index derived from
+   * aux_slots is only ever consulted for unpadded blocks. */
+  register_managed_ptr(p, SPROUT_HEAP_OBJ, (size_t)arity);
 }
 
 static SproutObj* sprout_alloc_obj_raw(int arity, const char* ctx) {
@@ -1190,6 +1193,7 @@ static void sprout_gc_mark_ptr(void* ptr) {
  * not yet processed) into its children until all reachable nodes are black.
  * Must be called after sprout_gc_mark_roots() and before sprout_gc_sweep(). */
 static void sprout_gc_drain_marks(void) {
+  SPROUT_PROF_HOT(g_gc_tracing = 1);
   while (g_gc_mark_wl_len > 0) {
     ManagedNode* node = g_gc_mark_worklist[--g_gc_mark_wl_len];
     size_t child_count = sprout_heap_child_count(node);
@@ -1199,6 +1203,7 @@ static void sprout_gc_drain_marks(void) {
       gc_mark_enqueue(find_managed_ptr((void*)(uintptr_t)child_val));
     }
   }
+  SPROUT_PROF_HOT(g_gc_tracing = 0);
   free(g_gc_mark_worklist);
   g_gc_mark_worklist = NULL;
   g_gc_mark_wl_len = 0;
@@ -1265,7 +1270,9 @@ static void sprout_gc_free_payload(ManagedNode* node) {
         return;
       }
       /* Push onto the per-arity freelist; link through the tag word.
-         aux_slots holds the alloc_arity recorded at registration. */
+         aux_slots holds the ctor arity recorded at registration, which is the
+         allocated field count on this path (lineage-padded blocks never get
+         here — lineage poisons and leaks above). */
       size_t k = node->aux_slots;
       obj->tag = (long long)(uintptr_t)g_sprout_obj_freelist[k];
       g_sprout_obj_freelist[k] = obj;
@@ -1386,9 +1393,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
   sprout_gc_mark_roots();
-  SPROUT_PROF_HOT(g_gc_tracing = 1);
   sprout_gc_drain_marks();
-  SPROUT_PROF_HOT(g_gc_tracing = 0);
   sprout_gc_sweep();
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
@@ -3470,14 +3475,12 @@ static void sprout_debug_adt_rec(long long val, int depth) {
   if (meta->arity == 0) return;
   fprintf(stderr, "(");
   const char* fk = (meta->field_kinds != NULL) ? meta->field_kinds : "";
-  /* Read only the fields this object actually has; reading beyond alloc_arity is OOB. */
-  long long fields[9] = {0};
-  for (long long i = 0; i < meta->arity && i < 9; i++)
-    fields[i] = ((long long*)obj)[1 + i];
+  /* Read only the fields this object actually has; reading beyond the ctor
+     arity is OOB on exact-size objects. */
   for (long long i = 0; i < meta->arity && i < 9; i++) {
     if (i > 0) fprintf(stderr, ", ");
     char kind = (fk[i] != '\0') ? fk[i] : '_';
-    sprout_debug_field(fields[i], kind, depth);
+    sprout_debug_field(sprout_field(val, i), kind, depth);
   }
   fprintf(stderr, ")");
 }
