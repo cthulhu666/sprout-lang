@@ -1,0 +1,53 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+
+# Invariant net for CSTR (heap-allocated C string) lifecycle across a GC rewrite.
+# All anchor strings are built at runtime via str_concat so they live on the GC
+# heap (not as static constants) and must genuinely survive collection cycles.
+# ~5000 short-lived concatenations are churned so the sweeper runs many times
+# before we re-assert anchor identity and length.
+
+# Each call allocates two CSTRs (int_to_string result + concat) and drops them.
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + str_len("ab" ++ int_to_string(n)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Runtime-allocated anchor strings (heap CSTRs, not static literals).
+    let anchor_a = "hello, " ++ "world"
+    let anchor_b = "sprout " ++ "language"
+    let anchor_c = "prefix-" ++ int_to_string(42)
+    let pre_len_a = str_len(anchor_a)
+    let pre_len_b = str_len(anchor_b)
+    let pre_len_c = str_len(anchor_c)
+
+    # 5000 iterations: each iteration allocates and drops two CSTRs.
+    # The GC sweeps the dead strings repeatedly between collections.
+    let total = churn(5000, 0)
+    assert_true(state, "churn produced nonzero total", total > 0)
+
+    # Exact-content identity after thousands of GC cycles.
+    assert_eq(state, "anchor_a content survives churn", anchor_a, "hello, world")
+    assert_eq(state, "anchor_b content survives churn", anchor_b, "sprout language")
+    assert_eq(state, "anchor_c content survives churn", anchor_c, "prefix-42")
+
+    # Length of a surviving string must be stable across collections.
+    assert_eq(state, "anchor_a str_len stable after churn", str_len(anchor_a), pre_len_a)
+    assert_eq(state, "anchor_b str_len stable after churn", str_len(anchor_b), pre_len_b)
+    assert_eq(state, "anchor_c str_len stable after churn", str_len(anchor_c), pre_len_c)
+    assert_eq(state, "pre_len_a is 12", pre_len_a, 12)
+    assert_eq(state, "pre_len_b is 15", pre_len_b, 15)
+    assert_eq(state, "pre_len_c is 9", pre_len_c, 9)
+
+    # str_slice: codepoint offset arithmetic on a surviving CSTR.
+    assert_eq(state, "str_slice first 5 chars", str_slice(anchor_a, 0, 5), "hello")
+    assert_eq(state, "str_slice tail 5 chars", str_slice(anchor_a, 7, 12), "world")
+
+    # Fresh allocations after churn must work — tests reuse of freed CSTR slots.
+    let post = "post" ++ "-churn"
+    assert_eq(state, "fresh concat after churn", post, "post-churn")
+    assert_eq(state, "fresh concat str_len", str_len(post), 10)
+
+    summary(state)

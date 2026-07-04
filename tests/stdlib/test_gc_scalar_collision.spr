@@ -1,0 +1,51 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+
+# Polymorphic (type-variable) fields holding Ints must never be misread as
+# heap pointers by the collector. The values below are plausible macOS heap
+# addresses; a conservative GC may over-RETAIN when one equals a live
+# address, but must never corrupt the value or crash.
+
+type Box a (..) =
+  | MkBox a
+
+fn unbox(b: Box Int) -> Int =
+  match b with
+  | MkBox v -> v
+
+fn sum_all(xs: List Int, acc: Int) -> Int =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> sum_all(t, acc + h)
+
+# String churn forces collections while the address-like Ints are live.
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + str_len("x" ++ int_to_string(n)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Address-like and boundary Ints in polymorphic positions.
+    let addrs = [4368491008, 105553116266496, 140737488355328, 1, 0, 0 - 1, 9007199254740993]
+    let pre_sum = sum_all(addrs, 0)
+    let box_a = MkBox(4368491008)
+    let box_b = MkBox(105553116266496)
+    let box_c = MkBox(0 - 4368491008)
+
+    let churned = churn(5000, 0)
+    assert_true(state, "churn ran", churned > 0)
+
+    # Values read back exactly after thousands of collections.
+    assert_eq(state, "list of address-like Ints stable", sum_all(addrs, 0), pre_sum)
+    assert_eq(state, "boxed address-like Int a", unbox(box_a), 4368491008)
+    assert_eq(state, "boxed address-like Int b", unbox(box_b), 105553116266496)
+    assert_eq(state, "boxed negative Int", unbox(box_c), 0 - 4368491008)
+
+    # Head/tail extraction still walks correctly.
+    let first = match addrs with
+      | Cons h t -> h
+      | Nil -> 0
+    assert_eq(state, "head of address list", first, 4368491008)
+
+    summary(state)
