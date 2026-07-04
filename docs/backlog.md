@@ -117,6 +117,21 @@ directly contends with the documented reason bare keying exists (own-module ADTs
    Completed groundwork: allocation visibility, centralized managed allocation for Sprout values, heap metadata hooks, and an initial non-moving stop-the-world mark-sweep collector with default threshold-triggered in-process collection in the native profile.
    Remaining v1 scope: close the remaining path-specific live-value gaps outside the current shadow-root coverage, keep validating and tuning the current default threshold (`4096` managed nodes) with the new per-cycle live-heap/timing diagnostics, and keep expanding reclamation-focused validation.
    V2 direction: pause/throughput improvements only after v1 is measured, likely via incremental or generational follow-up work if justified.
+9. **Incremental partial application miscompiles (SIGSEGV).** Applying a partial closure
+   one argument at a time when two or more arguments remain crashes at runtime.
+   `add3(1)(2)(3)` (with `fn add3(x, y, z)`) typechecks — the checker is currying-correct —
+   but codegen builds an arity-2 partial closure (`__sprout_partial_N(env, a0, a1)`) and the
+   next call site applies a single argument, under-saturating it; the malformed call returns
+   an `Int` that the following application reinterprets as a closure pointer (`inttoptr` +
+   `load`) → SIGSEGV. Saturating the partial in one call (`feed_two(add3(1), 2, 3)`) works, so
+   only incremental application is affected. The fix needs a design decision: either support
+   incremental partial application (a curried closure-calling convention that builds a fresh
+   partial on under-saturation) or reject under-saturating re-application at the checker (as a
+   clean type error, not a segfault). This decision also gates an `ap`/`<*>`-style Applicative
+   interface (which feeds one wrapped argument at a time); a `map2`/`map3` interface — fully
+   saturated application — is unaffected. Counterpart defect (checker rejecting function-typed
+   returns because `ctor_result_type` over-stripped arrows) is fixed in `infer.sprout` via
+   `fn_return_type`; regression: `tests/stdlib/test_function_returning_function.spr`.
 
 ## V1 Roadmap Candidates
 

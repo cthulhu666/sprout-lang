@@ -2500,6 +2500,15 @@ fn ctor_result_type(t: types.Type) -> types.Type =
   | types.TFunc _ ret _ -> ctor_result_type(ret)
   | _ -> t
 
+# Declared return type of a function with `n_params` parameters: strip exactly
+# `n_params` leading arrows. Preserves a function-typed return (e.g. -> Int -> Int),
+# unlike ctor_result_type which strips all arrows (correct only for constructors).
+fn fn_return_type(t: types.Type, n_params: Int) -> types.Type =
+  if n_params <= 0 then t
+  else match t with
+    | types.TFunc _ ret _ -> fn_return_type(ret, n_params - 1)
+    | _ -> t
+
 fn ctor_param_types(t: types.Type) -> List types.Type =
   match t with
   | types.TFunc p rest _ -> Cons(p, ctor_param_types(rest))
@@ -3835,7 +3844,7 @@ fn check_fn_body(
         match br with
         | InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty())
         | InferOk typed_body s1 _ _ ->
-            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
+            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) with
             | Err e -> (typed_ast.BodyErr(dummy_pos(), "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty())
             | Ok s2 -> (typed_ast.BodyOk(resolve_dispatch_typed_expr(self_env, s2, typed_body), unifier.apply_subst(s2, inst_type)), fwd_markers)
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst("Unit")), dict_empty())
@@ -4027,7 +4036,7 @@ fn check_instance_method(
         match br with
         | InferErr pos msg -> instance_method_err(name, pos, msg)
         | InferOk typed_body s1 _ _ ->
-            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), ctor_result_type(inst_type)) with
+            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) with
             | Err e -> InstanceMethodErr(dummy_pos(), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
             | Ok s2 ->
                 InstanceMethodOk(

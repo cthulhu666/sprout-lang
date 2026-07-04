@@ -1,0 +1,39 @@
+# Regression: a function whose declared return type is itself a function type.
+#
+# Was rejected by the checker with "Return type mismatch: Int -> Int vs Int".
+# Root cause: check_fn_body / check_instance_method computed the expected return
+# type with ctor_result_type, which strips EVERY function arrow (correct for
+# constructors, wrong for functions). For `f(n) -> Int -> Int` it over-stripped
+# to the final Int, so any function-typed body was rejected. The fix strips
+# exactly list_length(params) arrows.
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+fn add(x: Int, y: Int) -> Int = x + y
+
+# saturating application of a returned arity-1 closure
+fn apply_int(f: Int -> Int, x: Int) -> Int = f(x)
+
+# Case 1: return a lambda (no partial application involved).
+fn adder(n: Int) -> Int -> Int = \m -> n + m
+
+# Case 2: return a partially-applied named function (the Applicative-relevant shape).
+fn partial_ret(n: Int) -> Int -> Int = add(n)
+
+# Case 3: an instance method whose return type is a function (exercises 4030 path).
+class MakeAdder t {
+  fn make_adder(base: t) -> Int -> Int
+}
+
+instance MakeAdder Int {
+  fn make_adder(base: Int) -> Int -> Int = \m -> base + m
+}
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "fn returns lambda", apply_int(adder(5), 3), 8)
+    assert_eq(state, "fn returns partial application", apply_int(partial_ret(10), 7), 17)
+    assert_eq(state, "instance method returns function", apply_int(make_adder(100), 1), 101)
+
+    summary(state)
