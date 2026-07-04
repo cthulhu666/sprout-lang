@@ -1,0 +1,34 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+
+# M3b-3 consumption regression. Exercises the three dictionary-witness shapes
+# that lowering's evidence_to_witness must reproduce byte-identically to the old
+# resolve_tdict path:
+#   1. forwarded polymorphic constraint  (EvForward)   — `where Eq a` inside eq2
+#   2. concrete instance at the call site (EvInstance)  — eq2(1, 1)
+#   3. super-having + constrained + nested instance     — Ord (List Int), ToString (List (Maybe Int))
+# Behaviour must be unchanged across the refactor; this guards it under `just test`.
+
+fn eq2(x: a, y: a) -> Bool where Eq a = x == y
+
+fn cmp2(x: a, y: a) -> Int where Ord a = compare(x, y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # EvForward (inside eq2's body) + EvInstance (Eq Int at the call site)
+    assert_true(state, "eq2 1 1", eq2(1, 1))
+    assert_false(state, "eq2 1 2", eq2(1, 2))
+
+    # forwarded Ord a (in cmp2) + concrete Ord Int at the call
+    assert_true(state, "cmp2 1 2 negative", cmp2(1, 2) < 0)
+    assert_true(state, "cmp2 3 3 zero", cmp2(3, 3) == 0)
+
+    # super-having class: Ord (List Int) pulls in its Eq (List Int) super-block
+    assert_true(state, "ord list less", compare([1, 2], [1, 3]) < 0)
+    assert_true(state, "eq list equal", [1, 2] == [1, 2])
+
+    # constrained + nested instance: ToString (List (Maybe Int))
+    assert_eq(state, "to_string nested list", to_string([Just(1), Nothing]), "[Just(1), Nothing]")
+
+    summary(state)

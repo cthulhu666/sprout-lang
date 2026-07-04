@@ -193,14 +193,23 @@ fn dict_has(key: String, d: Dict Bool) -> Bool =
 # same way lowering's resolve_tdict does (class_with_transitive_supers, verbatim
 # order + dedup) and wraps the per-class blocks in EvClasses.  Each block mirrors
 # lowering's resolve_tdict_with_key decision order exactly:
-#   * type-variable head        → EvForward key   (lowering threads a hidden param
-#                                  whose ctx_fwd key is this same key)
+#   * key in fwd_keys           → EvForward key   (the enclosing function forwards
+#                                  this exact constraint as a hidden param — checked
+#                                  FIRST, mirroring lowering's ctx_fwd-before-ctx_inst
+#                                  priority; applies even to a CONCRETE head that also
+#                                  has an instance, e.g. `where Summable (Vec Int)`)
+#   * type-variable head        → EvForward key   (forwarded, or a phantom fresh tyvar
+#                                  that lowering null-fills on the ctx_fwd miss)
 #   * concrete head, bundled    → EvInstance key children  (children = one Evidence
 #                                  per substituted instance context constraint)
 #   * concrete head, env-marker → EvUnresolved    (imported instance not bundled;
 #                                  lowering resolves it, same as today)
 #   * concrete head, no instance→ EvMissing       (unreachable once check passes)
-fn produce_evidence(c: ast.TypeConstraint, tables: Tables) -> typed_ast.Evidence =
+#
+# fwd_keys is the set of constraint_keys the enclosing function forwards (its
+# where-clause constraints, super-expanded) — built exactly as lowering's
+# build_hidden_for_constraints keys ctx_fwd, so the two agree.
+fn produce_evidence(c: ast.TypeConstraint, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.Evidence =
   match c with
   | ast.TypeConstraint class_name type_args ->
       match type_args with
@@ -208,31 +217,36 @@ fn produce_evidence(c: ast.TypeConstraint, tables: Tables) -> typed_ast.Evidence
       | Cons head_arg _ ->
           typed_ast.EvClasses(
             list_map(
-              \eff_class -> produce_one_class(eff_class, head_arg, type_args, tables),
+              \eff_class -> produce_one_class(eff_class, head_arg, type_args, fwd_keys, tables),
               class_with_transitive_supers(class_name, tables_super(tables))))
 
 # One effective-class block. The key is computed exactly as lowering's
 # resolve_tdict_for_classes does: constraint_key_str(after_last_dot(eff_class), args).
+# class_name kept UNSTRIPPED (eff_class); only the key is stripped.
 fn produce_one_class(
   eff_class: String,
   head_arg: ast.TypeExpr,
   type_args: List ast.TypeExpr,
+  fwd_keys: Dict Bool,
   tables: Tables
 ) -> typed_ast.Evidence =
-  if head_is_concrete(head_arg) == false then
-    typed_ast.EvForward(constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
+  if dict_has(constraint_key_str(string.substring_after_last(eff_class, "."), type_args), fwd_keys) then
+    typed_ast.EvForward(eff_class, constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
+  else if head_is_concrete(head_arg) == false then
+    typed_ast.EvForward(eff_class, constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
   else
-    produce_concrete_evidence(string.substring_after_last(eff_class, "."), type_args, head_arg, eff_class, tables)
+    produce_concrete_evidence(eff_class, string.substring_after_last(eff_class, "."), type_args, head_arg, fwd_keys, tables)
 
 fn produce_concrete_evidence(
+  eff_class: String,
   class_bare: String,
   type_args: List ast.TypeExpr,
   head_arg: ast.TypeExpr,
-  eff_class: String,
+  fwd_keys: Dict Bool,
   tables: Tables
 ) -> typed_ast.Evidence =
   if dict_has(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
-    produce_instance_evidence(constraint_key_str(class_bare, type_args), type_args, tables)
+    produce_instance_evidence(eff_class, constraint_key_str(class_bare, type_args), type_args, fwd_keys, tables)
   else if env_has_inst("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables)) then
     typed_ast.EvUnresolved
   else
@@ -242,18 +256,44 @@ fn produce_concrete_evidence(
 # a constrained instance recurses on each context constraint substituted at the
 # concrete head's type args, in declaration order (matching lowering's inner_dicts).
 # Each child is itself an EvClasses (the context constraint is super-expanded too).
+# The inner dicts share the enclosing function's fwd_keys, exactly as lowering's
+# resolve_inner_constraint_dicts resolves them against the same ctx_fwd.
 fn produce_instance_evidence(
+  eff_class: String,
   key: String,
   type_args: List ast.TypeExpr,
+  fwd_keys: Dict Bool,
   tables: Tables
 ) -> typed_ast.Evidence =
   match dict_get(key, tables_ctx(tables)) with
-  | Nothing -> typed_ast.EvInstance(key, Nil)
+  | Nothing -> typed_ast.EvInstance(eff_class, key, Nil)
   | Just (inst_type_args, inst_constraints) ->
-      typed_ast.EvInstance(key,
+      typed_ast.EvInstance(eff_class, key,
         list_map(
-          \ic -> produce_evidence(substitute_constraint(ic, unify_type_args_list(inst_type_args, type_args, dict_empty())), tables),
+          \ic -> produce_evidence(substitute_constraint(ic, unify_type_args_list(inst_type_args, type_args, dict_empty())), fwd_keys, tables),
           inst_constraints))
+
+# The forwarded-key set for a function/method body: one key per (constraint, super)
+# in its where-clause, computed exactly as lowering's build_hidden_for_constraints
+# keys ctx_fwd (constraint_key_str(after_last_dot(eff_class), type_args)).
+fn build_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List String)) -> Dict Bool =
+  add_fwd_keys(constraints, super_map, dict_empty())
+
+fn add_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List String), acc: Dict Bool) -> Dict Bool =
+  match constraints with
+  | Nil -> acc
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name type_args ->
+          add_fwd_keys(rest, super_map,
+            add_eff_keys(class_with_transitive_supers(class_name, super_map), type_args, acc))
+
+fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, acc: Dict Bool) -> Dict Bool =
+  match effs with
+  | Nil -> acc
+  | Cons eff rest ->
+      add_eff_keys(rest, type_args,
+        dict_set(constraint_key_str(string.substring_after_last(eff, "."), type_args), true, acc))
 
 # ---------------------------------------------------------------------------
 # Superclass expansion (ported verbatim from lowering.sprout so the effective-
@@ -314,66 +354,72 @@ fn list_str_member(x: String, xs: List String) -> Bool =
 fn rewrite_decls(decls: List typed_ast.TypedDecl, tables: Tables) -> List typed_ast.TypedDecl =
   list_map(\d -> rewrite_decl(d, tables), decls)
 
+# Each decl body is rewritten under its own forwarded-key set: a function forwards
+# its where-clause constraints; an instance method forwards the instance's context
+# constraints (matching lowering's build_hidden_for_constraints call sites). A
+# top-level let forwards nothing.
 fn rewrite_decl(d: typed_ast.TypedDecl, tables: Tables) -> typed_ast.TypedDecl =
   match d with
   | typed_ast.TFnDecl name params ret_ty effects constraints body ->
-      typed_ast.TFnDecl(name, params, ret_ty, effects, constraints, rewrite_expr(body, tables))
+      typed_ast.TFnDecl(name, params, ret_ty, effects, constraints,
+        rewrite_expr(body, build_fwd_keys(constraints, tables_super(tables)), tables))
   | typed_ast.TLetDecl name body ->
-      typed_ast.TLetDecl(name, rewrite_expr(body, tables))
+      typed_ast.TLetDecl(name, rewrite_expr(body, dict_empty(), tables))
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
-      typed_ast.TInstanceDecl(constraint, inst_constraints, list_map(\m -> rewrite_method(m, tables), methods))
+      typed_ast.TInstanceDecl(constraint, inst_constraints,
+        list_map(\m -> rewrite_method(m, build_fwd_keys(inst_constraints, tables_super(tables)), tables), methods))
   | typed_ast.TExternFnDecl _ _ _ _ -> d
   | typed_ast.TPassThrough _ -> d
 
-fn rewrite_method(m: typed_ast.TypedInstanceMethod, tables: Tables) -> typed_ast.TypedInstanceMethod =
+fn rewrite_method(m: typed_ast.TypedInstanceMethod, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedInstanceMethod =
   match m with
   | typed_ast.TypedInstanceMethod name params ret_ty effects body ->
-      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, rewrite_expr(body, tables))
+      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, rewrite_expr(body, fwd_keys, tables))
 
 # Structural rebuild that visits the same nodes as check_expr; at each TDict the
 # Evidence field is replaced.  Any node not walked keeps EvUnresolved, which
 # lowering resolves itself — so a missed site degrades to today's behavior, never
-# to a wrong witness.
-fn rewrite_expr(e: typed_ast.TypedExpr, tables: Tables) -> typed_ast.TypedExpr =
+# to a wrong witness. fwd_keys is constant within a body (lambdas add no constraints).
+fn rewrite_expr(e: typed_ast.TypedExpr, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedExpr =
   match e with
-  | typed_ast.TDict c t pos _ -> typed_ast.TDict(c, t, pos, produce_evidence(c, tables))
+  | typed_ast.TDict c t pos _ -> typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables))
   | typed_ast.TCall callee args t pos ->
-      typed_ast.TCall(rewrite_expr(callee, tables), list_map(\a -> rewrite_expr(a, tables), args), t, pos)
+      typed_ast.TCall(rewrite_expr(callee, fwd_keys, tables), list_map(\a -> rewrite_expr(a, fwd_keys, tables), args), t, pos)
   | typed_ast.TIf cnd thn els t pos ->
-      typed_ast.TIf(rewrite_expr(cnd, tables), rewrite_expr(thn, tables), rewrite_expr(els, tables), t, pos)
+      typed_ast.TIf(rewrite_expr(cnd, fwd_keys, tables), rewrite_expr(thn, fwd_keys, tables), rewrite_expr(els, fwd_keys, tables), t, pos)
   | typed_ast.TMatch scrut branches t pos ->
-      typed_ast.TMatch(rewrite_expr(scrut, tables), list_map(\b -> rewrite_branch(b, tables), branches), t, pos)
+      typed_ast.TMatch(rewrite_expr(scrut, fwd_keys, tables), list_map(\b -> rewrite_branch(b, fwd_keys, tables), branches), t, pos)
   | typed_ast.TLambda params body t pos ->
-      typed_ast.TLambda(params, rewrite_expr(body, tables), t, pos)
+      typed_ast.TLambda(params, rewrite_expr(body, fwd_keys, tables), t, pos)
   | typed_ast.TTuple items t pos ->
-      typed_ast.TTuple(list_map(\i -> rewrite_expr(i, tables), items), t, pos)
+      typed_ast.TTuple(list_map(\i -> rewrite_expr(i, fwd_keys, tables), items), t, pos)
   | typed_ast.TBinary op l r t pos ->
-      typed_ast.TBinary(op, rewrite_expr(l, tables), rewrite_expr(r, tables), t, pos)
+      typed_ast.TBinary(op, rewrite_expr(l, fwd_keys, tables), rewrite_expr(r, fwd_keys, tables), t, pos)
   | typed_ast.TUnary op x t pos ->
-      typed_ast.TUnary(op, rewrite_expr(x, tables), t, pos)
+      typed_ast.TUnary(op, rewrite_expr(x, fwd_keys, tables), t, pos)
   | typed_ast.TRange lo hi t pos ->
-      typed_ast.TRange(rewrite_expr(lo, tables), rewrite_expr(hi, tables), t, pos)
+      typed_ast.TRange(rewrite_expr(lo, fwd_keys, tables), rewrite_expr(hi, fwd_keys, tables), t, pos)
   | typed_ast.TDo steps t pos ->
-      typed_ast.TDo(list_map(\s -> rewrite_step(s, tables), steps), t, pos)
+      typed_ast.TDo(list_map(\s -> rewrite_step(s, fwd_keys, tables), steps), t, pos)
   | typed_ast.TRecord name fields t pos ->
-      typed_ast.TRecord(name, list_map(\f -> rewrite_field(f, tables), fields), t, pos)
+      typed_ast.TRecord(name, list_map(\f -> rewrite_field(f, fwd_keys, tables), fields), t, pos)
   | typed_ast.TGetField obj fld t pos ->
-      typed_ast.TGetField(rewrite_expr(obj, tables), fld, t, pos)
+      typed_ast.TGetField(rewrite_expr(obj, fwd_keys, tables), fld, t, pos)
   | _ -> e
 
-fn rewrite_branch(b: typed_ast.TypedMatchBranch, tables: Tables) -> typed_ast.TypedMatchBranch =
+fn rewrite_branch(b: typed_ast.TypedMatchBranch, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedMatchBranch =
   match b with
-  | typed_ast.TypedMatchBranch pat body -> typed_ast.TypedMatchBranch(pat, rewrite_expr(body, tables))
+  | typed_ast.TypedMatchBranch pat body -> typed_ast.TypedMatchBranch(pat, rewrite_expr(body, fwd_keys, tables))
 
-fn rewrite_step(s: typed_ast.TypedDoStep, tables: Tables) -> typed_ast.TypedDoStep =
+fn rewrite_step(s: typed_ast.TypedDoStep, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedDoStep =
   match s with
-  | typed_ast.TDoBindStep pat ex -> typed_ast.TDoBindStep(pat, rewrite_expr(ex, tables))
-  | typed_ast.TDoLetStep name ex -> typed_ast.TDoLetStep(name, rewrite_expr(ex, tables))
-  | typed_ast.TDoExprStep ex -> typed_ast.TDoExprStep(rewrite_expr(ex, tables))
+  | typed_ast.TDoBindStep pat ex -> typed_ast.TDoBindStep(pat, rewrite_expr(ex, fwd_keys, tables))
+  | typed_ast.TDoLetStep name ex -> typed_ast.TDoLetStep(name, rewrite_expr(ex, fwd_keys, tables))
+  | typed_ast.TDoExprStep ex -> typed_ast.TDoExprStep(rewrite_expr(ex, fwd_keys, tables))
 
-fn rewrite_field(f: typed_ast.TypedRecordField, tables: Tables) -> typed_ast.TypedRecordField =
+fn rewrite_field(f: typed_ast.TypedRecordField, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedRecordField =
   match f with
-  | typed_ast.TypedRecordField name ex -> typed_ast.TypedRecordField(name, rewrite_expr(ex, tables))
+  | typed_ast.TypedRecordField name ex -> typed_ast.TypedRecordField(name, rewrite_expr(ex, fwd_keys, tables))
 
 # ---------------------------------------------------------------------------
 # Typed-AST walk: find every TDict and check its constraint

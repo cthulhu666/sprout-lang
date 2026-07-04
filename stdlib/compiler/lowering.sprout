@@ -1186,8 +1186,8 @@ fn expand_user_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed
 fn expand_dict_witness_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match args with
   | Nil -> Nil
-  | Cons (typed_ast.TDict c _ pos _) rest ->
-      list_append(resolve_tdict(c, pos, ctx), expand_dict_witness_args(rest, ctx))
+  | Cons (typed_ast.TDict c _ pos ev) rest ->
+      list_append(evidence_to_witness(ev, c, pos, ctx), expand_dict_witness_args(rest, ctx))
   | Cons _ rest -> expand_dict_witness_args(rest, ctx)
 
 # resolve_tdict: expand one TDict witness into a list of TypedExprs, one per
@@ -1308,6 +1308,97 @@ fn resolve_method_var(
   match dict_get(method_name, method_map) with
   | Just fn_name -> typed_ast.TVar(fn_name, lookup_scheme_type(fn_name, scheme_env), pos)
   | Nothing -> typed_ast.TVar("__unresolved_" ++ fallback_key ++ "_" ++ method_name, types.TVar("?gen"), pos)
+
+# ---------------------------------------------------------------------------
+# Evidence consumption (M3b-3): mechanical Evidence → witness translation
+# ---------------------------------------------------------------------------
+#
+# resolve.sprout has already made every resolution DECISION (fwd vs instance, which
+# key, which inner dicts). Lowering only does the mechanical fanout, REUSING the same
+# witness-building helpers (resolve_tdict_apply_inner_dicts / resolve_method_var) that
+# resolve_tdict uses, so the emitted exprs are byte-identical — only the decision
+# source changes. A fully-resolved tree is consumed; any EvUnresolved/EvMissing
+# anywhere (an env-marker-only imported instance resolve could not deep-resolve) falls
+# back to resolve_tdict for the whole constraint, i.e. today's behavior.
+fn evidence_to_witness(
+  ev: typed_ast.Evidence,
+  c: ast.TypeConstraint,
+  pos: source.SourcePos,
+  ctx: LowerCtx
+) -> List typed_ast.TypedExpr =
+  if evidence_fully_resolved(ev) then consume_evidence(ev, pos, ctx)
+  else resolve_tdict(c, pos, ctx)
+
+fn evidence_fully_resolved(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvUnresolved -> false
+  | typed_ast.EvMissing _ -> false
+  | typed_ast.EvForward _ _ -> true
+  | typed_ast.EvInstance _ _ children -> evidence_list_fully_resolved(children)
+  | typed_ast.EvClasses blocks -> evidence_list_fully_resolved(blocks)
+
+fn evidence_list_fully_resolved(evs: List typed_ast.Evidence) -> Bool =
+  match evs with
+  | Nil -> true
+  | Cons e rest -> if evidence_fully_resolved(e) then evidence_list_fully_resolved(rest) else false
+
+# A TDict's top-level Evidence is always an EvClasses (one block per effective class).
+fn consume_evidence(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
+  match ev with
+  | typed_ast.EvClasses blocks -> consume_blocks(blocks, pos, ctx)
+  | _ -> panic("lowering: consume_evidence expected EvClasses (internal error)")
+
+fn consume_blocks(blocks: List typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
+  match blocks with
+  | Nil -> Nil
+  | Cons b rest -> list_append(consume_block(b, pos, ctx), consume_blocks(rest, pos, ctx))
+
+# One effective-class block.
+#   EvInstance miss → hard error: resolve gated EvInstance on a *bundled* instance
+#     (tables_exists), built from the same TInstanceDecl nodes as ctx_inst, so a
+#     ctx_inst miss means the two tables disagree — a compiler bug, never valid input.
+#   EvForward miss → the sentinel, NOT an error: resolve cannot see the per-function
+#     ctx_fwd, so EvForward is optimistic. A metavar/phantom head (e.g. `Ord__` from
+#     an unresolved fresh tyvar) legitimately misses ctx_fwd and must null-fill exactly
+#     as the old resolve_tdict path did (guarded by test_unresolved_dict_nullfill).
+fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
+  match ev with
+  | typed_ast.EvForward class_name key ->
+      match dict_get(key, ctx_fwd(ctx)) with
+      | Just method_map ->
+          list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)),
+                   class_methods_for(class_name, ctx_class_order(ctx)))
+      | Nothing ->
+          list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar("?gen"), pos),
+                   class_methods_for(class_name, ctx_class_order(ctx)))
+  | typed_ast.EvInstance class_name key children ->
+      match dict_get(key, ctx_inst(ctx)) with
+      | Just method_map ->
+          resolve_tdict_apply_inner_dicts(
+            key, pos, method_map,
+            class_methods_for(class_name, ctx_class_order(ctx)),
+            evidence_inst_arities(key, ctx),
+            consume_inner_dicts(children, pos, ctx),
+            ctx_scheme_env(ctx))
+      | Nothing ->
+          panic("lowering: instance dict '" ++ key ++ "' at " ++ pos_loc(pos) ++
+                " absent from ctx_inst — resolve/lowering table disagreement")
+  | _ -> panic("lowering: consume_block expected EvForward/EvInstance (internal error)")
+
+fn evidence_inst_arities(key: String, ctx: LowerCtx) -> Dict Int =
+  match dict_get(key, ctx_inst_meta(ctx)) with
+  | Just (_, _, method_arities) -> method_arities
+  | Nothing -> dict_empty()
+
+# Each child is an EvClasses for one (super-expanded) context constraint; flatten
+# them in declaration order, matching resolve_inner_constraint_dicts.
+fn consume_inner_dicts(children: List typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
+  match children with
+  | Nil -> Nil
+  | Cons child rest -> list_append(consume_evidence(child, pos, ctx), consume_inner_dicts(rest, pos, ctx))
+
+fn pos_loc(pos: source.SourcePos) -> String =
+  int_to_string(source.position_line(pos)) ++ ":" ++ int_to_string(source.position_column(pos))
 
 # ---------------------------------------------------------------------------
 # Inner-dict helpers: type unification, substitution, lambda wrapping

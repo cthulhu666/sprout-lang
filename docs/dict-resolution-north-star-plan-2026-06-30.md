@@ -282,6 +282,37 @@ source. Byte-identical verified: IR for `typeclass_collections_demo`, `tuples`, 
 `tests/stdlib/compiler/test_resolve_evidence.spr` runs `resolve_program` on a synthetic
 program and asserts the populated `EvInstance`/nested/`EvForward` trees (9 assertions).
 
+**M3b-3 — lowering consumes Evidence on the call-position path. DONE (2026-07-04).**
+`expand_dict_witness_args` switches `resolve_tdict(c, pos, ctx)` → `evidence_to_witness(ev, c,
+pos, ctx)`: a fully-resolved tree is consumed by `consume_block`, which REUSES the existing
+`resolve_tdict_apply_inner_dicts`/`resolve_method_var` helpers (same witness shape, only the
+decision comes from Evidence); any `EvUnresolved`/`EvMissing` in the tree falls back to
+`resolve_tdict` for the whole constraint (env-marker-only imports — today's behavior).
+Byte-identical verified comprehensively: the new compiler's `--emit-ir` matches the old
+(master-seed) compiler's on all 40 examples and the stdlib test corpus.
+
+Two design facts emerged, both correcting earlier assumptions:
+1. **`fwd_keys` are required after all (the C.11 machinery, but cheap for key-based).**
+   M3b-2's "no new tables" claim was wrong for consumption: a CONCRETE-headed constraint that
+   the enclosing function *forwards* (e.g. `where Summable (Vec Int)`) has a bundled instance
+   too, and lowering's `resolve_tdict_with_key` checks `ctx_fwd` BEFORE `ctx_inst`. resolve was
+   picking `EvInstance` where lowering used the forwarded slot — a real divergence (caught by
+   the byte diff on `typeclass_collections_demo`). Fix: `produce_one_class` consults a per-body
+   `fwd_keys` SET (the where-clause constraints, super-expanded, keyed exactly as
+   `build_hidden_for_constraints`) and emits `EvForward` for any key in it, concrete or not —
+   mirroring the `ctx_fwd`-first priority. For key-based this is just a `Dict Bool`; name-based
+   would have needed the full slot-name ABI here (why key-based was the right call).
+2. **The loud-miss is `EvInstance`-only, not `EvForward`.** Advisor condition 1 said both
+   `ctx_inst` and `ctx_fwd` misses should panic. But a metavar/phantom head (`Ord__` from an
+   unresolved fresh tyvar) is legitimately `EvForward` and legitimately misses `ctx_fwd` — it
+   must null-fill exactly as today (guarded by `test_unresolved_dict_nullfill`). So `EvForward`
+   miss reproduces the sentinel (byte-identical); only `EvInstance` miss panics, where resolve
+   genuinely proved a *bundled* instance exists so a `ctx_inst` miss is a real table
+   disagreement. The "type-var head is always forwarded" premise is therefore FALSE — the
+   phantom is the counterexample, found by the located panic firing during self-compile.
+New test: `tests/stdlib/test_dict_evidence_consumption.spr` (forwarded + concrete-at-call +
+super-having + nested-constrained shapes; compile-and-run regression).
+
 **If full M3b is ever done — design notes.** Option A: resolve emits `EvInstance` for the
 concrete subtree + an opaque `EvForward` marker; lowering fills the forward slot from
 `ctx_fwd` mechanically (a lookup, no *decision*). Evidence threading: add an `Evidence`

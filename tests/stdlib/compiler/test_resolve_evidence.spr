@@ -51,14 +51,14 @@ fn ev_tag(ev: typed_ast.Evidence) -> String =
   match ev with
   | typed_ast.EvUnresolved -> "U"
   | typed_ast.EvClasses _ -> "C"
-  | typed_ast.EvInstance _ _ -> "I"
-  | typed_ast.EvForward _ -> "F"
+  | typed_ast.EvInstance _ _ _ -> "I"
+  | typed_ast.EvForward _ _ -> "F"
   | typed_ast.EvMissing _ -> "M"
 
 fn ev_key(ev: typed_ast.Evidence) -> String =
   match ev with
-  | typed_ast.EvInstance k _ -> k
-  | typed_ast.EvForward k -> k
+  | typed_ast.EvInstance _ k _ -> k
+  | typed_ast.EvForward _ k -> k
   | _ -> ""
 
 # The i-th effective-class block of an EvClasses (EvUnresolved if out of range).
@@ -74,7 +74,7 @@ fn nth_ev(blocks: List typed_ast.Evidence, i: Int) -> typed_ast.Evidence =
 
 fn ev_first_child(ev: typed_ast.Evidence) -> typed_ast.Evidence =
   match ev with
-  | typed_ast.EvInstance _ children ->
+  | typed_ast.EvInstance _ _ children ->
       match children with
       | Cons c _ -> c
       | Nil -> typed_ast.EvUnresolved

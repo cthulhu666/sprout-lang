@@ -33,15 +33,19 @@ export type TypedRecordField (..) = TypedRecordField String TypedExpr
 # EvClasses: one block per effective class — the constraint's class followed by its
 #   transitive superclasses (the witness order lowering's resolve_tdict produces).
 # EvUnresolved: not yet rewritten by the resolve pass (lowering resolves it itself).
-# EvInstance: instance method-map key + evidence (EvClasses) for the instance's
-#   context constraints.
-# EvForward: forwarded hidden-param dict slot at a polymorphic call site (the key).
+# EvInstance/EvForward each carry TWO differently-shaped strings:
+#   class_name — the ClassDecl name form, UNSTRIPPED (lowering's class_methods_for /
+#     class_order key on this form to get the ordered method list); and
+#   key — the after_last_dot-stripped constraint_key (lowering's ctx_inst / ctx_fwd
+#     key on this form). DO NOT strip class_name, or the method-list lookup breaks.
+# EvInstance: bundled instance (class_name, key, evidence for context constraints).
+# EvForward: forwarded hidden-param dict at a polymorphic call site (class_name, key).
 # EvMissing: unsatisfiable constraint; resolve rejects it with a diagnostic.
 export type Evidence (..) =
   | EvUnresolved
   | EvClasses (List Evidence)
-  | EvInstance String (List Evidence)
-  | EvForward String
+  | EvInstance String String (List Evidence)
+  | EvForward String String
   | EvMissing ast.TypeConstraint
 
 export type TypedExpr (..) =
