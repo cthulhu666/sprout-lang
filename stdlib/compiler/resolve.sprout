@@ -33,18 +33,23 @@ export type ResolveResult (..) =
 
 # Instance tables: existence (constraint_key → present from bundled decls),
 # context (constraint_key → (instance head type args, instance context constraints)),
-# and the full checker env (carries @inst: markers for instances defined in
-# imported modules whose decls are NOT bundled into this program).
-type Tables = Tables(Dict Bool) (Dict (List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme)
+# the full checker env (carries @inst: markers for instances defined in imported
+# modules whose decls are NOT bundled into this program), and super_map
+# (class_name → direct superclass names, for transitive-super expansion — the same
+# source lowering's collect_super_map reads).
+type Tables = Tables(Dict Bool) (Dict (List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String))
 
 fn tables_exists(t: Tables) -> Dict Bool =
-  match t with | Tables e _ _ -> e
+  match t with | Tables e _ _ _ -> e
 
 fn tables_ctx(t: Tables) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
-  match t with | Tables _ c _ -> c
+  match t with | Tables _ c _ _ -> c
 
 fn tables_env(t: Tables) -> Dict types.Scheme =
-  match t with | Tables _ _ v -> v
+  match t with | Tables _ _ v _ -> v
+
+fn tables_super(t: Tables) -> Dict (List String) =
+  match t with | Tables _ _ _ s -> s
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -69,7 +74,7 @@ fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> Resol
 # ---------------------------------------------------------------------------
 
 fn build_tables(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Tables =
-  collect_tables(decls, Tables(dict_empty(), dict_empty(), env))
+  collect_tables(decls, Tables(dict_empty(), dict_empty(), env, collect_super_map(decls, dict_empty())))
 
 fn collect_tables(decls: List typed_ast.TypedDecl, acc: Tables) -> Tables =
   match decls with
@@ -90,7 +95,8 @@ fn add_instance(
       Tables(
         dict_set(constraint_key_from_tc(constraint), true, tables_exists(acc)),
         add_ctx(constraint_key_from_tc(constraint), type_args, inst_constraints, tables_ctx(acc)),
-        tables_env(acc))
+        tables_env(acc),
+        tables_super(acc))
 
 fn add_ctx(
   key: String,
@@ -181,10 +187,14 @@ fn dict_has(key: String, d: Dict Bool) -> Bool =
 # Evidence production
 # ---------------------------------------------------------------------------
 #
-# Resolve one constraint into the Evidence tree lowering will consume.  Mirrors
-# lowering's resolve_tdict decision order exactly so the two agree byte-for-byte:
+# Resolve one constraint into the Evidence tree lowering will consume.  A single
+# TDict lowers to one witness block per *effective class* — the constraint's class
+# followed by its transitive superclasses — so produce_evidence expands supers the
+# same way lowering's resolve_tdict does (class_with_transitive_supers, verbatim
+# order + dedup) and wraps the per-class blocks in EvClasses.  Each block mirrors
+# lowering's resolve_tdict_with_key decision order exactly:
 #   * type-variable head        → EvForward key   (lowering threads a hidden param
-#                                  whose ctx_fwd key is this same super-expanded key)
+#                                  whose ctx_fwd key is this same key)
 #   * concrete head, bundled    → EvInstance key children  (children = one Evidence
 #                                  per substituted instance context constraint)
 #   * concrete head, env-marker → EvUnresolved    (imported instance not bundled;
@@ -196,16 +206,29 @@ fn produce_evidence(c: ast.TypeConstraint, tables: Tables) -> typed_ast.Evidence
       match type_args with
       | Nil -> typed_ast.EvUnresolved
       | Cons head_arg _ ->
-          if head_is_concrete(head_arg) == false then
-            typed_ast.EvForward(constraint_key_str(string.substring_after_last(class_name, "."), type_args))
-          else
-            produce_concrete_evidence(string.substring_after_last(class_name, "."), type_args, head_arg, c, tables)
+          typed_ast.EvClasses(
+            list_map(
+              \eff_class -> produce_one_class(eff_class, head_arg, type_args, tables),
+              class_with_transitive_supers(class_name, tables_super(tables))))
+
+# One effective-class block. The key is computed exactly as lowering's
+# resolve_tdict_for_classes does: constraint_key_str(after_last_dot(eff_class), args).
+fn produce_one_class(
+  eff_class: String,
+  head_arg: ast.TypeExpr,
+  type_args: List ast.TypeExpr,
+  tables: Tables
+) -> typed_ast.Evidence =
+  if head_is_concrete(head_arg) == false then
+    typed_ast.EvForward(constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
+  else
+    produce_concrete_evidence(string.substring_after_last(eff_class, "."), type_args, head_arg, eff_class, tables)
 
 fn produce_concrete_evidence(
   class_bare: String,
   type_args: List ast.TypeExpr,
   head_arg: ast.TypeExpr,
-  c: ast.TypeConstraint,
+  eff_class: String,
   tables: Tables
 ) -> typed_ast.Evidence =
   if dict_has(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
@@ -213,11 +236,12 @@ fn produce_concrete_evidence(
   else if env_has_inst("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables)) then
     typed_ast.EvUnresolved
   else
-    typed_ast.EvMissing(c)
+    typed_ast.EvMissing(ast.TypeConstraint(eff_class, type_args))
 
 # Bundled instance: an unconstrained instance has no context entry → no children;
 # a constrained instance recurses on each context constraint substituted at the
 # concrete head's type args, in declaration order (matching lowering's inner_dicts).
+# Each child is itself an EvClasses (the context constraint is super-expanded too).
 fn produce_instance_evidence(
   key: String,
   type_args: List ast.TypeExpr,
@@ -230,6 +254,58 @@ fn produce_instance_evidence(
         list_map(
           \ic -> produce_evidence(substitute_constraint(ic, unify_type_args_list(inst_type_args, type_args, dict_empty())), tables),
           inst_constraints))
+
+# ---------------------------------------------------------------------------
+# Superclass expansion (ported verbatim from lowering.sprout so the effective-
+# class order and diamond-dedup match byte-for-byte)
+# ---------------------------------------------------------------------------
+
+fn collect_super_map(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TPassThrough inner_decl ->
+          match inner_decl with
+          | ast.ClassDecl class_name _ _ supers _ ->
+              collect_super_map(rest, dict_set(class_name, extract_super_names(supers, Nil), acc))
+          | _ -> collect_super_map(rest, acc)
+      | _ -> collect_super_map(rest, acc)
+
+fn extract_super_names(supers: List ast.TypeConstraint, acc: List String) -> List String =
+  match supers with
+  | Nil -> list_reverse(acc)
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint super_name _ ->
+          extract_super_names(rest, Cons(super_name, acc))
+
+# Class itself followed by all transitive superclasses in DFS order, deduplicated.
+fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =
+  list_reverse(collect_supers_dfs(Cons(class_name, Nil), super_map, Nil))
+
+fn collect_supers_dfs(stack: List String, super_map: Dict (List String), visited: List String) -> List String =
+  match stack with
+  | Nil -> visited
+  | Cons name rest ->
+      if list_str_member(name, visited)
+      then collect_supers_dfs(rest, super_map, visited)
+      else collect_supers_dfs(prepend_supers(name, super_map, rest), super_map, Cons(name, visited))
+
+fn prepend_supers(name: String, super_map: Dict (List String), rest: List String) -> List String =
+  match dict_get(name, super_map) with
+  | Nothing -> rest
+  | Just supers -> append_str_list(supers, rest)
+
+fn append_str_list(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> ys
+  | Cons h t -> Cons(h, append_str_list(t, ys))
+
+fn list_str_member(x: String, xs: List String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons h t -> if h == x then true else list_str_member(x, t)
 
 # ---------------------------------------------------------------------------
 # Evidence rewrite: fill every TDict's Evidence, structure otherwise unchanged

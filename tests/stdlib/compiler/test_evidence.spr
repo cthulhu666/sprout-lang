@@ -27,9 +27,20 @@ fn is_missing(ev: typed_ast.Evidence) -> Bool =
 fn evidence_key(ev: typed_ast.Evidence) -> String =
   match ev with
   | typed_ast.EvUnresolved -> "unresolved"
+  | typed_ast.EvClasses _ -> "classes"
   | typed_ast.EvInstance key _ -> key
   | typed_ast.EvForward slot -> slot
   | typed_ast.EvMissing _ -> "missing"
+
+fn ev_classes_len(ev: typed_ast.Evidence) -> Int =
+  match ev with
+  | typed_ast.EvClasses blocks -> len_of(blocks)
+  | _ -> -1
+
+fn len_of(xs: List typed_ast.Evidence) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons _ t -> 1 + len_of(t)
 
 fn tdict_ev_is_unresolved() -> Bool =
   match typed_ast.TDict(
@@ -66,4 +77,7 @@ fn main() -> Unit !{IO} =
       evidence_key(typed_ast.EvMissing(ast.TypeConstraint("Show", Nil))), "missing")
     assert_true(state, "TDict 4-field: evidence is EvUnresolved", tdict_ev_is_unresolved())
     assert_true(state, "TDict 4-field: evidence is EvForward", tdict_ev_is_forwarded())
+    assert_eq(state, "EvClasses key", evidence_key(typed_ast.EvClasses(Nil)), "classes")
+    assert_eq(state, "EvClasses length",
+      ev_classes_len(typed_ast.EvClasses([typed_ast.EvForward("Ord_a"), typed_ast.EvForward("Eq_a")])), 2)
     summary(state)

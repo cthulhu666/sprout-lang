@@ -5,10 +5,11 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
 import stdlib.compiler.source as source
 
-# M3b-2 regression: resolve_program must populate each TDict's Evidence field
-# with the resolved instance/forward tree. On the pre-M3b-2 pass the program is
-# returned unchanged (every TDict stays EvUnresolved), so these assertions fail
-# for the right reason.
+# M3b-2 regression: resolve_program populates each TDict's Evidence with the
+# resolved dictionary tree. The top level is always EvClasses — one block per
+# effective class, i.e. the constraint's class followed by its transitive
+# superclasses (matching lowering's class_with_transitive_supers). So a plain
+# Eq yields a 1-block EvClasses; an Ord yields a 2-block [Ord, Eq] EvClasses.
 
 fn dpos() -> source.SourcePos = source.SourcePos(0, 1, 1)
 
@@ -19,14 +20,16 @@ fn tapp(base: ast.TypeExpr, arg: ast.TypeExpr) -> ast.TypeExpr = ast.TypeApply(b
 fn ec(class_name: String, args: List ast.TypeExpr) -> ast.TypeConstraint =
   ast.TypeConstraint(class_name, args)
 
-# A function decl whose body is a single TDict — a synthetic but valid input to
-# resolve's walk, chosen so the produced Evidence is trivially extractable.
 fn mk_fn(name: String, c: ast.TypeConstraint) -> typed_ast.TypedDecl =
   typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil,
     typed_ast.TDict(c, types.TVar("dummy"), dpos(), typed_ast.EvUnresolved))
 
 fn mk_inst(c: ast.TypeConstraint, ctx: List ast.TypeConstraint) -> typed_ast.TypedDecl =
   typed_ast.TInstanceDecl(c, ctx, Nil)
+
+# A class decl (as the checker passes it through) so resolve can build super_map.
+fn mk_class(name: String, supers: List ast.TypeConstraint) -> typed_ast.TypedDecl =
+  typed_ast.TPassThrough(ast.ClassDecl(name, ["a"], Nil, supers, dpos()))
 
 fn find_fn_body(decls: List typed_ast.TypedDecl, name: String) -> Maybe typed_ast.TypedExpr =
   match decls with
@@ -47,6 +50,7 @@ fn body_evidence(mb: Maybe typed_ast.TypedExpr) -> typed_ast.Evidence =
 fn ev_tag(ev: typed_ast.Evidence) -> String =
   match ev with
   | typed_ast.EvUnresolved -> "U"
+  | typed_ast.EvClasses _ -> "C"
   | typed_ast.EvInstance _ _ -> "I"
   | typed_ast.EvForward _ -> "F"
   | typed_ast.EvMissing _ -> "M"
@@ -56,6 +60,17 @@ fn ev_key(ev: typed_ast.Evidence) -> String =
   | typed_ast.EvInstance k _ -> k
   | typed_ast.EvForward k -> k
   | _ -> ""
+
+# The i-th effective-class block of an EvClasses (EvUnresolved if out of range).
+fn ev_block(ev: typed_ast.Evidence, i: Int) -> typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvClasses blocks -> nth_ev(blocks, i)
+  | _ -> typed_ast.EvUnresolved
+
+fn nth_ev(blocks: List typed_ast.Evidence, i: Int) -> typed_ast.Evidence =
+  match blocks with
+  | Nil -> typed_ast.EvUnresolved
+  | Cons h t -> if i == 0 then h else nth_ev(t, i - 1)
 
 fn ev_first_child(ev: typed_ast.Evidence) -> typed_ast.Evidence =
   match ev with
@@ -77,35 +92,52 @@ fn is_ok(r: resolve.ResolveResult) -> Bool =
   | resolve.ResolveOk _ -> true
   | resolve.ResolveErr _ _ -> false
 
+fn ev_of(r: resolve.ResolveResult, fn_name: String) -> typed_ast.Evidence =
+  body_evidence(find_fn_body(program_decls(r), fn_name))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    # instance Eq Int  +  instance Eq (Maybe a) where Eq a
-    # three test fns exercising concrete, constrained, and forwarded resolution.
     let result = resolve.resolve_program(
       typed_ast.TypedProgram([
+        mk_class("Eq", Nil),
+        mk_class("Ord", [ec("Eq", [tn("a")])]),
         mk_inst(ec("Eq", [tn("Int")]), Nil),
         mk_inst(ec("Eq", [tapp(tn("Maybe"), tn("a"))]), [ec("Eq", [tn("a")])]),
+        mk_inst(ec("Ord", [tn("Int")]), Nil),
         mk_fn("test_concrete", ec("Eq", [tn("Int")])),
         mk_fn("test_constrained", ec("Eq", [tapp(tn("Maybe"), tn("Int"))])),
-        mk_fn("test_forward", ec("Eq", [tn("a")]))
+        mk_fn("test_forward", ec("Eq", [tn("a")])),
+        mk_fn("test_ord_concrete", ec("Ord", [tn("Int")])),
+        mk_fn("test_ord_forward", ec("Ord", [tn("a")]))
       ]),
       dict_empty())
 
     assert_true(state, "resolve_program returns Ok", is_ok(result))
 
-    # concrete unconstrained instance → EvInstance("Eq_Int", [])
-    assert_eq(state, "concrete tag", ev_tag(body_evidence(find_fn_body(program_decls(result), "test_concrete"))), "I")
-    assert_eq(state, "concrete key", ev_key(body_evidence(find_fn_body(program_decls(result), "test_concrete"))), "Eq_Int")
+    # top level is always EvClasses
+    assert_eq(state, "concrete top tag", ev_tag(ev_of(result, "test_concrete")), "C")
 
-    # constrained instance → EvInstance("Eq_Maybe", [EvInstance("Eq_Int", [])])
-    assert_eq(state, "constrained tag", ev_tag(body_evidence(find_fn_body(program_decls(result), "test_constrained"))), "I")
-    assert_eq(state, "constrained key", ev_key(body_evidence(find_fn_body(program_decls(result), "test_constrained"))), "Eq_Maybe")
-    assert_eq(state, "constrained child tag", ev_tag(ev_first_child(body_evidence(find_fn_body(program_decls(result), "test_constrained")))), "I")
-    assert_eq(state, "constrained child key", ev_key(ev_first_child(body_evidence(find_fn_body(program_decls(result), "test_constrained")))), "Eq_Int")
+    # Eq has no supers → single block EvInstance("Eq_Int", [])
+    assert_eq(state, "concrete block0 tag", ev_tag(ev_block(ev_of(result, "test_concrete"), 0)), "I")
+    assert_eq(state, "concrete block0 key", ev_key(ev_block(ev_of(result, "test_concrete"), 0)), "Eq_Int")
+    assert_eq(state, "concrete has no block1", ev_tag(ev_block(ev_of(result, "test_concrete"), 1)), "U")
 
-    # type-variable head → EvForward("Eq_a")
-    assert_eq(state, "forward tag", ev_tag(body_evidence(find_fn_body(program_decls(result), "test_forward"))), "F")
-    assert_eq(state, "forward key", ev_key(body_evidence(find_fn_body(program_decls(result), "test_forward"))), "Eq_a")
+    # constrained: block0 = EvInstance("Eq_Maybe", [EvClasses([EvInstance("Eq_Int",[])])])
+    assert_eq(state, "constrained block0 key", ev_key(ev_block(ev_of(result, "test_constrained"), 0)), "Eq_Maybe")
+    assert_eq(state, "constrained child block0 key",
+      ev_key(ev_block(ev_first_child(ev_block(ev_of(result, "test_constrained"), 0)), 0)), "Eq_Int")
+
+    # forward: block0 = EvForward("Eq_a")
+    assert_eq(state, "forward block0 tag", ev_tag(ev_block(ev_of(result, "test_forward"), 0)), "F")
+    assert_eq(state, "forward block0 key", ev_key(ev_block(ev_of(result, "test_forward"), 0)), "Eq_a")
+
+    # SUPER-EXPANSION: Ord Int → EvClasses([EvInstance("Ord_Int",[]), EvInstance("Eq_Int",[])])
+    assert_eq(state, "ord block0 key", ev_key(ev_block(ev_of(result, "test_ord_concrete"), 0)), "Ord_Int")
+    assert_eq(state, "ord block1 key (super)", ev_key(ev_block(ev_of(result, "test_ord_concrete"), 1)), "Eq_Int")
+
+    # forwarded super-expansion: Ord a → [EvForward("Ord_a"), EvForward("Eq_a")]
+    assert_eq(state, "ord fwd block0 key", ev_key(ev_block(ev_of(result, "test_ord_forward"), 0)), "Ord_a")
+    assert_eq(state, "ord fwd block1 key (super)", ev_key(ev_block(ev_of(result, "test_ord_forward"), 1)), "Eq_a")
 
     summary(state)

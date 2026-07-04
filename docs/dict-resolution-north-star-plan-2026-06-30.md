@@ -210,6 +210,40 @@ below) two facts settled it:
 
 M3a is the shipped fix; this map is the spec for whenever full M3b is undertaken.
 
+**Evidence encoding — DECIDED key-based (advisor, 2026-07-04).** Evidence carries
+resolution *keys* (`EvInstance "Eq_Int"`, `EvForward "Eq_a"`); lowering keeps its
+mechanical `ctx_inst`/`ctx_fwd` tables and does the key→name mapping. The rejected
+alternative (name-based: Evidence carries resolved `fn_name`s + slot names, lowering
+emits `TVar`s with zero tables) is *more* plan-faithful ("no lookups") and makes the
+null-fill structurally impossible, but forces resolve to own a **second copy** of the
+hidden-param slot ABI (`tc_slot_name` per-function `idx`, super-within-idx,
+duplicate-same-class disambiguation — the C.11 blocker). Decision rationale (Kuba's two
+criteria): (1) long-term — key-based keeps a **single source of truth** for the slot ABI,
+since `ctx_fwd` is *built by* `build_hidden_for_constraints`, the same function that
+declares the callee's hidden params (`best-practices:19`, drift avoidance); (2) Sprout
+principles — key-based keeps the checker speaking *semantics* and lowering owning its
+*codegen ABI* (clean layer boundary), and sits inside `guidelines.md:31`'s explicit
+carve-out for loud invariant-guarded lookups. `guidelines.md:37` ("encode invariants in
+ADTs") does *not* favor name-based: its `EvInstance (List String)` still admits
+`EvUnresolved`/`EvMissing` and unvalidated strings, so it changes the *failure mode*
+(:31's domain), not the ADT's structural guarantee.
+**Two conditions make key-based legitimate (not a shortcut) — both mandatory:**
+1. The consumption lookup-miss (`ctx_inst`/`ctx_fwd`) becomes a **located panic**, not the
+   current `emit_var` null-fill — per `guidelines.md:31` (loud, never silent garbage).
+2. **Three invariant fixtures as tests:** a bundled `EvInstance` key ∈ `ctx_inst`; a forward
+   key ∈ `ctx_fwd`; a surviving type-var-headed TDict is always a forwarded param (the
+   dropped-`fwd_keys` premise — must be a test, not a comment).
+
+**Super-expansion correction (advisor, 2026-07-04) — applies to BOTH encodings.** A head
+TDict must carry its transitive-superclass blocks (`Ord (Maybe Int)` lowers to Ord's
+methods *and* the `Eq (Maybe Int)` super-block). M3b-2's initial `produce_evidence`
+captured only the head class, so #119's populated Evidence was **incomplete** (byte-identical
+because unconsumed, but a later PR would have to correct it). Fix folded into #119 before
+merge: add an `EvClasses (List Evidence)` wrapper (one block per effective class), port
+`class_with_transitive_supers` (verbatim DFS order + diamond-dedup) + `collect_super_map`
+into resolve, and super-expand at every constraint-resolution point (head and each context
+child). Keeps every merged step internally honest.
+
 **Full M3b — FUNDED (Kuba, 2026-07-03), eyes open on the eta cost below.** The machinery
 map (see "eta blocker" below) showed M3b-full needs an *inference-level* change, not just
 resolve+lowering work, so it is sequenced as four byte-identical increments:
