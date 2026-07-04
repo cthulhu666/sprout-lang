@@ -31,18 +31,10 @@
 #include <mach-o/dyld.h>
 #endif
 
-typedef struct {
-  long long tag;
-  long long f0;
-  long long f1;
-  long long f2;
-  long long f3;
-  long long f4;
-  long long f5;
-  long long f6;
-  long long f7;
-  long long f8;
-} SproutObj;
+/* SproutObj removed — tag lives in the inline heap header at (payload_ptr - 8);
+ * fields are accessed as ((long long*)payload)[idx].  The typedef keeps
+ * box_ptr / unbox_ptr compiling without cascading pointer-cast changes. */
+typedef void SproutObj;
 
 typedef enum {
   SPROUT_HEAP_OBJ = 1,
@@ -149,15 +141,15 @@ static ManagedNode* g_heap_index[4194301]; /* prime: 2^22 - 3 */
 static InternBucket* g_intern_table[65537];
 static RootNode* g_root_nodes = NULL;
 static RootNode* g_temp_root_nodes = NULL;
-static SproutObj* g_nothing_singleton = NULL;
+static void* g_nothing_singleton = NULL;
 /* IRType (stdlib.compiler.sprout_ir) nullary-ctor singletons.  Without this,
  * every IRType construction in the IR-codegen path allocates 16 bytes — and
  * IRType values flow through every IRFunction param, every IRLoadEnvSlot,
  * every IRGetField.  Caching keeps the ADT as cheap as the string-based kind
- * convention it replaced (closes BACKLOG.md:367 perf concern). */
-static SproutObj* g_irtheap_singleton = NULL;
-static SproutObj* g_irtscalar_singleton = NULL;
-static SproutObj* g_irtunknown_singleton = NULL;
+ * convention it replaced. */
+static void* g_irtheap_singleton = NULL;
+static void* g_irtscalar_singleton = NULL;
+static void* g_irtunknown_singleton = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
 static int g_listener_fd[2048];
@@ -541,16 +533,79 @@ static void sprout_gc_log_cycle(
 }
 
 /* SPROUT_GC_LINEAGE=1 — diagnostic mode for the rooting use-after-free class.
-   When on, swept OBJ payloads are NOT recycled onto the freelist; instead their
-   tag is poisoned to SPROUT_GC_POISON_TAG and the object is leaked (retained).
-   A later read via sprout_tag of a dangling reference then sees the poison and
+   When on, swept OBJ payloads are NOT recycled onto the freelist; instead the
+   header kind is poisoned to SPROUT_GC_POISON (0xFF) and the block is leaked.
+   A later sprout_tag read on a dangling reference sees the poison kind and
    aborts at the exact use site instead of silently walking a reused object.
    Leaking is acceptable: this mode is for short diagnostic runs only. */
-#define SPROUT_GC_POISON_TAG ((long long)0xDEADBEEF)
 static int g_gc_lineage = -1;
 static int sprout_gc_lineage_on(void) {
   if (g_gc_lineage < 0) { const char* e = getenv("SPROUT_GC_LINEAGE"); g_gc_lineage = (e && e[0] == '1') ? 1 : 0; }
   return g_gc_lineage;
+}
+
+/* SPROUT_GC_HDRCHECK=1 — consistency assert: header kind/arity must match the
+ * ManagedNode fields at free and at child-count query.  Also enabled implicitly
+ * when SPROUT_GC_LINEAGE=1 (both catch the same class of corruption). */
+static int g_gc_hdrcheck = -1;
+static int sprout_gc_hdrcheck_on(void) {
+  if (g_gc_hdrcheck < 0) { const char* e = getenv("SPROUT_GC_HDRCHECK"); g_gc_hdrcheck = (e && e[0] == '1') ? 1 : 0; }
+  return g_gc_hdrcheck || g_gc_lineage;
+}
+
+/* ── Inline heap header (64-bit word at payload_ptr - 8) ────────────────────
+ * Layout: bits 0-7  = SproutHeapKind (kind)
+ *         bits 8-9  = GC color (unused in this phase, written as 0)
+ *         bits 10-13 = reserved GC bits (written as 0)
+ *         bits 14-63 = aux (50 bits); interpretation per kind:
+ *           OBJ:     (tag << 4) | arity  — low 4 bits = ctor arity (0..9)
+ *           CLOSURE: n_caps
+ *           TUPLE:   width in words
+ *           others:  0
+ * SPROUT_GC_POISON (0xFF) written to kind bits marks a lineage-mode corpse. */
+#define SPROUT_GC_POISON ((uint64_t)0xFF)
+
+static inline uint64_t sprout_hdr_make(SproutHeapKind kind, unsigned long long aux) {
+  return (uint64_t)(kind & 0xFF) | ((uint64_t)aux << 14);
+}
+static inline uint64_t sprout_hdr_of(void* payload) {
+  uint64_t h; memcpy(&h, (char*)payload - 8, 8); return h;
+}
+static inline SproutHeapKind sprout_hdr_kind(uint64_t h) {
+  return (SproutHeapKind)(h & 0xFF);
+}
+static inline unsigned long long sprout_hdr_aux(uint64_t h) {
+  return h >> 14;
+}
+
+/* Write both kind and aux into the header word at (payload - 8). */
+static inline void sprout_hdr_write(void* payload, SproutHeapKind kind, unsigned long long aux) {
+  uint64_t h = sprout_hdr_make(kind, aux);
+  memcpy((char*)payload - 8, &h, 8);
+}
+
+/* Write tag into OBJ header keeping the arity nibble intact.
+ * Must be called before first use of sprout_tag on this payload.
+ * Arity must fit in 4 bits (0..9); checked in debug mode. */
+static inline void sprout_obj_write_tag(void* payload, long long tag, int arity) {
+  /* Debug arity-range check: 4-bit nibble holds 0..9 (max ctor arity). */
+  if (sprout_gc_hdrcheck_on() && (arity < 0 || arity > 9)) {
+    fprintf(stderr, "[sprout] sprout_obj_write_tag: arity %d out of 0..9 range\n", arity);
+    abort();
+  }
+  sprout_hdr_write(payload, SPROUT_HEAP_OBJ,
+                   ((unsigned long long)tag << 4) | (unsigned long long)(unsigned int)arity);
+}
+
+/* Unified allocation helper: malloc(8 + payload_bytes), write header, return
+ * the payload pointer (block + 8).  All nine non-CSTR alloc sites use this. */
+static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
+                                   size_t payload_bytes, const char* ctx) {
+  char* block = (char*)malloc(8 + payload_bytes);
+  if (block == NULL) tcp_fail(ctx);
+  uint64_t h = sprout_hdr_make(kind, aux);
+  memcpy(block, &h, 8);
+  return block + 8;
 }
 
 static int g_gc_stress = -1;
@@ -575,12 +630,12 @@ static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, 
   return out;
 }
 
-static long long box_ptr(SproutObj* p) {
+static long long box_ptr(void* p) {
   return (long long)(uintptr_t)p;
 }
 
-static SproutObj* unbox_ptr(long long h) {
-  return (SproutObj*)(uintptr_t)h;
+static void* unbox_ptr(long long h) {
+  return (void*)(uintptr_t)h;
 }
 
 static size_t sprout_managed_ptr_hash(void* ptr) {
@@ -621,10 +676,11 @@ static void sprout_managed_index_remove(ManagedNode* node) {
  * Single-threaded; no locking required. */
 static ManagedNode* g_managed_node_freelist = NULL;
 
-/* SproutObj freelists: one per alloc_arity (0..9), recycling exact-size blocks.
- * The tag word is used as the next-pointer while the object is on the freelist;
- * every make path always overwrites tag before any code reads it. */
-static SproutObj* g_sprout_obj_freelist[10] = {NULL};
+/* OBJ freelists: one per alloc_arity (0..9), recycling exact-size blocks.
+ * The header word holds the next-payload-pointer while the block is on the
+ * freelist; every make path overwrites the header with a valid kind+aux before
+ * any code reads it via sprout_tag / sprout_hdr_of. */
+static void* g_sprout_obj_freelist[10] = {NULL};
 
 static ManagedNode* alloc_managed_node(void) {
   if (g_managed_node_freelist != NULL) {
@@ -739,60 +795,67 @@ static void register_root_slot(void* slot, SproutRootKind kind, size_t aux_words
   g_root_nodes = node;
 }
 
-/* Allocation arity for a SproutObj with the given ctor arity.
- * In lineage mode the corpse must hold tag + f1 + f2 (poison backtrace slots),
- * so objects smaller than 3 fields are padded up to 3.
+/* Allocation arity for an OBJ with the given ctor arity.
+ * In lineage mode the corpse must hold payload[0]=frames and payload[1]=count
+ * (poison backtrace slots), so objects smaller than 2 payload words are padded.
  * In normal builds this always returns arity unchanged — no overhead. */
 static int sprout_obj_alloc_arity(int arity) {
-  return (sprout_gc_lineage_on() && arity < 3) ? 3 : arity;
+  return (sprout_gc_lineage_on() && arity < 2) ? 2 : arity;
 }
 
-static void register_obj(SproutObj* p, int arity) {
+static void register_obj(void* p, int arity) {
   /* aux_slots records the ctor arity; it equals the allocated field count in
-   * normal builds. Lineage pads allocations to >= 3 fields but never recycles
+   * normal builds. Lineage pads allocations to >= 2 fields but never recycles
    * (corpses are poisoned and leaked), so the freelist index derived from
    * aux_slots is only ever consulted for unpadded blocks. */
   register_managed_ptr(p, SPROUT_HEAP_OBJ, (size_t)arity);
 }
 
-static SproutObj* sprout_alloc_obj_raw(int arity, const char* ctx) {
+static void* sprout_alloc_obj_raw(int arity, const char* ctx) {
   sprout_gc_maybe_collect_threshold();
   int aa = sprout_obj_alloc_arity(arity);
   if (g_sprout_obj_freelist[aa] != NULL) {
-    SproutObj* obj = g_sprout_obj_freelist[aa];
-    g_sprout_obj_freelist[aa] = (SproutObj*)(uintptr_t)obj->tag;
+    void* payload = g_sprout_obj_freelist[aa];
+    /* Freelist next-pointer is stored in the header word while on the freelist. */
+    uint64_t next_raw; memcpy(&next_raw, (char*)payload - 8, 8);
+    g_sprout_obj_freelist[aa] = (void*)(uintptr_t)next_raw;
     g_debug_alloc_sprout_obj++;
-    return obj;
+    return payload;
   }
-  size_t sz = 8 + (size_t)aa * 8;
-  SproutObj* obj = (SproutObj*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sz, ctx);
+  /* payload_bytes = aa (padded) fields; tag moves into the header (not payload).
+   * aux uses ctor arity (not padded aa) so sprout_hdr_aux gives the real arity.
+   * sprout_obj_write_tag overwrites this header with the final (tag<<4)|arity. */
+  void* payload = sprout_gc_alloc_block(SPROUT_HEAP_OBJ, (unsigned long long)arity,
+                                        (size_t)aa * 8, ctx);
+  if (g_debug_alloc_enabled) g_debug_alloc_sprout_obj++;
   /* Zero padding slots (lineage only: aa > arity); no-op in normal builds. */
-  for (int i = arity; i < aa; i++) ((long long*)obj)[1 + i] = 0;
-  return obj;
+  for (int i = arity; i < aa; i++) ((long long*)payload)[i] = 0;
+  return payload;
 }
 
 /* Writes tag and first three fields; called only by make4..9 (arity >= 4).
- * Higher fields (f3+) are written by the caller; no zero-fill beyond f2. */
-static SproutObj* sprout_init_obj(SproutObj* obj, long long tag, long long f0, long long f1, long long f2) {
-  obj->tag = tag;
-  obj->f0 = f0;
-  obj->f1 = f1;
-  obj->f2 = f2;
-  return obj;
+ * Higher fields (f3+) are written by the caller; no zero-fill beyond [2]. */
+static void* sprout_init_obj(void* payload, int arity, long long tag,
+                             long long f0, long long f1, long long f2) {
+  sprout_obj_write_tag(payload, tag, arity);
+  ((long long*)payload)[0] = f0;
+  ((long long*)payload)[1] = f1;
+  ((long long*)payload)[2] = f2;
+  return payload;
 }
 
-static long long sprout_box_registered_obj(SproutObj* obj, int arity) {
-  register_obj(obj, arity);
-  return box_ptr(obj);
+static long long sprout_box_registered_obj(void* payload, int arity) {
+  register_obj(payload, arity);
+  return box_ptr(payload);
 }
 
 static long long sprout_make_registered_obj(int arity, long long tag, long long a0, long long a1, long long a2, const char* ctx) {
-  SproutObj* obj = sprout_alloc_obj_raw(arity, ctx);
-  obj->tag = tag;
-  if (arity >= 1) obj->f0 = a0;
-  if (arity >= 2) obj->f1 = a1;
-  if (arity >= 3) obj->f2 = a2;
-  return sprout_box_registered_obj(obj, arity);
+  void* payload = sprout_alloc_obj_raw(arity, ctx);
+  sprout_obj_write_tag(payload, tag, arity);
+  if (arity >= 1) ((long long*)payload)[0] = a0;
+  if (arity >= 2) ((long long*)payload)[1] = a1;
+  if (arity >= 3) ((long long*)payload)[2] = a2;
+  return sprout_box_registered_obj(payload, arity);
 }
 
 long long sprout_alloc_closure_env(long long size) {
@@ -802,12 +865,14 @@ long long sprout_alloc_closure_env(long long size) {
    *   IR computes size = (n_caps + 1) * 8.
    *   Runtime computes aux_slots = (size / 8) - 1 = n_caps.
    * Any layout change must update both formulas. */
-  void* out = sprout_alloc_counted(&g_debug_alloc_closure, (size_t)size, "sprout_alloc_closure_env: out of memory");
-  /* FIX R4#9: zero-init the env block to eliminate any window between
+  size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
+  void* out = sprout_gc_alloc_block(SPROUT_HEAP_CLOSURE, (unsigned long long)slots,
+                                    (size_t)size, "sprout_alloc_closure_env: out of memory");
+  if (g_debug_alloc_enabled) g_debug_alloc_closure++;
+  /* FIX R4#9: zero-init the env payload to eliminate any window between
    * register_managed_ptr and the IR-emitted capture stores where GC could
    * observe uninitialized slot values. */
   if (size > 0) memset(out, 0, (size_t)size);
-  size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
   register_managed_ptr(out, SPROUT_HEAP_CLOSURE, slots);
   return (long long)(uintptr_t)out;
 }
@@ -967,14 +1032,18 @@ static void sprout_handle_cleanup(SproutHandle* hp) {
 long long sprout_alloc_tuple_blob(long long size_bytes) {
   if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
   sprout_gc_maybe_collect_threshold();
-  void* out = sprout_alloc_counted(&g_debug_alloc_sprout_obj, (size_t)size_bytes, "sprout_alloc_tuple_blob: out of memory");
-  register_managed_ptr(out, SPROUT_HEAP_TUPLE, ((size_t)size_bytes) / sizeof(uintptr_t));
+  size_t words = ((size_t)size_bytes) / sizeof(uintptr_t);
+  void* out = sprout_gc_alloc_block(SPROUT_HEAP_TUPLE, (unsigned long long)words,
+                                    (size_t)size_bytes, "sprout_alloc_tuple_blob: out of memory");
+  if (g_debug_alloc_enabled) g_debug_alloc_sprout_obj++;
+  register_managed_ptr(out, SPROUT_HEAP_TUPLE, words);
   return (long long)(uintptr_t)out;
 }
 
 static VectorVal* sprout_alloc_vector_val(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
-  VectorVal* out = (VectorVal*)sprout_alloc_counted(&g_debug_alloc_vector, sizeof(VectorVal), ctx);
+  VectorVal* out = (VectorVal*)sprout_gc_alloc_block(SPROUT_HEAP_VECTOR, 0, sizeof(VectorVal), ctx);
+  if (g_debug_alloc_enabled) g_debug_alloc_vector++;
   register_managed_ptr(out, SPROUT_HEAP_VECTOR, 0);
   return out;
 }
@@ -989,7 +1058,8 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
 
 static BSTNode* sprout_alloc_bst_node(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
-  BSTNode* out = (BSTNode*)sprout_alloc_counted(&g_debug_alloc_map, sizeof(BSTNode), ctx);
+  BSTNode* out = (BSTNode*)sprout_gc_alloc_block(SPROUT_HEAP_MAP, 0, sizeof(BSTNode), ctx);
+  if (g_debug_alloc_enabled) g_debug_alloc_map++;
   register_managed_ptr(out, SPROUT_HEAP_MAP, 0);
   return out;
 }
@@ -1019,7 +1089,8 @@ static const char* intern_string(const char* s) {
 
 static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
-  BytesVal* out = (BytesVal*)sprout_alloc_counted(&g_debug_alloc_bytes, sizeof(BytesVal), ctx);
+  BytesVal* out = (BytesVal*)sprout_gc_alloc_block(SPROUT_HEAP_BYTES, 0, sizeof(BytesVal), ctx);
+  if (g_debug_alloc_enabled) g_debug_alloc_bytes++;
   register_managed_ptr(out, SPROUT_HEAP_BYTES, 0);
   return out;
 }
@@ -1030,7 +1101,8 @@ static unsigned char* sprout_alloc_bytes_data(size_t count, const char* ctx) {
 
 static BuilderVal* sprout_alloc_builder_val(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
-  BuilderVal* out = (BuilderVal*)sprout_alloc_counted(&g_debug_alloc_builder, sizeof(BuilderVal), ctx);
+  BuilderVal* out = (BuilderVal*)sprout_gc_alloc_block(SPROUT_HEAP_BUILDER, 0, sizeof(BuilderVal), ctx);
+  if (g_debug_alloc_enabled) g_debug_alloc_builder++;
   register_managed_ptr(out, SPROUT_HEAP_BUILDER, 0);
   return out;
 }
@@ -1041,17 +1113,19 @@ static BytesVal** sprout_alloc_builder_chunks(size_t count, const char* ctx) {
 
 static IntRangeVal* sprout_alloc_range_val(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
-  IntRangeVal* out = (IntRangeVal*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(IntRangeVal), ctx);
+  IntRangeVal* out = (IntRangeVal*)sprout_gc_alloc_block(SPROUT_HEAP_RANGE, 0, sizeof(IntRangeVal), ctx);
+  if (g_debug_alloc_enabled) g_debug_alloc_sprout_obj++;
   register_managed_ptr(out, SPROUT_HEAP_RANGE, 0);
   return out;
 }
 
 long long ref_new(long long value) {
   sprout_gc_maybe_collect_threshold();
-  RefVal* r = (RefVal*)sprout_alloc_counted(&g_debug_alloc_sprout_obj, sizeof(RefVal), "ref_new: out of memory");
+  RefVal* r = (RefVal*)sprout_gc_alloc_block(SPROUT_HEAP_REF, 0, sizeof(RefVal), "ref_new: out of memory");
+  if (g_debug_alloc_enabled) g_debug_alloc_sprout_obj++;
   r->value = value;
   register_managed_ptr(r, SPROUT_HEAP_REF, 0);
-  return box_ptr((SproutObj*)r);
+  return box_ptr(r);
 }
 
 long long ref_read(long long ref) {
@@ -1076,8 +1150,21 @@ static size_t sprout_heap_child_count(ManagedNode* node) {
   if (node == NULL) return 0;
   switch (node->kind) {
     case SPROUT_HEAP_OBJ: {
-      CtorMeta* meta = find_ctor(((SproutObj*)node->ptr)->tag);
-      return meta == NULL || meta->arity < 0 ? 0 : (size_t)meta->arity;
+      /* Arity is stored in the low 4 bits of the header aux — no find_ctor needed. */
+      unsigned long long aux = sprout_hdr_aux(sprout_hdr_of(node->ptr));
+      size_t hdr_arity = (size_t)(aux & 0xF);
+      if (sprout_gc_hdrcheck_on()) {
+        if (sprout_hdr_kind(sprout_hdr_of(node->ptr)) != SPROUT_HEAP_OBJ) {
+          fprintf(stderr, "[sprout] HDRCHECK: header kind mismatch in child_count (OBJ node)\n");
+          abort();
+        }
+        if (hdr_arity != node->aux_slots) {
+          fprintf(stderr, "[sprout] HDRCHECK: header arity mismatch in child_count: hdr=%zu aux_slots=%zu\n",
+                  hdr_arity, node->aux_slots);
+          abort();
+        }
+      }
+      return hdr_arity;
     }
     case SPROUT_HEAP_CLOSURE:
       return node->aux_slots;
@@ -1104,19 +1191,9 @@ static size_t sprout_heap_child_count(ManagedNode* node) {
 static long long sprout_heap_child_value(ManagedNode* node, size_t index) {
   if (node == NULL) tcp_fail("sprout_heap_child_value: null node");
   switch (node->kind) {
-    case SPROUT_HEAP_OBJ: {
-      SproutObj* obj = (SproutObj*)node->ptr;
-      if (index == 0) return obj->f0;
-      if (index == 1) return obj->f1;
-      if (index == 2) return obj->f2;
-      if (index == 3) return obj->f3;
-      if (index == 4) return obj->f4;
-      if (index == 5) return obj->f5;
-      if (index == 6) return obj->f6;
-      if (index == 7) return obj->f7;
-      if (index == 8) return obj->f8;
-      break;
-    }
+    case SPROUT_HEAP_OBJ:
+      /* Fields are at payload[0..arity-1]; tag lives in the header, not the payload. */
+      return ((long long*)node->ptr)[index];
     case SPROUT_HEAP_CLOSURE: {
       /* Slot 0 holds the function code-pointer (text-segment address) and is
        * NEVER traced by the GC — it is not a heap value.  Slots 1..N hold
@@ -1251,68 +1328,84 @@ static void sprout_gc_mark_roots(void) {
 }
 
 static void sprout_gc_free_payload(ManagedNode* node) {
+  if (sprout_gc_hdrcheck_on() && node->kind != SPROUT_HEAP_CSTR) {
+    SproutHeapKind hdr_kind = sprout_hdr_kind(sprout_hdr_of(node->ptr));
+    if (hdr_kind != node->kind && hdr_kind != (SproutHeapKind)SPROUT_GC_POISON) {
+      fprintf(stderr, "[sprout] HDRCHECK: header kind mismatch in free_payload: hdr=%d node=%d\n",
+              (int)hdr_kind, (int)node->kind);
+      abort();
+    }
+    if (node->kind == SPROUT_HEAP_OBJ) {
+      unsigned long long aux = sprout_hdr_aux(sprout_hdr_of(node->ptr));
+      if ((size_t)(aux & 0xF) != node->aux_slots) {
+        fprintf(stderr, "[sprout] HDRCHECK: OBJ header arity mismatch in free_payload: hdr=%zu aux_slots=%zu\n",
+                (size_t)(aux & 0xF), node->aux_slots);
+        abort();
+      }
+    }
+  }
   switch (node->kind) {
     case SPROUT_HEAP_OBJ: {
-      SproutObj* obj = (SproutObj*)node->ptr;
+      void* payload = node->ptr;
       if (sprout_gc_lineage_on()) {
         /* Poison and retain (leak) instead of recycling, so a dangling
-           reference reads the poison tag at its use site (see sprout_tag).
-           Stash the free-time backtrace in the corpse (f1=frames, f2=count):
-           it names the allocation that triggered this collection, i.e. the
-           site across which the victim was live-but-unrooted.
-           alloc_arity >= 3 is guaranteed in lineage mode (see sprout_obj_alloc_arity),
-           so f1 and f2 are always within the allocated block. */
+           reference reads the poison kind at its use site (see sprout_tag).
+           Stash the free-time backtrace in payload[0]=frames, payload[1]=count:
+           names the allocation that triggered this collection (the unrooted site).
+           alloc_arity >= 2 guaranteed in lineage mode (see sprout_obj_alloc_arity),
+           so payload[0] and payload[1] are always within the allocated block. */
         void** frames = (void**)malloc(sizeof(void*) * 32);
         int n = frames ? backtrace(frames, 32) : 0;
-        obj->tag = SPROUT_GC_POISON_TAG;
-        obj->f1 = (long long)(uintptr_t)frames;
-        obj->f2 = (long long)n;
+        /* Write poison kind into header (replaces valid header). */
+        uint64_t poison_hdr = SPROUT_GC_POISON;  /* kind=0xFF, all other bits 0 */
+        memcpy((char*)payload - 8, &poison_hdr, 8);
+        ((long long*)payload)[0] = (long long)(uintptr_t)frames;
+        ((long long*)payload)[1] = (long long)n;
         return;
       }
-      /* Push onto the per-arity freelist; link through the tag word.
-         aux_slots holds the ctor arity recorded at registration, which is the
-         allocated field count on this path (lineage-padded blocks never get
-         here — lineage poisons and leaks above). */
+      /* Push onto the per-arity freelist; link through the header word.
+         aux_slots holds the ctor arity recorded at registration (unpadded). */
       size_t k = node->aux_slots;
-      obj->tag = (long long)(uintptr_t)g_sprout_obj_freelist[k];
-      g_sprout_obj_freelist[k] = obj;
+      uint64_t next_raw = (uint64_t)(uintptr_t)g_sprout_obj_freelist[k];
+      memcpy((char*)payload - 8, &next_raw, 8);
+      g_sprout_obj_freelist[k] = payload;
       return;
     }
     case SPROUT_HEAP_CLOSURE:
-      free(node->ptr);
+      free((char*)node->ptr - 8);
       return;
     case SPROUT_HEAP_VECTOR: {
       VectorVal* value = (VectorVal*)node->ptr;
       free(value->data);
-      free(value);
+      free((char*)value - 8);
       return;
     }
     case SPROUT_HEAP_MAP:
-      free(node->ptr); /* key is interned (permanent); left/right handled by GC */
+      free((char*)node->ptr - 8); /* key is interned (permanent); left/right handled by GC */
       return;
     case SPROUT_HEAP_BYTES: {
       BytesVal* value = (BytesVal*)node->ptr;
       free(value->data);
-      free(value);
+      free((char*)value - 8);
       return;
     }
     case SPROUT_HEAP_BUILDER: {
       BuilderVal* value = (BuilderVal*)node->ptr;
       free(value->chunks);
-      free(value);
+      free((char*)value - 8);
       return;
     }
     case SPROUT_HEAP_TUPLE:
-      free(node->ptr);
+      free((char*)node->ptr - 8);
       return;
     case SPROUT_HEAP_RANGE:
-      free(node->ptr);
+      free((char*)node->ptr - 8);
       return;
     case SPROUT_HEAP_REF:
-      free(node->ptr);
+      free((char*)node->ptr - 8);
       return;
     case SPROUT_HEAP_CSTR:
-      free(node->ptr);
+      free(node->ptr);  /* CSTR: no header, payload IS the block */
       return;
   }
 }
@@ -1473,22 +1566,24 @@ static long long find_ctor_tag_by_name(const char* name) {
 
 static void print_inline_value(long long v);
 
-static void print_inline_obj(SproutObj* o) {
-  CtorMeta* m = find_ctor(o->tag);
+static void print_inline_obj(void* o) {
+  long long tag = sprout_tag((long long)(uintptr_t)o);
+  CtorMeta* m = find_ctor(tag);
   if (m == NULL) {
-    printf("Ctor%lld", o->tag);
+    printf("Ctor%lld", tag);
     return;
   }
   printf("%s", m->name);
   if (m->arity <= 0) return;
   printf("(");
-  print_inline_value(o->f0);
-  if (m->arity > 1) { printf(", "); print_inline_value(o->f1); }
-  if (m->arity > 2) { printf(", "); print_inline_value(o->f2); }
-  if (m->arity > 3) { printf(", "); print_inline_value(o->f3); }
-  if (m->arity > 4) { printf(", "); print_inline_value(o->f4); }
-  if (m->arity > 5) { printf(", "); print_inline_value(o->f5); }
-  if (m->arity > 6) { printf(", "); print_inline_value(o->f6); }
+  long long* fields = (long long*)o;
+  print_inline_value(fields[0]);
+  if (m->arity > 1) { printf(", "); print_inline_value(fields[1]); }
+  if (m->arity > 2) { printf(", "); print_inline_value(fields[2]); }
+  if (m->arity > 3) { printf(", "); print_inline_value(fields[3]); }
+  if (m->arity > 4) { printf(", "); print_inline_value(fields[4]); }
+  if (m->arity > 5) { printf(", "); print_inline_value(fields[5]); }
+  if (m->arity > 6) { printf(", "); print_inline_value(fields[6]); }
   printf(")");
 }
 
@@ -1613,8 +1708,8 @@ long long sprout_set_argv(int argc, char** argv) {
 }
 long long sprout_nothing(long long tag) {
   if (g_nothing_singleton == NULL) {
-    SproutObj* obj = sprout_alloc_obj_raw(0, "sprout_nothing: out of memory");
-    obj->tag = tag;
+    void* obj = sprout_alloc_obj_raw(0, "sprout_nothing: out of memory");
+    sprout_obj_write_tag(obj, tag, 0);
     register_obj(obj, 0);
     g_nothing_singleton = obj;
   }
@@ -1786,8 +1881,8 @@ static long long sprout_make_proc_result(int exit_code, GrowBuf* out, GrowBuf* e
 // Convert a Sprout Vec String (i64) to a NULL-terminated char** for execvp.
 // Caller must free() the returned array; the strings themselves are GC-managed.
 static char** sprout_vec_string_to_argv(long long vec_val) {
-  SproutObj* adt = (SproutObj*)(uintptr_t)vec_val;
-  VectorVal* vec = (VectorVal*)(uintptr_t)adt->f0;
+  /* vec_val is an OBJ handle; field 0 is the VectorVal* payload handle. */
+  VectorVal* vec = (VectorVal*)(uintptr_t)((long long*)(uintptr_t)vec_val)[0];
   long long  n   = vec->len;
   char** argv = (char**)malloc((size_t)(n + 1) * sizeof(char*));
   for (long long i = 0; i < n; i++)
@@ -3475,10 +3570,10 @@ static void sprout_debug_field(long long fval, char kind, int depth) {
 static void sprout_debug_adt_rec(long long val, int depth) {
   if (val == 0) { fprintf(stderr, "null"); return; }
   if (depth > 4) { fprintf(stderr, "..."); return; }
-  SproutObj* obj = (SproutObj*)(uintptr_t)val;
-  CtorMeta* meta = find_ctor(obj->tag);
+  long long tag = sprout_tag(val);
+  CtorMeta* meta = find_ctor(tag);
   if (meta == NULL) {
-    fprintf(stderr, "<tag:%lld>", obj->tag);
+    fprintf(stderr, "<tag:%lld>", tag);
     return;
   }
   fprintf(stderr, "%s", meta->name);
@@ -3501,10 +3596,10 @@ void sprout_debug_adt(long long val) {
 }
 
 /* Helper: lazily allocate or return the cached nullary-ctor singleton. */
-static long long get_or_make_singleton(SproutObj** slot, long long tag) {
+static long long get_or_make_singleton(void** slot, long long tag) {
   if (*slot == NULL) {
-    SproutObj* obj = sprout_alloc_obj_raw(0, "sprout_make0: out of memory");
-    obj->tag = tag;
+    void* obj = sprout_alloc_obj_raw(0, "sprout_make0: out of memory");
+    sprout_obj_write_tag(obj, tag, 0);
     register_obj(obj, 0);
     *slot = obj;
   }
@@ -3563,17 +3658,19 @@ long long sprout_tag(long long h) {
     fflush(stderr);
     abort();
   }
-  SproutObj* obj = unbox_ptr(h);
-  /* Cheap constant compare first: the poison tag is virtually never present, so
-     this short-circuits before the lineage-flag check on this hot path. */
-  if (obj->tag == SPROUT_GC_POISON_TAG && sprout_gc_lineage_on()) {
+  void* payload = (void*)(uintptr_t)h;
+  uint64_t hdr = sprout_hdr_of(payload);
+  /* Cheap kind check first: the poison kind (0xFF) is virtually never present,
+     so this short-circuits before the lineage-flag check on this hot path. */
+  if (sprout_hdr_kind(hdr) == (SproutHeapKind)SPROUT_GC_POISON && sprout_gc_lineage_on()) {
     fprintf(stderr,
             "\n=== USE-AFTER-FREE: sprout_tag read poisoned ptr 0x%llx ===\n",
             (unsigned long long)h);
     if (g_sprout_current_fn != NULL)
       fprintf(stderr, "  (reading fn: %s)\n", g_sprout_current_fn);
-    void** frames = (void**)(uintptr_t)obj->f1;
-    int n = (int)obj->f2;
+    /* Backtrace was stored in payload[0]=frames, payload[1]=count at free time. */
+    void** frames = (void**)(uintptr_t)((long long*)payload)[0];
+    int n = (int)((long long*)payload)[1];
     if (frames != NULL && n > 0) {
       fprintf(stderr,
               "  free backtrace (collection that swept the victim; the alloc\n"
@@ -3585,65 +3682,55 @@ long long sprout_tag(long long h) {
     }
     abort();
   }
-  return obj->tag;
+  /* Tag is in the upper bits of aux: aux = (tag << 4) | arity. */
+  return (long long)(sprout_hdr_aux(hdr) >> 4);
 }
 long long sprout_field(long long h, long long idx) {
-  SproutObj* o = unbox_ptr(h);
-  if (idx == 0) return o->f0;
-  if (idx == 1) {
-    return o->f1;
-  }
-  if (idx == 2) return o->f2;
-  if (idx == 3) return o->f3;
-  if (idx == 4) return o->f4;
-  if (idx == 5) return o->f5;
-  if (idx == 6) return o->f6;
-  if (idx == 7) return o->f7;
-  return o->f8;
+  return ((long long*)(uintptr_t)h)[idx];
 }
 long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(4, "sprout_make4: out of memory"), tag, a0, a1, a2);
-  obj->f3 = a3;
+  void* obj = sprout_init_obj(sprout_alloc_obj_raw(4, "sprout_make4: out of memory"), 4, tag, a0, a1, a2);
+  ((long long*)obj)[3] = a3;
   return sprout_box_registered_obj(obj, 4);
 }
 long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(5, "sprout_make5: out of memory"), tag, a0, a1, a2);
-  obj->f3 = a3;
-  obj->f4 = a4;
+  void* obj = sprout_init_obj(sprout_alloc_obj_raw(5, "sprout_make5: out of memory"), 5, tag, a0, a1, a2);
+  ((long long*)obj)[3] = a3;
+  ((long long*)obj)[4] = a4;
   return sprout_box_registered_obj(obj, 5);
 }
 long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(6, "sprout_make6: out of memory"), tag, a0, a1, a2);
-  obj->f3 = a3;
-  obj->f4 = a4;
-  obj->f5 = a5;
+  void* obj = sprout_init_obj(sprout_alloc_obj_raw(6, "sprout_make6: out of memory"), 6, tag, a0, a1, a2);
+  ((long long*)obj)[3] = a3;
+  ((long long*)obj)[4] = a4;
+  ((long long*)obj)[5] = a5;
   return sprout_box_registered_obj(obj, 6);
 }
 long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(7, "sprout_make7: out of memory"), tag, a0, a1, a2);
-  obj->f3 = a3;
-  obj->f4 = a4;
-  obj->f5 = a5;
-  obj->f6 = a6;
+  void* obj = sprout_init_obj(sprout_alloc_obj_raw(7, "sprout_make7: out of memory"), 7, tag, a0, a1, a2);
+  ((long long*)obj)[3] = a3;
+  ((long long*)obj)[4] = a4;
+  ((long long*)obj)[5] = a5;
+  ((long long*)obj)[6] = a6;
   return sprout_box_registered_obj(obj, 7);
 }
 long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(8, "sprout_make8: out of memory"), tag, a0, a1, a2);
-  obj->f3 = a3;
-  obj->f4 = a4;
-  obj->f5 = a5;
-  obj->f6 = a6;
-  obj->f7 = a7;
+  void* obj = sprout_init_obj(sprout_alloc_obj_raw(8, "sprout_make8: out of memory"), 8, tag, a0, a1, a2);
+  ((long long*)obj)[3] = a3;
+  ((long long*)obj)[4] = a4;
+  ((long long*)obj)[5] = a5;
+  ((long long*)obj)[6] = a6;
+  ((long long*)obj)[7] = a7;
   return sprout_box_registered_obj(obj, 8);
 }
 long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8) {
-  SproutObj* obj = sprout_init_obj(sprout_alloc_obj_raw(9, "sprout_make9: out of memory"), tag, a0, a1, a2);
-  obj->f3 = a3;
-  obj->f4 = a4;
-  obj->f5 = a5;
-  obj->f6 = a6;
-  obj->f7 = a7;
-  obj->f8 = a8;
+  void* obj = sprout_init_obj(sprout_alloc_obj_raw(9, "sprout_make9: out of memory"), 9, tag, a0, a1, a2);
+  ((long long*)obj)[3] = a3;
+  ((long long*)obj)[4] = a4;
+  ((long long*)obj)[5] = a5;
+  ((long long*)obj)[6] = a6;
+  ((long long*)obj)[7] = a7;
+  ((long long*)obj)[8] = a8;
   return sprout_box_registered_obj(obj, 9);
 }
 
@@ -4668,7 +4755,7 @@ static void json_append_escaped_string(ByteBuf* out, const char* raw) {
 
 static const char* json_ctor_name(long long value) {
   if (!is_obj_handle(value)) return NULL;
-  CtorMeta* meta = find_ctor(unbox_ptr(value)->tag);
+  CtorMeta* meta = find_ctor(sprout_tag(value));
   return meta == NULL ? NULL : meta->name;
 }
 
@@ -5922,8 +6009,8 @@ long long vector_sort_by_int(long long decorated_list) {
       SPROUT_GC_POP_LOCALS(1);
       tcp_fail("vector_sort_by_int: expected List");
     }
-    SproutObj* obj = (SproutObj*)node->ptr;
-    CtorMeta* meta = find_ctor(obj->tag);
+    long long node_tag = sprout_tag((long long)(uintptr_t)node->ptr);
+    CtorMeta* meta = find_ctor(node_tag);
     if (meta == NULL) {
       free(items);
       SPROUT_GC_POP_LOCALS(1);
@@ -5937,7 +6024,9 @@ long long vector_sort_by_int(long long decorated_list) {
       SPROUT_GC_POP_LOCALS(1);
       tcp_fail("vector_sort_by_int: expected List");
     }
-    ManagedNode* tuple_node = find_managed_ptr((void*)(uintptr_t)obj->f0);
+    /* Cons fields: [0]=head (the decorated tuple handle), [1]=tail (next cursor). */
+    long long* list_fields = (long long*)node->ptr;
+    ManagedNode* tuple_node = find_managed_ptr((void*)(uintptr_t)list_fields[0]);
     if (tuple_node == NULL || tuple_node->kind != SPROUT_HEAP_TUPLE || tuple_node->aux_slots != 3) {
       free(items);
       SPROUT_GC_POP_LOCALS(1);
@@ -5958,7 +6047,7 @@ long long vector_sort_by_int(long long decorated_list) {
     items[len].index = sprout_heap_child_value(tuple_node, 1);
     items[len].value = sprout_heap_child_value(tuple_node, 2);
     len++;
-    cursor = obj->f1;
+    cursor = list_fields[1];  /* advance to tail */
   }
 
   qsort(items, len, sizeof(SortItem), sort_item_cmp);
