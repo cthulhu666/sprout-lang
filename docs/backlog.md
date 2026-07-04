@@ -14,6 +14,22 @@ programs, session-by-session fix plan, and the five user decisions needed (D1-D5
 [fundamentals-code-review-handoff-2026-07-03.md](./fundamentals-code-review-handoff-2026-07-03.md).
 Recommended first session: W1 (global GC roots).
 
+**Bare-name type identity — cross-module type-name collision (2026-07-04).** Type
+resolution collapses every type to its unqualified name: scrutinee types resolve to
+`TConst(after_last_dot(name))` and `infer.build_ctor_map` keys constructor sets by the
+same bare name. Two types sharing a short name across modules (e.g.
+`stdlib.compiler.Diagnostic` vs `stdlib.compiler.compiler.Diagnostic`) therefore become
+one type identity — distinct runtime layouts, indistinguishable to the checker. The
+exhaustiveness pass caught this as a false "non-exhaustive match" when `sproutd` first
+bundled both modules (the guard fired; the latent hole is that unifying values of the two
+layouts would be silently accepted → memory corruption). Mitigated for that instance by
+renaming the report-entry type to `stdlib.compiler.ReportEntry` (regression guard:
+`tests/stdlib/compiler/test_diagnostic_name_collision.spr`). Root-cause fix (deferred):
+thread fully-qualified names through `lookup_type_var` and the `TConst` representation so
+type identity is module-qualified. This is a soundness-scale change to type resolution and
+directly contends with the documented reason bare keying exists (own-module ADTs keyed
+`main.C`, looked up as `C`, must still resolve) — scope it deliberately, not opportunistically.
+
 1. Execute Model C GC-rooting plan (typed Sprout-IR + linear types).
    Design doc: [gc-rooting-model-c-plan-2026-06-02.md](./gc-rooting-model-c-plan-2026-06-02.md).
    Status: Milestone 1 (scalar IR scaffolding, PRs 1.1–1.5) and Milestone 2 PRs 2.1–2.5

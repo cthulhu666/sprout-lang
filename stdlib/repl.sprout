@@ -626,7 +626,7 @@ fn render_compiler_instances_result(result: Result String compiler.InstanceMatch
       else
         single_line("Instances for " ++ compiler.instance_query_type(payload) ++ ":") ++ compiler.instance_match_names(payload)
 
-fn first_diagnostic_message(lines: Vec compiler.Diagnostic) -> Maybe String =
+fn first_diagnostic_message(lines: Vec compiler.ReportEntry) -> Maybe String =
   match vec_get(0, lines) with
   | Just value -> Just(compiler.diagnostic_message(value))
   | Nothing -> Nothing

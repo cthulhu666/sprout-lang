@@ -1,0 +1,43 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler as report
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# Regression guard: two distinct types named `Diagnostic` must not collide.
+#
+# `stdlib.compiler` exports a report-entry type (single constructor;
+# message + line + column) consumed by `report.diagnostic_message`, while
+# `stdlib.compiler.compiler` exports the compiler diagnostic ADT
+# (DiagError | DiagWarning).  The exhaustiveness checker keys its constructor
+# sets by BARE type name (infer.build_ctor_map via after_last_dot), so before
+# the ReportEntry rename both types collapsed to the key "Diagnostic".
+# Last-write-wins then fed one match the OTHER type's constructor set, raising a
+# false "Non-exhaustive match on Diagnostic" — which broke the first binary to
+# bundle both modules together (sproutd).
+#
+# This file bundles BOTH modules and forces a match on EACH type into the
+# executable, so on the unfixed compiler whichever type loses the ctor_map race
+# makes its match fail to compile.  It must compile and pass after the rename.
+
+# Statically references report.diagnostic_message (whose body matches the
+# report-entry type) WITHOUT naming that type, so the test stays valid across
+# the rename.  vec_empty() unifies to diagnostic_message's argument type.
+fn report_message_count() -> Int =
+  vec_length(vec_map(report.diagnostic_message, vec_empty()))
+
+# Forces the compiler Diagnostic ADT match into the bundle.
+fn diag_kind(d: compiler.Diagnostic) -> String =
+  match d with
+  | compiler.DiagError _ _ -> "error"
+  | compiler.DiagWarning _ _ -> "warning"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "report side bundles + checks", report_message_count(), 0)
+    assert_eq(state, "DiagError kind",
+      diag_kind(compiler.DiagError(source.SourcePos(0, 0, 0), "boom")), "error")
+    assert_eq(state, "DiagWarning kind",
+      diag_kind(compiler.DiagWarning(source.SourcePos(0, 0, 0), "careful")), "warning")
+    summary(state)

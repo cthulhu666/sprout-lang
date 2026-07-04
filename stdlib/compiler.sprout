@@ -7,14 +7,14 @@ export type CompilerSession (..) =
 export type SymbolInventory (..) =
   | SymbolInventory (Vec String) (Vec String) (Vec String)
 
-export type Diagnostic (..) =
-  | Diagnostic String Int Int
+export type ReportEntry (..) =
+  | ReportEntry String Int Int
 
 export type InstanceMatches (..) =
   | InstanceMatches String (Vec String)
 
 type ReportPayload =
-  | ReportPayload (Vec Diagnostic) (SymbolInventory)
+  | ReportPayload (Vec ReportEntry) (SymbolInventory)
 
 export type CompilerReport (..) =
   | CompilerReport Bool (Maybe String) (ReportPayload)
@@ -127,19 +127,19 @@ fn symbol_inventory_from_tuple(payload: (Vec String, Vec String, Vec String)) ->
   match payload with
   | (declared, imported, exported) -> SymbolInventory(declared, imported, exported)
 
-fn map_diagnostics(lines: Vec (String, Int, Int), index: Int, acc: Vec Diagnostic) -> Vec Diagnostic =
+fn map_diagnostics(lines: Vec (String, Int, Int), index: Int, acc: Vec ReportEntry) -> Vec ReportEntry =
   match vec_get(index, lines) with
   | Just value -> map_diagnostics(lines, index + 1, vec_append(diagnostic_from_tuple(value), acc))
   | Nothing -> acc
 
-fn diagnostic_from_tuple(value: (String, Int, Int)) -> Diagnostic =
+fn diagnostic_from_tuple(value: (String, Int, Int)) -> ReportEntry =
   match value with
-  | (message, line, column) -> Diagnostic(message, line, column)
+  | (message, line, column) -> ReportEntry(message, line, column)
 
-export fn diagnostics(session: CompilerSession) -> Vec Diagnostic !{IO} =
+export fn diagnostics(session: CompilerSession) -> Vec ReportEntry !{IO} =
   map_diagnostics(analysis_diagnostics_in_source(session_source(session)), 0, vec_empty())
 
-export fn diagnostics_in_source(module_source: String) -> Vec Diagnostic !{IO} =
+export fn diagnostics_in_source(module_source: String) -> Vec ReportEntry !{IO} =
   map_diagnostics(analysis_diagnostics_in_source(module_source), 0, vec_empty())
 
 export fn symbol_locations_in_source(module_source: String) -> Result String (Vec (String, String, Int, Int)) !{IO} =
@@ -175,7 +175,7 @@ export fn report_error_message(report: CompilerReport) -> Maybe String =
   match report with
   | CompilerReport _ message _ -> message
 
-export fn report_diagnostics(report: CompilerReport) -> Vec Diagnostic =
+export fn report_diagnostics(report: CompilerReport) -> Vec ReportEntry =
   match report with
   | CompilerReport _ _ payload -> payload_diagnostics(payload)
 
@@ -183,7 +183,7 @@ export fn report_symbol_inventory(report: CompilerReport) -> SymbolInventory =
   match report with
   | CompilerReport _ _ payload -> payload_inventory(payload)
 
-fn payload_diagnostics(payload: ReportPayload) -> Vec Diagnostic =
+fn payload_diagnostics(payload: ReportPayload) -> Vec ReportEntry =
   match payload with
   | ReportPayload items inventory -> items
 
@@ -191,9 +191,9 @@ fn payload_inventory(payload: ReportPayload) -> SymbolInventory =
   match payload with
   | ReportPayload items inventory -> inventory
 
-export fn diagnostic_message(value: Diagnostic) -> String =
+export fn diagnostic_message(value: ReportEntry) -> String =
   match value with
-  | Diagnostic message _ _ -> message
+  | ReportEntry message _ _ -> message
 
 # ---------------------------------------------------------------------------
 # StatefulSession — server-side session state (M2)
@@ -251,7 +251,7 @@ export fn type_of_in_session(session: StatefulSession, expr: String) -> Result S
   match session with
   | StatefulSession id _ _ -> analysis_session_type_of(id, expr)
 
-export fn diagnostics_in_session(session: StatefulSession) -> Vec Diagnostic !{IO} =
+export fn diagnostics_in_session(session: StatefulSession) -> Vec ReportEntry !{IO} =
   match session with
   | StatefulSession id _ _ -> map_diagnostics(analysis_session_diagnostics(id), 0, vec_empty())
 
