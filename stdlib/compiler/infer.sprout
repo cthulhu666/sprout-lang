@@ -779,20 +779,29 @@ fn check_instance_for_marker(
       match class_type with
       | types.TConst class_name ->
           if method_dispatch_is_input(method_name, class_vars, env) then
-            # Input-position dispatch — existing logic
-            match first_concrete_typed_arg_str(typed_args, subst) with
-            | Just head_str ->
-                match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-                | Nothing -> InferErr(pos, "No instance of " ++ class_name ++ " for " ++ head_str)
-                | Just _ ->
-                    InferOk(
-                      typed_ast.TCall(typed_callee,
-                        Cons(typed_ast.TDict(
-                          ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_fwd(head_str, class_name, typed_args, subst, env), Nil)),
-                          types.TConst(class_name), pos, typed_ast.EvUnresolved),
-                          typed_args),
-                        ret_t, pos),
-                      s3, es3, call_eff)
+            # Input-position dispatch. Select the instance by the class-var
+            # PARAMETER POSITION (the arg whose declared type mentions a class
+            # variable), not by "first concrete arg" — otherwise a leading
+            # concrete arg of an unrelated type (e.g. a String `tag`) hijacks the
+            # dict (fundamentals review W4 / probe sr_dispatch). head_str and the
+            # TDict TypeExpr are both derived from that one arg so they agree.
+            match class_var_arg_or_fallback(method_name, class_vars, typed_args, subst, env) with
+            | Just cv_arg ->
+                match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg))) with
+                | Nothing ->
+                    check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+                | Just head_str ->
+                    match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+                    | Nothing -> InferErr(pos, "No instance of " ++ class_name ++ " for " ++ head_str)
+                    | Just _ ->
+                        InferOk(
+                          typed_ast.TCall(typed_callee,
+                            Cons(typed_ast.TDict(
+                              ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), class_name, env), Nil)),
+                              types.TConst(class_name), pos, typed_ast.EvUnresolved),
+                              typed_args),
+                            ret_t, pos),
+                          s3, es3, call_eff)
             | Nothing ->
                 check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
           else
@@ -856,6 +865,58 @@ fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dic
       match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
       | Nothing -> first_concrete_typed_arg_str(rest, subst)
       | Just s -> Just(s)
+
+# W4 (F-DISPATCH): pick the argument that determines the instance dict by
+# CONSTRAINT POSITION. Walk the method's declared parameter chain alongside the
+# actual args and return the first arg whose declared parameter type mentions a
+# class variable AND has a concrete head. This makes `describe(tag: String,
+# x: a)` dispatch on `x` (the class-var parameter), not on the leading `tag`.
+# Returning Nothing (no class-var arg is concrete) routes to the @fwd
+# polymorphic path, matching the old first-concrete behaviour on that boundary.
+fn class_var_arg(
+  method_type: types.Type,
+  class_vars: List String,
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type
+) -> Maybe typed_ast.TypedExpr =
+  match method_type with
+  | types.TFunc param ret _ ->
+      match typed_args with
+      | Nil -> Nothing
+      | Cons arg rest ->
+          if type_contains_var(param, class_vars) then
+            match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(arg))) with
+            | Just _ -> Just(arg)
+            | Nothing -> class_var_arg(ret, class_vars, rest, subst)
+          else
+            class_var_arg(ret, class_vars, rest, subst)
+  | _ -> Nothing
+
+# Position-aware instance-arg selection with a safe fallback: when the method's
+# declared type is not in env (cannot locate the class-var position), fall back
+# to the historical first-concrete-arg heuristic rather than mis-dispatching.
+fn class_var_arg_or_fallback(
+  method_name: String,
+  class_vars: List String,
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme
+) -> Maybe typed_ast.TypedExpr =
+  match dict_get(method_name, env) with
+  | Just method_scheme ->
+      match method_scheme with
+      | types.Scheme _ _ method_type _ -> class_var_arg(method_type, class_vars, typed_args, subst)
+  | Nothing -> first_concrete_typed_arg(typed_args, subst)
+
+# Like first_concrete_typed_arg_str, but returns the arg itself (used as the W4
+# fallback so head_str and TypeExpr derive from the same TypedExpr).
+fn first_concrete_typed_arg(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe typed_ast.TypedExpr =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg rest ->
+      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Nothing -> first_concrete_typed_arg(rest, subst)
+      | Just _ -> Just(first_arg)
 
 # Like first_concrete_typed_arg_str but skips heads in the excluded list.
 # Used when multiple constraints share a class: subsequent constraints skip
@@ -957,20 +1018,6 @@ fn first_concrete_typed_arg_typeexpr_excluding(
 # names recovered from @fwd markers when the type contains TVars.  This is needed when
 # calling a class method on a polymorphic container (e.g. eq(x, y) where x: Maybe a):
 # without it, TVar args become TypeName("_") and the lowering's fwd-dict lookup fails.
-fn first_concrete_arg_typeexpr_fwd(
-  head_str: String,
-  class_name: String,
-  typed_args: List typed_ast.TypedExpr,
-  subst: Dict types.Type,
-  env: Dict types.Scheme
-) -> ast.TypeExpr =
-  match typed_args with
-  | Nil -> ast.TypeName(head_str)
-  | Cons first_arg rest ->
-      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_arg_typeexpr_fwd(head_str, class_name, rest, subst, env)
-      | Just _ -> type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)), class_name, env)
-
 # Like type_to_typeexpr, but for each TVar looks up @fwd:name:class_name in env
 # to recover the programmer-visible variable name (e.g. "a") rather than emitting "_".
 fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict types.Scheme) -> ast.TypeExpr =

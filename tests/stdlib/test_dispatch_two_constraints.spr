@@ -1,0 +1,22 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# W4 sibling guard: two same-class constraints (Sh a, Sh b) with the method
+# called on each arg. Because the constraint var is at an arg head, the forwarded
+# dict is keyed by that arg's own type variable (find_fwd_tdict_in_args), so `x`
+# gets a's instance and `y` gets b's — not whichever @fwd:*:Sh marker a linear
+# scan hits first. This is a positive regression guard; it must stay green.
+class Sh a {
+  fn sh(x: a) -> String
+}
+instance Sh Int  { fn sh(x: Int) -> String = "int" }
+instance Sh Bool { fn sh(x: Bool) -> String = "bool" }
+
+fn both(x: a, y: b) -> String where Sh a, Sh b =
+  sh(x) ++ "-" ++ sh(y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "two-constraint forwards distinct dicts", both(42, true), "int-bool")
+    assert_eq(state, "two-constraint reversed", both(false, 7), "bool-int")
+    summary(state)

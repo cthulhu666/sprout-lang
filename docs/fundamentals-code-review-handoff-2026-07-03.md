@@ -261,7 +261,33 @@ separate feature deferred to the D4 ingestion-policy decision.
   positive: polymorphic identity, mutual recursion with correct annotations still accepted.
 - **Gates:** compiler change → full §4 battery.
 
-### W4 — F-DISPATCH: class-method dict chosen by first concrete arg, not constraint position  [1S, CRITICAL, confirmed empirically]
+### W4 — F-DISPATCH: class-method dict chosen by first concrete arg, not constraint position  [DONE 2026-07-04, CRITICAL, confirmed empirically]
+
+**Fixed.** New `class_var_arg` (`infer.sprout`) walks the method's declared `TFunc`
+parameter chain alongside the actual args and returns the first arg whose declared
+parameter type mentions a class variable (`type_contains_var`) AND has a concrete head;
+`class_var_arg_or_fallback` wraps it, falling back to the old first-concrete scan only
+when the method type is absent from env. The input-dispatch branch of
+`check_instance_for_marker` now derives BOTH the dict `head_str` and the TDict `TypeExpr`
+from that one arg (via `type_to_typeexpr_with_prog_vars`), so they can't disagree — this
+also retired the parallel-scanning `first_concrete_arg_typeexpr_fwd` (deleted, was the
+sole second scan). `describe("tag", 42)` now selects `Desc Int`. The `fmap(fn, container)`
+case is subsumed (class var `f` is at param 2, so `class_var_arg` skips the function arg
+and picks the container). Seed refreshed to a fixed point at iteration 2 (self-compile
+oracle green). Regression tests: `tests/stdlib/test_dispatch_constraint_position.spr`
+(Int-at-pos-2 → INT; String-at-pos-2 → STRING) and
+`tests/stdlib/test_dispatch_two_constraints.spr` (sibling guard, below).
+
+**Sibling — closed, not reproducible.** The two-same-class-constraint probe (`Sh a, Sh b`,
+method called on each arg) resolves correctly: with the constraint var at an arg head,
+`find_fwd_tdict_in_args` keys the forwarded dict by that arg's own type variable, so each
+arg gets its own instance. `scan_fwd_markers`'s first-match is only reachable when the
+constraint var lives solely in return position with multiple same-class constraints — a
+path the return-type post-pass already covers, and which no realistic probe triggered.
+Keying `scan_fwd_markers` by prog var remains a low-priority hardening with no failing
+repro; deferred rather than changed blind.
+
+<details><summary>original plan</summary>
 
 - **Evidence:** probe `sr_dispatch` — `class Desc a { fn describe(tag: String, x: a) }`;
   `describe("tag", 42)` selects the **String** instance (IR stores the
@@ -284,6 +310,8 @@ separate feature deferred to the D4 ingestion-policy decision.
   (`Eq a, Eq b`) method probe; existing typeclass suites must stay green.
 - **Gates:** compiler change → full §4 battery (dict resolution is bootstrap-sensitive:
   self-compile oracle mandatory).
+
+</details>
 
 ### W5 — F-EXH: exhaustiveness + unreachable-branch diagnostics  [DONE 2026-07-03, HIGH, confirmed empirically]
 
