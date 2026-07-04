@@ -17,9 +17,9 @@ programs, session-by-session fix plan, and the five user decisions needed (D1-D5
 invalid UTF-8, Bytes-primary via the `bytes_to_utf8` choke point), and D5 (total
 `parse_int : Maybe Int` + delete dead `split_ints`; `mutvec_get : Maybe a`) all DECIDED;
 **D2 (effects) DEFERRED** — W6 is blocked on an effect-system *design* pass, not rollout
-shape. See §2 of the handoff doc for full rationale. W1 (global GC roots) and W5
-(exhaustiveness) already landed; recommended next unblocked session: W4
-(dispatch-by-constraint-position).
+shape. See §2 of the handoff doc for full rationale. W1 (global GC roots), W5
+(exhaustiveness), and W2 R1/R3/R4 (UTF-8 runtime safety) already landed; recommended next
+unblocked session: W4 (dispatch-by-constraint-position).
 
 **Bare-name type identity — cross-module type-name collision (2026-07-04).** Type
 resolution collapses every type to its unqualified name: scrutinee types resolve to

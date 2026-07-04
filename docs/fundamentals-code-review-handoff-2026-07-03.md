@@ -169,10 +169,31 @@ TYPED path (its IR header reads `ir_lowering.sprout`), not the direct path.
 
 </details>
 
-### W2 — F-UTF8: runtime string-safety batch  [1S, CRITICAL, source-verified; partially blocked on D4]
+### W2 — F-UTF8: runtime string-safety batch  [R1+R3+R4 DONE 2026-07-04, CRITICAL; R2 remains, blocked on D4]
 
 All in `runtime/sprout_runtime.c`. No compiler changes, no seed refresh. No new builtins
 (APPROVED_BUILTINS untouched).
+
+**R1, R3, R4 fixed (2026-07-04).** R1: new bounds-checked walker primitive
+`sprout_utf8_step(s, i)` returns the validated byte-width of the char at `s[i]`,
+verifying each continuation byte is present (it stops at the first NUL — always inside
+the allocation — so it never reads past the terminator) and matches `10xxxxxx`, else a
+clean `tcp_fail`. All seven advance/decode sites route through it
+(`codepoint_count`, `byte_offset`, `str_char_at`, `str_char_at_unboxed`, `str_find`,
+`regex_replace_all_literal`, `codepoint_prefix_count`); `sprout_utf8_char_width`'s panic
+message generalized from `str_len:` to `str_utf8:`. R3: shared `sprout_validate_codepoint`
+(0..0x10FFFF, excluding D800–DFFF, matching `utf8_validate`) wired into both `char_to_str`
+and `char_from_codepoint`, panicking on out-of-range/surrogate. R4: `term_read_key`'s
+single-char path now heap-allocates + registers a fresh String (no more `static char buf[2]`
+aliasing; EOF returns a static `""` like the arrow-key tokens), and a `>=0x80` byte panics
+(uniform policy — completing a multibyte key is deferred, see below). Regression tests are
+C-runtime drivers under `tests/c_runtime/` (`utf8_walker_oob.c`, `char_codepoint_validate.c`,
+`term_read_key_safety.c`, wired into `run.sh`) — crafted bytes fed directly to the runtime
+under ASan/UBSan, independent of the R2 ingestion gap; pre-fix the walker test reproduces the
+heap-buffer-overflow, post-fix it asserts the clean panic. Gates: `just c-runtime-test`, full
+`just test`, example-canary run — all green. **Follow-up filed:** term_read_key multibyte
+(non-ASCII) key input — assemble the continuation bytes into a full validated char — is a
+separate feature deferred to the D4 ingestion-policy decision.
 
 - **R1 — OOB walkers (unblocked, do first):** `sprout_utf8_char_width` (:3625) returns
   2/3/4 with no bounds check; callers `sprout_utf8_codepoint_count` (:3648),
@@ -512,7 +533,7 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
 | Session | Workstream | Blocked on |
 |---|---|---|
 | 1 | ~~W1 global GC roots~~ **DONE 2026-07-03** | — |
-| 2 | W2 runtime UTF-8 (R1+R3+R4 landed on branch); R2 = designed workstream | D4 DECIDED (reject) |
+| 2 | ~~W2 runtime UTF-8 (R1+R3+R4)~~ **DONE 2026-07-04**; R2 = designed workstream | D4 DECIDED (reject) |
 | 3 | W4 dispatch-by-constraint-position | — |
 | 4-5 | W3 rigidity + value restriction | — |
 | 6 | ~~W5 exhaustiveness + unreachability~~ **DONE 2026-07-03** | — |

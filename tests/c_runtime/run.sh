@@ -71,4 +71,58 @@ if ! grep -Eq '__attribute__\(\(noreturn\)\)[[:space:]]+static void tcp_fail\(co
   exit 1
 fi
 
+echo "==> c runtime: UTF-8 walkers reject truncated multibyte with a clean panic"
+if compile utf8_walker_oob.c "$TMP_DIR/utf8_walker_oob" -O1 -g -fsanitize=address,undefined; then
+  :
+else
+  echo "  sanitizer build unavailable; using unsanitized fallback"
+  compile utf8_walker_oob.c "$TMP_DIR/utf8_walker_oob" -O0 -g
+fi
+for sel in len char_at slice; do
+  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$TMP_DIR/utf8_walker_oob" "$sel" \
+       > "$TMP_DIR/utf8_oob.out" 2> "$TMP_DIR/utf8_oob.err"; then
+    echo "  walker '$sel' did not abort on truncated UTF-8" >&2
+    cat "$TMP_DIR/utf8_oob.out" >&2
+    exit 1
+  fi
+  grep -q "truncated or malformed UTF-8" "$TMP_DIR/utf8_oob.err" || {
+    echo "  walker '$sel' aborted without the expected clean panic (OOB or wrong message):" >&2
+    cat "$TMP_DIR/utf8_oob.err" >&2
+    exit 1
+  }
+done
+
+echo "==> c runtime: char_to_str / char_from_codepoint reject invalid codepoints"
+compile char_codepoint_validate.c "$TMP_DIR/char_codepoint_validate" -O0 -g
+for sel in neg toobig surrogate from_neg; do
+  if "$TMP_DIR/char_codepoint_validate" "$sel" > "$TMP_DIR/cc.out" 2> "$TMP_DIR/cc.err"; then
+    echo "  codepoint case '$sel' did not abort" >&2
+    cat "$TMP_DIR/cc.out" >&2
+    exit 1
+  fi
+  grep -q "out of Unicode range" "$TMP_DIR/cc.err" || {
+    echo "  codepoint case '$sel' aborted without the expected message:" >&2
+    cat "$TMP_DIR/cc.err" >&2
+    exit 1
+  }
+done
+"$TMP_DIR/char_codepoint_validate" ok > "$TMP_DIR/cc_ok.out"
+test "$(cat "$TMP_DIR/cc_ok.out")" = "char-codepoint-validated"
+
+echo "==> c runtime: term_read_key returns fresh, validated Strings"
+compile term_read_key_safety.c "$TMP_DIR/term_read_key_safety" -O0 -g
+printf 'AB' | "$TMP_DIR/term_read_key_safety" alias > "$TMP_DIR/trk.out"
+test "$(cat "$TMP_DIR/trk.out")" = "term-read-key-distinct"
+if printf '\303' | "$TMP_DIR/term_read_key_safety" badbyte \
+     > "$TMP_DIR/trk_bad.out" 2> "$TMP_DIR/trk_bad.err"; then
+  echo "  term_read_key did not abort on a non-ASCII byte" >&2
+  cat "$TMP_DIR/trk_bad.out" >&2
+  exit 1
+fi
+grep -q "non-ASCII" "$TMP_DIR/trk_bad.err" || {
+  echo "  term_read_key aborted without the expected message:" >&2
+  cat "$TMP_DIR/trk_bad.err" >&2
+  exit 1
+}
+
 echo "==> c runtime tests passed"

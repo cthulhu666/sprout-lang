@@ -1992,7 +1992,6 @@ long long term_show_cursor(void) {
   return 0;
 }
 long long term_read_key(void) {
-  static char buf[2] = {0, 0};
   static const char* token_ctrl_a = "ctrl-a";
   static const char* token_ctrl_b = "ctrl-b";
   static const char* token_ctrl_d = "ctrl-d";
@@ -2007,8 +2006,6 @@ long long term_read_key(void) {
   static const char* token_right = "right";
   static const char* token_tab = "tab";
   static const char* token_up = "up";
-  buf[0] = '\0';
-  buf[1] = '\0';
   int ch = EOF;
   if (!isatty(STDIN_FILENO)) {
     ch = getchar();
@@ -2053,7 +2050,7 @@ long long term_read_key(void) {
       }
     }
   }
-  if (ch == EOF) return (long long)(uintptr_t)buf;
+  if (ch == EOF) return (long long)(uintptr_t)"";
   if (ch == 1) return (long long)(uintptr_t)token_ctrl_a;
   if (ch == 2) return (long long)(uintptr_t)token_ctrl_b;
   if (ch == 4) return (long long)(uintptr_t)token_ctrl_d;
@@ -2064,8 +2061,21 @@ long long term_read_key(void) {
   if (ch == 27) return (long long)(uintptr_t)token_escape;
   if (ch == '\n' || ch == '\r') return (long long)(uintptr_t)token_enter;
   if (ch == '\t') return (long long)(uintptr_t)token_tab;
-  buf[0] = (char)ch;
-  return (long long)(uintptr_t)buf;
+  /* A single read() byte >= 0x80 is at most the lead of a multibyte sequence,
+   * never a complete UTF-8 char, so returning it would mint an invalid String.
+   * Reject with a clean panic, uniform with the other UTF-8 builtins (review
+   * W2/R4); assembling a full multibyte key is a separate deferred feature. */
+  if (ch >= 0x80)
+    tcp_fail("term_read_key: non-ASCII byte cannot form a complete UTF-8 char");
+  /* Heap-allocate a fresh String per keypress so a retained result never
+   * mutates under the caller on the next call (the old static-buffer aliasing). */
+  sprout_gc_maybe_collect_threshold();
+  char* out = (char*)malloc(2);
+  if (out == NULL) tcp_fail("term_read_key: out of memory");
+  out[0] = (char)ch;
+  out[1] = '\0';
+  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
+  return (long long)(uintptr_t)out;
 }
 long long term_write(long long text_val) {
   const char* text = (const char*)text_val;
@@ -3745,14 +3755,37 @@ static size_t sprout_utf8_char_width(unsigned char lead) {
   if ((lead & 0xE0) == 0xC0) return 2;
   if ((lead & 0xF0) == 0xE0) return 3;
   if ((lead & 0xF8) == 0xF0) return 4;
-  tcp_fail("str_len: invalid UTF-8 lead byte");
+  tcp_fail("str_utf8: invalid UTF-8 lead byte");
   return 1;
 }
 
+/* Validated forward step: the byte width of the UTF-8 char at s[i], having
+ * verified every continuation byte s[i+1 .. i+width-1] is present (before the
+ * NUL) and matches the 0b10xxxxxx pattern. Panics via tcp_fail on a truncated
+ * or malformed sequence.
+ *
+ * Safety: the scan stops at the first NUL — always inside the allocation, since
+ * Sprout Strings are NUL-terminated — so it never reads past the terminator,
+ * even on a malformed String. Every walker below routes through this, making
+ * them the last line of defense until ingestion validation lands (review W2/R2).
+ * Callers pass i at a codepoint boundary with s[i] != '\0'. */
+static size_t sprout_utf8_step(const char* s, size_t i) {
+  size_t width = sprout_utf8_char_width((unsigned char)s[i]);
+  for (size_t k = 1; k < width; k++) {
+    /* A NUL (0x00) fails this test too, so a truncated tail is rejected here
+     * before the width-byte advance could overshoot the terminator. */
+    if (((unsigned char)s[i + k] & 0xC0) != 0x80)
+      tcp_fail("str_utf8: truncated or malformed UTF-8 sequence");
+  }
+  return width;
+}
+
 /* Decode the Unicode codepoint of the `width`-byte UTF-8 sequence at s[pos].
- * Mirrors stdlib.compiler.source.decode_codepoint_at; assumes valid UTF-8
- * (callers get `width` from sprout_utf8_char_width over a NUL-terminated str).
- * Returns the codepoint as an i64 — the runtime representation of a Sprout Char. */
+ * Mirrors stdlib.compiler.source.decode_codepoint_at. `width` MUST come from
+ * sprout_utf8_step (not the bare sprout_utf8_char_width), which guarantees all
+ * continuation bytes are present — so the u[1..width-1] reads below are in
+ * bounds. Returns the codepoint as an i64 — the runtime representation of a
+ * Sprout Char. */
 static long long sprout_utf8_decode_at(const char* s, size_t pos, size_t width) {
   const unsigned char* u = (const unsigned char*)(s + pos);
   switch (width) {
@@ -3767,7 +3800,7 @@ static size_t sprout_utf8_codepoint_count(const char* s) {
   size_t count = 0;
   size_t i = 0;
   while (s[i] != '\0') {
-    i += sprout_utf8_char_width((unsigned char)s[i]);
+    i += sprout_utf8_step(s, i);
     count++;
   }
   return count;
@@ -3777,7 +3810,7 @@ static size_t sprout_utf8_byte_offset(const char* s, size_t codepoint_offset) {
   size_t i = 0;
   size_t count = 0;
   while (s[i] != '\0' && count < codepoint_offset) {
-    i += sprout_utf8_char_width((unsigned char)s[i]);
+    i += sprout_utf8_step(s, i);
     count++;
   }
   return i;
@@ -3874,14 +3907,14 @@ long long str_char_at(long long s_val, long long index) {
   size_t byte_pos = 0;
   long long cp_idx = 0;
   while (s[byte_pos] != '\0') {
+    size_t width = sprout_utf8_step(s, byte_pos);
     if (cp_idx == index) {
       /* A Sprout Char is its Unicode codepoint (immediate i64), so return the
        * decoded codepoint directly — no allocation. */
-      size_t width = sprout_utf8_char_width((unsigned char)s[byte_pos]);
       return sprout_make1(find_ctor_tag_by_name("Just"),
                           sprout_utf8_decode_at(s, byte_pos, width));
     }
-    byte_pos += sprout_utf8_char_width((unsigned char)s[byte_pos]);
+    byte_pos += width;
     cp_idx++;
   }
   return sprout_make0(find_ctor_tag_by_name("Nothing"));
@@ -4044,13 +4077,13 @@ SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   size_t byte_pos = 0;
   long long cp_idx = 0;
   while (s[byte_pos] != '\0') {
+    size_t width = sprout_utf8_step(s, byte_pos);
     if (cp_idx == index) {
       /* A Sprout Char is its Unicode codepoint (immediate i64) — return it. */
-      size_t width = sprout_utf8_char_width((unsigned char)s[byte_pos]);
       return (SproutUnboxed2){ cached_tag_just(),
                                (int64_t)sprout_utf8_decode_at(s, byte_pos, width) };
     }
-    byte_pos += sprout_utf8_char_width((unsigned char)s[byte_pos]);
+    byte_pos += width;
     cp_idx++;
   }
   return (SproutUnboxed2){ cached_tag_nothing(), 0 };
@@ -4144,7 +4177,7 @@ long long str_find(long long haystack_val, long long needle_val) {
   size_t count = 0;
   size_t i = 0;
   while (i < prefix_len) {
-    i += sprout_utf8_char_width((unsigned char)haystack[i]);
+    i += sprout_utf8_step(haystack, i);
     count++;
   }
   return (long long)count;
@@ -4251,7 +4284,7 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
     buf_append_cstr(&out, replacement_now);
     if (end == 0) {
       if (cursor[0] == '\0') break;
-      size_t width = sprout_utf8_char_width((unsigned char)cursor[0]);
+      size_t width = sprout_utf8_step(cursor, 0);
       buf_append_bytes(&out, cursor, width);
       cursor += width;
     } else {
@@ -4283,7 +4316,18 @@ long long regex_escape(long long raw_i) {
   return (long long)(uintptr_t)result;
 }
 
+/* A Sprout Char is a Unicode scalar value: 0 .. 0x10FFFF, excluding the UTF-16
+ * surrogate range D800 .. DFFF. These are exactly the codepoints utf8_validate
+ * accepts. Encoding an out-of-range value would mint an invalid-UTF-8 String
+ * (or an invalid Char), so both the Int->String and Int->Char constructors
+ * reject it with a clean panic (a Maybe-returning surface API is future work,
+ * pending the ingestion-policy decision — review W2/D4). */
+static void sprout_validate_codepoint(long long cp, const char* who) {
+  if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) tcp_fail(who);
+}
+
 long long char_to_str(long long codepoint) {
+  sprout_validate_codepoint(codepoint, "char_to_str: codepoint out of Unicode range");
   unsigned int cp = (unsigned int)codepoint;
   char buf[5];
   size_t len;
@@ -4322,6 +4366,7 @@ long long char_to_string(long long ch) {
  * this is the identity.  Retained as the typed Int->Char constructor at the
  * Sprout level (char_to_str / char_to_string only produce String). */
 long long char_from_codepoint(long long codepoint) {
+  sprout_validate_codepoint(codepoint, "char_from_codepoint: codepoint out of Unicode range");
   return codepoint;
 }
 
@@ -4518,7 +4563,7 @@ static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_l
   size_t count = 0;
   size_t i = 0;
   while (s[i] != '\0' && i < byte_limit) {
-    i += sprout_utf8_char_width((unsigned char)s[i]);
+    i += sprout_utf8_step(s, i);
     count += 1;
   }
   return (long long)count;
