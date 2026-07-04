@@ -132,6 +132,8 @@ directly contends with the documented reason bare keying exists (own-module ADTs
    saturated application — is unaffected. Counterpart defect (checker rejecting function-typed
    returns because `ctor_result_type` over-stripped arrows) is fixed in `infer.sprout` via
    `fn_return_type`; regression: `tests/stdlib/test_function_returning_function.spr`.
+   The remaining crash is coupled to the currying model and to item 12 (`|>` semantics); both
+   are framed for decision in [currying-and-pipe-decision-v1.md](./currying-and-pipe-decision-v1.md).
 
 ## V1 Roadmap Candidates
 
@@ -194,6 +196,10 @@ directly contends with the documented reason bare keying exists (own-module ADTs
    explicit lambdas (`x |> fn(y) = f(a, y)`), adopt Elixir-style value-first (`f(x, a, b)`),
    or keep as-is. First-class use is already covered by `pipe_apply` in the prelude.
    Decision deferred; current behaviour unchanged.
+   **Coupled with item 9 (currying model)** — the two are one decision, framed together in
+   [currying-and-pipe-decision-v1.md](./currying-and-pipe-decision-v1.md): a curried Sprout
+   collapses this operator to the single rule `x |> g` ≡ `g(x)`; an n-ary Sprout keeps it as
+   parser sugar and resolves the two-mode shape syntactically.
 14. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
    Design doc: [observability-guard-rails.md](./observability-guard-rails.md).
    These features are not scheduled, but the design constraints in that doc must be respected in all Stage 2+ self-hosted compiler code so they remain practical to add. The six constraints — source locations first-class, explicit typed passes, explicit capability passing, no premature pass fusion, type survival into typed core, accurate effect annotations — are active guard rails, not future work items.
