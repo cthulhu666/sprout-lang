@@ -38,6 +38,7 @@ fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
       is_pure_callee_type(typed_ast.typed_expr_type(callee)) &&
       is_pure_expr(callee) && all_pure_list(args)
   | typed_ast.TDict _ _ _ _ -> true
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.is_pure_expr: TMethodRef survived lowering (internal error)")
   | typed_ast.TLambda _ _ _ _ -> true
   | typed_ast.TBinary _ l r _ _ -> is_pure_expr(l) && is_pure_expr(r)
   | typed_ast.TUnary _ operand _ _ -> is_pure_expr(operand)
@@ -111,6 +112,7 @@ fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TCall callee args _ _ ->
       is_free(name, callee) || any_free_list(name, args)
   | typed_ast.TDict _ _ _ _ -> false
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.is_free: TMethodRef survived lowering (internal error)")
   | typed_ast.TLambda params body _ _ ->
       if params_bind(name, params) then false else is_free(name, body)
   | typed_ast.TBinary _ l r _ _ -> is_free(name, l) || is_free(name, r)
@@ -176,6 +178,7 @@ fn elim_expr(e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   | typed_ast.TCall callee args t p ->
       typed_ast.TCall(elim_expr(callee), elim_list(args), t, p)
   | typed_ast.TDict _ _ _ _ -> e
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.elim_expr: TMethodRef survived lowering (internal error)")
   | typed_ast.TLambda params body t p ->
       typed_ast.TLambda(params, elim_expr(body), t, p)
   | typed_ast.TBinary op l r t p ->

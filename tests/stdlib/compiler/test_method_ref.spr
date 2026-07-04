@@ -1,0 +1,55 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+# M3b-4a: value-position class-method references are carried by a dedicated
+# TypedExpr node, TMethodRef, so inference can attach dictionary Evidence to a
+# method used as a value (not immediately applied). Fields:
+#   TMethodRef method_name class_name types.Type source.SourcePos Evidence
+# The type accessor returns field 3, the pos accessor returns field 4, and the
+# Evidence starts as EvUnresolved (populated by resolve in M3b-4b).
+
+fn mref() -> typed_ast.TypedExpr =
+  typed_ast.TMethodRef("show", "Show", types.TConst("String"), source.SourcePos(0, 7, 3),
+    typed_ast.EvUnresolved)
+
+fn ev_is_unresolved(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvUnresolved -> true
+  | _ -> false
+
+fn mref_evidence(e: typed_ast.TypedExpr) -> typed_ast.Evidence =
+  match e with
+  | typed_ast.TMethodRef _ _ _ _ ev -> ev
+  | _ -> typed_ast.EvUnresolved
+
+fn mref_names(e: typed_ast.TypedExpr) -> (String, String) =
+  match e with
+  | typed_ast.TMethodRef method class_name _ _ _ -> (method, class_name)
+  | _ -> ("", "")
+
+fn type_name(t: types.Type) -> String =
+  match t with
+  | types.TConst n -> n
+  | _ -> "?"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "TMethodRef method name", first_of(mref_names(mref())), "show")
+    assert_eq(state, "TMethodRef class name", second_of(mref_names(mref())), "Show")
+    assert_eq(state, "TMethodRef type accessor",
+      type_name(typed_ast.typed_expr_type(mref())), "String")
+    assert_eq(state, "TMethodRef pos-line accessor",
+      source.position_line(typed_ast.typed_expr_pos(mref())), 7)
+    assert_true(state, "TMethodRef starts EvUnresolved", ev_is_unresolved(mref_evidence(mref())))
+    summary(state)
+
+fn first_of(p: (String, String)) -> String =
+  match p with
+  | (a, _) -> a
+
+fn second_of(p: (String, String)) -> String =
+  match p with
+  | (_, b) -> b

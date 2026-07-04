@@ -1330,6 +1330,7 @@ fn collect_free_vars(e: typed_ast.TypedExpr, bound: Set, acc: List String, seen:
   | typed_ast.TDo steps _ _ ->
       collect_free_vars_steps(steps, bound, acc, seen)
   | typed_ast.TDict _ _ _ _ -> (acc, seen)
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("codegen.collect_free_vars: TMethodRef survived lowering (internal error)")
   | typed_ast.TRecord _ _ _ _ -> (acc, seen)
   | typed_ast.TGetField obj _ _ _ ->
       collect_free_vars(obj, bound, acc, seen)
@@ -1798,6 +1799,8 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
   | typed_ast.TDict _ ty _ _ ->
       # TDict nodes should be eliminated by lowering; treat as unit if we see one
       zero_val(type_to_ll(ty))
+  | typed_ast.TMethodRef _ _ _ _ _ ->
+      panic("codegen.emit_expr: TMethodRef survived lowering (internal error)")
   | typed_ast.TRecord _ _ ty _ ->
       zero_val(type_to_ll(ty))
   | typed_ast.TGetField obj _ ty _ ->

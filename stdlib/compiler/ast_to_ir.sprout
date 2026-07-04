@@ -59,6 +59,7 @@ fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set, top_level: Set) -> S
   | typed_ast.TDo steps _ _ ->
       compute_free_vars_do_steps(steps, bound, top_level)
   | typed_ast.TDict _ _ _ _ -> set_empty()
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("ast_to_ir.compute_free_vars: TMethodRef survived lowering (internal error)")
   | typed_ast.TRecord _ fields _ _ ->
       compute_free_vars_record_fields(fields, bound, top_level)
   | typed_ast.TMatch scrut arms _ _ ->
@@ -831,6 +832,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                       captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                       name_prefix)
   | typed_ast.TDict _ _ _ _ -> Err("ast_to_ir: TDict not yet supported")
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("ast_to_ir.translate_expr: TMethodRef survived lowering (internal error)")
   | typed_ast.TLambda lparams body lam_ty _ ->
       translate_lambda(lparams, body, lam_ty, params, ctors, idx, cur_label, cur_ops,
                        captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
@@ -1378,6 +1380,7 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
       # FIX R4#6: mirror compute_free_vars_do_steps; walk steps threading shadow info.
       find_capture_type_do_steps(steps, name)
   | typed_ast.TDict _ _ _ _ -> Nothing
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("ast_to_ir.find_capture_type: TMethodRef survived lowering (internal error)")
   | typed_ast.TRecord _ fields _ _ ->
       find_capture_type_fields(fields, name)
   | typed_ast.TMatch scrut arms _ _ ->

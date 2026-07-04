@@ -466,6 +466,23 @@ export fn typecheck_expr(
 
 # --- Variable ---
 
+# A value-position reference to a class method (`@class:{name}` marker present)
+# becomes a TMethodRef carrying the class name, so lowering can eta-expand it
+# against the final substituted type and fill its dictionary from Evidence.
+# Callee-position methods never reach here — infer_call_var builds their TVar
+# directly.  Detection precision is not load-bearing yet: both the TVar and
+# TMethodRef lowering arms run the same eta reconstruction until M3b-4b.
+fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict types.Scheme) -> typed_ast.TypedExpr =
+  match dict_get("@class:" ++ name, env) with
+  | Nothing -> typed_ast.TVar(name, t, pos)
+  | Just marker ->
+      match marker with
+      | types.Scheme _ _ class_type _ ->
+          match class_type with
+          | types.TConst class_name ->
+              typed_ast.TMethodRef(name, class_name, t, pos, typed_ast.EvUnresolved)
+          | _ -> typed_ast.TVar(name, t, pos)
+
 fn infer_var(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -479,7 +496,7 @@ fn infer_var(
   | Just scheme ->
       do
         t <- unifier.instantiate(state, scheme)
-        InferOk(typed_ast.TVar(name, t, pos), subst, eff_subst, types.EffectPure)
+        InferOk(value_var_node(name, t, pos, env), subst, eff_subst, types.EffectPure)
 
 # --- If ---
 
@@ -3388,6 +3405,8 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
       typed_ast.TCall(apply_subst_typed_expr(subst, fn_), apply_subst_typed_expr_list(subst, args), unifier.apply_subst(subst, t), pos)
   | typed_ast.TDict constraint t pos ev ->
       typed_ast.TDict(constraint, unifier.apply_subst(subst, t), pos, ev)
+  | typed_ast.TMethodRef method class_name t pos ev ->
+      typed_ast.TMethodRef(method, class_name, unifier.apply_subst(subst, t), pos, ev)
   | typed_ast.TLambda params body t pos ->
       typed_ast.TLambda(params, apply_subst_typed_expr(subst, body), unifier.apply_subst(subst, t), pos)
   | typed_ast.TBinary op left right t pos ->
@@ -3658,6 +3677,7 @@ fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, e
         resolve_dispatch_typed_list(env, subst, args),
         t, pos)
   | typed_ast.TDict _ _ _ _ -> e
+  | typed_ast.TMethodRef _ _ _ _ _ -> e
   | typed_ast.TLambda params body t pos ->
       typed_ast.TLambda(params, resolve_dispatch_typed_expr(env, subst, body), t, pos)
   | typed_ast.TBinary op left right t pos ->
@@ -3750,6 +3770,7 @@ fn assert_resolved_typed_expr(fn_name: String, expr: typed_ast.TypedExpr) -> Uni
           assert_resolved_typed_expr(fn_name, fn_)
           assert_resolved_typed_expr_list(fn_name, args)
     | typed_ast.TDict _ _ _ _ -> ()
+    | typed_ast.TMethodRef _ _ _ _ _ -> ()
     | typed_ast.TLambda _ body _ _ -> assert_resolved_typed_expr(fn_name, body)
     | typed_ast.TBinary _ left right _ _ ->
         do

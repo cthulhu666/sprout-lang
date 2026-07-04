@@ -1116,24 +1116,31 @@ fn lower_expr_callee(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedE
 # Expression lowering
 # ---------------------------------------------------------------------------
 
-fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
-  match te with
-  | typed_ast.TVar name t pos ->
-      if list_member(name, ctx_bound_vars(ctx)) then
-        typed_ast.TVar(name, t, pos)
-      else
-        match find_eta_class_of_method(name, ctx) with
+# Lower a value-position variable reference.  Bound locals stay plain; an
+# unbound class-method name is eta-expanded into a dictionary-applied lambda
+# (or a forwarded slot).  Shared by the TVar and TMethodRef arms of lower_expr
+# so both drive the identical reconstruction.
+fn lower_value_var(name: String, t: types.Type, pos: source.SourcePos, ctx: LowerCtx) -> typed_ast.TypedExpr =
+  if list_member(name, ctx_bound_vars(ctx)) then
+    typed_ast.TVar(name, t, pos)
+  else
+    match find_eta_class_of_method(name, ctx) with
+    | Nothing ->
+        match try_eta_forwarded_without_class(name, t, ctx) with
+        | Just expanded -> lower_expr(expanded, ctx)
+        | Nothing -> typed_ast.TVar(name, t, pos)
+    | Just class_name ->
+        match try_eta_in_class(class_name, name, t, ctx) with
+        | Just expanded -> lower_expr(expanded, ctx)
         | Nothing ->
             match try_eta_forwarded_without_class(name, t, ctx) with
             | Just expanded -> lower_expr(expanded, ctx)
-            | Nothing -> typed_ast.TVar(name, t, pos)
-        | Just class_name ->
-            match try_eta_in_class(class_name, name, t, ctx) with
-            | Just expanded -> lower_expr(expanded, ctx)
-            | Nothing ->
-                match try_eta_forwarded_without_class(name, t, ctx) with
-                | Just expanded -> lower_expr(expanded, ctx)
-                | Nothing -> typed_ast.TVar("__eta_unresolved_" ++ string.after_last_dot(class_name) ++ "_" ++ string.after_last_dot(name), t, pos)
+            | Nothing -> typed_ast.TVar("__eta_unresolved_" ++ string.after_last_dot(class_name) ++ "_" ++ string.after_last_dot(name), t, pos)
+
+fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
+  match te with
+  | typed_ast.TVar name t pos -> lower_value_var(name, t, pos, ctx)
+  | typed_ast.TMethodRef name _ t pos _ -> lower_value_var(name, t, pos, ctx)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)

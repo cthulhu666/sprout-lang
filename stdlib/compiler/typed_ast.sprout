@@ -17,6 +17,13 @@ import stdlib.compiler.source as source
 # dictionary.  The lowering pass replaces TDict nodes with concrete instance
 # function references (or hidden parameters for polymorphic call sites).
 #
+# A class method used in *value* position (passed as a value, not immediately
+# applied — e.g. `map(show, xs)`) has no arguments to dispatch on, so inference
+# cannot resolve its dictionary at the use site.  Such references are carried by
+# TMethodRef (method_name, class_name, type, pos, Evidence); lowering eta-expands
+# them against the final substituted type, filling the dictionary from the
+# resolved Evidence just as it does for TDict at call sites.
+#
 # This design follows the "Trees That Grow" principle: the IR carries exactly
 # the information each downstream pass needs without ad-hoc attribute mutation.
 
@@ -60,6 +67,7 @@ export type TypedExpr (..) =
   | TMatch TypedExpr (List TypedMatchBranch) types.Type source.SourcePos
   | TCall TypedExpr (List TypedExpr) types.Type source.SourcePos
   | TDict ast.TypeConstraint types.Type source.SourcePos Evidence
+  | TMethodRef String String types.Type source.SourcePos Evidence
   | TLambda (List ast.Param) TypedExpr types.Type source.SourcePos
   | TBinary String TypedExpr TypedExpr types.Type source.SourcePos
   | TUnary String TypedExpr types.Type source.SourcePos
@@ -81,6 +89,7 @@ export fn typed_expr_type(e: TypedExpr) -> types.Type =
   | TMatch _ _ t _ -> t
   | TCall _ _ t _ -> t
   | TDict _ t _ _ -> t
+  | TMethodRef _ _ t _ _ -> t
   | TLambda _ _ t _ -> t
   | TBinary _ _ _ t _ -> t
   | TUnary _ _ t _ -> t
@@ -102,6 +111,7 @@ export fn typed_expr_pos(e: TypedExpr) -> source.SourcePos =
   | TMatch _ _ _ p -> p
   | TCall _ _ _ p -> p
   | TDict _ _ p _ -> p
+  | TMethodRef _ _ _ p _ -> p
   | TLambda _ _ _ p -> p
   | TBinary _ _ _ _ p -> p
   | TUnary _ _ _ p -> p

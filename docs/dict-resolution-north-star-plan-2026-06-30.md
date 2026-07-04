@@ -252,7 +252,8 @@ resolve+lowering work, so it is sequenced as four byte-identical increments:
 - **M3b-3** — lowering *consumes* Evidence on the call-position path (`expand_dict_witness_args`),
   falling back to `resolve_tdict` on `EvUnresolved`.
 - **M3b-4** — inference emits an evidence-carrying node for value-position class methods so
-  the eta path can consume Evidence.
+  the eta path can consume Evidence. Split: **4a** = dormant `TMethodRef` node (DONE, below);
+  **4b** = resolve populates it + lowering consumes (incl. the eta reroute).
 - **M3b-5** — delete `resolve_tdict`; lowering becomes a pure Evidence→witness printer.
 
 **The eta blocker (why M3b needs inference surgery).** `resolve_tdict` has three callers.
@@ -312,6 +313,44 @@ Two design facts emerged, both correcting earlier assumptions:
    phantom is the counterexample, found by the located panic firing during self-compile.
 New test: `tests/stdlib/test_dict_evidence_consumption.spr` (forwarded + concrete-at-call +
 super-having + nested-constrained shapes; compile-and-run regression).
+
+**M3b-4a — inference emits a value-position method node (dormant). DONE (2026-07-04).**
+Kuba chose the *localized new node* over eta-expanding in inference (Option A): a value-position
+class method used as a value (e.g. `list_map(to_string, xs)`) is now carried by a dedicated
+`typed_ast.TMethodRef method_name class_name types.Type source.SourcePos Evidence`, minted by a
+new `infer_var` helper `value_var_node` when the reference has an `@class:{name}` marker.
+Rationale over Option B: eta-expansion is a *desugaring*; doing it in inference would put
+synthetic lambdas in the typed AST, degrading the source-faithful LSP/TASTy artifact and the
+pass boundary (infer types / lower desugars). The extra node keeps value-position methods
+observable — the price of the ~24-site exhaustive-match ripple, which is mechanical and gated.
+
+4a is the M3b-1 analog: the node is emitted but **nothing consumes its Evidence yet**.
+Lowering's `TVar` eta body is extracted into a shared `lower_value_var(name, t, pos, ctx)`;
+both the `TVar` and new `TMethodRef` arms of `lower_expr` delegate to it, so whichever node
+inference emits, lowering runs the *identical* eta reconstruction (bound-var gate included).
+This makes 4a byte-identical **regardless** of `value_var_node`'s detection precision — the
+`TVar`/`TMethodRef` split only starts to matter in 4b when `TMethodRef` alone carries Evidence.
+
+Arm strategy for the 14 at-risk `TypedExpr` matches (census: 14 at-risk + 14 wildcard):
+- **Pre-lowering** (typed_ast `typed_expr_type`/`typed_expr_pos`; infer `apply_subst_typed_expr`,
+  `resolve_dispatch_typed_expr`, `assert_resolved_typed_expr`) — mirror `TVar`/`TDict`. `TMethodRef`
+  genuinely flows through these; `apply_subst_typed_expr` is what makes its type concrete (the head
+  lowering later reads).
+- **Post-lowering** (dce ×3, ast_to_ir ×3, codegen ×2) — **loud panic**. Lowering eliminates every
+  `TMethodRef` before dce/codegen run (`compile_phase_lower` = check→lower→dce→codegen), so these
+  arms are unreachable; a panic turns any future leak into a located oracle instead of silent
+  codegen corruption (the M3b-3 located-panic pattern).
+- `resolve.rewrite_expr`/`check_expr` wildcards pass `TMethodRef` through unchanged in 4a (Evidence
+  stays `EvUnresolved`); `rewrite_expr` gains a real arm in 4b.
+
+Verified: (1) byte-identical `--emit-ir` stage1(old-seed) vs stage2(new source) on all 158
+corpus files (0 diffs) via new `scripts/ir_byte_identical_check.sh`; (2) a temporary panic probe
+in `value_var_node` confirmed the path *fires* on real code (`to_string` in
+`tests/stdlib/test_to_string.spr:27`) — the byte-identity is not vacuous. New constructor test:
+`tests/stdlib/compiler/test_method_ref.spr`. Next: **M3b-4b** — `resolve.rewrite_expr` populates
+`TMethodRef` Evidence (incl. the eta **reroute**: `EvInstance(impl, [EvForward(inner-missing)])`
+reroutes to the outer slot at eta position, where the *same* shape null-fills at call position —
+the asymmetry the advisor flagged); lowering consumes it with `resolve_tdict` fallback.
 
 **If full M3b is ever done — design notes.** Option A: resolve emits `EvInstance` for the
 concrete subtree + an opaque `EvForward` marker; lowering fills the forward slot from
