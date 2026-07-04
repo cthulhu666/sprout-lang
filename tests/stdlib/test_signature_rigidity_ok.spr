@@ -1,0 +1,25 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# W3/F-RIGID positive guard: genuinely polymorphic signatures must STILL be
+# accepted after the rigidity check. Each declared type variable stays abstract
+# in these bodies (resolves to a variable, not a concrete type), so none is a
+# violation. If the post-hoc check over-rejects, these fail to compile.
+fn id_(x: a) -> a = x
+
+fn const_(x: a, y: b) -> a = x
+
+fn swap_(p: (a, b)) -> (b, a) =
+  match p with
+  | (x, y) -> (y, x)
+
+# Polymorphic result built from a value (Nil): a stays abstract.
+fn empty_() -> List a = Nil
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "polymorphic id at Int", id_(7), 7)
+    assert_eq(state, "polymorphic id at String", id_("hi"), "hi")
+    assert_eq(state, "polymorphic const", const_(42, "ignored"), 42)
+    assert_eq(state, "polymorphic swap", swap_((1, "a")), ("a", 1))
+    summary(state)

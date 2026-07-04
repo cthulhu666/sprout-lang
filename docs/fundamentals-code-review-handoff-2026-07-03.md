@@ -227,7 +227,31 @@ separate feature deferred to the D4 ingestion-policy decision.
 - **Gates:** runtime change → example canary (run, not just compile): `tuples`,
   `factorial`, `maybe_map`, `typeclass_collections_demo`, `fizzbuzz`.
 
-### W3 — F-RIGID + F-VALRESTR: signature rigidity and value restriction  [1-2S, CRITICAL, confirmed empirically]
+### W3 — F-RIGID + F-VALRESTR: signature rigidity and value restriction  [DONE 2026-07-04, CRITICAL, confirmed empirically]
+
+**Fixed (both holes), `infer.sprout`.** **F-RIGID via a post-hoc generalization check**,
+NOT skolemization — the advisor's call: skolemizing (declared tyvar → `TConst`) would
+change the `TVar` representation `@fwd`/`find_fwd_tdict_in_args` depend on and break dict
+forwarding for correct constrained functions. Instead body-checking is untouched (flexible
+vars, markers intact); after `check_fn_body`'s return-type unification, `rigidity_violation`
+walks the scheme's WRITTEN type-variable names and, for each, checks `apply_subst(s2, ·)` —
+if it resolved to a non-`TVar`, the body over-constrained it → "Signature too general for
+its body". Crucial subtlety surfaced by the self-compile oracle: `_unann`/`_unann_<param>`
+placeholders for UNANNOTATED returns/params are excluded (inference legitimately
+specializes them — e.g. `rcompose(f: a->b, g: b->c) = \x -> g(f(x))`, whose inferred
+return is `a->c`; the first self-compile attempt false-flagged it). **F-VALRESTR via
+syntactic value restriction** + ambiguity rejection: only syntactic values (`is_syntactic_value`:
+literals, variables, lambdas, tuples/constructor-apps of values) generalize; a non-value
+whose resolved type still has free type vars is REJECTED ("value restriction: … ambiguous
+polymorphic type"), because this compiler threads a `GlobalEnv` of schemes but NO global
+substitution, so a `mono` free var can't be shared across decls (SML's ungeneralizable-
+top-level-tyvar error). Both probes now rejected; genuine polymorphism (`id`/`const`/`swap`/
+`empty`) still accepted; self-compile reached a fixed point (oracle green). Tests:
+`tests/conformance/type_error/{rigid_signature,value_restriction}.spr` (+ `.err`),
+`tests/stdlib/test_signature_rigidity_ok.spr` (positive guard). Note: `not` is not a Sprout
+operator — negate with `== false`.
+
+<details><summary>original plan</summary>
 
 - **F-RIGID evidence:** probe `sr_rigid` type-checks (env shows `main.g : Int` with
   `main.f : Int -> Int`) and at runtime prints a pointer+1 (`4331685068`).
@@ -260,6 +284,8 @@ separate feature deferred to the D4 ingestion-policy decision.
 - **Regression tests:** `sr_rigid`, `sr_valrestr` must be REJECTED (negative tests);
   positive: polymorphic identity, mutual recursion with correct annotations still accepted.
 - **Gates:** compiler change → full §4 battery.
+
+</details>
 
 ### W4 — F-DISPATCH: class-method dict chosen by first concrete arg, not constraint position  [DONE 2026-07-04, CRITICAL, confirmed empirically]
 

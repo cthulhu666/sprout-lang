@@ -1,0 +1,13 @@
+module main
+
+# W3/F-RIGID: `f` declares `forall a. a -> Int`, but its body `x + 1` forces the
+# declared variable `a` to Int. `g` meanwhile calls `f("hello")` against the
+# forward-reference (pre-scan) `forall a` scheme. The declared signature is too
+# general for the body and must be rejected — otherwise `g` commits to f(String)
+# while the body treats it as Int, printing pointer garbage. (probe sr_rigid)
+fn g() -> Int = f("hello")
+
+fn f(x: a) -> Int = x + 1
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(g()))

@@ -4,7 +4,7 @@ import stdlib.collections (Functor, Foldable, List, Vec)
 fn add_one(x: Int) -> Int = x + 1
 fn add(acc: Int, x: Int) -> Int = acc + x
 
-fn map_and_sum(xs: c) -> Int where Functor c, Foldable c =
+fn map_and_sum(xs: f Int) -> Int where Functor f, Foldable f =
   fold(add, 0, map(add_one, xs))
 
 fn map_and_sum_list(xs: List Int) -> Int where Functor List, Foldable List =

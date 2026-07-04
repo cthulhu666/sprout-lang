@@ -1,0 +1,25 @@
+module main
+
+# W3/F-VALRESTR: a top-level `let` bound to a non-value (a function call) must
+# NOT be generalized. Without the value restriction, `cell` generalizes to
+# `forall a. MutVec (List a)`, so `stash` may write a `List Int` while
+# `read_back` reads it as a `List String` — both accepted, and unsound. With the
+# value restriction `cell` is monomorphic, so the write-Int / read-String uses
+# unify the element type and the program is correctly rejected. (probe sr_valrestr)
+let cell = mutvec_new(1, Nil)
+
+fn stash() -> Unit !{IO} =
+  mutvec_set(cell, 0, Cons(42, Nil))
+
+fn read_back() -> String !{IO} =
+  do
+    xs <- mutvec_get(cell, 0)
+    match xs with
+    | Cons s _ -> s
+    | Nil -> "empty"
+
+fn main() -> Unit !{IO} =
+  do
+    stash()
+    s <- read_back()
+    print(s)
