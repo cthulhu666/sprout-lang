@@ -6,7 +6,6 @@
 # as GC roots.
 #
 # Rooting mechanisms recognized:
-#   register_managed_ptr(var, ...)
 #   SPROUT_GC_PUSH_PTR_LOCAL(var) / SPROUT_GC_PUSH_I64_LOCAL(var)
 #   SPROUT_HANDLE(name, ...)
 #
@@ -127,8 +126,7 @@ function analyze(body, lineno,   gc_pos, sig, fn, before, after, body_before, v,
 
     # Remove variables already rooted before the GC call
     for (v in all_vars) {
-        if (index(before, "register_managed_ptr(" v ",") > 0 ||
-            index(before, "SPROUT_GC_PUSH_PTR_LOCAL(" v ")") > 0 ||
+        if (index(before, "SPROUT_GC_PUSH_PTR_LOCAL(" v ")") > 0 ||
             index(before, "SPROUT_GC_PUSH_I64_LOCAL(" v ")") > 0 ||
             index(before, "SPROUT_HANDLE(") > 0)
             delete all_vars[v]

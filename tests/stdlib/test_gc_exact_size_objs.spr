@@ -1,9 +1,9 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 
-# Regression net for exact-size SproutObj allocation: each ctor arity gets its
-# own block size and freelist class, freelists link through the tag word, and
-# field values must survive GC cycles and freelist reuse. Covers the arity
-# spectrum ends (0 has no f0; 9 is the max inline arity).
+# Regression net for exact-size OBJ allocation: each ctor arity gets its own
+# slot size and freelist class, freelists link through the slot's first payload
+# word (tag lives in the object header at payload-8), and field values must
+# survive GC cycles and freelist reuse. Covers the arity spectrum (0..9).
 
 type Spectrum (..) =
   | A0

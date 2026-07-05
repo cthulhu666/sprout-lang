@@ -43,7 +43,7 @@ fn main() -> Unit !{IO} =
 
     # str_slice: codepoint offset arithmetic on a surviving CSTR.
     assert_eq(state, "str_slice first 5 chars", str_slice(anchor_a, 0, 5), "hello")
-    assert_eq(state, "str_slice tail 5 chars", str_slice(anchor_a, 7, 12), "world")
+    assert_eq(state, "str_slice tail 5 chars", str_slice(anchor_a, 7, 5), "world")
 
     # Fresh allocations after churn must work — tests reuse of freed CSTR slots.
     let post = "post" ++ "-churn"

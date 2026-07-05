@@ -23,7 +23,20 @@ If you see `ll_ptr()` for String/Char in codegen, that is a regression. Canonica
 
 **Foundational invariant — relied on by every rooting helper.**
 
-Sprout's GC is **non-moving mark-sweep**: `sprout_gc_sweep` in `runtime/sprout_runtime.c` (~line 1063) walks the managed-node list; unmarked nodes are `free()`d, marked nodes have their `marked` flag reset and stay in place — never relocated, never compacted. The address of a live heap object is stable for the entire program lifetime.
+Sprout's GC is **non-moving mark-sweep**.  Every heap object occupies a 16-byte-aligned slot inside a 1 MiB region (`SproutRegion`).  Each slot begins with an 8-byte inline header at `payload_ptr - 8`; the payload starts at `payload_ptr`.  Header layout (64 bits):
+
+```
+bits  0– 7  kind   (SproutHeapKind: FREE=0, OBJ=1, CLOSURE=2, …, CSTR=10; POISON=0xFF)
+bit   8      color  (mark bit, toggled during the mark phase)
+bits  9–13  (reserved)
+bits 14–63  aux    (OBJ: (tag<<4)|arity; CSTR: byte length; CLOSURE: n_caps; TUPLE: word count; FREE/POISON: slot_bytes)
+```
+
+Per-region 1-bit slotmaps track live slot starts; `sprout_heap_lookup` does a binary search over the region table, verifies the slotmap bit, and rejects FREE-kind headers — giving exact membership in O(log region_count).  Large objects (slot > 4096 bytes) are stored as single-slot dedicated `malloc` blocks registered in the region table with `is_large=1`.
+
+`sprout_gc_sweep` (~line 1488 in `runtime/sprout_runtime.c`) runs three passes: (1) scan all slots — live slots clear their color bit; dead slots release external storage and get a FREE header (or a POISON header in lineage mode, retaining the corpse with the slotmap bit set); (2) release regions with no live and no poison objects (keeping at least one normal region); (3) rebuild per-class freelists from surviving FREE slots so future allocations reuse them without scanning.
+
+Because objects never move, the address of a live heap object is **stable for the entire program lifetime**.
 
 Implications for codegen / IR design:
 

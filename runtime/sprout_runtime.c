@@ -340,6 +340,9 @@ static void sprout_gc_collect_with_reason(const char* reason);
 static long long sprout_now_micros(void);
 static void* sprout_heap_lookup(void* p);
 static int sprout_obj_alloc_arity(int arity);
+void sprout_gc_trace_alloc(void* payload);
+void sprout_gc_trace_free(void* payload);
+static int g_gc_stress;  /* -1 until first read; defined below */
 
 static int sprout_debug_alloc_truthy(const char* value) {
   if (value == NULL || value[0] == '\0') return 0;
@@ -598,10 +601,11 @@ static inline void sprout_obj_write_tag(void* payload, long long tag, int arity)
 #define SPROUT_FREELIST_CLASSES 257                 /* classes 1..256 + sentinel */
 
 typedef struct {
-  char*     base;        /* malloc'd 1-MiB block (or single large object block) */
-  size_t    cap;         /* bytes in block (SPROUT_REGION_SIZE or slot_bytes) */
-  size_t    bump;        /* next free byte offset from base */
-  long long live_count;  /* objects marked live in last sweep */
+  char*     base;         /* malloc'd 1-MiB block (or single large object block) */
+  size_t    cap;          /* bytes in block (SPROUT_REGION_SIZE or slot_bytes) */
+  size_t    bump;         /* next free byte offset from base */
+  long long live_count;   /* objects marked live in last sweep */
+  long long poison_count; /* lineage corpses in this region (never released while > 0) */
   uint8_t*  slotmap;    /* 8192-byte bitmap (NULL for is_large) */
   int       is_large;   /* 1 = single large-object region */
 } SproutRegion;
@@ -609,6 +613,9 @@ typedef struct {
 static SproutRegion* g_regions = NULL;  /* sorted by base address */
 static size_t        g_region_count = 0;
 static size_t        g_region_cap   = 0;
+/* Hint index of a normal region with bump room; validated before use and
+ * refreshed on miss — table inserts/removals may shift it. */
+static size_t        g_open_region_hint = 0;
 
 /* Class freelist: index = slot_bytes/16 (class 1..256 for <= 4096-byte slots).
  * Free slot's header word = {kind=SPROUT_HEAP_FREE, aux=slot_bytes}.
@@ -683,6 +690,7 @@ static SproutRegion* open_new_region(void) {
   r.cap = SPROUT_REGION_SIZE;
   r.bump = 0;
   r.live_count = 0;
+  r.poison_count = 0;
   r.slotmap = slotmap;
   r.is_large = 0;
   region_table_insert(r);
@@ -693,6 +701,7 @@ static SproutRegion* open_new_region(void) {
     if ((uintptr_t)g_regions[mid].base < (uintptr_t)base) lo = mid + 1;
     else hi = mid;
   }
+  g_open_region_hint = lo;
   return &g_regions[lo];
 }
 
@@ -710,6 +719,56 @@ static SproutRegion* region_find(void* p) {
   return NULL;
 }
 
+/* ── GC profiling instrumentation (opt-in, off by default) ────────────────
+ * HOT counters (per-lookup / per-edge / per-slot) are gated at COMPILE time
+ * behind -DSPROUT_GC_PROFILE, so they are byte-for-byte absent from a default
+ * build.  COLD per-cycle counters and the exit dump are gated at RUNTIME on
+ * SPROUT_GC_PROFILE=1, so a profiling build stays silent until asked.
+ *
+ * Build a profiling binary, then run it:
+ *   clang <ir>.ll runtime/sprout_runtime.c -O2 -DSPROUT_GC_PROFILE ... -o bin
+ *   SPROUT_GC_PROFILE=1 ./bin   # dumps "[gc profile] ..." at exit */
+#if defined(SPROUT_GC_PROFILE)
+static unsigned long long g_prof_fmp_calls;                        /* hot */
+static unsigned long long g_prof_drain_edges, g_prof_sweep_visits; /* hot */
+static unsigned long long g_prof_trace_hits, g_prof_trace_misses;  /* hot: drain-phase lookup outcomes */
+static unsigned long long g_prof_freelist_hits;                    /* hot: alloc reuse from freelist */
+static unsigned long long g_prof_cycles, g_prof_mark_slots, g_prof_gc_us; /* cold */
+static int g_prof_enabled = -1;
+static int g_gc_tracing = 0;   /* set to 1 during drain to classify hit/miss */
+static int sprout_prof_on(void) {
+  if (g_prof_enabled < 0) {
+    const char* e = getenv("SPROUT_GC_PROFILE");
+    g_prof_enabled = (e && e[0] == '1') ? 1 : 0;
+  }
+  return g_prof_enabled;
+}
+/* Note a sprout_heap_lookup outcome; called once per invocation. */
+static void sprout_prof_note_probe(int hit) {
+  if (g_gc_tracing) {
+    if (hit) g_prof_trace_hits++;
+    else     g_prof_trace_misses++;
+  }
+}
+#  define SPROUT_PROF_HOT(stmt)  do { stmt; } while (0)
+#  define SPROUT_PROF_COLD(stmt) do { if (sprout_prof_on()) { stmt; } } while (0)
+__attribute__((destructor)) static void sprout_gc_profile_dump(void) {
+  if (!sprout_prof_on()) return;
+  fprintf(stderr,
+    "[gc profile] cycles=%llu heap_lookup_calls=%llu drain_edges=%llu "
+    "sweep_visits=%llu mark_root_slots=%llu gc_us=%llu "
+    "trace_hits=%llu trace_misses=%llu "
+    "region_count=%zu freelist_hits=%llu\n",
+    g_prof_cycles, g_prof_fmp_calls, g_prof_drain_edges,
+    g_prof_sweep_visits, g_prof_mark_slots, g_prof_gc_us,
+    g_prof_trace_hits, g_prof_trace_misses,
+    g_region_count, g_prof_freelist_hits);
+}
+#else
+#  define SPROUT_PROF_HOT(stmt)  ((void)0)
+#  define SPROUT_PROF_COLD(stmt) ((void)0)
+#endif
+
 /* Allocate one heap slot from the region arena. Selects from per-class freelist,
  * bump-allocates in the current open region, or opens a new region. Large objects
  * (slot_bytes > SPROUT_LARGE_THRESHOLD) get a dedicated malloc block.
@@ -721,18 +780,19 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     /* Large object path: dedicated malloc block. */
     char* block = (char*)malloc(needed_slot);
     if (block == NULL) tcp_fail(ctx);
-    uint64_t h = sprout_hdr_make(kind, aux);
-    memcpy(block, &h, 8);
+    sprout_hdr_write(block + 8, kind, aux);
     SproutRegion r;
     r.base = block;
     r.cap = needed_slot;
     r.bump = needed_slot;
     r.live_count = 0;
+    r.poison_count = 0;
     r.slotmap = NULL;
     r.is_large = 1;
     region_table_insert(r);
     g_managed_heap_count++;
     g_managed_alloc_since_gc++;
+    if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(block + 8);
     return block + 8;
   }
   size_t cls = needed_slot / SPROUT_SLOT_GRAN;  /* class 1..256 */
@@ -743,25 +803,29 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     void* next;
     memcpy(&next, payload, sizeof(void*));  /* next-ptr in payload word 0 */
     g_freelist[cls] = next;
-    uint64_t h = sprout_hdr_make(kind, aux);
-    memcpy((char*)payload - 8, &h, 8);
-    SproutRegion* r = region_find(payload);
-    if (r != NULL && !r->is_large) {
-      size_t off = (size_t)((char*)payload - r->base);
-      size_t slot = (off - 8) / SPROUT_SLOT_GRAN;
-      r->slotmap[slot / 8] |= (uint8_t)(1u << (slot % 8));
-    }
+    /* Slotmap bit stayed set while the slot was FREE (sprout_heap_lookup
+     * rejects FREE by header kind), so reuse is header-write only. */
+    sprout_hdr_write(payload, kind, aux);
+    SPROUT_PROF_HOT(g_prof_freelist_hits++);
     g_managed_heap_count++;
     g_managed_alloc_since_gc++;
+    if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(payload);
     return payload;
   }
-  /* Bump allocate: find the highest-base region with room, else open one. */
+  /* Bump allocate: try the hinted open region, else scan, else open one. */
   SproutRegion* r = NULL;
-  for (size_t i = g_region_count; i > 0; i--) {
-    SproutRegion* cand = &g_regions[i - 1];
-    if (!cand->is_large && cand->bump + needed_slot <= cand->cap) {
-      r = cand;
-      break;
+  if (g_open_region_hint < g_region_count) {
+    SproutRegion* cand = &g_regions[g_open_region_hint];
+    if (!cand->is_large && cand->bump + needed_slot <= cand->cap) r = cand;
+  }
+  if (r == NULL) {
+    for (size_t i = g_region_count; i > 0; i--) {
+      SproutRegion* cand = &g_regions[i - 1];
+      if (!cand->is_large && cand->bump + needed_slot <= cand->cap) {
+        r = cand;
+        g_open_region_hint = i - 1;
+        break;
+      }
     }
   }
   if (r == NULL) {
@@ -770,12 +834,12 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   size_t off = r->bump;
   r->bump += needed_slot;
   char* slot_base = r->base + off;
-  uint64_t h = sprout_hdr_make(kind, aux);
-  memcpy(slot_base, &h, 8);
+  sprout_hdr_write(slot_base + 8, kind, aux);
   size_t slot_idx = off / SPROUT_SLOT_GRAN;
   r->slotmap[slot_idx / 8] |= (uint8_t)(1u << (slot_idx % 8));
   g_managed_heap_count++;
   g_managed_alloc_since_gc++;
+  if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(slot_base + 8);
   return slot_base + 8;   /* payload pointer */
 }
 
@@ -802,6 +866,12 @@ static char* sprout_gc_adopt_cstr(char* buf, size_t len, const char* ctx) {
   free(buf);
   return out;
 }
+
+/* lldb anchors for scripts/gc_free_trace.py (`just gc-trace`): empty noinline
+ * functions fired per alloc/free ONLY under stress or lineage mode, so the
+ * tracer has stable symbols to break on with the payload as the argument. */
+__attribute__((noinline, used)) void sprout_gc_trace_alloc(void* payload) { (void)payload; }
+__attribute__((noinline, used)) void sprout_gc_trace_free(void* payload) { (void)payload; }
 
 static int g_gc_stress = -1;
 static void sprout_gc_maybe_collect_threshold(void) {
@@ -833,67 +903,6 @@ static void* unbox_ptr(long long h) {
   return (void*)(uintptr_t)h;
 }
 
-/* ── GC profiling instrumentation (opt-in, off by default) ────────────────
- * HOT counters (per-hop / per-edge / per-node — hundreds of millions of times)
- * are gated at COMPILE time behind -DSPROUT_GC_PROFILE, so they are byte-for-
- * byte absent from a default build: no counter, no branch, in the
- * sprout_heap_lookup / drain / sweep inner loops.  COLD per-cycle counters and
- * the exit dump are gated at RUNTIME on SPROUT_GC_PROFILE=1, so a profiling
- * build stays silent until asked (and pays ~nothing when the env is unset).
- *
- * Build a profiling binary, then run it:
- *   clang <ir>.ll runtime/sprout_runtime.c -O2 -DSPROUT_GC_PROFILE ... -o bin
- *   SPROUT_GC_PROFILE=1 ./bin            # dumps "[gc profile] ..." at exit
- * With the region allocator, sprout_heap_lookup is O(log region_count) with no
- * chain hops, so the hop counters are always 0 (kept for output compatibility). */
-#if defined(SPROUT_GC_PROFILE)
-static unsigned long long g_prof_fmp_calls, g_prof_fmp_hops;       /* hot */
-static unsigned long long g_prof_fmp_max_probe;                     /* hot: max chain length seen in a single lookup */
-static unsigned long long g_prof_drain_edges, g_prof_sweep_visits; /* hot */
-static unsigned long long g_prof_trace_hits, g_prof_trace_misses;  /* hot: drain-phase lookup outcomes */
-static unsigned long long g_prof_trace_hit_hops, g_prof_trace_miss_hops; /* hot: hops per outcome during drain */
-static unsigned long long g_prof_cycles, g_prof_mark_slots, g_prof_gc_us; /* cold */
-static int g_prof_enabled = -1;
-static int g_gc_tracing = 0;   /* set to 1 during drain to classify hit/miss hops */
-static int sprout_prof_on(void) {
-  if (g_prof_enabled < 0) {
-    const char* e = getenv("SPROUT_GC_PROFILE");
-    g_prof_enabled = (e && e[0] == '1') ? 1 : 0;
-  }
-  return g_prof_enabled;
-}
-/* Update per-call probe metrics; called once per sprout_heap_lookup invocation. */
-static void sprout_prof_note_probe(unsigned long long hops, int hit) {
-  if (hops > g_prof_fmp_max_probe) g_prof_fmp_max_probe = hops;
-  if (g_gc_tracing) {
-    if (hit) { g_prof_trace_hits++; g_prof_trace_hit_hops += hops; }
-    else     { g_prof_trace_misses++; g_prof_trace_miss_hops += hops; }
-  }
-}
-#  define SPROUT_PROF_HOT(stmt)  do { stmt; } while (0)
-#  define SPROUT_PROF_COLD(stmt) do { if (sprout_prof_on()) { stmt; } } while (0)
-__attribute__((destructor)) static void sprout_gc_profile_dump(void) {
-  if (!sprout_prof_on()) return;
-  double avg_hops = g_prof_fmp_calls ? (double)g_prof_fmp_hops / (double)g_prof_fmp_calls : 0.0;
-  unsigned long long drain_total = g_prof_trace_hit_hops + g_prof_trace_miss_hops;
-  double miss_hop_frac = drain_total ? (double)g_prof_trace_miss_hops / (double)drain_total : 0.0;
-  fprintf(stderr,
-    "[gc profile] cycles=%llu heap_lookup_calls=%llu total_hops=%llu "
-    "avg_probe_len=%.2f max_probe=%llu drain_edges=%llu sweep_visits=%llu "
-    "mark_root_slots=%llu gc_us=%llu "
-    "trace_hits=%llu trace_misses=%llu trace_hit_hops=%llu trace_miss_hops=%llu "
-    "miss_hop_frac=%.3f\n",
-    g_prof_cycles, g_prof_fmp_calls, g_prof_fmp_hops, avg_hops,
-    g_prof_fmp_max_probe, g_prof_drain_edges, g_prof_sweep_visits,
-    g_prof_mark_slots, g_prof_gc_us,
-    g_prof_trace_hits, g_prof_trace_misses, g_prof_trace_hit_hops,
-    g_prof_trace_miss_hops, miss_hop_frac);
-}
-#else
-#  define SPROUT_PROF_HOT(stmt)  ((void)0)
-#  define SPROUT_PROF_COLD(stmt) ((void)0)
-#endif
-
 /* Exact membership: p is a live payload iff (a) it falls in a region, (b) the
  * offset p-base is 8 mod 16 (payloads sit at slot+8), AND (c) the slotmap bit
  * for that slot is set (cleared while free or not-yet-allocated). Returns the
@@ -903,29 +912,36 @@ static void* sprout_heap_lookup(void* p) {
   SPROUT_PROF_HOT(g_prof_fmp_calls++);
   SproutRegion* r = region_find(p);
   if (r == NULL) {
-    SPROUT_PROF_HOT(sprout_prof_note_probe(0, 0));
+    SPROUT_PROF_HOT(sprout_prof_note_probe(0));
     return NULL;
   }
   if (r->is_large) {
     if (p == r->base + 8) {
-      SPROUT_PROF_HOT(sprout_prof_note_probe(0, 1));
+      SPROUT_PROF_HOT(sprout_prof_note_probe(1));
       return r->base;   /* header at base, payload at base+8 */
     }
-    SPROUT_PROF_HOT(sprout_prof_note_probe(0, 0));
+    SPROUT_PROF_HOT(sprout_prof_note_probe(0));
     return NULL;
   }
   size_t off = (size_t)((char*)p - r->base);
   /* Payload must be at slot+8; slot must be 16-aligned. */
   if (off < 8 || (off - 8) % SPROUT_SLOT_GRAN != 0) {
-    SPROUT_PROF_HOT(sprout_prof_note_probe(0, 0));
+    SPROUT_PROF_HOT(sprout_prof_note_probe(0));
     return NULL;
   }
   size_t slot = (off - 8) / SPROUT_SLOT_GRAN;  /* slot index of containing slot */
   if (!(r->slotmap[slot / 8] & (1u << (slot % 8)))) {
-    SPROUT_PROF_HOT(sprout_prof_note_probe(0, 0));
+    SPROUT_PROF_HOT(sprout_prof_note_probe(0));
     return NULL;
   }
-  SPROUT_PROF_HOT(sprout_prof_note_probe(0, 1));
+  /* FREE slots keep their slotmap bit (reuse is then header-write only);
+   * reject them here so dangling pointers to freed slots still miss. */
+  uint64_t h; memcpy(&h, (char*)p - 8, 8);
+  if ((h & 0xFF) == SPROUT_HEAP_FREE) {
+    SPROUT_PROF_HOT(sprout_prof_note_probe(0));
+    return NULL;
+  }
+  SPROUT_PROF_HOT(sprout_prof_note_probe(1));
   return (char*)p - 8;  /* header address */
 }
 
@@ -947,10 +963,6 @@ static int sprout_obj_alloc_arity(int arity) {
   return (sprout_gc_lineage_on() && arity < 2) ? 2 : arity;
 }
 
-static void register_obj(void* p, int arity) {
-  (void)p; (void)arity;
-  /* No-op: header and slotmap already set by sprout_gc_alloc_block. */
-}
 
 static void* sprout_alloc_obj_raw(int arity, const char* ctx) {
   sprout_gc_maybe_collect_threshold();
@@ -964,22 +976,6 @@ static void* sprout_alloc_obj_raw(int arity, const char* ctx) {
   /* Zero padding slots (lineage only: aa > arity); no-op in normal builds. */
   for (int i = arity; i < aa; i++) ((long long*)payload)[i] = 0;
   return payload;
-}
-
-/* Writes tag and first three fields; called only by make4..9 (arity >= 4).
- * Higher fields (f3+) are written by the caller; no zero-fill beyond [2]. */
-static void* sprout_init_obj(void* payload, int arity, long long tag,
-                             long long f0, long long f1, long long f2) {
-  sprout_obj_write_tag(payload, tag, arity);
-  ((long long*)payload)[0] = f0;
-  ((long long*)payload)[1] = f1;
-  ((long long*)payload)[2] = f2;
-  return payload;
-}
-
-static long long sprout_box_registered_obj(void* payload, int arity) {
-  (void)arity;
-  return box_ptr(payload);
 }
 
 static long long sprout_make_registered_obj(int arity, long long tag, long long a0, long long a1, long long a2, const char* ctx) {
@@ -1253,25 +1249,30 @@ long long ref_new(long long value) {
   return box_ptr(r);
 }
 
+/* Kind of the live heap object at p, or -1 when p is not a managed payload.
+ * Reads the header once via the address sprout_heap_lookup already resolved. */
+static int sprout_heap_kind_at(void* p) {
+  void* hdr = sprout_heap_lookup(p);
+  if (hdr == NULL) return -1;
+  uint64_t h; memcpy(&h, hdr, 8);
+  return (int)(h & 0xFF);
+}
+
 long long ref_read(long long ref) {
-  void* hdr = sprout_heap_lookup((void*)(uintptr_t)ref);
-  if (hdr == NULL || sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)ref)) != SPROUT_HEAP_REF)
+  if (sprout_heap_kind_at((void*)(uintptr_t)ref) != SPROUT_HEAP_REF)
     tcp_fail("ref_read: not a Ref");
   return ((RefVal*)(uintptr_t)ref)->value;
 }
 
 long long ref_write(long long ref, long long value) {
-  void* hdr = sprout_heap_lookup((void*)(uintptr_t)ref);
-  if (hdr == NULL || sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)ref)) != SPROUT_HEAP_REF)
+  if (sprout_heap_kind_at((void*)(uintptr_t)ref) != SPROUT_HEAP_REF)
     tcp_fail("ref_write: not a Ref");
   ((RefVal*)(uintptr_t)ref)->value = value;
   return 0;
 }
 
 static int is_obj_handle(long long h) {
-  void* hdr = sprout_heap_lookup((void*)(uintptr_t)h);
-  if (hdr == NULL) return 0;
-  return sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)h)) == SPROUT_HEAP_OBJ;
+  return sprout_heap_kind_at((void*)(uintptr_t)h) == SPROUT_HEAP_OBJ;
 }
 
 /* Number of GC-traceable children of a payload, derived from its inline header. */
@@ -1460,6 +1461,26 @@ static void sprout_release_payload_extras(void* payload, SproutHeapKind kind) {
   }
 }
 
+/* Null out any singleton handles that point to a payload being reclaimed. */
+static void sprout_gc_invalidate_singletons(void* payload) {
+  if (payload == g_nothing_singleton)    g_nothing_singleton    = NULL;
+  if (payload == g_irtheap_singleton)    g_irtheap_singleton    = NULL;
+  if (payload == g_irtscalar_singleton)  g_irtscalar_singleton  = NULL;
+  if (payload == g_irtunknown_singleton) g_irtunknown_singleton = NULL;
+}
+
+/* Return the slot walk stride for a header word.
+ * FREE or POISON: aux field (h>>14) floored at 16 bytes.
+ * Any live kind: slot_bytes(kind, aux). */
+static inline size_t sprout_slot_step(uint64_t h) {
+  uint64_t kind_bits = h & 0xFF;
+  if (kind_bits == SPROUT_HEAP_FREE || kind_bits == SPROUT_GC_POISON) {
+    size_t ssize = (size_t)(h >> 14);
+    return (ssize < 16) ? 16 : ssize;
+  }
+  return slot_bytes((SproutHeapKind)kind_bits, h >> 14);
+}
+
 /* Region-walking mark-sweep collector.  Pass 1: process every slot in every
  * region (live → clear color; dead → release extras + write FREE header + clear
  * slotmap, OR poison in lineage mode).  Pass 2: release regions with no live and
@@ -1476,36 +1497,24 @@ static void sprout_gc_sweep(void) {
   for (size_t ri = 0; ri < g_region_count; ri++) {
     SproutRegion* r = &g_regions[ri];
     if (r->is_large) {
+      /* OBJ (the only poisoned kind) is never large — max OBJ slot is 96 bytes
+       * — so large entries need no poison handling. */
       void* payload = r->base + 8;
       uint64_t h; memcpy(&h, r->base, 8);
-      uint64_t kind_bits = h & 0xFF;
-      if (kind_bits == SPROUT_GC_POISON) continue;  /* skip poison */
       if (h & SPROUT_GC_COLOR_BIT) {
         h &= ~SPROUT_GC_COLOR_BIT;
         memcpy(r->base, &h, 8);
         r->live_count = 1;
       } else {
         SproutHeapKind kind = sprout_hdr_kind(h);
-        if (payload == g_nothing_singleton) g_nothing_singleton = NULL;
-        if (payload == g_irtheap_singleton) g_irtheap_singleton = NULL;
-        if (payload == g_irtscalar_singleton) g_irtscalar_singleton = NULL;
-        if (payload == g_irtunknown_singleton) g_irtunknown_singleton = NULL;
-        if (lineage_on && kind == SPROUT_HEAP_OBJ) {
-          uint64_t phdr = SPROUT_GC_POISON | ((uint64_t)r->cap << 14);
-          memcpy(r->base, &phdr, 8);
-          void** frames = (void**)malloc(sizeof(void*) * 32);
-          int n = frames ? backtrace(frames, 32) : 0;
-          ((long long*)payload)[0] = (long long)(uintptr_t)frames;
-          ((long long*)payload)[1] = (long long)n;
-          r->live_count = -1;  /* poison marker: Pass 2 keeps it */
-        } else {
-          sprout_release_payload_extras(payload, kind);
-          free(r->base);
-          r->base = NULL;  /* mark for removal in Pass 2 */
-          g_managed_heap_count--;
-          g_debug_gc_swept++;
-          r->live_count = 0;
-        }
+        sprout_gc_invalidate_singletons(payload);
+        if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+        sprout_release_payload_extras(payload, kind);
+        free(r->base);
+        r->base = NULL;  /* mark for removal in Pass 2 */
+        g_managed_heap_count--;
+        g_debug_gc_swept++;
+        r->live_count = 0;
       }
       continue;
     }
@@ -1516,24 +1525,19 @@ static void sprout_gc_sweep(void) {
     size_t off = 0;
     while (off < r->bump) {
       uint64_t h; memcpy(&h, r->base + off, 8);
+      size_t ssize = sprout_slot_step(h);
       uint64_t kind_bits = h & 0xFF;
-      size_t ssize;
       if (kind_bits == SPROUT_HEAP_FREE) {
-        ssize = (size_t)(h >> 14);
-        if (ssize < 16) ssize = 16;
         off += ssize;
         continue;
       }
       if (kind_bits == SPROUT_GC_POISON) {
-        ssize = (size_t)(h >> 14);
-        if (ssize < 16) ssize = 16;
         region_poison++;
         off += ssize;
         continue;
       }
       SproutHeapKind kind = (SproutHeapKind)kind_bits;
       unsigned long long aux = h >> 14;
-      ssize = slot_bytes(kind, aux);
       void* payload = r->base + off + 8;
       if (h & SPROUT_GC_COLOR_BIT) {
         h &= ~SPROUT_GC_COLOR_BIT;
@@ -1559,10 +1563,7 @@ static void sprout_gc_sweep(void) {
         }
       } else {
         /* Dead slot. */
-        if (payload == g_nothing_singleton) g_nothing_singleton = NULL;
-        if (payload == g_irtheap_singleton) g_irtheap_singleton = NULL;
-        if (payload == g_irtscalar_singleton) g_irtscalar_singleton = NULL;
-        if (payload == g_irtunknown_singleton) g_irtunknown_singleton = NULL;
+        sprout_gc_invalidate_singletons(payload);
 
         if (sprout_gc_hdrcheck_on() && kind == SPROUT_HEAP_CSTR) {
           size_t actual_len = strlen((const char*)payload);
@@ -1582,13 +1583,19 @@ static void sprout_gc_sweep(void) {
           ((long long*)payload)[0] = (long long)(uintptr_t)frames;
           ((long long*)payload)[1] = (long long)n;
           region_poison++;
-          /* Slotmap bit STAYS set (dangling reads must resolve to corpse). */
+          /* Slotmap bit STAYS set (dangling reads must resolve to corpse).
+           * The corpse leaves the live count like any other dead object;
+           * only its memory is retained. */
+          g_managed_heap_count--;
+          g_debug_gc_swept++;
+          if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
         } else {
+          /* Slotmap bit stays set for FREE slots; sprout_heap_lookup rejects
+           * them by header kind, and reuse rewrites the header in place. */
+          if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
           sprout_release_payload_extras(payload, kind);
           uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)ssize << 14);
           memcpy(r->base + off, &free_hdr, 8);
-          size_t slot_idx = off / SPROUT_SLOT_GRAN;
-          r->slotmap[slot_idx / 8] &= (uint8_t)~(1u << (slot_idx % 8));
           g_managed_heap_count--;
           g_debug_gc_swept++;
         }
@@ -1597,7 +1604,7 @@ static void sprout_gc_sweep(void) {
       off += ssize;
     }
     r->live_count = region_live;
-    (void)region_poison;
+    r->poison_count = region_poison;
   }
 
   /* Pass 2: release empty regions (no live, no poison). Keep >= 1 normal region. */
@@ -1616,30 +1623,11 @@ static void sprout_gc_sweep(void) {
       }
       continue;
     }
-    if (r->live_count == 0) {
-      int has_poison = 0;
-      size_t off = 0;
-      while (off < r->bump) {
-        uint64_t h; memcpy(&h, r->base + off, 8);
-        uint64_t kind_bits = h & 0xFF;
-        if (kind_bits == SPROUT_GC_POISON) { has_poison = 1; break; }
-        size_t ssize;
-        if (kind_bits == SPROUT_HEAP_FREE) {
-          ssize = (size_t)(h >> 14);
-          if (ssize < 16) ssize = 16;
-        } else {
-          unsigned long long aux = h >> 14;
-          SproutHeapKind kind = (SproutHeapKind)kind_bits;
-          ssize = slot_bytes(kind, aux);
-        }
-        off += ssize;
-      }
-      if (!has_poison && kept_normal > 1) {
-        free(r->base);
-        free(r->slotmap);
-        kept_normal--;
-        region_table_remove(ri);
-      }
+    if (r->live_count == 0 && r->poison_count == 0 && kept_normal > 1) {
+      free(r->base);
+      free(r->slotmap);
+      kept_normal--;
+      region_table_remove(ri);
     }
   }
 
@@ -1656,24 +1644,14 @@ static void sprout_gc_sweep(void) {
     size_t off = 0;
     while (off < r->bump) {
       uint64_t h; memcpy(&h, r->base + off, 8);
-      uint64_t kind_bits = h & 0xFF;
-      size_t ssize;
-      if (kind_bits == SPROUT_HEAP_FREE) {
-        ssize = (size_t)(h >> 14);
-        if (ssize < 16) ssize = 16;
+      size_t ssize = sprout_slot_step(h);
+      if ((h & 0xFF) == SPROUT_HEAP_FREE) {
         size_t cls = ssize / SPROUT_SLOT_GRAN;
         if (cls < SPROUT_FREELIST_CLASSES) {
           void* payload = r->base + off + 8;
           memcpy(payload, &g_freelist[cls], sizeof(void*));
           g_freelist[cls] = payload;
         }
-      } else if (kind_bits == SPROUT_GC_POISON) {
-        ssize = (size_t)(h >> 14);
-        if (ssize < 16) ssize = 16;
-      } else {
-        unsigned long long aux = h >> 14;
-        SproutHeapKind kind2 = (SproutHeapKind)kind_bits;
-        ssize = slot_bytes(kind2, aux);
       }
       off += ssize;
     }
@@ -1808,7 +1786,8 @@ static void print_inline_obj(void* o) {
 static void print_inline_value(long long v) {
   void* hdr = sprout_heap_lookup((void*)(uintptr_t)v);
   if (hdr != NULL) {
-    SproutHeapKind kind = sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)v));
+    uint64_t h; memcpy(&h, hdr, 8);
+    SproutHeapKind kind = sprout_hdr_kind(h);
     if (kind == SPROUT_HEAP_CSTR) {
       printf("%s", (const char*)(uintptr_t)v);
     } else if (kind == SPROUT_HEAP_RANGE) {
@@ -1818,7 +1797,6 @@ static void print_inline_value(long long v) {
       /* Tuple blob: aux words, each a value (recurse).  Renders structurally
          like an ADT — e.g. (1, 7) — consistent with print's Bool-as-i64
          semantics (print(true) prints 1, not "true"). */
-      uint64_t h = sprout_hdr_of((void*)(uintptr_t)v);
       size_t n = (size_t)(h >> 14);
       printf("(");
       for (size_t i = 0; i < n; i++) {
@@ -1833,8 +1811,6 @@ static void print_inline_value(long long v) {
     } else {
       printf("%lld", v);
     }
-  } else if (is_obj_handle(v)) {
-    print_inline_obj(unbox_ptr(v));
   } else {
     printf("%lld", v);
   }
@@ -1902,15 +1878,13 @@ long long int_range(long long start, long long end) {
 }
 long long int_range_start(long long range_h) {
   IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
-  void* hdr = sprout_heap_lookup(value);
-  if (value == NULL || hdr == NULL || sprout_hdr_kind(sprout_hdr_of(value)) != SPROUT_HEAP_RANGE)
+  if (value == NULL || sprout_heap_kind_at(value) != SPROUT_HEAP_RANGE)
     tcp_fail("int_range_start: expected IntRange");
   return value->start;
 }
 long long int_range_end(long long range_h) {
   IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
-  void* hdr = sprout_heap_lookup(value);
-  if (value == NULL || hdr == NULL || sprout_hdr_kind(sprout_hdr_of(value)) != SPROUT_HEAP_RANGE)
+  if (value == NULL || sprout_heap_kind_at(value) != SPROUT_HEAP_RANGE)
     tcp_fail("int_range_end: expected IntRange");
   return value->end;
 }
@@ -1937,7 +1911,6 @@ long long sprout_nothing(long long tag) {
   if (g_nothing_singleton == NULL) {
     void* obj = sprout_alloc_obj_raw(0, "sprout_nothing: out of memory");
     sprout_obj_write_tag(obj, tag, 0);
-    register_obj(obj, 0);
     g_nothing_singleton = obj;
   }
   return box_ptr(g_nothing_singleton);
@@ -2700,8 +2673,7 @@ __attribute__((noreturn)) static void sprout_builtin_fail_detail(const char* bui
 }
 static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_handle_ptr, const char* builtin_name, const char* label) {
   long long vec_handle = (long long)(uintptr_t)vec_handle_ptr;
-  void* vec_hdr = sprout_heap_lookup((void*)(uintptr_t)vec_handle);
-  if (vec_hdr == NULL || sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)vec_handle)) != SPROUT_HEAP_OBJ) {
+  if (sprout_heap_kind_at((void*)(uintptr_t)vec_handle) != SPROUT_HEAP_OBJ) {
     char detail[128];
     snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
     sprout_builtin_fail_detail(builtin_name, detail);
@@ -2712,8 +2684,7 @@ static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_han
     sprout_builtin_fail_detail(builtin_name, detail);
   }
   long long raw_handle = sprout_field(vec_handle, 0);
-  void* raw_hdr = sprout_heap_lookup((void*)(uintptr_t)raw_handle);
-  if (raw_hdr == NULL || sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)raw_handle)) != SPROUT_HEAP_VECTOR) {
+  if (sprout_heap_kind_at((void*)(uintptr_t)raw_handle) != SPROUT_HEAP_VECTOR) {
     char detail[128];
     snprintf(detail, sizeof(detail), "expects %s to be Vec String", label);
     sprout_builtin_fail_detail(builtin_name, detail);
@@ -3824,7 +3795,6 @@ static long long get_or_make_singleton(void** slot, long long tag) {
   if (*slot == NULL) {
     void* obj = sprout_alloc_obj_raw(0, "sprout_make0: out of memory");
     sprout_obj_write_tag(obj, tag, 0);
-    register_obj(obj, 0);
     *slot = obj;
   }
   return box_ptr(*slot);
@@ -3913,49 +3883,49 @@ long long sprout_field(long long h, long long idx) {
   return ((long long*)(uintptr_t)h)[idx];
 }
 long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3) {
-  void* obj = sprout_init_obj(sprout_alloc_obj_raw(4, "sprout_make4: out of memory"), 4, tag, a0, a1, a2);
-  ((long long*)obj)[3] = a3;
-  return sprout_box_registered_obj(obj, 4);
+  void* obj = sprout_alloc_obj_raw(4, "sprout_make4: out of memory");
+  sprout_obj_write_tag(obj, tag, 4);
+  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1;
+  ((long long*)obj)[2] = a2; ((long long*)obj)[3] = a3;
+  return box_ptr(obj);
 }
 long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4) {
-  void* obj = sprout_init_obj(sprout_alloc_obj_raw(5, "sprout_make5: out of memory"), 5, tag, a0, a1, a2);
-  ((long long*)obj)[3] = a3;
-  ((long long*)obj)[4] = a4;
-  return sprout_box_registered_obj(obj, 5);
+  void* obj = sprout_alloc_obj_raw(5, "sprout_make5: out of memory");
+  sprout_obj_write_tag(obj, tag, 5);
+  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
+  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4;
+  return box_ptr(obj);
 }
 long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5) {
-  void* obj = sprout_init_obj(sprout_alloc_obj_raw(6, "sprout_make6: out of memory"), 6, tag, a0, a1, a2);
-  ((long long*)obj)[3] = a3;
-  ((long long*)obj)[4] = a4;
-  ((long long*)obj)[5] = a5;
-  return sprout_box_registered_obj(obj, 6);
+  void* obj = sprout_alloc_obj_raw(6, "sprout_make6: out of memory");
+  sprout_obj_write_tag(obj, tag, 6);
+  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
+  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
+  return box_ptr(obj);
 }
 long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6) {
-  void* obj = sprout_init_obj(sprout_alloc_obj_raw(7, "sprout_make7: out of memory"), 7, tag, a0, a1, a2);
-  ((long long*)obj)[3] = a3;
-  ((long long*)obj)[4] = a4;
-  ((long long*)obj)[5] = a5;
+  void* obj = sprout_alloc_obj_raw(7, "sprout_make7: out of memory");
+  sprout_obj_write_tag(obj, tag, 7);
+  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
+  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
   ((long long*)obj)[6] = a6;
-  return sprout_box_registered_obj(obj, 7);
+  return box_ptr(obj);
 }
 long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7) {
-  void* obj = sprout_init_obj(sprout_alloc_obj_raw(8, "sprout_make8: out of memory"), 8, tag, a0, a1, a2);
-  ((long long*)obj)[3] = a3;
-  ((long long*)obj)[4] = a4;
-  ((long long*)obj)[5] = a5;
-  ((long long*)obj)[6] = a6;
-  ((long long*)obj)[7] = a7;
-  return sprout_box_registered_obj(obj, 8);
+  void* obj = sprout_alloc_obj_raw(8, "sprout_make8: out of memory");
+  sprout_obj_write_tag(obj, tag, 8);
+  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
+  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
+  ((long long*)obj)[6] = a6; ((long long*)obj)[7] = a7;
+  return box_ptr(obj);
 }
 long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8) {
-  void* obj = sprout_init_obj(sprout_alloc_obj_raw(9, "sprout_make9: out of memory"), 9, tag, a0, a1, a2);
-  ((long long*)obj)[3] = a3;
-  ((long long*)obj)[4] = a4;
-  ((long long*)obj)[5] = a5;
-  ((long long*)obj)[6] = a6;
-  ((long long*)obj)[7] = a7;
-  ((long long*)obj)[8] = a8;
-  return sprout_box_registered_obj(obj, 9);
+  void* obj = sprout_alloc_obj_raw(9, "sprout_make9: out of memory");
+  sprout_obj_write_tag(obj, tag, 9);
+  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
+  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
+  ((long long*)obj)[6] = a6; ((long long*)obj)[7] = a7; ((long long*)obj)[8] = a8;
+  return box_ptr(obj);
 }
 
 __attribute__((noreturn)) void sprout_abort_match(void) {
@@ -4130,11 +4100,15 @@ _Bool str_eq(const char* left, const char* right) {
   /* Fast-reject: if both are managed CSTRs with differing byte lengths they
    * cannot be equal (strcmp is byte-wise, so length equality is necessary). */
   void* lhdr = sprout_heap_lookup((void*)left);
-  void* rhdr = sprout_heap_lookup((void*)right);
-  if (lhdr != NULL && sprout_hdr_kind(sprout_hdr_of((void*)left)) == SPROUT_HEAP_CSTR &&
-      rhdr != NULL && sprout_hdr_kind(sprout_hdr_of((void*)right)) == SPROUT_HEAP_CSTR) {
-    if (sprout_hdr_aux(sprout_hdr_of((void*)left)) !=
-        sprout_hdr_aux(sprout_hdr_of((void*)right))) return 0;
+  if (lhdr != NULL) {
+    void* rhdr = sprout_heap_lookup((void*)right);
+    if (rhdr != NULL) {
+      uint64_t lh, rh;
+      memcpy(&lh, lhdr, 8);
+      memcpy(&rh, rhdr, 8);
+      if ((lh & 0xFF) == SPROUT_HEAP_CSTR && (rh & 0xFF) == SPROUT_HEAP_CSTR &&
+          (lh >> 14) != (rh >> 14)) return 0;
+    }
   }
   return strcmp(left, right) == 0;
 }
@@ -4455,8 +4429,10 @@ long long str_byte_len(long long s_val) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_byte_len: null input");
   void* hdr = sprout_heap_lookup((void*)s);
-  if (hdr != NULL && sprout_hdr_kind(sprout_hdr_of((void*)s)) == SPROUT_HEAP_CSTR) {
-    unsigned long long len = sprout_hdr_aux(sprout_hdr_of((void*)s));
+  uint64_t h = 0;
+  if (hdr != NULL) memcpy(&h, hdr, 8);
+  if ((h & 0xFF) == SPROUT_HEAP_CSTR) {
+    unsigned long long len = (unsigned long long)(h >> 14);
     if (sprout_gc_hdrcheck_on()) {
       size_t actual = strlen(s);
       if (len != (unsigned long long)actual) {
@@ -6244,8 +6220,7 @@ long long vector_sort_by_int(long long decorated_list) {
   SortItem* items = NULL;
   long long cursor = decorated_list;
   while (1) {
-    void* node_hdr = sprout_heap_lookup((void*)(uintptr_t)cursor);
-    if (node_hdr == NULL || sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)cursor)) != SPROUT_HEAP_OBJ) {
+    if (sprout_heap_kind_at((void*)(uintptr_t)cursor) != SPROUT_HEAP_OBJ) {
       free(items);
       SPROUT_GC_POP_LOCALS(1);
       tcp_fail("vector_sort_by_int: expected List");
