@@ -1,0 +1,27 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# Regression guard for M3b-4b (resolve side): the resolve pass fills the
+# Evidence field of value-position class-method references (TMethodRef) by
+# deriving the class-parameter head type from the method's substituted type and
+# reusing produce_one_class.  A class method used as a first-class value (passed
+# to a higher-order function rather than applied directly) must still dispatch to
+# the correct concrete instance dictionary.
+
+fn apply_show(f: (Int) -> String, x: Int) -> String = f(x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(
+      state,
+      "to_string passed as a value dispatches to the Int instance",
+      apply_show(to_string, 7) == "7"
+    )
+    assert_true(
+      state,
+      "value-position to_string via list_map renders each element",
+      list_map(to_string, [1, 2, 3]) == ["1", "2", "3"]
+    )
+
+    summary(state)

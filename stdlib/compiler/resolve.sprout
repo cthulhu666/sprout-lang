@@ -37,19 +37,22 @@ export type ResolveResult (..) =
 # modules whose decls are NOT bundled into this program), and super_map
 # (class_name → direct superclass names, for transitive-super expansion — the same
 # source lowering's collect_super_map reads).
-type Tables = Tables(Dict Bool) (Dict (List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String))
+type Tables = Tables(Dict Bool) (Dict (List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String)) (Dict String)
 
 fn tables_exists(t: Tables) -> Dict Bool =
-  match t with | Tables e _ _ _ -> e
+  match t with | Tables e _ _ _ _ -> e
 
 fn tables_ctx(t: Tables) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
-  match t with | Tables _ c _ _ -> c
+  match t with | Tables _ c _ _ _ -> c
 
 fn tables_env(t: Tables) -> Dict types.Scheme =
-  match t with | Tables _ _ v _ -> v
+  match t with | Tables _ _ v _ _ -> v
 
 fn tables_super(t: Tables) -> Dict (List String) =
-  match t with | Tables _ _ _ s -> s
+  match t with | Tables _ _ _ s _ -> s
+
+fn tables_class_params(t: Tables) -> Dict String =
+  match t with | Tables _ _ _ _ p -> p
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -74,7 +77,7 @@ fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> Resol
 # ---------------------------------------------------------------------------
 
 fn build_tables(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Tables =
-  collect_tables(decls, Tables(dict_empty(), dict_empty(), env, collect_super_map(decls, dict_empty())))
+  collect_tables(decls, Tables(dict_empty(), dict_empty(), env, collect_super_map(decls, dict_empty()), collect_class_params(decls, dict_empty())))
 
 fn collect_tables(decls: List typed_ast.TypedDecl, acc: Tables) -> Tables =
   match decls with
@@ -96,7 +99,8 @@ fn add_instance(
         dict_set(constraint_key_from_tc(constraint), true, tables_exists(acc)),
         add_ctx(constraint_key_from_tc(constraint), type_args, inst_constraints, tables_ctx(acc)),
         tables_env(acc),
-        tables_super(acc))
+        tables_super(acc),
+        tables_class_params(acc))
 
 fn add_ctx(
   key: String,
@@ -320,6 +324,26 @@ fn extract_super_names(supers: List ast.TypeConstraint, acc: List String) -> Lis
       | ast.TypeConstraint super_name _ ->
           extract_super_names(rest, Cons(super_name, acc))
 
+# class_name → class-parameter name (e.g. "ToString" → "a"), the same table
+# lowering's ctx_class_params carries.  Used to derive a value-position class
+# method's head type from its (substituted) type.
+fn collect_class_params(decls: List typed_ast.TypedDecl, acc: Dict String) -> Dict String =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TPassThrough inner_decl ->
+          match inner_decl with
+          | ast.ClassDecl class_name params _ _ _ ->
+              collect_class_params(rest, add_class_param(class_name, params, acc))
+          | _ -> collect_class_params(rest, acc)
+      | _ -> collect_class_params(rest, acc)
+
+fn add_class_param(class_name: String, params: List String, acc: Dict String) -> Dict String =
+  match params with
+  | Nil -> acc
+  | Cons p _ -> dict_set(class_name, p, acc)
+
 # Class itself followed by all transitive superclasses in DFS order, deduplicated.
 fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =
   list_reverse(collect_supers_dfs(Cons(class_name, Nil), super_map, Nil))
@@ -346,6 +370,93 @@ fn list_str_member(x: String, xs: List String) -> Bool =
   match xs with
   | Nil -> false
   | Cons h t -> if h == x then true else list_str_member(x, t)
+
+# ---------------------------------------------------------------------------
+# Value-position class-method head derivation (ported from lowering.sprout so the
+# resolve pass can fill a TMethodRef's Evidence the same way lowering eta-expands
+# it). The `mr_` prefix avoids clashing with resolve's own helpers.
+# ---------------------------------------------------------------------------
+
+fn mr_first_concrete_head_str(t: types.Type) -> Maybe String =
+  match t with
+  | types.TConst name -> Just(string.after_last_dot(name))
+  | types.TApp base _ -> mr_first_concrete_head_str(base)
+  | _ -> Nothing
+
+fn mr_class_param_for(class_name: String, class_params: Dict String) -> Maybe String =
+  match dict_get(class_name, class_params) with
+  | Just param -> Just(param)
+  | Nothing -> dict_get(string.after_last_dot(class_name), class_params)
+
+fn mr_eta_class_type(class_name: String, method_name: String, actual_type: types.Type, fallback: types.Type, class_params: Dict String, scheme_env: Dict types.Scheme) -> types.Type =
+  match mr_class_param_for(class_name, class_params) with
+  | Nothing -> fallback
+  | Just class_param ->
+      match mr_lookup_method_scheme(method_name, scheme_env) with
+      | Nothing -> fallback
+      | Just scheme -> mr_eta_class_type_from_scheme(class_param, types.scheme_type(scheme), actual_type, fallback)
+
+fn mr_lookup_method_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
+  match dict_get(method_name, scheme_env) with
+  | Just scheme -> Just(scheme)
+  | Nothing -> dict_get(string.after_last_dot(method_name), scheme_env)
+
+fn mr_eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actual_type: types.Type, fallback: types.Type) -> types.Type =
+  match dict_get(class_param, match_type_vars(scheme_type, mr_eta_actual_type_for_scheme_match(scheme_type, actual_type), dict_empty())) with
+  | Nothing -> fallback
+  | Just class_type -> class_type
+
+fn mr_eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.Type) -> types.Type =
+  match scheme_type with
+  | types.TFunc _ _ _ -> actual_type
+  | _ ->
+      match actual_type with
+      | types.TFunc param ret _ ->
+          # Zero-arg methods are inferred as their result type, but can appear
+          # in value position as Unit -> result.
+          if type_is_unit(param) then ret else actual_type
+      | _ -> actual_type
+
+fn type_is_unit(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name -> string.after_last_dot(name) == "Unit"
+  | _ -> false
+
+fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
+  match pattern with
+  | types.TVar name -> dict_set(name, actual, acc)
+  | types.TConst _ -> acc
+  | types.TApp pbase parg ->
+      match actual with
+      | types.TApp abase aarg -> match_type_vars(parg, aarg, match_type_vars(pbase, abase, acc))
+      | _ -> acc
+  | types.TFunc pparam pret _ ->
+      match actual with
+      | types.TFunc aparam aret _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
+      | _ -> acc
+  | types.TTuple pitems ->
+      match actual with
+      | types.TTuple aitems -> match_type_var_lists(pitems, aitems, acc)
+      | _ -> acc
+
+fn match_type_var_lists(patterns: List types.Type, actuals: List types.Type, acc: Dict types.Type) -> Dict types.Type =
+  match (patterns, actuals) with
+  | (Nil, _) -> acc
+  | (_, Nil) -> acc
+  | (Cons p prest, Cons a arest) -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
+
+# Value-position class method: derive the class-parameter head type from the
+# method's (substituted) type via the class-method scheme, then reuse
+# produce_one_class for that single class. Non-derivable / non-concrete head →
+# EvUnresolved (lowering falls back to its own eta reconstruction).
+fn method_ref_evidence(method: String, class_name: String, t: types.Type, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.Evidence =
+  match mr_eta_class_type(class_name, method, t, t, tables_class_params(tables), tables_env(tables)) with
+  | class_type ->
+      match mr_first_concrete_head_str(class_type) with
+      | Nothing -> typed_ast.EvUnresolved
+      | Just _ ->
+          produce_one_class(class_name, typed_ast.type_to_type_expr(class_type),
+            Cons(typed_ast.type_to_type_expr(class_type), Nil), fwd_keys, tables)
 
 # ---------------------------------------------------------------------------
 # Evidence rewrite: fill every TDict's Evidence, structure otherwise unchanged
@@ -405,6 +516,8 @@ fn rewrite_expr(e: typed_ast.TypedExpr, fwd_keys: Dict Bool, tables: Tables) -> 
       typed_ast.TRecord(name, list_map(\f -> rewrite_field(f, fwd_keys, tables), fields), t, pos)
   | typed_ast.TGetField obj fld t pos ->
       typed_ast.TGetField(rewrite_expr(obj, fwd_keys, tables), fld, t, pos)
+  | typed_ast.TMethodRef method class_name t pos _ ->
+      typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(method, class_name, t, fwd_keys, tables))
   | _ -> e
 
 fn rewrite_branch(b: typed_ast.TypedMatchBranch, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedMatchBranch =

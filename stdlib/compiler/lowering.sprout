@@ -1140,7 +1140,15 @@ fn lower_value_var(name: String, t: types.Type, pos: source.SourcePos, ctx: Lowe
 fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   match te with
   | typed_ast.TVar name t pos -> lower_value_var(name, t, pos, ctx)
-  | typed_ast.TMethodRef name _ t pos _ -> lower_value_var(name, t, pos, ctx)
+  | typed_ast.TMethodRef name _ t pos ev ->
+      # A shadowed local is emitted as TMethodRef too — bound-var check first,
+      # then the clean Evidence path, else today's eta reconstruction.
+      if list_member(name, ctx_bound_vars(ctx)) then
+        lower_value_var(name, t, pos, ctx)
+      else
+        match eta_from_evidence(name, t, pos, ev, ctx) with
+        | Just lam -> lam
+        | Nothing -> lower_value_var(name, t, pos, ctx)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)
@@ -1406,6 +1414,35 @@ fn consume_inner_dicts(children: List typed_ast.Evidence, pos: source.SourcePos,
 
 fn pos_loc(pos: source.SourcePos) -> String =
   int_to_string(source.position_line(pos)) ++ ":" ++ int_to_string(source.position_column(pos))
+
+# M3b-4b: consume a value-position method's Evidence into an eta-lambda, REUSING
+# make_eta_lambda_with_dicts so the emitted lambda is byte-identical to today's
+# eta reconstruction.  Only the CLEAN concrete case is handled: a bundled
+# EvInstance whose method slot is in ctx_inst and whose inner context dicts all
+# resolve.  Every other shape — EvForward/EvUnresolved/EvMissing, a non-concrete
+# head, or an inner forward-miss that today's path REROUTES to the outer slot
+# (surfacing here as a __unresolved_ sentinel) — returns Nothing, and the caller
+# falls back to lower_value_var (today's reconstruction).  Reroute-in-Evidence is
+# deferred to M3b-5; the clean case here is the eta analog of M3b-3's call path.
+# An empty-children EvInstance yields make_eta_lambda_with_dicts(impl, t, []),
+# which is identical to make_eta_lambda(impl, t) — today's no-inner-dict outcome.
+fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: typed_ast.Evidence, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match ev with
+  | typed_ast.EvInstance _ key children ->
+      if evidence_list_fully_resolved(children) then
+        eta_from_instance(method, key, t, pos, consume_inner_dicts(children, pos, ctx), ctx)
+      else Nothing
+  | _ -> Nothing
+
+fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  if has_unresolved_dict(inner_dicts) then Nothing
+  else
+    match dict_get(key, ctx_inst(ctx)) with
+    | Nothing -> Nothing
+    | Just method_map ->
+        match dict_get_method(method, method_map) with
+        | Nothing -> Nothing
+        | Just impl_name -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, pos))
 
 # ---------------------------------------------------------------------------
 # Inner-dict helpers: type unification, substitution, lambda wrapping

@@ -253,7 +253,8 @@ resolve+lowering work, so it is sequenced as four byte-identical increments:
   falling back to `resolve_tdict` on `EvUnresolved`.
 - **M3b-4** — inference emits an evidence-carrying node for value-position class methods so
   the eta path can consume Evidence. Split: **4a** = dormant `TMethodRef` node (DONE, below);
-  **4b** = resolve populates it + lowering consumes (incl. the eta reroute).
+  **4b** = resolve populates it + lowering consumes the CLEAN concrete case (DONE, below); the
+  eta **reroute** is deferred to M3b-5 (handled by the `resolve_tdict` fallback, byte-identical).
 - **M3b-5** — delete `resolve_tdict`; lowering becomes a pure Evidence→witness printer.
 
 **The eta blocker (why M3b needs inference surgery).** `resolve_tdict` has three callers.
@@ -347,10 +348,51 @@ Verified: (1) byte-identical `--emit-ir` stage1(old-seed) vs stage2(new source) 
 corpus files (0 diffs) via new `scripts/ir_byte_identical_check.sh`; (2) a temporary panic probe
 in `value_var_node` confirmed the path *fires* on real code (`to_string` in
 `tests/stdlib/test_to_string.spr:27`) — the byte-identity is not vacuous. New constructor test:
-`tests/stdlib/compiler/test_method_ref.spr`. Next: **M3b-4b** — `resolve.rewrite_expr` populates
-`TMethodRef` Evidence (incl. the eta **reroute**: `EvInstance(impl, [EvForward(inner-missing)])`
-reroutes to the outer slot at eta position, where the *same* shape null-fills at call position —
-the asymmetry the advisor flagged); lowering consumes it with `resolve_tdict` fallback.
+`tests/stdlib/compiler/test_method_ref.spr`.
+
+**M3b-4b — resolve populates + lowering consumes the CLEAN eta case. DONE (2026-07-05).**
+Scope was REFINED from the original "incl. the eta reroute" to "clean cases via Evidence, reroute
+deferred to M3b-5" (advisor, on the finding below). A faithful M3b-3 analog for the value-position
+path.
+
+*Resolve side.* `rewrite_expr` gains a `TMethodRef` arm calling `method_ref_evidence`, which
+derives the class-parameter head type from the method's (substituted) type and reuses
+`produce_one_class` for that SINGLE class (not the super-expanding `produce_evidence` wrapper — a
+method ref extracts one class's slot). The head derivation (`mr_eta_class_type` + `match_type_vars`
++ helpers) is ported ~verbatim from lowering; it needs the class→param map, so a 5th `Tables` field
+`class_params: Dict String` was added (built by `collect_class_params` from `ClassDecl`
+TPassThroughs, same scan shape as `collect_super_map`). Non-concrete / non-derivable head →
+`EvUnresolved` (lowering falls back).
+
+*Lowering side.* `lower_expr`'s `TMethodRef` arm: bound-var check first (a shadowed local is still
+emitted as `TMethodRef`), then `eta_from_evidence`, else `lower_value_var` (today's reconstruction).
+`eta_from_evidence` handles ONLY the clean case — a bundled `EvInstance` whose method slot is in
+`ctx_inst` and whose inner context dicts (consumed via M3b-3's `consume_inner_dicts`) contain no
+`__unresolved_` sentinel — building `make_eta_lambda_with_dicts(impl, t, inner_dicts, pos)`. An
+empty-children `EvInstance` yields the same node as today's `make_eta_lambda(impl, t)` (outcome 3);
+non-empty is outcome 4. Everything else returns `Nothing` → fallback: `EvForward` (forwarded or
+phantom), `EvUnresolved`/`EvMissing`, non-concrete head, and the **reroute** (an inner forward-miss
+surfaces as a `__unresolved_` sentinel in the consumed dicts → `has_unresolved_dict` → fall back,
+where `lower_value_var` reroutes to the outer slot exactly as today). Reroute-in-Evidence is M3b-5.
+
+*The finding that refined scope.* The eta path's ONLY `resolve_tdict` calls are for inner context
+dicts; the impl-vs-forward decision and reroute trigger are plain `ctx` lookups. So only inner-dict
+resolution needed Evidence-ifying; the reroute is reachable only through it and the existing
+reconstruction handles it byte-identically — so deferring it (fallback) is a real M3b-3 analog, not
+a shortcut. At **eta** position `EvInstance(impl, [EvForward(inner-miss)])` reroutes to the outer
+slot; at **call** position the same shape null-fills — the asymmetry stays unencoded until M3b-5
+forces it.
+
+Verified: byte-identical `--emit-ir` stage1(old-seed) vs stage2(new source) on all 159 corpus files
+(0 diffs) at BOTH checkpoints — populate-only (lowering ignores) AND full (lowering consumes). A
+temporary panic probe in `eta_from_instance` confirmed the consumer FIRES on real code, both outcome
+3 (`to_string@Int`, empty inner dicts) and outcome 4 (`my_eq@Box` in
+`test_constrained_eta_codegen.spr`, with a `MyEq Int` inner dict) — so the consumer is non-vacuous
+(the eta clean path genuinely consumes Evidence, groundwork for M3b-5). The **reroute** is covered by
+the existing `test_constrained_eta_codegen.spr:box_eq_via_hof` (forwards `MyEq (Box a)`, uses `my_eq`
+value-position → `EvForward` → fallback), byte-identical in the harness. New test:
+`tests/stdlib/test_value_position_method_ref.spr`. Next: **M3b-5** — delete `resolve_tdict`,
+Evidence-ify the reroute, make the eta path a pure Evidence→witness printer.
 
 **If full M3b is ever done — design notes.** Option A: resolve emits `EvInstance` for the
 concrete subtree + an opaque `EvForward` marker; lowering fills the forward slot from
