@@ -2362,11 +2362,9 @@ long long term_read_key(void) {
   /* Heap-allocate a fresh String per keypress so a retained result never
    * mutates under the caller on the next call (the old static-buffer aliasing). */
   sprout_gc_maybe_collect_threshold();
-  char* out = (char*)malloc(2);
-  if (out == NULL) tcp_fail("term_read_key: out of memory");
+  char* out = sprout_gc_alloc_cstr(1, "term_read_key: out of memory");
   out[0] = (char)ch;
   out[1] = '\0';
-  register_managed_ptr(out, SPROUT_HEAP_CSTR, 0);
   return (long long)(uintptr_t)out;
 }
 long long term_write(long long text_val) {
