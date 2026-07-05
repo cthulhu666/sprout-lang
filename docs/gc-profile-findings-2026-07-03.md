@@ -138,3 +138,27 @@ the whole hash machinery.
   lever for that is the generational nursery, the planned next step.
 - Full suite + `test-stress` green under `SPROUT_GC_HDRCHECK=1`; suite wall
   itself dropped 164s → 85s and suite peak RSS 1067 → 456 MB.
+
+### Benchmark A/B (2026-07-05, post-review-fixes 959144f)
+
+Identical stage-1-emitted IR linked against master's runtime vs this
+branch's — the collector is the only variable. Outputs identical.
+
+| benchmark | master runtime | phase-2 runtime | Δ |
+|---|---|---|---|
+| nqueens wall | 6.02s | 5.75s | −4.5% |
+| nqueens N=13 solve | 4825 ms | 4612 ms | −4.4% |
+| nqueens max RSS | 38.0 MB | 4.3 MB | 8.9× less |
+| astar wall (100 runs, 100×100) | 0.20s | 0.20s | flat |
+| astar max RSS | 37.8 MB | 4.5 MB | 8.4× less |
+
+Reading: the ~9× memory drop on both is the deleted 32 MiB index + 48 B/object
+`ManagedNode`s — small programs' RSS now tracks their working set. Wall gains
+here are single-digit by design: neither workload was hash-bound (nqueens probe
+len was 0.30 pre-campaign); nqueens' remaining GC cost is 33k sweep cycles ×
+O(heap), which is the generational-nursery follow-up's target. The large wall
+wins live in the compiler itself (2.9× self-compile).
+
+Repro: `./build/compile_driver_bin_stage1 --emit-ir stdlib examples/<b>.sprout
+> b.ll && clang b.ll <runtime.c> -O2 -framework Security -framework
+CoreFoundation -o bin && /usr/bin/time -l ./bin`.
