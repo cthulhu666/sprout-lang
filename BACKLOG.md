@@ -508,7 +508,7 @@ directly contends with the documented reason bare keying exists (own-module ADTs
      under `tools/` (implementation language — LLDB Lua / standalone C binary / format
      strings — decided at M2 kickoff).  Delivers human-readable ADT values at
      breakpoints.
-   - M3: `just build-debug` / `just debug-run` recipes; README §Debugging section.
+   - M3: `just build-debug` / `just debug-run` recipes; `docs/debugging.md` §Debugging compiled programs section.
    First milestone constraints: debug metadata is strictly opt-in; release builds are
    unchanged; M1 scopes `!dbg` to user-module functions only (not stdlib/prelude) to
    avoid misleading source attribution in multi-file bundles; full multi-file DWARF is a

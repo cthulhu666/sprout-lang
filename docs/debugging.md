@@ -137,3 +137,76 @@ typed-codegen flip work lands; make them hard CI gates once green.
    scripts/memwatch.sh 4096 1 -- just refresh-seed
    git add bootstrap/compile_driver.ll
    ```
+
+## Debugging compiled programs (DWARF + lldb)
+
+Compiled Sprout programs support source-level debugging via LLVM DWARF metadata and `lldb` (or `gdb`).
+Debug info is opt-in; release builds are unchanged.
+
+**Building a debug binary**
+
+```
+mise exec -- just build-debug myprog.spr ./myprog_dbg
+```
+
+This compiles `myprog.spr` with DWARF metadata (`--emit-ir --debug`) and links with `-g -O0`.
+The resulting binary can be loaded directly into `lldb`:
+
+```
+lldb ./myprog_dbg
+```
+
+**Starting a debug session**
+
+```
+(lldb) b myprog.spr:10              # break at line 10 of myprog.spr
+(lldb) run                      # start the program
+(lldb) bt                       # print Sprout backtrace
+(lldb) n                        # step to next instruction
+(lldb) s                        # step into a call
+(lldb) continue                 # resume execution
+```
+
+**Launching under lldb directly** (one-liner):
+
+```
+mise exec -- just debug-run myprog.spr
+```
+
+This compiles with debug info and opens `lldb` in one step.
+
+**Inspecting values with the LLDB helper script**
+
+Load `tools/sprout.lldb` for convenience aliases:
+
+```
+(lldb) command source tools/sprout.lldb
+(lldb) br set -n "main.fact"        # dots confuse b's parser; use br set -n
+(lldb) run
+(lldb) register read x0        # first arg as raw i64 (Int = decimal value)
+(lldb) call sprout_debug_adt($x0)   # print ADT constructor name + fields (depth 4)
+(lldb) call sprout_debug_int($x0)   # print an Int/Bool value
+```
+
+`sprout_debug_adt` uses the per-constructor `field_kinds` table (populated at startup)
+to decode each field:
+
+```
+Cons(42, Cons(1, Nil))
+Just("hello")
+True
+```
+
+**What works**
+
+- Breakpoints by source file and line: `b myprog.spr:N` — line numbers match the original `.spr` file exactly
+- Breakpoints by function name: `br set -n "main.fact"` — the `b` shorthand misparses dots; `br set -n` with quotes is required
+- Sprout-attributed backtraces in `bt`: frame names are qualified Sprout function names (`main.add`, `main.main`)
+- Instruction-level `n` and `s`
+- `call sprout_debug_adt($x0)` / `call sprout_debug_int($x0)` for value inspection
+
+**Known limitations**
+
+- **User-module functions only**: stdlib and prelude functions do not carry debug metadata. `bt` shows "source not available" for any stdlib frame, which is expected — stdlib sources are not distributed with binaries.
+- **ADT function bodies**: `fr v` (frame variables) is not available; inspect via `register read` and `sprout_debug_adt`.
+
