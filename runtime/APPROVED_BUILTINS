@@ -79,7 +79,6 @@ native_set_member
 native_set_size
 native_set_to_list
 panic
-parse_int
 print_int
 print_newline
 print_str

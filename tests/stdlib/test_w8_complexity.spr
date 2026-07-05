@@ -1,0 +1,117 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression tests for W8 O(n²) → O(n) rewrites in prelude.sprout.
+# Each test asserts that the new implementation produces the same output as the
+# expected result on sample data.  Covers P3, P4, P5, P6, and P10 algorithm changes.
+
+fn empty_int_list() -> List Int = []
+fn empty_int_vec() -> Vec Int = vec_empty()
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- P10: vec_map ---
+    assert_eq(state, "vec_map singleton",
+      vec_map(\x -> x * 2, foldable_to_vec([1])),
+      foldable_to_vec([2]))
+    assert_eq(state, "vec_map triple",
+      vec_map(\x -> x * 2, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([2, 4, 6]))
+    assert_eq(state, "vec_map order preserved",
+      vec_map(\x -> x, foldable_to_vec([3, 1, 2])),
+      foldable_to_vec([3, 1, 2]))
+
+    # --- P10: vec_filter ---
+    assert_eq(state, "vec_filter keeps all",
+      vec_filter(\x -> x > 0, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([1, 2, 3]))
+    assert_eq(state, "vec_filter keeps some",
+      vec_filter(\x -> x > 1, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([2, 3]))
+    assert_eq(state, "vec_filter keeps none",
+      vec_filter(\x -> x > 10, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([]))
+
+    # --- P10: vec_filter_map ---
+    assert_eq(state, "vec_filter_map some",
+      vec_filter_map(\x -> if x > 1 then Just(x * 10) else Nothing, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([20, 30]))
+    assert_eq(state, "vec_filter_map all filtered",
+      vec_filter_map(\x -> if x > 10 then Just(x) else Nothing, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([]))
+
+    # --- P10: vec_reverse ---
+    assert_eq(state, "vec_reverse singleton",
+      vec_reverse(foldable_to_vec([1])),
+      foldable_to_vec([1]))
+    assert_eq(state, "vec_reverse triple",
+      vec_reverse(foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([3, 2, 1]))
+    assert_eq(state, "vec_reverse not identity",
+      vec_reverse(foldable_to_vec([1, 2, 3, 4])),
+      foldable_to_vec([4, 3, 2, 1]))
+
+    # --- P10: vec_slice ---
+    assert_eq(state, "vec_slice mid",
+      vec_slice(1, 2, foldable_to_vec([1, 2, 3, 4])),
+      foldable_to_vec([2, 3]))
+    assert_eq(state, "vec_slice from start",
+      vec_slice(0, 2, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([1, 2]))
+    assert_eq(state, "vec_slice zero count empty",
+      vec_slice(0, 0, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([]))
+
+    # --- P3: vec_sort_by ---
+    # vec_sort (the identity-key wrapper) is intentionally NOT tested here: it hits
+    # a pre-existing dict-resolution bug (its forwarded `Ord a` resolves to the
+    # `Ord (Vec a)` instance), which is unrelated to this O(n) rewrite. P3 rewrote
+    # vec_sort_by, which is correct; the same sort is exercised through it below.
+    assert_eq(state, "vec_sort_by ascending",
+      vec_sort_by(\x -> x, foldable_to_vec([3, 1, 2])),
+      foldable_to_vec([1, 2, 3]))
+    assert_eq(state, "vec_sort_by descending key",
+      vec_sort_by(\x -> 0 - x, foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([3, 2, 1]))
+    assert_eq(state, "vec_sort_by preserves all elements",
+      vec_sort_by(\x -> x, foldable_to_vec([5, 3, 1, 4, 2])),
+      foldable_to_vec([1, 2, 3, 4, 5]))
+    assert_eq(state, "vec_sort_by singleton",
+      vec_sort_by(\x -> x, foldable_to_vec([42])),
+      foldable_to_vec([42]))
+
+    # --- P4: instance ToString (List a) ---
+    assert_eq(state, "to_string list empty",
+      to_string(empty_int_list()),
+      "[]")
+    assert_eq(state, "to_string list singleton",
+      to_string([1]),
+      "[1]")
+    assert_eq(state, "to_string list multi",
+      to_string([1, 2, 3]),
+      "[1, 2, 3]")
+    assert_eq(state, "to_string list no trailing sep",
+      to_string([42]),
+      "[42]")
+
+    # --- P5: instance ToString (Vec a) ---
+    assert_eq(state, "to_string vec empty",
+      to_string(empty_int_vec()),
+      "[]")
+    assert_eq(state, "to_string vec singleton",
+      to_string(foldable_to_vec([1])),
+      "[1]")
+    assert_eq(state, "to_string vec multi",
+      to_string(foldable_to_vec([1, 2, 3])),
+      "[1, 2, 3]")
+
+    # --- P6: instance ToString (Dict v) ---
+    assert_eq(state, "to_string dict singleton",
+      to_string(dict_set("x", 1, dict_empty())),
+      "{x: 1}")
+    assert_eq(state, "to_string dict two entries",
+      to_string(dict_set("b", 2, dict_set("a", 1, dict_empty()))),
+      "{a: 1, b: 2}")
+
+    summary(state)

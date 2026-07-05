@@ -8,8 +8,8 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 class Sh a {
   fn sh(x: a) -> String
 }
-instance Sh Int  { fn sh(x: Int) -> String = "int" }
-instance Sh Bool { fn sh(x: Bool) -> String = "bool" }
+instance Sh Int {fn sh(x: Int) -> String = "int"}
+instance Sh Bool {fn sh(x: Bool) -> String = "bool"}
 
 fn both(x: a, y: b) -> String where Sh a, Sh b =
   sh(x) ++ "-" ++ sh(y)

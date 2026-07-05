@@ -1,0 +1,18 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# W8/P2 (D5): mutvec_get is total — Just(v) in range, Nothing out of range
+# (previously it panicked via vector_get_direct on OOB).
+fn describe(m: Maybe Int) -> String =
+  match m with
+  | Just n -> "Just " ++ int_to_string(n)
+  | Nothing -> "Nothing"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    v <- mutvec_new(3, 0)
+    mutvec_set(v, 1, 42)
+    assert_eq(state, "mutvec_get in-bounds", describe(mutvec_get(v, 1)), "Just 42")
+    assert_eq(state, "mutvec_get OOB high", describe(mutvec_get(v, 5)), "Nothing")
+    assert_eq(state, "mutvec_get OOB negative", describe(mutvec_get(v, 0 - 1)), "Nothing")
+    summary(state)

@@ -445,7 +445,25 @@ follow-up.
 
 </details>
 
-### W8 — Prelude totality + complexity batch  [1S, mechanical; P1/P2 blocked on D5]
+### W8 — Prelude totality + complexity batch  [DONE 2026-07-05]
+
+**DONE.** P1: `parse_int` is now total pure Sprout (`String -> Maybe Int`, digit values via
+`==` on char literals — no per-digit alloc); the C `strtoll` builtin was removed via a
+bootstrap bridge (emit a Sprout-`@parse_int` seed while the C symbol still exists, then drop
+the C symbol so the two don't collide), and `split_ints` (dead, junk-swallowing) was deleted.
+11 consumers migrated (parser uses a loud `int_from_lexed` panic-on-`Nothing`; scram/http keep
+a non-negative guard; lsp/examples handle the `Maybe`). P2: `mutvec_get : Maybe a !{IO}` via
+the bounds-checked `vector_get` (the handoff's "C UB" premise was stale — `vector_get_direct`/
+`vector_mutset` already bounds-check). P3–P10: all `vec_*` rebuilds route through `vec_from_list`
+(O(n)); `ToString` List/Vec/Dict accumulate parts + `string_concat_many`; P7/P8/P9 honest O()
+comments. Tests: `test_parse_int_total`, `test_mutvec_get_bounds`, `test_w8_complexity`.
+
+**Discovered + filed (NOT W8):** `vec_sort` (the identity-key wrapper) SIGSEGVs — a pre-existing
+dict-resolution soundness bug (forwarded `Ord a` resolves to `instance Ord (Vec a)` instead of
+forwarding). Context-independent; `vec_sort` had zero callers so it sat latent. Ruled out as
+GC/allocator (malloc-per-object + ASan clean) and as W8-introduced. Filed under BACKLOG §1 `P1`;
+diagnosis in memory `project_w8_p10_dispatch_miscompile`. The complexity test exercises the sort
+via `vec_sort_by` (correct) instead.
 
 All `stdlib/prelude.sprout`. Every touched export gets/keeps a correct `# O(...)` comment
 (project rule).

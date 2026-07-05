@@ -1,9 +1,0 @@
-fn is_even(x: Int) -> Bool =
-  (x / 2) * 2 == x
-
-fn double(x: Int) -> Int = x + x
-
-fn add(acc: Int, x: Int) -> Int = acc + x
-
-fn main() -> Unit !{IO} =
-  print(fold(add, 0, map(double, filter(is_even, split_ints("1 2 3 4 5")))))

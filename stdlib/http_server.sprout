@@ -83,20 +83,19 @@ fn parse_headers(raw: String) -> ServerResult (Dict String) =
 where
   lines = split_lines(raw)
 
-fn all_digits(raw: String, index: Int, total: Int) -> Bool =
-  if index >= total then true
-  else
-    match string.find("0123456789", string.string_from_char(char_at(raw, index))) with
-    | Nothing -> false
-    | Just _ -> all_digits(raw, index + 1, total)
-
+# W8/P1: parse_int is now total (Maybe Int), so the all_digits predicate is
+# redundant. Still reject negatives (the old digits check excluded '-').
 fn parse_content_length(headers: Dict String) -> ServerResult Int =
   match dict_get("content-length", headers) with
   | Nothing -> Ok(0)
   | Just raw ->
       if string.is_empty(raw) then Err(HttpInvalidRequest("empty Content-Length"))
-      else if all_digits(raw, 0, string.length(raw)) then Ok(parse_int(raw))
-      else Err(HttpInvalidRequest("invalid Content-Length"))
+      else content_length_result(parse_int(raw))
+
+fn content_length_result(m: Maybe Int) -> ServerResult Int =
+  match m with
+  | Just n -> if n >= 0 then Ok(n) else Err(HttpInvalidRequest("invalid Content-Length"))
+  | Nothing -> Err(HttpInvalidRequest("invalid Content-Length"))
 
 fn request_body_start(raw: String) -> Maybe Int =
   match find_headers_end(raw) with

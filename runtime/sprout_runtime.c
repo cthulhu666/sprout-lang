@@ -1851,14 +1851,9 @@ long long print_value(long long x) {
   printf("\n");
   return x;
 }
-long long parse_int(long long s_val) {
-  const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("parse_int: null input");
-  char* end = NULL;
-  long long out = strtoll(s, &end, 10);
-  if (end == s || *end != '\0') tcp_fail("parse_int: invalid integer");
-  return out;
-}
+// W8/P1 (D5): parse_int is now a total pure-Sprout function (prelude.sprout,
+// String -> Maybe Int). The C strtoll builtin was removed; the committed seed no
+// longer references @parse_int as a host symbol (it defines the Sprout one).
 long long int_to_string(long long value) {
   char buf[32];
   int written = snprintf(buf, sizeof(buf), "%lld", value);

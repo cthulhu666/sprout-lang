@@ -32,11 +32,17 @@ fn template_status_string(user: String, unread: Int) -> String =
 fn emit_buffered(line: StringTemplate) -> Unit !{IO} =
   print(template_to_string(line))
 
+# W8/P1: parse_int is total now; fall back to 0 for a non-numeric argument.
+fn int_or_zero(m: Maybe Int) -> Int =
+  match m with
+  | Just n -> n
+  | Nothing -> 0
+
 fn main() -> Unit !{IO} =
   do
     user <- arg_or(0, "Ada")
     raw_unread <- arg_or(1, "3")
-    let unread = parse_int(raw_unread)
+    let unread = int_or_zero(parse_int(raw_unread))
     let template_rendered = template_status_string(user, unread)
     let concat_rendered = concat_status_string(user, unread)
     print(`Hello, ${user} ! `)

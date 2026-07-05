@@ -12,12 +12,18 @@ export type Answers (..) =
 export type Database (..) =
   | Database (Vec IntRange) (Vec Int)
 
+# W8/P1: parse_int is total now; AoC input is well-formed, fall back to 0.
+fn int_or_zero(m: Maybe Int) -> Int =
+  match m with
+  | Just n -> n
+  | Nothing -> 0
+
 fn parse_range(raw: String) -> IntRange =
   match split_once(raw, "-") with
-  | Nothing -> range(parse_int(trim(raw)), parse_int(trim(raw)))
+  | Nothing -> range(int_or_zero(parse_int(trim(raw))), int_or_zero(parse_int(trim(raw))))
   | Just pair ->
       match pair with
-      | (left, right) -> range(parse_int(trim(left)), parse_int(trim(right)))
+      | (left, right) -> range(int_or_zero(parse_int(trim(left))), int_or_zero(parse_int(trim(right))))
 
 fn parse_database(lines: Vec String, index: Int, seen_blank: Bool, ranges: Vec IntRange, ids: Vec Int) -> Database =
   match vec_get(index, lines) with
@@ -25,7 +31,7 @@ fn parse_database(lines: Vec String, index: Int, seen_blank: Bool, ranges: Vec I
   | Just raw ->
       if trim(raw) == "" then parse_database(lines, index + 1, true, ranges, ids)
       else if seen_blank then
-        parse_database(lines, index + 1, true, ranges, vec_append(parse_int(trim(raw)), ids))
+        parse_database(lines, index + 1, true, ranges, vec_append(int_or_zero(parse_int(trim(raw))), ids))
       else
         parse_database(lines, index + 1, false, vec_append(parse_range(trim(raw)), ranges), ids)
 

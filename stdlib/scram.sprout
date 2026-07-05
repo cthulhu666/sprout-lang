@@ -69,15 +69,16 @@ fn attr_value(raw: String, key: String) -> Maybe String =
           | Just value -> Just(value)
           | Nothing -> attr_value(rest, key)
 
-fn digits_only(raw: String, index: Int, total: Int) -> Bool =
-  if index >= total then true
-  else if string.contains("0123456789", string.string_from_char(char_at(raw, index))) then digits_only(raw, index + 1, total)
-  else false
-
+# W8/P1: parse_int is now total (Maybe Int), so the digits_only predicate is
+# redundant. Still reject negatives (the old digits check excluded '-').
 fn parse_positive_int(raw: String) -> ScramResult Int =
   if string.is_empty(raw) then Err(ScramInvalidIterationCount("SCRAM iteration count cannot be empty"))
-  else if digits_only(raw, 0, string.length(raw)) then Ok(parse_int(raw))
-  else Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
+  else scram_int_result(parse_int(raw))
+
+fn scram_int_result(m: Maybe Int) -> ScramResult Int =
+  match m with
+  | Just n -> if n >= 0 then Ok(n) else Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
+  | Nothing -> Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
 
 export fn parse_server_first(raw: String) -> ScramResult ScramServerFirst =
   match attr_value(raw, "r") with

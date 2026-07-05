@@ -42,7 +42,9 @@ fn lsp_send(body: String) -> Unit !{IO} =
 export fn parse_content_length(line: String) -> Maybe Int =
   match string.strip_prefix(line, "Content-Length: ") with
   | Nothing -> Nothing
-  | Just value -> Just(parse_int(value))
+  # W8/P1: parse_int is total (Maybe Int); a malformed header now yields Nothing
+  # instead of Just(0).
+  | Just value -> parse_int(value)
 
 fn read_headers_loop(cl: Maybe Int) -> Maybe Int !{IO} =
   match term_read_line() with

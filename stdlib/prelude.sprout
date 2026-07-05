@@ -121,9 +121,6 @@ export fn filter(pred: a -> Bool, xs: List a) -> List a =
       if pred(x) then Cons(x, filter(pred, rest))
       else filter(pred, rest)
 
-export fn split_ints(s: String) -> List Int =
-  list_map_go(parse_int, split_words(s))
-
 export fn list_map(f: a -> b, xs: List a) -> List b =
   list_map_go(f, xs)
 
@@ -185,15 +182,16 @@ export fn vec_set(index: Int, value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_set(raw, index, value))
 
-fn vec_map_indexed(f: a -> b, vec: Vec a, index: Int, total: Int, acc: Vec b) -> Vec b =
-  if index >= total then acc
+fn vec_map_indexed(f: a -> b, vec: Vec a, index: Int, total: Int, acc: List b) -> Vec b =
+  if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else
     match vec_get(index, vec) with
-    | Nothing -> acc
-    | Just value -> vec_map_indexed(f, vec, index + 1, total, vec_append(f(value), acc))
+    | Nothing -> vec_from_list(list_reverse_go(acc, Nil))
+    | Just value -> vec_map_indexed(f, vec, index + 1, total, Cons(f(value), acc))
 
+# O(n): one pass over the vec; result built via vec_from_list in a single allocation.
 export fn vec_map(f: a -> b, vec: Vec a) -> Vec b =
-  vec_map_indexed(f, vec, 0, vec_length(vec), vec_empty())
+  vec_map_indexed(f, vec, 0, vec_length(vec), Nil)
 
 fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) -> b =
   if index >= total then acc
@@ -205,30 +203,32 @@ fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) 
 export fn vec_fold(f: b -> a -> b, init: b, vec: Vec a) -> b =
   vec_fold_indexed(f, init, vec, 0, vec_length(vec))
 
-fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: Vec a) -> Vec a =
-  if index >= total then acc
+fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: List a) -> Vec a =
+  if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else
     match vec_get(index, vec) with
-    | Nothing -> acc
+    | Nothing -> vec_from_list(list_reverse_go(acc, Nil))
     | Just value ->
-        if pred(value) then vec_filter_indexed(pred, vec, index + 1, total, vec_append(value, acc))
+        if pred(value) then vec_filter_indexed(pred, vec, index + 1, total, Cons(value, acc))
         else vec_filter_indexed(pred, vec, index + 1, total, acc)
 
+# O(n): one pass; result built via vec_from_list in a single allocation.
 export fn vec_filter(pred: a -> Bool, vec: Vec a) -> Vec a =
-  vec_filter_indexed(pred, vec, 0, vec_length(vec), vec_empty())
+  vec_filter_indexed(pred, vec, 0, vec_length(vec), Nil)
 
-fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, acc: Vec b) -> Vec b =
-  if index >= total then acc
+fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, acc: List b) -> Vec b =
+  if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else
     match vec_get(index, vec) with
-    | Nothing -> acc
+    | Nothing -> vec_from_list(list_reverse_go(acc, Nil))
     | Just value ->
         match f(value) with
         | Nothing -> vec_filter_map_indexed(f, vec, index + 1, total, acc)
-        | Just mapped -> vec_filter_map_indexed(f, vec, index + 1, total, vec_append(mapped, acc))
+        | Just mapped -> vec_filter_map_indexed(f, vec, index + 1, total, Cons(mapped, acc))
 
+# O(n): one pass; result built via vec_from_list in a single allocation.
 export fn vec_filter_map(f: a -> Maybe b, vec: Vec a) -> Vec b =
-  vec_filter_map_indexed(f, vec, 0, vec_length(vec), vec_empty())
+  vec_filter_map_indexed(f, vec, 0, vec_length(vec), Nil)
 
 fn vec_any_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
   if index >= total then false
@@ -262,30 +262,32 @@ fn vec_count_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: I
 export fn vec_count(pred: a -> Bool, vec: Vec a) -> Int =
   vec_count_indexed(pred, vec, 0, vec_length(vec), 0)
 
-fn vec_slice_from(start: Int, count: Int, vec: Vec a, index: Int, total: Int, acc: Vec a) -> Vec a =
-  if index >= total then acc
+fn vec_slice_from(start: Int, count: Int, vec: Vec a, index: Int, total: Int, acc: List a) -> Vec a =
+  if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else if index < start then
     vec_slice_from(start, count, vec, index + 1, total, acc)
-  else if index >= start + count then acc
+  else if index >= start + count then vec_from_list(list_reverse_go(acc, Nil))
   else
     match vec_get(index, vec) with
-    | Nothing -> acc
-    | Just value -> vec_slice_from(start, count, vec, index + 1, total, vec_append(value, acc))
+    | Nothing -> vec_from_list(list_reverse_go(acc, Nil))
+    | Just value -> vec_slice_from(start, count, vec, index + 1, total, Cons(value, acc))
 
+# O(n): one pass over the range; result built via vec_from_list in a single allocation.
 export fn vec_slice(start: Int, count: Int, vec: Vec a) -> Vec a =
   if count <= 0 then vec_empty()
   else
-    vec_slice_from(if start < 0 then 0 else start, count, vec, 0, vec_length(vec), vec_empty())
+    vec_slice_from(if start < 0 then 0 else start, count, vec, 0, vec_length(vec), Nil)
 
-fn vec_reverse_from(vec: Vec a, index: Int, acc: Vec a) -> Vec a =
-  if index < 0 then acc
+fn vec_reverse_from(vec: Vec a, index: Int, total: Int, acc: List a) -> Vec a =
+  if index >= total then vec_from_list(acc)
   else
     match vec_get(index, vec) with
-    | Nothing -> acc
-    | Just value -> vec_reverse_from(vec, index - 1, vec_append(value, acc))
+    | Nothing -> vec_from_list(acc)
+    | Just value -> vec_reverse_from(vec, index + 1, total, Cons(value, acc))
 
+# O(n): forward-iterate, Cons-prepend into a List (naturally reverses), freeze with vec_from_list.
 export fn vec_reverse(vec: Vec a) -> Vec a =
-  vec_reverse_from(vec, vec_length(vec) - 1, vec_empty())
+  vec_reverse_from(vec, 0, vec_length(vec), Nil)
 
 fn vec_to_list_go(vec: Vec a, index: Int, acc: List a) -> List a =
   if index < 0 then acc
@@ -384,6 +386,8 @@ fn list_dedup_acc(xs: List a, seen: List a) -> List a where Eq a =
       if list_member(h, seen) then list_dedup_acc(t, seen)
       else Cons(h, list_dedup_acc(t, Cons(h, seen)))
 
+# O(n²): list_member on 'seen' is O(n); called once per element.
+# A sub-quadratic algorithm needs Ord or Hash — neither is available as a constraint here.
 export fn list_dedup(xs: List a) -> List a where Eq a =
   list_dedup_acc(xs, Nil)
 
@@ -435,18 +439,18 @@ fn decorated_sort(xs: List (k, Int, a)) -> List(k, Int, a) where Ord k =
 export fn vec_from_list(xs: List a) -> Vec a =
   Vec(vector_from_list(xs))
 
-fn decorated_values_to_vec(xs: List (k, Int, a), acc: Vec a) -> Vec a =
+fn decorated_values_to_list(xs: List (k, Int, a)) -> List a =
   match xs with
-  | Nil -> acc
+  | Nil -> Nil
   | Cons entry rest ->
       match entry with
-      | (_, _, value) -> decorated_values_to_vec(rest, vec_append(value, acc))
+      | (_, _, value) -> Cons(value, decorated_values_to_list(rest))
 
-# O(n log n): stable merge sort in Sprout space, plus O(n) decoration and rebuild passes.
+# O(n log n): stable merge sort (O(n log n)) plus O(n) decoration, collect, and vec_from_list passes.
 export fn vec_sort_by(f: a -> k, vec: Vec a) -> Vec a where Ord k =
-  decorated_values_to_vec(
-    decorated_sort(list_reverse(vec_sort_by_collect(f, vec, 0, vec_length(vec), Nil))),
-    vec_empty()
+  vec_from_list(
+    decorated_values_to_list(
+      decorated_sort(list_reverse(vec_sort_by_collect(f, vec, 0, vec_length(vec), Nil))))
   )
 
 export fn vec_sort(vec: Vec a) -> Vec a where Ord a =
@@ -576,6 +580,8 @@ export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Folda
   match fold(\ (s, x) -> match s with | (i, acc) -> (i + 1, f(acc, i, x)), (0, init), xs) with
   | (_, result) -> result
 
+# O(n²) when 'a = String': each '++' copies the growing accumulator (O(total chars so far)).
+# Use string_concat_many directly for String; a String-specific fast path would need Monoid dispatch.
 export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
   fold(\ (acc, x) -> acc ++ x, empty(), xs)
 
@@ -877,6 +883,8 @@ instance Semigroup (Vec a) {
     vec_from_list(list_append(vec_to_list(left), vec_to_list(right)))
 }
 
+# O(n²): dict_set is O(n) (linear key scan on the growing acc); inserting all m right-hand
+# entries into an n-entry left dict costs O(m*n). No bulk-build map primitive exists in the runtime.
 fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict v =
   if index >= total then acc
   else
@@ -968,15 +976,21 @@ instance ToString (Maybe a) where ToString a {
     | Just v -> "Just(" ++ to_string(v) ++ ")"
 }
 
-fn list_to_string_go(strs: List String, acc: String) -> String =
+fn list_to_string_parts(strs: List String, first: Bool, acc: List String) -> String =
   match strs with
-  | Nil -> acc
+  | Nil -> string_concat_many(list_reverse_go(acc, Nil))
   | Cons s rest ->
-    list_to_string_go(rest, if acc == "" then s else acc ++ ", " ++ s)
+      if first then list_to_string_parts(rest, false, Cons(s, acc))
+      else list_to_string_parts(rest, false, Cons(s, Cons(", ", acc)))
 
+# O(n): accumulates parts into a reversed List, then string_concat_many joins in one pass.
+fn list_to_string_go(strs: List String) -> String =
+  list_to_string_parts(strs, true, Nil)
+
+# O(n): one to_string call per element; string joining via string_concat_many is O(total chars).
 instance ToString (List a) where ToString a {
   fn to_string(xs: List a) -> String =
-    "[" ++ list_to_string_go(list_map(\ (v) -> to_string(v), xs), "") ++ "]"
+    "[" ++ list_to_string_go(list_map(\ (v) -> to_string(v), xs)) ++ "]"
 }
 
 instance ToString (Result e a) where ToString e, ToString a {
@@ -986,32 +1000,33 @@ instance ToString (Result e a) where ToString e, ToString a {
     | Err e -> "Err(" ++ to_string(e) ++ ")"
 }
 
-fn vec_to_string_go(vec: Vec a, i: Int, total: Int, acc: String) -> String where ToString a =
-  if i == total then acc
+fn vec_to_string_go(vec: Vec a, i: Int, total: Int, first: Bool, acc: List String) -> String where ToString a =
+  if i == total then string_concat_many(list_reverse_go(acc, Nil))
   else
     match vec_get(i, vec) with
-    | Nothing -> acc
+    | Nothing -> string_concat_many(list_reverse_go(acc, Nil))
     | Just v ->
-        vec_to_string_go(vec, i + 1, total,
-          if acc == "" then to_string(v) else acc ++ ", " ++ to_string(v))
+        if first then vec_to_string_go(vec, i + 1, total, false, Cons(to_string(v), acc))
+        else vec_to_string_go(vec, i + 1, total, false, Cons(to_string(v), Cons(", ", acc)))
 
+# O(n): one to_string call per element; string joining via string_concat_many is O(total chars).
 instance ToString (Vec a) where ToString a {
   fn to_string(vec: Vec a) -> String =
-    "[" ++ vec_to_string_go(vec, 0, vec_length(vec), "") ++ "]"
+    "[" ++ vec_to_string_go(vec, 0, vec_length(vec), true, Nil) ++ "]"
 }
 
-fn dict_to_string_go(entries: Vec (String, v), i: Int, total: Int, acc: String) -> String where ToString v =
-  if i == total then acc
+fn dict_to_string_go(entries: Vec (String, v), i: Int, total: Int, first: Bool, acc: List String) -> String where ToString v =
+  if i == total then string_concat_many(list_reverse_go(acc, Nil))
   else
     match vec_get(i, entries) with
-    | Nothing -> acc
+    | Nothing -> string_concat_many(list_reverse_go(acc, Nil))
     | Just (k, v) ->
-        dict_to_string_go(entries, i + 1, total,
-          if acc == "" then k ++ ": " ++ to_string(v)
-          else acc ++ ", " ++ k ++ ": " ++ to_string(v))
+        if first then dict_to_string_go(entries, i + 1, total, false, Cons(k ++ ": " ++ to_string(v), acc))
+        else dict_to_string_go(entries, i + 1, total, false, Cons(k ++ ": " ++ to_string(v), Cons(", ", acc)))
 
+# O(n): accumulates parts into a reversed List, then string_concat_many joins in one pass.
 fn dict_entries_to_string(entries: Vec (String, v)) -> String where ToString v =
-  dict_to_string_go(entries, 0, vec_length(entries), "")
+  dict_to_string_go(entries, 0, vec_length(entries), true, Nil)
 
 instance ToString (Dict v) where ToString v {
   fn to_string(dict: Dict v) -> String =
@@ -1019,10 +1034,9 @@ instance ToString (Dict v) where ToString v {
 }
 
 instance ToString Set {
-  # O(n²): set_to_list is O(n); list_to_string_go does n string concats each
-  # touching the growing accumulator (worst-case O(n)).
+  # O(n): set_to_list is O(n); list_to_string_go joins parts via string_concat_many.
   fn to_string(s: Set) -> String =
-    "{" ++ list_to_string_go(set_to_list(s), "") ++ "}"
+    "{" ++ list_to_string_go(set_to_list(s)) ++ "}"
 }
 
 # O(1)
@@ -1088,7 +1102,45 @@ extern fn env_get(name: String) -> Maybe String !{IO}
 extern fn time_now_micros() -> Int !{IO}
 
 # Numeric / string conversions
-extern fn parse_int(s: String) -> Int
+# W8/P1 (D5): total signed-decimal integer parse. Returns Nothing for anything
+# that is not `-?[0-9]+` (previously the C `strtoll` extern silently returned 0
+# for junk). Pure Sprout — the digit value comes from `==` against char literals
+# (no per-digit String allocation). Overflow wraps at i64 (documented v0 Int
+# behavior; overflow *rejection* is the separate W9/X4 work).  # O(n)
+fn digit_value(c: Char) -> Int =
+  if c == '0' then 0
+  else if c == '1' then 1
+  else if c == '2' then 2
+  else if c == '3' then 3
+  else if c == '4' then 4
+  else if c == '5' then 5
+  else if c == '6' then 6
+  else if c == '7' then 7
+  else if c == '8' then 8
+  else if c == '9' then 9
+  else 0 - 1
+
+# Accumulate digits from index i. Nothing if any char is a non-digit, or if no
+# digit was seen at all. `seen` guards against empty / lone-sign input.
+fn accum_digits(s: String, i: Int, acc: Int, seen: Bool) -> Maybe Int =
+  match str_char_at(s, i) with
+  | Nothing -> if seen then Just(acc) else Nothing
+  | Just c ->
+      if digit_value(c) < 0 then Nothing
+      else accum_digits(s, i + 1, (acc * 10) + digit_value(c), true)
+
+fn negate_maybe(m: Maybe Int) -> Maybe Int =
+  match m with
+  | Nothing -> Nothing
+  | Just n -> Just(0 - n)
+
+# O(n)
+export fn parse_int(s: String) -> Maybe Int =
+  match str_char_at(s, 0) with
+  | Nothing -> Nothing
+  | Just c ->
+      if c == '-' then negate_maybe(accum_digits(s, 1, 0, false))
+      else accum_digits(s, 0, 0, false)
 extern fn int_to_string(n: Int) -> String
 extern fn char_to_string(c: Char) -> String
 extern fn char_to_str(codepoint: Int) -> String
@@ -1171,8 +1223,10 @@ export fn mutvec_new(n: Int, val: a) -> MutVec a !{IO} =
     raw <- vec_make_filled(n, val)
     MutVec(raw)
 
-export fn mutvec_get(v: MutVec a, i: Int) -> a !{IO} =
-  vector_get_direct(mutvec_raw(v), i)
+# O(1). Total: Nothing when i is out of range (previously panicked via the
+# bounds-checked vector_get_direct). Routes through vector_get (W8/P2, D5).
+export fn mutvec_get(v: MutVec a, i: Int) -> Maybe a !{IO} =
+  vector_get(mutvec_raw(v), i)
 
 export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
   vector_mutset(mutvec_raw(v), i, val)
