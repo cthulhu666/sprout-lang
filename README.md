@@ -26,7 +26,6 @@ via LLVM IR and clang. Python is no longer part of the compiler or tooling pipel
 - [Bootstrap Chain](./docs/bootstrap-chain.md)
 - [Native REPL Roadmap](./docs/native-repl-roadmap.md) *(historical — sproutd M4 shipped 2026-05-26)*
 - [REPL Self-Hosting v1 Draft](./docs/repl-self-hosting-v1-draft.md) *(partially superseded)*
-- [Compiler Self-Hosting Roadmap](./docs/compiler-self-hosting-roadmap.md) *(historical — M7 fixed point reached 2026-05-17)*
 - [Sequencing Sugar v1 Draft](./docs/sequencing-sugar-v1-draft.md)
 - [Language Design Best Practices (Research Notes)](./docs/language-design-best-practices.md)
 - [HM Typechecker Guide (Human-Friendly)](./docs/hm-typechecker.md)
@@ -103,9 +102,9 @@ Normative status:
 - The Python-backed REPL and analysis service have been replaced by the self-hosted native compiler pipeline. A native REPL launcher is the next planned tooling milestone; until then `just repl` is unavailable.
 - `docs/repl-self-hosting-v1-draft.md` and the language-server/compiler
   milestones remain relevant future directions.
-- `docs/compiler-self-hosting-roadmap.md` captures the staged path toward a
-  compiler implemented substantially in Sprout; the self-hosting milestone has
-  been reached through Phase 10 (see `docs/self-hosting-eliminate-python-backlog.md`).
+- The compiler self-hosting milestone has been reached (M1–M7 complete, stage-3
+  fixed point 2026-05-17). Open post-M7 follow-ups live in `BACKLOG.md`
+  §"Design Roadmap" and §"Compiler Internals Follow-Ups".
 
 ## Repository Layout
 
@@ -985,7 +984,7 @@ fn print_all(items: List String) -> Unit !{IO} =
 
 ## Backlog
 
-See [docs/backlog.md](./docs/backlog.md) for the current roadmap and follow-up work.
+See [BACKLOG.md](./BACKLOG.md) for the current roadmap and follow-up work (the "Design Roadmap" section holds the forward-looking design/soundness priorities and V1 candidates).
 
 ## Contributing
 

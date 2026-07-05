@@ -302,4 +302,4 @@ it suits this audience. The tiebreaker is rooting feasibility, not ergonomics.
 - `docs/guidelines.md`: Guideline #6 (data-last) stays; add guidance on partials-vs-lambdas (A)
   or the no-partials idiom (C-a).
 - `README.md` §Not Yet Supported: update once the crash is fixed and the model is chosen.
-- `docs/backlog.md`: close items 9 and 12 with a pointer here.
+- `BACKLOG.md` §"Design Roadmap": close the partial-application entry (Current Priorities item 9) and the `|>` entry (V1 Roadmap Candidate 12) with a pointer here.
