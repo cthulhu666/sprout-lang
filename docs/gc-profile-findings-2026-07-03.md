@@ -110,3 +110,31 @@ Measured on the same machine, sequential runs, self-emit workload:
   that is the Phase 2 target (inline 1-word header + region allocator +
   address-range membership; decided direction: non-moving generational,
   integer tagging deferred).
+
+## Addendum 2 (2026-07-05): Phase 2 complete — regions + header, table deleted
+
+Phase 2 landed on `gc-phase2-regions`: inline 1-word header on every heap
+object (kind | color | reserved GC bits | aux), 1 MiB region allocator with
+per-region slot bitmaps (membership = region binary-search + payload-start
+bit — exact, O(1), zero chain hops), header-color marking, linear region
+sweep with per-sweep freelist rebuild and empty-region release, O(1)
+`str_byte_len` + length-first `str_eq` from the CSTR header, and deletion of
+`ManagedNode` (48 B/object), `g_heap_index` (the 32 MiB STOPGAP table), and
+the whole hash machinery.
+
+| metric | pre-phase-1 | phase 1 | phase 2 | total |
+|---|---|---|---|---|
+| self-emit wall (plain -O2) | 35.8s | 28.4s | **12.2s** | 2.9× |
+| self-emit GC time | 26.1s | 14.3s | **3.6s** | 7.3× |
+| self-emit peak footprint | 420.5 MB | 322.5 MB | **212.5 MB** | −49% |
+| self-emit max RSS | 437.8 MB | 415.3 MB | **284.6 MB** | −35% |
+| nqueens max RSS | 39.0 MB | 38.1 MB | **4.8 MB** | 8.1× |
+| membership hash hops | 296.6M | 53.5M | **0** | — |
+
+- Wall improvement exceeds the GC savings: the O(1) `str_byte_len` header
+  read removed most of the ~41%-of-mutator `_platform_strlen` cost.
+- nqueens' 8× memory drop is the static table + per-object nodes vanishing;
+  its remaining GC time is sweep-per-cycle (33k cycles × O(heap)) — the
+  lever for that is the generational nursery, the planned next step.
+- Full suite + `test-stress` green under `SPROUT_GC_HDRCHECK=1`; suite wall
+  itself dropped 164s → 85s and suite peak RSS 1067 → 456 MB.
