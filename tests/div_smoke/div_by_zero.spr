@@ -1,0 +1,11 @@
+module main
+
+# W7/F-DIV smoke: the divisor is 0 at RUNTIME (argv is empty when the binary is
+# run with no arguments), so neither the Sprout compiler nor clang can fold the
+# division away. Before the fix, `10 / 0` lowers to a bare `sdiv i64 _, 0`, which
+# is LLVM undefined behavior. After the fix, the emitted guard panics cleanly with
+# "division by zero" and a non-zero exit.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    print(int_to_string(10 / list_length(args)))

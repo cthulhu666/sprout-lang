@@ -327,7 +327,31 @@ unifier T7; `tests/conformance/run/` is orphaned). Fixtures under
   typecheck-failure tests for each hole individually.
 - **Gates:** compiler change → full §4 battery; expect multiple seed refreshes.
 
-### W7 — F-DIV: division UB  [1S, CRITICAL, source-verified; blocked on D1]
+### W7 — F-DIV: division UB  [div-by-zero DONE 2026-07-05, CRITICAL; INT_MIN/-1 operator-guard deferred]
+
+**Fixed (div-by-zero), typed path.** Per D1: `/` panics on a zero divisor (bare `sdiv i64
+_, 0` is LLVM UB) and a total `safe_div : Int -> Int -> Result DivByZero Int` (+`DivByZero`)
+lands in `prelude.sprout`. **Mechanism = IR-level guard (Kuba's D1 choice), no runtime
+addition:** new `IRPanic <msg>` terminator op (`sprout_ir.sprout`) that lowers to
+`call i64 @panic(i64 <msg>)` + `unreachable` — reuses the existing `panic` builtin;
+classified in the four exhaustive `ir_rooting` matches (non-trigger / no-heap / uses-msg /
+no-exposure). `ast_to_ir.finish_checked_div` builds the guard CFG for `op == "/"`: seal the
+current block with `divisor == 0 ? panic_block : ok_block`, panic_block = `IRStrConst` +
+`IRPanic`, ok_block holds the `IRIDiv` and becomes the new current block (so downstream phis
+name it — the reason the guard is at `ast_to_ir`, NOT the ir_lowering text layer, where
+block-splitting would break phi predecessors). `panic` added to `is_hardcoded_intrinsic` so
+`lower_extern_decls` doesn't double-declare it against `ir_header`. Verified: `10/0` →
+`runtime error: division by zero`, exit 1; `10/2` → 5; self-compile fixed point (iter 3).
+Tests: `tests/div_smoke/div_by_zero.spr` + `just div-by-zero-smoke` recipe (runtime-zero
+divisor so nothing folds); `tests/stdlib/test_safe_div.spr`. Spec §6/§8.4: TODO in this PR.
+
+**Deferred:** the `INT_MIN / -1` overflow at the OPERATOR (the other undefined `sdiv` case)
+— covered by `safe_div`, but the operator still `sdiv`s it. Guarding it needs 3 more
+hand-built blocks (negate-based `is_int_min`, since the lexer can't yet represent the
+`INT_MIN` literal — that's W9/X4); low risk/reward for a near-impossible input, so it's a
+follow-up.
+
+<details><summary>original plan</summary>
 
 - **Locations:** direct path `codegen.sprout:2056-2062` (bare `sdiv`); typed path
   `ast_to_ir.sprout:1861` (`IRIDiv`) → `ir_lowering.sprout:118` (bare `sdiv`);
@@ -343,6 +367,8 @@ unifier T7; `tests/conformance/run/` is orphaned). Fixtures under
   `INT_MIN / -1` defined; constant `1/0` in a top-level let too (checks both const and
   runtime paths).
 - **Gates:** compiler change → full §4 battery; spec update in same change (Docs&Spec §5).
+
+</details>
 
 ### W8 — Prelude totality + complexity batch  [1S, mechanical; P1/P2 blocked on D5]
 

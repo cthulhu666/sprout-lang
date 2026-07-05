@@ -341,6 +341,14 @@ flow through unchanged.  Plain `"..."` string literals are unaffected.
 3. Function-local `where` bindings evaluate in source order after function parameters are bound, with each binding extending the environment for later bindings and the final body.
 4. `let`: evaluate RHS immediately, then bind.
 5. Binary operators: evaluate left operand, then right operand.
+   - Integer division `/`: dividing by zero **panics** with a runtime error
+     (`division by zero`) rather than producing an undefined result. `INT_MIN / -1`
+     is also undefined for a machine `Int` and is excluded on the same basis.
+     For a total, non-panicking division use `safe_div : Int -> Int -> Result
+     DivByZero Int`, which returns `Err(DivByZero)` in exactly those two cases.
+   - `Int` addition, subtraction, and multiplication **wrap** on overflow in the
+     native backend (two's-complement `i64`); see §8.4. This is a temporary v0
+     implementation constraint, not the intended long-term meaning of `Int`.
 6. Short-circuiting:
 - `a && b`: evaluate `b` only if `a` is `true`.
 - `a || b`: evaluate `b` only if `a` is `false`.

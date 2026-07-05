@@ -60,6 +60,8 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRGetTag _ _ -> false
   | sprout_ir.IRGetField _ _ _ _ -> false
   | sprout_ir.IRAbortMatch -> false
+  # IRPanic calls @panic then `unreachable`; panic exits, so no GC.
+  | sprout_ir.IRPanic _ -> false
   # /code-review-v2 fix #3: width-conversion ops are pure casts; NOT triggers.
   | sprout_ir.IRZextI1ToI64 _ _ -> false
   | sprout_ir.IRTruncI64ToI1 _ _ -> false
@@ -150,6 +152,8 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
       | _ -> Just(r)
   # IRAbortMatch defines no value (/code-review fix #15: void noreturn).
   | sprout_ir.IRAbortMatch -> Nothing
+  # IRPanic defines no value (noreturn terminator).
+  | sprout_ir.IRPanic _ -> Nothing
   # Width-conversion ops produce i64/i1 scalars — never heap.
   | sprout_ir.IRZextI1ToI64 _ _ -> Nothing
   | sprout_ir.IRTruncI64ToI1 _ _ -> Nothing
@@ -295,6 +299,8 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRGetTag _ s -> Cons(s, Nil)
   | sprout_ir.IRGetField _ s _ _ -> Cons(s, Nil)
   | sprout_ir.IRAbortMatch -> Nil
+  # IRPanic reads its message operand (keep it live for the @panic call).
+  | sprout_ir.IRPanic msg -> Cons(msg, Nil)
   # /code-review-v2 fix #3: width-conversion ops use their single source.
   | sprout_ir.IRZextI1ToI64 _ s -> Cons(s, Nil)
   | sprout_ir.IRTruncI64ToI1 _ s -> Cons(s, Nil)
@@ -605,6 +611,8 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRGetTag _ _ -> false
   | sprout_ir.IRGetField _ _ _ _ -> false
   | sprout_ir.IRAbortMatch -> false
+  # IRPanic does not trigger GC (panic exits), so it exposes no operands.
+  | sprout_ir.IRPanic _ -> false
   | sprout_ir.IRZextI1ToI64 _ _ -> false
   | sprout_ir.IRTruncI64ToI1 _ _ -> false
   # TCO ops never trigger GC, so they expose nothing (the values they store are

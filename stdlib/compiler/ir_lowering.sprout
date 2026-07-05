@@ -225,6 +225,10 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
   | sprout_ir.IRAbortMatch ->
       "  call void @sprout_abort_match()\n  unreachable"
+  # W7/F-DIV: reuses the existing `panic` builtin. The call result is unused
+  # (panic is noreturn); the block ends with `unreachable`.
+  | sprout_ir.IRPanic msg ->
+      "  call i64 @panic(i64 " ++ msg ++ ")\n  unreachable"
   | sprout_ir.IRZextI1ToI64 r s ->
       "  " ++ r ++ " = zext i1 " ++ s ++ " to i64"
   | sprout_ir.IRTruncI64ToI1 r s ->
@@ -351,6 +355,9 @@ export fn ir_header() -> String =
   "declare i64 @sprout_tag(i64)\n" ++
   "declare i64 @sprout_field(i64, i64)\n" ++
   "declare void @sprout_abort_match() noreturn\n" ++
+  # W7/F-DIV: `panic` (long long panic(long long)) backs the IRPanic terminator
+  # emitted by the `/` divide-by-zero guard.
+  "declare i64 @panic(i64)\n" ++
   # Stack save/restore intrinsics for TCO loops (reset per-iteration root allocas).
   "declare ptr @llvm.stacksave()\n" ++
   "declare void @llvm.stackrestore(ptr)\n" ++
@@ -453,7 +460,7 @@ fn is_hardcoded_intrinsic(name: String) -> Bool =
   name == "sprout_gc_push_i64_root" || name == "sprout_gc_pop_roots" ||
   name == "sprout_alloc_closure_env" || name == "sprout_alloc_tuple_blob" ||
   name == "sprout_register_ctor" || name == "sprout_tag" || name == "sprout_field" ||
-  name == "sprout_abort_match" ||
+  name == "sprout_abort_match" || name == "panic" ||
   name == "sprout_make0" || name == "sprout_make1" || name == "sprout_make2" ||
   name == "sprout_make3" || name == "sprout_make4" || name == "sprout_make5" ||
   name == "sprout_make6" || name == "sprout_make7" || name == "sprout_make8" ||

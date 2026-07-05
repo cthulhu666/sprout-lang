@@ -1,0 +1,22 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# W7: safe_div is the TOTAL division API (D1) — Ok(quotient), or Err(DivByZero)
+# for the two cases where integer `/` is undefined: a zero divisor and the
+# INT_MIN / -1 overflow. The `/` operator itself panics on those; safe_div is the
+# non-panicking sibling.
+fn is_ok_5(r: Result DivByZero Int) -> Bool =
+  match r with
+  | Ok n -> n == 5
+  | Err _ -> false
+
+fn is_err(r: Result DivByZero Int) -> Bool =
+  match r with
+  | Ok _ -> false
+  | Err _ -> true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "safe_div 10 2 = Ok 5", is_ok_5(safe_div(10, 2)))
+    assert_true(state, "safe_div 7 0 = Err DivByZero", is_err(safe_div(7, 0)))
+    summary(state)

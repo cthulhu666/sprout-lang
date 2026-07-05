@@ -1833,6 +1833,9 @@ fn finish_binary(op: String,
                  l_name: String, r_name: String,
                  idx: Int, name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  if op == "/" then
+    finish_checked_div(lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
+  else
   match arith_op(op, result, l_name, r_name) with
   | Just iop ->
       Ok((list_append(lblocks, rblocks), cur_lbl,
@@ -1854,6 +1857,42 @@ fn finish_binary(op: String,
       | Nothing -> Err("ast_to_ir: binary op '" ++ op ++ "' not yet supported")
   where result = fresh_name(name_prefix, idx)
         zext_result = fresh_name(name_prefix, idx + 1)
+
+# W7/F-DIV: `/` lowers to a guarded division. A bare `sdiv i64 _, 0` is LLVM
+# undefined behavior, so the current block is sealed with a check `divisor == 0`
+# that branches either to a panic block (build the message String, call @panic
+# via IRPanic, then `unreachable`) or to a continuation block holding the sdiv.
+# The continuation block becomes the new current block, so downstream phis name
+# it as their predecessor (block/label threading stays consistent — the reason
+# this cannot be done at the ir_lowering text layer). The INT_MIN / -1 overflow
+# (the other undefined case) is covered by the total `safe_div`; guarding it here
+# too is a follow-up. Consumes 4 fresh-name slots (icmp, msg-raw, msg, quotient).
+fn finish_checked_div(lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+                      cur_lbl: String, cur_ops: List sprout_ir.IROp,
+                      l_name: String, r_name: String,
+                      idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  Ok((all_blocks, ok_lbl, Cons(div_op, Nil), div_result, idx + 4))
+  where z_name = fresh_name(name_prefix, idx)
+        msg_raw = fresh_name(name_prefix, idx + 1)
+        msg_result = fresh_name(name_prefix, idx + 2)
+        div_result = fresh_name(name_prefix, idx + 3)
+        panic_lbl = "divpanic_" ++ int_to_string(idx)
+        ok_lbl = "divok_" ++ int_to_string(idx)
+        # Seal the current block: divisor == 0 ? panic : ok. IRICmp yields i1,
+        # which IRCondBr consumes directly (no trunc needed).
+        cond_block = sprout_ir.IRBlock(cur_lbl,
+                       list_append(cur_ops,
+                         Cons(sprout_ir.IRICmp(z_name, "eq", r_name, "0"),
+                         Cons(sprout_ir.IRCondBr(z_name, panic_lbl, ok_lbl), Nil))))
+        # Panic block: materialize the message String, then panic + unreachable.
+        panic_block = sprout_ir.IRBlock(panic_lbl,
+                        Cons(sprout_ir.IRStrConst(msg_result, msg_raw, "division by zero"),
+                        Cons(sprout_ir.IRPanic(msg_result), Nil)))
+        # Continuation block: the sdiv runs here; it is the new current block.
+        div_op = sprout_ir.IRIDiv(div_result, l_name, r_name)
+        all_blocks = list_append(list_append(lblocks, rblocks),
+                       Cons(cond_block, Cons(panic_block, Nil)))
 
 # Map a TBinary op String to the matching arithmetic IR constructor.
 # Returns Nothing for non-arith ops; the caller falls back to cmp_predicate.

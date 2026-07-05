@@ -37,6 +37,24 @@ export type Result e a =
   | Ok a
   | Err e
 
+# W7/D1: the total division API. The `/` operator panics on a zero divisor and on
+# the INT_MIN / -1 overflow (both undefined for machine integers); safe_div is the
+# non-panicking sibling, returning Err(DivByZero) in exactly those two cases.
+export type DivByZero =
+  | DivByZero
+
+# True iff a is the most-negative Int (INT_MIN), for which a / -1 overflows.
+# Detected without an INT_MIN literal (which the lexer cannot yet represent):
+# negating INT_MIN wraps back to a negative value.  # O(1)
+fn int_is_min(a: Int) -> Bool =
+  a < 0 && (0 - a) < 0
+
+# O(1)
+export fn safe_div(a: Int, b: Int) -> Result DivByZero Int =
+  if b == 0 then Err(DivByZero)
+  else if b == -1 && int_is_min(a) then Err(DivByZero)
+  else Ok(a / b)
+
 export type Vec a =
   | Vec (Vector a)
 

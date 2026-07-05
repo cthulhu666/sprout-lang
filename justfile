@@ -968,6 +968,38 @@ stack-overflow-smoke: bootstrap-from-seed
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
 
+# W7/F-DIV division-by-zero guard regression. The fixture divides by a RUNTIME
+# zero (`10 / list_length(argv)` with no args), which neither the compiler nor
+# clang can fold. A bare `sdiv i64 _, 0` is LLVM undefined behavior; the emitted
+# guard must panic cleanly ("division by zero", non-zero exit). RED before the
+# ast_to_ir guard (UB — often exit 0 or garbage), GREEN after.
+div-by-zero-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_divz_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/div_smoke/div_by_zero.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    echo "div-by-zero-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "div-by-zero-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  set +e
+  "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+  ec=$?
+  set -e
+  if [ "$ec" -eq 0 ]; then
+    echo "div-by-zero-smoke: 10/0 did NOT panic (exit 0) — the guard is missing or was optimized away" >&2
+    exit 1
+  fi
+  if ! grep -q "division by zero" "$TMPD/run.err"; then
+    echo "div-by-zero-smoke: not reported cleanly (exit $ec); expected 'division by zero' on stderr" >&2
+    echo "--- stderr was ---" >&2; cat "$TMPD/run.err" >&2
+    exit 1
+  fi
+  echo "==> div-by-zero-smoke ✓ (clean panic, exit $ec)"
+
 # TCO differential: typed codegen (--use-ir-codegen) must emit at least as many
 # tail-call-optimization loops as direct codegen (--emit-ir) for the same source.
 # A self-tail-recursive function that direct codegen loops but typed codegen does

@@ -265,6 +265,15 @@ export type IROp (..) =
   # syntactically visible terminator; equivalent to IRCall + IRUnreachable
   # but avoids growing the IR with a standalone unreachable op. NOT a GC trigger.
   | IRAbortMatch
+  # IRPanic <msg>
+  # Lowers to:
+  #   call i64 @panic(i64 <msg>)
+  #   unreachable
+  # A noreturn terminator like IRAbortMatch, but with a caller-supplied message
+  # String (<msg> is an i64 handle). Reuses the existing `panic` builtin
+  # (long long panic(long long)); no runtime addition. Used by the `/`
+  # divide-by-zero guard (W7/F-DIV). NOT a GC trigger — panic exits the process.
+  | IRPanic String
   # IRZextI1ToI64 <result> <source>
   # Lowers to: %result = zext i1 %source to i64
   # /code-review-v2 fix #3: emitted after every IRICmp so comparison
@@ -440,6 +449,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = get_field " ++ s ++ ", " ++ int_to_string(i) ++ " [" ++ print_ir_type(k) ++ "]"
   | IRAbortMatch ->
       "    abort_match; unreachable"
+  | IRPanic msg ->
+      "    panic(" ++ msg ++ "); unreachable"
   | IRZextI1ToI64 r s ->
       "    " ++ r ++ " = zext_i1_i64 " ++ s
   | IRTruncI64ToI1 r s ->
