@@ -394,6 +394,32 @@ value-position → `EvForward` → fallback), byte-identical in the harness. New
 `tests/stdlib/test_value_position_method_ref.spr`. Next: **M3b-5** — delete `resolve_tdict`,
 Evidence-ify the reroute, make the eta path a pure Evidence→witness printer.
 
+**M3b-5 prerequisites surfaced by the M3b-4 code review (2026-07-05).** A recall-biased
+multi-angle review found NO current correctness regression (the strongest candidate — a missing
+`TFunc` gate — was empirically refuted: `fn get_empty() -> String = empty` compiles to the SAME
+`__eta_unresolved_Monoid_empty` sentinel under old and new). But three items are *latent*, safe only
+while the `resolve_tdict` fallback exists, and MUST be handled (with tests) when M3b-5 removes it:
+1. **`TFunc` gate on `eta_from_evidence`.** `eta_from_instance` builds
+   `make_eta_lambda_with_dicts` with no check that the use-site type is a function. Today a
+   non-function value-position method (a nullary method inferred as its bare result type, e.g.
+   `empty` at `String`) never reaches it — `try_eta_in_class`'s `TFunc` gate bails and both paths
+   emit the sentinel, byte-identical. When the fallback is deleted, that case would reach
+   `eta_from_instance` and build a malformed *nullary-applied* lambda (`\ -> impl()` typed as a
+   non-function). M3b-5 must add `match t with types.TFunc _ _ _ -> … | _ -> <sentinel/diagnostic>`,
+   with a regression test that fails without it (a nullary method in value position).
+2. **`value_var_node` classification precision becomes load-bearing.** It emits `TMethodRef` iff an
+   `@class:{name}` marker is present and its payload is a bare `types.TConst`. A miss (imported
+   method whose marker isn't in env, or a non-`TConst` class type) silently yields `TVar`, which is
+   harmless now (the `TVar` eta path reconstructs identically) but at M3b-5 leaves the reference
+   with no Evidence AND no fallback. Add a test exercising a marker-miss before deleting the fallback.
+3. **Two independent resolutions must collapse to one.** resolve's `method_ref_evidence` and
+   lowering's `lower_value_var`/`try_eta_in_class` are two head-derivation + instance-lookup
+   implementations kept in lockstep only by the byte-identity corpus (which cannot prove agreement on
+   uncovered shapes: multi-param classes, deeply-nested `TApp` heads, the multi-same-class-constraint
+   `@eta_fwd` disambiguation). M3b-5's deletion of `resolve_tdict` collapses them to one authority —
+   that is the real fix; until then the `mr_*` helpers in resolve are verbatim copies of lowering's
+   (`match_type_vars`, `type_is_unit`, `eta_class_type` family) that can silently drift.
+
 **If full M3b is ever done — design notes.** Option A: resolve emits `EvInstance` for the
 concrete subtree + an opaque `EvForward` marker; lowering fills the forward slot from
 `ctx_fwd` mechanically (a lookup, no *decision*). Evidence threading: add an `Evidence`
