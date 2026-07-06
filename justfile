@@ -476,7 +476,7 @@ _compile-examples stage xfail="":
   declare -a stats=()
   idx=0
   active=0
-  for f in examples/*.sprout; do
+  for f in examples/*.sprout examples/*/*.sprout; do
     [ -f "$f" ] || continue
     outs+=("$TMPD/$idx.out")
     stats+=("$TMPD/$idx.st")

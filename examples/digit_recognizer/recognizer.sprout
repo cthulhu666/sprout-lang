@@ -1,0 +1,322 @@
+module examples.digit_recognizer.recognizer
+
+# Handwritten-digit recognition trained on real public data.
+#
+# Dataset: the UCI "Optical Recognition of Handwritten Digits" set (Alpaydin &
+# Kaynak) — the 8x8 cousin of MNIST.  Each sample is 64 pixels (integer 0..16)
+# plus a label 0..9.  A bounded subset ships alongside this file:
+#   optdigits_train.txt  (500 samples)   optdigits_test.txt (150 samples)
+# one sample per line, whitespace-separated, label last.
+#
+# Model: a 64 -> 24 -> 10 multilayer perceptron.  Hidden activation is softsign,
+# s(x) = x/(1+|x|) — smooth and bounded like tanh but pure arithmetic (no exp),
+# with derivative (1-|s|)^2.  The 10 linear outputs are trained toward a one-hot
+# target under MSE (no softmax, so no exp); the prediction is argmax.  Trained by
+# stochastic gradient descent, one weight update per sample.
+#
+# Run from the repository root:
+#   ./build/compile_driver_bin_stage1 --emit-ir "$PWD/stdlib" \
+#       examples/digit_recognizer/recognizer.sprout | clang -x ir - \
+#       runtime/sprout_runtime.c -O2 -framework Security -framework CoreFoundation \
+#       -o /tmp/digits && /tmp/digits
+#
+# It exercises the full Double surface: to_double (pixel/int -> Double),
+# double_to_string (loss + accuracy printout), float arithmetic and comparison,
+# and MutVec Double as weight storage.
+
+# ---------------------------------------------------------------------------
+# Dimensions and flat weight-vector layout
+# ---------------------------------------------------------------------------
+# N_IN = 64, N_HID = 24, N_OUT = 10.  All weights live in one MutVec Double:
+#   W1[h][i] : h*64 + i                 (0 .. 1535)   input -> hidden
+#   B1[h]    : 1536 + h                 (1536 .. 1559) hidden bias
+#   W2[o][h] : 1560 + o*24 + h          (1560 .. 1799) hidden -> output
+#   B2[o]    : 1800 + o                 (1800 .. 1809) output bias
+fn n_in() -> Int = 64
+fn n_hid() -> Int = 24
+fn n_out() -> Int = 10
+fn n_weights() -> Int = 1810
+
+fn iw1(h: Int, i: Int) -> Int = h * 64 + i
+fn ib1(h: Int) -> Int = 1536 + h
+fn iw2(o: Int, h: Int) -> Int = 1560 + o * 24 + h
+fn ib2(o: Int) -> Int = 1800 + o
+
+# ---------------------------------------------------------------------------
+# Activation
+# ---------------------------------------------------------------------------
+fn dabs(x: Double) -> Double = if x < 0.0 then -x else x
+
+fn softsign(x: Double) -> Double = x / (1.0 + dabs(x))
+
+# s'(x) = (1 - |s(x)|)^2, from the activation output s.
+fn softsign_deriv_from_out(s: Double) -> Double =
+  (1.0 - dabs(s)) * (1.0 - dabs(s))
+
+# One-hot target component: 1.0 for the true class, else 0.0.
+fn target_of(o: Int, label: Int) -> Double = if o == label then 1.0 else 0.0
+
+# ---------------------------------------------------------------------------
+# Deterministic LCG weight initialisation
+# ---------------------------------------------------------------------------
+fn mod_int(a: Int, m: Int) -> Int = a - (a / m) * m
+
+fn lcg_next(state: Int) -> Int = mod_int(1664525 * state + 1013904223, 2147483648)
+
+# Small initial weight in roughly [-0.1, 0.1) — scaled for a 64-input fan-in so
+# softsign pre-activations start near its linear region.
+fn lcg_to_weight(state: Int) -> Double =
+  to_double(mod_int(state, 2000) - 1000) / 10000.0
+
+fn init_weights(w: MutVec Double, i: Int, state: Int) -> Int !{IO} =
+  if i >= n_weights() then 0
+  else
+    do
+      mutvec_set(w, i, lcg_to_weight(state))
+      init_weights(w, i + 1, lcg_next(state))
+
+# ---------------------------------------------------------------------------
+# Data loading:  file -> List (pixels: MutVec Double, label: Int)
+# ---------------------------------------------------------------------------
+# Parse a whitespace-token list into ints, skipping any unparseable token
+# (e.g. a trailing blank).
+fn parse_ints(toks: List String) -> List Int =
+  match toks with
+  | Nil -> Nil
+  | Cons t rest ->
+      match parse_int(t) with
+      | Just v -> Cons(v, parse_ints(rest))
+      | Nothing -> parse_ints(rest)
+
+fn ilen(xs: List Int) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons _ rest -> 1 + ilen(rest)
+
+# Fill pixels[0..63] with normalised values (0..16 -> 0.0..1.0) and return the
+# 65th int as the label.
+fn fill_sample(ints: List Int, pixels: MutVec Double, i: Int) -> Int !{IO} =
+  match ints with
+  | Nil -> 0
+  | Cons v rest ->
+      if i < n_in() then
+        do
+          mutvec_set(pixels, i, to_double(v) / 16.0)
+          fill_sample(rest, pixels, i + 1)
+      else v
+
+fn load_lines(lines: List String) -> List (MutVec Double, Int) !{IO} =
+  match lines with
+  | Nil -> Nil
+  | Cons line rest ->
+      do
+        let ints = parse_ints(split_words(line))
+        if ilen(ints) < n_in() + 1 then load_lines(rest)  # skip blank/short lines
+        else
+          do
+            pixels <- mutvec_new(n_in(), 0.0)
+            label <- fill_sample(ints, pixels, 0)
+            others <- load_lines(rest)
+            Cons((pixels, label), others)
+
+fn load_dataset(path: String) -> List (MutVec Double, Int) !{IO} =
+  # Match read_file directly: a do-bind would strip the Result wrapper.
+  match read_file(path) with
+  | Err _ -> Nil
+  | Ok text -> load_lines(str_split_lines(text))
+
+fn dataset_size(xs: List (MutVec Double, Int)) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons _ rest -> 1 + dataset_size(rest)
+
+# ---------------------------------------------------------------------------
+# Forward pass (writes into caller-provided hidden/out buffers)
+# ---------------------------------------------------------------------------
+# Dot product of W1 row h with the input x, plus bias — the hidden pre-activation.
+fn hidden_z(w: MutVec Double, x: MutVec Double, h: Int, i: Int, acc: Double) -> Double !{IO} =
+  if i >= n_in() then acc
+  else
+    do
+      wi <- mutvec_get(w, iw1(h, i))
+      xi <- mutvec_get(x, i)
+      hidden_z(w, x, h, i + 1, acc + wi * xi)
+
+fn compute_hidden(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, h: Int) -> Int !{IO} =
+  if h >= n_hid() then 0
+  else
+    do
+      b <- mutvec_get(w, ib1(h))
+      z <- hidden_z(w, x, h, 0, b)
+      mutvec_set(hidden, h, softsign(z))
+      compute_hidden(w, x, hidden, h + 1)
+
+fn out_z(w: MutVec Double, hidden: MutVec Double, o: Int, h: Int, acc: Double) -> Double !{IO} =
+  if h >= n_hid() then acc
+  else
+    do
+      wh <- mutvec_get(w, iw2(o, h))
+      hh <- mutvec_get(hidden, h)
+      out_z(w, hidden, o, h + 1, acc + wh * hh)
+
+fn compute_out(w: MutVec Double, hidden: MutVec Double, out: MutVec Double, o: Int) -> Int !{IO} =
+  if o >= n_out() then 0
+  else
+    do
+      b <- mutvec_get(w, ib2(o))
+      z <- out_z(w, hidden, o, 0, b)
+      mutvec_set(out, o, z)
+      compute_out(w, hidden, out, o + 1)
+
+fn forward(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, out: MutVec Double) -> Int !{IO} =
+  do
+    _ <- compute_hidden(w, x, hidden, 0)
+    compute_out(w, hidden, out, 0)
+
+fn argmax(out: MutVec Double, i: Int, best_i: Int, best_v: Double) -> Int !{IO} =
+  if i >= n_out() then best_i
+  else
+    do
+      v <- mutvec_get(out, i)
+      if v > best_v then argmax(out, i + 1, i, v)
+      else argmax(out, i + 1, best_i, best_v)
+
+# ---------------------------------------------------------------------------
+# Backpropagation with inline SGD weight updates
+# ---------------------------------------------------------------------------
+fn zero_vec(v: MutVec Double, n: Int, i: Int) -> Int !{IO} =
+  if i >= n then 0
+  else
+    do
+      mutvec_set(v, i, 0.0)
+      zero_vec(v, n, i + 1)
+
+# dhidden[h] += dout_o * W2[o][h] for one output o (uses OLD W2, before updates).
+fn accum_dhidden_o(w: MutVec Double, dhidden: MutVec Double, o: Int, dout_o: Double, h: Int) -> Int !{IO} =
+  if h >= n_hid() then 0
+  else
+    do
+      wh <- mutvec_get(w, iw2(o, h))
+      cur <- mutvec_get(dhidden, h)
+      mutvec_set(dhidden, h, cur + dout_o * wh)
+      accum_dhidden_o(w, dhidden, o, dout_o, h + 1)
+
+fn accum_dhidden(w: MutVec Double, out: MutVec Double, label: Int, dhidden: MutVec Double, o: Int) -> Int !{IO} =
+  if o >= n_out() then 0
+  else
+    do
+      oo <- mutvec_get(out, o)
+      let dout_o = 2.0 * (oo - target_of(o, label))
+      _ <- accum_dhidden_o(w, dhidden, o, dout_o, 0)
+      accum_dhidden(w, out, label, dhidden, o + 1)
+
+# Update W2[o][.] and B2[o] for one output o.
+fn update_out_o(w: MutVec Double, hidden: MutVec Double, o: Int, dout_o: Double, lr: Double, h: Int) -> Int !{IO} =
+  if h >= n_hid() then 0
+  else
+    do
+      hh <- mutvec_get(hidden, h)
+      cur <- mutvec_get(w, iw2(o, h))
+      mutvec_set(w, iw2(o, h), cur - lr * dout_o * hh)
+      update_out_o(w, hidden, o, dout_o, lr, h + 1)
+
+fn update_output(w: MutVec Double, hidden: MutVec Double, out: MutVec Double, label: Int, lr: Double, o: Int) -> Int !{IO} =
+  if o >= n_out() then 0
+  else
+    do
+      oo <- mutvec_get(out, o)
+      let dout_o = 2.0 * (oo - target_of(o, label))
+      _ <- update_out_o(w, hidden, o, dout_o, lr, 0)
+      bo <- mutvec_get(w, ib2(o))
+      mutvec_set(w, ib2(o), bo - lr * dout_o)
+      update_output(w, hidden, out, label, lr, o + 1)
+
+# Update W1[h][.] and B1[h] for one hidden unit h, given dz = dhidden[h]*s'(h).
+fn update_hidden_h(w: MutVec Double, x: MutVec Double, h: Int, dz: Double, lr: Double, i: Int) -> Int !{IO} =
+  if i >= n_in() then 0
+  else
+    do
+      xi <- mutvec_get(x, i)
+      cur <- mutvec_get(w, iw1(h, i))
+      mutvec_set(w, iw1(h, i), cur - lr * dz * xi)
+      update_hidden_h(w, x, h, dz, lr, i + 1)
+
+fn update_hidden(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, dhidden: MutVec Double, lr: Double, h: Int) -> Int !{IO} =
+  if h >= n_hid() then 0
+  else
+    do
+      hh <- mutvec_get(hidden, h)
+      dh <- mutvec_get(dhidden, h)
+      let dz = dh * softsign_deriv_from_out(hh)
+      _ <- update_hidden_h(w, x, h, dz, lr, 0)
+      bh <- mutvec_get(w, ib1(h))
+      mutvec_set(w, ib1(h), bh - lr * dz)
+      update_hidden(w, x, hidden, dhidden, lr, h + 1)
+
+fn backprop(w: MutVec Double, x: MutVec Double, label: Int, hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double) -> Int !{IO} =
+  do
+    _ <- zero_vec(dhidden, n_hid(), 0)
+    _ <- accum_dhidden(w, out, label, dhidden, 0)  # dhidden from OLD W2
+    _ <- update_output(w, hidden, out, label, lr, 0)  # now update W2/B2
+    update_hidden(w, x, hidden, dhidden, lr, 0)  # update W1/B1
+
+# ---------------------------------------------------------------------------
+# Training and evaluation
+# ---------------------------------------------------------------------------
+fn train_epoch(w: MutVec Double, samples: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double) -> Int !{IO} =
+  match samples with
+  | Nil -> 0
+  | Cons (x, label) rest ->
+      do
+        _ <- forward(w, x, hidden, out)
+        _ <- backprop(w, x, label, hidden, out, dhidden, lr)
+        train_epoch(w, rest, hidden, out, dhidden, lr)
+
+# Count correct predictions over a dataset.
+fn count_correct(w: MutVec Double, samples: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, acc: Int) -> Int !{IO} =
+  match samples with
+  | Nil -> acc
+  | Cons (x, label) rest ->
+      do
+        _ <- forward(w, x, hidden, out)
+        pred <- argmax(out, 0, 0, -1000000.0)
+        if pred == label then count_correct(w, rest, hidden, out, acc + 1)
+        else count_correct(w, rest, hidden, out, acc)
+
+fn accuracy_pct(correct: Int, total: Int) -> Double =
+  to_double(correct) * 100.0 / to_double(total)
+
+fn train(w: MutVec Double, train_set: List (MutVec Double, Int), test_set: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double, epoch: Int, total_epochs: Int, n_test: Int) -> Int !{IO} =
+  if epoch > total_epochs then 0
+  else
+    do
+      _ <- report(w, test_set, hidden, out, epoch, n_test)
+      _ <- train_epoch(w, train_set, hidden, out, dhidden, lr)
+      train(w, train_set, test_set, hidden, out, dhidden, lr, epoch + 1, total_epochs, n_test)
+
+fn report(w: MutVec Double, test_set: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, epoch: Int, n_test: Int) -> Int !{IO} =
+  if mod_int(epoch, 5) == 0 then
+    do
+      c <- count_correct(w, test_set, hidden, out, 0)
+      print("epoch " ++ to_string(epoch) ++ "  test accuracy " ++ to_string(accuracy_pct(c, n_test)) ++ "%")
+      0
+  else 0
+
+fn main() -> Unit !{IO} =
+  do
+    train_set <- load_dataset("examples/digit_recognizer/optdigits_train.txt")
+    test_set <- load_dataset("examples/digit_recognizer/optdigits_test.txt")
+    let n_train = dataset_size(train_set)
+    let n_test = dataset_size(test_set)
+    print("loaded " ++ to_string(n_train) ++ " train / " ++ to_string(n_test) ++ " test samples")
+
+    w <- mutvec_new(n_weights(), 0.0)
+    _ <- init_weights(w, 0, 12345)
+    hidden <- mutvec_new(n_hid(), 0.0)
+    out <- mutvec_new(n_out(), 0.0)
+    dhidden <- mutvec_new(n_hid(), 0.0)
+
+    _ <- train(w, train_set, test_set, hidden, out, dhidden, 0.05, 0, 25, n_test)
+
+    c <- count_correct(w, test_set, hidden, out, 0)
+    print("final test accuracy: " ++ to_string(accuracy_pct(c, n_test)) ++ "% (" ++ to_string(c) ++ "/" ++ to_string(n_test) ++ ")")
