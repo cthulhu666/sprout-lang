@@ -1,0 +1,33 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# Step 4 GC-safety test for the Double feature (docs/nn-gap-analysis.md §7.1).
+#
+# A Double is carried as its i64 bit-pattern.  When stored in a MutVec (heap
+# slot) — exactly how a neural network holds its weights — the GC must classify
+# the slot as a non-heap scalar and NOT trace the bit-pattern as a pointer.
+# `Double` was added to type_kind.type_is_non_heap_scalar for this reason.
+#
+# Run under `just test-stress` (SPROUT_GC_STRESS=1, collect on every alloc): the
+# `churn` calls force collections while the doubles are live in the MutVec.  If a
+# double were traced as a pointer, this would crash (segfault), not just fail.
+
+fn churn(n: Int) -> Int =
+  if n == 0 then 0
+  else churn(n - 1) + list_length(Cons(n, Cons(n + 1, Nil)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    v <- mutvec_new(3, 0.0)
+    mutvec_set(v, 0, 3.14)
+    mutvec_set(v, 1, 2.71)
+    mutvec_set(v, 2, 1.41)
+    assert_true(state, "gc churn before read", churn(80) >= 0)
+    a <- mutvec_get(v, 0)
+    b <- mutvec_get(v, 1)
+    c <- mutvec_get(v, 2)
+    assert_true(state, "gc churn after read", churn(80) >= 0)
+    assert_true(state, "MutVec Double slot0 (3.14) > slot1 (2.71) survives GC", a > b)
+    assert_true(state, "MutVec Double slot1 (2.71) > slot2 (1.41) survives GC", b > c)
+    assert_true(state, "MutVec Double sum 7.26 > 7.0 via fadd survives GC", a + b + c > 7.0)
+    summary(state)

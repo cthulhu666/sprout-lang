@@ -901,6 +901,7 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
   | ast.VarExpr name pos ->
       ast.VarExpr(qualify_value_name(ctx, scope, name), pos)
   | ast.IntExpr _ _ -> expr
+  | ast.FloatExpr _ _ -> expr
   | ast.BoolExpr _ _ -> expr
   | ast.StringExpr _ _ -> expr
   | ast.CharExpr _ _ -> expr

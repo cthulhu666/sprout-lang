@@ -40,7 +40,8 @@ export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
   | ast.TypeName name ->
       type_name_leaf_is(name, "Int") ||
       type_name_leaf_is(name, "Bool") ||
-      type_name_leaf_is(name, "Char")
+      type_name_leaf_is(name, "Char") ||
+      type_name_leaf_is(name, "Double")
   | _ -> false
 
 # Same predicate over an inferred `types.Type` (used by ast_to_ir to classify a
@@ -53,5 +54,6 @@ export fn type_is_non_heap_scalar(t: types.Type) -> Bool =
   | types.TConst name ->
       type_name_leaf_is(name, "Int") ||
       type_name_leaf_is(name, "Bool") ||
-      type_name_leaf_is(name, "Char")
+      type_name_leaf_is(name, "Char") ||
+      type_name_leaf_is(name, "Double")
   | _ -> false

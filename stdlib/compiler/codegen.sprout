@@ -178,6 +178,12 @@ export type IrLinesResult (..) =
 # ===========================================================================
 
 fn ll_i64() -> String = "i64"
+fn ll_double() -> String = "double"
+
+fn is_double_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name -> name == "Double"
+  | _ -> false
 fn ll_i32() -> String = "i32"
 fn ll_i1() -> String = "i1"
 fn ll_ptr() -> String = "ptr"
@@ -1300,6 +1306,7 @@ fn collect_free_vars(e: typed_ast.TypedExpr, bound: Set, acc: List String, seen:
       then (acc, seen)
       else (Cons(name, acc), set_insert(name, seen))
   | typed_ast.TInt _ _ _ -> (acc, seen)
+  | typed_ast.TFloat _ _ _ -> (acc, seen)
   | typed_ast.TBool _ _ _ -> (acc, seen)
   | typed_ast.TString _ _ _ -> (acc, seen)
   | typed_ast.TChar _ _ _ -> (acc, seen)
@@ -1765,6 +1772,15 @@ fn emit_expr(ctx: CgCtx, locals: Dict Value, em: Emitter, tco_ctx: Maybe TcoCtx,
   match e with
   | typed_ast.TInt n _ _ ->
       val_make(ll_i64(), int_to_string(n))
+  | typed_ast.TFloat text _ _ ->
+      # A Double is carried as its i64 bit-pattern through the uniform ABI
+      # (docs/nn-gap-analysis.md §7.1).  LLVM accepts a plain decimal literal in
+      # `double` context (the lexer guarantees `digits.digits`); bitcast it to
+      # i64 so the value flows like any other scalar.
+      do
+        tmp <- fresh_tmp(em)
+        emit_template(em, `  ${tmp} = bitcast double ${text} to i64`)
+        val_make(ll_i64(), tmp)
   | typed_ast.TBool b _ _ ->
       val_make(ll_i1(), if b then "1" else "0")
   | typed_ast.TString s _ _ ->
@@ -2060,9 +2076,24 @@ fn emit_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr
         do
           pop_temp_roots(rooted, em)
           tmp <- fresh_tmp(em)
-          let inst = if op == "+" then "add" else if op == "-" then "sub" else if op == "*" then "mul" else "sdiv"
-          emit_template(em, `  ${tmp} = ${inst} i64 ${val_ir (lv)}, ${val_ir (rv)}`)
-          val_make(ll_i64(), tmp)
+          if is_double_type(ty) then
+            # Operands arrive as i64 bit-patterns; bitcast to double, do the
+            # float op, then bitcast the result back to i64 (uniform ABI).
+            do
+              la <- fresh_tmp(em)
+              emit_template(em, `  ${la} = bitcast i64 ${val_ir (lv)} to double`)
+              lb <- fresh_tmp(em)
+              emit_template(em, `  ${lb} = bitcast i64 ${val_ir (rv)} to double`)
+              fr <- fresh_tmp(em)
+              let finst = if op == "+" then "fadd" else if op == "-" then "fsub" else if op == "*" then "fmul" else "fdiv"
+              emit_template(em, `  ${fr} = ${finst} double ${la}, ${lb}`)
+              emit_template(em, `  ${tmp} = bitcast double ${fr} to i64`)
+              val_make(ll_i64(), tmp)
+          else
+            do
+              let inst = if op == "+" then "add" else if op == "-" then "sub" else if op == "*" then "mul" else "sdiv"
+              emit_template(em, `  ${tmp} = ${inst} i64 ${val_ir (lv)}, ${val_ir (rv)}`)
+              val_make(ll_i64(), tmp)
       else if op == "%" then
         do
           pop_temp_roots(rooted, em)

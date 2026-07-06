@@ -58,6 +58,7 @@ export type Evidence (..) =
 export type TypedExpr (..) =
   | TVar String types.Type source.SourcePos
   | TInt Int types.Type source.SourcePos
+  | TFloat String types.Type source.SourcePos
   | TBool Bool types.Type source.SourcePos
   | TString String types.Type source.SourcePos
   | TChar Int types.Type source.SourcePos
@@ -80,6 +81,7 @@ export fn typed_expr_type(e: TypedExpr) -> types.Type =
   match e with
   | TVar _ t _ -> t
   | TInt _ t _ -> t
+  | TFloat _ t _ -> t
   | TBool _ t _ -> t
   | TString _ t _ -> t
   | TChar _ t _ -> t
@@ -102,6 +104,7 @@ export fn typed_expr_pos(e: TypedExpr) -> source.SourcePos =
   match e with
   | TVar _ _ p -> p
   | TInt _ _ p -> p
+  | TFloat _ _ p -> p
   | TBool _ _ p -> p
   | TString _ _ p -> p
   | TChar _ _ p -> p

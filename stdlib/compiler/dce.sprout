@@ -25,6 +25,7 @@ fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
   match e with
   | typed_ast.TVar _ _ _ -> true
   | typed_ast.TInt _ _ _ -> true
+  | typed_ast.TFloat _ _ _ -> true
   | typed_ast.TBool _ _ _ -> true
   | typed_ast.TString _ _ _ -> true
   | typed_ast.TChar _ _ _ -> true
@@ -100,6 +101,7 @@ fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
   match e with
   | typed_ast.TVar n _ _ -> n == name
   | typed_ast.TInt _ _ _ -> false
+  | typed_ast.TFloat _ _ _ -> false
   | typed_ast.TBool _ _ _ -> false
   | typed_ast.TString _ _ _ -> false
   | typed_ast.TChar _ _ _ -> false
@@ -165,6 +167,7 @@ fn elim_expr(e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   match e with
   | typed_ast.TVar _ _ _ -> e
   | typed_ast.TInt _ _ _ -> e
+  | typed_ast.TFloat _ _ _ -> e
   | typed_ast.TBool _ _ _ -> e
   | typed_ast.TString _ _ _ -> e
   | typed_ast.TChar _ _ _ -> e

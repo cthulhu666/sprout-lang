@@ -52,6 +52,7 @@ export type Scheme (..) =
 # ---------------------------------------------------------------------------
 
 export fn type_int() -> Type = TConst("Int")
+export fn type_double() -> Type = TConst("Double")
 export fn type_bool() -> Type = TConst("Bool")
 export fn type_string() -> Type = TConst("String")
 export fn type_char() -> Type = TConst("Char")

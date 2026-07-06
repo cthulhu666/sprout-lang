@@ -58,6 +58,11 @@ fn tok_is_int(t: token.Token) -> Bool =
   | token.TokenIntKind -> true
   | _ -> false
 
+fn tok_is_float(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenFloatKind -> true
+  | _ -> false
+
 fn tok_is_string(t: token.Token) -> Bool =
   match token.token_kind(t) with
   | token.TokenStringKind -> true
@@ -711,6 +716,8 @@ fn parse_primary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
   else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolExpr(false, cur_pos(tokens, i)), i + 1))
   else if tok_is_int(tok_at(tokens, i)) then
     Ok((ast.IntExpr(int_from_lexed(token.token_text(tok_at(tokens, i))), cur_pos(tokens, i)), i + 1))
+  else if tok_is_float(tok_at(tokens, i)) then
+    Ok((ast.FloatExpr(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)), i + 1))
   else if tok_is_char(tok_at(tokens, i)) then
     Ok((ast.CharExpr(char_token_codepoint(token.token_text(tok_at(tokens, i))), cur_pos(tokens, i)), i + 1))
   else if tok_is_string(tok_at(tokens, i)) then
@@ -1017,6 +1024,7 @@ fn expr_names(expr: ast.Expr) -> List String =
   match expr with
   | ast.VarExpr name _ -> Cons(name, Nil)
   | ast.IntExpr _ _ -> Nil
+  | ast.FloatExpr _ _ -> Nil
   | ast.BoolExpr _ _ -> Nil
   | ast.StringExpr _ _ -> Nil
   | ast.StringTemplateExpr parts _ -> template_parts_names(parts)
@@ -1087,6 +1095,7 @@ fn expr_mentions_name(expr: ast.Expr, name: String) -> Bool =
   match expr with
   | ast.VarExpr var_name _ -> var_name == name
   | ast.IntExpr _ _ -> false
+  | ast.FloatExpr _ _ -> false
   | ast.BoolExpr _ _ -> false
   | ast.StringExpr _ _ -> false
   | ast.StringTemplateExpr parts _ -> template_parts_mention_name(parts, name)

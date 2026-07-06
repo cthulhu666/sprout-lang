@@ -1,0 +1,63 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
+
+# TDD — step 1 of the Double feature (docs/nn-gap-analysis.md §7.1).
+#
+# A float literal `3.14` must lex as a SINGLE numeric token whose text is
+# "3.14".  Today the lexer's scan_int_end stops at the '.', so "3.14" splits
+# into `3`, `.`, `14` — this test is RED until scan_int_next grows a float path.
+#
+# tokenize appends a trailing EOF token, so a lone literal yields 2 tokens.
+#
+# Disambiguation guard: a '.' is a decimal point only when the char AFTER it is
+# a digit.  So `1..5` (range) must stay `1` `..` `5` and never be eaten as a
+# float — the `1..5` cases below pass today and must keep passing after the fix.
+
+fn first_text(raw: String) -> String =
+  match lexer.tokenize(raw) with
+  | Err _ -> "<lex-error>"
+  | Ok toks ->
+      match vec_get(0, toks) with
+      | Nothing -> "<empty>"
+      | Just t -> token.token_text(t)
+
+fn tok_count(raw: String) -> Int =
+  match lexer.tokenize(raw) with
+  | Err _ -> -1
+  | Ok toks -> vec_length(toks)
+
+# The token KIND is the real contract — text alone can't tell a float token
+# from an int token with a float-looking spelling.
+fn first_is_float_kind(raw: String) -> Bool =
+  match lexer.tokenize(raw) with
+  | Err _ -> false
+  | Ok toks ->
+      match vec_get(0, toks) with
+      | Nothing -> false
+      | Just t ->
+          match token.token_kind(t) with
+          | token.TokenFloatKind -> true
+          | _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Float literals: the feature under test (RED today) ---
+    assert_eq(state, "3.14 is one token + EOF", tok_count("3.14"), 2)
+    assert_eq(state, "3.14 lexes with text 3.14", first_text("3.14"), "3.14")
+    assert_eq(state, "0.5 lexes with text 0.5", first_text("0.5"), "0.5")
+    assert_true(state, "3.14 classified as float kind", first_is_float_kind("3.14"))
+
+    # --- Plain integers still lex unchanged (no regression) ---
+    assert_eq(state, "42 stays one int token + EOF", tok_count("42"), 2)
+    assert_eq(state, "42 text preserved", first_text("42"), "42")
+    assert_false(state, "42 is NOT a float kind", first_is_float_kind("42"))
+
+    # --- Range operator must NOT be swallowed as a float ('.' + non-digit) ---
+    # `1..5` -> Int "1", Symbol "..", Int "5", EOF = 4 tokens.
+    assert_eq(state, "1..5 range not eaten as float (count)", tok_count("1..5"), 4)
+    assert_eq(state, "1..5 first token is int 1", first_text("1..5"), "1")
+
+    summary(state)

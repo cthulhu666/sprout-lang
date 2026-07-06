@@ -107,6 +107,15 @@ fn replicate_i64_csv(n: Int) -> String =
 # Render a single IROp as one LLVM IR line (without trailing newline).
 # str_table maps raw-ptr names (e.g. "%t0") introduced by IRStrConst to
 # (global_name, byte_length) — populated by collect_str_consts before lowering.
+# Emit the 4-line bitcast dance for a Double binary op.  Intermediate names are
+# namespaced under the unique result name `r` (`r$la`, `r$lb`, `r$fr`), so they
+# stay SSA-unique without a fresh-name counter.
+fn lower_float_binop(r: String, inst: String, a: String, b: String) -> String =
+  "  " ++ r ++ "$la = bitcast i64 " ++ a ++ " to double\n" ++
+  "  " ++ r ++ "$lb = bitcast i64 " ++ b ++ " to double\n" ++
+  "  " ++ r ++ "$fr = " ++ inst ++ " double " ++ r ++ "$la, " ++ r ++ "$lb\n" ++
+  "  " ++ r ++ " = bitcast double " ++ r ++ "$fr to i64"
+
 fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match op with
   | sprout_ir.IRConst name n -> "  " ++ name ++ " = add i64 0, " ++ int_to_string(n)
@@ -116,6 +125,18 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRISub r a b -> "  " ++ r ++ " = sub i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIMul r a b -> "  " ++ r ++ " = mul i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIDiv r a b -> "  " ++ r ++ " = sdiv i64 " ++ a ++ ", " ++ b
+  # Float ops: operands are i64 bit-patterns — bitcast to double, apply the
+  # instruction, bitcast the result back to i64 (uniform ABI, §7.1).
+  | sprout_ir.IRFloatConst r text -> "  " ++ r ++ " = bitcast double " ++ text ++ " to i64"
+  | sprout_ir.IRFAdd r a b -> lower_float_binop(r, "fadd", a, b)
+  | sprout_ir.IRFSub r a b -> lower_float_binop(r, "fsub", a, b)
+  | sprout_ir.IRFMul r a b -> lower_float_binop(r, "fmul", a, b)
+  | sprout_ir.IRFDiv r a b -> lower_float_binop(r, "fdiv", a, b)
+  # IRFCmp yields i1 (like IRICmp); the caller follows it with IRZextI1ToI64.
+  | sprout_ir.IRFCmp r pred a b ->
+      "  " ++ r ++ "$fa = bitcast i64 " ++ a ++ " to double\n" ++
+      "  " ++ r ++ "$fb = bitcast i64 " ++ b ++ " to double\n" ++
+      "  " ++ r ++ " = fcmp " ++ pred ++ " double " ++ r ++ "$fa, " ++ r ++ "$fb"
   | sprout_ir.IRBoolNot r a -> "  " ++ r ++ " = xor i64 " ++ a ++ ", 1"
   | sprout_ir.IRINeg r a -> "  " ++ r ++ " = sub i64 0, " ++ a
   | sprout_ir.IRLoadGlobal r name -> "  " ++ r ++ " = load i64, ptr @" ++ name

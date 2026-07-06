@@ -142,6 +142,7 @@ fn dump_expr(e: ast.Expr) -> String =
   match e with
   | ast.VarExpr name _ -> sexp("var", Cons(q(name), Nil))
   | ast.IntExpr n _ -> sexp("int", Cons(int_to_string(n), Nil))
+  | ast.FloatExpr text _ -> sexp("float", Cons(text, Nil))
   | ast.BoolExpr b _ -> sexp("bool", Cons(bool_str(b), Nil))
   | ast.StringExpr s _ -> sexp("string", Cons(q(s), Nil))
   | ast.StringTemplateExpr parts _ -> sexp("template-expr", dump_template_parts(parts))

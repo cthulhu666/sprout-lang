@@ -49,6 +49,7 @@ export type RecordField (..) =
 export type Expr (..) =
   | VarExpr String source.SourcePos
   | IntExpr Int source.SourcePos
+  | FloatExpr String source.SourcePos
   | BoolExpr Bool source.SourcePos
   | StringExpr String source.SourcePos
   | StringTemplateExpr (List TemplateExprPart) source.SourcePos

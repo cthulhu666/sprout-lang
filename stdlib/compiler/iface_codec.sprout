@@ -1140,6 +1140,8 @@ export fn encode_ast_expr(e: ast.Expr) -> String =
       string_concat_many(["(VarExpr ", encode_quoted_str(name), " ", encode_ast_pos(p), ")"])
   | ast.IntExpr n p ->
       string_concat_many(["(IntExpr ", int_to_string(n), " ", encode_ast_pos(p), ")"])
+  | ast.FloatExpr text p ->
+      string_concat_many(["(FloatExpr ", encode_quoted_str(text), " ", encode_ast_pos(p), ")"])
   | ast.BoolExpr b p ->
       string_concat_many(["(BoolExpr ", encode_ast_bool(b), " ", encode_ast_pos(p), ")"])
   | ast.StringExpr v p ->
@@ -1816,6 +1818,7 @@ fn decode_ast_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.
 fn decode_ast_expr_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(ast.Expr, Int) =
   if tag == "VarExpr" then decode_var_expr_at(s, bytes, i, total)
   else if tag == "IntExpr" then decode_int_expr_at(s, bytes, i, total)
+  else if tag == "FloatExpr" then decode_float_expr_at(s, bytes, i, total)
   else if tag == "BoolExpr" then decode_bool_expr_at(s, bytes, i, total)
   else if tag == "StringExpr" then decode_string_expr_at(s, bytes, i, total)
   else if tag == "StringTemplateExpr" then decode_string_template_expr_at(s, bytes, i, total)
@@ -1877,6 +1880,19 @@ fn decode_string_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(a
           match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
           | Nothing -> Nothing
           | Just end -> Just((ast.StringExpr(v, p), end))
+
+# FloatExpr carries its literal text (like StringExpr) — the numeric value is
+# materialized in codegen, so the iface only round-trips the spelling.
+fn decode_float_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  match decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) with
+  | Nothing -> Nothing
+  | Just (v, j) ->
+      match decode_pos_at(s, bytes, skip_ws(s, bytes, j, total), total) with
+      | Nothing -> Nothing
+      | Just (p, k) ->
+          match expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') with
+          | Nothing -> Nothing
+          | Just end -> Just((ast.FloatExpr(v, p), end))
 
 fn decode_string_template_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
   match decode_template_part_list_at(s, bytes, skip_ws(s, bytes, i, total), total) with

@@ -5,6 +5,7 @@ export type TokenKind (..) =
   | TokenIdentKind
   | TokenKeywordKind
   | TokenIntKind
+  | TokenFloatKind
   | TokenCharKind
   | TokenStringKind
   | TokenSymbolKind

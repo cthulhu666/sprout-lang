@@ -210,6 +210,7 @@ fn is_constructor_ref(name: String) -> Bool =
 fn is_syntactic_value(expr: ast.Expr) -> Bool =
   match expr with
   | ast.IntExpr _ _ -> true
+  | ast.FloatExpr _ _ -> true
   | ast.BoolExpr _ _ -> true
   | ast.StringExpr _ _ -> true
   | ast.CharExpr _ _ -> true
@@ -457,6 +458,7 @@ fn infer_expr(
 ) -> InferResult !{IO} =
   match expr with
   | ast.IntExpr v pos -> InferOk(typed_ast.TInt(v, types.type_int(), pos), subst, eff_subst, types.EffectPure)
+  | ast.FloatExpr text pos -> InferOk(typed_ast.TFloat(text, types.type_double(), pos), subst, eff_subst, types.EffectPure)
   | ast.BoolExpr v pos -> InferOk(typed_ast.TBool(v, types.type_bool(), pos), subst, eff_subst, types.EffectPure)
   | ast.StringExpr v pos -> InferOk(typed_ast.TString(v, types.type_string(), pos), subst, eff_subst, types.EffectPure)
   | ast.CharExpr v pos -> InferOk(typed_ast.TChar(v, types.type_char(), pos), subst, eff_subst, types.EffectPure)
@@ -1827,14 +1829,24 @@ fn check_arith(
   eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), types.type_int()) with
-  | Err e -> InferErr(pos, op ++ " needs Int: " ++ e)
+  # Concrete-only, same-type numeric rule (docs/nn-gap-analysis.md §7.1):
+  # unify the operands with each other first, then require the shared type be
+  # Int or Double.  Int op Int -> Int; Double op Double -> Double; a mixed
+  # Int/Double pair fails the operand unify (no implicit promotion).  `/` stays
+  # in this set for Int (truncating) — the deliberate §7.3 divergence.
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
+  | Err e -> InferErr(pos, op ++ " needs matching numeric operands: " ++ e)
   | Ok s1 ->
-      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_right), types.type_int()) with
-      | Err e -> InferErr(pos, op ++ " needs Int: " ++ e)
+      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
       | Ok s2 ->
           InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_int(), pos),
                   s2, eff_subst, eff)
+      | Err _ ->
+          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
+          | Err e -> InferErr(pos, op ++ " needs Int or Double operands: " ++ e)
+          | Ok s2 ->
+              InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_double(), pos),
+                      s2, eff_subst, eff)
 
 fn check_compare(
   subst: Dict types.Type,
@@ -1845,7 +1857,9 @@ fn check_compare(
   eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  # Unify left and right with each other first, then check the result is Int or Char.
+  # Unify left and right with each other first, then check the result is
+  # Int, Char, or Double.  Double comparison (e.g. `x < 0.0`) lowers to an
+  # ordered fcmp in the IR (docs/nn-gap-analysis.md §7.1).
   match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
   | Err e -> InferErr(pos, op ++ " needs matching types: " ++ e)
   | Ok s1 ->
@@ -1855,10 +1869,15 @@ fn check_compare(
                   s2, eff_subst, eff)
       | Err _ ->
           match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_char()) with
-          | Err e -> InferErr(pos, op ++ " needs Int or Char: " ++ e)
           | Ok s2 ->
               InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
                       s2, eff_subst, eff)
+          | Err _ ->
+              match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
+              | Err e -> InferErr(pos, op ++ " needs Int, Char, or Double: " ++ e)
+              | Ok s2 ->
+                  InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
+                          s2, eff_subst, eff)
 
 fn is_primitive_eq_type(t: types.Type) -> Bool =
   match t with
@@ -3130,8 +3149,8 @@ fn builtin_type_names() -> List String =
   append(primitive_type_names(), c_runtime_type_names())
 
 fn primitive_type_names() -> List String =
-  Cons("Int", Cons("Bool", Cons("String", Cons("Char",
-    Cons("Unit", Cons("Bytes", Cons("IntRange", Nil)))))))
+  Cons("Int", Cons("Double", Cons("Bool", Cons("String", Cons("Char",
+    Cons("Unit", Cons("Bytes", Cons("IntRange", Nil))))))))
 
 fn c_runtime_type_names() -> List String =
   Cons("Vector", Cons("Map", Cons("NativeSet", Cons("Ref", Nil))))
@@ -3496,6 +3515,8 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
       typed_ast.TVar(name, unifier.apply_subst(subst, t), pos)
   | typed_ast.TInt val t pos ->
       typed_ast.TInt(val, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TFloat text t pos ->
+      typed_ast.TFloat(text, unifier.apply_subst(subst, t), pos)
   | typed_ast.TBool val t pos ->
       typed_ast.TBool(val, unifier.apply_subst(subst, t), pos)
   | typed_ast.TString val t pos ->
@@ -3765,6 +3786,7 @@ fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, e
   match e with
   | typed_ast.TVar _ _ _ -> e
   | typed_ast.TInt _ _ _ -> e
+  | typed_ast.TFloat _ _ _ -> e
   | typed_ast.TBool _ _ _ -> e
   | typed_ast.TString _ _ _ -> e
   | typed_ast.TChar _ _ _ -> e
@@ -3860,6 +3882,7 @@ fn assert_resolved_typed_expr(fn_name: String, expr: typed_ast.TypedExpr) -> Uni
     match expr with
     | typed_ast.TVar _ _ _ -> ()
     | typed_ast.TInt _ _ _ -> ()
+    | typed_ast.TFloat _ _ _ -> ()
     | typed_ast.TBool _ _ _ -> ()
     | typed_ast.TString _ _ _ -> ()
     | typed_ast.TChar _ _ _ -> ()

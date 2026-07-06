@@ -8,6 +8,7 @@ fn kind_str(t: token.Token) -> String =
   | token.TokenIdentKind -> "ident"
   | token.TokenKeywordKind -> "keyword"
   | token.TokenIntKind -> "int"
+  | token.TokenFloatKind -> "float"
   | token.TokenCharKind -> "char"
   | token.TokenStringKind -> "string"
   | token.TokenSymbolKind -> "symbol"
@@ -75,6 +76,14 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "int kind", tok_kind_at("42", 0), "int")
     assert_eq(state, "int text", tok_text_at("42", 0), "42")
     assert_eq(state, "zero int", tok_kind_at("0", 0), "int")
+
+    # Float literals (Double feature) — `digits.digits` lexes as one float token
+    assert_eq(state, "float kind", tok_kind_at("3.14", 0), "float")
+    assert_eq(state, "float text", tok_text_at("3.14", 0), "3.14")
+    assert_eq(state, "float leading-zero kind", tok_kind_at("0.5", 0), "float")
+    # A range `1..5` must NOT be eaten as a float: `.` needs a digit after it
+    assert_eq(state, "range first token stays int", tok_kind_at("1..5", 0), "int")
+    assert_eq(state, "range first int text", tok_text_at("1..5", 0), "1")
 
     # String literals
     assert_eq(state, "string kind", tok_kind_at("\"hello\"", 0), "string")

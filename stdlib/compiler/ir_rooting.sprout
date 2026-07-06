@@ -80,6 +80,12 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRISub _ _ _ -> false
   | sprout_ir.IRIMul _ _ _ -> false
   | sprout_ir.IRIDiv _ _ _ -> false
+  | sprout_ir.IRFloatConst _ _ -> false
+  | sprout_ir.IRFAdd _ _ _ -> false
+  | sprout_ir.IRFSub _ _ _ -> false
+  | sprout_ir.IRFMul _ _ _ -> false
+  | sprout_ir.IRFDiv _ _ _ -> false
+  | sprout_ir.IRFCmp _ _ _ _ -> false
   | sprout_ir.IRBoolNot _ _ -> false
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false
@@ -178,6 +184,12 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRISub _ _ _ -> Nothing
   | sprout_ir.IRIMul _ _ _ -> Nothing
   | sprout_ir.IRIDiv _ _ _ -> Nothing
+  | sprout_ir.IRFloatConst _ _ -> Nothing
+  | sprout_ir.IRFAdd _ _ _ -> Nothing
+  | sprout_ir.IRFSub _ _ _ -> Nothing
+  | sprout_ir.IRFMul _ _ _ -> Nothing
+  | sprout_ir.IRFDiv _ _ _ -> Nothing
+  | sprout_ir.IRFCmp _ _ _ _ -> Nothing
   | sprout_ir.IRBoolNot _ _ -> Nothing
   | sprout_ir.IRINeg _ _ -> Nothing
   # A value loaded from a global needs no temp root: its slot is a permanent GC
@@ -265,6 +277,12 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRISub _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRIMul _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRIDiv _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRFloatConst _ _ -> Nil
+  | sprout_ir.IRFAdd _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRFSub _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRFMul _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRFDiv _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRFCmp _ _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRBoolNot _ a -> Cons(a, Nil)
   | sprout_ir.IRINeg _ a -> Cons(a, Nil)
   | sprout_ir.IRLoadGlobal _ _ -> Nil
@@ -317,6 +335,12 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRISub r _ _ -> Just(r)
   | sprout_ir.IRIMul r _ _ -> Just(r)
   | sprout_ir.IRIDiv r _ _ -> Just(r)
+  | sprout_ir.IRFloatConst r _ -> Just(r)
+  | sprout_ir.IRFAdd r _ _ -> Just(r)
+  | sprout_ir.IRFSub r _ _ -> Just(r)
+  | sprout_ir.IRFMul r _ _ -> Just(r)
+  | sprout_ir.IRFDiv r _ _ -> Just(r)
+  | sprout_ir.IRFCmp r _ _ _ -> Just(r)
   | sprout_ir.IRBoolNot r _ -> Just(r)
   | sprout_ir.IRINeg r _ -> Just(r)
   | sprout_ir.IRLoadGlobal r _ -> Just(r)
@@ -586,6 +610,12 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRISub _ _ _ -> false
   | sprout_ir.IRIMul _ _ _ -> false
   | sprout_ir.IRIDiv _ _ _ -> false
+  | sprout_ir.IRFloatConst _ _ -> false
+  | sprout_ir.IRFAdd _ _ _ -> false
+  | sprout_ir.IRFSub _ _ _ -> false
+  | sprout_ir.IRFMul _ _ _ -> false
+  | sprout_ir.IRFDiv _ _ _ -> false
+  | sprout_ir.IRFCmp _ _ _ _ -> false
   | sprout_ir.IRBoolNot _ _ -> false
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false

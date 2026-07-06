@@ -307,10 +307,28 @@ fn scan_ident_next(raw: String, cursor: source.SourceCursor) -> (source.SourceCu
 where
   end_cursor = scan_ident_end(cursor)
 
+# If the integer digit run at `int_end` is immediately followed by '.' and then
+# a digit, consume the fractional digit run and return the cursor past it;
+# otherwise Nothing.  The digit-after-dot check keeps the `..` range operator
+# (e.g. `1..5`) and a trailing dot (`3.`) from being lexed as floats.
+fn scan_float_frac_end(int_end: source.SourceCursor) -> Maybe source.SourceCursor =
+  match source.next(int_end) with
+  | Nothing -> Nothing
+  | Just (dot_ch, after_dot) ->
+      if dot_ch == '.' then
+        match source.peek(after_dot) with
+        | Nothing -> Nothing
+        | Just next_ch ->
+            if string.is_ascii_digit(next_ch) then Just(scan_int_end(after_dot)) else Nothing
+      else
+        Nothing
+
 fn scan_int_next(raw: String, cursor: source.SourceCursor) -> (source.SourceCursor, token.Token) =
-  (end_cursor, emit_token(token.TokenIntKind, raw, cursor, end_cursor))
+  match scan_float_frac_end(int_end) with
+  | Just frac_end -> (frac_end, emit_token(token.TokenFloatKind, raw, cursor, frac_end))
+  | Nothing -> (int_end, emit_token(token.TokenIntKind, raw, cursor, int_end))
 where
-  end_cursor = scan_int_end(cursor)
+  int_end = scan_int_end(cursor)
 
 fn scan_string_next(cursor: source.SourceCursor, start_pos: source.SourcePos) -> Result token.TokenizeError (source.SourceCursor, token.Token) =
   match source.next(cursor) with

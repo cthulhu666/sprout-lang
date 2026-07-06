@@ -93,6 +93,20 @@ export type IROp (..) =
   # zero matches LLVM's: undefined behaviour.  Source-level division-by-zero
   # guards must be inserted by the user (or by a later pass) before the IRIDiv.
   | IRIDiv String String String
+  # Float ops (Double).  A Double is carried as its i64 bit-pattern through the
+  # uniform ABI; these ops bitcast to `double`, apply the float instruction, and
+  # bitcast the result back to i64 — so the operand/result SSA names are i64 like
+  # every other scalar (docs/nn-gap-analysis.md §7.1).  fdiv-by-zero is IEEE
+  # defined (inf/nan), so unlike IRIDiv there is no div-by-zero guard.
+  #   IRFloatConst <result> <decimal-text>   — result = bitcast double <text> to i64
+  #   IRFAdd/Sub/Mul/Div <result> <lhs> <rhs> — bitcast dance around fadd/fsub/…
+  #   IRFCmp <result> <fpred> <lhs> <rhs>     — ordered fcmp, result is i1
+  | IRFloatConst String String
+  | IRFAdd String String String
+  | IRFSub String String String
+  | IRFMul String String String
+  | IRFDiv String String String
+  | IRFCmp String String String String
   # IRBoolNot <result> <operand>  — boolean negation (lowers to `xor i64 %x, 1`).
   # Sprout's `!` operator.  Both operand and result are the i64-uniform Bool
   # representation (0 = false, 1 = true).  Xor with 1 flips the low bit.
@@ -404,6 +418,12 @@ fn print_op(op: IROp) -> String =
   | IRISub r a b -> "    " ++ r ++ " = isub " ++ a ++ ", " ++ b
   | IRIMul r a b -> "    " ++ r ++ " = imul " ++ a ++ ", " ++ b
   | IRIDiv r a b -> "    " ++ r ++ " = idiv " ++ a ++ ", " ++ b
+  | IRFloatConst r text -> "    " ++ r ++ " = fconst " ++ text
+  | IRFAdd r a b -> "    " ++ r ++ " = fadd " ++ a ++ ", " ++ b
+  | IRFSub r a b -> "    " ++ r ++ " = fsub " ++ a ++ ", " ++ b
+  | IRFMul r a b -> "    " ++ r ++ " = fmul " ++ a ++ ", " ++ b
+  | IRFDiv r a b -> "    " ++ r ++ " = fdiv " ++ a ++ ", " ++ b
+  | IRFCmp r pred a b -> "    " ++ r ++ " = fcmp " ++ pred ++ " " ++ a ++ ", " ++ b
   | IRBoolNot r a -> "    " ++ r ++ " = bnot " ++ a
   | IRINeg r a -> "    " ++ r ++ " = ineg " ++ a
   | IRLoadGlobal r name -> "    " ++ r ++ " = load_global @" ++ name

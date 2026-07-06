@@ -1150,6 +1150,7 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
         | Just lam -> lam
         | Nothing -> lower_value_var(name, t, pos, ctx)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
+  | typed_ast.TFloat text t pos -> typed_ast.TFloat(text, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
   | typed_ast.TString s t pos -> typed_ast.TString(s, t, pos)
   | typed_ast.TChar c t pos -> typed_ast.TChar(c, t, pos)

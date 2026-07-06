@@ -31,6 +31,7 @@ fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set, top_level: Set) -> S
       then set_empty()
       else set_insert(name, set_empty())
   | typed_ast.TInt _ _ _ -> set_empty()
+  | typed_ast.TFloat _ _ _ -> set_empty()
   | typed_ast.TBool _ _ _ -> set_empty()
   | typed_ast.TString _ _ _ -> set_empty()
   | typed_ast.TChar _ _ _ -> set_empty()
@@ -277,7 +278,7 @@ fn capture_kind(v: String, body: typed_ast.TypedExpr) -> sprout_ir.IRType =
   match find_capture_type(body, v) with
   | Nothing -> sprout_ir.IRTUnknown
   | Just t ->
-      if is_int_type(t) || is_char_type(t)
+      if is_int_type(t) || is_char_type(t) || is_double_type(t)
       then sprout_ir.IRTScalar
       else sprout_ir.IRTHeap
 
@@ -563,6 +564,12 @@ fn is_int_type(t: types.Type) -> Bool =
   | types.TConst name -> name == "Int"
   | _ -> false
 
+# True iff t is the monomorphic Double type.
+fn is_double_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst name -> name == "Double"
+  | _ -> false
+
 # True iff t is the monomorphic Bool type.
 fn is_bool_type(t: types.Type) -> Bool =
   match t with
@@ -710,6 +717,10 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
   | typed_ast.TInt n _ _ ->
       Ok((Nil, cur_label,
            list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), n), Nil)),
+           fresh_name(name_prefix, idx), idx + 1))
+  | typed_ast.TFloat text _ _ ->
+      Ok((Nil, cur_label,
+           list_append(cur_ops, Cons(sprout_ir.IRFloatConst(fresh_name(name_prefix, idx), text), Nil)),
            fresh_name(name_prefix, idx), idx + 1))
   | typed_ast.TVar name _ _ ->
       # A TVar may reference: (a) a function parameter, (b) a 0-arity
@@ -1354,6 +1365,7 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
   | typed_ast.TVar n ty _ ->
       if n == name then Just(ty) else Nothing
   | typed_ast.TInt _ _ _ -> Nothing
+  | typed_ast.TFloat _ _ _ -> Nothing
   | typed_ast.TBool _ _ _ -> Nothing
   | typed_ast.TString _ _ _ -> Nothing
   | typed_ast.TChar _ _ _ -> Nothing
@@ -1806,9 +1818,10 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                 match rr with
                 | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
                     finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops,
-                                  l_name, r_name, idx2, name_prefix)
-  else if ! (is_int_or_char_type(typed_ast.typed_expr_type(left)) && is_int_or_char_type(typed_ast.typed_expr_type(right)))
-  then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int operands")
+                                  l_name, r_name, idx2, false, name_prefix)
+  else if ! ((is_int_or_char_type(typed_ast.typed_expr_type(left)) && is_int_or_char_type(typed_ast.typed_expr_type(right)))
+             || (is_double_type(typed_ast.typed_expr_type(left)) && is_double_type(typed_ast.typed_expr_type(right))))
+  then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int or Double operands")
   else
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
                          captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
@@ -1825,15 +1838,17 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                 match rr with
                 | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
                     finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops,
-                                  l_name, r_name, idx2, name_prefix)
+                                  l_name, r_name, idx2, is_double_type(typed_ast.typed_expr_type(left)), name_prefix)
 
 fn finish_binary(op: String,
                  lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
                  cur_lbl: String, cur_ops: List sprout_ir.IROp,
                  l_name: String, r_name: String,
-                 idx: Int, name_prefix: String) ->
+                 idx: Int, is_float: Bool, name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
-  if op == "/" then
+  if is_float then
+    finish_binary_float(op, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
+  else if op == "/" then
     finish_checked_div(lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
   else
   match arith_op(op, result, l_name, r_name) with
@@ -1857,6 +1872,51 @@ fn finish_binary(op: String,
       | Nothing -> Err("ast_to_ir: binary op '" ++ op ++ "' not yet supported")
   where result = fresh_name(name_prefix, idx)
         zext_result = fresh_name(name_prefix, idx + 1)
+
+# Double binary ops.  fdiv-by-zero is IEEE defined (no guard needed, unlike
+# IRIDiv).  Comparisons use ordered fcmp predicates and, like the Int path, zext
+# the i1 result to the i64-uniform Bool.
+fn finish_binary_float(op: String,
+                       lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+                       cur_lbl: String, cur_ops: List sprout_ir.IROp,
+                       l_name: String, r_name: String,
+                       idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match float_arith_op(op, result, l_name, r_name) with
+  | Just fop ->
+      Ok((list_append(lblocks, rblocks), cur_lbl,
+           list_append(cur_ops, Cons(fop, Nil)),
+           result, idx + 1))
+  | Nothing ->
+      match float_cmp_predicate(op) with
+      | Just pred ->
+          Ok((list_append(lblocks, rblocks), cur_lbl,
+               list_append(cur_ops,
+                 Cons(sprout_ir.IRFCmp(result, pred, l_name, r_name),
+                 Cons(sprout_ir.IRZextI1ToI64(zext_result, result), Nil))),
+               zext_result, idx + 2))
+      | Nothing -> Err("ast_to_ir: float binary op '" ++ op ++ "' not yet supported")
+  where result = fresh_name(name_prefix, idx)
+        zext_result = fresh_name(name_prefix, idx + 1)
+
+# Map a Double arith op to its float IR constructor (Nothing for comparisons).
+fn float_arith_op(op: String, result: String, lhs: String, rhs: String) -> Maybe sprout_ir.IROp =
+  if op == "+" then Just(sprout_ir.IRFAdd(result, lhs, rhs))
+  else if op == "-" then Just(sprout_ir.IRFSub(result, lhs, rhs))
+  else if op == "*" then Just(sprout_ir.IRFMul(result, lhs, rhs))
+  else if op == "/" then Just(sprout_ir.IRFDiv(result, lhs, rhs))
+  else Nothing
+
+# Map a Double comparison op to its ordered fcmp predicate ("ordered" = false
+# when either operand is NaN).
+fn float_cmp_predicate(op: String) -> Maybe String =
+  if op == "<" then Just("olt")
+  else if op == "<=" then Just("ole")
+  else if op == ">" then Just("ogt")
+  else if op == ">=" then Just("oge")
+  else if op == "==" then Just("oeq")
+  else if op == "!=" then Just("one")
+  else Nothing
 
 # W7/F-DIV: `/` lowers to a guarded division. A bare `sdiv i64 _, 0` is LLVM
 # undefined behavior, so the current block is sealed with a check `divisor == 0`

@@ -1,0 +1,60 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.typed_ast as typed_ast
+
+# TDD — step 3 of the Double feature (docs/nn-gap-analysis.md §7.1, §7.3).
+#
+# The typechecker must:
+#   * infer a float literal `3.14` as type Double;
+#   * accept `Double` as a type annotation;
+#   * type `+ - * /` with the concrete-only, same-type rule:
+#       Int  op Int  -> Int
+#       Double op Double -> Double
+#       Int  op Double -> TYPE ERROR (no implicit promotion; §6.6 no polymorphic literals)
+#   * keep `/` working on Int (truncating) — the deliberate §7.3 divergence.
+#
+# Observable: does a small program typecheck (TypedOk) or not (TypedErr)?
+# Annotations pin the inferred type: `-> Double = 3.14` only checks if 3.14 : Double.
+
+fn typechecks(src: String) -> Bool !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> false
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> false
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ _ -> false
+            | typed_ast.TypedOk _ _ -> true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Float literals infer as Double; Double is a valid annotation ---
+    ok_lit <- typechecks("fn f() -> Double = 3.14")
+    ok_darith <- typechecks("fn f() -> Double = 3.14 + 1.5")
+    ok_dmul <- typechecks("fn f() -> Double = 2.0 * 0.5")
+    assert_true(state, "3.14 : Double", ok_lit)
+    assert_true(state, "Double + Double : Double", ok_darith)
+    assert_true(state, "Double * Double : Double", ok_dmul)
+
+    # --- Integer arithmetic unchanged (regression), incl. truncating `/` (§7.3) ---
+    ok_iarith <- typechecks("fn f() -> Int = 1 + 2")
+    ok_idiv <- typechecks("fn f() -> Int = 7 / 2")
+    assert_true(state, "Int + Int : Int", ok_iarith)
+    assert_true(state, "Int / Int : Int (truncating, kept per 7.3)", ok_idiv)
+
+    # --- No implicit promotion / mixing (the same-type rule) ---
+    bad_int_ann <- typechecks("fn f() -> Int = 3.14")
+    bad_dbl_ann <- typechecks("fn f() -> Double = 1 + 2")
+    bad_mixed <- typechecks("fn f() -> Double = 1 + 2.0")
+    assert_false(state, "Double body vs Int annotation is an error", bad_int_ann)
+    assert_false(state, "Int arith vs Double annotation is an error", bad_dbl_ann)
+    assert_false(state, "mixed Int + Double is an error", bad_mixed)
+
+    summary(state)

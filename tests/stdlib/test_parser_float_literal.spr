@@ -1,0 +1,64 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+
+# TDD — step 2 of the Double feature (docs/nn-gap-analysis.md §7.1).
+#
+# The parser must accept a float literal as a primary expression and build a
+# FloatExpr node carrying the literal text.  Today parse_primary has no float
+# branch, so a TokenFloatKind falls through to a parse error — these float
+# cases are RED until parse_primary grows a `tok_is_float` branch.
+
+fn parses(raw: String) -> Bool =
+  match lexer.tokenize(raw) with
+  | Err _ -> false
+  | Ok toks ->
+      match parser.parse_expr(toks, 0) with
+      | Err _ -> false
+      | Ok _ -> true
+
+# The node IDENTITY is the real contract: the primary must be a FloatExpr
+# carrying the literal text, not e.g. an IntExpr or a mis-parse.
+fn float_text(raw: String) -> String =
+  match lexer.tokenize(raw) with
+  | Err _ -> "<lex>"
+  | Ok toks ->
+      match parser.parse_expr(toks, 0) with
+      | Err _ -> "<parse>"
+      | Ok (e, _) ->
+          match e with
+          | ast.FloatExpr text _ -> text
+          | _ -> "<not-float>"
+
+# An integer literal must remain an IntExpr, not become a FloatExpr.
+fn is_int_expr(raw: String) -> Bool =
+  match lexer.tokenize(raw) with
+  | Err _ -> false
+  | Ok toks ->
+      match parser.parse_expr(toks, 0) with
+      | Err _ -> false
+      | Ok (e, _) ->
+          match e with
+          | ast.IntExpr _ _ -> true
+          | _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Float literals now parse (RED today) ---
+    assert_true(state, "3.14 parses as an expression", parses("3.14"))
+    assert_true(state, "0.5 parses as an expression", parses("0.5"))
+    assert_true(state, "3.14 + 1.0 parses as a binary expr", parses("3.14 + 1.0"))
+
+    # --- Node identity: float literal -> FloatExpr carrying its text ---
+    assert_eq(state, "3.14 parses to FloatExpr \"3.14\"", float_text("3.14"), "3.14")
+    assert_eq(state, "0.5 parses to FloatExpr \"0.5\"", float_text("0.5"), "0.5")
+
+    # --- Integers still parse, and stay IntExpr (no regression) ---
+    assert_true(state, "42 still parses", parses("42"))
+    assert_true(state, "42 stays an IntExpr", is_int_expr("42"))
+    assert_false(state, "3.14 is not an IntExpr", is_int_expr("3.14"))
+
+    summary(state)
