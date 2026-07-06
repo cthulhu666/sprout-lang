@@ -2,6 +2,29 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, 
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+# W9/X5: line of the first fn's desugared body (a where-binding lowers to a
+# CallExpr wrapping a lambda). Sentinels: -1 lex err, -2 parse err, -3 no decls,
+# -4 body not a CallExpr, -5 first decl not a FnDecl.
+fn first_fn_body_line(src: String) -> Int =
+  match lexer.tokenize(src) with
+  | Err _ -> 0 - 1
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> 0 - 2
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | Nil -> 0 - 3
+              | Cons d _ ->
+                  match d with
+                  | ast.FnDecl _ _ _ _ _ body _ ->
+                      match body with
+                      | ast.CallExpr _ _ pos -> source.position_line(pos)
+                      | _ -> 0 - 4
+                  | _ -> 0 - 5
 
 fn parse_ok(src: String) -> Bool =
   match lexer.tokenize(src) with
@@ -168,5 +191,14 @@ fn main() -> Unit !{IO} =
       parse_fails("let deriving = 1"))
     assert_true(state, "deriving as fn name rejected (hard keyword)",
       parse_fails("fn deriving() -> Int = 1"))
+
+    # W9/X5: a where-binding with a non-variable (tuple) pattern must carry the
+    # pattern's own span, not SourcePos(0,0,0). The whole program is on line 1,
+    # so the desugared body's line must be 1 (was 0 before the fix).
+    assert_eq(state, "tuple where-pattern body carries a real line",
+      first_fn_body_line("fn f() -> Int = a where (a, b) = (1, 2)"), 1)
+    # Control: a variable where-pattern already threads its own span.
+    assert_eq(state, "variable where-pattern body carries a real line",
+      first_fn_body_line("fn g() -> Int = x where x = 5"), 1)
 
     summary(state)

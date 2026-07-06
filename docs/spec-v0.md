@@ -330,6 +330,11 @@ the elaborator inserts an implicit coercion `template_to_string :
 StringTemplate -> String`; in a `StringTemplate`-expected context the parts
 flow through unchanged.  Plain `"..."` string literals are unaffected.
 
+Only the five `escape_seq` forms above are valid after a backslash inside a
+template literal; there is no raw pass-through. A backslash followed by any other
+character (e.g. `\r`, `\0`, `\z`) is a lexical error, mirroring how string and
+char literals reject unsupported escapes.
+
 ## 6. Evaluation Semantics (Strict)
 
 1. Function application: evaluate callee, then args left-to-right.

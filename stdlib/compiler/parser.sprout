@@ -1143,6 +1143,19 @@ fn wrap_tuple_where_binding(inner: ast.Expr, value: ast.Expr, pattern: ast.Patte
       pos),
     Cons(value, Nil), pos)
 
+# Span of a pattern (every Pattern variant carries its SourcePos last).
+fn pattern_pos(p: ast.Pattern) -> source.SourcePos =
+  match p with
+  | ast.WildcardPattern pos -> pos
+  | ast.VarPattern _ pos -> pos
+  | ast.IntPattern _ pos -> pos
+  | ast.BoolPattern _ pos -> pos
+  | ast.StringPattern _ pos -> pos
+  | ast.CharPattern _ pos -> pos
+  | ast.UnitPattern pos -> pos
+  | ast.TuplePattern _ pos -> pos
+  | ast.ConstructorPattern _ _ pos -> pos
+
 fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.Expr =
   match binding with
   | (pattern, value) ->
@@ -1150,7 +1163,7 @@ fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.
       | ast.VarPattern name pos ->
           ast.CallExpr(ast.LambdaExpr(Cons(ast.Param(name, Nothing), Nil), inner, pos), Cons(value, Nil), pos)
       | _ ->
-          wrap_tuple_where_binding(inner, value, pattern, source.SourcePos(0, 0, 0), fresh_where_tmp_name(inner, value))
+          wrap_tuple_where_binding(inner, value, pattern, pattern_pos(pattern), fresh_where_tmp_name(inner, value))
 
 # ---------------------------------------------------------------------------
 # Type constructor parsing

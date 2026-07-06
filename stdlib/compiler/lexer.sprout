@@ -132,15 +132,16 @@ fn scan_string_content(cursor: source.SourceCursor, start_pos: source.SourcePos,
         scan_string_content(c1, start_pos, Cons(string.string_from_char(ch), acc))
 
 # Decodes a template escape (the char after \).
-# Recognised: \` -> ` , \${ -> $ (only \ before $ is special for \${),
-# \n, \t, \\. Unknown escapes fall back to the raw character.
-fn decode_template_escape(ch: Char, cursor_after_ch: source.SourceCursor) -> (String, source.SourceCursor) =
-  if ch == '`' then ("`", cursor_after_ch)
-  else if ch == '$' then ("$", cursor_after_ch)
-  else if ch == 'n' then ("\n", cursor_after_ch)
-  else if ch == 't' then ("\t", cursor_after_ch)
-  else if ch == '\\' then ("\\", cursor_after_ch)
-  else (string.string_from_char(ch), cursor_after_ch)
+# Recognised (spec §5.7): \` -> ` , \${ -> $ (only \ before $ is special for
+# \${), \n, \t, \\. Any other escape is Nothing (rejected) — the grammar admits
+# no raw pass-through, matching how string/char literals reject unsupported \0.
+fn decode_template_escape(ch: Char, cursor_after_ch: source.SourceCursor) -> Maybe (String, source.SourceCursor) =
+  if ch == '`' then Just(("`", cursor_after_ch))
+  else if ch == '$' then Just(("$", cursor_after_ch))
+  else if ch == 'n' then Just(("\n", cursor_after_ch))
+  else if ch == 't' then Just(("\t", cursor_after_ch))
+  else if ch == '\\' then Just(("\\", cursor_after_ch))
+  else Nothing
 
 # Emits a TEMPLATE_LIT token if acc is non-empty, otherwise nothing.
 # acc is in reverse order (built via Cons); reversed and joined here.
@@ -285,7 +286,8 @@ fn scan_template_escape(raw: String, cursor: source.SourceCursor, start_pos: sou
       | Nothing -> Err(token.TokenizeError("Unterminated template literal", start_pos))
       | Just (esc, c2) ->
           match decode_template_escape(esc, c2) with
-          | (decoded_str, next_cursor) ->
+          | Nothing -> Err(token.TokenizeError("Unsupported escape sequence in template literal", start_pos))
+          | Just (decoded_str, next_cursor) ->
               scan_template_content(raw, next_cursor, start_pos,
                 Cons(decoded_str, lit_acc), lit_start, toks_acc)
 

@@ -129,6 +129,16 @@ fn main() -> Unit !{IO} =
     # Template with escape sequence — ensures escape decoding preserves order
     assert_eq(state, "template escape text", tok_text_at("`a\\nb`", 1), "a\nb")
 
+    # W9/X1+X2: template escapes must match spec §5.7 (only \` \${ \n \t \\).
+    # An unrecognised escape used to silently pass through as the raw char
+    # (\r -> "r", \0 -> "0"); it must now be a clean tokenize error, matching
+    # how string/char literals already reject \0.
+    assert_false(state, "template \\r rejected (not a spec escape)", lex_ok("`a\\rb`"))
+    assert_false(state, "template \\0 rejected (as in string literals)", lex_ok("`a\\0b`"))
+    assert_false(state, "template unknown escape \\z rejected", lex_ok("`a\\zb`"))
+    # Controls: the five spec-sanctioned escapes stay valid.
+    assert_true(state, "template \\n \\t \\\\ still valid", lex_ok("`x\\ny\\tz\\\\w`"))
+
     # String escape sequence — ensures escape decoding preserves order
     assert_eq(state, "string escape text", tok_text_at("\"a\\nb\"", 0), "a\nb")
 
