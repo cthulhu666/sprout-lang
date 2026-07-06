@@ -82,13 +82,20 @@ For any non-trivial language change, include:
 
 1. Problem statement.
 2. Goals and non-goals.
-3. High-level implementation overview for approval before editing.
-4. Syntax and semantics impact.
-5. Type-system impact.
-6. Error-message impact.
-7. Compatibility/migration notes.
-8. Tests added/updated.
-9. Spec/docs updated, with the normative vs experimental status made explicit.
+3. **Prior-art survey.** When the decision is a choice among established alternatives — a
+   semantics, diagnostics, or policy question comparable languages have also faced — present
+   a brief survey of how state-of-the-art languages handle it: the options they took and the
+   consensus or notable divergences, so the choice is grounded in prior art rather than
+   invented. Keep it short (a handful of languages); every claim must be verified against a
+   primary source (language reference/spec) — do not present an unconfirmed survey row or
+   hedge it with a confidence label. Present this *with* the decision, before asking for a call.
+4. High-level implementation overview for approval before editing.
+5. Syntax and semantics impact.
+6. Type-system impact.
+7. Error-message impact.
+8. Compatibility/migration notes.
+9. Tests added/updated.
+10. Spec/docs updated, with the normative vs experimental status made explicit.
 
 ## Code and Testing
 
