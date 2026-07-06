@@ -10,8 +10,8 @@ module examples.neural_network_xor
 fn relu(x: Double) -> Double =
   if x < 0.0 then 0.0 else x
 
-# One hidden neuron: relu(w1*x1 + w2*x2 - bias).  Bias is subtracted so we never
-# need a negative literal (unary `-` on a Double is not yet supported).
+# One hidden neuron: relu(w1*x1 + w2*x2 - bias).  Written with a subtracted bias
+# for readability; unary `-` on a Double is now supported either way.
 fn neuron(w1: Double, w2: Double, bias: Double, x1: Double, x2: Double) -> Double =
   relu(w1 * x1 + w2 * x2 - bias)
 

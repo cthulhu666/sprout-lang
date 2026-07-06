@@ -1,0 +1,179 @@
+module examples.neural_network_train_xor
+
+# A 2-2-1 neural network that LEARNS XOR from scratch with backpropagation and
+# gradient descent — the counterpart to neural_network_xor.sprout, whose weights
+# were hand-wired.  Here the weights start from a deterministic pseudo-random
+# seed and are trained until the network discovers XOR on its own.
+#
+# It showcases the Double type end to end:
+#   - to_double        : turn LCG integer state into fractional initial weights
+#   - float arithmetic : the forward pass, the loss, and every gradient
+#   - double_to_string : print the MSE shrinking each epoch band (via to_string)
+#   - MutVec Double     : mutable weight and gradient vectors, updated in place
+#
+# The activation is softsign, s(x) = x / (1 + |x|): smooth and bounded like tanh
+# but built from pure arithmetic — no `exp` needed — so gradient descent trains
+# reliably where a ReLU of this size would stall on dead units.  Its derivative,
+# used in backprop, is (1 - |s(x)|)^2.
+
+# --- Weight-vector layout (weights and gradients each live in a MutVec 9) ---
+#   0..3  W1  (input i -> hidden j):  index = j*2 + i
+#   4..5  B1  (hidden bias j):        index = 4 + j
+#   6..7  W2  (hidden j -> output):   index = 6 + j
+#   8     B2  (output bias)
+fn idx_w1(j: Int, i: Int) -> Int = j * 2 + i
+fn idx_b1(j: Int) -> Int = 4 + j
+fn idx_w2(j: Int) -> Int = 6 + j
+fn idx_b2() -> Int = 8
+
+# --- Activation ---
+fn dabs(x: Double) -> Double = if x < 0.0 then -x else x
+
+fn softsign(x: Double) -> Double = x / (1.0 + dabs(x))
+
+# s'(x) = (1 - |s(x)|)^2, recovered from the activation output s.
+fn softsign_deriv_from_out(s: Double) -> Double =
+  (1.0 - dabs(s)) * (1.0 - dabs(s))
+
+# --- Deterministic LCG (Numerical Recipes constants) for reproducible init ---
+fn mod_int(a: Int, m: Int) -> Int = a - (a / m) * m
+
+fn lcg_next(state: Int) -> Int = mod_int(1664525 * state + 1013904223, 2147483648)
+
+# Map an LCG state to a small weight in roughly [-1, 1).
+fn lcg_to_weight(state: Int) -> Double =
+  to_double(mod_int(state, 2000) - 1000) / 1000.0
+
+# --- Forward pass ---
+fn hidden_out(w: MutVec Double, j: Int, x1: Double, x2: Double) -> Double !{IO} =
+  do
+    w1_0 <- mutvec_get(w, idx_w1(j, 0))
+    w1_1 <- mutvec_get(w, idx_w1(j, 1))
+    b1 <- mutvec_get(w, idx_b1(j))
+    softsign(w1_0 * x1 + w1_1 * x2 + b1)
+
+fn forward(w: MutVec Double, x1: Double, x2: Double) -> Double !{IO} =
+  do
+    h0 <- hidden_out(w, 0, x1, x2)
+    h1 <- hidden_out(w, 1, x1, x2)
+    w2_0 <- mutvec_get(w, idx_w2(0))
+    w2_1 <- mutvec_get(w, idx_w2(1))
+    b2 <- mutvec_get(w, idx_b2())
+    w2_0 * h0 + w2_1 * h1 + b2
+
+# --- Backprop: accumulate one sample's gradient into `g` ---
+fn accum(g: MutVec Double, i: Int, delta: Double) -> Int !{IO} =
+  do
+    cur <- mutvec_get(g, i)
+    mutvec_set(g, i, cur + delta)
+    0
+
+fn accum_hidden(w: MutVec Double, g: MutVec Double, j: Int, w2_j: Double, h_j: Double, d: Double, x1: Double, x2: Double) -> Int !{IO} =
+  do
+    let dzv = d * w2_j * softsign_deriv_from_out(h_j)
+    _ <- accum(g, idx_w1(j, 0), dzv * x1)
+    _ <- accum(g, idx_w1(j, 1), dzv * x2)
+    _ <- accum(g, idx_b1(j), dzv)
+    0
+
+fn accum_sample_grad(w: MutVec Double, g: MutVec Double, x1: Double, x2: Double, target: Double) -> Int !{IO} =
+  do
+    h0 <- hidden_out(w, 0, x1, x2)
+    h1 <- hidden_out(w, 1, x1, x2)
+    out <- forward(w, x1, x2)
+    let d = 2.0 * (out - target)  # dL/dout for L = (out - target)^2
+    _ <- accum(g, idx_w2(0), d * h0)
+    _ <- accum(g, idx_w2(1), d * h1)
+    _ <- accum(g, idx_b2(), d)
+    w2_0 <- mutvec_get(w, idx_w2(0))
+    w2_1 <- mutvec_get(w, idx_w2(1))
+    _ <- accum_hidden(w, g, 0, w2_0, h0, d, x1, x2)
+    _ <- accum_hidden(w, g, 1, w2_1, h1, d, x1, x2)
+    0
+
+# --- Weight-vector housekeeping ---
+fn zero_grads(g: MutVec Double, i: Int) -> Int !{IO} =
+  if i >= 9 then 0
+  else
+    do
+      mutvec_set(g, i, 0.0)
+      zero_grads(g, i + 1)
+
+fn apply_update(w: MutVec Double, g: MutVec Double, lr: Double, i: Int) -> Int !{IO} =
+  if i >= 9 then 0
+  else
+    do
+      wi <- mutvec_get(w, i)
+      gi <- mutvec_get(g, i)
+      mutvec_set(w, i, wi - lr * gi)
+      apply_update(w, g, lr, i + 1)
+
+# --- Mean squared error over the four XOR samples ---
+fn sq_err(w: MutVec Double, x1: Double, x2: Double, target: Double) -> Double !{IO} =
+  do
+    out <- forward(w, x1, x2)
+    (out - target) * (out - target)
+
+fn mse(w: MutVec Double) -> Double !{IO} =
+  do
+    e00 <- sq_err(w, 0.0, 0.0, 0.0)
+    e01 <- sq_err(w, 0.0, 1.0, 1.0)
+    e10 <- sq_err(w, 1.0, 0.0, 1.0)
+    e11 <- sq_err(w, 1.0, 1.0, 0.0)
+    (e00 + e01 + e10 + e11) / 4.0
+
+# --- Training ---
+fn train_epoch(w: MutVec Double, g: MutVec Double, lr: Double) -> Int !{IO} =
+  do
+    _ <- zero_grads(g, 0)
+    _ <- accum_sample_grad(w, g, 0.0, 0.0, 0.0)
+    _ <- accum_sample_grad(w, g, 0.0, 1.0, 1.0)
+    _ <- accum_sample_grad(w, g, 1.0, 0.0, 1.0)
+    _ <- accum_sample_grad(w, g, 1.0, 1.0, 0.0)
+    apply_update(w, g, lr, 0)
+
+# Train `total` epochs, printing the MSE every `band` epochs so the loss trace
+# is visible as the network learns.
+fn train_verbose(w: MutVec Double, g: MutVec Double, lr: Double, epoch: Int, total: Int, band: Int) -> Int !{IO} =
+  if epoch > total then 0
+  else
+    do
+      _ <- report_loss(w, epoch, band)
+      _ <- train_epoch(w, g, lr)
+      train_verbose(w, g, lr, epoch + 1, total, band)
+
+fn report_loss(w: MutVec Double, epoch: Int, band: Int) -> Int !{IO} =
+  if mod_int(epoch, band) == 0 then
+    do
+      loss <- mse(w)
+      print("epoch " ++ to_string(epoch) ++ "  mse " ++ to_string(loss))
+      0
+  else 0
+
+fn init_weights(w: MutVec Double, i: Int, state: Int) -> Int !{IO} =
+  if i >= 9 then 0
+  else
+    do
+      mutvec_set(w, i, lcg_to_weight(state))
+      init_weights(w, i + 1, lcg_next(state))
+
+fn predict(w: MutVec Double, x1: Double, x2: Double) -> Int !{IO} =
+  do
+    out <- forward(w, x1, x2)
+    if out > 0.5 then 1 else 0
+
+fn main() -> Unit !{IO} =
+  do
+    w <- mutvec_new(9, 0.0)
+    g <- mutvec_new(9, 0.0)
+    _ <- init_weights(w, 0, 12345)
+
+    # Watch the loss fall as the network learns.
+    _ <- train_verbose(w, g, 0.1, 0, 5000, 1000)
+
+    # Learned XOR truth table — expect 0, 1, 1, 0.
+    print("XOR predictions (expect 0 1 1 0):")
+    print(predict(w, 0.0, 0.0))
+    print(predict(w, 0.0, 1.0))
+    print(predict(w, 1.0, 0.0))
+    print(predict(w, 1.0, 1.0))

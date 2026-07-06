@@ -1,0 +1,165 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# Regression test: a 2-2-1 neural network LEARNS XOR from scratch via backprop.
+#
+# Unlike examples/neural_network_xor.sprout (fixed hand-wired weights), this
+# initialises weights from a deterministic LCG and trains them with full-batch
+# gradient descent on MSE.  It exercises the whole Double surface end-to-end:
+# to_double (LCG int -> weight), float arithmetic, comparison, and — implicitly
+# via the loss trace in the example — double_to_string.
+#
+# Activation is softsign s(x) = x/(1+|x|): smooth and bounded like tanh but built
+# from pure arithmetic (no exp), so gradient descent converges reliably without
+# the dead-unit failures of ReLU on XOR.  Its derivative is (1-|s(x)|)^2.
+#
+# The run is fully deterministic (fixed seed + fixed epoch count), so the learned
+# predictions are reproducible: after training, the net must classify XOR as
+# 0,1,1,0.  RED until the trainer exists and the chosen seed/LR/epochs converge.
+
+# --- Weight-vector layout (both weights and gradients live in a MutVec 9) ---
+#   0..3  W1  (input i -> hidden j):  index = j*2 + i
+#   4..5  B1  (hidden bias j):        index = 4 + j
+#   6..7  W2  (hidden j -> output):   index = 6 + j
+#   8     B2  (output bias)
+fn idx_w1(j: Int, i: Int) -> Int = j * 2 + i
+fn idx_b1(j: Int) -> Int = 4 + j
+fn idx_w2(j: Int) -> Int = 6 + j
+fn idx_b2() -> Int = 8
+
+# --- Activation ---
+fn dabs(x: Double) -> Double = if x < 0.0 then -x else x
+
+fn softsign(x: Double) -> Double = x / (1.0 + dabs(x))
+
+# s'(x) = (1 - |s(x)|)^2, computed from the activation output s.
+fn softsign_deriv_from_out(s: Double) -> Double =
+  (1.0 - dabs(s)) * (1.0 - dabs(s))
+
+# --- Deterministic LCG (Numerical Recipes constants), state in Int ---
+fn lcg_next(state: Int) -> Int = mod_int(1664525 * state + 1013904223, 2147483648)
+
+fn mod_int(a: Int, m: Int) -> Int = a - (a / m) * m
+
+# Map an LCG state to a small weight in roughly [-1, 1): take state mod 2000,
+# shift to [-1000, 1000), scale by 1/1000.
+fn lcg_to_weight(state: Int) -> Double =
+  to_double(mod_int(state, 2000) - 1000) / 1000.0
+
+# --- Forward pass: returns the network output for one input pair ---
+fn hidden_out(w: MutVec Double, j: Int, x1: Double, x2: Double) -> Double !{IO} =
+  do
+    w1_0 <- mutvec_get(w, idx_w1(j, 0))
+    w1_1 <- mutvec_get(w, idx_w1(j, 1))
+    b1 <- mutvec_get(w, idx_b1(j))
+    softsign(w1_0 * x1 + w1_1 * x2 + b1)
+
+fn forward(w: MutVec Double, x1: Double, x2: Double) -> Double !{IO} =
+  do
+    h0 <- hidden_out(w, 0, x1, x2)
+    h1 <- hidden_out(w, 1, x1, x2)
+    w2_0 <- mutvec_get(w, idx_w2(0))
+    w2_1 <- mutvec_get(w, idx_w2(1))
+    b2 <- mutvec_get(w, idx_b2())
+    w2_0 * h0 + w2_1 * h1 + b2
+
+# --- Accumulate the gradient of one sample's squared error into `g` ---
+fn accum_sample_grad(w: MutVec Double, g: MutVec Double, x1: Double, x2: Double, target: Double) -> Int !{IO} =
+  do
+    h0 <- hidden_out(w, 0, x1, x2)
+    h1 <- hidden_out(w, 1, x1, x2)
+    out <- forward(w, x1, x2)
+    # dL/dout for L = (out - target)^2
+    let d = 2.0 * (out - target)
+    # output layer grads
+    _ <- accum(g, idx_w2(0), d * h0)
+    _ <- accum(g, idx_w2(1), d * h1)
+    _ <- accum(g, idx_b2(), d)
+    # hidden layer grads (dz_j = dh_j * s'(z_j), dh_j = d * w2_j)
+    w2_0 <- mutvec_get(w, idx_w2(0))
+    w2_1 <- mutvec_get(w, idx_w2(1))
+    _ <- accum_hidden(w, g, 0, w2_0, h0, d, x1, x2)
+    _ <- accum_hidden(w, g, 1, w2_1, h1, d, x1, x2)
+    0
+
+fn accum_hidden(w: MutVec Double, g: MutVec Double, j: Int, w2_j: Double, h_j: Double, d: Double, x1: Double, x2: Double) -> Int !{IO} =
+  do
+    let dzv = d * w2_j * softsign_deriv_from_out(h_j)
+    _ <- accum(g, idx_w1(j, 0), dzv * x1)
+    _ <- accum(g, idx_w1(j, 1), dzv * x2)
+    _ <- accum(g, idx_b1(j), dzv)
+    0
+
+# Add `delta` to gradient slot `i`.
+fn accum(g: MutVec Double, i: Int, delta: Double) -> Int !{IO} =
+  do
+    cur <- mutvec_get(g, i)
+    mutvec_set(g, i, cur + delta)
+    0
+
+# Zero all 9 gradient slots.
+fn zero_grads(g: MutVec Double, i: Int) -> Int !{IO} =
+  if i >= 9 then 0
+  else
+    do
+      mutvec_set(g, i, 0.0)
+      zero_grads(g, i + 1)
+
+# Apply w[i] -= lr * g[i] for all 9 slots.
+fn apply_update(w: MutVec Double, g: MutVec Double, lr: Double, i: Int) -> Int !{IO} =
+  if i >= 9 then 0
+  else
+    do
+      wi <- mutvec_get(w, i)
+      gi <- mutvec_get(g, i)
+      mutvec_set(w, i, wi - lr * gi)
+      apply_update(w, g, lr, i + 1)
+
+# One full-batch epoch over the four XOR samples.
+fn train_epoch(w: MutVec Double, g: MutVec Double, lr: Double) -> Int !{IO} =
+  do
+    _ <- zero_grads(g, 0)
+    _ <- accum_sample_grad(w, g, 0.0, 0.0, 0.0)
+    _ <- accum_sample_grad(w, g, 0.0, 1.0, 1.0)
+    _ <- accum_sample_grad(w, g, 1.0, 0.0, 1.0)
+    _ <- accum_sample_grad(w, g, 1.0, 1.0, 0.0)
+    apply_update(w, g, lr, 0)
+
+fn train(w: MutVec Double, g: MutVec Double, lr: Double, epochs: Int) -> Int !{IO} =
+  if epochs <= 0 then 0
+  else
+    do
+      _ <- train_epoch(w, g, lr)
+      train(w, g, lr, epochs - 1)
+
+# Initialise the 9 weights from the LCG, threading the state through.
+fn init_weights(w: MutVec Double, i: Int, state: Int) -> Int !{IO} =
+  if i >= 9 then 0
+  else
+    do
+      mutvec_set(w, i, lcg_to_weight(state))
+      init_weights(w, i + 1, lcg_next(state))
+
+fn predict(w: MutVec Double, x1: Double, x2: Double) -> Int !{IO} =
+  do
+    out <- forward(w, x1, x2)
+    if out > 0.5 then 1 else 0
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    w <- mutvec_new(9, 0.0)
+    g <- mutvec_new(9, 0.0)
+    _ <- init_weights(w, 0, 12345)
+    _ <- train(w, g, 0.1, 5000)
+
+    p00 <- predict(w, 0.0, 0.0)
+    p01 <- predict(w, 0.0, 1.0)
+    p10 <- predict(w, 1.0, 0.0)
+    p11 <- predict(w, 1.0, 1.0)
+
+    assert_eq(state, "XOR(0,0) = 0", p00, 0)
+    assert_eq(state, "XOR(0,1) = 1", p01, 1)
+    assert_eq(state, "XOR(1,0) = 1", p10, 1)
+    assert_eq(state, "XOR(1,1) = 0", p11, 0)
+
+    summary(state)
