@@ -1539,7 +1539,19 @@ fn resolve_obligation(
           | Nothing ->
               match scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded) with
               | Just tdict2 -> Just(tdict2)
-              | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded)
+              | Nothing ->
+                  # The constraint variable resolved to a type variable, not a
+                  # concrete head (scan_prog_to_fresh_for_instance found no @inst).
+                  # A constraint on a forwardable type variable MUST forward the
+                  # in-scope dict, never fall to resolve_one_constraint_tdict's
+                  # first-concrete-arg heuristic — that grabs an unrelated argument's
+                  # instance (e.g. vec_sort's `Ord a` mis-resolving to `Ord (Vec a)`
+                  # off the `vec: Vec a` argument, a soundness hole). The @fwd marker
+                  # is keyed by the caller's fresh var, not the callee's constraint
+                  # var name, so scan for the class's forward marker directly.
+                  match scan_fwd_markers(class_name, env, pos) with
+                  | Just fwd_tdict -> Just(fwd_tdict)
+                  | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded)
           | fwd -> fwd
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
