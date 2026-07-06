@@ -487,7 +487,21 @@ All `stdlib/prelude.sprout`. Every touched export gets/keeps a correct `# O(...)
 - **Gates:** stdlib change → fmt, full suite, compile-examples, seed refresh (stdlib is
   bundled into the compiler → seed gate applies).
 
-### W9 — Lexer/parser diagnostics batch  [1S, mechanical]
+### W9 — Lexer/parser diagnostics batch  [X1+X2+X5 DONE 2026-07-06; X6 descoped; X3/X4 blocked]
+
+**X1+X2 (template escapes) + X5 (where-pattern span) DONE.** `decode_template_escape`
+now returns `Maybe` and `scan_template_escape` rejects any escape outside spec §5.7's five
+forms (was a silent raw pass-through — `\r`→"r", `\0`→"0"); spec §5.7 clarified. A total
+`pattern_pos` helper threads a tuple where-pattern's own span instead of `SourcePos(0,0,0)`.
+Regression tests in `tests/stdlib/compiler/test_lexer.spr` + `test_parser.spr`; seed
+refreshed. **X6 descoped:** proven unreachable from source — the lexer appends a *positioned*
+EOF token, so truncated programs already report a real line (probed: all report line 1);
+`tok_at`'s `0,0,0` fallback is defensive-only and `tok_at` is private (no clean white-box
+test without exporting internals). **X3 (raw newline in `"..."`) blocked on a single-line-
+string semantics decision. X4 (integer-literal overflow) blocked on the deferred Int-overflow
+policy (`docs/int-overflow-policy-decision.md`) — literal-overflow rejection must be coherent
+with the runtime `+`/`-`/`*` overflow choice.**
+
 
 | ID | Item | Location | Fix |
 |---|---|---|---|
