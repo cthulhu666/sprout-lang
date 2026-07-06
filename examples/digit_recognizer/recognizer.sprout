@@ -27,20 +27,27 @@ module examples.digit_recognizer.recognizer
 # ---------------------------------------------------------------------------
 # Dimensions and flat weight-vector layout
 # ---------------------------------------------------------------------------
-# N_IN = 64, N_HID = 24, N_OUT = 10.  All weights live in one MutVec Double:
-#   W1[h][i] : h*64 + i                 (0 .. 1535)   input -> hidden
-#   B1[h]    : 1536 + h                 (1536 .. 1559) hidden bias
-#   W2[o][h] : 1560 + o*24 + h          (1560 .. 1799) hidden -> output
-#   B2[o]    : 1800 + o                 (1800 .. 1809) output bias
-fn n_in() -> Int = 64
-fn n_hid() -> Int = 24
-fn n_out() -> Int = 10
-fn n_weights() -> Int = 1810
+# Everything derives from three dimensions: the segment offsets and the total
+# weight count follow, so changing a dimension needs no other edit.  All weights
+# live in one MutVec Double, laid out in four contiguous segments:
+#   W1[h][i] : off_w1 + h*n_in  + i     input -> hidden   (n_in*n_hid slots)
+#   B1[h]    : off_b1 + h                hidden bias        (n_hid slots)
+#   W2[o][h] : off_w2 + o*n_hid + h     hidden -> output   (n_hid*n_out slots)
+#   B2[o]    : off_b2 + o                output bias        (n_out slots)
+let n_in = 64
+let n_hid = 24
+let n_out = 10
 
-fn iw1(h: Int, i: Int) -> Int = h * 64 + i
-fn ib1(h: Int) -> Int = 1536 + h
-fn iw2(o: Int, h: Int) -> Int = 1560 + o * 24 + h
-fn ib2(o: Int) -> Int = 1800 + o
+let off_w1 = 0
+let off_b1 = off_w1 + n_in * n_hid
+let off_w2 = off_b1 + n_hid
+let off_b2 = off_w2 + n_hid * n_out
+let n_weights = off_b2 + n_out
+
+fn iw1(h: Int, i: Int) -> Int = off_w1 + h * n_in + i
+fn ib1(h: Int) -> Int = off_b1 + h
+fn iw2(o: Int, h: Int) -> Int = off_w2 + o * n_hid + h
+fn ib2(o: Int) -> Int = off_b2 + o
 
 # ---------------------------------------------------------------------------
 # Activation
@@ -69,7 +76,7 @@ fn lcg_to_weight(state: Int) -> Double =
   to_double(mod_int(state, 2000) - 1000) / 10000.0
 
 fn init_weights(w: MutVec Double, i: Int, state: Int) -> Int !{IO} =
-  if i >= n_weights() then 0
+  if i >= n_weights then 0
   else
     do
       mutvec_set(w, i, lcg_to_weight(state))
@@ -99,7 +106,7 @@ fn fill_sample(ints: List Int, pixels: MutVec Double, i: Int) -> Int !{IO} =
   match ints with
   | Nil -> 0
   | Cons v rest ->
-      if i < n_in() then
+      if i < n_in then
         do
           mutvec_set(pixels, i, to_double(v) / 16.0)
           fill_sample(rest, pixels, i + 1)
@@ -111,10 +118,10 @@ fn load_lines(lines: List String) -> List (MutVec Double, Int) !{IO} =
   | Cons line rest ->
       do
         let ints = parse_ints(split_words(line))
-        if ilen(ints) < n_in() + 1 then load_lines(rest)  # skip blank/short lines
+        if ilen(ints) < n_in + 1 then load_lines(rest)  # skip blank/short lines
         else
           do
-            pixels <- mutvec_new(n_in(), 0.0)
+            pixels <- mutvec_new(n_in, 0.0)
             label <- fill_sample(ints, pixels, 0)
             others <- load_lines(rest)
             Cons((pixels, label), others)
@@ -135,7 +142,7 @@ fn dataset_size(xs: List (MutVec Double, Int)) -> Int =
 # ---------------------------------------------------------------------------
 # Dot product of W1 row h with the input x, plus bias — the hidden pre-activation.
 fn hidden_z(w: MutVec Double, x: MutVec Double, h: Int, i: Int, acc: Double) -> Double !{IO} =
-  if i >= n_in() then acc
+  if i >= n_in then acc
   else
     do
       wi <- mutvec_get(w, iw1(h, i))
@@ -143,7 +150,7 @@ fn hidden_z(w: MutVec Double, x: MutVec Double, h: Int, i: Int, acc: Double) -> 
       hidden_z(w, x, h, i + 1, acc + wi * xi)
 
 fn compute_hidden(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, h: Int) -> Int !{IO} =
-  if h >= n_hid() then 0
+  if h >= n_hid then 0
   else
     do
       b <- mutvec_get(w, ib1(h))
@@ -152,7 +159,7 @@ fn compute_hidden(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, h: 
       compute_hidden(w, x, hidden, h + 1)
 
 fn out_z(w: MutVec Double, hidden: MutVec Double, o: Int, h: Int, acc: Double) -> Double !{IO} =
-  if h >= n_hid() then acc
+  if h >= n_hid then acc
   else
     do
       wh <- mutvec_get(w, iw2(o, h))
@@ -160,7 +167,7 @@ fn out_z(w: MutVec Double, hidden: MutVec Double, o: Int, h: Int, acc: Double) -
       out_z(w, hidden, o, h + 1, acc + wh * hh)
 
 fn compute_out(w: MutVec Double, hidden: MutVec Double, out: MutVec Double, o: Int) -> Int !{IO} =
-  if o >= n_out() then 0
+  if o >= n_out then 0
   else
     do
       b <- mutvec_get(w, ib2(o))
@@ -174,7 +181,7 @@ fn forward(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, out: MutVe
     compute_out(w, hidden, out, 0)
 
 fn argmax(out: MutVec Double, i: Int, best_i: Int, best_v: Double) -> Int !{IO} =
-  if i >= n_out() then best_i
+  if i >= n_out then best_i
   else
     do
       v <- mutvec_get(out, i)
@@ -193,7 +200,7 @@ fn zero_vec(v: MutVec Double, n: Int, i: Int) -> Int !{IO} =
 
 # dhidden[h] += dout_o * W2[o][h] for one output o (uses OLD W2, before updates).
 fn accum_dhidden_o(w: MutVec Double, dhidden: MutVec Double, o: Int, dout_o: Double, h: Int) -> Int !{IO} =
-  if h >= n_hid() then 0
+  if h >= n_hid then 0
   else
     do
       wh <- mutvec_get(w, iw2(o, h))
@@ -202,7 +209,7 @@ fn accum_dhidden_o(w: MutVec Double, dhidden: MutVec Double, o: Int, dout_o: Dou
       accum_dhidden_o(w, dhidden, o, dout_o, h + 1)
 
 fn accum_dhidden(w: MutVec Double, out: MutVec Double, label: Int, dhidden: MutVec Double, o: Int) -> Int !{IO} =
-  if o >= n_out() then 0
+  if o >= n_out then 0
   else
     do
       oo <- mutvec_get(out, o)
@@ -212,7 +219,7 @@ fn accum_dhidden(w: MutVec Double, out: MutVec Double, label: Int, dhidden: MutV
 
 # Update W2[o][.] and B2[o] for one output o.
 fn update_out_o(w: MutVec Double, hidden: MutVec Double, o: Int, dout_o: Double, lr: Double, h: Int) -> Int !{IO} =
-  if h >= n_hid() then 0
+  if h >= n_hid then 0
   else
     do
       hh <- mutvec_get(hidden, h)
@@ -221,7 +228,7 @@ fn update_out_o(w: MutVec Double, hidden: MutVec Double, o: Int, dout_o: Double,
       update_out_o(w, hidden, o, dout_o, lr, h + 1)
 
 fn update_output(w: MutVec Double, hidden: MutVec Double, out: MutVec Double, label: Int, lr: Double, o: Int) -> Int !{IO} =
-  if o >= n_out() then 0
+  if o >= n_out then 0
   else
     do
       oo <- mutvec_get(out, o)
@@ -233,7 +240,7 @@ fn update_output(w: MutVec Double, hidden: MutVec Double, out: MutVec Double, la
 
 # Update W1[h][.] and B1[h] for one hidden unit h, given dz = dhidden[h]*s'(h).
 fn update_hidden_h(w: MutVec Double, x: MutVec Double, h: Int, dz: Double, lr: Double, i: Int) -> Int !{IO} =
-  if i >= n_in() then 0
+  if i >= n_in then 0
   else
     do
       xi <- mutvec_get(x, i)
@@ -242,7 +249,7 @@ fn update_hidden_h(w: MutVec Double, x: MutVec Double, h: Int, dz: Double, lr: D
       update_hidden_h(w, x, h, dz, lr, i + 1)
 
 fn update_hidden(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, dhidden: MutVec Double, lr: Double, h: Int) -> Int !{IO} =
-  if h >= n_hid() then 0
+  if h >= n_hid then 0
   else
     do
       hh <- mutvec_get(hidden, h)
@@ -255,7 +262,7 @@ fn update_hidden(w: MutVec Double, x: MutVec Double, hidden: MutVec Double, dhid
 
 fn backprop(w: MutVec Double, x: MutVec Double, label: Int, hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double) -> Int !{IO} =
   do
-    _ <- zero_vec(dhidden, n_hid(), 0)
+    _ <- zero_vec(dhidden, n_hid, 0)
     _ <- accum_dhidden(w, out, label, dhidden, 0)  # dhidden from OLD W2
     _ <- update_output(w, hidden, out, label, lr, 0)  # now update W2/B2
     update_hidden(w, x, hidden, dhidden, lr, 0)  # update W1/B1
@@ -310,11 +317,11 @@ fn main() -> Unit !{IO} =
     let n_test = dataset_size(test_set)
     print("loaded " ++ to_string(n_train) ++ " train / " ++ to_string(n_test) ++ " test samples")
 
-    w <- mutvec_new(n_weights(), 0.0)
+    w <- mutvec_new(n_weights, 0.0)
     _ <- init_weights(w, 0, 12345)
-    hidden <- mutvec_new(n_hid(), 0.0)
-    out <- mutvec_new(n_out(), 0.0)
-    dhidden <- mutvec_new(n_hid(), 0.0)
+    hidden <- mutvec_new(n_hid, 0.0)
+    out <- mutvec_new(n_out, 0.0)
+    dhidden <- mutvec_new(n_hid, 0.0)
 
     _ <- train(w, train_set, test_set, hidden, out, dhidden, 0.05, 0, 25, n_test)
 
