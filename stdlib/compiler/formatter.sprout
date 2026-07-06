@@ -34,6 +34,7 @@ fn is_word_like(tok: token.Token) -> Bool =
   | token.TokenIdentKind -> true
   | token.TokenKeywordKind -> true
   | token.TokenIntKind -> true
+  | token.TokenFloatKind -> true
   | token.TokenStringKind -> true
   | token.TokenCharKind -> true
   | _ -> false
@@ -170,6 +171,7 @@ fn is_call_like_pp_other(prev: token.Token, pp: token.Token, next_tok: Maybe tok
     match token.token_kind(pp) with
     | token.TokenIdentKind -> false
     | token.TokenIntKind -> false
+    | token.TokenFloatKind -> false
     | token.TokenStringKind -> false
     | token.TokenCharKind -> false
     | _ ->
@@ -228,6 +230,7 @@ fn needs_space_after_close(ck: token.TokenKind) -> Bool =
   | token.TokenIdentKind -> true
   | token.TokenKeywordKind -> true
   | token.TokenIntKind -> true
+  | token.TokenFloatKind -> true
   | token.TokenStringKind -> true
   | token.TokenCharKind -> true
   | _ -> false

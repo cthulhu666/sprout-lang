@@ -1,0 +1,37 @@
+module examples.neural_network_xor
+
+# A hand-wired two-layer ReLU network that computes XOR — the textbook function
+# that no single linear neuron can represent.  It exercises the Double type:
+# fractional weights, float arithmetic, and a ReLU activation built from a float
+# comparison.  The weights are a fixed exact solution, so there is no training
+# loop here; the point is a forward pass over real numbers.
+
+# ReLU activation, max(0, x).  The comparison lowers to a float `fcmp`.
+fn relu(x: Double) -> Double =
+  if x < 0.0 then 0.0 else x
+
+# One hidden neuron: relu(w1*x1 + w2*x2 - bias).  Bias is subtracted so we never
+# need a negative literal (unary `-` on a Double is not yet supported).
+fn neuron(w1: Double, w2: Double, bias: Double, x1: Double, x2: Double) -> Double =
+  relu(w1 * x1 + w2 * x2 - bias)
+
+# Forward pass of the 2-2-1 network.  Both hidden neurons read (x1 + x2) but at
+# different thresholds; the output subtracts twice the second so that only the
+# "exactly one input is 1" cases survive:
+#   h1 = relu(x1 + x2)         # fires when at least one input is 1
+#   h2 = relu(x1 + x2 - 1)     # fires only when both inputs are 1
+#   y  = h1 - 2*h2             # 1 for XOR-true, 0 otherwise
+fn xor_net(x1: Double, x2: Double) -> Double =
+  neuron(1.0, 1.0, 0.0, x1, x2) - 2.0 * neuron(1.0, 1.0, 1.0, x1, x2)
+
+# Threshold the network's real-valued output to a 0/1 label.
+fn predict(x1: Double, x2: Double) -> Int =
+  if xor_net(x1, x2) > 0.5 then 1 else 0
+
+fn main() -> Unit !{IO} =
+  do
+    # XOR truth table — expect 0, 1, 1, 0.
+    print(predict(0.0, 0.0))
+    print(predict(0.0, 1.0))
+    print(predict(1.0, 0.0))
+    print(predict(1.0, 1.0))
