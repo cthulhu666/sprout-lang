@@ -1882,7 +1882,9 @@ fn check_compare(
 fn is_primitive_eq_type(t: types.Type) -> Bool =
   match t with
   | types.TConst name ->
-      name == "Int" || name == "Bool" || name == "Char" || name == "String"
+      # Double joins the direct-fcmp short-circuit: == -> oeq, != -> one (via
+      # float_cmp_predicate), matching its already-wired ordering comparisons.
+      name == "Int" || name == "Bool" || name == "Char" || name == "String" || name == "Double"
   | _ -> false
 
 fn eq_via_class_method(

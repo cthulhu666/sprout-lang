@@ -1,0 +1,34 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# TDD — `double_to_string` + `instance ToString Double`
+# (docs/nn-gap-analysis.md §7.1 step 5).
+#
+# `to_string` on a Double renders it as decimal text via the `double_to_string`
+# runtime builtin (snprintf "%g", with a trailing ".0" appended when the result
+# is integral so a Double reads as a float, not an Int).  RED until the builtin
+# + the ToString Double instance land — today `to_string(3.14)` fails with
+# "No instance of ToString for Double".
+#
+# Values are chosen so %g (6 significant digits, trailing zeros stripped) yields
+# a stable, unambiguous string.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- fractional values render as-is (RED today) ---
+    assert_eq(state, "to_string 3.14", to_string(3.14), "3.14")
+    assert_eq(state, "to_string 0.5", to_string(0.5), "0.5")
+
+    # --- integral doubles keep a decimal point so they don't look like Int ---
+    assert_eq(state, "to_string 1.0 keeps .0", to_string(1.0), "1.0")
+    assert_eq(state, "to_string 0.0 keeps .0", to_string(0.0), "0.0")
+    assert_eq(state, "to_string 100.0 keeps .0", to_string(100.0), "100.0")
+
+    # --- negatives (exercises the merged unary-minus-on-Double fix) ---
+    assert_eq(state, "to_string -2.5", to_string(-2.5), "-2.5")
+
+    # --- integrates with to_double: Int 7 -> Double 7.0 -> "7.0" ---
+    assert_eq(state, "to_string(to_double(7))", to_string(to_double(7)), "7.0")
+
+    summary(state)

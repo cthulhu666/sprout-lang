@@ -87,6 +87,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRFDiv _ _ _ -> false
   | sprout_ir.IRFCmp _ _ _ _ -> false
   | sprout_ir.IRFNeg _ _ -> false
+  | sprout_ir.IRSIToF _ _ -> false
   | sprout_ir.IRBoolNot _ _ -> false
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false
@@ -192,6 +193,7 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRFDiv _ _ _ -> Nothing
   | sprout_ir.IRFCmp _ _ _ _ -> Nothing
   | sprout_ir.IRFNeg _ _ -> Nothing
+  | sprout_ir.IRSIToF _ _ -> Nothing
   | sprout_ir.IRBoolNot _ _ -> Nothing
   | sprout_ir.IRINeg _ _ -> Nothing
   # A value loaded from a global needs no temp root: its slot is a permanent GC
@@ -286,6 +288,7 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRFDiv _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRFCmp _ _ a b -> Cons(a, Cons(b, Nil))
   | sprout_ir.IRFNeg _ a -> Cons(a, Nil)
+  | sprout_ir.IRSIToF _ a -> Cons(a, Nil)
   | sprout_ir.IRBoolNot _ a -> Cons(a, Nil)
   | sprout_ir.IRINeg _ a -> Cons(a, Nil)
   | sprout_ir.IRLoadGlobal _ _ -> Nil
@@ -345,6 +348,7 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRFDiv r _ _ -> Just(r)
   | sprout_ir.IRFCmp r _ _ _ -> Just(r)
   | sprout_ir.IRFNeg r _ -> Just(r)
+  | sprout_ir.IRSIToF r _ -> Just(r)
   | sprout_ir.IRBoolNot r _ -> Just(r)
   | sprout_ir.IRINeg r _ -> Just(r)
   | sprout_ir.IRLoadGlobal r _ -> Just(r)
@@ -621,6 +625,7 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRFDiv _ _ _ -> false
   | sprout_ir.IRFCmp _ _ _ _ -> false
   | sprout_ir.IRFNeg _ _ -> false
+  | sprout_ir.IRSIToF _ _ -> false
   | sprout_ir.IRBoolNot _ _ -> false
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false

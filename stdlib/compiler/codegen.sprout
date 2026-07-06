@@ -2483,6 +2483,8 @@ fn emit_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ty: ty
       emit_print_call(args, ctx, locals, em)
   | typed_ast.TVar "eprint" _ _ ->
       emit_eprint_call(args, ctx, locals, em)
+  | typed_ast.TVar "to_double" _ _ ->
+      emit_to_double_call(args, ctx, locals, em)
   | typed_ast.TVar name callee_ty _ ->
       emit_named_call(name, callee_ty, args, ty, ctx, locals, em, tco_ctx)
   | _ ->
@@ -2518,6 +2520,21 @@ fn emit_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ty: ty
               pop_temp_roots(rooted_args, em)
               pop_temp_roots(rooted_callee, em)
               result
+
+# `to_double(n)` — compiler intrinsic (no runtime symbol).  Convert the Int arg
+# with `sitofp`, then bitcast the double to its i64 bit-pattern (uniform ABI).
+# The Nil case is unreachable: infer types to_double as Int -> Double (arity 1).
+fn emit_to_double_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
+  match args with
+  | Cons arg _ ->
+      do
+        v <- emit_expr(ctx, locals, em, Nothing, arg)
+        fr <- fresh_tmp(em)
+        emit_template(em, `  ${fr} = sitofp i64 ${val_ir (v)} to double`)
+        tmp <- fresh_tmp(em)
+        emit_template(em, `  ${tmp} = bitcast double ${fr} to i64`)
+        val_make(ll_i64(), tmp)
+  | Nil -> panic("emit_to_double_call: to_double expects 1 argument, got 0")
 
 fn emit_print_call(args: List typed_ast.TypedExpr, ctx: CgCtx, locals: Dict Value, em: Emitter) -> Value !{IO} =
   match args with

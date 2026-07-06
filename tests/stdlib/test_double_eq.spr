@@ -1,0 +1,30 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+
+# TDD — `==` / `!=` on Double.
+#
+# Ordering comparisons (`< <= > >=`) on Double route through check_compare and
+# already work (ordered fcmp).  But `==`/`!=` route through check_eq, whose
+# is_primitive_eq_type short-circuit listed only Int/Bool/Char/String — Double
+# fell through to the Eq typeclass, which has no Double instance, so `3.0 == 3.0`
+# failed with "No instance of Eq for Double".  Codegen was already ready
+# (float_cmp_predicate maps == -> oeq, != -> one); the fix is adding Double to
+# is_primitive_eq_type.  RED until that lands.
+#
+# Uses only values that are exactly representable in IEEE-754 double, so the
+# equality checks are deterministic (no rounding surprises).
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- == on Double (RED today) ---
+    assert_true(state, "3.0 == 3.0", 3.0 == 3.0)
+    assert_false(state, "3.0 == 4.0", 3.0 == 4.0)
+    assert_true(state, "0.5 == 0.5", 0.5 == 0.5)
+    assert_true(state, "arithmetic result equality: 1.0 + 2.0 == 3.0", 1.0 + 2.0 == 3.0)
+
+    # --- != on Double (lowers to !(oeq); the != path wraps in TUnary "!") ---
+    assert_true(state, "3.0 != 4.0", 3.0 != 4.0)
+    assert_false(state, "3.0 != 3.0", 3.0 != 3.0)
+
+    summary(state)

@@ -700,6 +700,11 @@ instance Eq (Dict v) where Eq v {
     dict_eq(dict_entries(left), dict_entries(right))
 }
 
+instance ToString Double {
+  fn to_string(value: Double) -> String =
+    double_to_string(value)
+}
+
 instance ToString Int {
   fn to_string(value: Int) -> String =
     int_to_string(value)
@@ -1142,9 +1147,18 @@ export fn parse_int(s: String) -> Maybe Int =
       if c == '-' then negate_maybe(accum_digits(s, 1, 0, false))
       else accum_digits(s, 0, 0, false)
 extern fn int_to_string(n: Int) -> String
+extern fn double_to_string(x: Double) -> String
 extern fn char_to_string(c: Char) -> String
 extern fn char_to_str(codepoint: Int) -> String
 extern fn char_from_codepoint(cp: Int) -> Char
+
+# Compiler intrinsic: intercepted in ast_to_ir/codegen and lowered to an inline
+# `sitofp` (an Int value to the equal Double value), NOT a runtime call — there
+# is no @to_double symbol.  The extern decl exists only to give it a type, the
+# same way `print` is declared-but-intercepted.  Like `print`, and for the same
+# reason, it cannot be used as a first-class value (e.g. `map(to_double, xs)`):
+# that references the undefined @to_double and fails to link (loud, not silent).
+extern fn to_double(n: Int) -> Double
 
 # Integer ranges
 extern fn int_range(start: Int, end: Int) -> IntRange

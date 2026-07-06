@@ -30,4 +30,18 @@ fn main() -> Unit !{IO} =
     assert_true(state, "MutVec Double slot0 (3.14) > slot1 (2.71) survives GC", a > b)
     assert_true(state, "MutVec Double slot1 (2.71) > slot2 (1.41) survives GC", b > c)
     assert_true(state, "MutVec Double sum 7.26 > 7.0 via fadd survives GC", a + b + c > 7.0)
+
+    # IRSIToF coverage: a `to_double` (sitofp) result is a Double bit-pattern,
+    # classified non-heap-scalar exactly like any Double.  Store two in a heap
+    # MutVec and churn so collections fire while they are live — if IRSIToF's
+    # output were mis-rooted (traced as a pointer), this would segfault.
+    w <- mutvec_new(2, 0.0)
+    mutvec_set(w, 0, to_double(5))
+    mutvec_set(w, 1, to_double(3))
+    assert_true(state, "gc churn with live to_double values", churn(80) >= 0)
+    d0 <- mutvec_get(w, 0)
+    d1 <- mutvec_get(w, 1)
+    assert_true(state, "MutVec to_double(5)=5.0 > to_double(3)=3.0 survives GC", d0 > d1)
+    assert_true(state, "to_double(5) == 5.0 exactly after GC", d0 == 5.0)
+
     summary(state)

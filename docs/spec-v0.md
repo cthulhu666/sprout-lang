@@ -447,6 +447,7 @@ automatically available without an explicit import.  They are experimental in v0
 | Type | Result |
 |---|---|
 | `Int` | decimal string, e.g. `"42"` |
+| `Double` | decimal string via `%g`; a `.0` is appended when the value is integral so it never reads as an `Int`, e.g. `"3.14"`, `"1.0"` |
 | `Bool` | `"true"` or `"false"` |
 | `String` | identity |
 | `(a, b)` | `"(s_a, s_b)"` where `s_x = to_string(x)` — requires `ToString a`, `ToString b` |

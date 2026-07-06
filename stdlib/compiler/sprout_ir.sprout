@@ -113,6 +113,11 @@ export type IROp (..) =
   # bit-pattern, not its IEEE value.  Lowers to a bitcast to double, `fneg`, and a
   # bitcast back (uniform i64 ABI), the same dance as IRFAdd/…
   | IRFNeg String String
+  # IRSIToF <result> <operand>  — signed int -> double (`to_double`).  The operand
+  # is a genuine i64 integer value; `sitofp` yields a double, then bitcast to i64
+  # to carry it as a bit-pattern (uniform ABI).  The bitcast lands AFTER the
+  # convert (opposite side from IRFCmp/IRFNeg, whose operands are already bits).
+  | IRSIToF String String
   # IRBoolNot <result> <operand>  — boolean negation (lowers to `xor i64 %x, 1`).
   # Sprout's `!` operator.  Both operand and result are the i64-uniform Bool
   # representation (0 = false, 1 = true).  Xor with 1 flips the low bit.
@@ -431,6 +436,7 @@ fn print_op(op: IROp) -> String =
   | IRFDiv r a b -> "    " ++ r ++ " = fdiv " ++ a ++ ", " ++ b
   | IRFCmp r pred a b -> "    " ++ r ++ " = fcmp " ++ pred ++ " " ++ a ++ ", " ++ b
   | IRFNeg r a -> "    " ++ r ++ " = fneg " ++ a
+  | IRSIToF r a -> "    " ++ r ++ " = sitofp " ++ a
   | IRBoolNot r a -> "    " ++ r ++ " = bnot " ++ a
   | IRINeg r a -> "    " ++ r ++ " = ineg " ++ a
   | IRLoadGlobal r name -> "    " ++ r ++ " = load_global @" ++ name

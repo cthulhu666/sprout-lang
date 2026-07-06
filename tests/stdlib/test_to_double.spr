@@ -1,0 +1,31 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# TDD — `to_double(Int) -> Double` (docs/nn-gap-analysis.md §7.1 step 5 conversion).
+#
+# `to_double` converts an Int VALUE to the equal Double value (LLVM `sitofp`),
+# NOT a bit reinterpretation.  It is a compiler intrinsic: declared `extern fn`
+# for typing, but `translate_call` intercepts the name and emits an inline
+# `IRSIToF` op (sitofp + bitcast), the same pattern `print` uses — no runtime
+# symbol.  RED until the op + interception land.
+#
+# Observable here via Double `==`/`>` (printing arrives in the next commit).
+# The `> 2.5` check is the discriminator against a no-op bit reinterpretation:
+# bits(3) as a double is a tiny denormal (~1.5e-323), nowhere near 3.0 — so a
+# broken passthrough would fail it.  Values chosen are exactly representable.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Int -> equal Double value (RED today) ---
+    assert_true(state, "to_double(3) == 3.0", to_double(3) == 3.0)
+    assert_true(state, "to_double(0) == 0.0", to_double(0) == 0.0)
+    assert_true(state, "to_double(-5) == -5.0", to_double(-5) == -5.0)
+
+    # --- Discriminates against a bit-reinterpretation no-op ---
+    assert_true(state, "to_double(3) > 2.5 (real value, not denormal bits)", to_double(3) > 2.5)
+
+    # --- Mixes cleanly with Double arithmetic (float division, not truncating) ---
+    assert_true(state, "to_double(7) / 2.0 == 3.5", to_double(7) / 2.0 == 3.5)
+
+    summary(state)

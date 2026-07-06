@@ -141,6 +141,11 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ "$fa = bitcast i64 " ++ a ++ " to double\n" ++
       "  " ++ r ++ "$fr = fneg double " ++ r ++ "$fa\n" ++
       "  " ++ r ++ " = bitcast double " ++ r ++ "$fr to i64"
+  # to_double: the operand is a real i64 int, so convert first, then bitcast the
+  # resulting double to its i64 bit-pattern (opposite bitcast side from IRFNeg).
+  | sprout_ir.IRSIToF r a ->
+      "  " ++ r ++ "$fr = sitofp i64 " ++ a ++ " to double\n" ++
+      "  " ++ r ++ " = bitcast double " ++ r ++ "$fr to i64"
   | sprout_ir.IRBoolNot r a -> "  " ++ r ++ " = xor i64 " ++ a ++ ", 1"
   | sprout_ir.IRINeg r a -> "  " ++ r ++ " = sub i64 0, " ++ a
   | sprout_ir.IRLoadGlobal r name -> "  " ++ r ++ " = load i64, ptr @" ++ name

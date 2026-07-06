@@ -1865,6 +1865,38 @@ long long int_to_string(long long value) {
   out[content_len] = '\0';
   return (long long)(uintptr_t)out;
 }
+/* Format a Double (passed as its i64 bit-pattern, uniform ABI) to decimal text.
+ * Uses "%g" (6 significant digits, trailing zeros stripped) as the default;
+ * fine-grained formatting is a separate future tool.  When "%g" yields a bare
+ * integer form (no '.', exponent, or inf/nan letters), a ".0" is appended so a
+ * Double never reads as an Int.  Correct float->decimal formatting (incl. inf/
+ * nan and scientific notation) is impractical to reproduce faithfully in Sprout,
+ * so this stays in C — a correctness justification, not a performance one. */
+long long double_to_string(long long bits) {
+  double d;
+  memcpy(&d, &bits, sizeof(d));
+  char buf[64];
+  int written = snprintf(buf, sizeof(buf), "%g", d);
+  if (written < 0) tcp_fail("double_to_string: formatting failed");
+  int is_bare_int = 1;
+  for (int i = 0; i < written; i++) {
+    char c = buf[i];
+    if (c == '.' || c == 'e' || c == 'E' ||
+        c == 'n' || c == 'N' || c == 'i' || c == 'I') { is_bare_int = 0; break; }
+  }
+  if (is_bare_int && written + 2 < (int)sizeof(buf)) {
+    buf[written]     = '.';
+    buf[written + 1] = '0';
+    written += 2;
+    buf[written] = '\0';
+  }
+  size_t content_len = (size_t)written;
+  sprout_gc_maybe_collect_threshold();
+  char* out = sprout_gc_alloc_cstr(content_len, "double_to_string: out of memory");
+  memcpy(out, buf, content_len);
+  out[content_len] = '\0';
+  return (long long)(uintptr_t)out;
+}
 long long int_range(long long start, long long end) {
   IntRangeVal* out = sprout_alloc_range_val("int_range: out of memory");
   out->start = start;

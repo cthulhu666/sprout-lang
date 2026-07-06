@@ -87,9 +87,12 @@ A small `rand`/`srand` or a pure LCG in stdlib would close this.
 
 ### 3.2 No float↔string / float↔int conversion
 
-Downstream of §2.1: no `to_double`/`from_int`, and **no string→float parsing**.
-Even once floats exist, loading a dataset from a text/CSV file needs a float
-parser that does not exist. Only `Int` parsing and `int_to_string` are present.
+**Partly closed.** `to_double(Int) -> Double` now exists (a compiler intrinsic
+lowering to inline `sitofp`, no runtime builtin), and `double_to_string` +
+`instance ToString Double` render a `Double` as decimal text (`%g`, `.0`
+appended for integrals). Also `==`/`!=` now work on `Double`. Still missing:
+`from_int`'s inverse `to_int` (`fptosi`), and **string→float parsing** — loading
+a dataset from a text/CSV file still needs a float parser that does not exist.
 
 ### 3.3 No `zip`/`zip_with`, no matrix type
 

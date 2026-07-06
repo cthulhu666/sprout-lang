@@ -3425,6 +3425,33 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
                           Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTScalar, "print_value", Cons(a_name, Nil)), Nil)),
                         fresh_name(name_prefix, idx1), idx1 + 1))
 
+# `to_double(n)` — compiler intrinsic (no runtime symbol).  Translate the single
+# Int arg, then emit IRSIToF (sitofp) to convert it to the equal Double value.
+# Mirrors the print interception: recognized by name in translate_call.
+fn translate_to_double_call(args: List typed_ast.TypedExpr,
+                            params: List String, ctors: Dict (Int, Int, Int, String), idx: Int,
+                            cur_label: String, cur_ops: List sprout_ir.IROp,
+                            captures: Dict String,
+                            lifted_ref: Ref (List sprout_ir.IRFunction),
+                            top_level: Set, let_names: Set, fn_arities: Dict Int,
+                            lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                            name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match args with
+  | Cons arg _ ->
+      match translate_expr(arg, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                           name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok ar ->
+          match ar with
+          | (ablocks, acur_lbl, acur_ops, a_name, idx1) ->
+              Ok((ablocks, acur_lbl,
+                   list_append(acur_ops,
+                     Cons(sprout_ir.IRSIToF(fresh_name(name_prefix, idx1), a_name), Nil)),
+                   fresh_name(name_prefix, idx1), idx1 + 1))
+  | Nil -> Err("ast_to_ir: to_double expects 1 argument, got 0")
+
 fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   call_ty: types.Type, params: List String,
                   ctors: Dict (Int, Int, Int, String), idx: Int,
@@ -3457,6 +3484,10 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
           then translate_print_call(fname, args, params, ctors, idx,
                                     cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
                                     lambda_ctr_ref, lifted_idx_ref, name_prefix)
+          else if fname == "to_double"
+          then translate_to_double_call(args, params, ctors, idx,
+                                        cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                                        lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else if param_known(fname, params)
           then
             # Trust the typechecker: any param reached here was accepted as
