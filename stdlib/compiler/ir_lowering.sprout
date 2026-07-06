@@ -137,6 +137,10 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ "$fa = bitcast i64 " ++ a ++ " to double\n" ++
       "  " ++ r ++ "$fb = bitcast i64 " ++ b ++ " to double\n" ++
       "  " ++ r ++ " = fcmp " ++ pred ++ " double " ++ r ++ "$fa, " ++ r ++ "$fb"
+  | sprout_ir.IRFNeg r a ->
+      "  " ++ r ++ "$fa = bitcast i64 " ++ a ++ " to double\n" ++
+      "  " ++ r ++ "$fr = fneg double " ++ r ++ "$fa\n" ++
+      "  " ++ r ++ " = bitcast double " ++ r ++ "$fr to i64"
   | sprout_ir.IRBoolNot r a -> "  " ++ r ++ " = xor i64 " ++ a ++ ", 1"
   | sprout_ir.IRINeg r a -> "  " ++ r ++ " = sub i64 0, " ++ a
   | sprout_ir.IRLoadGlobal r name -> "  " ++ r ++ " = load i64, ptr @" ++ name

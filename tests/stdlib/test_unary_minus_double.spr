@@ -1,0 +1,41 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+
+# TDD — unary minus on Double (docs/nn-gap-analysis.md follow-up gap).
+#
+# `-x` on a Double is typed correctly by infer (the TUnary node inherits the
+# operand's Double type), but ast_to_ir lowers EVERY unary "-" to IRINeg, i.e.
+# `sub i64 0, bits`.  That integer-negates the double's bit-pattern instead of
+# flipping its IEEE sign bit, so `-3.0` (bits 0x4008000000000000) comes out as
+# 0xBFF8000000000000 = -1.5, not -3.0.  A silent, plausible-looking miscompile.
+#
+# These Double cases are RED until the "-" branch emits a float negation
+# (IRFNeg -> `fneg double`) when the operand is a Double.  The failure mode is a
+# WRONG VALUE (failed assertion), not a compile/parse error.
+#
+# Note: 2.0 would hide the bug (its bit-pattern negates to exactly -2.0 because
+# it is a power of two).  3.0 is chosen precisely because it exposes it.
+
+fn dneg(x: Double) -> Double = -x
+
+fn ineg(x: Int) -> Int = -x
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Unary minus on Double must be an exact IEEE sign-flip (RED today) ---
+    # Fixed: -3.0 + 4.5 == 1.5, so < 2.0.  Bug: -1.5 + 4.5 == 3.0, NOT < 2.0.
+    assert_true(state, "-3.0 is exact: (-3.0) + 4.5 = 1.5 < 2.0", dneg(3.0) + 4.5 < 2.0)
+
+    # -3.0 must be strictly negative (true under both bug and fix; a sanity rail)
+    assert_true(state, "-3.0 < 0.0", dneg(3.0) < 0.0)
+
+    # Cross-check against binary subtraction, which is already correct.
+    # Fixed: -3.0 > -3.0 is FALSE.  Bug: -1.5 > -3.0 is TRUE.
+    assert_false(state, "unary and binary negation agree", dneg(3.0) > (0.0 - 3.0))
+
+    # --- Integer unary minus must keep working (no regression) ---
+    assert_true(state, "unary minus on Int still works: -5 + 10 = 5", ineg(5) + 10 == 5)
+    assert_true(state, "-5 < 0", ineg(5) < 0)
+
+    summary(state)

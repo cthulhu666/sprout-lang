@@ -850,9 +850,10 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                        name_prefix)
   | typed_ast.TUnary op operand _ _ ->
       # Parser produces TUnary "!" (boolean negation, parser.sprout:665) and
-      # TUnary "-" (integer negation, parser.sprout:661).  No other unary ops.
-      # !x lowers to IRBoolNot (`xor i64 %x, 1`); -x lowers to IRINeg
-      # (`sub i64 0, %x`).
+      # TUnary "-" (arithmetic negation, parser.sprout:661).  No other unary ops.
+      # !x lowers to IRBoolNot (`xor i64 %x, 1`).  -x lowers to IRINeg
+      # (`sub i64 0, %x`) for Int, or IRFNeg (`fneg double`) for Double: negating
+      # a double's i64 bit-pattern with `sub` corrupts it, so dispatch on type.
       match translate_expr(operand, params, ctors, idx, cur_label, cur_ops,
                            captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                            name_prefix) with
@@ -868,7 +869,9 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
               else if op == "-"
               then Ok((oblocks, ocur_lbl,
                         list_append(ocur_ops,
-                          Cons(sprout_ir.IRINeg(fresh_name(name_prefix, idx1), o_name), Nil)),
+                          Cons(if is_double_type(typed_ast.typed_expr_type(operand))
+                               then sprout_ir.IRFNeg(fresh_name(name_prefix, idx1), o_name)
+                               else sprout_ir.IRINeg(fresh_name(name_prefix, idx1), o_name), Nil)),
                         fresh_name(name_prefix, idx1), idx1 + 1))
               else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
   | typed_ast.TRange start end_ _ _ ->

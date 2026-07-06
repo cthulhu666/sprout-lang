@@ -2035,10 +2035,22 @@ fn emit_unary(op: String, operand: typed_ast.TypedExpr, ctx: CgCtx, locals: Dict
   do
     v <- emit_expr(ctx, locals, em, Nothing, operand)
     if op == "-" then
-      do
-        tmp <- fresh_tmp(em)
-        emit_template(em, `  ${tmp} = sub i64 0, ${val_ir (v)}`)
-        val_make(ll_i64(), tmp)
+      if is_double_type(typed_ast.typed_expr_type(operand)) then
+        # `sub i64 0` would negate the double's bit-pattern, not its value.
+        # Bitcast to double, fneg, bitcast back (uniform ABI), like emit_binary.
+        do
+          fa <- fresh_tmp(em)
+          emit_template(em, `  ${fa} = bitcast i64 ${val_ir (v)} to double`)
+          fr <- fresh_tmp(em)
+          emit_template(em, `  ${fr} = fneg double ${fa}`)
+          tmp <- fresh_tmp(em)
+          emit_template(em, `  ${tmp} = bitcast double ${fr} to i64`)
+          val_make(ll_i64(), tmp)
+      else
+        do
+          tmp <- fresh_tmp(em)
+          emit_template(em, `  ${tmp} = sub i64 0, ${val_ir (v)}`)
+          val_make(ll_i64(), tmp)
     else if op == "!" then
       do
         tmp <- fresh_tmp(em)

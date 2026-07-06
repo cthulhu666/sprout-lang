@@ -109,7 +109,10 @@ Dot-products must index-zip manually via `vec_get`. There is also no 2D
   not a `map` over an effectful body.
 - **No `let … in` inside pure functions**, and **no `!`/`not` boolean
   negation** (README "Not Yet Supported"). Minor readability impact. Unary minus
-  `-x` *does* work (`codegen.sprout:2024`).
+  `-x` works on both `Int` (`IRINeg` → `sub i64 0, x`) and `Double` (`IRFNeg` →
+  `fneg double`); the two dispatch on operand type in `ast_to_ir`, because a
+  naive `sub i64 0` on a double's i64 bit-pattern silently corrupts it (`-3.0`
+  would come out as `-1.5`).
 
 ---
 
