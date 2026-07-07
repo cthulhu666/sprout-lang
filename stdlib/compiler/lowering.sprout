@@ -1433,6 +1433,19 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
       if evidence_list_fully_resolved(children) then
         eta_from_instance(method, key, t, pos, consume_inner_dicts(children, pos, ctx), ctx)
       else Nothing
+  # M3b-5 (PR-A): value-position reroute to a forwarded hidden-dict slot — the eta
+  # analog of consume_block's EvForward arm.  Mirrors the fallback's
+  # find_fwd_method_for_head -> make_eta_lambda(fwd_slot): look up the forwarded
+  # method_map by the same key consume_block uses, then the method's slot within it.
+  # A ctx_fwd miss (a phantom fresh tyvar resolve emitted EvForward for
+  # optimistically) returns Nothing, so lower_value_var null-fills exactly as today.
+  | typed_ast.EvForward _ key ->
+      match dict_get(key, ctx_fwd(ctx)) with
+      | Nothing -> Nothing
+      | Just method_map ->
+          match dict_get_method(method, method_map) with
+          | Nothing -> Nothing
+          | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
   | _ -> Nothing
 
 fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =

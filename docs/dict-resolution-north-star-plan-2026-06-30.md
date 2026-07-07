@@ -394,6 +394,33 @@ value-position → `EvForward` → fallback), byte-identical in the harness. New
 `tests/stdlib/test_value_position_method_ref.spr`. Next: **M3b-5** — delete `resolve_tdict`,
 Evidence-ify the reroute, make the eta path a pure Evidence→witness printer.
 
+**M3b-5 (PR-A) — eta reroute consumed from Evidence. DONE (2026-07-07).**
+Split from M3b-5 per the sequencing decision ("encode first, delete second") so byte-identity is
+provable at each half; `resolve_tdict` stays as an unreached-but-present fallback until PR-B removes
+it. `eta_from_evidence` gains an `EvForward class key` arm — the eta analog of `consume_block`'s
+call-path `EvForward` arm — that looks up `ctx_fwd[key]`, then the method's slot within it, and emits
+`make_eta_lambda(fwd_slot, t)`. A `ctx_fwd` miss (a phantom fresh tyvar resolve emitted `EvForward`
+for optimistically) returns `Nothing`, so `lower_value_var` null-fills exactly as today. It reuses the
+identical `dict_get(key, ctx_fwd(ctx))` lookup the call path already proved key-correct in M3b-3, so
+the key↔`ctx_fwd` correspondence needs no new argument.
+
+*Correction to the M3b-4b framing above.* The value-position reroute is driven by a **top-level
+`EvForward`**, not `EvInstance(impl, [EvForward(inner-miss)])`. When the forwarded key is in
+`fwd_keys`, `produce_one_class` short-circuits (line 237) to `EvForward` before ever reaching the
+concrete/bundled branch — so a forwarded reroute never produces an `EvInstance` with an unresolved
+child in the first place; that `has_unresolved_dict` path is a distinct, rarer sub-case. A temporary
+panic probe confirmed the new arm FIRES on `box_eq_via_hof` (key `MyEq_Box`) and a new distinct-output
+regression (key `Label_Wrap`) — non-vacuous. Verified byte-identical `--emit-ir` OLD(seed) vs
+NEW(source) across the 181-file corpus (0 diffs). New test:
+`tests/stdlib/test_value_position_reroute.spr` (distinct per-instance strings so a wrong-slot
+dispatch is observable, unlike `box_eq_via_hof`'s unconditional `true`).
+
+**Open for PR-B (deletion).** The eta path still calls `resolve_tdict` for two reasons that PR-B must
+Evidence-ify or excise: (1) inner **context** dicts of an eta instance (`resolve_eta_substituted_inner_dicts`),
+and (2) every `eta_from_evidence` `Nothing` result still falls through to `lower_value_var` →
+`try_eta_in_class`. PR-B also adds the `TFunc` gate on `eta_from_evidence` (prereq 1) and the
+marker-miss test (prereq 2) before removing the fallback.
+
 **M3b-5 prerequisites surfaced by the M3b-4 code review (2026-07-05).** A recall-biased
 multi-angle review found NO current correctness regression (the strongest candidate — a missing
 `TFunc` gate — was empirically refuted: `fn get_empty() -> String = empty` compiles to the SAME

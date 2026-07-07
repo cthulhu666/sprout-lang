@@ -1,0 +1,40 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# M3b-5 (PR-A) coverage: a value-position class method used inside a function that
+# FORWARDS the constraint drives the EvForward eta-reroute arm of
+# eta_from_evidence (distinct from the clean concrete EvInstance case in
+# test_value_position_method_ref).  Unlike test_constrained_eta_codegen's
+# box_eq_via_hof — whose instance returns `true` unconditionally and so cannot
+# detect a wrong-slot dispatch — here each instance yields a DISTINCT string, so
+# selecting the wrong dictionary is observable in the output, not just a crash.
+
+class Label a {
+  fn label(x: a) -> String
+}
+
+type Wrap a = Wrap a
+
+instance Label Int {
+  fn label(x: Int) -> String = "int"
+}
+
+instance Label (Wrap a) where Label a {
+  fn label(x: Wrap a) -> String = "wrap"
+}
+
+fn apply_label(f: a -> String, x: a) -> String = f(x)
+
+# Forwards Label (Wrap a); uses `label` in value position -> EvForward reroute to
+# the forwarded outer slot.  Must dispatch to the Wrap instance ("wrap").
+fn label_via_hof(x: Wrap a) -> String where Label (Wrap a) =
+  apply_label(label, x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(
+      state,
+      "forwarded Label (Wrap a) value-position reroute selects the Wrap instance",
+      label_via_hof(Wrap(1)) == "wrap"
+    )
+    summary(state)
