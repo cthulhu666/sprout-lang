@@ -14,6 +14,11 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "vec_reverse", vec_reverse(v), foldable_to_vec([40, 30, 20, 10]))
     assert_eq(state, "vec_slice", vec_slice(1, 2, v), foldable_to_vec([20, 30]))
 
+    # vec_eq_from: equal, differ-in-element (else-false path), differ-in-length (guard)
+    assert_true(state, "vec eq self", v == v)
+    assert_false(state, "vec eq differs (element)", v == foldable_to_vec([10, 20, 99, 40]))
+    assert_false(state, "vec eq differs (length)", v == foldable_to_vec([10, 20, 30]))
+
     assert_eq(state, "vec_sum_by identity", vec_sum_by(\x -> x, v), 100)
     assert_eq(state, "vec_sum_by halved", vec_sum_by(\x -> x / 10, v), 10)
 
@@ -22,6 +27,10 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "dict eq self", d, d)
     assert_eq(state, "dict remove reduces", d2, {alpha: 1, gamma: 3})
+
+    # dict_entries_eq: differ-in-value (else-false path), differ-in-length (guard)
+    assert_false(state, "dict eq differs (value)", d == {alpha: 1, beta: 99, gamma: 3})
+    assert_false(state, "dict eq differs (length)", d == d2)
 
     let keys = dict_keys(d)
     let vals = dict_values(d)

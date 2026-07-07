@@ -663,14 +663,10 @@ instance Eq (a, b, c, d, e) where Eq a, Eq b, Eq c, Eq d, Eq e {
 fn vec_eq_from(left: Vec a, right: Vec a, i: Int, total: Int) -> Bool where Eq a =
   if i == total then true
   else
-    match vec_get(i, left) with
-    | Nothing -> false
-    | Just lv ->
-        match vec_get(i, right) with
-        | Nothing -> false
-        | Just rv ->
-            if eq(lv, rv) then vec_eq_from(left, right, i + 1, total)
-            else false
+    let Just lv = vec_get(i, left) else false
+        Just rv = vec_get(i, right) else false
+    in if eq(lv, rv) then vec_eq_from(left, right, i + 1, total)
+       else false
 
 instance Eq (Vec a) where Eq a {
   fn eq(left: Vec a, right: Vec a) -> Bool =
@@ -681,15 +677,11 @@ instance Eq (Vec a) where Eq a {
 fn dict_entries_eq(le: Vec (String, v), re: Vec (String, v), i: Int, total: Int) -> Bool where Eq v =
   if i == total then true
   else
-    match vec_get(i, le) with
-    | Nothing -> false
-    | Just (lk, lv) ->
-        match vec_get(i, re) with
-        | Nothing -> false
-        | Just (rk, rv) ->
-            if lk == rk && eq(lv, rv)
-            then dict_entries_eq(le, re, i + 1, total)
-            else false
+    let Just(lk, lv) = vec_get(i, le) else false
+        Just(rk, rv) = vec_get(i, re) else false
+    in if lk == rk && eq(lv, rv)
+       then dict_entries_eq(le, re, i + 1, total)
+       else false
 
 fn dict_eq(le: Vec (String, v), re: Vec (String, v)) -> Bool where Eq v =
   if vec_length(le) != vec_length(re) then false

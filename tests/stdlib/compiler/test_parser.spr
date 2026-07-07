@@ -4,27 +4,26 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 
+# One named reason per destructure step, so the `let … in` block's per-binding
+# `else` records *where* it stopped — the whole point of distinct `else`s.
+# Eq drives the assert_eq comparisons; ToString prints the reason on failure.
+type BodyLineError deriving (Eq, ToString) =
+  | LexError
+  | ParseError
+  | NoDecls
+  | FirstNotFn
+  | BodyNotCall
+
 # W9/X5: line of the first fn's desugared body (a where-binding lowers to a
-# CallExpr wrapping a lambda). Sentinels: -1 lex err, -2 parse err, -3 no decls,
-# -4 body not a CallExpr, -5 first decl not a FnDecl.
-fn first_fn_body_line(src: String) -> Int =
-  match lexer.tokenize(src) with
-  | Err _ -> 0 - 1
-  | Ok toks ->
-      match parser.parse_program(toks) with
-      | Err _ -> 0 - 2
-      | Ok prog ->
-          match prog with
-          | ast.Program decls _ ->
-              match decls with
-              | Nil -> 0 - 3
-              | Cons d _ ->
-                  match d with
-                  | ast.FnDecl _ _ _ _ _ body _ ->
-                      match body with
-                      | ast.CallExpr _ _ pos -> source.position_line(pos)
-                      | _ -> 0 - 4
-                  | _ -> 0 - 5
+# CallExpr wrapping a lambda). Each step bails to its own reason, so a failure
+# says which stage stopped it — lex, parse, empty, non-fn, or non-call body.
+fn first_fn_body_line(src: String) -> Result BodyLineError Int =
+  let Ok toks = lexer.tokenize(src) else Err(LexError)
+      Ok prog = parser.parse_program(toks) else Err(ParseError)
+      ast.Program(Cons d _) _ = prog else Err(NoDecls)
+      ast.FnDecl _ _ _ _ _ body _ = d else Err(FirstNotFn)
+      ast.CallExpr _ _ pos = body else Err(BodyNotCall)
+  in Ok(source.position_line(pos))
 
 fn parse_ok(src: String) -> Bool =
   match lexer.tokenize(src) with
@@ -196,9 +195,22 @@ fn main() -> Unit !{IO} =
     # pattern's own span, not SourcePos(0,0,0). The whole program is on line 1,
     # so the desugared body's line must be 1 (was 0 before the fix).
     assert_eq(state, "tuple where-pattern body carries a real line",
-      first_fn_body_line("fn f() -> Int = a where (a, b) = (1, 2)"), 1)
+      first_fn_body_line("fn f() -> Int = a where (a, b) = (1, 2)"), Ok(1))
     # Control: a variable where-pattern already threads its own span.
     assert_eq(state, "variable where-pattern body carries a real line",
-      first_fn_body_line("fn g() -> Int = x where x = 5"), 1)
+      first_fn_body_line("fn g() -> Int = x where x = 5"), Ok(1))
+
+    # Each `let … in` step bails to its own reason — exercise all five so the
+    # distinct `else`s are tested, not just decorative.
+    assert_eq(state, "bail: lex error",
+      first_fn_body_line("@"), Err (LexError))
+    assert_eq(state, "bail: parse error",
+      first_fn_body_line("fn f() -> Int"), Err (ParseError))
+    assert_eq(state, "bail: no declarations",
+      first_fn_body_line(""), Err (NoDecls))
+    assert_eq(state, "bail: first decl not a fn",
+      first_fn_body_line("type Color = Red | Green"), Err (FirstNotFn))
+    assert_eq(state, "bail: body not a call",
+      first_fn_body_line("fn f() -> Int = 42"), Err (BodyNotCall))
 
     summary(state)
