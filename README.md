@@ -75,7 +75,7 @@ Requires [`mise`](https://mise.jdx.dev) (pins the toolchain) and `clang`.
 
 ```
 mise install
-mise exec -- just build-stage1                                 # build the self-hosted compiler
+mise exec -- just bootstrap-from-seed                          # build the self-hosted compiler (stage-1)
 mise exec -- just compile-native examples/fizzbuzz.sprout /tmp/fizzbuzz
 /tmp/fizzbuzz
 ```

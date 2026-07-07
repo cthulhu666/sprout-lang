@@ -85,9 +85,11 @@ Experimental snapshot analysis hooks:
 - Application code should prefer `stdlib.compiler` for these capabilities.
   The raw `analysis_*`/`repl_*` hooks are not part of the implicit builtin
   prelude for ordinary modules.
-- The self-hosted analysis service binary (`analysis_service_bin`) is built with
-  `just build-analysis-service` and run with `just run-analysis-service`. It
-  implements `declared_names_in_source`, `exported_names_in_source`,
+- The self-hosted analysis service is served by `sproutd`: build it with
+  `just build-sproutd` and run it with `sproutd --analysis-service <stdlib_root>`.
+  (The former standalone `analysis_service_bin` / `just build-analysis-service`
+  are retired — sproutd wraps the identical `analysis_service_driver.run_service`
+  entry.) It implements `declared_names_in_source`, `exported_names_in_source`,
   `symbol_inventory_in_source`, `symbol_locations_in_source`, `check_source`,
   `diagnostics_in_source`, `type_of_in_source`, and `eval_expr_in_source` over a
   JSON-over-stdio protocol. Override the service command via

@@ -80,26 +80,24 @@ one run what an `lldb` backtrace cannot (the overflow faults mid-prologue, so
   `[sprout] SIGSEGV` message plus the same backtrace.
 - Regression: `just stack-overflow-smoke` (`tests/stack_overflow_smoke/`).
 
-## Typed-codegen flip gates (`just tco-diff`, `just flip-readiness`)
+## Typed-codegen TCO gate (`just tco-runtime-smoke`)
 
-Two checks for the "typed codegen diverges from direct codegen only at scale or
-under a runtime condition" bug class — the class the parity corpus structurally
-cannot catch (it runs only small files, with no argv). Both are RED until the
-typed-codegen flip work lands; make them hard CI gates once green.
+The typed-codegen flip has landed: `--emit-ir` (the default) *is* typed codegen,
+so the standalone flip meters (`tco-diff`, `flip-smoke`, `flip-readiness`) are
+retired. The surviving guard for the "self-tail-recursion regresses only at
+runtime scale" bug class — which the parity corpus structurally cannot catch (it
+runs only small files) — is:
 
-- **`just tco-diff [PROBE]`** — emits IR for `PROBE` via both `--emit-ir`
-  (direct) and `--use-ir-codegen` (typed), counts `tco_loop` basic-block labels,
-  and fails if typed emits fewer. Direct currently emits 55 and typed 0 for the
-  default probe — i.e. typed codegen does **no** tail-call optimization, so any
-  self-tail-recursive function overflows the stack at scale (flip blocker #2,
-  `lexer.tokenize_from`). Doubles as the progress meter for the TCO fix (watch
-  `typed` climb to match `direct`).
-- **`just flip-readiness`** — the real flip gate: typed self-compile the compiler
-  → `opt --passes=verify` → link → have that binary self-compile to a **fixed
-  point**, asserting the result is *verifiable IR with `define` blocks* (not just
-  non-empty — the argv blocker prints a ~240-byte usage string with exit 0, a
-  false green against a naive check). When it fails, read the failing binary's
-  stderr: the stack-overflow panic names the recursing culprit.
+- **`just tco-runtime-smoke`** — compiles a deep tail-recursive fixture via
+  `--use-ir-codegen` and requires it to *run to completion*. A non-TCO'd typed
+  build either exhausts the GC root pool or overflows the native stack (one frame
+  per iteration). This is a hard CI gate. When it fails, the runtime's
+  stack-overflow panic names the recursing culprit on stderr (see
+  `sprout_install_crash_handlers`).
+
+The end-to-end "typed-built compiler self-compiles to a fixed point" property the
+old `flip-readiness` checked is now covered by `just verify-bootstrap-fixed-point`
+(the seed *is* typed-codegen output) plus `just build-stage2` + the stage-2 tests.
 
 ## 2-Step Bootstrap Protocol
 

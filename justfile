@@ -9,12 +9,14 @@ default:
   @just --list
 
 # Wire the tracked .githooks/ directory as the active hook path (run once after cloning).
+[group('bootstrap')]
 install-hooks:
   git config core.hooksPath .githooks
   @echo "Hooks installed — .githooks/pre-commit is now active."
 
 # Bypass the bootstrap seed gate for one commit when a compiler change does not
 # affect IR output.  Run `just verify-bootstrap-fixed-point` first to confirm.
+[group('bootstrap')]
 seed-fp-ack:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -25,6 +27,7 @@ seed-fp-ack:
 
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
+[group('dev')]
 repl:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -152,23 +155,16 @@ check-iface-all: bootstrap-from-seed
 # ── Check / Run ───────────────────────────────────────────────────────────────
 
 [group('dev')]
-check file:
+check file: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
-  fi
   "{{build_dir}}/compile_driver_bin_stage1" --phase check "{{stdlib_root}}" {{quote(file)}}
 
 # Compile {{file}} with stage-1 and run the resulting binary.
 [group('dev')]
-run file:
+run file: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
-    exit 1
-  fi
   TMP_LL="/tmp/sprout_run_$$.ll"
   TMP_BIN="/tmp/sprout_run_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
@@ -182,13 +178,9 @@ run file:
 # gc_us, trace hits/misses, region_count, and freelist_hits. The hot-path
 # counters are compile-time gated, so a normal `just run` build is byte-identical.
 [group('dev')]
-gc-profile file:
+gc-profile file: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
-    exit 1
-  fi
   TMP_LL="/tmp/sprout_gcprof_$$.ll"
   TMP_BIN="/tmp/sprout_gcprof_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
@@ -198,24 +190,16 @@ gc-profile file:
 
 # Emit LLVM IR for {{file}} to {{out}} using stage-1.
 [group('dev')]
-compile file out:
+compile file out: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
-    exit 1
-  fi
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > {{quote(out)}}
 
 # Compile {{file}} to a native binary at {{out}} using stage-1.
 [group('dev')]
-compile-native file out:
+compile-native file out: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
-    exit 1
-  fi
   TMP_LL="/tmp/sprout_compile_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
@@ -224,13 +208,9 @@ compile-native file out:
 # Compile {{file}} to a debug binary at {{out}} using stage-1 (DWARF, no optimisation).
 # Use: just build-debug path/to/prog.spr ./prog_dbg && lldb ./prog_dbg
 [group('dev')]
-build-debug file out:
+build-debug file out: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
-    exit 1
-  fi
   TMP_LL="/tmp/sprout_debug_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
@@ -238,13 +218,9 @@ build-debug file out:
 
 # Compile {{file}} with debug info and launch it under lldb.
 [group('dev')]
-debug-run file:
+debug-run file: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2
-    exit 1
-  fi
   TMP_LL="/tmp/sprout_debug_$$.ll"
   TMP_BIN="/tmp/sprout_debug_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
@@ -430,12 +406,9 @@ build-stage3: (_build-stage "build/compile_driver_bin_stage2" "build/compile_dri
 
 # Build stage-2 with AddressSanitizer + UBSan (slow; for debugging only).
 [group('build')]
-build-stage2-asan:
+build-stage2-asan: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
-  fi
   TMP_LL="/tmp/sprout_stage2_asan_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR via stage-1..."
@@ -543,6 +516,7 @@ compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "e
 # be rejected by `--phase check` with output containing the substring in <n>.err.
 # (`--phase check` exits 0 even on type errors, so matching is by output content.)
 # xfail = fixtures whose expected diagnostic is not yet produced (tracked TODO).
+[private]
 _test-type-errors stage xfail="":
   #!/usr/bin/env bash
   set -euo pipefail
@@ -730,7 +704,7 @@ llvm-where ll_file line:
 # DoD #7 — smoke shapes.  Each tests/smoke_shapes/*.spr must emit IR cleanly,
 # contain at least one `define` block, and contain no `str_concat(ptr null,…)`
 # (null-pointer codegen regression guard).
-[group('ci-checks')]
+[group('smoke')]
 smoke-shapes: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -760,7 +734,7 @@ smoke-shapes: bootstrap-from-seed
 
 # DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
 # prelude.sprout must produce non-empty output with no dot-prefix qualified names.
-[group('ci-checks')]
+[group('smoke')]
 bundle-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -797,7 +771,7 @@ bundle-smoke: bootstrap-from-seed
 # call" error, NOT silently emit zero_val (`ret i64 0`).  Regression for the
 # codegen.emit_named_call silent fallback that disguised bundler/iface gaps as
 # GC/typeclass/print bugs.
-[group('ci-checks')]
+[group('smoke')]
 loud-fail-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -819,7 +793,7 @@ loud-fail-smoke: bootstrap-from-seed
 # its command-line arguments — the typed-codegen flip self-compiles the
 # compiler, whose main() reads argv.  The parity corpus runs every binary with
 # NO args, so this is the ONLY gate exercising argv_all() under typed codegen.
-[group('ci-checks')]
+[group('smoke')]
 argv-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -840,40 +814,10 @@ argv-smoke: bootstrap-from-seed
   fi
   echo "==> argv-smoke ✓"
 
-# Flip smoke: verifies `--emit-ir` routes through TYPED codegen (the flip) by
-# asserting its output is byte-identical to `--use-ir-codegen`, and that the
-# `--use-direct-codegen` escape hatch still reaches the direct backend (valid,
-# non-empty IR that DIFFERS from typed). RED until the flip lands in the seed.
-flip-smoke: bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -uo pipefail
-  TMPD=$(mktemp -d /tmp/sprout_flipsmoke_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
-  BIN="{{build_dir}}/compile_driver_bin_stage1"
-  FIX=tests/flip_smoke/flip_fixture.spr
-  "$BIN" --emit-ir        "{{stdlib_root}}" "$FIX" > "$TMPD/emit.ll"   2>"$TMPD/emit.err"
-  "$BIN" --use-ir-codegen "{{stdlib_root}}" "$FIX" > "$TMPD/typed.ll"  2>"$TMPD/typed.err"
-  if ! "$BIN" --use-direct-codegen "{{stdlib_root}}" "$FIX" > "$TMPD/direct.ll" 2>"$TMPD/direct.err"; then
-    echo "flip-smoke: --use-direct-codegen failed (escape hatch missing?)" >&2; cat "$TMPD/direct.err" >&2; exit 1
-  fi
-  if ! cmp -s "$TMPD/emit.ll" "$TMPD/typed.ll"; then
-    echo "flip-smoke: --emit-ir is NOT routing through typed codegen (differs from --use-ir-codegen)." >&2
-    echo "  -> the flip is not in the seed; refresh-seed after the dispatcher reroute." >&2
-    exit 1
-  fi
-  if [ ! -s "$TMPD/direct.ll" ] || ! grep -q '^define ' "$TMPD/direct.ll"; then
-    echo "flip-smoke: --use-direct-codegen produced no real IR." >&2; exit 1
-  fi
-  if cmp -s "$TMPD/emit.ll" "$TMPD/direct.ll"; then
-    echo "flip-smoke: --use-direct-codegen output equals typed — escape hatch not reaching direct codegen." >&2
-    exit 1
-  fi
-  echo "==> flip-smoke ✓ (--emit-ir == typed; --use-direct-codegen reaches direct)"
-
 # DoD #9 — APPROVED_BUILTINS guard.  Every non-static `long long <name>(` in
 # runtime/sprout_runtime.c must be listed in runtime/APPROVED_BUILTINS.
 # Per AGENTS.md "Builtin vs Stdlib" rules 4–6.
-[group('ci-checks')]
+[group('smoke')]
 check-approved-builtins:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -901,7 +845,7 @@ check-approved-builtins:
 # DoD #10 — example canary RUN.  The canary set must compile AND run to
 # completion without crashing.  `just compile-examples-stage1` only covers
 # compile; this recipe adds the runtime check.
-[group('ci-checks')]
+[group('smoke')]
 run-example-canary: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -933,12 +877,12 @@ run-example-canary: bootstrap-from-seed
   fi
   echo "==> run-example-canary ✓"
 
-# Stack-overflow diagnostic regression. A deeply (non-tail) recursive program
-# overflows the native stack; the runtime must catch it on its alternate signal
-# stack and panic cleanly ("stack overflow" + a backtrace) instead of dying with
-# a bare, silent SIGSEGV. RED before the sigaltstack handler (empty stderr,
-# exit 139); GREEN after. -rdynamic (Linux only) makes the backtrace frames
-# named rather than bare addresses; macOS symbolises from the symbol table.
+# Stack-overflow diagnostic regression (CI gate). A deeply (non-tail) recursive
+# program overflows the native stack; the runtime must catch it on its alternate
+# signal stack and panic cleanly ("stack overflow" + a backtrace) instead of
+# dying with a bare, silent SIGSEGV. -rdynamic (Linux only) makes the backtrace
+# frames named rather than bare addresses; macOS symbolises from the symbol table.
+[group('smoke')]
 stack-overflow-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -968,11 +912,12 @@ stack-overflow-smoke: bootstrap-from-seed
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
 
-# W7/F-DIV division-by-zero guard regression. The fixture divides by a RUNTIME
+# Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
 # clang can fold. A bare `sdiv i64 _, 0` is LLVM undefined behavior; the emitted
-# guard must panic cleanly ("division by zero", non-zero exit). RED before the
-# ast_to_ir guard (UB — often exit 0 or garbage), GREEN after.
+# ast_to_ir guard must panic cleanly ("division by zero", non-zero exit) rather
+# than return UB garbage.
+[group('smoke')]
 div-by-zero-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -1000,42 +945,13 @@ div-by-zero-smoke: bootstrap-from-seed
   fi
   echo "==> div-by-zero-smoke ✓ (clean panic, exit $ec)"
 
-# TCO differential: typed codegen (--use-ir-codegen) must emit at least as many
-# tail-call-optimization loops as direct codegen (--emit-ir) for the same source.
-# A self-tail-recursive function that direct codegen loops but typed codegen does
-# NOT becomes one native frame per iteration — fine on small inputs, a stack
-# overflow at scale (e.g. the compiler's own lexer.tokenize_from: flip blocker #2).
-# The parity corpus can't see this (all inputs are small); this can. Counts the
-# `tco_loop` basic-block labels direct codegen emits and asserts typed emits no
-# fewer. Diagnostic + progress meter for the typed-codegen TCO work.
-tco-diff PROBE="tests/stack_overflow_smoke/deep_recursion.spr": bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -uo pipefail
-  TMPD=$(mktemp -d /tmp/sprout_tco_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
-  BIN="{{build_dir}}/compile_driver_bin_stage1"
-  if ! "$BIN" --use-direct-codegen "{{stdlib_root}}" "{{PROBE}}" > "$TMPD/direct.ll" 2>"$TMPD/d.err"; then
-    echo "tco-diff: direct emit failed for {{PROBE}}" >&2; cat "$TMPD/d.err" >&2; exit 1
-  fi
-  if ! "$BIN" --use-ir-codegen "{{stdlib_root}}" "{{PROBE}}" > "$TMPD/typed.ll"  2>"$TMPD/t.err"; then
-    echo "tco-diff: typed emit failed for {{PROBE}}" >&2; cat "$TMPD/t.err" >&2; exit 1
-  fi
-  d=$(grep -cE '^tco_loop' "$TMPD/direct.ll" || true)
-  t=$(grep -cE '^tco_loop' "$TMPD/typed.ll"  || true)
-  echo "tco-diff {{PROBE}}: direct=$d typed=$t"
-  if [ "$t" -lt "$d" ]; then
-    echo "tco-diff: REGRESSION — typed codegen dropped $((d - t)) TCO loop(s)." >&2
-    echo "  Self-tail-recursive functions will overflow the stack at scale; see flip blocker #2 (lexer.tokenize_from)." >&2
-    exit 1
-  fi
-  echo "==> tco-diff ✓ (typed >= direct TCO loops)"
-
-# TCO runtime regression: a deep tail-recursive program must run to completion
-# under typed codegen (--use-ir-codegen), not just direct codegen. The fixture
+# TCO runtime regression (CI gate): a deep tail-recursive program must run to
+# completion under typed codegen (--use-ir-codegen, now the default). The fixture
 # carries a heap param rooted across the recursive call, so a non-TCO'd typed
 # build either exhausts the GC root pool or overflows the stack (the failure
-# WITHOUT a per-iteration root reset on the back-edge). Direct codegen already
-# TCOs it. RED until typed-codegen TCO lands (blocker #2); GREEN after.
+# WITHOUT a per-iteration root reset on the back-edge). Guards against a TCO
+# regression in the self-tail-recursion lowering.
+[group('smoke')]
 tco-runtime-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -uo pipefail
@@ -1059,75 +975,13 @@ tco-runtime-smoke: bootstrap-from-seed
   fi
   echo "==> tco-runtime-smoke ✓ (deep tail recursion completes under typed codegen)"
 
-# Flip-readiness dry-run: the real gate for making typed codegen the default.
-# Parity (ir_runtime_parity.sh) is necessary but NOT sufficient — it runs only
-# small corpus files with no argv. The compiler self-compiling exercises argv,
-# deep recursion, and the whole language at once, which is where both flip
-# blockers surfaced. This drives the canonical sequence: typed self-compile the
-# compiler -> verify -> link -> have THAT binary self-compile to a fixed point.
-# RED until BOTH the argv fix (#95) is in the seed AND blocker #2 (typed codegen
-# does no TCO) is fixed: without #95 the typed-built compiler sees empty argv and
-# prints usage; with #95 it then stack-overflows self-compiling. The new
-# stack-overflow panic names the culprit when it fails. Make this a hard CI gate
-# once it goes green.
-flip-readiness: bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -uo pipefail
-  TMPD=$(mktemp -d /tmp/sprout_flip_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
-  BIN="{{build_dir}}/compile_driver_bin_stage1"
-  COMPILER=stdlib/compiler/compile_driver.sprout
-  echo "== [1/4] typed self-compile of the compiler =="
-  if ! "$BIN" --use-ir-codegen "{{stdlib_root}}" "$COMPILER" > "$TMPD/typed_self.ll" 2>"$TMPD/emit.err"; then
-    echo "flip-readiness: FAIL [1/4] typed self-compile emit failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
-  fi
-  echo "   ok ($(wc -c <"$TMPD/typed_self.ll" | tr -d ' ') bytes)"
-  echo "== [2/4] opt --passes=verify =="
-  if ! opt --passes=verify "$TMPD/typed_self.ll" -o /dev/null 2>"$TMPD/verify.err"; then
-    echo "flip-readiness: FAIL [2/4] typed IR failed verify" >&2; cat "$TMPD/verify.err" >&2; exit 1
-  fi
-  echo "   ok"
-  echo "== [3/4] link typed-built compiler =="
-  if ! clang "$TMPD/typed_self.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/stage2_typed" 2>"$TMPD/link.err"; then
-    echo "flip-readiness: FAIL [3/4] link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
-  fi
-  echo "   ok"
-  echo "== [4/4] FIXED POINT — typed-built compiler self-compiles the compiler =="
-  set +e
-  "$TMPD/stage2_typed" --emit-ir "{{stdlib_root}}" "$COMPILER" > "$TMPD/fp.ll" 2>"$TMPD/fp.err"
-  ec=$?
-  set -e 2>/dev/null || true
-  fpsize=$(wc -c <"$TMPD/fp.ll" | tr -d ' ')
-  # The output must be REAL IR, not a usage/error message: a non-empty exit-0
-  # stdout is not enough (the argv blocker prints a ~240-byte usage string with
-  # exit 0). Require it to verify as LLVM IR, define functions, and be large.
-  real_ir=1
-  [ "$ec" -ne 0 ] && real_ir=0
-  [ "$fpsize" -lt 100000 ] && real_ir=0
-  grep -q '^define ' "$TMPD/fp.ll" || real_ir=0
-  opt --passes=verify "$TMPD/fp.ll" -o /dev/null 2>/dev/null || real_ir=0
-  if [ "$real_ir" -ne 1 ]; then
-    echo "flip-readiness: FAIL [4/4] typed-built compiler did not self-compile to real IR (exit $ec, $fpsize bytes)" >&2
-    if grep -q '^ERROR: usage' "$TMPD/fp.ll"; then
-      echo "  -> typed-built compiler printed USAGE: empty argv (blocker #1, needs the #95 argv fix in the seed)." >&2
-    fi
-    echo "--- its stderr (the stack-overflow panic, if any, names the culprit) ---" >&2
-    head -c 1200 "$TMPD/fp.err" >&2 || true
-    echo "" >&2
-    echo "--- its stdout head ---" >&2
-    head -c 400 "$TMPD/fp.ll" >&2 || true
-    echo "" >&2
-    echo "This is the flip gate. NOT ready until this step emits verifiable IR." >&2
-    exit 1
-  fi
-  echo "   ok ($fpsize bytes, verifies) — FLIP READY ✓"
-
 # GC-stress pass (P11-2e lessons): run a curated set of rooting-exercising
 # typed-codegen tests under SPROUT_GC_STRESS=1 (collect on EVERY allocation).
 # The default-threshold suite hides use-after-free rooting bugs as false greens;
 # stress collapses the timing window and fails loudly.  This is the durable
 # guard for the whole typed-codegen rooting class.  See project_gc_stress_oracle.
 # Grow STRESS_FILES as typed-codegen coverage warrants.
+[group('test')]
 test-stress: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -1186,6 +1040,7 @@ test-stress: bootstrap-from-seed
 # that RECEIVES the suspected victim as its first argument — find it from the
 # crash's abort backtrace first (e.g. the match-dispatch fn that reads the
 # corrupted scrutinee), NOT the arg-less sprout_abort_match.  See scripts/gc_free_trace.py.
+[group('dev')]
 gc-trace file watch_fn: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
@@ -1209,7 +1064,7 @@ gc-trace file watch_fn: bootstrap-from-seed
 # Catches what `opt --passes=verify` cannot: structural drift between codegen
 # paths where each side is internally consistent but the two disagree.  This
 # is the silent-runtime-crash class — exactly what CPR ABI bugs look like.
-[group('ir-codegen')]
+[group('smoke')]
 cpr-differential-check: bootstrap-from-seed
   bash scripts/cpr_differential_check.sh
 
@@ -1217,12 +1072,9 @@ cpr-differential-check: bootstrap-from-seed
 
 # Build sproutd — combined REPL + analysis service binary (self-configuring).
 [group('build')]
-build-sproutd:
+build-sproutd: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  if [[ ! -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    echo "ERROR: compile_driver_bin_stage1 not found; run: just bootstrap-from-seed" >&2; exit 1
-  fi
   TMP_LL="/tmp/sprout_sproutd_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Emitting LLVM IR for sproutd..."
@@ -1234,39 +1086,6 @@ build-sproutd:
   clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/sproutd"
   echo "==> Built {{build_dir}}/sproutd"
 
-# ── Analysis Service ──────────────────────────────────────────────────────────
-
-# Build the analysis service binary. Prefers stage-2; falls back to stage-1.
-[group('service')]
-build-analysis-service:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ -x "{{build_dir}}/compile_driver_bin_stage2" ]]; then
-    STAGE="{{build_dir}}/compile_driver_bin_stage2"
-  elif [[ -x "{{build_dir}}/compile_driver_bin_stage1" ]]; then
-    STAGE="{{build_dir}}/compile_driver_bin_stage1"
-  else
-    echo "ERROR: neither compile_driver_bin_stage2 nor compile_driver_bin_stage1 found" >&2; exit 1
-  fi
-  echo "==> Using compiler: $STAGE"
-  TMP_LL="/tmp/sprout_analysis_service_$$.ll"
-  trap 'rm -f "$TMP_LL"' EXIT
-  echo "==> Emitting LLVM IR for analysis service..."
-  "$STAGE" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/analysis_service_main.sprout" > "$TMP_LL"
-  echo "==> Validating IR..."
-  opt --passes=verify "$TMP_LL" -o /dev/null
-  echo "==> Linking with clang..."
-  mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/analysis_service_bin"
-  echo "==> Built {{build_dir}}/analysis_service_bin"
-
-# Run the analysis service in foreground (reads JSON from stdin, writes to stdout).
-# Example: echo '{"op":"declared_names_in_source","module_source":"fn foo() -> Int = 1"}' | just run-analysis-service
-[group('service')]
-run-analysis-service:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ ! -x "{{build_dir}}/analysis_service_bin" ]]; then
-    echo "ERROR: analysis_service_bin not found; run: just build-analysis-service" >&2; exit 1
-  fi
-  exec "{{build_dir}}/analysis_service_bin" "{{stdlib_root}}"
+# The standalone analysis-service binary is retired: sproutd subsumes it.
+# `sproutd --analysis-service <stdlib_root>` runs the identical
+# analysis_service_driver.run_service entry (see stdlib/compiler/sproutd_driver.sprout).
