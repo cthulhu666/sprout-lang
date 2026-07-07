@@ -1,0 +1,10 @@
+module main
+
+# A refutable pattern in a `let … in` block without an `else` desugars to a
+# single-arm match, which W5 rejects as non-exhaustive (Nil is uncovered).
+fn bad(xs: List Int) -> Int =
+  let Cons h _ = xs
+  in h
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(bad(Nil)))

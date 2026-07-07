@@ -1,0 +1,48 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# `let … in` block: layout-aligned bindings under one `let`, `in` dedented to the
+# `let` column. Each binding `<pat> = <e>` (irrefutable) or `<pat> = <e> else <fb>`
+# (refutable). Sequential; a refute short-circuits the whole block to that else.
+
+# Single refutable binding over a bare ADT (List).
+fn first_or(xs: List Int, dflt: Int) -> Int =
+  let Cons h _ = xs else dflt
+  in h
+
+# Two chained bindings, each with its own distinct sentinel.
+fn second(xs: List Int) -> Int =
+  let Cons _ rest = xs else -1
+      Cons y _ = rest else -2
+  in y
+
+# Refutable binding over a Result (refutability comes from the pattern).
+fn ok_or(r: Result String Int, dflt: Int) -> Int =
+  let Ok v = r else dflt
+  in v
+
+# Irrefutable bindings, no else (the plain `where`-complement use); sequential.
+fn plain(n: Int) -> Int =
+  let x = n + 1
+      y = x * 2
+  in y
+
+# Mixed block: an irrefutable binding then a refutable one whose else refers to it.
+fn mixed(mx: Maybe Int) -> Int =
+  let base = 10
+      Just v = mx else base
+  in base + v
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "single refutable: match", first_or(Cons(7, Nil), 0), 7)
+    assert_eq(state, "single refutable: else", first_or(Nil, 99), 99)
+    assert_eq(state, "two bindings: second element", second(Cons(1, Cons(2, Nil))), 2)
+    assert_eq(state, "two bindings: first sentinel", second(Nil), -1)
+    assert_eq(state, "two bindings: second sentinel", second(Cons(1, Nil)), -2)
+    assert_eq(state, "Result: Ok binds value", ok_or(Ok(5), 0), 5)
+    assert_eq(state, "Result: Err takes else", ok_or(Err("nope"), 42), 42)
+    assert_eq(state, "irrefutable block, no else", plain(3), 8)
+    assert_eq(state, "mixed block: Just", mixed(Just(5)), 15)
+    assert_eq(state, "mixed block: Nothing short-circuits to else", mixed(Nothing), 10)
+    summary(state)

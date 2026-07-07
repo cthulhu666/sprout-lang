@@ -110,13 +110,6 @@ The following are planned features not yet implemented. Each has a standard work
 if is_valid(x) then false else true
 ```
 
-**`let x = e in body` in pure functions**
-`let` bindings work only inside `do` (effectful) blocks. In pure functions, use `where`:
-```sprout
-# instead of: let trimmed = string.trim(s) in string.length(trimmed)
-string.length(trimmed) where trimmed = string.trim(s)
-```
-
 **Effectful list iteration (`list_each`, `list_for_each`)**
 No built-in IO-effectful list traversal exists yet. Write a tail-recursive helper:
 ```sprout

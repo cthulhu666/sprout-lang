@@ -43,6 +43,7 @@ fn is_keyword(raw: String) -> Bool =
   raw == "if" ||
   raw == "then" ||
   raw == "else" ||
+  raw == "in" ||
   raw == "true" ||
   raw == "false" ||
   raw == "extern" ||

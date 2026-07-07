@@ -503,12 +503,78 @@ fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
       Ok((ast.DoExpr(steps, tok_pos(do_tok)), i3))
 
 # ---------------------------------------------------------------------------
+# `let … in` binding block (pure expression position)
+#
+#   let <pat> = <rhs> [else <fb>]      -- one or more, layout-aligned
+#       <pat> = <rhs> [else <fb>]
+#   in  <body>                         -- `in` dedented to the `let` column
+#
+# Bindings are sequential (each in scope for later bindings + body). Each
+# desugars right-over the body to a match; `in` closes the block. No new AST
+# node — the refutability rules enforce themselves through W5:
+#   pat = e else fb  →  match e with | pat -> <rest> | _ -> fb   (always exhaustive)
+#   pat = e          →  match e with | pat -> <rest>             (single arm)
+# so a refutable pattern without `else` is a non-exhaustive match (error), and an
+# `else` on an irrefutable pattern makes the wildcard arm unreachable (error).
+
+fn build_let_binding_match(pat: ast.Pattern, rhs: ast.Expr, fb: Maybe ast.Expr, rest: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match fb with
+  | Just fbe ->
+      ast.MatchExpr(rhs,
+        Cons(ast.MatchBranch(pat, rest),
+          Cons(ast.MatchBranch(ast.WildcardPattern(pos), fbe), Nil)),
+        pos)
+  | Nothing ->
+      ast.MatchExpr(rhs, Cons(ast.MatchBranch(pat, rest), Nil), pos)
+
+# Parses one binding `<pat> = <rhs> [else <fb>]` from its exact token slice.
+fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((ast.Pattern, ast.Expr, Maybe ast.Expr), Int) =
+  do
+    (pat, b) <- parse_pattern(step_tokens, 0)
+    (_, c) <- expected_symbol("=", step_tokens, b)
+    (rhs, d) <- parse_expr(step_tokens, c)
+    if tok_is_keyword(tok_at(step_tokens, d), "else") then
+      do
+        (_, e) <- expected_keyword("else", step_tokens, d)
+        (fb, _) <- parse_expr(step_tokens, e)
+        Ok(((pat, rhs, Just(fb)), 0))
+    else
+      Ok(((pat, rhs, Nothing), 0))
+
+# Parses one binding (given its layout-scanned slice end), recurses for the rest.
+fn parse_let_binding_step(tokens: Vec token.Token, i: Int, block_col: Int, binding_end: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (binding, _) <- parse_let_binding_sub(vec_slice(i, binding_end - i, tokens))
+    (rest, k) <- parse_let_block(tokens, binding_end, block_col)
+    match binding with
+    | (pat, rhs, fb) -> Ok((build_let_binding_match(pat, rhs, fb, rest, cur_pos(tokens, i)), k))
+
+# Collects bindings at block_col until `in`, then parses the body.
+fn parse_let_block(tokens: Vec token.Token, i: Int, block_col: Int) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "in") then
+    do
+      (_, j) <- expected_keyword("in", tokens, i)
+      parse_expr(tokens, j)
+  else
+    parse_let_binding_step(tokens, i, block_col,
+      scan_do_step_end(tokens, i, i, source.position_line(tok_pos(tok_at(tokens, i))), 0, block_col))
+
+fn parse_let_else_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, a) <- expected_keyword("let", tokens, i)
+    if tok_is_keyword(tok_at(tokens, a), "in") then
+      Err(ParseError("let requires at least one binding before in", cur_pos(tokens, a)))
+    else
+      parse_let_block(tokens, a, source.position_column(tok_pos(tok_at(tokens, a))))
+
+# ---------------------------------------------------------------------------
 # Expression parsing
 
 export fn parse_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   if tok_is_keyword(tok_at(tokens, i), "do") then parse_do_expr(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "if") then parse_if_expr(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "match") then parse_match_expr(tokens, i)
+  else if tok_is_keyword(tok_at(tokens, i), "let") then parse_let_else_expr(tokens, i)
   else parse_pipe(tokens, i)
 
 fn parse_if_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =

@@ -136,6 +136,53 @@ let answer = 42
 Bindings are immutable.
 At top level, `let` initializers must be pure.
 
+### 5.2.1 `let … in` binding block
+
+In pure expression position, a `let … in` block introduces one or more local
+bindings before a body expression. Bindings are layout-aligned under `let`; `in`,
+dedented to the `let` column, closes the block:
+
+```sprout
+fn first_or(xs: List Int, dflt: Int) -> Int =
+  let Cons h _ = xs else dflt
+  in h
+```
+
+Each binding is `<pattern> = <expr>` or `<pattern> = <expr> else <expr>`.
+Bindings are **sequential**: each is in scope for later bindings and the body
+(a binding's own right-hand side sees the *previous* meaning of any name it
+rebinds). A binding
+
+```
+<pat> = <e> else <fb>
+```
+
+with continuation `<rest>` (the remaining bindings and body) is exactly
+`match <e> with | <pat> -> <rest> | _ -> <fb>`; a binding without `else` is
+`match <e> with | <pat> -> <rest>`. Thus a non-matching refutable pattern
+short-circuits the whole block to that binding's `else` value.
+
+Rules:
+
+- The right-hand side has **any** type — refutability is a property of the
+  pattern versus its type, so `Result`/`Maybe` and bare-ADT bindings compose
+  uniformly; no wrapper is required. It must be **pure** (an effectful RHS is an
+  error; use `do`).
+- A **refutable** pattern **requires** an `else`; a refutable pattern without one
+  is a non-exhaustive match (error). An `else` on an **irrefutable** pattern is
+  an error (its wildcard arm is unreachable). An irrefutable pattern without an
+  `else` is an ordinary local binding.
+- Each `else` supplies its own value, so distinct bindings may fail to distinct
+  results. `else` does not bind the refuted value (a residual-binding form and
+  monadic propagation are planned — see
+  `docs/let-else-and-monadic-binding-plan.md`).
+- Every `else` and the body must unify to the block's result type. At least one
+  binding is required.
+- `let … in` is an ordinary expression (usable anywhere), and **complements**
+  `where`: a function may use both, with `where` as the outer scope (its bindings
+  are visible in a `let … in` RHS/body; `let … in` bindings are not visible in
+  `where`).
+
 ### 5.3 Lambda expression
 
 ```sprout

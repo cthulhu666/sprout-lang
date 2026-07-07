@@ -1,0 +1,10 @@
+module main
+
+# An `else` on an irrefutable pattern (a plain variable) makes the wildcard arm
+# of the desugared match unreachable; W5 rejects the redundant else.
+fn bad(n: Int) -> Int =
+  let x = n else -1
+  in x
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(bad(5)))
