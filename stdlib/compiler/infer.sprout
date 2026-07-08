@@ -3712,9 +3712,14 @@ fn find_inst_in_return_type(class_name: String, t: types.Type, env: Dict types.S
 fn find_inst_in_return_type_children(class_name: String, t: types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match t with
   | types.TApp base arg ->
+      # Recurse into BOTH children: a multi-parameter application like
+      # `Pair e a` = `TApp (TApp Pair e) a` carries the inner type argument
+      # `e` in `base`, so scanning only `arg` misses an instance needed on an
+      # inner type parameter (return-type dispatch would then fall back to
+      # @fwd and fail late — see test_constrained_fn_return_type_nested_tapp).
       match find_inst_in_return_type(class_name, arg, env, pos) with
       | Just d -> Just(d)
-      | Nothing -> Nothing
+      | Nothing -> find_inst_in_return_type(class_name, base, env, pos)
   | types.TTuple items -> find_inst_in_return_type_list(class_name, items, env, pos)
   | _ -> Nothing
 

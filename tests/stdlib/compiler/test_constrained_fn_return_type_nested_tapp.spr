@@ -1,0 +1,49 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# Regression test for find_inst_in_return_type_children (infer.sprout).
+#
+# `Pair e a` is represented as `TApp (TApp (TConst "Pair") e) a`. The TApp
+# arm of find_inst_in_return_type_children recurses only into the outermost
+# type argument `a`, never into `base` (which holds `e`). A constrained
+# function whose class variable is instantiated in the INNER type-application
+# position of a multi-parameter return type therefore fails to have its
+# dictionary resolved by the return-type-dispatch post-pass
+# (find_inst_in_return_type).
+#
+# This test pins the class variable `e` in the inner slot of `Pair e Bool`
+# (the outer slot `Bool` deliberately has no `Deser` instance, so the
+# arg-only recursion cannot find a dict by accident) and dispatches by the
+# fully concrete return type at the call site, with no argument to carry the
+# instance. `deser` is total so `make_pair`'s body stays genuinely
+# polymorphic in `e` (no Int-forcing fallback -> passes rigidity).
+
+type Pair e a =
+  | MkPair e a
+
+class Deser c {
+  fn deser(s: String) -> c
+}
+
+instance Deser Int {
+  fn deser(s: String) -> Int = 7
+}
+
+# `where Deser e` constrains the INNER type parameter of the `Pair e Bool`
+# return type. No argument carries `e`, so the dict must be resolved by
+# scanning the concrete return type at the call site.
+fn make_pair(s: String) -> Pair e Bool where Deser e =
+  MkPair(deser(s), true)
+
+fn inner_is_seven(p: Pair Int Bool) -> Bool =
+  match p with
+  | MkPair v _ -> v == 7
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(
+      state,
+      "dict resolved for inner type-app slot of multi-param return type",
+      inner_is_seven(make_pair("x"))
+    )
+    summary(state)

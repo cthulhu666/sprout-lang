@@ -584,9 +584,12 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
   for generated names in `ast_to_ir`/`ir_lowering`. Regression:
   `tests/stdlib/compiler/test_fresh_tvar_collision.spr`.
 - **T10 — `find_inst_in_return_type_children` recurses only into the TApp argument,
-  never the base:** `infer.sprout:3218-3223` — multi-param TApp chains (`Result e a`
-  needing an instance on `e`) miss the concrete dict and fall back to @fwd; worst case a
-  late missing-dict failure (not wrong-dict). Fix: recurse both sides.
+  never the base:** [DONE 2026-07-08] multi-param TApp chains (`Pair e Bool` needing an
+  instance on the inner `e`) missed the concrete dict and fell back to @fwd. Confirmed
+  triggerable, not merely latent: with no enclosing constraint to forward from, the dict
+  resolved to an unresolved sentinel and the program crashed at runtime with
+  `non-exhaustive match`. **Fix:** on the `Nothing` branch, also recurse into `base`.
+  Regression: `tests/stdlib/compiler/test_constrained_fn_return_type_nested_tapp.spr`.
 - **T11 — `check_overlapping_instances` scans only the current program's decls**
   (`infer.sprout:2802`) — sound under today's whole-program bundling; breaks silently if
   a non-bundled path ever lands (`register_instance_marker` is a plain `dict_set`
