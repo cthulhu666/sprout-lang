@@ -574,11 +574,15 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
   stripping was needed (bundler dot-prefix legacy?) before changing; self-compile oracle
   mandatory.
 - **T8 — pattern variables share the substitution namespace with fresh tyvars:**
-  `infer.sprout:2050` keys the subst by source identifier; fresh vars are `"t"++N`
-  (`unifier.sprout:29`) — a user binding `t0`/`t1` can clobber a live fresh binding
-  (realistic in importless files where the counter starts low). Fix: distinct namespace
-  for fresh vars (illegal-in-surface prefix) or apply the existing
-  `FreshTVarName` wrap discipline at this boundary.
+  [DONE 2026-07-08] `infer.sprout` keys the subst by source identifier; fresh vars were
+  `"t"++N`/`"e"++N` (`unifier.sprout`) — `is_lowercase_name` only checks the first char, so
+  a user tyvar spelled `t1` is accepted as a scheme var, and `apply_full_subst`'s transitive
+  lookup then chases a minted value name (`t1`) through a live user key of the same spelling,
+  silently fusing two independent tyvars (realistic in importless files where the counter
+  starts low). **Fix:** prefix fresh names with `$` (illegal at identifier start per
+  `is_ident_start`), making collision structurally impossible — the convention already used
+  for generated names in `ast_to_ir`/`ir_lowering`. Regression:
+  `tests/stdlib/compiler/test_fresh_tvar_collision.spr`.
 - **T10 — `find_inst_in_return_type_children` recurses only into the TApp argument,
   never the base:** `infer.sprout:3218-3223` — multi-param TApp chains (`Result e a`
   needing an instance on `e`) miss the concrete dict and fall back to @fwd; worst case a

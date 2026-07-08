@@ -20,13 +20,20 @@ export fn new_state() -> InferState !{IO} =
     ctor_ref <- ref_new(dict_empty())
     InferState(t_id, e_id, ctor_ref)
 
+# "$" cannot open a Sprout identifier (string.is_ident_start admits only
+# ASCII alpha or '_'; see stdlib/string.sprout), so a "$"-prefixed name can
+# never collide with a user-written identifier — same convention already
+# used for IR-level generated names in ast_to_ir.sprout/ir_lowering.sprout.
+# Without this prefix, a user type variable spelled like a fresh name (e.g.
+# "t1") could alias a live compiler-internal metavariable of the same name
+# and silently corrupt unification (see tests/stdlib/compiler/test_fresh_tvar_collision.spr).
 export fn fresh(state: InferState) -> String !{IO} =
   match state with
   | InferState t_ref _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)
-        "t" ++ int_to_string(n)
+        "$t" ++ int_to_string(n)
 
 export fn fresh_effect(state: InferState) -> String !{IO} =
   match state with
@@ -34,7 +41,7 @@ export fn fresh_effect(state: InferState) -> String !{IO} =
       do
         n <- ref_read(e_ref)
         ref_write(e_ref, n + 1)
-        "e" ++ int_to_string(n)
+        "$e" ++ int_to_string(n)
 
 export fn set_ctor_map(state: InferState, ctor_map: Dict (List String)) -> Unit !{IO} =
   match state with

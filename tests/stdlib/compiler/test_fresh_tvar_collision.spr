@@ -1,0 +1,77 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.source as source
+
+# Regression test for a fresh-type-variable / user-identifier namespace
+# collision.
+#
+# `unifier.fresh` mints compiler-internal type variables named "t0", "t1",
+# ... from a per-InferState counter starting at 0. Nothing prevents a user
+# from writing a type-variable name in a signature that has the same shape
+# ("t1", "t0", ...) — `infer.is_lowercase_name` only inspects the first
+# character of a TypeName, so a multi-character name like "t1" is (wrongly)
+# accepted as a scheme-quantified type variable, same as "a" or "b".
+#
+# When such a scheme is instantiated, `unifier.build_type_repl` builds one
+# Dict keyed by the RAW user-written var names, with freshly-minted names as
+# values (e.g. {"t1" -> TVar("t0"), "a" -> TVar("t1")} for a two-var scheme
+# instantiated at counter 0). `apply_full_subst`'s lookup is transitive: it
+# recurses into the looked-up value. If a freshly-minted value name happens
+# to equal another RAW key still present in the same dict, the walk chases
+# through that key too, silently fusing two type variables the user declared
+# as independent.
+#
+# Below, `foo(x: t1, y: a) -> a` is the FIRST declaration checked in an
+# importless program, so its instantiation starts at counter 0:
+#   build_type_repl(["t1", "a"]):
+#     "t1" -> fresh() = "t0"   (counter 0 -> 1)
+#     "a"  -> fresh() = "t1"   (counter 1 -> 2)
+#   type_repl = {"t1" -> TVar("t0"), "a" -> TVar("t1")}
+# Resolving TVar("a") looks up "a" -> TVar("t1"), then transitively looks up
+# "t1" (a live key!) -> TVar("t0"). So both `x`'s declared type ("t1") and
+# `y`/the return type ("a") resolve to the SAME TVar("t0") — foo's
+# instantiated type collapses from `t1 -> a -> a` to `t0 -> t0 -> t0`.
+#
+# Calling `foo(true, 5)` should typecheck (t1 = Bool, a = Int, independent),
+# but under the bug the collapsed single type variable is unified with both
+# Bool and Int, producing a spurious "Bool vs Int" type error.
+
+fn run_check(src: String) -> checker.CheckResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "parse error")
+      | Ok prog -> checker.check_program(prog)
+
+fn is_check_ok(r: checker.CheckResult) -> Bool =
+  match r with
+  | checker.CheckOk _ -> true
+  | checker.CheckErr _ _ -> false
+
+fn check_err_msg(r: checker.CheckResult) -> String =
+  match r with
+  | checker.CheckErr _ msg -> msg
+  | checker.CheckOk _ -> ""
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # First declaration in an importless program: fresh-var counter starts
+    # at 0, so this instantiation hits the t1/t0 collision described above.
+    r1 <- run_check("fn foo(x: t1, y: a) -> a = y\nfn use_foo() -> Int = foo(true, 5)")
+    assert_true(
+      state,
+      "user type var literally named 't1' does not collide with compiler fresh vars",
+      is_check_ok(r1)
+    )
+    assert_true(
+      state,
+      "no spurious Bool/Int mismatch leaks from the collision",
+      str_find(check_err_msg(r1), "Bool vs Int") == -1
+    )
+
+    summary(state)
