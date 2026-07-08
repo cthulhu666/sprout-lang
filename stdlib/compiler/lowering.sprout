@@ -976,19 +976,26 @@ fn resolve_eta_substituted_inner_dict(c: ast.TypeConstraint, pos: source.SourceP
       | [ast.TypeName name] ->
           match resolve_eta_fwd_type_name_dict(class_name, name, pos, ctx) with
           | Just dicts -> dicts
-          | Nothing -> resolve_tdict(c, pos, ctx)
-      | _ -> resolve_tdict(c, pos, ctx)
+          | Nothing -> eta_inner_dict_unreachable(class_name, pos)
+      | _ -> eta_inner_dict_unreachable(class_name, pos)
+
+# M3b-5: the deleted resolve_tdict once resolved eta inner-context dicts at these
+# sites.  The Evidence-consuming eta path (eta_from_evidence) covers every inner
+# dict exercised by valid programs — census-verified: these sites never fire across
+# the whole corpus + compiler self-compile.  Reaching one signals a resolve/lowering
+# disagreement, so fail loudly rather than emit a wrong witness (the located-panic
+# discipline the dict-resolution north star mandates for a consumption miss).
+fn eta_inner_dict_unreachable(class_name: String, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  panic("lowering: eta inner-dict resolution for '" ++ class_name ++ "' at " ++ pos_loc(pos) ++
+        " reached the deleted resolve_tdict path — Evidence should cover this (M3b-5)")
 
 fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: source.SourcePos, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
   match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ string.after_last_dot(class_name), ctx_scheme_env(ctx)) with
   | Nothing -> Nothing
   | Just prog_scheme ->
       match types.scheme_type(prog_scheme) with
-      | types.TConst prog_var ->
-          Just(resolve_tdict(
-            ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
-            pos,
-            ctx))
+      | types.TConst _ ->
+          Just(eta_inner_dict_unreachable(class_name, pos))
       | _ -> Nothing
 
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
@@ -1206,81 +1213,14 @@ fn expand_dict_witness_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> Li
       list_append(evidence_to_witness(ev, c, pos, ctx), expand_dict_witness_args(rest, ctx))
   | Cons _ rest -> expand_dict_witness_args(rest, ctx)
 
-# resolve_tdict: expand one TDict witness into a list of TypedExprs, one per
-# class method.  Resolution order:
-#   1. Forwarded hidden param (fwd_methods in ctx — polymorphic call site)
-#   2. Concrete instance fn  (inst_table in ctx — concrete call site)
-#   3. Fallback: TVar with unresolved name (should not happen in well-typed programs)
-fn resolve_tdict(
-  c: ast.TypeConstraint,
-  pos: source.SourcePos,
-  ctx: LowerCtx
-) -> List typed_ast.TypedExpr =
-  match c with
-  | ast.TypeConstraint class_name type_args ->
-      resolve_tdict_for_classes(
-        class_with_transitive_supers(class_name, ctx_super_map(ctx)),
-        type_args, pos, ctx)
-
-# Iterate over [Class, super1, super2, ...] (transitive) and concatenate the
-# witness exprs each effective class needs. This must mirror the order in which
-# build_hidden_for_constraints (and class wrappers) lay out hidden params, so
-# the call site's witness list lines up with the callee's hidden param list.
-fn resolve_tdict_for_classes(
-  classes: List String,
-  type_args: List ast.TypeExpr,
-  pos: source.SourcePos,
-  ctx: LowerCtx
-) -> List typed_ast.TypedExpr =
-  match classes with
-  | Nil -> Nil
-  | Cons eff_class rest ->
-      list_append(
-        resolve_tdict_with_key(
-          constraint_key_str(string.after_last_dot(eff_class), type_args),
-          eff_class, type_args, pos, ctx),
-        resolve_tdict_for_classes(rest, type_args, pos, ctx))
-
-fn resolve_tdict_with_key(
-  key: String,
-  class_name: String,
-  type_args: List ast.TypeExpr,
-  pos: source.SourcePos,
-  ctx: LowerCtx
-) -> List typed_ast.TypedExpr =
-  match dict_get(key, ctx_fwd(ctx)) with
-  | Just method_map ->
-      list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)),
-               class_methods_for(class_name, ctx_class_order(ctx)))
-  | Nothing ->
-      match dict_get(key, ctx_inst(ctx)) with
-      | Just method_map ->
-          resolve_tdict_for_inst(key, type_args, pos, ctx, method_map,
-                                 class_methods_for(class_name, ctx_class_order(ctx)))
-      | Nothing ->
-          list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar("?gen"), pos),
-                   class_methods_for(class_name, ctx_class_order(ctx)))
-
-# Resolve a concrete instance's dict, checking inst_meta for lambda-wrapping of
-# constrained instances (e.g. instance Eq (Maybe a) where Eq a).
-fn resolve_tdict_for_inst(
-  key: String,
-  type_args: List ast.TypeExpr,
-  pos: source.SourcePos,
-  ctx: LowerCtx,
-  method_map: Dict String,
-  methods: List String
-) -> List typed_ast.TypedExpr =
-  match dict_get(key, ctx_inst_meta(ctx)) with
-  | Nothing ->
-      list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)), methods)
-  | Just (inst_type_args, inst_constraints, method_arities) ->
-      resolve_tdict_apply_inner_dicts(key, pos, method_map, methods, method_arities,
-        resolve_inner_constraint_dicts(
-          inst_constraints,
-          unify_type_args_list(inst_type_args, type_args, dict_empty()),
-          pos, ctx),
-        ctx_scheme_env(ctx))
+# M3b-5: resolve_tdict and its decision family (resolve_tdict_for_classes /
+# _with_key / _for_inst, resolve_inner_constraint_dicts) are DELETED — the resolve
+# pass now makes every dictionary-resolution decision and lowering only consumes
+# its Evidence (evidence_to_witness on the call path, eta_from_evidence on the
+# value-position path).  The witness-BUILDING helpers below
+# (resolve_tdict_apply_inner_dicts / resolve_method_with_lambda / resolve_method_var)
+# are retained: the Evidence consumer (consume_block) reuses them so the emitted
+# witnesses stay byte-identical to the old path.
 
 # Apply resolved inner dicts to instance methods: bare refs if Nil, lambda-wrapped otherwise.
 fn resolve_tdict_apply_inner_dicts(
@@ -1343,7 +1283,42 @@ fn evidence_to_witness(
   ctx: LowerCtx
 ) -> List typed_ast.TypedExpr =
   if evidence_fully_resolved(ev) then consume_evidence(ev, pos, ctx)
-  else resolve_tdict(c, pos, ctx)
+  else match c with
+    | ast.TypeConstraint class_name type_args ->
+        evidence_unresolved_witnesses(class_name, type_args, pos, ctx)
+
+# EvUnresolved/EvMissing at call position: resolve found no BUNDLED instance and
+# the constraint is not forwarded (a forwarded one is EvForward, already fully
+# resolved), so both ctx_fwd and ctx_inst necessarily miss.  Emit the identical
+# __unresolved_ null-fill sentinel the deleted resolve_tdict produced on its
+# double-miss path (one per method across the super-expanded class chain).
+# ast_to_ir hard-errors on this sentinel; the `++`/append IR-codegen special-case
+# peels the dict arg before codegen, so an unresolvable Semigroup ++ stays valid.
+fn evidence_unresolved_witnesses(
+  class_name: String,
+  type_args: List ast.TypeExpr,
+  pos: source.SourcePos,
+  ctx: LowerCtx
+) -> List typed_ast.TypedExpr =
+  unresolved_witnesses_for_classes(
+    class_with_transitive_supers(class_name, ctx_super_map(ctx)), type_args, pos, ctx)
+
+fn unresolved_witnesses_for_classes(
+  classes: List String,
+  type_args: List ast.TypeExpr,
+  pos: source.SourcePos,
+  ctx: LowerCtx
+) -> List typed_ast.TypedExpr =
+  match classes with
+  | Nil -> Nil
+  | Cons eff_class rest ->
+      list_append(
+        list_map(
+          \_ -> typed_ast.TVar(
+            "__unresolved_" ++ constraint_key_str(string.after_last_dot(eff_class), type_args),
+            types.TVar("?gen"), pos),
+          class_methods_for(eff_class, ctx_class_order(ctx))),
+        unresolved_witnesses_for_classes(rest, type_args, pos, ctx))
 
 fn evidence_fully_resolved(ev: typed_ast.Evidence) -> Bool =
   match ev with
@@ -1529,21 +1504,6 @@ fn substitute_constraint(tc: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> ast
   match tc with
   | ast.TypeConstraint class_name type_args ->
       ast.TypeConstraint(class_name, list_map(\te -> substitute_type_expr(te, subs), type_args))
-
-# resolve_inner_constraint_dicts: resolve each inner constraint (after substitution)
-# into a list of typed dict expressions (one per class method).
-fn resolve_inner_constraint_dicts(
-  inst_constraints: List ast.TypeConstraint,
-  subs: Dict ast.TypeExpr,
-  pos: source.SourcePos,
-  ctx: LowerCtx
-) -> List typed_ast.TypedExpr =
-  match inst_constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      list_append(
-        resolve_tdict(substitute_constraint(c, subs), pos, ctx),
-        resolve_inner_constraint_dicts(rest, subs, pos, ctx))
 
 # build_lambda_with_inner_dicts: build a lambda that pre-applies inner dict args.
 # For an instance method fn_name with n_params explicit params and inner_dicts as

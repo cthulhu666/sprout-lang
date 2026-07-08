@@ -415,11 +415,47 @@ NEW(source) across the 181-file corpus (0 diffs). New test:
 `tests/stdlib/test_value_position_reroute.spr` (distinct per-instance strings so a wrong-slot
 dispatch is observable, unlike `box_eq_via_hof`'s unconditional `true`).
 
-**Open for PR-B (deletion).** The eta path still calls `resolve_tdict` for two reasons that PR-B must
-Evidence-ify or excise: (1) inner **context** dicts of an eta instance (`resolve_eta_substituted_inner_dicts`),
-and (2) every `eta_from_evidence` `Nothing` result still falls through to `lower_value_var` →
-`try_eta_in_class`. PR-B also adds the `TFunc` gate on `eta_from_evidence` (prereq 1) and the
-marker-miss test (prereq 2) before removing the fallback.
+**M3b-5 (PR-B) — `resolve_tdict` DELETED. DONE (2026-07-08).**
+`resolve_tdict` + its decision family (`resolve_tdict_for_classes` / `_with_key` / `_for_inst`,
+`resolve_inner_constraint_dicts`) are gone.  The witness-BUILDING helpers
+(`resolve_tdict_apply_inner_dicts` / `resolve_method_with_lambda` / `resolve_method_var`) stay — the
+Evidence consumer (`consume_block`) reuses them so witnesses are unchanged.  Three fallback sites were
+handled: the call-path `evidence_to_witness` `EvUnresolved`/`EvMissing` fallback now emits the
+`__unresolved_` sentinel directly (`evidence_unresolved_witnesses`) — sound because
+`EvUnresolved`/`EvMissing` ⟹ not forwarded (`EvForward` is fully-resolved) ⟹ both `ctx_fwd` and
+`ctx_inst` necessarily miss, so `resolve_tdict` produced that same sentinel; and the two eta
+inner-dict sites became located unreachable-guards (`eta_inner_dict_unreachable`) — census-verified
+they never fire across the corpus + self-compile.
+
+**Verification method correction (important for future M3b work).** The byte-identity harness's active
+`--emit-ir` path *always* resolves, so it compared `consume_evidence` vs `consume_evidence` and NEVER
+exercised `resolve_tdict`.  `resolve_tdict`'s only live consumers were the *non-resolving* paths:
+`test_lowering`'s `run_lower`, and the `--use-direct-codegen` pipeline body
+(`compile_phase_recheck_timed`, live via `cpr_differential_check` / `ir_runtime_parity` / `flip-smoke`).
+Both were pre-M3b relics that skipped the resolve pass and relied on `resolve_tdict` self-resolving;
+both now run `resolve.resolve_program` before `lower_program` (mirroring `compile_phase_check`).
+`compile_full`/`full_driver` is dead (no recipe) and was left untouched.
+
+**Behavior change (verified correct, NOT byte-identical).** For a value-position method inside a
+function that forwards a *parameterized* constraint whose inner dict is ALSO forwarded
+(`where MyEq (Box a), MyEq a`), `resolve` emits `EvForward` for the forwarded outer key, so lowering
+uses the forwarded slot directly (2-arg eta lambda) instead of reconstructing from the concrete
+instance + inner dict (the deleted `resolve_tdict` eta path's 3/4-arg output).  This unifies the eta
+path with the call path (fwd-first) and is the more consistent behavior; the forwarded outer dict is
+already complete.  Runtime-verified via `tests/stdlib/test_forwarded_inner_dict_dispatch.spr`
+(observable inner dispatch: `Box`'s method calls the inner element's method, distinct per-instance
+strings — `box(int)`/`box(bool)` correct on both codegen paths).  `test_lowering`'s 4 structural
+arg-count assertions (p1-constrained, p1b-multi-var/mixed-inner/super-inner) were updated 3/4 → 2.
+
+**Still deferred — the eta→single-authority collapse.** `try_eta_in_class` /
+`try_eta_forwarded_without_class` remain a *second* resolution authority for ONE shape: a **polymorphic
+(type-variable-head) forwarded** value-position method (`apply_any(x, to_string)` inside
+`fn f(x: a) ... where ToString a`).  `resolve` emits `EvUnresolved` there (non-concrete head), so
+lowering resolves it.  Making `resolve` emit `EvForward` instead produces a key
+(`ToString_<generalized-tyvar>`) that misses `ctx_fwd`'s source-name key (`ToString_a`) — blocked on
+**tyvar canonicalization** (see [[project_typevar_identity_generalization_gap]]).  Until then,
+`prereq 1` (`TFunc` gate on `eta_from_evidence`) and `prereq 2` (marker-miss) stay moot: the nullary
+value-position case is still caught by `try_eta_in_class`'s existing `TFunc` gate → clean sentinel.
 
 **M3b-5 prerequisites surfaced by the M3b-4 code review (2026-07-05).** A recall-biased
 multi-angle review found NO current correctness regression (the strongest candidate — a missing

@@ -29,6 +29,12 @@ fn apply_label(f: a -> String, x: a) -> String = f(x)
 fn label_via_hof(x: Wrap a) -> String where Label (Wrap a) =
   apply_label(label, x)
 
+# Same forwarded constraint used in BOTH value position (via HOF) and direct call
+# position within one function — the two lowering paths (eta EvForward reroute and
+# call-path expand_dict_witness_args) must resolve to the same forwarded slot.
+fn label_both_positions(x: Wrap a) -> Bool where Label (Wrap a) =
+  apply_label(label, x) == label(x)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -36,5 +42,10 @@ fn main() -> Unit !{IO} =
       state,
       "forwarded Label (Wrap a) value-position reroute selects the Wrap instance",
       label_via_hof(Wrap(1)) == "wrap"
+    )
+    assert_true(
+      state,
+      "value-position and call-position of a forwarded method agree",
+      label_both_positions(Wrap(1))
     )
     summary(state)

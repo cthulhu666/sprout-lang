@@ -1,0 +1,46 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# M3b-5 runtime guard: a value-position class method inside a function that
+# FORWARDS a parameterized constraint (Tag (Box a)) lowers to the forwarded
+# dict slot directly (2-arg eta lambda) rather than reconstructing the concrete
+# instance + inner dict.  The forwarded Tag (Box a) dict already encapsulates the
+# inner Tag a dict, so dispatch must still reach the correct element instance.
+#
+# Unlike test_lowering's structural arg-count checks (whose instances return a
+# constant and cannot observe dispatch), here Box's `tag` CALLS the inner
+# element's `tag` and each instance yields a DISTINCT string — so a wrong or
+# dropped inner dict changes the output (or crashes) instead of passing silently.
+
+class Tag a {
+  fn tag(x: a) -> String
+}
+
+type Box a = Box a
+
+instance Tag Int {
+  fn tag(x: Int) -> String = "int"
+}
+
+instance Tag Bool {
+  fn tag(x: Bool) -> String = "bool"
+}
+
+instance Tag (Box a) where Tag a {
+  fn tag(b: Box a) -> String =
+    match b with
+    | Box inner -> "box(" ++ tag(inner) ++ ")"
+}
+
+fn apply_tag(f: a -> String, x: a) -> String = f(x)
+
+# Forwards Tag (Box a) AND Tag a; uses `tag` in value position.
+fn tag_via_hof(x: Box a) -> String where Tag (Box a), Tag a =
+  apply_tag(tag, x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # The forwarded Box dict must dispatch to the correct element instance.
+    assert_eq(state, "forwarded Box(Int) reaches inner Int dict", tag_via_hof(Box(42)), "box(int)")
+    assert_eq(state, "forwarded Box(Bool) reaches inner Bool dict", tag_via_hof(Box(true)), "box(bool)")
+    summary(state)

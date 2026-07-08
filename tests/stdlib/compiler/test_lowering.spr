@@ -2,6 +2,7 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, 
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.checker as checker
+import stdlib.compiler.resolve as resolve
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
@@ -17,7 +18,13 @@ fn run_lower(src: String) -> lowering.LowerResult !{IO} =
             tc <- checker.typecheck_typed(prog, Nil)
             match tc with
             | typed_ast.TypedErr _ msg -> lowering.LowerErr("typecheck: " ++ msg)
-            | typed_ast.TypedOk typed_prog env -> lowering.lower_program(typed_prog, env)
+            | typed_ast.TypedOk typed_prog env ->
+                # Post-M3b, lowering is a mechanical Evidence consumer: the resolve
+                # pass must run first to populate each TDict's Evidence (mirrors the
+                # production pipeline in compiler.compile_phase_check).
+                match resolve.resolve_program(typed_prog, env) with
+                | resolve.ResolveErr _ msg -> lowering.LowerErr("resolve: " ++ msg)
+                | resolve.ResolveOk resolved -> lowering.lower_program(resolved, env)
 
 fn is_lower_ok(r: lowering.LowerResult) -> Bool =
   match r with
@@ -354,13 +361,19 @@ fn main() -> Unit !{IO} =
     assert_false(state, "shadowed param: NOT eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_shadowed, "test"))
 
     # P1-constrained: class method in value position where the instance is parameterized
-    # (instance MyEq (Box a) where MyEq a). The concrete-head branch fires with head "Box",
-    # finding __tc_MyEq_Box_my_eq — but the eta wrapper must also thread the inner
-    # MyEq a dict so the inner call has 3 args (dict + 2 value), not 2.
+    # (instance MyEq (Box a) where MyEq a) AND the outer constraint MyEq (Box a) is
+    # forwarded.  M3b-5: resolve emits EvForward for the forwarded MyEq (Box a) key, so
+    # lowering uses the forwarded slot DIRECTLY (2-arg inner call) — the same path as
+    # p2-fwd-only below.  The forwarded MyEq (Box a) dict is already complete (its inner
+    # MyEq a was supplied by the caller), so no separate inner-dict reconstruction is
+    # needed.  (The deleted resolve_tdict eta path reconstructed from the concrete
+    # instance + inner dict — 3 args — only when the inner was ALSO forwarded; that
+    # inconsistency with the call path is now unified.  Runtime-verified: observable
+    # inner dispatch through the forwarded slot is correct.)
     r_p1c <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Box a = Box a\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq (Box a) where MyEq a {\n  fn my_eq(x: Box a, y: Box a) -> Bool = true\n}\nfn test(f: (Box a -> Box a -> Bool) -> Bool) -> Bool where MyEq (Box a), MyEq a = f(my_eq)")
     assert_true(state, "p1-constrained: lowers ok", is_lower_ok(r_p1c))
     assert_true(state, "p1-constrained: my_eq is eta-expanded to lambda", lowered_fn_body_has_lambda_first_arg(r_p1c, "test"))
-    assert_eq(state, "p1-constrained: inner call has 3 args (1 dict + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1c, "test"), 3)
+    assert_eq(state, "p1-constrained: forwarded slot used directly (2-arg inner call)", lowered_fn_lambda_inner_arg_count(r_p1c, "test"), 2)
 
     # P1-match-binder: a variable bound by a match pattern that shares a class method name
     # must NOT be eta-expanded in the branch body.
@@ -390,11 +403,14 @@ fn main() -> Unit !{IO} =
     assert_true(state, "p1b-concrete-inner: lowers ok", is_lower_ok(r_p1b_conc))
     assert_eq(state, "p1b-concrete-inner: inner call has 3 args (1 dict + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_conc, "test"), 3)
 
-    # P1b-multi-var: eta-expansion for an instance (MyEq (Pair a b) where MyEq a, MyEq b)
-    # must thread BOTH inner dicts, not just the last TVar (b).
+    # P1b-multi-var: instance MyEq (Pair a b) where MyEq a, MyEq b, with the outer
+    # MyEq (Pair a b) forwarded.  M3b-5: resolve emits EvForward for the forwarded
+    # Pair key → forwarded slot used directly (2-arg inner call).  The forwarded
+    # MyEq (Pair a b) dict already encapsulates both inner dicts (caller-supplied), so
+    # no reconstruction of the two inner dicts is needed (was 4 args via resolve_tdict).
     r_p1b_multi <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Pair a b = Pair a b\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq Bool {\n  fn my_eq(x: Bool, y: Bool) -> Bool = true\n}\ninstance MyEq (Pair a b) where MyEq a, MyEq b {\n  fn my_eq(x: Pair a b, y: Pair a b) -> Bool = true\n}\nfn test(f: (Pair a b -> Pair a b -> Bool) -> Bool) -> Bool where MyEq (Pair a b), MyEq a, MyEq b = f(my_eq)")
     assert_true(state, "p1b-multi-var: lowers ok", is_lower_ok(r_p1b_multi))
-    assert_eq(state, "p1b-multi-var: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_multi, "test"), 4)
+    assert_eq(state, "p1b-multi-var: forwarded slot used directly (2-arg inner call)", lowered_fn_lambda_inner_arg_count(r_p1b_multi, "test"), 2)
 
     # P1b-multi-concrete: the same Pair instance at Pair Int Bool must resolve
     # both concrete inner dictionaries. The old eta path only looked at the final
@@ -403,18 +419,22 @@ fn main() -> Unit !{IO} =
     assert_true(state, "p1b-multi-concrete: lowers ok", is_lower_ok(r_p1b_multi_concrete))
     assert_eq(state, "p1b-multi-concrete: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_multi_concrete, "test"), 4)
 
-    # P1b-mixed-inner: Pair a Bool must resolve one forwarded dict and one
-    # concrete dict through the same general substitution path.
+    # P1b-mixed-inner: Pair a Bool with the outer MyEq (Pair a Bool) forwarded.
+    # M3b-5: resolve emits EvForward for the forwarded Pair key → forwarded slot used
+    # directly (2-arg inner call); the forwarded dict already carries both inner dicts
+    # (was 4 args via resolve_tdict reconstruction).
     r_p1b_mixed <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\ntype Pair a b = Pair a b\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyEq Bool {\n  fn my_eq(x: Bool, y: Bool) -> Bool = true\n}\ninstance MyEq (Pair a b) where MyEq a, MyEq b {\n  fn my_eq(x: Pair a b, y: Pair a b) -> Bool = true\n}\nfn test(f: (Pair a Bool -> Pair a Bool -> Bool) -> Bool) -> Bool where MyEq (Pair a Bool), MyEq a = f(my_eq)")
     assert_true(state, "p1b-mixed-inner: lowers ok", is_lower_ok(r_p1b_mixed))
-    assert_eq(state, "p1b-mixed-inner: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_mixed, "test"), 4)
+    assert_eq(state, "p1b-mixed-inner: forwarded slot used directly (2-arg inner call)", lowered_fn_lambda_inner_arg_count(r_p1b_mixed, "test"), 2)
 
-    # P1b-super-inner: if the forwarded inner constraint has superclasses, eta
-    # expansion must include the direct class slots plus transitive superclass
-    # slots. MyOrd a contributes my_less and superclass MyEq a contributes my_eq.
+    # P1b-super-inner: forwarded inner constraint with a superclass (MyOrd a where
+    # MyEq a), outer MyOrd (Box a) forwarded.  M3b-5: resolve emits EvForward for the
+    # forwarded MyOrd (Box a) key → forwarded slot used directly (2-arg inner call).
+    # The forwarded MyOrd (Box a) dict already carries its own + superclass slots, so
+    # they are not reconstructed here (was 4 args via resolve_tdict).
     r_p1b_super <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\nclass MyOrd a where MyEq a {\n  fn my_less(x: a, y: a) -> Bool\n}\ntype Box a = Box a\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd Int {\n  fn my_less(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd (Box a) where MyOrd a {\n  fn my_less(x: Box a, y: Box a) -> Bool = true\n}\nfn test(f: (Box a -> Box a -> Bool) -> Bool) -> Bool where MyOrd (Box a), MyOrd a = f(my_less)")
     assert_true(state, "p1b-super-inner: lowers ok", is_lower_ok(r_p1b_super))
-    assert_eq(state, "p1b-super-inner: inner call has 4 args (2 dicts + 2 value)", lowered_fn_lambda_inner_arg_count(r_p1b_super, "test"), 4)
+    assert_eq(state, "p1b-super-inner: forwarded slot used directly (2-arg inner call)", lowered_fn_lambda_inner_arg_count(r_p1b_super, "test"), 2)
 
     # P1c-class-type-not-first-param: Decode's class parameter is the return
     # type, not the String input. Eta expansion must pick Decode Int for

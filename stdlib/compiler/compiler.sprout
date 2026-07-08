@@ -343,17 +343,25 @@ fn compile_phase_recheck_timed(path: source.FilePath, stdlib_root: source.Stdlib
                 ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t3))
                 typed_ast.TypedErr(pos, "check: " ++ msg)
           | typed_ast.TypedOk typed_prog env ->
-              match lowering.lower_program(typed_prog, env) with
-              | lowering.LowerErr msg ->
+              # Post-M3b, lowering consumes resolve's Evidence — run resolve first
+              # (mirrors compile_phase_check).  resolve_tdict no longer self-resolves.
+              match resolve.resolve_program(typed_prog, env) with
+              | resolve.ResolveErr pos msg ->
                   do
-                    t4 <- time_now_micros()
-                    ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t4))
-                    typed_ast.TypedErr(no_pos(), "lower: " ++ msg)
-              | lowering.LowerOk typed_lowered ->
-                  do
-                    t4 <- time_now_micros()
-                    ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t4))
-                    typed_ast.TypedOk(typed_lowered, env)
+                    ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t3))
+                    typed_ast.TypedErr(pos, "check: " ++ msg)
+              | resolve.ResolveOk resolved ->
+                  match lowering.lower_program(resolved, env) with
+                  | lowering.LowerErr msg ->
+                      do
+                        t4 <- time_now_micros()
+                        ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t4))
+                        typed_ast.TypedErr(no_pos(), "lower: " ++ msg)
+                  | lowering.LowerOk typed_lowered ->
+                      do
+                        t4 <- time_now_micros()
+                        ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t4))
+                        typed_ast.TypedOk(typed_lowered, env)
 
 # compile_full_ir_lines: single pipeline entry point.  Calls
 # compile_phase_recheck_timed (the canonical pipeline body) then runs codegen.
