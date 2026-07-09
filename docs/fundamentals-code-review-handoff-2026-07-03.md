@@ -582,7 +582,11 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
   starts low). **Fix:** prefix fresh names with `$` (illegal at identifier start per
   `is_ident_start`), making collision structurally impossible — the convention already used
   for generated names in `ast_to_ir`/`ir_lowering`. Regression:
-  `tests/stdlib/compiler/test_fresh_tvar_collision.spr`.
+  `tests/stdlib/compiler/test_fresh_tvar_collision.spr` pins the invariant directly (fresh
+  names must be unspellable as an identifier). Note: the runtime fusion only fires when the
+  fresh counter is very low at the colliding instantiation, so a scenario test through
+  `check_program` — which seeds a builtin env and advances the counter — is non-discriminating;
+  the invariant test is the robust guard.
 - **T10 — `find_inst_in_return_type_children` recurses only into the TApp argument,
   never the base:** [DONE 2026-07-08] multi-param TApp chains (`Pair e Bool` needing an
   instance on the inner `e`) missed the concrete dict and fell back to @fwd. Confirmed

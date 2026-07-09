@@ -1,77 +1,40 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
-import stdlib.compiler.lexer as lexer
-import stdlib.compiler.parser as parser
-import stdlib.compiler.checker as checker
-import stdlib.compiler.source as source
+import stdlib.compiler.unifier as unifier
 
-# Regression test for a fresh-type-variable / user-identifier namespace
-# collision.
+# Regression test for the fresh-type-variable / user-identifier namespace
+# invariant.
 #
-# `unifier.fresh` mints compiler-internal type variables named "t0", "t1",
-# ... from a per-InferState counter starting at 0. Nothing prevents a user
-# from writing a type-variable name in a signature that has the same shape
-# ("t1", "t0", ...) — `infer.is_lowercase_name` only inspects the first
-# character of a TypeName, so a multi-character name like "t1" is (wrongly)
-# accepted as a scheme-quantified type variable, same as "a" or "b".
+# `unifier.fresh` / `fresh_effect` mint compiler-internal type/effect
+# variables. `infer.is_lowercase_name` only inspects the FIRST character of a
+# TypeName, so a user type variable spelled like a bare fresh name (e.g. "t1")
+# is wrongly accepted as a scheme-quantified variable. If a minted name ever
+# equals a live user-written name in the same substitution, `apply_full_subst`'s
+# transitive lookup fuses two type variables the user declared as independent
+# (silent type confusion).
 #
-# When such a scheme is instantiated, `unifier.build_type_repl` builds one
-# Dict keyed by the RAW user-written var names, with freshly-minted names as
-# values (e.g. {"t1" -> TVar("t0"), "a" -> TVar("t1")} for a two-var scheme
-# instantiated at counter 0). `apply_full_subst`'s lookup is transitive: it
-# recurses into the looked-up value. If a freshly-minted value name happens
-# to equal another RAW key still present in the same dict, the walk chases
-# through that key too, silently fusing two type variables the user declared
-# as independent.
-#
-# Below, `foo(x: t1, y: a) -> a` is the FIRST declaration checked in an
-# importless program, so its instantiation starts at counter 0:
-#   build_type_repl(["t1", "a"]):
-#     "t1" -> fresh() = "t0"   (counter 0 -> 1)
-#     "a"  -> fresh() = "t1"   (counter 1 -> 2)
-#   type_repl = {"t1" -> TVar("t0"), "a" -> TVar("t1")}
-# Resolving TVar("a") looks up "a" -> TVar("t1"), then transitively looks up
-# "t1" (a live key!) -> TVar("t0"). So both `x`'s declared type ("t1") and
-# `y`/the return type ("a") resolve to the SAME TVar("t0") — foo's
-# instantiated type collapses from `t1 -> a -> a` to `t0 -> t0 -> t0`.
-#
-# Calling `foo(true, 5)` should typecheck (t1 = Bool, a = Int, independent),
-# but under the bug the collapsed single type variable is unified with both
-# Bool and Int, producing a spurious "Bool vs Int" type error.
-
-fn run_check(src: String) -> checker.CheckResult !{IO} =
-  match lexer.tokenize(src) with
-  | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "lex error")
-  | Ok toks ->
-      match parser.parse_program(toks) with
-      | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "parse error")
-      | Ok prog -> checker.check_program(prog)
-
-fn is_check_ok(r: checker.CheckResult) -> Bool =
-  match r with
-  | checker.CheckOk _ -> true
-  | checker.CheckErr _ _ -> false
-
-fn check_err_msg(r: checker.CheckResult) -> String =
-  match r with
-  | checker.CheckErr _ msg -> msg
-  | checker.CheckOk _ -> ""
+# Whether that runtime collision actually fires depends on the exact fresh
+# counter value when a scheme is instantiated (it only lines up when the
+# counter is very low, e.g. 0/1) — so a scenario-based test is fragile and
+# non-discriminating once `check_program` seeds a builtin env that advances the
+# counter. This test instead pins the INVARIANT the fix establishes: a fresh
+# name must never be spellable as a Sprout identifier. The "$" prefix is
+# illegal at identifier start (`string.is_ident_start` admits only [A-Za-z_]),
+# so a "$"-prefixed name can never collide with any user identifier.
 
 fn main() -> Unit !{IO} =
   do
+    istate <- unifier.new_state()
+    tv <- unifier.fresh(istate)
+    ev <- unifier.fresh_effect(istate)
     state <- new_state()
-
-    # First declaration in an importless program: fresh-var counter starts
-    # at 0, so this instantiation hits the t1/t0 collision described above.
-    r1 <- run_check("fn foo(x: t1, y: a) -> a = y\nfn use_foo() -> Int = foo(true, 5)")
     assert_true(
       state,
-      "user type var literally named 't1' does not collide with compiler fresh vars",
-      is_check_ok(r1)
+      "fresh type var is unspellable by users (\"$\"-prefixed)",
+      str_find(tv, "$t") == 0
     )
     assert_true(
       state,
-      "no spurious Bool/Int mismatch leaks from the collision",
-      str_find(check_err_msg(r1), "Bool vs Int") == -1
+      "fresh effect var is unspellable by users (\"$\"-prefixed)",
+      str_find(ev, "$e") == 0
     )
-
     summary(state)
