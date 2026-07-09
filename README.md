@@ -124,7 +124,13 @@ list_each (f: a -> Unit !{e}, xs: List a)  -> Unit !{e}            # traverse fo
 list_fold (step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
 ```
 
-`IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is `range(0, n - 1)`.
+`IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is `range(0, n - 1)`
+**only when `n >= 1`**. Beware `n == 0`: `range(0, -1)` iterates *descending* over
+`[0, -1]` (start > end flips the step to −1), running the body on `0` and `-1` instead
+of zero times. Guard a possibly-empty loop: `if n == 0 then () else range_each(f, range(0, n - 1))`.
+(The hand-rolled `if i >= n` loop handled `n == 0` for free; a half-open range helper is
+tracked in BACKLOG.)
+
 Because inline multi-statement `do`-lambdas do not yet parse, lift a multi-line step
 body into a named helper and pass it via a single-expression lambda:
 
