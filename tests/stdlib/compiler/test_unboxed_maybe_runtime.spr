@@ -1,0 +1,35 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Behavior test for the Tier-1 CPR peephole: IR-shape alone cannot prove the
+# Just payload is bound from extractvalue index 1 (value) rather than 0 (tag),
+# nor that the Just/Nothing tags aren't swapped.  A compile-and-run over both
+# in-bounds and out-of-bounds indices pins both down.
+
+# `match vector_get(...)` here is the peephole target (direct extern scrutinee).
+fn get_or(v: Vector Int, i: Int) -> Int !{IO} =
+  match vector_get(v, i) with
+  | Just x -> x
+  | Nothing -> 0 - 1
+
+# Build [0, 10, 20, 30, 40] as a raw Vector Int.
+fn build_list(i: Int, acc: List Int) -> List Int =
+  if i < 0 then acc else build_list(i - 1, Cons(i * 10, acc))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let v = vector_from_list(build_list(4, Nil))
+    r0 <- get_or(v, 0)
+    r2 <- get_or(v, 2)
+    r4 <- get_or(v, 4)
+    rneg <- get_or(v, 0 - 1)
+    roob <- get_or(v, 5)
+    # Just arm binds the payload (extractvalue 1), not the tag (extractvalue 0).
+    assert_eq(state, "in-bounds idx 0 -> 0", r0, 0)
+    assert_eq(state, "in-bounds idx 2 -> 20", r2, 20)
+    assert_eq(state, "in-bounds idx 4 -> 40", r4, 40)
+    # Nothing arm fires for out-of-range (tags not swapped).
+    assert_eq(state, "negative idx -> Nothing arm", rneg, 0 - 1)
+    assert_eq(state, "oob idx -> Nothing arm", roob, 0 - 1)
+    summary(state)

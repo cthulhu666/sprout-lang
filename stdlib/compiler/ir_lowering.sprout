@@ -169,6 +169,16 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRPhi r ty pairs -> "  " ++ r ++ " = phi " ++ ty ++ " " ++ lower_phi_pairs(pairs)
   | sprout_ir.IRCall r _kind fname args ->
       "  " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")"
+  # Tier-1 CPR peephole: unboxed { i64, i64 } extern call + two extractvalues.
+  # The struct SSA (<tag>$st) is synthesized here — it never exists at IR level.
+  # The callee is declared explicitly in ir_header() (the 10 `declare { i64, i64 }
+  # @<fn>_unboxed` lines) — an implicit declaration from the call site is NOT
+  # emitted; the C runtime provides `SproutUnboxed2 <fn>(long long, …)`
+  # (ABI-identical to { i64, i64 }).
+  | sprout_ir.IRCallUnboxed2 tag val _vk fname args ->
+      "  " ++ tag ++ "$st = call { i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")\n" ++
+      "  " ++ tag ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 0\n" ++
+      "  " ++ val ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 1"
   | sprout_ir.IRStrConst r raw _ ->
       match dict_get(raw, str_table) with
       | Just entry ->
@@ -406,6 +416,22 @@ export fn ir_header() -> String =
   "declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
+  # Tier-1 CPR peephole: unboxed { i64, i64 } (SproutUnboxed2) variants of the
+  # Maybe-returning externs.  Emitted by IRCallUnboxed2 when a `match` scrutinizes
+  # one of these directly.  Arg signatures mirror the boxed externs' uniform-i64
+  # ABI (env/regex pass a pointer in an i64 register — identical to the boxed
+  # declares above them).  All 10 declared unconditionally; only the linked ones
+  # are used.  Must stay in sync with unboxed_maybe_extern_name in ast_to_ir.sprout.
+  "declare { i64, i64 } @vector_get_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @map_get_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @map_nth_key_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @map_nth_value_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @bytes_get_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @str_char_at_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @regex_find_range_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @argv_get_unboxed(i64)\n" ++
+  "declare { i64, i64 } @env_get_unboxed(i64)\n" ++
+  "declare { i64, i64 } @term_read_line_unboxed()\n" ++
   # IO builtins used by programs after M3 PR 11 (do-block support) lands.
   # print() dispatches by argument type (mirrors direct codegen's emit_print_call):
   #   String/Char -> @print_str(ptr) via IRPrintStr;  Int/Bool -> @print_value(i64)

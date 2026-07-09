@@ -172,6 +172,22 @@ export type IROp (..) =
   # IRTHeap/IRTUnknown), used by ir_rooting to decide whether the result must be
   # rooted across later GC triggers.  Lowering ignores it (uniform i64 ABI).
   | IRCall String IRType String (List String)
+  # IRCallUnboxed2 <tag> <val> <val_kind> <fn> <args> — Tier-1 CPR peephole.
+  # A `match` whose scrutinee is a direct call to a Maybe-returning C extern with
+  # an `_unboxed` { i64, i64 } variant lowers to THIS instead of a boxed IRCall +
+  # IRGetTag + IRGetField.  <fn> is the FULL unboxed callee name (e.g.
+  # "vector_get_unboxed").  Lowers to:
+  #   %<struct> = call { i64, i64 } @<fn>(<args>)
+  #   <tag>     = extractvalue { i64, i64 } %<struct>, 0
+  #   <val>     = extractvalue { i64, i64 } %<struct>, 1
+  # The struct SSA is synthesized at lowering (derived from <tag>); it never
+  # appears as an IR-level value, so the rooting pass sees exactly two defs:
+  # <tag> (always IRTScalar — a ctor tag) and <val> (the payload, kind <val_kind>).
+  # No `Just` heap allocation occurs (the C `_unboxed` variant returns the struct
+  # by value), eliminating ~20 ns/get of box+strip overhead.  GC: op_triggers_gc
+  # = true (regex/term_read variants allocate their payload before returning);
+  # <val> is rooted per <val_kind> exactly as the boxed IRGetField result was.
+  | IRCallUnboxed2 String String IRType String (List String)
   | IRStrConst String String String
   | IRStrSlice String String String String
   | IRStrConcat String String String
@@ -450,6 +466,8 @@ fn print_op(op: IROp) -> String =
   | IRPhi r ty pairs -> "    " ++ r ++ " = phi " ++ ty ++ " " ++ print_phi_pairs(pairs)
   | IRCall r _kind fname args ->
       "    " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
+  | IRCallUnboxed2 tag val _vk fname args ->
+      "    (" ++ tag ++ ", " ++ val ++ ") = call_unboxed2 @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
   | IRStrConst r raw s ->
       "    " ++ r ++ " = strconst (" ++ raw ++ ") \"" ++ s ++ "\""
   | IRStrSlice r s start len ->

@@ -42,6 +42,11 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # Conservative: every user call may transitively allocate.  Over-roots
   # non-allocating callees; correctness > optimization at M2.
   | sprout_ir.IRCall _ _ _ _ -> true
+  # IRCallUnboxed2 calls a C `_unboxed` extern.  Most (vector_get, map_get, …)
+  # do not allocate, but regex_find_range_unboxed / term_read_line_unboxed still
+  # allocate their payload before returning — so, like IRCall, conservatively a
+  # trigger.  Purely additive (over-roots the non-allocating variants).
+  | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
   # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
   # IRMkClosure allocates env via @sprout_alloc_closure_env; trigger.
@@ -131,6 +136,14 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
       match kind with
       | sprout_ir.IRTScalar -> Nothing
       | _ -> Just(r)
+  # IRCallUnboxed2 produces two SSA defs: <tag> (always a scalar ctor tag, never
+  # rooted) and <val> (the payload).  Report ONLY <val>, keyed by its kind — this
+  # is what seeds the rooting scope (update_scope), so <val> is rooted across
+  # later triggers exactly as the boxed IRGetField result would have been.
+  | sprout_ir.IRCallUnboxed2 _ val vk _ _ ->
+      match vk with
+      | sprout_ir.IRTScalar -> Nothing
+      | _ -> Just(val)
   # FIX R4#7: honour the kind field. IRTScalar slots (Int, Bool, Char) are
   # not heap; IRTHeap slots (String, ADT, closure) are; IRTUnknown is
   # treated as heap (conservative). This avoids over-rooting scalar captures
@@ -304,6 +317,8 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   # live_out — see successor_live_in_for_pred.  Intra-block uses are empty.
   | sprout_ir.IRPhi _ _ _ -> Nil
   | sprout_ir.IRCall _ _ _ args -> args
+  # Unboxed call reads its args (the two defs <tag>/<val> are results, not uses).
+  | sprout_ir.IRCallUnboxed2 _ _ _ _ args -> args
   | sprout_ir.IRStrConst _ _ _ -> Nil
   | sprout_ir.IRStrSlice _ s start len -> Cons(s, Cons(start, Cons(len, Nil)))
   | sprout_ir.IRStrConcat _ a b -> Cons(a, Cons(b, Nil))
@@ -357,6 +372,11 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRICmp r _ _ _ -> Just(r)
   | sprout_ir.IRPhi r _ _ -> Just(r)
   | sprout_ir.IRCall r _ _ _ -> Just(r)
+  # Two defs; report <val> (the heap-relevant one) so liveness kills it at its
+  # definition.  <tag> is scalar and un-killed here — harmless over-approximation,
+  # and emission is gated by update_scope's in_scope_ord (op_produces_simple_heap),
+  # so <val> is never rooted before it is defined.
+  | sprout_ir.IRCallUnboxed2 _ val _ _ _ -> Just(val)
   | sprout_ir.IRStrConst r _ _ -> Just(r)
   | sprout_ir.IRStrSlice r _ _ _ -> Just(r)
   | sprout_ir.IRStrConcat r _ _ -> Just(r)
@@ -607,6 +627,9 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # A call may collect before consuming its operands (e.g. @ref_new); root the
   # heap operands across the call.  See the function-level comment above.
   | sprout_ir.IRCall _ _ _ _ -> true
+  # Like IRCall, an unboxed extern may collect before consuming its operands;
+  # root the heap operands across it (additive — only adds roots).
+  | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
   # Everything else does NOT expose operands: str builtins SPROUT_HANDLE their
   # inputs before allocating; the rest do not allocate.  EXHAUSTIVE on purpose —
   # no `_` catch-all, so a new allocating IROp is a COMPILE ERROR until its

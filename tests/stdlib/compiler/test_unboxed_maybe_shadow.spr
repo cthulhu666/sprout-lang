@@ -1,0 +1,27 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression: the Tier-1 CPR peephole must NOT fire when the callee name is a
+# LOCAL binding (param/capture/let) that merely happens to match one of the 10
+# unboxable extern names — it would emit a direct `@<name>_unboxed` call to the C
+# runtime instead of applying the user's closure, silently miscompiling.
+#
+# Here `env_get` is a PARAMETER of Maybe-returning function type.  `match env_get(k)`
+# is a closure application, not the prelude extern.  Correct result routes through
+# the passed closure; the bug routes to the C runtime's real env_get (→ Nothing).
+
+fn use_getter(env_get: String -> Maybe String, k: String) -> String !{IO} =
+  match env_get(k) with
+  | Just v -> v
+  | Nothing -> "MISS"
+
+fn my_lookup(k: String) -> Maybe String !{IO} = Just(str_concat(k, "!"))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r <- use_getter(my_lookup, "hello")
+    # The closure `my_lookup` always returns Just("<k>!"); "MISS" means the
+    # peephole wrongly called the C extern instead of the parameter.
+    assert_eq(state, "peephole must not fire on a param shadowing an extern name", r, "hello!")
+    summary(state)

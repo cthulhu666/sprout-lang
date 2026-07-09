@@ -1,0 +1,45 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# GC-stress regression for the Tier-1 CPR peephole (IRCallUnboxed2).
+#
+# The peephole binds a Just payload straight from `extractvalue { i64, i64 } …, 1`
+# (no heap Just, no IRGetField).  When that payload is a HEAP value (String here)
+# held live ACROSS a later allocation, ir_rooting must root it — op_triggers_gc=
+# true + op_produces_simple_heap→val seeds update_scope so the value is rooted
+# across the trigger.  A missing root is a silent use-after-free that ONLY shows
+# under SPROUT_GC_STRESS=1 (collect on every allocation) — the default-threshold
+# run is a false green.  This file is in test-stress's STRESS_FILES.
+#
+# The scalar-payload behavior test (test_unboxed_maybe_runtime.spr) cannot catch
+# this: an Int payload is never a GC root.
+
+# Allocate `n` fresh strings and discard them — forces collections under stress.
+fn burn(n: Int, acc: String) -> String !{IO} =
+  if n <= 0 then acc
+  else burn(n - 1, str_concat(acc, "x"))
+
+# `match vector_get(...)` is the peephole target.  `s` (a heap String) is bound
+# from the unboxed struct, then held live across `burn` (a GC trigger) before use.
+# If `s` is not rooted across `burn`, str_concat reads swept memory under stress.
+fn lookup(v: Vector String, i: Int) -> String !{IO} =
+  match vector_get(v, i) with
+  | Just s ->
+      do
+        _ <- burn(40, "")
+        str_concat(s, "!")
+  | Nothing -> "none"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let v = vector_from_list(Cons("hello", Cons("world", Cons("foo", Nil))))
+    r0 <- lookup(v, 0)
+    r1 <- lookup(v, 1)
+    r2 <- lookup(v, 2)
+    roob <- lookup(v, 9)
+    assert_eq(state, "heap payload survives GC across trigger (idx 0)", r0, "hello!")
+    assert_eq(state, "heap payload survives GC across trigger (idx 1)", r1, "world!")
+    assert_eq(state, "heap payload survives GC across trigger (idx 2)", r2, "foo!")
+    assert_eq(state, "oob -> Nothing arm", roob, "none")
+    summary(state)
