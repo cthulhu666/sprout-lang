@@ -594,6 +594,11 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
   resolved to an unresolved sentinel and the program crashed at runtime with
   `non-exhaustive match`. **Fix:** on the `Nothing` branch, also recurse into `base`.
   Regression: `tests/stdlib/compiler/test_constrained_fn_return_type_nested_tapp.spr`.
+  Follow-up (minor): `find_inst_in_return_type` finds *any* instance of the class anywhere
+  in the return type without checking it matches the specific constrained tyvar. Arg-first
+  order is unchanged (base is only scanned when arg misses), so this strictly widens what a
+  previously-failing lookup resolves — but it is the first suspect if a multi-parameter
+  return-type dispatch ever resolves a same-class instance from the wrong slot.
 - **T11 — `check_overlapping_instances` scans only the current program's decls**
   (`infer.sprout:2802`) — sound under today's whole-program bundling; breaks silently if
   a non-bundled path ever lands (`register_instance_marker` is a plain `dict_set`
