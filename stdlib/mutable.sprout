@@ -1,0 +1,60 @@
+module stdlib.mutable
+
+# Mutable indexed containers. Split out of the implicit prelude so mutation is an
+# explicit, opt-in dependency. The raw `Vector` backing store and its `vector_*`
+# builtins stay in the prelude (shared with the immutable `Vec`), available here
+# implicitly.
+
+# ---------------------------------------------------------------------------
+# MutVec — a 1-D mutable array (opaque; use the mutvec_* functions only)
+# ---------------------------------------------------------------------------
+export type MutVec a = MutVec(Vector a)
+
+fn mutvec_raw(v: MutVec a) -> Vector a =
+  match v with | MutVec raw -> raw
+
+export fn mutvec_new(n: Int, val: a) -> MutVec a !{IO} =
+  do
+    raw <- vec_make_filled(n, val)
+    MutVec(raw)
+
+# O(1). Total: Nothing when i is out of range (routes through the bounds-checked
+# vector_get).
+export fn mutvec_get(v: MutVec a, i: Int) -> Maybe a !{IO} =
+  vector_get(mutvec_raw(v), i)
+
+export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
+  vector_mutset(mutvec_raw(v), i, val)
+
+# ---------------------------------------------------------------------------
+# MutMatrix — a 2-D row-major mutable array backed by one MutVec
+# ---------------------------------------------------------------------------
+# Element (r, c) lives at flat index r * cols + c. get/set bounds-check both
+# indices so an out-of-range column cannot silently address the adjacent row.
+export type MutMatrix a = MutMatrix Int Int (MutVec a)
+
+# O(rows*cols): allocates one backing MutVec filled with `init`.
+export fn mutmatrix_new(rows: Int, cols: Int, init: a) -> MutMatrix a !{IO} =
+  do
+    data <- mutvec_new(rows * cols, init)
+    MutMatrix(rows, cols, data)
+
+export fn mutmatrix_rows(m: MutMatrix a) -> Int =
+  match m with | MutMatrix rows _ _ -> rows
+
+export fn mutmatrix_cols(m: MutMatrix a) -> Int =
+  match m with | MutMatrix _ cols _ -> cols
+
+# O(1). Nothing when (r, c) is out of range.
+export fn mutmatrix_get(m: MutMatrix a, r: Int, c: Int) -> Maybe a !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows || c < 0 || c >= cols then Nothing
+      else mutvec_get(data, r * cols + c)
+
+# O(1). No-op when (r, c) is out of range.
+export fn mutmatrix_set(m: MutMatrix a, r: Int, c: Int, val: a) -> Unit !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows || c < 0 || c >= cols then ()
+      else mutvec_set(data, r * cols + c, val)

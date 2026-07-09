@@ -1,4 +1,5 @@
 module examples.neural_network_train_xor
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
 
 # A 2-2-1 neural network that LEARNS XOR from scratch with backpropagation and
 # gradient descent — the counterpart to neural_network_xor.sprout, whose weights

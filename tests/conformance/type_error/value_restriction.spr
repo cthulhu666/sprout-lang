@@ -1,4 +1,5 @@
 module main
+import stdlib.mutable (mutvec_new, mutvec_get, mutvec_set)
 
 # W3/F-VALRESTR: a top-level `let` bound to a non-value (a function call) must
 # NOT be generalized. Without the value restriction, `cell` generalizes to

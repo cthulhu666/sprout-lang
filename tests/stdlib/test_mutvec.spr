@@ -1,4 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.mutable (mutvec_new, mutvec_get, mutvec_set)
 
 fn main() -> Unit !{IO} =
   do

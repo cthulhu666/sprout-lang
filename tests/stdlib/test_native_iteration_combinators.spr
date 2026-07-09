@@ -1,4 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
 
 # Named helper steps (B1: multi-statement lambda bodies must be lifted to named fns).
 # Single-expression lambdas at call sites may still close over locals (e.g. `v`).

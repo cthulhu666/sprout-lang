@@ -1,0 +1,32 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_rows, mutmatrix_cols)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    m <- mutmatrix_new(2, 3, 0)
+    assert_eq(state, "mutmatrix_rows", mutmatrix_rows(m), 2)
+    assert_eq(state, "mutmatrix_cols", mutmatrix_cols(m), 3)
+
+    # set/get roundtrip at (1, 2)
+    _ <- mutmatrix_set(m, 1, 2, 42)
+    got <- mutmatrix_get(m, 1, 2)
+    assert_eq(state, "set/get roundtrip", got, 42)
+
+    # distinct cells addressed independently (row-major)
+    _ <- mutmatrix_set(m, 0, 0, 7)
+    _ <- mutmatrix_set(m, 1, 0, 9)
+    a <- mutmatrix_get(m, 0, 0)
+    b <- mutmatrix_get(m, 1, 0)
+    assert_eq(state, "independent cell (0,0)", a, 7)
+    assert_eq(state, "independent cell (1,0)", b, 9)
+
+    # bounds: an out-of-range COLUMN must return Nothing, not silently read the
+    # adjacent row (raw r*cols+c delegation would return cell (1,0) here).
+    assert_true(state, "col overflow returns Nothing",
+      match mutmatrix_get(m, 0, 3) with | Nothing -> true | Just _ -> false)
+    assert_true(state, "row overflow returns Nothing",
+      match mutmatrix_get(m, 2, 0) with | Nothing -> true | Just _ -> false)
+
+    summary(state)

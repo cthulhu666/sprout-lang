@@ -1,4 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.mutable (mutvec_new, mutvec_get, mutvec_set)
 
 # W8/P2 (D5): mutvec_get is total — Just(v) in range, Nothing out of range
 # (previously it panicked via vector_get_direct on OOB).

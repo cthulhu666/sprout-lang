@@ -58,8 +58,6 @@ export fn safe_div(a: Int, b: Int) -> Result DivByZero Int =
 export type Vec a =
   | Vec (Vector a)
 
-type MutVec a = MutVec(Vector a)
-
 export type Dict v =
   | Dict (Map v)
 
@@ -1254,22 +1252,7 @@ extern fn ref_new(val: a) -> Ref a !{IO}
 extern fn ref_read(r: Ref a) -> a !{IO}
 extern fn ref_write(r: Ref a, val: a) -> Unit !{IO}
 
-# Mutable vectors (opaque; use mutvec_* functions only)
-fn mutvec_raw(v: MutVec a) -> Vector a =
-  match v with | MutVec raw -> raw
-
-export fn mutvec_new(n: Int, val: a) -> MutVec a !{IO} =
-  do
-    raw <- vec_make_filled(n, val)
-    MutVec(raw)
-
-# O(1). Total: Nothing when i is out of range (previously panicked via the
-# bounds-checked vector_get_direct). Routes through vector_get (W8/P2, D5).
-export fn mutvec_get(v: MutVec a, i: Int) -> Maybe a !{IO} =
-  vector_get(mutvec_raw(v), i)
-
-export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
-  vector_mutset(mutvec_raw(v), i, val)
+# Mutable vectors and matrices now live in stdlib.mutable (import explicitly).
 
 # Regex
 extern fn regex_validate(pattern: String) -> Result String Unit
