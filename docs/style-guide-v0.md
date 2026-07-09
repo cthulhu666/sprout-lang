@@ -265,6 +265,13 @@ Rules:
 - Use `|>` when it makes the left-to-right data flow clearer.
 - Do not build long, dense operator chains when intermediate names would make
   the logic clearer.
+- **Data-last argument order.** When a function takes a collection (or the value
+  being transformed) alongside callbacks or configuration, put that data argument
+  **last**. This matches the prelude's higher-order family (`map`, `fold`,
+  `filter`, `range_each`/`range_fold`, `list_each`/`list_fold`) and keeps calls
+  pipeline-friendly, since `|>` feeds the left value into the final position:
+  `xs |> map(f)` desugars to `map(f, xs)`. Reserve data-first only for accessors
+  where the receiver reads as a subject (`range_start(r)`, `vec_length(v)`).
 
 Good:
 

@@ -110,13 +110,29 @@ The following are planned features not yet implemented. Each has a standard work
 if is_valid(x) then false else true
 ```
 
-**Effectful list iteration (`list_each`, `list_for_each`)**
-No built-in IO-effectful list traversal exists yet. Write a tail-recursive helper:
+## Iteration Combinators
+
+The prelude provides effect-polymorphic iteration combinators — use these instead
+of hand-rolling counter recursion. Each takes an effect-polymorphic step (`!{e}`),
+so the same function serves both pure and `!{IO}` code, and all follow the
+data-last argument convention (the collection is the final argument).
+
 ```sprout
-fn print_all(items: List String) -> Unit !{IO} =
-  match items with
-  | Nil -> ()
-  | Cons h t -> do print(h) ; print_all(t)
+range_each(f: Int -> Unit !{e}, r: IntRange) -> Unit !{e}          # imperative loop
+range_fold(step: b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e}
+list_each (f: a -> Unit !{e}, xs: List a)  -> Unit !{e}            # traverse for effect
+list_fold (step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
+```
+
+`IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is `range(0, n - 1)`.
+Because inline multi-statement `do`-lambdas do not yet parse, lift a multi-line step
+body into a named helper and pass it via a single-expression lambda:
+
+```sprout
+fn print_line(items: Vec String, i: Int) -> Unit !{IO} =
+  match vec_get(i, items) with | Just s -> print(s) | Nothing -> ()
+
+range_each(\i -> print_line(items, i), range(0, vec_length(items) - 1))
 ```
 
 ## Backlog
