@@ -8,9 +8,9 @@ fn aisle_pick_minutes(aisle: Int) -> Int =
 
 fn route_minutes(route: IntRange) -> Int =
   range_fold(
-    route,
+    \ (acc, aisle) -> acc + aisle_pick_minutes(aisle),
     0,
-    \ (acc, aisle) -> acc + aisle_pick_minutes(aisle)
+    route
   )
 
 fn return_trip_crosses_loading_bay(route: IntRange) -> Int =

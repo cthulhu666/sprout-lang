@@ -97,22 +97,50 @@ fn range_to_list_go(current: Int, end_value: Int, step: Int) -> List Int =
 export fn range_to_list(value: IntRange) -> List Int =
   range_to_list_go(range_start(value), range_end(value), range_step(value))
 
-fn range_fold_go(current: Int, end_value: Int, step: Int, acc: a, f: a -> Int -> a) -> a =
-  if current == end_value then f(acc, current)
-  else range_fold_go(current + step, end_value, step, f(acc, current), f)
+fn range_fold_go(current: Int, end_value: Int, by: Int, acc: b, step: b -> Int -> b !{e}) -> b !{e} =
+  if current == end_value then step(acc, current)
+  else
+    do
+      next <- step(acc, current)
+      range_fold_go(current + by, end_value, by, next, step)
 
-export fn range_fold(value: IntRange, init: a, f: a -> Int -> a) -> a =
-  range_fold_go(range_start(value), range_end(value), range_step(value), init, f)
+# O(n): inclusive fold over [start, end] following the range's step. The step's effect
+# row is polymorphic (`!{e}`), so pure callers get `e = {}` and effectful callers may
+# read/write mutable state inside `step`. Data-last: the range is the final argument.
+export fn range_fold(step: b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e} =
+  range_fold_go(range_start(r), range_end(r), range_step(r), init, step)
+
+fn range_each_go(f: Int -> Unit !{e}, current: Int, end_value: Int, by: Int) -> Unit !{e} =
+  if current == end_value then f(current)
+  else
+    do
+      _ <- f(current)
+      range_each_go(f, current + by, end_value, by)
+
+# O(n): inclusive imperative loop over [start, end]; `f` runs for its effect at each index.
+export fn range_each(f: Int -> Unit !{e}, r: IntRange) -> Unit !{e} =
+  range_each_go(f, range_start(r), range_end(r), range_step(r))
 
 fn list_map_go(f: a -> b, xs: List a) -> List b =
   match xs with
   | Nil -> Nil
   | Cons x rest -> Cons(f(x), list_map_go(f, rest))
 
-fn list_fold_go(f: b -> a -> b, init: b, xs: List a) -> b =
+fn list_fold_go(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
   match xs with
   | Nil -> init
-  | Cons x rest -> list_fold_go(f, f(init, x), rest)
+  | Cons x rest ->
+      do
+        next <- step(init, x)
+        list_fold_go(step, next, rest)
+
+fn list_each_go(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
+  match xs with
+  | Nil -> ()
+  | Cons x rest ->
+      do
+        _ <- f(x)
+        list_each_go(f, rest)
 
 export fn filter(pred: a -> Bool, xs: List a) -> List a =
   match xs with
@@ -124,8 +152,14 @@ export fn filter(pred: a -> Bool, xs: List a) -> List a =
 export fn list_map(f: a -> b, xs: List a) -> List b =
   list_map_go(f, xs)
 
-export fn list_fold(step: b -> a -> b, init: b, xs: List a) -> b =
+# O(n): left fold; `step`'s effect row is polymorphic, so this serves both pure folds and
+# effectful accumulation (reading/writing mutable state inside `step`). Data-last.
+export fn list_fold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
   list_fold_go(step, init, xs)
+
+# O(n): imperative traversal; `f` runs for its effect on each element.
+export fn list_each(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
+  list_each_go(f, xs)
 
 export fn list_append(left: List a, right: List a) -> List a =
   match left with
@@ -162,7 +196,7 @@ fn range_vec_step(acc: Vec Int, item: Int) -> Vec Int =
   vec_append(item, acc)
 
 export fn range_to_vec(value: IntRange) -> Vec Int =
-  range_fold(value, vec_empty(), range_vec_step)
+  range_fold(range_vec_step, vec_empty(), value)
 
 export fn vec_length(vec: Vec a) -> Int =
   match vec with

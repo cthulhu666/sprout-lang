@@ -4792,49 +4792,49 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @range_fold_go(i64 %current$in, i64 %end_value$in, i64 %step$in, i64 %acc$in, i64 %f$in) {
+define i64 @range_fold_go(i64 %current$in, i64 %end_value$in, i64 %by$in, i64 %acc$in, i64 %step$in) {
 entry:
   %t$9 = alloca i64
   store i64 %current$in, ptr %t$9
   %t$10 = alloca i64
   store i64 %end_value$in, ptr %t$10
   %t$11 = alloca i64
-  store i64 %step$in, ptr %t$11
+  store i64 %by$in, ptr %t$11
   %t$12 = alloca i64
   store i64 %acc$in, ptr %t$12
   %t$13 = alloca i64
-  store i64 %f$in, ptr %t$13
+  store i64 %step$in, ptr %t$13
   %t$14 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %current = load i64, ptr %t$9
   %end_value = load i64, ptr %t$10
-  %step = load i64, ptr %t$11
+  %by = load i64, ptr %t$11
   %acc = load i64, ptr %t$12
-  %f = load i64, ptr %t$13
+  %step = load i64, ptr %t$13
   %t$0 = icmp eq i64 %current, %end_value
   %t$1 = zext i1 %t$0 to i64
   %t$8 = trunc i64 %t$1 to i1
   br i1 %t$8, label %then_2, label %else_2
 then_2:
-  %t$4$env_ptr = inttoptr i64 %f to ptr
+  %t$4$env_ptr = inttoptr i64 %step to ptr
   %t$4$code = load ptr, ptr %t$4$env_ptr
-  %t$4 = call i64 (i64, i64, i64) %t$4$code(i64 %f, i64 %acc, i64 %current)
+  %t$4 = call i64 (i64, i64, i64) %t$4$code(i64 %step, i64 %acc, i64 %current)
   br label %join_2
 else_2:
-  %t$5 = add i64 %current, %step
   %t$15 = alloca i64
-  store i64 %f, ptr %t$15
+  store i64 %step, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$6$env_ptr = inttoptr i64 %f to ptr
-  %t$6$code = load ptr, ptr %t$6$env_ptr
-  %t$6 = call i64 (i64, i64, i64) %t$6$code(i64 %f, i64 %acc, i64 %current)
+  %t$5$env_ptr = inttoptr i64 %step to ptr
+  %t$5$code = load ptr, ptr %t$5$env_ptr
+  %t$5 = call i64 (i64, i64, i64) %t$5$code(i64 %step, i64 %acc, i64 %current)
+  %t$6 = add i64 %current, %by
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %t$5, ptr %t$9
+  store i64 %t$6, ptr %t$9
   store i64 %end_value, ptr %t$10
-  store i64 %step, ptr %t$11
-  store i64 %t$6, ptr %t$12
-  store i64 %f, ptr %t$13
+  store i64 %by, ptr %t$11
+  store i64 %t$5, ptr %t$12
+  store i64 %step, ptr %t$13
   call void @llvm.stackrestore(ptr %t$14)
   br label %tco_loop
 join_2:
@@ -4842,22 +4842,84 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @range_fold(i64 %value, i64 %init, i64 %f) {
+define i64 @range_fold(i64 %step, i64 %init, i64 %r) {
 entry:
   %t$4 = alloca i64
-  store i64 %value, ptr %t$4
+  store i64 %step, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$6 = alloca i64
-  store i64 %init, ptr %t$6
+  store i64 %r, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$8 = alloca i64
-  store i64 %f, ptr %t$8
+  store i64 %init, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$0 = call i64 @range_start(i64 %value)
-  %t$1 = call i64 @range_end(i64 %value)
-  %t$2 = call i64 @range_step(i64 %value)
-  %t$3 = call i64 @range_fold_go(i64 %t$0, i64 %t$1, i64 %t$2, i64 %init, i64 %f)
+  %t$0 = call i64 @range_start(i64 %r)
+  %t$1 = call i64 @range_end(i64 %r)
+  %t$2 = call i64 @range_step(i64 %r)
+  %t$3 = call i64 @range_fold_go(i64 %t$0, i64 %t$1, i64 %t$2, i64 %init, i64 %step)
   %t$10 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$3
+}
+
+define i64 @range_each_go(i64 %f$in, i64 %current$in, i64 %end_value$in, i64 %by$in) {
+entry:
+  %t$9 = alloca i64
+  store i64 %f$in, ptr %t$9
+  %t$10 = alloca i64
+  store i64 %current$in, ptr %t$10
+  %t$11 = alloca i64
+  store i64 %end_value$in, ptr %t$11
+  %t$12 = alloca i64
+  store i64 %by$in, ptr %t$12
+  %t$13 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %f = load i64, ptr %t$9
+  %current = load i64, ptr %t$10
+  %end_value = load i64, ptr %t$11
+  %by = load i64, ptr %t$12
+  %t$0 = icmp eq i64 %current, %end_value
+  %t$1 = zext i1 %t$0 to i64
+  %t$8 = trunc i64 %t$1 to i1
+  br i1 %t$8, label %then_2, label %else_2
+then_2:
+  %t$4$env_ptr = inttoptr i64 %f to ptr
+  %t$4$code = load ptr, ptr %t$4$env_ptr
+  %t$4 = call i64 (i64, i64) %t$4$code(i64 %f, i64 %current)
+  br label %join_2
+else_2:
+  %t$14 = alloca i64
+  store i64 %f, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$5$env_ptr = inttoptr i64 %f to ptr
+  %t$5$code = load ptr, ptr %t$5$env_ptr
+  %t$5 = call i64 (i64, i64) %t$5$code(i64 %f, i64 %current)
+  %t$6 = add i64 %current, %by
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %f, ptr %t$9
+  store i64 %t$6, ptr %t$10
+  store i64 %end_value, ptr %t$11
+  store i64 %by, ptr %t$12
+  call void @llvm.stackrestore(ptr %t$13)
+  br label %tco_loop
+join_2:
+  %t$3 = phi i64 [%t$4, %then_2]
+  ret i64 %t$3
+}
+
+define i64 @range_each(i64 %f, i64 %r) {
+entry:
+  %t$4 = alloca i64
+  store i64 %r, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$6 = alloca i64
+  store i64 %f, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$0 = call i64 @range_start(i64 %r)
+  %t$1 = call i64 @range_end(i64 %r)
+  %t$2 = call i64 @range_step(i64 %r)
+  %t$3 = call i64 @range_each_go(i64 %f, i64 %t$0, i64 %t$1, i64 %t$2)
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$3
 }
 
@@ -4906,10 +4968,10 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @list_fold_go(i64 %f$in, i64 %init$in, i64 %xs$in) {
+define i64 @list_fold_go(i64 %step$in, i64 %init$in, i64 %xs$in) {
 entry:
   %t$11 = alloca i64
-  store i64 %f$in, ptr %t$11
+  store i64 %step$in, ptr %t$11
   %t$12 = alloca i64
   store i64 %init$in, ptr %t$12
   %t$13 = alloca i64
@@ -4917,7 +4979,7 @@ entry:
   %t$14 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %f = load i64, ptr %t$11
+  %step = load i64, ptr %t$11
   %init = load i64, ptr %t$12
   %xs = load i64, ptr %t$13
   %t$0 = call i64 @sprout_tag(i64 %xs)
@@ -4936,16 +4998,16 @@ body_1_1:
   %t$7 = call i64 @sprout_field(i64 %xs, i64 0)
   %t$8 = call i64 @sprout_field(i64 %xs, i64 1)
   %t$15 = alloca i64
-  store i64 %f, ptr %t$15
+  store i64 %step, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$17 = alloca i64
   store i64 %t$8, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$9$env_ptr = inttoptr i64 %f to ptr
+  %t$9$env_ptr = inttoptr i64 %step to ptr
   %t$9$code = load ptr, ptr %t$9$env_ptr
-  %t$9 = call i64 (i64, i64, i64) %t$9$code(i64 %f, i64 %init, i64 %t$7)
+  %t$9 = call i64 (i64, i64, i64) %t$9$code(i64 %step, i64 %init, i64 %t$7)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
-  store i64 %f, ptr %t$11
+  store i64 %step, ptr %t$11
   store i64 %t$9, ptr %t$12
   store i64 %t$8, ptr %t$13
   call void @llvm.stackrestore(ptr %t$14)
@@ -4955,6 +5017,55 @@ arm_2_1:
   unreachable
 join_1:
   %t$2 = phi i64 [%init, %body_0_1]
+  ret i64 %t$2
+}
+
+define i64 @list_each_go(i64 %f$in, i64 %xs$in) {
+entry:
+  %t$12 = alloca i64
+  store i64 %f$in, ptr %t$12
+  %t$13 = alloca i64
+  store i64 %xs$in, ptr %t$13
+  %t$14 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %f = load i64, ptr %t$12
+  %xs = load i64, ptr %t$13
+  %t$0 = call i64 @sprout_tag(i64 %xs)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 5
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = add i64 0, 0
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 6
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$8 = call i64 @sprout_field(i64 %xs, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %xs, i64 1)
+  %t$15 = alloca i64
+  store i64 %f, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$17 = alloca i64
+  store i64 %t$9, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$10$env_ptr = inttoptr i64 %f to ptr
+  %t$10$code = load ptr, ptr %t$10$env_ptr
+  %t$10 = call i64 (i64, i64) %t$10$code(i64 %f, i64 %t$8)
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
+  store i64 %f, ptr %t$12
+  store i64 %t$9, ptr %t$13
+  call void @llvm.stackrestore(ptr %t$14)
+  br label %tco_loop
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1]
   ret i64 %t$2
 }
 
@@ -5060,6 +5171,19 @@ entry:
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$0 = call i64 @list_fold_go(i64 %step, i64 %init, i64 %xs)
   %t$7 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$0
+}
+
+define i64 @list_each(i64 %f, i64 %xs) {
+entry:
+  %t$1 = alloca i64
+  store i64 %xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %f, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @list_each_go(i64 %f, i64 %xs)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
 
@@ -5347,17 +5471,17 @@ entry:
   %t$3 = alloca i64
   store i64 %value, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @vec_empty()
+  %t$0 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$0$raw = inttoptr i64 %t$0 to ptr
+  store ptr @__sprout_ir_eta_range_vec_step_0, ptr %t$0$raw
   %t$5 = alloca i64
   store i64 %t$0, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$1 = call i64 @sprout_alloc_closure_env(i64 8)
-  %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_range_vec_step_0, ptr %t$1$raw
+  %t$1 = call i64 @vec_empty()
   %t$7 = alloca i64
   store i64 %t$1, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$2 = call i64 @range_fold(i64 %value, i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @range_fold(i64 %t$0, i64 %t$1, i64 %value)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$2
 }
