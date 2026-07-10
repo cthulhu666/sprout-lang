@@ -228,3 +228,22 @@ export fn mutmatrix_row_sub_scaled_inplace(m: MutMatrix Double, r: Int, v: MutVe
   | MutMatrix rows cols data ->
       if r < 0 || r >= rows then ()
       else mutmatrix_row_sub_scaled_go(mutvec_raw(data), mutvec_raw(v), scale, r * cols, 0, min_int(cols, mutvec_len(v)))
+
+fn mutmatrix_row_add_scaled_into_go(raw_dst: Vector Double, raw_m: Vector Double, scale: Double, row_start: Int, i: Int, total: Int) -> Unit !{IO} =
+  if i >= total then ()
+  else
+    do
+      dst_i <- vector_get_direct(raw_dst, i)
+      cell <- vector_get_direct(raw_m, row_start + i)
+      _ <- vector_mutset(raw_dst, i, dst_i + scale * cell)
+      mutmatrix_row_add_scaled_into_go(raw_dst, raw_m, scale, row_start, i + 1, total)
+
+# O(min(cols, len dst)). Into dst: dst[i] := dst[i] + scale * m[r][i], ascending i — the
+# fused gradient-accumulate step (dhidden += dout * W_row). Reads a matrix row, writes a
+# separate vector, so it complements row_sub_scaled_inplace (which writes the matrix).
+# Bit-identical to a per-element `cur + scale*cell` loop. Invalid row is a no-op.
+export fn mutmatrix_row_add_scaled_into(dst: MutVec Double, m: MutMatrix Double, r: Int, scale: Double) -> Unit !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows then ()
+      else mutmatrix_row_add_scaled_into_go(mutvec_raw(dst), mutvec_raw(data), scale, r * cols, 0, min_int(cols, mutvec_len(dst)))

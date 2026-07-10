@@ -212,3 +212,92 @@ Contiguous unboxed `f64` storage for `MutVec Double` / `MutMatrix Double`, and/o
 lowering of row-dot/row-update to vectorizable loops. Large; justified by the **scalar-throughput**
 finding above (the allocation profile is already flat with problem size), not by allocation
 counts.
+
+## Phase D preparation — static-IR + asm + sample evidence (2026-07-10)
+
+The Phase C gate ("a correctly-parsed CPU profile should confirm where the scalar cost sits
+before committing to a design") is satisfied here — but the *decisive* artifact is **static**, not
+sampled. A `sample` profiler aggregates the hot loop into one inlined symbol and can only report
+the forward-vs-backprop split; it structurally cannot separate "bitcast vs bounds-branch vs call
+overhead." The compiled IR and asm can, and do. Config profiled: the current scaled `64→256→10`,
+`clang -O2`, wall ~4.7s, accuracy `139/150 = 92.6667%`.
+
+### What the compiled dot kernel actually costs (ground truth)
+
+`mutmatrix_row_dot_go` — the fused forward-pass kernel — lowers to a 22-instruction inner loop of
+which **exactly 2 instructions are the arithmetic** (`fmul`, `fadd`). Per element it pays:
+
+| cost | evidence | lever |
+|---|---|---|
+| **2× `bl _vector_get_direct`** | un-inlined C calls; bounds-check hidden inside, invisible to LLVM | call + bounds-branch |
+| **3× GC-root `bl`** (`push_i64_root` ×2, `pop_roots`) | root-stack + `sp` juggling every iteration, in an allocation-free loop | rooting model |
+| **4× `fmov` GPR↔FP** | `fmov d0,x24` / `fmov d1,x0` around the math | uniform-i64 ABI tax |
+| **no SIMD** | scalar `d0/d1/d8`, one element/iteration | blocked by the opaque calls above |
+
+The ABI bitcast (`fmov`) that the original Phase D framing named as *the* lever is in fact the
+**smallest** of the four. The dominant cost is the **five `bl` calls per element**, and the largest
+of those (`vector_get_direct`) is un-inlined.
+
+### The `-flto` probe: proven ineffective (kills the cheapest hypothetical option)
+
+Rebuilding the recognizer with `clang -O2 -flto` (throwaway binary) gave **no speedup**
+(4.63–5.40s vs 4.65–4.73s baseline, same accuracy). Disassembly confirms why: the kernel loop is
+**byte-for-byte unchanged** — LLVM's LTO inliner declines to inline `vector_get_direct`, and the
+opaque `sprout_gc_push/pop` calls bracketing each access are optimization barriers. Conclusion: the
+per-element calls must be removed at the **Sprout-IR / compiler** level (inlinable intrinsic access
++ leaf-loop root elision), not by a build flag.
+
+### `sample` finding (the one thing static IR did not show): Phase B is not finished
+
+The heaviest self-time frame is **`mutvec_get_worker` (66)** — the un-fused `Maybe`-returning
+path — outweighing *both* fused kernels combined (`row_dot_go` 36, `row_sub_scaled_go` 23). Its
+source is `backprop`'s `accum_dhidden.term` inner loop (`recognizer.sprout:181–184`):
+`dhidden[h] += dout_o * W2[o][h]`, which runs `n_hid·n_out·samples·epochs ≈ 32M` times using
+`mutmatrix_get` (double bounds-check) + `mutvec_get` + `mutvec_set` per element. **This loop was
+never given a fused kernel** — Phase B only covered forward-dot and the SGD update. (The `Maybe`
+box is already stripped by Tier-2 CPR/do-bind, so the residual cost is call + bounds-check + root
+traffic, not allocation — consistent with Phase C's size-independent `sprout_obj`.)
+
+### Consequence for the plan — an ordering correction + a reframed Phase D
+
+1. **Phase B follow-up (pure stdlib, no approval-gated change), do first:** add a fused
+   `mutmatrix_row_add_scaled_into(dst: MutVec Double, m: MutMatrix Double, r: Int, scale: Double)`
+   kernel (`dst[i] += scale·m[r][i]`) and wire `accum_dhidden` to it. This removes the currently
+   co-dominant `mutvec_get_worker`/`mutmatrix_get` traffic from the hottest loop. Measuring Phase D
+   before this is measuring a half-kerneled program.
+
+2. **Phase D, reframed by the asm** — the lever is the **5 `bl` calls per element**, ranked:
+   - **B (biggest): compiler-level inlinable element access** — lower a monomorphic `Vector Double`
+     read to inline `getelementptr`+`load` (bounds-check inline & hoistable) instead of an opaque
+     `vector_get_direct` call, and **elide per-iteration GC root push/pop in allocation-free leaf
+     loops**. Removes 5 calls/element and unblocks LLVM autovectorization.
+   - **A (smaller): contiguous unboxed `f64` storage** — removes the `fmov` ABI shuffles and is the
+     prerequisite for *hand/codegen* SIMD, but on its own leaves the calls (the dominant cost) in
+     place.
+   - Evidence says **B captures most of the win and A compounds it**; "storage alone" (the original
+     framing) is the least of the three.
+
+Raw evidence captured under the session scratchpad (`recognizer.ll`, `recognizer.asm`,
+`recognizer_lto.asm`, `sample.txt`).
+
+### Phase B follow-up landed — `mutmatrix_row_add_scaled_into` + re-profile
+
+Closed the kernel gap the sample exposed. New fused kernel
+`mutmatrix_row_add_scaled_into(dst, m, r, scale)` (`dst[i] += scale·m[r][i]`, ascending i,
+bit-identical to the old `cur + dout_o·wh` loop) added to `stdlib.mutable` (TDD,
+6 new cases in `tests/stdlib/test_native_mutmatrix.spr`), and `backprop.accum_dhidden`'s inner
+`term` loop rewired to it. `mutmatrix_get` is now unused by the recognizer.
+
+- **Accuracy:** `139/150 = 92.6667%`, bit-identical. ✓
+- **Wall:** ~4.7s → **~3.18s median (~1.5×)** — the single biggest hot loop was indeed un-kerneled.
+- **Re-profile (`sample`, fully-kerneled):** kernels now own the tight loops
+  (`row_dot` 37 + `row_add_scaled_into` 13 + `row_sub_scaled` 27); `mutvec_get_worker` fell 66→44
+  (residual scalar accesses in `forward`/`update_hidden`, not tight loops). GC-root push/pop appears
+  in the most call-tree nodes (91+55), un-inlined `vector_get_direct` in 23. (These are node/frame
+  *occurrence* counts, not summed self-time percentages — the same node-vs-self-time caveat that
+  burned the first profiling attempt; the decisive backing is the **asm**, which shows 3 live
+  GC-root `bl` + 2 `vector_get_direct` `bl` per element.)
+
+This is the measurement Phase D should be designed against: on a fully-kerneled program the residual
+hot-loop cost is **per-element GC-root traffic + the un-inlined element-access call** — both
+lever B (IR/compiler), confirming storage-alone (lever A) is not the primary lever.

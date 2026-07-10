@@ -1,5 +1,5 @@
 module examples.digit_recognizer.recognizer
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_cols, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_cols, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
 
 # Handwritten-digit recognition trained on real public data.
 #
@@ -178,11 +178,9 @@ fn backprop(net: Net, x: MutVec Double, label: Int, hidden: MutVec Double, out: 
         let accum_dhidden = \o -> do
               oo <- mutvec_get(out, o)
               let dout_o = 2.0 * (oo - target_of(o, label))
-              let term = \h -> do
-                    wh <- mutmatrix_get(w2, o, h)
-                    cur <- mutvec_get(dhidden, h)
-                    mutvec_set(dhidden, h, cur + dout_o * wh)
-              range_each(term, range(0, n_hid - 1))
+              # dhidden[h] += dout_o * W2[o][h], ascending h — fused kernel (no per-element
+              # mutvec_get/set closure). Bit-identical to the old `cur + dout_o * wh` loop.
+              mutmatrix_row_add_scaled_into(dhidden, w2, o, dout_o)
         # Update W2[o][h] and B2[o] toward the gradient for output o.
         let update_output = \o -> do
               oo <- mutvec_get(out, o)
