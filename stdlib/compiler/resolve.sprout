@@ -630,7 +630,11 @@ fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast
 # type_expr_head_name so module-qualified concrete names (stdlib.x.Bar) still
 # read as concrete after their prefix is stripped.
 fn head_is_concrete(te: ast.TypeExpr) -> Bool =
-  starts_upper(type_expr_head_name(te))
+  # Module-qualified type identity (T7): concreteness is a property of the type NAME,
+  # not the module path. type_expr_head_name now returns the canonical dotted name
+  # (e.g. "main.Maybe"), so test the last segment's case — a qualified concrete type
+  # starts with a lowercase module component and would otherwise read as a type var.
+  starts_upper(string.substring_after_last(type_expr_head_name(te), "."))
 
 fn starts_upper(s: String) -> Bool =
   match str_char_at(s, 0) with
@@ -665,7 +669,11 @@ fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
 
 fn type_expr_head_name(te: ast.TypeExpr) -> String =
   match te with
-  | ast.TypeName name -> string.substring_after_last(name, ".")
+  # Module-qualified type identity (T7): instance dispatch keys preserve the
+  # canonical (dotted) name so main.Maybe and a prelude Maybe get distinct keys.
+  # Must agree with infer's @inst registration and lowering's ctx_inst keys, which
+  # are all raw dotted names; only the emitted __tc_ LLVM symbol is dot-sanitized.
+  | ast.TypeName name -> name
   | ast.TypeApply base _ -> type_expr_head_name(base)
   | ast.TypeArrow _ _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"

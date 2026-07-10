@@ -1,0 +1,41 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression guard for module-qualified type identity — runtime dispatch half
+# (docs/module-qualified-type-identity-design-2026-07-10.md §10, Change C.3).
+#
+# main.Maybe shares the short name with prelude's Maybe (which has its own ToString
+# instance). main gives ITS Maybe a ToString instance returning "MAIN". A call on a
+# main.Maybe value must dispatch to main's instance.
+#
+# Two coupled defects on the unfixed compiler:
+#  1. Codegen mangles instance-method SYMBOLS by bare type head, so main's and the
+#     prelude's `ToString` instances both emit `__tc_ToString_Maybe_a_to_string` — a
+#     duplicate-symbol LINK error. Fixed by dot-sanitizing the __tc_ symbol only.
+#  2. Instance dispatch KEYS (infer @inst, resolve.sprout Evidence producer, lowering
+#     ctx_inst) must agree on the canonical (dotted) head. The call-site TDict head was
+#     built by infer's type_to_typeexpr_with_prog_vars, which stripped the module
+#     prefix (after_last_dot) — so the Evidence key was bare "ToString_Maybe" and
+#     matched the prelude instance instead of main's, for a main.Maybe value → runtime
+#     "non-exhaustive match". (resolve/lowering key helpers also had to keep the dotted
+#     name; only the emitted __tc_ LLVM symbol is dot-sanitized.)
+# The complete fix spans four layers, all keyed on the raw dotted canonical name
+# (only the emitted __tc_ LLVM symbol is dot-sanitized):
+#   - infer: concrete_type_str + type_to_typeexpr_with_prog_vars keep the dotted head
+#     (the TDict constraint that becomes the Evidence key);
+#   - resolve/lowering: constraint keys keep the dotted head; head_is_concrete tests the
+#     LAST SEGMENT's case (a dotted concrete type starts with a lowercase module
+#     component, else it reads as a type variable and mis-resolves to a null dict);
+#   - codegen: mangle_type_expr dot-sanitizes only the symbol.
+# Result: dispatch resolves to main's own instance → "MAIN".
+type Maybe a = Wrap a
+
+instance ToString (Maybe a) {
+  fn to_string(m: Maybe a) -> String = "MAIN"
+}
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "shadowing type dispatches to its own instance", to_string(Wrap(5)), "MAIN")
+    summary(state)

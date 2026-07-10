@@ -121,7 +121,11 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   match dict_get(name, local_vars) with
   | Just t -> t
-  | Nothing -> types.TConst(string.after_last_dot(name))
+  # Module-qualified type identity (T7): return the bundler's already-canonical
+  # name verbatim. Stripping here collapsed `main.Foo` and a prelude `Foo` to one
+  # identity. The prelude's canonical form is unqualified (empty module header), so
+  # this is a no-op on dotless names and only preserves genuine module prefixes.
+  | Nothing -> types.TConst(name)
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
@@ -355,10 +359,10 @@ fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List S
       # lookup_type_var (TConst(after_last_dot(...))), so the ctor map must agree
       # or lookups for own-module ADTs (keyed `main.C`, looked up as `C`) miss.
       | ast.TypeDecl name _ ctors _ _ ->
-          build_ctor_map(rest, dict_set(string.after_last_dot(name), collect_ctor_names(ctors, Nil), acc))
+          build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
       # WrapDecl: a single synthetic constructor with the same name as the type.
       | ast.WrapDecl name _ _ ->
-          build_ctor_map(rest, dict_set(string.after_last_dot(name), Cons(name, Nil), acc))
+          build_ctor_map(rest, dict_set(name, Cons(name, Nil), acc))
       | _ -> build_ctor_map(rest, acc)
 
 fn collect_ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
@@ -1055,7 +1059,11 @@ fn first_concrete_typed_arg_typeexpr_excluding(
 # to recover the programmer-visible variable name (e.g. "a") rather than emitting "_".
 fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(string.after_last_dot(name))
+  # Module-qualified type identity (T7): keep the canonical (dotted) name. This
+  # TypeExpr becomes the injected TDict's constraint head, which resolve.sprout turns
+  # into the instance-dispatch Evidence key — stripping here made the key bare
+  # ("ToString_Maybe") and mis-resolved a shadowed type to the prelude instance.
+  | types.TConst name -> ast.TypeName(name)
   | types.TApp base arg ->
       ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, env),
                     type_to_typeexpr_with_prog_vars(arg, class_name, env))
@@ -1106,12 +1114,13 @@ fn type_head_str(t: types.Type) -> String =
 # the outermost head is a type variable, a function type, or any non-concrete
 # form.  Used to look up @inst:{Class}:{head} instance markers.
 #
-# Module prefix is stripped (e.g. "stdlib.compiler.types.Type" → "Type") so
-# that instance lookups use bare names, matching how register_instance_marker
-# registers them via type_from_ast → lookup_type_var → after_last_dot.
+# The full module-qualified name is returned (T7): instance lookups key
+# @inst:{Class}:{head} on the canonical identity, matching register_instance_marker
+# which derives its head via type_head_str (no strip) over a resolved type. Read and
+# write must agree — de-stripping one without the other is a silent dispatch miss.
 fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(string.after_last_dot(name))
+  | types.TConst name -> Just(name)
   | types.TApp base _ -> concrete_type_str(base)
   | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | _ -> Nothing

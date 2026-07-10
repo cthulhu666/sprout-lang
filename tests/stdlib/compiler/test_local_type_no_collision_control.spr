@@ -1,0 +1,22 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Positive guard for module-qualified type identity
+# (docs/module-qualified-type-identity-design-2026-07-10.md §10).
+#
+# A module-local ADT whose short name does NOT collide with any prelude type must
+# keep working exactly as before the fix. This is the control for
+# test_type_name_collision_shadow.spr: the two files are identical except the type
+# name (LMaybe vs Maybe), which isolates the collision as the sole variable and
+# guards that de-stripping type identity does not regress ordinary local ADTs.
+type LMaybe a = MyJust a a
+
+fn second(m: LMaybe Int) -> Int =
+  match m with
+  | MyJust _ y -> y
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "non-colliding local ADT resolves and matches", second(MyJust(3, 9)), 9)
+    summary(state)

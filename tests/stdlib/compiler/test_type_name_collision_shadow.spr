@@ -1,0 +1,34 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression guard for module-qualified type identity
+# (docs/module-qualified-type-identity-design-2026-07-10.md, closes W11/T7).
+#
+# `main.Maybe` shares the SHORT name `Maybe` with `stdlib.prelude.Maybe` but is a
+# distinct type with a distinct layout. This program uses ONLY the local type —
+# it never references prelude's Just/Nothing — so it is a perfectly valid program
+# and must print/return 9.
+#
+# On the unfixed compiler, type identity is keyed by BARE name: build_ctor_map
+# (infer.sprout, via after_last_dot) collapses `main.Maybe` and
+# `stdlib.prelude.Maybe` to the single key "Maybe", last-write-wins. The prelude's
+# OWN functions that match Just/Nothing (e.g. vec_prepend_into) then fail
+# exhaustiveness with a spurious "Non-exhaustive match on Maybe" — so this file
+# fails to COMPILE on the unfixed compiler (RED for the right reason: the
+# collision breaks unrelated correct code, not a crash or import error).
+#
+# After the fix (module-qualified identity), main.Maybe and stdlib.prelude.Maybe
+# are distinct identities, keyed separately; the prelude compiles cleanly and this
+# program returns 9.
+type Maybe a = MyJust a a
+
+fn second(m: Maybe Int) -> Int =
+  match m with
+  | MyJust _ y -> y
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "local Maybe shadow does not corrupt prelude ctor map",
+      second(MyJust(3, 9)), 9)
+    summary(state)

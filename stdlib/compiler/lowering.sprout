@@ -669,11 +669,19 @@ fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
   | Nil -> ""
   | Cons h rest -> "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
 
+# Module-qualified type identity (T7): dot-sanitize a canonical type name into an
+# LLVM-valid instance-method SYMBOL fragment (__tc_...). Used ONLY for the emitted
+# symbol (mangle_type_expr). Dispatch KEYS — ctx_inst, resolve.sprout Evidence, and
+# infer @inst — keep the RAW dotted name so all three compare equal; sanitizing a
+# key would desync it from the others. Two same-short-named types thus get distinct
+# symbols and distinct keys. The prelude's canonical head is unqualified (no-op).
+fn qualified_head(name: String) -> String = string.replace_all(".", "_", name)
+
 # Returns the outermost constructor/variable name from a type expression.
 # For TupleType, include the arity so 2-tuple and 3-tuple instances don't collide.
 fn type_expr_head_name(te: ast.TypeExpr) -> String =
   match te with
-  | ast.TypeName name -> string.after_last_dot(name)
+  | ast.TypeName name -> name
   | ast.TypeApply base _ -> type_expr_head_name(base)
   | ast.TypeArrow _ _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
@@ -702,7 +710,7 @@ fn mangle_type_args_rev(args: List ast.TypeExpr, acc: List String) -> List Strin
 
 fn mangle_type_expr(te: ast.TypeExpr) -> String =
   match te with
-  | ast.TypeName name -> string.after_last_dot(name)
+  | ast.TypeName name -> qualified_head(name)
   | ast.TypeApply base arg ->
       mangle_type_expr(base) ++ "_" ++ mangle_type_expr(arg)
   | ast.TypeArrow l r effects_maybe ->
@@ -752,7 +760,7 @@ fn list_str_member_stripped(needle: String, xs: List String) -> Bool =
 
 fn first_concrete_head_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(string.after_last_dot(name))
+  | types.TConst name -> Just(name)
   | types.TApp base _ -> first_concrete_head_str(base)
   | _ -> Nothing
 
@@ -792,7 +800,7 @@ fn eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.
 
 fn type_is_unit(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> string.after_last_dot(name) == "Unit"
+  | types.TConst name -> name == "Unit"
   | _ -> false
 
 fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
@@ -939,7 +947,7 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
 
 fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(string.after_last_dot(name))
+  | types.TConst name -> ast.TypeName(name)
   | types.TVar name -> ast.TypeName(name)
   | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
   | types.TFunc param ret _ ->

@@ -335,25 +335,24 @@ runtime safety) already landed. W3 (rigidity + value restriction), W4
 (dispatch-by-constraint-position), W7 (div-by-zero), and W8 (prelude totality) have since
 landed too; W11 T8 (fresh-tyvar namespace) + T10 (inner-TApp return-type dict) landed
 2026-07-08. Remaining unblocked correctness work: W9 remainder, W7's `INT_MIN / -1`
-operator guard (coupled to the int-overflow policy), W2 R2, and W11 T7 (risky — bare-name
-type identity) / T11 (iface-gated). W6 (effects) stays DEFERRED pending an effect-system
-design pass.
+operator guard (coupled to the int-overflow policy), W2 R2, and T11 (iface-gated). W11 T7
+(bare-name type identity) LANDED 2026-07-10. W6 (effects) stays DEFERRED pending an
+effect-system design pass.
 
-**Bare-name type identity — cross-module type-name collision (2026-07-04).** Type
-resolution collapses every type to its unqualified name: scrutinee types resolve to
-`TConst(after_last_dot(name))` and `infer.build_ctor_map` keys constructor sets by the
-same bare name. Two types sharing a short name across modules (e.g.
-`stdlib.compiler.Diagnostic` vs `stdlib.compiler.compiler.Diagnostic`) therefore become
-one type identity — distinct runtime layouts, indistinguishable to the checker. The
-exhaustiveness pass caught this as a false "non-exhaustive match" when `sproutd` first
-bundled both modules (the guard fired; the latent hole is that unifying values of the two
-layouts would be silently accepted → memory corruption). Mitigated for that instance by
-renaming the report-entry type to `stdlib.compiler.ReportEntry` (regression guard:
-`tests/stdlib/compiler/test_diagnostic_name_collision.spr`). Root-cause fix (deferred):
-thread fully-qualified names through `lookup_type_var` and the `TConst` representation so
-type identity is module-qualified. This is a soundness-scale change to type resolution and
-directly contends with the documented reason bare keying exists (own-module ADTs keyed
-`main.C`, looked up as `C`, must still resolve) — scope it deliberately, not opportunistically.
+**Bare-name type identity — cross-module type-name collision. DONE 2026-07-10** (branch
+`design/module-qualified-type-identity`, W11/T7). Type identity is now module-qualified.
+The root-cause fix was "stop stripping," not a new resolver: `bundler.qualify_type_name`
+already resolves references correctly (local-shadows-prelude), so ~37 `after_last_dot`
+sites re-stripping the canonical name were the whole bug; the prelude's empty module header
+makes its canonical identity the bare name, distinct from `main.Maybe`. The fix threaded
+six representations (checker identity, the injected TDict head, three dispatch keyspaces,
+the `__tc_` LLVM symbol, and `head_is_concrete`) — see
+`docs/module-qualified-type-identity-design-2026-07-10.md` for the full anatomy and the
+`head_is_concrete`-reads-the-lowercase-module-prefix-as-a-type-variable gotcha. Regression
+guards: `tests/stdlib/compiler/test_type_name_collision_{shadow,instance_dispatch}.spr` +
+`test_local_type_no_collision_control.spr`. Prerequisite for sound separate compilation in
+the iface arc. Latent hardening left: `resolve`/`lowering` `is_type_var_name` lack the
+dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable).
 
 1. Execute Model C GC-rooting plan (typed Sprout-IR + linear types).
    Design doc: [gc-rooting-model-c-plan-2026-06-02.md](./docs/gc-rooting-model-c-plan-2026-06-02.md).
