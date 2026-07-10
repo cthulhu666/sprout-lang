@@ -81,7 +81,11 @@ git checkout -B "$LOCAL_BRANCH" "origin/$HEAD_REF" >/dev/null 2>&1
 echo "PR#$PR: rebasing onto origin/master ($(git rev-parse origin/master | cut -c1-12))"
 git rebase origin/master 2>&1 | tail -5 || true
 NON_SEED_CONFLICT=0
-while [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; do
+# NB: use git-path, not a literal .git/ — in a git worktree .git is a FILE
+# pointing at the common gitdir, so `.git/rebase-merge` never exists and this
+# loop would silently skip conflict resolution, leaving the rebase incomplete
+# and the script exiting 0 with a false "rebased" (observed on PR #156).
+while [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; do
   CONFLICTS=$(git diff --name-only --diff-filter=U)
   if [ -z "$CONFLICTS" ]; then
     git rebase --abort 2>/dev/null || true
