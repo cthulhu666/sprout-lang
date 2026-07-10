@@ -1,0 +1,142 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set)
+
+# Regression: a `wrap` type (tag sentinel -1, UNBOXED) passed the width-2 shape
+# check, so a matched wrap-returning fn routed to a worker whose catch-all repack
+# aborted (wrap types aren't in adt_index). Tier-2 must NOT route wrap matches.
+wrap Label = String
+
+fn make_label(n: Int) -> Label =
+  match n with
+  | 0 -> Label("zero")
+  | _ -> Label("other")
+
+fn label_probe(n: Int) -> String =
+  match make_label(n) with
+  | Label s -> s
+
+# Tier-2 CPR runtime behaviour: each `match f(..) with` below routes to an
+# emitted `@f_worker`; these assertions confirm the unboxed round-trip returns
+# the same values the boxed path would. Exercises every worker-body shape.
+
+# --- custom width-2 ADT: tail-ctor + `if` recursion path ---
+type Box a = Empty | Full a
+
+fn bget(i: Int) -> Box Int =
+  if i < 0 then Empty else Full(i)
+
+fn box_probe(i: Int) -> Int =
+  match bget(i) with
+  | Full x -> x
+  | Empty -> 0 - 1
+
+# --- Result: tail-ctor path (Ok/Err both arity 1) ---
+fn parse(k: Int) -> Result String Int =
+  if k < 0 then Err("neg") else Ok(k + 100)
+
+fn parse_probe(k: Int) -> Int =
+  match parse(k) with
+  | Ok x -> x
+  | Err _ -> 0 - 1
+
+# --- catch-all repack: body is a `match`, not a recognized tail shape ---
+fn lookup(k: Int) -> Maybe Int =
+  match k with
+  | 0 -> Nothing
+  | _ -> Just(k * 10)
+
+fn lookup_probe(k: Int) -> Int =
+  match lookup(k) with
+  | Just x -> x
+  | Nothing -> 0 - 1
+
+# --- recursion through the worker (Result, nested rerouted matches) ---
+fn sumcheck(t: Int) -> Result String Int =
+  if t == 0 then Ok(0)
+  else match sumcheck(t - 1) with
+       | Ok acc -> Ok(acc + t)
+       | Err e -> Err(e)
+
+fn sum_probe(t: Int) -> Int =
+  match sumcheck(t) with
+  | Ok v -> v
+  | Err _ -> 0 - 1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # custom ADT (if + tail ctor)
+    assert_eq(state, "box Full payload", box_probe(7), 7)
+    assert_eq(state, "box Empty (nullary, val=0)", box_probe(0 - 3), 0 - 1)
+
+    # Result (tail ctor)
+    assert_eq(state, "parse Ok payload", parse_probe(5), 105)
+    assert_eq(state, "parse Err", parse_probe(0 - 5), 0 - 1)
+
+    # catch-all repack (match-bodied fn)
+    assert_eq(state, "lookup Just payload", lookup_probe(4), 40)
+    assert_eq(state, "lookup Nothing", lookup_probe(0), 0 - 1)
+
+    # recursion through worker
+    assert_eq(state, "sumcheck 1..5", sum_probe(5), 15)
+
+    # extern-chain: mutvec_get worker chains to vector_get_unboxed
+    v <- mutvec_new(3, 10)
+    mutvec_set(v, 1, 99)
+    assert_eq(state, "mutvec_get in-bounds set", mutvec_get_probe(v, 1), 99)
+    assert_eq(state, "mutvec_get default fill", mutvec_get_probe(v, 0), 10)
+    assert_eq(state, "mutvec_get out-of-bounds", mutvec_get_probe(v, 9), 0 - 1)
+
+    # do-bind unboxing (Maybe): `x <- mutvec_get(..)` routes to the worker;
+    # the whole chain mutmatrix_get -> mutvec_get -> vector_get returns unboxed.
+    mm <- mutmatrix_new(2, 3, 8)
+    mutmatrix_set(mm, 1, 2, 55)
+    assert_eq(state, "do-bind Maybe chain (in-bounds)", cell_get_probe(mm, v), 154)
+    assert_eq(state, "do-bind Maybe chain (out-of-bounds)", cell_get_probe_oob(mm), 0 - 1)
+
+    # do-bind unboxing (Result): Ok round-trip and Err short-circuit
+    assert_eq(state, "do-bind Result Ok", combine_probe(3, 4), 14)
+    assert_eq(state, "do-bind Result Err short-circuit", combine_probe(3, 0 - 1), 0 - 1)
+
+    # wrap type (unboxed, tag -1) must not route to a Tier-2 worker
+    assert_eq(state, "wrap-returning match not miscompiled (zero)", label_probe(0), "zero")
+    assert_eq(state, "wrap-returning match not miscompiled (other)", label_probe(7), "other")
+
+    summary(state)
+
+fn mutvec_get_probe(v: MutVec Int, i: Int) -> Int !{IO} =
+  match mutvec_get(v, i) with
+  | Just x -> x
+  | Nothing -> 0 - 1
+
+# do-bind Maybe: getters used via `<-`, exercising do-bind unboxing + chaining.
+fn cell_get(m: MutMatrix Int, v: MutVec Int) -> Maybe Int !{IO} =
+  do
+    a <- mutmatrix_get(m, 1, 2)
+    b <- mutvec_get(v, 1)
+    Just(a + b)
+
+fn cell_get_probe(m: MutMatrix Int, v: MutVec Int) -> Int !{IO} =
+  match cell_get(m, v) with | Just x -> x | Nothing -> 0 - 1
+
+fn cell_oob(m: MutMatrix Int) -> Maybe Int !{IO} =
+  do
+    a <- mutmatrix_get(m, 9, 9)
+    Just(a)
+
+fn cell_get_probe_oob(m: MutMatrix Int) -> Int !{IO} =
+  match cell_oob(m) with | Just x -> x | Nothing -> 0 - 1
+
+# do-bind Result: Ok round-trip + Err short-circuit through the worker.
+fn checked(k: Int) -> Result String Int =
+  if k < 0 then Err("neg") else Ok(k * 2)
+
+fn combine(a: Int, b: Int) -> Result String Int =
+  do
+    x <- checked(a)
+    y <- checked(b)
+    Ok(x + y)
+
+fn combine_probe(a: Int, b: Int) -> Int =
+  match combine(a, b) with | Ok v -> v | Err _ -> 0 - 1

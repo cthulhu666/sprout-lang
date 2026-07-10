@@ -188,6 +188,19 @@ export type IROp (..) =
   # = true (regex/term_read variants allocate their payload before returning);
   # <val> is rooted per <val_kind> exactly as the boxed IRGetField result was.
   | IRCallUnboxed2 String String IRType String (List String)
+  # IRRetUnboxed2 <base> <tag> <val> — Tier-2 CPR: a CPR worker's return.  Packs
+  # the ctor tag and its single payload (0 for a nullary ctor) into the
+  # { i64, i64 } worker ABI and returns by value — no `Just`/ctor heap box.
+  # <tag>/<val> may be SSA names OR integer literals ("13", "0"); <base> is a
+  # FRESH SSA name (e.g. %t$7) that seeds the two insertvalue temporaries so the
+  # emitted names are always valid regardless of literal operands.  Emitted only
+  # inside a `define { i64, i64 } @<fn>_worker`.  Lowers to:
+  #   <base>$r0 = insertvalue { i64, i64 } undef, i64 <tag>, 0
+  #   <base>$r1 = insertvalue { i64, i64 } <base>$r0, i64 <val>, 1
+  #   ret { i64, i64 } <base>$r1
+  # No GC trigger between materializing <val> and the ret, so <val> needs no
+  # extra root here (the callee already rooted it if heap).
+  | IRRetUnboxed2 String String String
   | IRStrConst String String String
   | IRStrSlice String String String String
   | IRStrConcat String String String
@@ -468,6 +481,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
   | IRCallUnboxed2 tag val _vk fname args ->
       "    (" ++ tag ++ ", " ++ val ++ ") = call_unboxed2 @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
+  | IRRetUnboxed2 _base tag val ->
+      "    ret_unboxed2 (" ++ tag ++ ", " ++ val ++ ")"
   | IRStrConst r raw s ->
       "    " ++ r ++ " = strconst (" ++ raw ++ ") \"" ++ s ++ "\""
   | IRStrSlice r s start len ->

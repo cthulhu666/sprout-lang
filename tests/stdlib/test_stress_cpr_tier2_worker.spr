@@ -1,0 +1,68 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# GC-stress regression for Tier-2 CPR *workers* returning a HEAP payload.
+#
+# Tier-1's heap-payload stress test hits the extern `_unboxed` path. This one
+# exercises the new surface: a `{i64,i64}` Sprout `@<fn>_worker` whose `val`
+# slot is a live heap String, held across a GC trigger, reached via a WORKER
+# CHAIN (outer_worker -> inner_worker) and consumed both through a `match` and a
+# `<-` do-bind. If the worker body / call site fails to root `val` (kind
+# IRTUnknown -> heap), str_concat reads swept memory — visible ONLY under
+# SPROUT_GC_STRESS=1. In test-stress's STRESS_FILES.
+
+# Allocate `n` fresh strings and discard them — forces collections under stress.
+fn burn(n: Int, acc: String) -> String !{IO} =
+  if n <= 0 then acc
+  else burn(n - 1, str_concat(acc, "x"))
+
+# inner is matched (probe_inner) -> inner_worker exists; returns a heap String.
+fn inner(i: Int) -> Maybe String =
+  if i < 0 then Nothing else Just(str_concat("v", int_to_string(i)))
+
+# outer's tail-call to inner chains to @inner_worker (no box); heap payload flows
+# through the chain.
+fn outer(i: Int) -> Maybe String =
+  if i > 100 then Nothing else inner(i)
+
+fn probe_inner(i: Int) -> String !{IO} =
+  match inner(i) with
+  | Just s ->
+      do
+        _ <- burn(40, "")
+        str_concat(s, "#")
+  | Nothing -> "none"
+
+# Consume the chained worker's heap payload via `match`, held live across burn.
+fn probe_match(i: Int) -> String !{IO} =
+  match outer(i) with
+  | Just s ->
+      do
+        _ <- burn(40, "")
+        str_concat(s, "!")
+  | Nothing -> "none"
+
+# Consume it via do-bind unboxing, held live across burn.
+fn probe_dobind(i: Int) -> String !{IO} =
+  match run_dobind(i) with
+  | Just s -> s
+  | Nothing -> "none"
+
+fn run_dobind(i: Int) -> Maybe String !{IO} =
+  do
+    s <- outer(i)
+    _ <- burn(40, "")
+    Just(str_concat(s, "?"))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    a <- probe_inner(3)
+    b <- probe_match(2)
+    c <- probe_dobind(5)
+    d <- probe_match(0 - 1)
+    assert_eq(state, "inner worker heap payload survives GC", a, "v3#")
+    assert_eq(state, "chained worker (match) heap payload survives GC", b, "v2!")
+    assert_eq(state, "chained worker (do-bind) heap payload survives GC", c, "v5?")
+    assert_eq(state, "outer Nothing arm", d, "none")
+    summary(state)

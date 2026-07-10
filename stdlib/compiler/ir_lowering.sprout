@@ -179,6 +179,12 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ tag ++ "$st = call { i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")\n" ++
       "  " ++ tag ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 0\n" ++
       "  " ++ val ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 1"
+  # Tier-2 CPR worker return: pack (tag, val) into the { i64, i64 } ABI and
+  # return by value.  `undef` seeds the aggregate; two insertvalues fill it.
+  | sprout_ir.IRRetUnboxed2 base tag val ->
+      "  " ++ base ++ "$r0 = insertvalue { i64, i64 } undef, i64 " ++ tag ++ ", 0\n" ++
+      "  " ++ base ++ "$r1 = insertvalue { i64, i64 } " ++ base ++ "$r0, i64 " ++ val ++ ", 1\n" ++
+      "  ret { i64, i64 } " ++ base ++ "$r1"
   | sprout_ir.IRStrConst r raw _ ->
       match dict_get(raw, str_table) with
       | Just entry ->

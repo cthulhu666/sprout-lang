@@ -47,6 +47,8 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # allocate their payload before returning — so, like IRCall, conservatively a
   # trigger.  Purely additive (over-roots the non-allocating variants).
   | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
+  # IRRetUnboxed2 is a terminator: two insertvalues + ret, pure — no allocation.
+  | sprout_ir.IRRetUnboxed2 _ _ _ -> false
   # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
   # IRMkClosure allocates env via @sprout_alloc_closure_env; trigger.
@@ -144,6 +146,8 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
       match vk with
       | sprout_ir.IRTScalar -> Nothing
       | _ -> Just(val)
+  # IRRetUnboxed2 is a terminator — it produces no SSA def to root.
+  | sprout_ir.IRRetUnboxed2 _ _ _ -> Nothing
   # FIX R4#7: honour the kind field. IRTScalar slots (Int, Bool, Char) are
   # not heap; IRTHeap slots (String, ADT, closure) are; IRTUnknown is
   # treated as heap (conservative). This avoids over-rooting scalar captures
@@ -319,6 +323,8 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRCall _ _ _ args -> args
   # Unboxed call reads its args (the two defs <tag>/<val> are results, not uses).
   | sprout_ir.IRCallUnboxed2 _ _ _ _ args -> args
+  # Both the packed tag and payload are live into the ret (base is a fresh def).
+  | sprout_ir.IRRetUnboxed2 _ tag val -> Cons(tag, Cons(val, Nil))
   | sprout_ir.IRStrConst _ _ _ -> Nil
   | sprout_ir.IRStrSlice _ s start len -> Cons(s, Cons(start, Cons(len, Nil)))
   | sprout_ir.IRStrConcat _ a b -> Cons(a, Cons(b, Nil))
@@ -630,6 +636,8 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # Like IRCall, an unboxed extern may collect before consuming its operands;
   # root the heap operands across it (additive — only adds roots).
   | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
+  # IRRetUnboxed2 is a terminator: insertvalue+ret, no allocation, no exposure.
+  | sprout_ir.IRRetUnboxed2 _ _ _ -> false
   # Everything else does NOT expose operands: str builtins SPROUT_HANDLE their
   # inputs before allocating; the rest do not allocate.  EXHAUSTIVE on purpose —
   # no `_` catch-all, so a new allocating IROp is a COMPILE ERROR until its

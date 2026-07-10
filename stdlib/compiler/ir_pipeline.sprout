@@ -121,6 +121,39 @@ fn stream_decls(decls: List typed_ast.TypedDecl,
                             stream_decls(rest, ctors, top_level, let_names, fn_arities,
                                          lambda_ctr_ref, lifted_idx_ref, s2)
 
+# Tier-2 CPR: stream an unboxed { i64, i64 } worker for each matched callee,
+# AFTER all boxed decls (so an escaping use resolves to the boxed original).
+# Each worker is rooted + lowered through emit_one_fn like any other fn.
+fn stream_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
+                  ctors: Dict (Int, Int, Int, String), top_level: Set, let_names: Set,
+                  fn_arities: Dict Int, adt_index: Dict (List (Int, Int)),
+                  lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                  state: StreamState) -> Result String StreamState !{IO} =
+  match names with
+  | Nil -> Ok(state)
+  | Cons name rest ->
+      match ast_to_ir.emit_worker_for(name, decls, ctors, top_level, let_names, fn_arities,
+                                      adt_index, worker_set, lambda_ctr_ref, lifted_idx_ref) with
+      | Err msg -> Err(msg)
+      | Ok maybe_w ->
+          match maybe_w with
+          | Nothing ->
+              stream_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities, adt_index,
+                             lambda_ctr_ref, lifted_idx_ref, state)
+          | Just wtriple ->
+              match wtriple with
+              | (wfn, wnext, wlifted) ->
+                  match wfn with
+                  | sprout_ir.IRFunction wname _ _ _ ->
+                      do
+                        lifted_idx <- ref_read(lifted_idx_ref)
+                        let idx_map = dict_set(wname, wnext, lifted_idx)
+                        match emit_lifted_then_fn(wlifted, wfn, idx_map, state) with
+                        | Err msg -> Err(msg)
+                        | Ok s2 ->
+                            stream_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities,
+                                           adt_index, lambda_ctr_ref, lifted_idx_ref, s2)
+
 # ---------------------------------------------------------------------------
 # Entry point: compile_program_streaming
 #
@@ -155,7 +188,16 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                          lambda_ctr_ref, lifted_idx_ref, init_state) with
                       | Err msg -> Err(msg)
                       | Ok after_decls ->
-                          match after_decls with
+                        match ast_to_ir.collect_worker_callees(decls, top_level_set, ctors) with
+                        | wset ->
+                        match stream_workers(
+                                set_to_list(wset), wset,
+                                decls, ctors, top_level_set, let_names, fn_arities,
+                                ast_to_ir.build_adt_ctor_index(decls, ctors),
+                                lambda_ctr_ref, lifted_idx_ref, after_decls) with
+                        | Err msg -> Err(msg)
+                        | Ok after_workers ->
+                          match after_workers with
                           | StreamState next_idx2 str_acc bodies_acc defined has_user_main ->
                               # Emit init fn last if there are runtime lets.
                               match runtime_lets with

@@ -1,0 +1,96 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+# Tier-2 CPR generalizes beyond Maybe: ANY width-2 ADT (every constructor holds
+# 0 or 1 field, i.e. max_ar <= 1) is unboxable.  Here a custom `Box a = Empty |
+# Full a` wrapper whose body is `if i < 0 then Empty else Full(i)` must emit a
+# { i64, i64 } worker (tail constructors -> struct, `if` recursed into), and the
+# matched call site must route to it — no boxed `@bget` allocation.
+
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+
+fn box_int() -> types.Type =
+  types.TApp(types.TConst("Box"), types.TConst("Int"))
+
+# type Box a = Empty | Full a   (Empty arity 0, Full arity 1 -> max_ar = 1)
+fn box_decl() -> typed_ast.TypedDecl =
+  typed_ast.TPassThrough(
+    ast.TypeDecl("Box", Cons("a", Nil),
+      Cons(ast.TypeConstructor("Empty", Nil),
+        Cons(ast.TypeConstructor("Full", Cons(ast.TypeName("a"), Nil)), Nil)),
+      Nil, no_pos()))
+
+# fn bget(i) = if i < 0 then Empty else Full(i)
+fn bget_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("bget",
+    Cons(ast.Param("i", Nothing), Nil),
+    Nothing, Nothing, Nil,
+    typed_ast.TIf(
+      typed_ast.TBinary("<",
+        typed_ast.TVar("i", types.TConst("Int"), no_pos()),
+        typed_ast.TInt(0, types.TConst("Int"), no_pos()),
+        types.TConst("Bool"), no_pos()),
+      typed_ast.TVar("Empty", box_int(), no_pos()),
+      typed_ast.TCall(
+        typed_ast.TVar("Full", box_int(), no_pos()),
+        Cons(typed_ast.TVar("i", types.TConst("Int"), no_pos()), Nil),
+        box_int(), no_pos()),
+      box_int(), no_pos()))
+
+# fn probe2(i) =
+#   match bget(i) with
+#   | Full x -> x
+#   | Empty  -> 0
+fn probe2_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("probe2",
+    Cons(ast.Param("i", Nothing), Nil),
+    Nothing, Nothing, Nil,
+    typed_ast.TMatch(
+      typed_ast.TCall(
+        typed_ast.TVar("bget", types.TConst("Int"), no_pos()),
+        Cons(typed_ast.TVar("i", types.TConst("Int"), no_pos()), Nil),
+        box_int(), no_pos()),
+      Cons(
+        typed_ast.TypedMatchBranch(
+          ast.ConstructorPattern("Full", Cons(ast.VarPattern("x", no_pos()), Nil), no_pos()),
+          typed_ast.TVar("x", types.TConst("Int"), no_pos())),
+        Cons(
+          typed_ast.TypedMatchBranch(
+            ast.ConstructorPattern("Empty", Nil, no_pos()),
+            typed_ast.TInt(0, types.TConst("Int"), no_pos())),
+          Nil)),
+      types.TConst("Int"), no_pos()))
+
+fn probe_program() -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram(
+    Cons(box_decl(),
+    Cons(bget_decl(),
+    Cons(probe2_decl(), Nil))))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match ast_to_ir.translate_program(probe_program()) with
+    | Err msg ->
+        do
+          assert_true(state, "translate should succeed (got Err: " ++ msg ++ ")", false)
+          summary(state)
+    | Ok pair ->
+        match pair with
+        | (ir_prog, idx_map) ->
+            do
+              let ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+              assert_true(state, "custom-ADT worker define emitted",
+                str_find(ir, "define { i64, i64 } @bget_worker(") >= 0)
+              assert_true(state, "match site calls the worker",
+                str_find(ir, "call { i64, i64 } @bget_worker(") >= 0)
+              assert_true(state, "no boxed bget call at match site",
+                str_find(ir, "call i64 @bget(") < 0)
+              summary(state)
