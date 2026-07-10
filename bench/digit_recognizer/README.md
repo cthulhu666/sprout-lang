@@ -44,7 +44,7 @@ migration, and the fused Double matvec kernels (`mutmatrix_row_dot` /
 | Java | 0.12 |
 | Scala (imperative) | 0.20 |
 | Scala (idiomatic) | 0.72 |
-| Sprout (clang -O2) | 0.76 |
+| Sprout (kernels, clang -O2) | 0.76 |
 | Haskell (pure) | 1.02 |
 | Python (plain) | 1.69 |
 
@@ -55,6 +55,31 @@ migration moved the row dot products and updates to closed library loops reading
 `vector_get_direct`; the fused Double kernels then inlined the multiply-accumulate, removing
 the per-callback closure entirely (about **1.13M → 0.21M closure allocations**, a ~2× cut of
 this stage on its own).
+
+### Reading the Sprout row — it is the *tuned* idiom, not the naive one
+
+The Sprout number is not apples-to-apples with the *inline* array loops the other fast ports
+write, and it should not be read as "idiomatic Sprout." The distinction:
+
+- **Go / Java / Scala-imperative / Haskell-unsafe** write the inner dot product and weight
+  update as a plain inline loop over the array — `z += w[h][i] * x[i]` — the obvious code any
+  programmer reaches for in that language.
+- **Sprout** cannot express that inline loop in user code today. An unboxed *and* bounds-checked
+  array read (`vector_get_direct`) is private to `stdlib.mutable`, and the generic iteration
+  combinators allocate a closure per element. So the fast path is only reachable through the
+  hand-written stdlib kernels `mutmatrix_row_dot` / `mutmatrix_row_sub_scaled_inplace`. **The
+  `0.76s` above is Sprout's *tuned* number** — comparable to the other *tuned* ports (Haskell-
+  unsafe, Scala-imperative), not to a naive baseline.
+
+This is not the kernel skipping work: it performs the same bounds-checked, unboxed
+multiply-accumulate as Go's inline loop (and is *safer* than Haskell-unsafe's unchecked
+`unsafeRead`), with bit-identical results. What it hides is expressibility — **idiomatic Sprout,
+using the generic `mutmatrix_row_zip_fold` / `row_zip_update` combinators, runs at about
+`1.42s`** (a closure allocated per element). That combinators→kernels spread (`1.42s → 0.76s`)
+is Sprout's own version of the naive→tuned gap this benchmark isolates for Scala (`Vector →
+Array`) and Haskell (lists → `IOUArray`); the single row above simply reports the tuned end.
+Making that inline fast loop expressible in ordinary Sprout — so no bespoke kernel is needed — is
+the point of the unboxed-float / numeric-representation work tracked in `BACKLOG.md`.
 
 Sprout is now ~7× Go, sits between idiomatic Scala and pure Haskell, and is ~2.2× faster
 than plain CPython here. The remaining gap is mostly the same numeric representation problem:
