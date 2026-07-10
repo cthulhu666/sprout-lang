@@ -352,6 +352,28 @@ typechecker while sharing the underlying representation.
 Int` makes `Foo` interchangeable with `Int` everywhere. A `wrap` is opaque to
 callers and requires explicit construction or pattern matching.
 
+### 5.6.2 Type identity
+
+Two types are equal **iff they have the same canonical identity assigned by name
+resolution** — not iff their unqualified names match. Name resolution maps every
+surface type reference to the declaration it denotes, using the current module,
+its imports, and the prelude, with the current module taking precedence (a
+module-local type shadows a prelude type of the same short name). A bare name is a
+resolution convenience, never an identity.
+
+Consequently, two type declarations that share a short name in different modules
+are **distinct types**: their values do not unify, each has its own constructor
+set for exhaustiveness, and each may carry its own typeclass instances. A program
+that redefines a prelude/stdlib type name gets a genuinely new type, not the
+stdlib one.
+
+> The v0 implementation realizes canonical identity as the module-qualified name
+> (e.g. `main.Maybe`; the prelude, having no module header, canonically owns the
+> unqualified name). That representation is an implementation choice — the
+> normative rule is that identity is canonical and resolver-assigned, which leaves
+> room for a future generative identity (functors / path-dependent types) without
+> a spec change.
+
 ### 5.7 Template literals (Experimental)
 
 > **Experimental** — not part of normative v0 until Phase 5 of the string
