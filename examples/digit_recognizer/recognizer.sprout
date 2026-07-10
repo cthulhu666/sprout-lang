@@ -20,7 +20,8 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, MutMatrix, mu
 # `MutMatrix` replaces the earlier single flat MutVec + hand-rolled index math.
 # Iteration uses the prelude's effect-polymorphic combinators (`range_each`/
 # `range_fold`/`list_each`/`list_fold`); IntRange is inclusive, so a half-open
-# [0, n) loop is `range(0, n - 1)`.
+# [0, n) loop is `range(0, n - 1)`.  Each loop body is a local `let`-closure that
+# captures the enclosing net / buffers, so no state is threaded through parameters.
 #
 # Run from the repository root:
 #   ./build/compile_driver_bin_stage1 --emit-ir "$PWD/stdlib" \
@@ -60,29 +61,32 @@ fn lcg_next(state: Int) -> Int = mod_int(1664525 * state + 1013904223, 214748364
 fn lcg_to_weight(state: Int) -> Double =
   to_double(mod_int(state, 2000) - 1000) / 10000.0
 
-# Fill matrix cell k (row-major: k -> (k/cols, k%cols)) from the LCG state,
-# returning the advanced state so the whole net threads one continuous sequence.
-fn fill_matrix_step(m: MutMatrix Double, state: Int, k: Int) -> Int !{IO} =
-  do
-    let cols = mutmatrix_cols(m)
-    _ <- mutmatrix_set(m, k / cols, k - (k / cols) * cols, lcg_to_weight(state))
-    lcg_next(state)
-
-fn fill_vec_step(v: MutVec Double, state: Int, k: Int) -> Int !{IO} =
-  do
-    _ <- mutvec_set(v, k, lcg_to_weight(state))
-    lcg_next(state)
-
-# Thread one LCG sequence through W1 (row-major), then B1, then W2, then B2 —
-# the same element order the old flat weight vector used, so results are stable.
+# Thread one LCG sequence through W1 (row-major), then B1, then W2, then B2 — the
+# same element order the old flat weight vector used, so results are stable.  Each
+# fill closure captures its target matrix/vector; a step reads state s, writes cell
+# k (row-major: k -> (k/cols, k%cols)), and returns the advanced state.
 fn init_net(net: Net) -> Unit !{IO} =
   match net with
   | Net w1 b1 w2 b2 ->
       do
-        s1 <- range_fold(\ (s, k) -> fill_matrix_step(w1, s, k), 12345, range(0, n_hid * n_in - 1))
-        s2 <- range_fold(\ (s, k) -> fill_vec_step(b1, s, k), s1, range(0, n_hid - 1))
-        s3 <- range_fold(\ (s, k) -> fill_matrix_step(w2, s, k), s2, range(0, n_out * n_hid - 1))
-        _ <- range_fold(\ (s, k) -> fill_vec_step(b2, s, k), s3, range(0, n_out - 1))
+        let fill_w1 = \ (s, k) -> do
+              let cols = mutmatrix_cols(w1)
+              mutmatrix_set(w1, k / cols, k - (k / cols) * cols, lcg_to_weight(s))
+              lcg_next(s)
+        let fill_b1 = \ (s, k) -> do
+              mutvec_set(b1, k, lcg_to_weight(s))
+              lcg_next(s)
+        let fill_w2 = \ (s, k) -> do
+              let cols = mutmatrix_cols(w2)
+              mutmatrix_set(w2, k / cols, k - (k / cols) * cols, lcg_to_weight(s))
+              lcg_next(s)
+        let fill_b2 = \ (s, k) -> do
+              mutvec_set(b2, k, lcg_to_weight(s))
+              lcg_next(s)
+        s1 <- range_fold(fill_w1, 12345, range(0, n_hid * n_in - 1))
+        s2 <- range_fold(fill_b1, s1, range(0, n_hid - 1))
+        s3 <- range_fold(fill_w2, s2, range(0, n_out * n_hid - 1))
+        _ <- range_fold(fill_b2, s3, range(0, n_out - 1))
         ()
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ fn fill_sample(ints: List Int, pixels: MutVec Double, i: Int) -> Int !{IO} =
   | Cons v rest ->
       if i < n_in then
         do
-          _ <- mutvec_set(pixels, i, to_double(v) / 16.0)
+          mutvec_set(pixels, i, to_double(v) / 16.0)
           fill_sample(rest, pixels, i + 1)
       else v
 
@@ -134,128 +138,106 @@ fn dataset_size(xs: List (MutVec Double, Int)) -> Int =
 # ---------------------------------------------------------------------------
 # Forward pass (writes into caller-provided hidden/out buffers)
 # ---------------------------------------------------------------------------
-fn hidden_z_step(w1: MutMatrix Double, x: MutVec Double, h: Int, acc: Double, i: Int) -> Double !{IO} =
-  do
-    wi <- mutmatrix_get(w1, h, i)
-    xi <- mutvec_get(x, i)
-    acc + wi * xi
-
-fn compute_hidden_unit(w1: MutMatrix Double, b1: MutVec Double, x: MutVec Double, hidden: MutVec Double, h: Int) -> Unit !{IO} =
-  do
-    b <- mutvec_get(b1, h)
-    z <- range_fold(\ (acc, i) -> hidden_z_step(w1, x, h, acc, i), b, range(0, n_in - 1))
-    mutvec_set(hidden, h, softsign(z))
-
-fn out_z_step(w2: MutMatrix Double, hidden: MutVec Double, o: Int, acc: Double, h: Int) -> Double !{IO} =
-  do
-    wh <- mutmatrix_get(w2, o, h)
-    hh <- mutvec_get(hidden, h)
-    acc + wh * hh
-
-fn compute_output_unit(w2: MutMatrix Double, b2: MutVec Double, hidden: MutVec Double, out: MutVec Double, o: Int) -> Unit !{IO} =
-  do
-    b <- mutvec_get(b2, o)
-    z <- range_fold(\ (acc, h) -> out_z_step(w2, hidden, o, acc, h), b, range(0, n_hid - 1))
-    mutvec_set(out, o, z)
-
+# Each unit closure captures the weights + buffers; the inner `dot` closure captures
+# the current row index and folds the weighted sum, seeded with the bias.
 fn forward(net: Net, x: MutVec Double, hidden: MutVec Double, out: MutVec Double) -> Unit !{IO} =
   match net with
   | Net w1 b1 w2 b2 ->
       do
-        _ <- range_each(\h -> compute_hidden_unit(w1, b1, x, hidden, h), range(0, n_hid - 1))
-        range_each(\o -> compute_output_unit(w2, b2, hidden, out, o), range(0, n_out - 1))
+        let hidden_unit = \h -> do
+              let dot = \ (acc, i) -> do
+                    wi <- mutmatrix_get(w1, h, i)
+                    xi <- mutvec_get(x, i)
+                    acc + wi * xi
+              b <- mutvec_get(b1, h)
+              z <- range_fold(dot, b, range(0, n_in - 1))
+              mutvec_set(hidden, h, softsign(z))
+        let output_unit = \o -> do
+              let dot = \ (acc, h) -> do
+                    wh <- mutmatrix_get(w2, o, h)
+                    hh <- mutvec_get(hidden, h)
+                    acc + wh * hh
+              b <- mutvec_get(b2, o)
+              z <- range_fold(dot, b, range(0, n_hid - 1))
+              mutvec_set(out, o, z)
+        range_each(hidden_unit, range(0, n_hid - 1))
+        range_each(output_unit, range(0, n_out - 1))
 
 # argmax over the output layer, as a fold threading (best_index, best_value).
-fn argmax_step(out: MutVec Double, acc: (Int, Double), o: Int) -> (Int, Double) !{IO} =
-  do
-    v <- mutvec_get(out, o)
-    match acc with
-    | (best_i, best_v) -> if v > best_v then (o, v) else (best_i, best_v)
-
 fn predict(out: MutVec Double) -> Int !{IO} =
   do
-    result <- range_fold(\ (acc, o) -> argmax_step(out, acc, o), (0, -1000000.0), range(0, n_out - 1))
+    let step = \ (acc, o) -> do
+          v <- mutvec_get(out, o)
+          match acc with
+          | (best_i, best_v) -> if v > best_v then (o, v) else (best_i, best_v)
+    result <- range_fold(step, (0, -1000000.0), range(0, n_out - 1))
     match result with | (best_i, _) -> best_i
 
 # ---------------------------------------------------------------------------
 # Backpropagation with inline SGD weight updates
 # ---------------------------------------------------------------------------
-# dhidden[h] += dout_o * W2[o][h] for one output o (uses OLD W2, before updates).
-fn accum_dhidden_term(w2: MutMatrix Double, dhidden: MutVec Double, o: Int, dout_o: Double, h: Int) -> Unit !{IO} =
-  do
-    wh <- mutmatrix_get(w2, o, h)
-    cur <- mutvec_get(dhidden, h)
-    mutvec_set(dhidden, h, cur + dout_o * wh)
-
-fn accum_dhidden_output(w2: MutMatrix Double, out: MutVec Double, label: Int, dhidden: MutVec Double, o: Int) -> Unit !{IO} =
-  do
-    oo <- mutvec_get(out, o)
-    let dout_o = 2.0 * (oo - target_of(o, label))
-    range_each(\h -> accum_dhidden_term(w2, dhidden, o, dout_o, h), range(0, n_hid - 1))
-
-# Update W2[o][h] toward the gradient for one output o.
-fn update_out_weight(w2: MutMatrix Double, hidden: MutVec Double, o: Int, dout_o: Double, lr: Double, h: Int) -> Unit !{IO} =
-  do
-    hh <- mutvec_get(hidden, h)
-    cur <- mutmatrix_get(w2, o, h)
-    mutmatrix_set(w2, o, h, cur - lr * dout_o * hh)
-
-fn update_output_unit(w2: MutMatrix Double, b2: MutVec Double, hidden: MutVec Double, out: MutVec Double, label: Int, lr: Double, o: Int) -> Unit !{IO} =
-  do
-    oo <- mutvec_get(out, o)
-    let dout_o = 2.0 * (oo - target_of(o, label))
-    _ <- range_each(\h -> update_out_weight(w2, hidden, o, dout_o, lr, h), range(0, n_hid - 1))
-    bo <- mutvec_get(b2, o)
-    mutvec_set(b2, o, bo - lr * dout_o)
-
-# Update W1[h][i] toward the gradient for one hidden unit h, given dz.
-fn update_hidden_weight(w1: MutMatrix Double, x: MutVec Double, h: Int, dz: Double, lr: Double, i: Int) -> Unit !{IO} =
-  do
-    xi <- mutvec_get(x, i)
-    cur <- mutmatrix_get(w1, h, i)
-    mutmatrix_set(w1, h, i, cur - lr * dz * xi)
-
-fn update_hidden_unit(w1: MutMatrix Double, b1: MutVec Double, x: MutVec Double, hidden: MutVec Double, dhidden: MutVec Double, lr: Double, h: Int) -> Unit !{IO} =
-  do
-    hh <- mutvec_get(hidden, h)
-    dh <- mutvec_get(dhidden, h)
-    let dz = dh * softsign_deriv_from_out(hh)
-    _ <- range_each(\i -> update_hidden_weight(w1, x, h, dz, lr, i), range(0, n_in - 1))
-    bh <- mutvec_get(b1, h)
-    mutvec_set(b1, h, bh - lr * dz)
-
+# Three phase-closures, each capturing the net + buffers + learning rate.  Order
+# matters: dhidden is accumulated from the OLD W2 before W2/B2 are updated.
 fn backprop(net: Net, x: MutVec Double, label: Int, hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double) -> Unit !{IO} =
   match net with
   | Net w1 b1 w2 b2 ->
       do
-        _ <- range_each(\h -> mutvec_set(dhidden, h, 0.0), range(0, n_hid - 1))
-        _ <- range_each(\o -> accum_dhidden_output(w2, out, label, dhidden, o), range(0, n_out - 1))  # dhidden from OLD W2
-        _ <- range_each(\o -> update_output_unit(w2, b2, hidden, out, label, lr, o), range(0, n_out - 1))  # now update W2/B2
-        range_each(\h -> update_hidden_unit(w1, b1, x, hidden, dhidden, lr, h), range(0, n_hid - 1))  # update W1/B1
+        # dhidden[h] += dout_o * W2[o][h], summed over outputs (uses OLD W2).
+        let accum_dhidden = \o -> do
+              oo <- mutvec_get(out, o)
+              let dout_o = 2.0 * (oo - target_of(o, label))
+              let term = \h -> do
+                    wh <- mutmatrix_get(w2, o, h)
+                    cur <- mutvec_get(dhidden, h)
+                    mutvec_set(dhidden, h, cur + dout_o * wh)
+              range_each(term, range(0, n_hid - 1))
+        # Update W2[o][h] and B2[o] toward the gradient for output o.
+        let update_output = \o -> do
+              oo <- mutvec_get(out, o)
+              let dout_o = 2.0 * (oo - target_of(o, label))
+              let step = \h -> do
+                    hh <- mutvec_get(hidden, h)
+                    cur <- mutmatrix_get(w2, o, h)
+                    mutmatrix_set(w2, o, h, cur - lr * dout_o * hh)
+              range_each(step, range(0, n_hid - 1))
+              bo <- mutvec_get(b2, o)
+              mutvec_set(b2, o, bo - lr * dout_o)
+        # Update W1[h][i] and B1[h] toward the gradient for hidden unit h.
+        let update_hidden = \h -> do
+              hh <- mutvec_get(hidden, h)
+              dh <- mutvec_get(dhidden, h)
+              let dz = dh * softsign_deriv_from_out(hh)
+              let step = \i -> do
+                    xi <- mutvec_get(x, i)
+                    cur <- mutmatrix_get(w1, h, i)
+                    mutmatrix_set(w1, h, i, cur - lr * dz * xi)
+              range_each(step, range(0, n_in - 1))
+              bh <- mutvec_get(b1, h)
+              mutvec_set(b1, h, bh - lr * dz)
+        range_each(\h -> mutvec_set(dhidden, h, 0.0), range(0, n_hid - 1))
+        range_each(accum_dhidden, range(0, n_out - 1))
+        range_each(update_output, range(0, n_out - 1))
+        range_each(update_hidden, range(0, n_hid - 1))
 
 # ---------------------------------------------------------------------------
 # Training and evaluation
 # ---------------------------------------------------------------------------
-fn train_sample(net: Net, hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double, sample: (MutVec Double, Int)) -> Unit !{IO} =
-  match sample with
-  | (x, label) ->
-      do
-        _ <- forward(net, x, hidden, out)
-        backprop(net, x, label, hidden, out, dhidden, lr)
-
 fn train_epoch(net: Net, samples: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double) -> Unit !{IO} =
-  list_each(\sample -> train_sample(net, hidden, out, dhidden, lr, sample), samples)
-
-fn count_correct_step(net: Net, hidden: MutVec Double, out: MutVec Double, acc: Int, sample: (MutVec Double, Int)) -> Int !{IO} =
-  match sample with
-  | (x, label) ->
-      do
-        _ <- forward(net, x, hidden, out)
-        pred <- predict(out)
-        if pred == label then acc + 1 else acc
+  do
+    let train_sample = \sample -> match sample with
+          | (x, label) -> do
+              forward(net, x, hidden, out)
+              backprop(net, x, label, hidden, out, dhidden, lr)
+    list_each(train_sample, samples)
 
 fn count_correct(net: Net, samples: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double) -> Int !{IO} =
-  list_fold(\ (acc, sample) -> count_correct_step(net, hidden, out, acc, sample), 0, samples)
+  do
+    let step = \ (acc, sample) -> match sample with
+          | (x, label) -> do
+              forward(net, x, hidden, out)
+              pred <- predict(out)
+              if pred == label then acc + 1 else acc
+    list_fold(step, 0, samples)
 
 fn accuracy_pct(correct: Int, total: Int) -> Double =
   to_double(correct) * 100.0 / to_double(total)
@@ -264,19 +246,15 @@ fn report(net: Net, test_set: List (MutVec Double, Int), hidden: MutVec Double, 
   if mod_int(epoch, 5) == 0 then
     do
       c <- count_correct(net, test_set, hidden, out)
-      print("epoch " ++ to_string(epoch) ++ "  test accuracy " ++ to_string(accuracy_pct(c, n_test)) ++ "%")
+      print(`epoch ${epoch}  test accuracy ${accuracy_pct(c, n_test)}%`)
   else ()
 
-fn train_step(net: Net, train_set: List (MutVec Double, Int), test_set: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double, n_test: Int, epoch: Int) -> Unit !{IO} =
-  do
-    _ <- report(net, test_set, hidden, out, epoch, n_test)
-    train_epoch(net, train_set, hidden, out, dhidden, lr)
-
 fn train(net: Net, train_set: List (MutVec Double, Int), test_set: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double, total_epochs: Int, n_test: Int) -> Unit !{IO} =
-  range_each(
-    \epoch -> train_step(net, train_set, test_set, hidden, out, dhidden, lr, n_test, epoch),
-    range(0, total_epochs)
-  )
+  do
+    let epoch_step = \epoch -> do
+          report(net, test_set, hidden, out, epoch, n_test)
+          train_epoch(net, train_set, hidden, out, dhidden, lr)
+    range_each(epoch_step, range(0, total_epochs))
 
 fn main() -> Unit !{IO} =
   do
@@ -284,7 +262,7 @@ fn main() -> Unit !{IO} =
     test_set <- load_dataset("examples/digit_recognizer/optdigits_test.txt")
     let n_train = dataset_size(train_set)
     let n_test = dataset_size(test_set)
-    print("loaded " ++ to_string(n_train) ++ " train / " ++ to_string(n_test) ++ " test samples")
+    print(`loaded ${n_train} train / ${n_test} test samples`)
 
     w1 <- mutmatrix_new(n_hid, n_in, 0.0)
     b1 <- mutvec_new(n_hid, 0.0)
@@ -300,4 +278,4 @@ fn main() -> Unit !{IO} =
     _ <- train(net, train_set, test_set, hidden, out, dhidden, 0.05, 25, n_test)
 
     c <- count_correct(net, test_set, hidden, out)
-    print("final test accuracy: " ++ to_string(accuracy_pct(c, n_test)) ++ "% (" ++ to_string(c) ++ "/" ++ to_string(n_test) ++ ")")
+    print(`final test accuracy: ${accuracy_pct(c, n_test)}% (${c}/${n_test})`)
