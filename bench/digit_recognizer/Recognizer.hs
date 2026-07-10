@@ -6,7 +6,7 @@
 -- foldl', zip/foldl' instead of any indexing or mutation. Every SGD step allocates a whole
 -- new Net. deepseq forces each epoch so the lazy-list thunks don't leak across 26 passes —
 -- that's strictness, not impurity. Accumulation is seeded with the bias, so the numerics are
--- bit-identical to the mutable ports and it reaches the same 89.33%.
+-- bit-identical to the mutable ports and it reaches the same 92.67%.
 -- See RecognizerUnsafe.hs for the in-place unboxed-array variant.
 
 module Main where
@@ -18,7 +18,7 @@ import Text.Printf (printf)
 
 nIn, nHid, nOut :: Int
 nIn = 64
-nHid = 24
+nHid = 256
 nOut = 10
 
 dabs :: Double -> Double

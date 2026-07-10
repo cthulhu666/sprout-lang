@@ -1,7 +1,7 @@
 """Handwritten-digit recognition — plain implementation, no ML libraries.
 64 -> 24 -> 10 softsign MLP, MSE, SGD; same algorithm as the Sprout version."""
 
-N_IN, N_HID, N_OUT = 64, 24, 10
+N_IN, N_HID, N_OUT = 64, 256, 10
 
 
 def dabs(x):

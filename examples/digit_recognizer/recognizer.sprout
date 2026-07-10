@@ -9,7 +9,7 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_in
 #   optdigits_train.txt  (500 samples)   optdigits_test.txt (150 samples)
 # one sample per line, whitespace-separated, label last.
 #
-# Model: a 64 -> 24 -> 10 multilayer perceptron.  Hidden activation is softsign,
+# Model: a 64 -> 256 -> 10 multilayer perceptron.  Hidden activation is softsign,
 # s(x) = x/(1+|x|) — smooth and bounded like tanh but pure arithmetic (no exp),
 # with derivative (1-|s|)^2.  The 10 linear outputs are trained toward a one-hot
 # target under MSE (no softmax, so no exp); the prediction is argmax.  Trained by
@@ -30,7 +30,7 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_in
 #       -o /tmp/digits && /tmp/digits
 
 let n_in = 64
-let n_hid = 24
+let n_hid = 256
 let n_out = 10
 
 # W1: n_hid x n_in, B1: n_hid, W2: n_out x n_hid, B2: n_out.

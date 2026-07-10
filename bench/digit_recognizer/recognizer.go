@@ -10,7 +10,7 @@ import (
 
 const (
 	nIn  = 64
-	nHid = 24
+	nHid = 256
 	nOut = 10
 )
 

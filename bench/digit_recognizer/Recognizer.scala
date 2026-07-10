@@ -5,7 +5,7 @@ import scala.io.Source
 // fair execution-cost comparison. See RecognizerIdiomatic.scala for the functional variant.
 object Recognizer:
   final val NIn = 64
-  final val NHid = 24
+  final val NHid = 256
   final val NOut = 10
 
   inline def dabs(x: Double): Double = if x < 0 then -x else x

@@ -3,7 +3,7 @@
 #
 # Every implementation trains the SAME model — a 64->24->10 softsign MLP, MSE loss,
 # stochastic gradient descent, 25 epochs over 500 samples — with the same
-# deterministic LCG weight init, so all reach the same final accuracy (89.33%).
+# deterministic LCG weight init, so all reach the same final accuracy (92.67%).
 #
 # Compiled languages are pre-built so the run phase times execution, not compilation.
 # The recognizer is a single training run; compute dominates (data load + process

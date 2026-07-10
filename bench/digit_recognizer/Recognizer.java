@@ -7,7 +7,7 @@ import java.util.List;
 
 // 64 -> 24 -> 10 softsign MLP, MSE, SGD; same algorithm as the Sprout version.
 public class Recognizer {
-    static final int N_IN = 64, N_HID = 24, N_OUT = 10;
+    static final int N_IN = 64, N_HID = 256, N_OUT = 10;
 
     static double dabs(double x) { return x < 0 ? -x : x; }
     static double softsign(double x) { return x / (1.0 + dabs(x)); }

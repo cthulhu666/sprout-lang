@@ -188,14 +188,27 @@ orthogonal to the kernels and worth its own regression test + fix.
 
 ## Phase C — re-profile (decision gate for Phase D)
 
-Done as the Phase B table above. `sprout_obj` (Double boxes) is now the untouched residue —
-`340,427` allocations, ~62% of the remaining `sprout_obj + closure` traffic. Root/closure traffic
-fell with the kernels; the next dominant allocation category is boxed `Double`. **This is the
-signal that promotes Phase D** (unboxed `Double` storage) from speculative to justified — but it
-remains a large, separate, approval-gated effort. Recommend re-running a CPU profile (correctly
-parsed this time) before committing to a Phase D design.
+**Correction over the initial read.** I first took `sprout_obj = 340,427` to be per-element
+`Double` boxes from the matmul and the residue Phase D would remove. A scaling experiment
+disproves that: widening the hidden layer 24 → 256 (a ~10× increase in FLOPs) left the kernel
+path's allocation profile **byte-for-byte identical** — `211,859` closures, `340,427`
+`sprout_obj`, `177` GC cycles, all independent of the layer size — while wall grew ~0.55s → ~4.76s.
+So the kernel hot loop is **allocation-free** (the `Double` accumulator threads unboxed; no
+per-element value is boxed), and those `sprout_obj` are size-independent overhead (data loading,
+sample list, tuples), not matmul boxes.
+
+The consequence for Phase D: at scale the recognizer is **compute-bound**, and Sprout's residual
+~9× gap to Go is **scalar `Double` throughput**, not allocation or GC — every access pays a
+uniform-i64↔`double` ABI bitcast and a per-element bounds-check branch, and the tail-recursive
+kernel is not vectorized. Phase D is still justified, but reframed: the lever is **contiguous
+unboxed `f64` storage (SIMD-friendly, no per-access bitcast/bounds-check) + loop-shaped codegen**,
+not "stop boxing Doubles in the hot loop" (the kernels already don't). A correctly-parsed CPU
+profile should confirm where the scalar cost sits (bitcast vs bounds-branch vs call overhead)
+before committing to a design.
 
 ## Phase D — representation/compiler (deferred, own design + approval)
 
-Unboxed `Double` storage for `MutVec Double`, or compiler lowering of row-dot/row-update. Large;
-justified by the 340K Double-box allocations, not by this phase's counters.
+Contiguous unboxed `f64` storage for `MutVec Double` / `MutMatrix Double`, and/or compiler
+lowering of row-dot/row-update to vectorizable loops. Large; justified by the **scalar-throughput**
+finding above (the allocation profile is already flat with problem size), not by allocation
+counts.

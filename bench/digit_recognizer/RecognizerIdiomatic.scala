@@ -3,11 +3,11 @@ import scala.io.Source
 // 64 -> 24 -> 10 softsign MLP, MSE, SGD — the SAME algorithm/seed as Recognizer.scala,
 // written in idiomatic functional Scala: immutable Vector weights, a case-class Net threaded
 // through foldLeft, zip/map/fold instead of index loops, no var in the core. Accumulation
-// order is preserved (fold seeded with the bias), so it reaches the identical 89.33%.
+// order is preserved (fold seeded with the bias), so it reaches the identical 92.67%.
 // This exists to measure the cost of FP purity + boxed collections against Recognizer.scala.
 object RecognizerIdiomatic:
   final val NIn = 64
-  final val NHid = 24
+  final val NHid = 256
   final val NOut = 10
 
   def dabs(x: Double): Double = if x < 0 then -x else x

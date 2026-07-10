@@ -6,7 +6,7 @@
 -- Data.Array.Base.unsafeRead / unsafeWrite (no bounds checks), manual index arithmetic,
 -- strict recursive inner loops. This is Haskell written like C — it discards the immutability
 -- and purity the language is built on to buy speed. Contrast Recognizer.hs, the pure port.
--- Identical numerics -> identical 89.33%.
+-- Identical numerics -> identical 92.67%.
 
 module Main where
 
@@ -19,7 +19,7 @@ import Text.Printf (printf)
 
 nIn, nHid, nOut :: Int
 nIn = 64
-nHid = 24
+nHid = 256
 nOut = 10
 
 type Vec = IOUArray Int Double
