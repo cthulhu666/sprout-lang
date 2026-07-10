@@ -8,6 +8,11 @@ High-effort, recall-biased: 5 finder angles → adversarial empirical verificati
 full suite, compile-examples, smokes, self-compile fixed point, plus two targeted probes
 below). Findings 1–4 are hardening / cleanup; none rejects a valid program or miscompiles.
 
+**Resolution:** findings 1–4 applied in commit `8f506b5` (finding 5 — comments — left as
+present-tense rationale). Full suite + fixed point green. Finding 1 added
+`tests/stdlib/compiler/test_type_identity_dispatch_paths.spr` for the previously-untested
+constrained-function and return-type dispatch paths.
+
 ## Headline correction (important)
 
 All three correctness finder angles (line-by-line, removed-behavior, cross-file)
