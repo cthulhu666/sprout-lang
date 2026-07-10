@@ -36,6 +36,51 @@ export type Type (..) =
   | TTuple (List Type)
 
 # ---------------------------------------------------------------------------
+# TypeId — opaque canonical type identity (G6)
+# ---------------------------------------------------------------------------
+#
+# Identity is the module-qualified canonical name (e.g. "main.Maybe"; the prelude,
+# having no module header, owns the unqualified name). Consumers MUST go through this
+# API — never raw string surgery on the name — so module-qualification is touched in
+# one place and a future generative identity (functors / path-dependent types) is a
+# representation swap here, not a compiler-wide re-migration. (v1: TConst still carries
+# a raw String; G6.3 flips it to `TConst TypeId` to make the boundary compiler-enforced.)
+
+export wrap TypeId = String
+
+# Mint a TypeId from a canonical (already-resolved) name. The bundler/resolver is the
+# source of canonical names; this is the single construction point.
+export fn type_id(name: String) -> TypeId = TypeId(name)
+
+# Raw canonical name. Internal — for serialization and the identity helpers below;
+# call sites should prefer type_id_display / _eq / _is_concrete / _symbol.
+export fn type_id_name(id: TypeId) -> String =
+  match id with | TypeId s -> s
+
+# Identity equality: exact on the canonical name.
+export fn type_id_eq(a: TypeId, b: TypeId) -> Bool =
+  type_id_name(a) == type_id_name(b)
+
+# Display form: the short (last-segment) name, for diagnostics.
+export fn type_id_display(id: TypeId) -> String =
+  string.after_last_dot(type_id_name(id))
+
+# Concreteness: a concrete type's NAME is uppercase, a type variable lowercase. Reads
+# the LAST segment, since a qualified concrete type starts with a lowercase module
+# component (e.g. "main.Maybe" — the '.m' is not the type name).
+export fn type_id_is_concrete(id: TypeId) -> Bool =
+  type_id_starts_upper(string.after_last_dot(type_id_name(id)))
+
+fn type_id_starts_upper(s: String) -> Bool =
+  match str_char_at(s, 0) with
+  | Nothing -> false
+  | Just c -> c >= 'A' && c <= 'Z'
+
+# LLVM symbol fragment: dot-sanitized canonical name (dots are illegal in symbols).
+export fn type_id_symbol(id: TypeId) -> String =
+  string.replace_all(".", "_", type_id_name(id))
+
+# ---------------------------------------------------------------------------
 # Schemes  (∀ type_vars effect_vars. body_type !body_effects)
 # ---------------------------------------------------------------------------
 #
