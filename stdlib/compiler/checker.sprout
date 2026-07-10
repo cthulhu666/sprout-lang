@@ -692,13 +692,13 @@ export fn builtin_entries() -> List (String, types.Scheme) =
 
 # -- Type shortcuts ----------------------------------------------------------
 
-fn bt_str() -> types.Type = types.TConst("String")
-fn bt_int() -> types.Type = types.TConst("Int")
-fn bt_unit() -> types.Type = types.TConst("Unit")
+fn bt_str() -> types.Type = types.TConst(types.type_id("String"))
+fn bt_int() -> types.Type = types.TConst(types.type_id("Int"))
+fn bt_unit() -> types.Type = types.TConst(types.type_id("Unit"))
 
-fn bt_vec(t: types.Type) -> types.Type = types.TApp(types.TConst("Vec"), t)
+fn bt_vec(t: types.Type) -> types.Type = types.TApp(types.TConst(types.type_id("Vec")), t)
 fn bt_result(e: types.Type, a: types.Type) -> types.Type =
-  types.TApp(types.TApp(types.TConst("Result"), e), a)
+  types.TApp(types.TApp(types.TConst(types.type_id("Result")), e), a)
 
 fn bt_fn(a: types.Type, b: types.Type) -> types.Type =
   types.TFunc(a, b, types.EffectPure)

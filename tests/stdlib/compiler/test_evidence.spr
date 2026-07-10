@@ -45,7 +45,7 @@ fn len_of(xs: List typed_ast.Evidence) -> Int =
 fn tdict_ev_is_unresolved() -> Bool =
   match typed_ast.TDict(
     ast.TypeConstraint("Show", Cons(ast.TypeName("Int"), Nil)),
-    types.TConst("Show"),
+    types.TConst(types.type_id("Show")),
     source.SourcePos(0, 1, 1),
     typed_ast.EvUnresolved) with
   | typed_ast.TDict _ _ _ ev -> is_unresolved(ev)
@@ -54,7 +54,7 @@ fn tdict_ev_is_unresolved() -> Bool =
 fn tdict_ev_is_forwarded() -> Bool =
   match typed_ast.TDict(
     ast.TypeConstraint("Show", Cons(ast.TypeName("a"), Nil)),
-    types.TConst("Show"),
+    types.TConst(types.type_id("Show")),
     source.SourcePos(0, 1, 1),
     typed_ast.EvForward("Show", "dict0")) with
   | typed_ast.TDict _ _ _ ev -> is_forward(ev)

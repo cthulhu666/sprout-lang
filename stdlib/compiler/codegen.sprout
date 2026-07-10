@@ -182,7 +182,7 @@ fn ll_double() -> String = "double"
 
 fn is_double_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> name == "Double"
+  | types.TConst name -> types.type_id_name(name) == "Double"
   | _ -> false
 fn ll_i32() -> String = "i32"
 fn ll_i1() -> String = "i1"
@@ -210,7 +210,7 @@ fn format_ll_ir(ll: String, ir: String) -> String = ll ++ " " ++ ir
 # Everything else (ADTs, containers, Unit, …) → "i64".
 fn type_to_ll(t: types.Type) -> String =
   match t with
-  | types.TConst name -> const_to_ll(name)
+  | types.TConst name -> const_to_ll(types.type_id_name(name))
   | types.TVar _ -> ll_i64()
   | types.TApp _ _ -> ll_i64()
   | types.TFunc _ _ _ -> ll_ptr()
@@ -250,28 +250,28 @@ fn call_sig_acc(t: types.Type, acc: List String) -> Maybe CallSig =
 # Check whether a type is a Maybe type (TApp (TConst "Maybe") _).
 fn is_maybe_type(t: types.Type) -> Bool =
   match t with
-  | types.TApp (types.TConst "Maybe") _ -> true
+  | types.TApp (types.TConst name) _ -> types.type_id_name(name) == "Maybe"
   | _ -> false
 
 # Check whether a type is a Result type (TApp (TApp (TConst "Result") _) _).
 fn is_result_type(t: types.Type) -> Bool =
   match t with
-  | types.TApp (types.TApp(types.TConst "Result") _) _ -> true
+  | types.TApp (types.TApp(types.TConst name) _) _ -> types.type_id_name(name) == "Result"
   | _ -> false
 
 fn is_string_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst "String" -> true
+  | types.TConst name -> types.type_id_name(name) == "String"
   | _ -> false
 
 fn is_char_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst "Char" -> true
+  | types.TConst name -> types.type_id_name(name) == "Char"
   | _ -> false
 
 fn is_list_type(t: types.Type) -> Bool =
   match t with
-  | types.TApp (types.TConst "List") _ -> true
+  | types.TApp (types.TConst name) _ -> types.type_id_name(name) == "List"
   | _ -> false
 
 # ===========================================================================
@@ -853,9 +853,9 @@ fn sizeof_struct(struct_type: String, em: Emitter) -> String !{IO} =
 fn type_is_non_heap_scalar(t: types.Type) -> Bool =
   match t with
   | types.TConst name ->
-      type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool") ||
-      type_name_leaf_is(name, "Char")
+      type_name_leaf_is(types.type_id_name(name), "Int") ||
+      type_name_leaf_is(types.type_id_name(name), "Bool") ||
+      type_name_leaf_is(types.type_id_name(name), "Char")
   | _ -> false
 
 # NB: type_expr_is_non_heap_scalar has been hoisted to stdlib.compiler.type_kind
@@ -1674,7 +1674,7 @@ fn do_last_has_tail_to_set(steps: List typed_ast.TypedDoStep, names: Set) -> Boo
 # caller/callee return types, and the mutual-TCO path hardcodes i64.
 fn body_ret_is_i64(body: typed_ast.TypedExpr) -> Bool =
   match typed_ast.typed_expr_type(body) with
-  | types.TConst "Bool" -> false
+  | types.TConst name -> if types.type_id_name(name) == "Bool" then false else true
   | types.TTuple _ -> false
   | _ -> true
 
@@ -3171,11 +3171,13 @@ fn emit_fn_decl(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
           pop_temp_roots(rooted, em)
           if is_entry then
             match typed_ast.typed_expr_type(body) with
-            | types.TConst "Int" ->
-                do
-                  exit_reg <- fresh_tmp(em)
-                  emit_template(em, `  ${exit_reg} = trunc i64 ${val_ir (result)} to i32`)
-                  emit_template(em, `  ret i32 ${exit_reg}`)
+            | types.TConst name ->
+                if types.type_id_name(name) == "Int" then
+                  do
+                    exit_reg <- fresh_tmp(em)
+                    emit_template(em, `  ${exit_reg} = trunc i64 ${val_ir (result)} to i32`)
+                    emit_template(em, `  ret i32 ${exit_reg}`)
+                else emit_line(em, "  ret i32 0")
             | _ -> emit_line(em, "  ret i32 0")
           else
             emit_template(em, `  ret ${fn_ret (sig)} ${val_ir (coerced_result)}`)

@@ -379,7 +379,7 @@ fn list_str_member(x: String, xs: List String) -> Bool =
 
 fn mr_first_concrete_head_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(string.after_last_dot(name))
+  | types.TConst name -> Just(types.type_id_display(name))
   | types.TApp base _ -> mr_first_concrete_head_str(base)
   | _ -> Nothing
 
@@ -419,7 +419,7 @@ fn mr_eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: typ
 
 fn type_is_unit(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> string.after_last_dot(name) == "Unit"
+  | types.TConst name -> types.type_id_display(name) == "Unit"
   | _ -> false
 
 fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =

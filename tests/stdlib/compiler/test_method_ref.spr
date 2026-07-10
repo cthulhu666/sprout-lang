@@ -11,7 +11,7 @@ import stdlib.compiler.source as source
 # Evidence starts as EvUnresolved (populated by resolve in M3b-4b).
 
 fn mref() -> typed_ast.TypedExpr =
-  typed_ast.TMethodRef("show", "Show", types.TConst("String"), source.SourcePos(0, 7, 3),
+  typed_ast.TMethodRef("show", "Show", types.TConst(types.type_id("String")), source.SourcePos(0, 7, 3),
     typed_ast.EvUnresolved)
 
 fn ev_is_unresolved(ev: typed_ast.Evidence) -> Bool =
@@ -31,7 +31,7 @@ fn mref_names(e: typed_ast.TypedExpr) -> (String, String) =
 
 fn type_name(t: types.Type) -> String =
   match t with
-  | types.TConst n -> n
+  | types.TConst n -> types.type_id_name(n)
   | _ -> "?"
 
 fn main() -> Unit !{IO} =

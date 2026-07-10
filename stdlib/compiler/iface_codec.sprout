@@ -53,7 +53,7 @@ export fn encode_scheme(s: types.Scheme) -> String =
 export fn encode_type(t: types.Type) -> String =
   match t with
   | types.TVar n -> string_concat_many(Cons("(TVar ", Cons(n, Cons(")", Nil))))
-  | types.TConst n -> string_concat_many(Cons("(TConst ", Cons(n, Cons(")", Nil))))
+  | types.TConst n -> string_concat_many(Cons("(TConst ", Cons(types.type_id_name(n), Cons(")", Nil))))
   | types.TApp a b ->
       string_concat_many(Cons("(TApp ",
         Cons(encode_type(a),
@@ -232,7 +232,7 @@ fn decode_tvar_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Ty
 fn decode_tconst_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   match read_atom_then_close(s, bytes, i, total) with
   | Nothing -> Nothing
-  | Just (name, end) -> Just((types.TConst(name), end))
+  | Just (name, end) -> Just((types.TConst(types.type_id(name)), end))
 
 fn decode_tapp_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   match decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) with
@@ -644,7 +644,7 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
   | ast.TypeName name ->
       match dict_get(name, local_vars) with
       | Just t -> t
-      | Nothing -> types.TConst(strip_mod_prefix(name))
+      | Nothing -> types.TConst(types.type_id(strip_mod_prefix(name)))
   | ast.TypeApply base arg ->
       types.TApp(typeexpr_to_type_with_vars(base, local_vars),
                  typeexpr_to_type_with_vars(arg, local_vars))
@@ -846,7 +846,7 @@ fn build_instance_info(class_name: String, type_args: List ast.TypeExpr) -> Inst
 
 fn head_type_from_args(type_args: List ast.TypeExpr) -> types.Type =
   match type_args with
-  | Nil -> types.TConst("Unknown")
+  | Nil -> types.TConst(types.type_id("Unknown"))
   | Cons te _ -> typeexpr_to_type_with_vars(te, dict_empty())
 
 # ============================================================================

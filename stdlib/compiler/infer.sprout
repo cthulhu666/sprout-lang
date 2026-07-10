@@ -125,7 +125,7 @@ fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   # name verbatim. Stripping here collapsed `main.Foo` and a prelude `Foo` to one
   # identity. The prelude's canonical form is unqualified (empty module header), so
   # this is a no-op on dotless names and only preserves genuine module prefixes.
-  | Nothing -> types.TConst(name)
+  | Nothing -> types.TConst(types.type_id(name))
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
@@ -307,7 +307,7 @@ fn build_local_params(params: List String, acc: Dict types.Type) -> Dict types.T
   | Cons p rest -> build_local_params(rest, dict_set(p, types.TVar(p), acc))
 
 fn build_result_type(name: String, params: List String) -> types.Type =
-  apply_type_params(types.TConst(name), params)
+  apply_type_params(types.TConst(types.type_id(name)), params)
 
 fn apply_type_params(base: types.Type, params: List String) -> types.Type =
   match params with
@@ -447,7 +447,7 @@ fn typed_method_rev_acc(xs: List typed_ast.TypedInstanceMethod, acc: List typed_
 fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
 fn dummy_unit() -> typed_ast.TypedExpr =
-  typed_ast.TUnit(types.TConst("Unit"), dummy_pos())
+  typed_ast.TUnit(types.TConst(types.type_id("Unit")), dummy_pos())
 
 # ---------------------------------------------------------------------------
 # Expression inference
@@ -466,7 +466,7 @@ fn infer_expr(
   | ast.BoolExpr v pos -> InferOk(typed_ast.TBool(v, types.type_bool(), pos), subst, eff_subst, types.EffectPure)
   | ast.StringExpr v pos -> InferOk(typed_ast.TString(v, types.type_string(), pos), subst, eff_subst, types.EffectPure)
   | ast.CharExpr v pos -> InferOk(typed_ast.TChar(v, types.type_char(), pos), subst, eff_subst, types.EffectPure)
-  | ast.UnitExpr pos -> InferOk(typed_ast.TUnit(types.TConst("Unit"), pos), subst, eff_subst, types.EffectPure)
+  | ast.UnitExpr pos -> InferOk(typed_ast.TUnit(types.TConst(types.type_id("Unit")), pos), subst, eff_subst, types.EffectPure)
   | ast.VarExpr name pos -> infer_var(state, env, subst, eff_subst, name, pos)
   | ast.IfExpr cond then_ else_ pos -> infer_if(state, env, subst, eff_subst, cond, then_, else_, pos)
   | ast.CallExpr callee args pos -> infer_call(state, env, subst, eff_subst, callee, args, pos)
@@ -517,7 +517,7 @@ fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict 
       | types.Scheme _ _ class_type _ ->
           match class_type with
           | types.TConst class_name ->
-              typed_ast.TMethodRef(name, class_name, t, pos, typed_ast.EvUnresolved)
+              typed_ast.TMethodRef(name, types.type_id_name(class_name), t, pos, typed_ast.EvUnresolved)
           | _ -> typed_ast.TVar(name, t, pos)
 
 fn infer_var(
@@ -826,28 +826,28 @@ fn check_instance_for_marker(
             | Just cv_arg ->
                 match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg))) with
                 | Nothing ->
-                    check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+                    check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
                 | Just head_str ->
-                    match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-                    | Nothing -> InferErr(pos, "No instance of " ++ class_name ++ " for " ++ head_str)
+                    match dict_get("@inst:" ++ types.type_id_name(class_name) ++ ":" ++ head_str, env) with
+                    | Nothing -> InferErr(pos, "No instance of " ++ types.type_id_name(class_name) ++ " for " ++ head_str)
                     | Just _ ->
                         InferOk(
                           typed_ast.TCall(typed_callee,
                             Cons(typed_ast.TDict(
-                              ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), class_name, env), Nil)),
+                              ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
                               types.TConst(class_name), pos, typed_ast.EvUnresolved),
                               typed_args),
                             ret_t, pos),
                           s3, es3, call_eff)
             | Nothing ->
-                check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+                check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
           else
             # Return-position dispatch — first_concrete_typed_arg_str would pick
             # an irrelevant arg type (e.g. the String input of `deserialize`).
             # Route directly to fwd markers; the post-pass walker
             # (resolve_dispatch_typed_expr) rewrites the TDict once the outer
             # unification has made ret_t concrete.
-            check_instance_fwd(class_name, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+            check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
       | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
 # Resolve a polymorphic class-method call by scanning args for a @fwd marker.
@@ -983,7 +983,7 @@ fn str_list_contains(xs: List String, target: String) -> Bool =
 # Only TConst, TApp, and TTuple are meaningful here; anything else falls back to "_".
 fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(string.after_last_dot(name))
+  | types.TConst name -> ast.TypeName(types.type_id_display(name))
   | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base), type_to_typeexpr(arg))
   | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_typeexpr(item), items))
   | _ -> ast.TypeName("_")
@@ -992,7 +992,7 @@ fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
 # TTuple is always concrete (its head is a known arity, never a variable).
 fn concrete_typeexpr(t: types.Type) -> Maybe ast.TypeExpr =
   match t with
-  | types.TConst name -> Just(ast.TypeName(string.after_last_dot(name)))
+  | types.TConst name -> Just(ast.TypeName(types.type_id_display(name)))
   | types.TApp base _ ->
       match concrete_typeexpr(base) with
       | Nothing -> Nothing
@@ -1063,7 +1063,7 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
   # TypeExpr becomes the injected TDict's constraint head, which resolve.sprout turns
   # into the instance-dispatch Evidence key — stripping here made the key bare
   # ("ToString_Maybe") and mis-resolved a shadowed type to the prelude instance.
-  | types.TConst name -> ast.TypeName(name)
+  | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TApp base arg ->
       ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, env),
                     type_to_typeexpr_with_prog_vars(arg, class_name, env))
@@ -1071,7 +1071,7 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
       match dict_get("@fwd:" ++ name ++ ":" ++ class_name, env) with
       | Just scheme ->
           match scheme with
-          | types.Scheme _ _ (types.TConst prog_var) _ -> ast.TypeName(prog_var)
+          | types.Scheme _ _ (types.TConst prog_var) _ -> ast.TypeName(types.type_id_name(prog_var))
           | _ -> ast.TypeName("_")
       | Nothing -> ast.TypeName("_")
   | types.TTuple items ->
@@ -1104,7 +1104,7 @@ fn tvar_head_of_type(t: types.Type) -> Maybe String =
 
 fn type_head_str(t: types.Type) -> String =
   match t with
-  | types.TConst name -> name
+  | types.TConst name -> types.type_id_name(name)
   | types.TApp base _ -> type_head_str(base)
   | types.TVar name -> name
   | types.TTuple items -> "Tuple" ++ int_to_string(list_length(items))
@@ -1120,7 +1120,7 @@ fn type_head_str(t: types.Type) -> String =
 # write must agree — de-stripping one without the other is a silent dispatch miss.
 fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(name)
+  | types.TConst name -> Just(types.type_id_name(name))
   | types.TApp base _ -> concrete_type_str(base)
   | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | _ -> Nothing
@@ -1317,7 +1317,7 @@ fn scan_ptf_entries(
                 | Just _ ->
                     Just(typed_ast.TDict(
                       ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                      types.TConst(class_name), pos, typed_ast.EvUnresolved))
+                      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
                 | Nothing ->
                     scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
 
@@ -1328,7 +1328,7 @@ fn tvar_for_prog_var_in_type(t: types.Type, class_name: String, prog_var: String
       match dict_get("@fwd:" ++ name ++ ":" ++ class_name, env) with
       | Just scheme ->
           match scheme with
-          | types.Scheme _ _ (types.TConst pv) _ -> pv == prog_var
+          | types.Scheme _ _ (types.TConst pv) _ -> types.type_id_name(pv) == prog_var
           | _ -> false
       | Nothing -> false
   | types.TApp base arg ->
@@ -1381,7 +1381,7 @@ fn scan_ptf_prog_var_entries(
                 | Just _ ->
                     Just(typed_ast.TDict(
                       ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                      types.TConst(class_name), pos, typed_ast.EvUnresolved))
+                      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
                 | Nothing ->
                     scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
               else
@@ -1401,7 +1401,7 @@ fn resolve_one_constraint_tdict(
       | Just _ ->
           Just(typed_ast.TDict(
             ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, excluded), Nil)),
-            types.TConst(class_name), pos, typed_ast.EvUnresolved))
+            types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
   | Nothing ->
@@ -1415,7 +1415,7 @@ fn resolve_one_constraint_tdict(
           | Just _ ->
               Just(typed_ast.TDict(
                 ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst), Nil)),
-                types.TConst(class_name), pos, typed_ast.EvUnresolved))
+                types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
       | Nothing ->
@@ -1449,8 +1449,8 @@ fn fwd_scheme_to_tdict(fwd_scheme: types.Scheme, class_name: String, pos: source
   match fwd_scheme with
   | types.Scheme _ _ (types.TConst prog_var) _ ->
       Just(typed_ast.TDict(
-        ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
-        types.TConst(class_name), pos, typed_ast.EvUnresolved))
+        ast.TypeConstraint(class_name, Cons(ast.TypeName(types.type_id_name(prog_var)), Nil)),
+        types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
   | _ -> Nothing
 
 # Scan all env entries for the first "@fwd:*:class_name" marker.
@@ -1509,10 +1509,10 @@ fn scan_fwd_markers_for_prog_var(
           then
             match val with
             | types.Scheme _ _ (types.TConst stored_prog_var) _ ->
-                if stored_prog_var == prog_var
+                if types.type_id_name(stored_prog_var) == prog_var
                 then Just(typed_ast.TDict(
                        ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
-                       types.TConst(class_name), pos, typed_ast.EvUnresolved))
+                       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
                 else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
             | _ -> scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
           else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
@@ -1574,7 +1574,7 @@ fn resolve_obligation(
           | Just _ ->
               Just(typed_ast.TDict(
                 ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                types.TConst(class_name), pos, typed_ast.EvUnresolved))
+                types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
       | Nothing ->
@@ -1603,13 +1603,13 @@ fn inject_constrained_fn_dicts(
           # Wrap as ProgVarName at the extraction site: this is the programmer's
           # type variable name (from the constraint head), not a compiler-generated
           # fresh TVar name. Confusing these would silently break cascade resolution.
-          match resolve_obligation(class_name, ProgVarName(prog_var), prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
+          match resolve_obligation(types.type_id_name(class_name), ProgVarName(types.type_id_name(prog_var)), prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
           | Nothing ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
           | Just tdict ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
       | types.Scheme _ _ (types.TConst class_name) _ ->
-          match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
+          match resolve_one_constraint_tdict(types.type_id_name(class_name), user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
           | Nothing ->
               inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
           | Just tdict ->
@@ -1665,7 +1665,7 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
 fn seed_fwd_with_supers(class_name: String, fresh_name: FreshTVarName, prog_var: ProgVarName, env: Dict types.Scheme) -> Dict types.Scheme =
   seed_superclass_fwd_markers(class_name, fresh_tvar_str(fresh_name), prog_var_str(prog_var),
     dict_set("@fwd:" ++ fresh_tvar_str(fresh_name) ++ ":" ++ class_name,
-             types.mono(types.TConst(prog_var_str(prog_var))), env))
+             types.mono(types.TConst(types.type_id(prog_var_str(prog_var)))), env))
 
 # Seed @fwd markers for all superclasses of class_name.
 # Scans env for "@super:{class_name}:{super_name}" entries and adds
@@ -1682,7 +1682,7 @@ fn seed_super_from_entries(class_name: String, fresh_name: String, prog_var: Str
           if str_starts_with(key, "@super:" ++ class_name ++ ":")
           then seed_super_from_entries(class_name, fresh_name, prog_var, rest,
                  dict_set("@fwd:" ++ fresh_name ++ ":" ++ str_slice(key, str_len("@super:" ++ class_name ++ ":"), str_len(key)),
-                          types.mono(types.TConst(prog_var)), env))
+                          types.mono(types.TConst(types.type_id(prog_var))), env))
           else seed_super_from_entries(class_name, fresh_name, prog_var, rest, env)
 
 # Computes the @eta_fwd:* markers that correspond to the @fwd:* entries
@@ -1718,7 +1718,7 @@ fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
                       # value stores ProgVarName for lowering to retrieve.
                       add_eta_with_supers(class_name, FreshTVarName(fresh_name), ProgVarName(prog_var), env,
                         dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ class_name,
-                                 types.mono(types.TConst(prog_var)), markers))
+                                 types.mono(types.TConst(types.type_id(prog_var))), markers))
                   | _ -> markers
           | _ -> markers
 
@@ -1737,7 +1737,7 @@ fn add_eta_supers_from_entries(class_name: String, fresh_name: String, prog_var:
           if str_starts_with(key, "@super:" ++ class_name ++ ":")
           then add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest,
                  dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ str_slice(key, str_len("@super:" ++ class_name ++ ":"), str_len(key)),
-                          types.mono(types.TConst(prog_var)), markers))
+                          types.mono(types.TConst(types.type_id(prog_var))), markers))
           else add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest, markers)
 
 # --- Args accumulator ---
@@ -1893,7 +1893,7 @@ fn is_primitive_eq_type(t: types.Type) -> Bool =
   | types.TConst name ->
       # Double joins the direct-fcmp short-circuit: == -> oeq, != -> one (via
       # float_cmp_predicate), matching its already-wired ordering comparisons.
-      name == "Int" || name == "Bool" || name == "Char" || name == "String" || name == "Double"
+      types.type_id_name(name) == "Int" || types.type_id_name(name) == "Bool" || types.type_id_name(name) == "Char" || types.type_id_name(name) == "String" || types.type_id_name(name) == "Double"
   | _ -> false
 
 fn eq_via_class_method(
@@ -2010,7 +2010,7 @@ fn infer_unary(
 
 fn extract_adt_name(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(name)
+  | types.TConst name -> Just(types.type_id_name(name))
   | types.TApp base _ -> extract_adt_name(base)
   | _ -> Nothing
 
@@ -2155,7 +2155,7 @@ fn coverage_gap_resolved(
   pats: List ast.Pattern
 ) -> Maybe String !{IO} =
   match rty with
-  | types.TConst name -> coverage_gap_const(state, env, subst, ctor_map, name, rty, pats)
+  | types.TConst name -> coverage_gap_const(state, env, subst, ctor_map, types.type_id_name(name), rty, pats)
   | types.TApp _ _ -> coverage_gap_adt(state, env, subst, ctor_map, rty, pats)
   | types.TTuple elems -> tuple_gap(state, env, subst, ctor_map, elems, pats)
   # TVar / TFunc / records / anything unresolved: accept (never reject the
@@ -2354,10 +2354,10 @@ fn adt_all_ctors_covered(ctor_map: Dict (List String), adt_name: String, prefix:
 fn prefix_covers_toplevel(ctor_map: Dict (List String), scrut_type: types.Type, prefix: List ast.Pattern) -> Bool =
   match scrut_type with
   | types.TConst name ->
-      if name == "Bool" then
+      if types.type_id_name(name) == "Bool" then
         (if pats_have_bool(prefix, true) then pats_have_bool(prefix, false) else false)
-      else if name == "Unit" then pats_have_unit(prefix)
-      else adt_all_ctors_covered(ctor_map, name, prefix)
+      else if types.type_id_name(name) == "Unit" then pats_have_unit(prefix)
+      else adt_all_ctors_covered(ctor_map, types.type_id_name(name), prefix)
   | types.TApp _ _ ->
       match extract_adt_name(scrut_type) with
       | Nothing -> false
@@ -2528,7 +2528,7 @@ export fn infer_pattern(
   | ast.CharPattern _ _ ->
       check_pattern_type(subst, eff_subst, expected, types.type_char(), "Char")
   | ast.UnitPattern _ ->
-      check_pattern_type(subst, eff_subst, expected, types.TConst("Unit"), "Unit")
+      check_pattern_type(subst, eff_subst, expected, types.TConst(types.type_id("Unit")), "Unit")
   | ast.TuplePattern pats _ ->
       infer_tuple_pattern(state, env, subst, eff_subst, expected, pats)
   | ast.ConstructorPattern name fields _ ->
@@ -2591,7 +2591,7 @@ fn check_pattern_list(
 ) -> InferResult !{IO} =
   match (expected_list, pats) with
   | (Nil, Nil) ->
-      InferOk(typed_ast.TUnit(types.TConst("Unit"), dummy_pos()), subst, eff_subst, types.EffectPure)
+      InferOk(typed_ast.TUnit(types.TConst(types.type_id("Unit")), dummy_pos()), subst, eff_subst, types.EffectPure)
   | (Cons exp_h exp_rest, Cons pat_h pat_rest) ->
       do
         r <- infer_pattern(state, env, subst, eff_subst, exp_h, pat_h)
@@ -2680,10 +2680,10 @@ fn short_circuit_family(t: types.Type) -> Maybe String =
   match t with
   | types.TApp outer _ ->
       match outer with
-      | types.TConst name -> if name == "Maybe" then Just("Maybe") else Nothing
+      | types.TConst name -> if types.type_id_name(name) == "Maybe" then Just("Maybe") else Nothing
       | types.TApp outer2 _ ->
           match outer2 with
-          | types.TConst name -> if name == "Result" then Just("Result") else Nothing
+          | types.TConst name -> if types.type_id_name(name) == "Result" then Just("Result") else Nothing
           | _ -> Nothing
       | _ -> Nothing
   | _ -> Nothing
@@ -2791,11 +2791,11 @@ fn do_unwrap_type(t: types.Type) -> types.Type =
   | types.TApp outer inner ->
       match outer with
       | types.TConst name ->
-          if name == "Maybe" then inner else t
+          if types.type_id_name(name) == "Maybe" then inner else t
       | types.TApp outer2 _ ->
           match outer2 with
           | types.TConst name ->
-              if name == "Result" then inner else t
+              if types.type_id_name(name) == "Result" then inner else t
           | _ -> t
       | _ -> t
   | _ -> t
@@ -2940,7 +2940,7 @@ fn infer_record_fields(
       InferOk(
         typed_ast.TRecord(type_name,
                           typed_record_field_list_reverse(acc_fields),
-                          types.TConst(type_name), pos),
+                          types.TConst(types.type_id(type_name)), pos),
         subst, eff_subst, acc_eff)
   | Cons field rest_fields ->
       match field with
@@ -2993,7 +2993,7 @@ fn get_field_from_resolved(
 ) -> InferResult !{IO} =
   match resolved with
   | types.TConst rec_name ->
-      lookup_record_field_typed(state, env, subst, eff_subst, rec_name, Nil, typed_rec, field_name, rec_eff, pos)
+      lookup_record_field_typed(state, env, subst, eff_subst, types.type_id_name(rec_name), Nil, typed_rec, field_name, rec_eff, pos)
   | types.TApp _ _ ->
       lookup_record_field_typed(state, env, subst, eff_subst,
         extract_tconst_name(resolved), extract_tapp_args(resolved),
@@ -3005,7 +3005,7 @@ fn get_field_from_resolved(
 
 fn extract_tconst_name(t: types.Type) -> String =
   match t with
-  | types.TConst name -> name
+  | types.TConst name -> types.type_id_name(name)
   | types.TApp base _ -> extract_tconst_name(base)
   | _ -> "Unknown"
 
@@ -3090,7 +3090,7 @@ fn infer_range(
                   | Ok s4 ->
                       InferOk(
                         typed_ast.TRange(typed_lo, typed_hi,
-                          types.TConst("IntRange"), pos),
+                          types.TConst(types.type_id("IntRange")), pos),
                         s4, es2, merge_effects(lo_eff, hi_eff))
 
 # ---------------------------------------------------------------------------
@@ -3682,7 +3682,7 @@ fn build_constrained_fn_dicts(
                    build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
           | Nothing ->
               # No existing dict — try to add one from the concrete return type
-              match find_inst_in_return_type(class_name, concrete_ret, env, pos) with
+              match find_inst_in_return_type(types.type_id_name(class_name), concrete_ret, env, pos) with
               | Just new_dict ->
                   Cons(new_dict,
                        build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
@@ -3712,7 +3712,7 @@ fn find_inst_in_return_type(class_name: String, t: types.Type, env: Dict types.S
       | Just _ ->
           Just(typed_ast.TDict(
             ast.TypeConstraint(class_name, Cons(type_to_typeexpr(t), Nil)),
-            types.TConst(class_name), pos, typed_ast.EvUnresolved))
+            types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
       | Nothing ->
           find_inst_in_return_type_children(class_name, t, env, pos)
   | Nothing ->
@@ -3764,7 +3764,7 @@ fn try_rewrite_for_return_dispatch(
           typed_ast.TCall(fn_,
             Cons(typed_ast.TDict(
               ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, env), Nil)),
-              types.TConst(class_name), pos, typed_ast.EvUnresolved),
+              types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved),
               strip_leading_tdicts(args)),
             t, pos)
 
@@ -3794,7 +3794,7 @@ fn maybe_rewrite_class_method_call(
                           match method_scheme with
                           | types.Scheme _ _ method_type _ ->
                               if class_var_in_args(method_type, class_vars) then typed_ast.TCall(fn_, args, t, pos)
-                              else try_rewrite_for_return_dispatch(env, subst, fn_, args, t, pos, class_name, class_vars, method_type)
+                              else try_rewrite_for_return_dispatch(env, subst, fn_, args, t, pos, types.type_id_name(class_name), class_vars, method_type)
               | _ -> typed_ast.TCall(fn_, args, t, pos)
   | _ -> typed_ast.TCall(fn_, args, t, pos)
 
@@ -4071,7 +4071,7 @@ fn check_fn_body(
                     (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty())
                 | Nothing ->
                     (typed_ast.BodyOk(resolve_dispatch_typed_expr(self_env, s2, typed_body), unifier.apply_subst(s2, inst_type)), fwd_markers)
-  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst("Unit")), dict_empty())
+  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty())
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(
@@ -4124,7 +4124,7 @@ fn register_class_method_markers(class_name: String, type_params: List String, m
       | ast.ClassMethodSig name _ _ _ ->
           register_class_method_markers(class_name, type_params, rest,
             dict_set("@class:" ++ name,
-                     types.Scheme(type_params, Nil, types.TConst(class_name), types.EffectPure),
+                     types.Scheme(type_params, Nil, types.TConst(types.type_id(class_name)), types.EffectPure),
                      env))
 
 # Register "@super:{class_name}:{super_name}" entries for each superclass in the
@@ -4138,7 +4138,7 @@ fn register_superclass_markers(class_name: String, superclasses: List ast.TypeCo
       | ast.TypeConstraint super_name _ ->
           register_superclass_markers(class_name, rest,
             dict_set("@super:" ++ class_name ++ ":" ++ super_name,
-                     types.mono(types.TConst(super_name)), env))
+                     types.mono(types.TConst(types.type_id(super_name))), env))
 
 # ---------------------------------------------------------------------------
 # FnDecl: constrained-function markers
@@ -4187,11 +4187,11 @@ fn register_constrained_fn_markers_acc(name: String, constraints: List ast.TypeC
           | Cons (ast.TypeName prog_var) _ ->
               register_constrained_fn_markers_acc(name, rest, idx + 1,
                 dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                         types.mono(types.TApp(types.TConst(class_name), types.TConst(prog_var))), env))
+                         types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(prog_var)))), env))
           | _ ->
               register_constrained_fn_markers_acc(name, rest, idx + 1,
                 dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                         types.mono(types.TConst(class_name)), env))
+                         types.mono(types.TConst(types.type_id(class_name))), env))
 
 # ---------------------------------------------------------------------------
 # InstanceDecl: instance marker registration
@@ -4205,7 +4205,7 @@ fn register_instance_marker(constraint: ast.TypeConstraint, env: Dict types.Sche
       | Cons head_te _ ->
           dict_set(
             "@inst:" ++ class_name ++ ":" ++ type_head_str(type_from_ast(head_te, dict_empty())),
-            types.mono(types.TConst("Unit")),
+            types.mono(types.TConst(types.type_id("Unit"))),
             env
           )
 

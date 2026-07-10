@@ -33,18 +33,18 @@ fn roundtrip_eq(f: iface_codec.IfaceFile) -> Bool =
 # --- Sample scheme constructors for readable test cases ------------------
 
 fn sample_const_scheme(name: String) -> types.Scheme =
-  types.mono(types.TConst(name))
+  types.mono(types.TConst(types.type_id(name)))
 
 fn sample_poly_scheme() -> types.Scheme =
   # forall a. (List a) -> Int
   types.Scheme(
     Cons("a", Nil), Nil,
-    types.TFunc(types.TApp(types.TConst("List"), types.TVar("a")), types.TConst("Int"), types.EffectPure),
+    types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar("a")), types.TConst(types.type_id("Int")), types.EffectPure),
     types.EffectPure)
 
 fn sample_io_scheme() -> types.Scheme =
   # String -> Unit !{IO}
-  types.mono(types.TFunc(types.TConst("String"), types.TConst("Unit"), types.EffectIO))
+  types.mono(types.TFunc(types.TConst(types.type_id("String")), types.TConst(types.type_id("Unit")), types.EffectIO))
 
 fn main() -> Unit !{IO} =
   do
@@ -93,7 +93,7 @@ fn main() -> Unit !{IO} =
     # InstanceInfo: simulates `instance Eq Int = int_eq_inst`
     assert_true(state, "iface with instances roundtrip",
       roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.foo", Nil, Nil, Nil,
-        Cons(iface_codec.InstanceInfo("Eq", types.TConst("Int"), "stdlib.prelude.int_eq_inst"), Nil))))
+        Cons(iface_codec.InstanceInfo("Eq", types.TConst(types.type_id("Int")), "stdlib.prelude.int_eq_inst"), Nil))))
 
     # --- Malformed input rejection (v2 wire format) ---
     assert_true(state, "decode empty rejected",
@@ -114,9 +114,9 @@ fn main() -> Unit !{IO} =
     # different modules. extract_named_schemes(env, "stdlib.foo") should
     # yield only the two stdlib.foo.* entries, dropping stdlib.other.qux.
     let test_env =
-      dict_set("stdlib.foo.bar", types.mono(types.TConst("Int")),
-        dict_set("stdlib.foo.baz", types.mono(types.TConst("Bool")),
-          dict_set("stdlib.other.qux", types.mono(types.TConst("String")),
+      dict_set("stdlib.foo.bar", types.mono(types.TConst(types.type_id("Int"))),
+        dict_set("stdlib.foo.baz", types.mono(types.TConst(types.type_id("Bool"))),
+          dict_set("stdlib.other.qux", types.mono(types.TConst(types.type_id("String"))),
             dict_empty())))
     assert_true(state, "extract filters by module prefix",
       list_length(iface_codec.extract_named_schemes(test_env, "stdlib.foo")) == 2)

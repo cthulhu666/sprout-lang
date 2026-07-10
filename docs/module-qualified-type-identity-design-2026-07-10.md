@@ -1,14 +1,14 @@
 # Module-qualified type identity — design (2026-07-10)
 
-**Status:** IMPLEMENTED 2026-07-10 (branch `design/module-qualified-type-identity`),
-**except G6 (opaque `TypeId`), which is DEFERRED — not built.** Correctness landed with
-identity as a raw `String`; ~40 sites do direct string ops on it (`after_last_dot`,
-`replace_all`, `substring_after_last`, `head_is_concrete`, `is_type_var_name`, …). G6
-(`wrap TypeId = String` + `type_id_*` API) was approved to *contain* exactly that
-scattering and keep functors/PDTs an option (N2a); it remains a follow-up. Four
-regression tests green (shadow, control, concrete dispatch, eta/polymorphic dispatch);
-self-compile is a fixed point; full suite + compile-examples + smoke-shapes +
-bundle-smoke green.
+**Status:** IMPLEMENTED 2026-07-10 (branch `feat/module-qualified-type-identity`),
+**including G6.** T7 correctness landed first; then G6 made identity opaque: `wrap
+TypeId = String` with a `type_id_*` API (`_eq`/`_display`/`_is_concrete`/`_symbol`), and
+`TConst`'s payload flipped from `String` to `TypeId` (~137 sites across 11 files) so the
+type checker now *forbids* raw string surgery on identity — the containment G6/N2a were
+approved for, which keeps a future generative identity (functors/PDTs) a representation
+swap. Five regression tests green (shadow, control, concrete dispatch, eta/polymorphic
+dispatch, TypeId API); self-compile is a fixed point; full suite + compile-examples +
+smoke-shapes + bundle-smoke green.
 **Normative status:** changes a core representation invariant of the type checker;
 the spec's type-identity rules (§ type equality) are normative as of this change.
 
@@ -148,7 +148,7 @@ identity and no real resolution pass** — the inverse of a sound design.
 - G4. No regression in self-compile; the change reaches a bootstrap fixed point.
 - G5. Lay the identity foundation the iface arc requires for sound separate
   compilation (§9).
-- G6. **(DEFERRED — not built; see Status.)** **Identity is an opaque, resolver-minted
+- G6. **(DONE — see Status.)** **Identity is an opaque, resolver-minted
   token** — `wrap TypeId = String` (zero-cost distinct wrapper). Consumers compare via `type_id_eq` and
   render via `type_id_display` only; **no consumer destructures or does string surgery
   on it.** This is what makes the representation swappable (FQN string → stamp →

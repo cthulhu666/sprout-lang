@@ -22,5 +22,5 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
     assert_eq(state, "eta-expanded dispatch of shadowed instance",
-      string_concat_many(list_map(to_string, Cons(Wrap(1), Cons(Wrap(2), Nil)))), "WW")
+      string_concat_many(list_map(to_string, Cons (Wrap(1), Cons (Wrap(2), Nil)))), "WW")
     summary(state)

@@ -24,4 +24,6 @@ fn main() -> Unit !{IO} =
     # symbol mangling sanitizes dots for LLVM
     assert_eq(state, "symbol dots to underscores", types.type_id_symbol(types.type_id("main.Maybe")), "main_Maybe")
     assert_eq(state, "symbol bare unchanged", types.type_id_symbol(types.type_id("Int")), "Int")
+    # round-trip: mint then read back the raw canonical name
+    assert_eq(state, "round-trip name", types.type_id_name(types.type_id("stdlib.compiler.types.Type")), "stdlib.compiler.types.Type")
     summary(state)

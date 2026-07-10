@@ -562,30 +562,30 @@ fn cmp_predicate(op: String) -> Maybe String =
 # True iff t is the monomorphic Int type.
 fn is_int_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> name == "Int"
+  | types.TConst name -> types.type_id_name(name) == "Int"
   | _ -> false
 
 # True iff t is the monomorphic Double type.
 fn is_double_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> name == "Double"
+  | types.TConst name -> types.type_id_name(name) == "Double"
   | _ -> false
 
 # True iff t is the monomorphic Bool type.
 fn is_bool_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> name == "Bool"
+  | types.TConst name -> types.type_id_name(name) == "Bool"
   | _ -> false
 
 fn is_string_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> name == "String"
+  | types.TConst name -> types.type_id_name(name) == "String"
   | _ -> false
 
 # True iff t is the monomorphic Char type.
 fn is_char_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> name == "Char"
+  | types.TConst name -> types.type_id_name(name) == "Char"
   | _ -> false
 
 # True iff t is Int or Char — both are immediate i64 values that compare and
@@ -596,7 +596,7 @@ fn is_int_or_char_type(t: types.Type) -> Bool =
 # True iff t is the monomorphic Unit type.
 fn is_unit_type(t: types.Type) -> Bool =
   match t with
-  | types.TConst name -> name == "Unit"
+  | types.TConst name -> types.type_id_name(name) == "Unit"
   | _ -> false
 
 # True iff t is a Maybe type (TApp (TConst "Maybe") _).
@@ -604,7 +604,7 @@ fn is_unit_type(t: types.Type) -> Bool =
 # does not export it.
 fn is_maybe_type(t: types.Type) -> Bool =
   match t with
-  | types.TApp (types.TConst "Maybe") _ -> true
+  | types.TApp (types.TConst name) _ -> types.type_id_name(name) == "Maybe"
   | _ -> false
 
 # True iff t is a Result type (TApp (TApp (TConst "Result") err) ok).
@@ -612,7 +612,7 @@ fn is_maybe_type(t: types.Type) -> Bool =
 # through the Result wrapper-strip path (Err short-circuit, Ok unwrap).
 fn is_result_type(t: types.Type) -> Bool =
   match t with
-  | types.TApp (types.TApp(types.TConst "Result") _) _ -> true
+  | types.TApp (types.TApp(types.TConst name) _) _ -> types.type_id_name(name) == "Result"
   | _ -> false
 
 # True iff t is a List type (TApp (TConst "List") _).
@@ -620,7 +620,7 @@ fn is_result_type(t: types.Type) -> Bool =
 # does not export it.
 fn is_list_type(t: types.Type) -> Bool =
   match t with
-  | types.TApp (types.TConst "List") _ -> true
+  | types.TApp (types.TConst name) _ -> types.type_id_name(name) == "List"
   | _ -> false
 
 

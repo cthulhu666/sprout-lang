@@ -52,8 +52,8 @@ export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
 export fn type_is_non_heap_scalar(t: types.Type) -> Bool =
   match t with
   | types.TConst name ->
-      type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool") ||
-      type_name_leaf_is(name, "Char") ||
-      type_name_leaf_is(name, "Double")
+      type_name_leaf_is(types.type_id_name(name), "Int") ||
+      type_name_leaf_is(types.type_id_name(name), "Bool") ||
+      type_name_leaf_is(types.type_id_name(name), "Char") ||
+      type_name_leaf_is(types.type_id_name(name), "Double")
   | _ -> false

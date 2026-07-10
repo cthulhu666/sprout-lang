@@ -17,7 +17,7 @@ fn trivial_program() -> typed_ast.TypedProgram =
   typed_ast.TypedProgram(
     Cons(
       typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
-        typed_ast.TInt(42, types.TConst("Int"), no_pos())),
+        typed_ast.TInt(42, types.TConst(types.type_id("Int")), no_pos())),
       Nil
     )
   )

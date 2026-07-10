@@ -28,25 +28,24 @@ export type Effect (..) =
 #   TFunc — function type with associated effect row
 #   TTuple — tuple type (Int, Bool, …)
 
-export type Type (..) =
-  | TVar String
-  | TConst String
-  | TApp Type Type
-  | TFunc Type Type Effect
-  | TTuple (List Type)
-
 # ---------------------------------------------------------------------------
 # TypeId — opaque canonical type identity (G6)
 # ---------------------------------------------------------------------------
 #
 # Identity is the module-qualified canonical name (e.g. "main.Maybe"; the prelude,
-# having no module header, owns the unqualified name). Consumers MUST go through this
-# API — never raw string surgery on the name — so module-qualification is touched in
-# one place and a future generative identity (functors / path-dependent types) is a
-# representation swap here, not a compiler-wide re-migration. (v1: TConst still carries
-# a raw String; G6.3 flips it to `TConst TypeId` to make the boundary compiler-enforced.)
-
+# having no module header, owns the unqualified name). TConst carries a TypeId, so the
+# checker forbids raw string surgery on identity — consumers MUST go through the API
+# below (type_id_eq / _display / _is_concrete / _symbol). A future generative identity
+# (functors / path-dependent types) is a representation swap here, not a compiler-wide
+# re-migration. Declared before Type so TConst can reference it.
 export wrap TypeId = String
+
+export type Type (..) =
+  | TVar String
+  | TConst TypeId
+  | TApp Type Type
+  | TFunc Type Type Effect
+  | TTuple (List Type)
 
 # Mint a TypeId from a canonical (already-resolved) name. The bundler/resolver is the
 # source of canonical names; this is the single construction point.
@@ -96,13 +95,13 @@ export type Scheme (..) =
 # Commonly-used type constants
 # ---------------------------------------------------------------------------
 
-export fn type_int() -> Type = TConst("Int")
-export fn type_double() -> Type = TConst("Double")
-export fn type_bool() -> Type = TConst("Bool")
-export fn type_string() -> Type = TConst("String")
-export fn type_char() -> Type = TConst("Char")
-export fn type_list(a: Type) -> Type = TApp(TConst("List"), a)
-export fn type_maybe(a: Type) -> Type = TApp(TConst("Maybe"), a)
+export fn type_int() -> Type = TConst(type_id("Int"))
+export fn type_double() -> Type = TConst(type_id("Double"))
+export fn type_bool() -> Type = TConst(type_id("Bool"))
+export fn type_string() -> Type = TConst(type_id("String"))
+export fn type_char() -> Type = TConst(type_id("Char"))
+export fn type_list(a: Type) -> Type = TApp(TConst(type_id("List")), a)
+export fn type_maybe(a: Type) -> Type = TApp(TConst(type_id("Maybe")), a)
 
 export fn effect_pure() -> Effect = EffectPure
 export fn effect_io() -> Effect = EffectIO
@@ -226,7 +225,7 @@ fn wrap_parens(s: String) -> String =
 fn type_to_string_aux(t: Type, as_arg: Bool) -> String =
   match t with
   | TVar name -> name
-  | TConst name -> name
+  | TConst name -> type_id_name(name)
   | TApp base arg ->
       type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true)
   | TFunc param ret eff ->
@@ -332,7 +331,7 @@ fn effect_eq(left: Effect, right: Effect) -> Bool =
 fn type_eq(left: Type, right: Type) -> Bool =
   match left with
   | TVar s -> match right with | TVar t -> s == t | _ -> false
-  | TConst s -> match right with | TConst t -> s == t | _ -> false
+  | TConst s -> match right with | TConst t -> type_id_eq(s, t) | _ -> false
   | TApp f a -> match right with | TApp g b -> type_eq(f, g) && type_eq(a, b) | _ -> false
   | TFunc p r e -> match right with
       | TFunc q s f -> type_eq(p, q) && type_eq(r, s) && effect_eq(e, f)
