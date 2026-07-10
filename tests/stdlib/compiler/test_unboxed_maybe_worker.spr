@@ -17,7 +17,7 @@ import stdlib.compiler.source as source
 fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
 fn maybe_int() -> types.Type =
-  types.TApp(types.TConst("Maybe"), types.TConst("Int"))
+  types.TApp(types.TConst(types.type_id("Maybe")), types.TConst(types.type_id("Int")))
 
 # Maybe declared so Just/Nothing land in the ctor table (prelude does this in
 # real compilation; a hand-built TypedProgram must supply it).
@@ -34,9 +34,9 @@ fn mvget_decl() -> typed_ast.TypedDecl =
     Cons(ast.Param("v", Nothing), Cons(ast.Param("i", Nothing), Nil)),
     Nothing, Nothing, Nil,
     typed_ast.TCall(
-      typed_ast.TVar("vector_get", types.TConst("Int"), no_pos()),
-      Cons(typed_ast.TVar("v", types.TConst("Int"), no_pos()),
-        Cons(typed_ast.TVar("i", types.TConst("Int"), no_pos()), Nil)),
+      typed_ast.TVar("vector_get", types.TConst(types.type_id("Int")), no_pos()),
+      Cons(typed_ast.TVar("v", types.TConst(types.type_id("Int")), no_pos()),
+        Cons(typed_ast.TVar("i", types.TConst(types.type_id("Int")), no_pos()), Nil)),
       maybe_int(), no_pos()))
 
 # fn probe(v, i) =
@@ -49,20 +49,20 @@ fn probe_decl() -> typed_ast.TypedDecl =
     Nothing, Nothing, Nil,
     typed_ast.TMatch(
       typed_ast.TCall(
-        typed_ast.TVar("mvget", types.TConst("Int"), no_pos()),
-        Cons(typed_ast.TVar("v", types.TConst("Int"), no_pos()),
-          Cons(typed_ast.TVar("i", types.TConst("Int"), no_pos()), Nil)),
+        typed_ast.TVar("mvget", types.TConst(types.type_id("Int")), no_pos()),
+        Cons(typed_ast.TVar("v", types.TConst(types.type_id("Int")), no_pos()),
+          Cons(typed_ast.TVar("i", types.TConst(types.type_id("Int")), no_pos()), Nil)),
         maybe_int(), no_pos()),
       Cons(
         typed_ast.TypedMatchBranch(
           ast.ConstructorPattern("Just", Cons(ast.VarPattern("x", no_pos()), Nil), no_pos()),
-          typed_ast.TVar("x", types.TConst("Int"), no_pos())),
+          typed_ast.TVar("x", types.TConst(types.type_id("Int")), no_pos())),
         Cons(
           typed_ast.TypedMatchBranch(
             ast.ConstructorPattern("Nothing", Nil, no_pos()),
-            typed_ast.TInt(0, types.TConst("Int"), no_pos())),
+            typed_ast.TInt(0, types.TConst(types.type_id("Int")), no_pos())),
           Nil)),
-      types.TConst("Int"), no_pos()))
+      types.TConst(types.type_id("Int")), no_pos()))
 
 fn probe_program() -> typed_ast.TypedProgram =
   typed_ast.TypedProgram(

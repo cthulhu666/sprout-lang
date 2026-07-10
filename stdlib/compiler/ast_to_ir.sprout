@@ -5453,7 +5453,7 @@ fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
 # Head TConst of a possibly-applied inferred type: `Maybe Int` -> "Maybe".
 fn type_head_name(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst name -> Just(name)
+  | types.TConst name -> Just(types.type_id_name(name))
   | types.TApp base _ -> type_head_name(base)
   | _ -> Nothing
 
@@ -6048,9 +6048,9 @@ fn worker_source_for(name: String, decls: List typed_ast.TypedDecl,
 # translates it to a boxed `call @name(…)` and repacks the result.
 fn synth_extern_body(name: String, params: List ast.Param) -> typed_ast.TypedExpr =
   typed_ast.TCall(
-    typed_ast.TVar(name, types.TConst("Unit"), source.SourcePos(0, 0, 0)),
+    typed_ast.TVar(name, types.TConst(types.type_id("Unit")), source.SourcePos(0, 0, 0)),
     synth_param_vars(params),
-    types.TConst("Unit"), source.SourcePos(0, 0, 0))
+    types.TConst(types.type_id("Unit")), source.SourcePos(0, 0, 0))
 
 fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
   match params with
@@ -6058,7 +6058,7 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
   | Cons p rest ->
       match p with
       | ast.Param pname _ ->
-          Cons(typed_ast.TVar(pname, types.TConst("Unit"), source.SourcePos(0, 0, 0)),
+          Cons(typed_ast.TVar(pname, types.TConst(types.type_id("Unit")), source.SourcePos(0, 0, 0)),
                synth_param_vars(rest))
 
 # Emit the worker (+ its lifted lambdas) for one matched callee `name`, or

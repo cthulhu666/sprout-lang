@@ -10,6 +10,8 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 # Both build a dispatch TDict head from the concrete type; if that head strips the module
 # prefix ("Box") while @inst/ctx_inst register the full name ("main.Box"), dispatch misses.
 
+# (Also guards the TConst-TypeId migration of ast_to_ir consumers merged from master
+# during the PR #156 rebase — type_head_name and the Unit placeholders.)
 type Box a = MkBox a
 
 instance ToString (Box a) {
